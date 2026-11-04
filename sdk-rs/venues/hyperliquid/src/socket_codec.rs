@@ -1,9 +1,26 @@
 //! Native topic projection and wire encoding; the shared core owns transport.
 use super::*;
 use safe_cex_engine::socket_lifecycle::{
-    AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, FeedPolicy, Interest, Invalidation,
+    AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, Epoch, FeedPolicy, Interest, Invalidation,
     LifecycleEvent, RetireReason, TrafficPolicy,
 };
+
+const PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 30_000.;
+const MAX_PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 300_000.;
+
+#[derive(Default)]
+pub(super) struct PrivateBootstrap {
+    epoch: Option<Epoch>,
+    timer: Option<TimerId>,
+    deadline: Option<f64>,
+    pending: bool,
+}
+
+impl PrivateBootstrap {
+    fn pending(&self) -> bool {
+        self.pending
+    }
+}
 
 #[derive(Serialize)]
 struct PublicTopic<'a> {
@@ -80,6 +97,144 @@ struct DepthOrder<'a> {
 }
 
 impl Hyperliquid {
+    /// Track early native snapshots too: delivery can beat the release continuation.
+    fn prepare_private_snapshots(&mut self, cx: &mut Cx<'_, Pending>, epoch: Epoch) {
+        if self.private_socket_interests(cx.store).is_empty()
+            || self.connection.private_bootstrap.epoch == Some(epoch)
+            || cx.socket_epoch(epoch.feed()) != Some(epoch)
+        {
+            return;
+        }
+        self.clear_private_snapshot_watch(cx);
+        self.connection.private_bootstrap = PrivateBootstrap {
+            epoch: Some(epoch),
+            timer: None,
+            deadline: None,
+            pending: true,
+        };
+    }
+
+    /// The initial-state deadline starts when the private subscriptions are released.
+    pub(super) fn watch_private_snapshots(&mut self, cx: &mut Cx<'_, Pending>, epoch: Epoch) {
+        let timeout = (PRIVATE_SNAPSHOT_TIMEOUT_MS
+            * f64::from(1u32 << self.connection.private_bootstrap_misses.min(4)))
+        .min(MAX_PRIVATE_SNAPSHOT_TIMEOUT_MS);
+        let watch = &mut self.connection.private_bootstrap;
+        if watch.epoch != Some(epoch)
+            || cx.socket_epoch(epoch.feed()) != Some(epoch)
+            || !watch.pending()
+            || watch.deadline.is_some()
+        {
+            return;
+        }
+        watch.deadline = Some(cx.now + timeout);
+        watch.timer = Some(cx.set_timer(timeout));
+    }
+
+    fn clear_private_snapshot_watch(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(timer) = self.connection.private_bootstrap.timer.take() {
+            cx.clear_timer(timer);
+        }
+        self.connection.private_bootstrap = PrivateBootstrap::default();
+    }
+
+    fn expire_private_snapshots(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        let watch = &self.connection.private_bootstrap;
+        if !watch.pending() || !cx.now.is_finite() || watch.deadline.is_none_or(|at| cx.now < at) {
+            return false;
+        }
+        let epoch = watch.epoch;
+        self.clear_private_snapshot_watch(cx);
+        if let Some(epoch) = epoch
+            && cx.socket_epoch(epoch.feed()) == Some(epoch)
+        {
+            if self.connection.private_bootstrap_misses == 0 {
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    code::STREAM_UNAVAILABLE,
+                    "Hyperliquid initial private snapshots did not arrive; reconnecting the account stream",
+                );
+            }
+            self.connection.private_bootstrap_misses = self
+                .connection
+                .private_bootstrap_misses
+                .saturating_add(1)
+                .min(4);
+            cx.retire_socket(
+                epoch.feed(),
+                RetireReason::Timeout(safe_cex_engine::socket::Timeout::Silent),
+            );
+            return true;
+        }
+        false
+    }
+
+    pub(super) fn private_snapshot_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.connection.private_bootstrap.timer == Some(timer) {
+            self.connection.private_bootstrap.timer = None;
+        }
+        if !self.expire_private_snapshots(cx) {
+            self.rearm_private_snapshot_watch(cx);
+        }
+    }
+
+    fn rearm_private_snapshot_watch(&mut self, cx: &mut Cx<'_, Pending>) {
+        let watch = &mut self.connection.private_bootstrap;
+        if cx.now.is_finite()
+            && watch.pending()
+            && watch.timer.is_none()
+            && let Some(deadline) = watch.deadline
+            && deadline > cx.now
+        {
+            watch.timer = Some(cx.set_timer(deadline - cx.now));
+        }
+    }
+
+    /// Pongs, public prices and REST reads cannot acknowledge a private subscription.
+    pub(super) fn observe_private_snapshot(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        text: &str,
+    ) -> bool {
+        if !self.connection.private_bootstrap.pending() {
+            return true;
+        }
+        if !cx.now.is_finite() || self.expire_private_snapshots(cx) {
+            return false;
+        }
+        self.rearm_private_snapshot_watch(cx);
+        let Ok(frame) = serde_json::from_str::<Envelope>(text) else {
+            return true;
+        };
+        let watch = &mut self.connection.private_bootstrap;
+        match frame.channel.as_ref() {
+            "clearinghouseState" if !self.spot => {
+                if let Ok(env) = serde_json::from_str::<ClearingEnvelope>(frame.data.get())
+                    && env.dex.is_empty()
+                    && (env.clearinghouse_state.is_some()
+                        || serde_json::from_str::<Clearinghouse>(frame.data.get()).is_ok())
+                {
+                    watch.pending = false;
+                }
+            }
+            "spotState" | "spotClearinghouseState"
+                if self.spot
+                    && (serde_json::from_str::<SpotEnvelope>(frame.data.get()).is_ok()
+                        || serde_json::from_str::<SpotState>(frame.data.get()).is_ok()) =>
+            {
+                watch.pending = false;
+            }
+            _ => {}
+        }
+        if !watch.pending() {
+            self.connection.private_bootstrap_misses = 0;
+            if let Some(timer) = watch.timer.take() {
+                cx.clear_timer(timer);
+            }
+        }
+        true
+    }
+
     /// Every native stream one book on `coin` subscribes: perps' `l2Book` and
     /// `bbo`, or spot's full-precision depth and each rounded tier.
     fn book_topics(&self, coin: &str, push: &mut dyn FnMut(String)) {
@@ -237,6 +392,8 @@ impl Hyperliquid {
             if error == SocketError::Capacity && epoch.is_some() && cx.socket_epoch(feed) == epoch {
                 cx.retire_socket(feed, RetireReason::Closed);
             }
+        } else if let Some(epoch) = epoch {
+            self.prepare_private_snapshots(cx, epoch);
         }
     }
 
@@ -276,6 +433,7 @@ impl Hyperliquid {
                 if self.connection.feed != Some(epoch.feed()) {
                     return Err(SocketError::Stale);
                 }
+                self.clear_private_snapshot_watch(cx);
                 self.connection.open = false;
                 for ladder in self.books.values_mut() {
                     ladder.spot_depth = Default::default();

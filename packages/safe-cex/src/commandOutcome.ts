@@ -78,6 +78,7 @@ export type SerializedCommandError = {
   outcome?: CommandOutcome;
   /** Rust venue classification (`ExchangeError`); absent where the venue did not classify. */
   kind?: ExchangeErrorKind;
+  causeCode?: string;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
@@ -104,6 +105,7 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   const result: SerializedCommandError = {
     message: typeof source.message === 'string' ? source.message : String(value),
   };
+  if (typeof source.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(source.causeCode)) result.causeCode = source.causeCode;
   const errorReported = isErrorReported(value) ? true : source.errorReported;
   if (typeof errorReported === 'boolean') result.errorReported = errorReported;
   for (const key of ['name', 'stack', 'command', 'clientOrderId', 'receiptKey', 'venueCode', 'venueMessage'] as const) {

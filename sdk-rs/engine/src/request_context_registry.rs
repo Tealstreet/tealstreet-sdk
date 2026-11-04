@@ -261,7 +261,7 @@ pub(super) struct ContextRegistry {
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
-    read_marks: Vec<(Owner, u64)>,
+    read_marks: Vec<(Owner, u64, crate::order_read_cover::OrderReadMark)>,
 }
 
 /// Plan-backed executions' physical owners. Few live at once, so a vector
@@ -314,12 +314,18 @@ impl ContextRegistry {
     /// The order-read token for a Read released now under `owner`: the epoch of
     /// its earliest released Read. A mark only ever keeps a fence longer.
     #[cfg(feature = "order-locks")]
-    pub(super) fn read_mark(&mut self, owner: Owner, epoch: u64) -> u64 {
-        if let Some((_, mark)) = self.read_marks.iter().find(|(held, _)| *held == owner) {
-            return *mark;
+    /// The order-lock epoch and release of `owner`'s earliest released leg.
+    pub(super) fn read_mark(
+        &mut self,
+        owner: Owner,
+        epoch: u64,
+        read: crate::order_read_cover::OrderReadMark,
+    ) -> (u64, crate::order_read_cover::OrderReadMark) {
+        if let Some((_, mark, first)) = self.read_marks.iter().find(|(held, ..)| *held == owner) {
+            return (*mark, *first);
         }
-        self.read_marks.push((owner, epoch));
-        epoch
+        self.read_marks.push((owner, epoch, read));
+        (epoch, read)
     }
     #[cfg(all(test, feature = "order-locks"))]
     pub(super) fn read_mark_count(&self) -> usize {
@@ -333,7 +339,7 @@ impl ContextRegistry {
             return;
         }
         let (contexts, commands) = (&self.contexts, &self.commands);
-        self.read_marks.retain(|(owner, _)| {
+        self.read_marks.retain(|(owner, ..)| {
             matches!(owner, Owner::Command { id, generation }
                 if commands.get(id).is_some_and(|live| live.generation == *generation))
                 || contexts.values().any(|context| context.owner() == *owner)
@@ -341,7 +347,7 @@ impl ContextRegistry {
     }
     fn forget_read_mark(&mut self, _owner: Owner) {
         #[cfg(feature = "order-locks")]
-        self.read_marks.retain(|(held, _)| *held != _owner);
+        self.read_marks.retain(|(held, ..)| *held != _owner);
     }
     pub(super) fn prune(&mut self, now: f64) {
         self.contexts.retain(|_, old| old.deadline() > now);
@@ -2959,9 +2965,19 @@ mod tests {
         let mut registry = ContextRegistry::default();
         let first = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
         let other = registry.issue(2, Scope::Background, policy(), 0.).unwrap();
-        assert_eq!(registry.read_mark(first.owner(), 5), 5);
-        assert_eq!(registry.read_mark(first.owner(), 9), 5);
-        assert_eq!(registry.read_mark(other.owner(), 9), 9);
+        let at = |seq, sent| crate::order_read_cover::OrderReadMark { seq, sent };
+        assert_eq!(
+            registry.read_mark(first.owner(), 5, at(1, 1.)),
+            (5, at(1, 1.))
+        );
+        assert_eq!(
+            registry.read_mark(first.owner(), 9, at(2, 2.)),
+            (5, at(1, 1.))
+        );
+        assert_eq!(
+            registry.read_mark(other.owner(), 9, at(2, 2.)),
+            (9, at(2, 2.))
+        );
         assert_eq!(registry.read_mark_count(), 2);
     }
 
@@ -2976,27 +2992,30 @@ mod tests {
         let Owner::Command { id, generation } = command.owner() else {
             panic!("a command scope has a command owner");
         };
-        registry.read_mark(command.owner(), 1);
-        registry.read_mark(background.owner(), 1);
+        let at = crate::order_read_cover::OrderReadMark { seq: 0, sent: 0. };
+        registry.read_mark(command.owner(), 1, at);
+        registry.read_mark(background.owner(), 1, at);
         registry.read_mark(
             Owner::Command {
                 id,
                 generation: generation + 1,
             },
             1,
+            at,
         );
         registry.read_mark(
             Owner::Background {
                 generation: u64::MAX,
             },
             1,
+            at,
         );
         registry.forget_dead_read_marks();
         assert_eq!(registry.read_mark_count(), 2, "dead and regenerated swept");
         registry.forget_read_mark(background.owner());
         assert_eq!(registry.read_mark_count(), 1);
         assert_eq!(
-            registry.read_mark(command.owner(), 9),
+            registry.read_mark(command.owner(), 9, at).0,
             1,
             "the live mark stays"
         );

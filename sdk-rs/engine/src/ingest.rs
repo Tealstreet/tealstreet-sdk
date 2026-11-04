@@ -860,6 +860,55 @@ pub(crate) mod tests {
         assert!(parse(&frame[..12]).is_err());
     }
 
+    /// Read covers (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.2): ingest
+    /// before step 2 takes the orders beside an ORDERS_READ section and
+    /// ignores the section, so a page that predates covers is unchanged.
+    #[test]
+    fn an_orders_read_section_is_ignored_beside_its_orders() {
+        use crate::order_read_cover::{OrderReadMark, OrderReadScope};
+        let mut source = Store::default();
+        let read = OrderReadMark {
+            seq: source.order_read_sequence(),
+            sent: 7.,
+        };
+        let order = crate::model::Order {
+            id: "a".into(),
+            parent_id: None,
+            status: crate::model::OrderStatus::Open,
+            symbol: "BTCUSDT".into(),
+            kind: crate::model::OrderType::Limit,
+            side: crate::model::OrderSide::Buy,
+            price: 10.,
+            amount: 1.,
+            filled: 0.,
+            remaining: 1.,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        };
+        source.commit_orders_read(
+            read,
+            OrderReadScope::Account {
+                key: "all",
+                account: &["all"],
+            },
+            |_| true,
+            vec![order],
+            &[],
+        );
+        assert_eq!(sections_of(&source, section::ORDERS_READ).len(), 1);
+        let (store, applied) = round_trip(&source);
+        assert!(applied.orders);
+        let ids: Vec<&str> = store.orders().iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, ["a"]);
+    }
+
     use crate::model::{Balance, CoinBalance, CurrencyBalance, MarginType};
     use crate::store::MarketSetting;
 

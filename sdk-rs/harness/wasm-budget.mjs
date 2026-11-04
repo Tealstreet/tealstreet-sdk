@@ -99,24 +99,29 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // ddi2il approved each CI size plus 10 KiB, rounded up to the KiB, after shared-provider attribution.
 // #2981 WOO account-read attribution: CI measured 2,365,883 B; ddi2il approved
 // CI size plus 10 KiB, rounded up to the KiB.
+// Batch #2989/#2994/#2995 on master 05275f74aec: CI run 41774217377 measured bingx 1,987,316,
+// hyperliquid 2,066,112 and phemex 2,023,431 B; ddi2il ruling, CI size plus 10 KiB, rounded up to the KiB.
+// Master CI run 41783084277: apexomni 1,959,768, asterdex 2,099,176, backpack 1,860,786,
+// binance 2,157,319, bybit 2,163,030, coinbase 1,800,411, hyperliquid/spot 2,069,390 and weex 1,909,946 B.
+// ddi2il ruling: CI size plus 10 KiB, rounded up to the KiB; shared-family siblings carry the same cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 1_957_888,
-  asterdex: 2_097_152,
-  backpack: 1_860_608,
-  binance: 2_152_448,
-  bingx: 1_980_416,
+  apexomni: 1_970_176,
+  asterdex: 2_109_440,
+  backpack: 1_871_872,
+  binance: 2_167_808,
+  bingx: 1_997_824,
   bitget: 2_275_328,
   bitgetusdc: 2_276_352,
   bitrue: 1_798_144,
   bitunix: 1_824_768,
   blofin: 1_934_336,
   breakoutprop: 1_494_016,
-  bybit: 2_159_616,
-  coinbase: 1_800_192,
+  bybit: 2_173_952,
+  coinbase: 1_811_456,
   cryptocom: 1_701_888,
   grvt: 1_767_424,
-  hyperliquid: 2_064_384,
-  hyperliquidspot: 2_065_408,
+  hyperliquid: 2_079_744,
+  hyperliquidspot: 2_079_744,
   kraken: 2_108_416,
   krakenspot: 2_108_416,
   kucoin: 1_640_448,
@@ -127,10 +132,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   okx: 1_921_024,
   orderly: 1_708_032,
   paradex: 2_196_480,
-  phemex: 2_023_424,
+  phemex: 2_034_688,
   polymarket: 1_587_200,
   txflow: 1_817_600,
-  weex: 1_908_736,
+  weex: 1_921_024,
   woo: 2_376_704,
 });
 export const wasmBudgetBytes = (profile, venue) =>

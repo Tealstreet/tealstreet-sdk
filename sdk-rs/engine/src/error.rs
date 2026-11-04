@@ -83,6 +83,24 @@ pub struct BuilderAuthorization {
     pub authorized_raw: Option<u32>,
 }
 
+/// Closed history failure classifications; no raw venue text enters this field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ErrorCause {
+    HistoryRateLimited,
+    HistoryAuthInvalid,
+    HistoryAuthPermission,
+    HistoryInvalidParams,
+    HistoryVenueError,
+    HistoryHttpError,
+    HistoryDecode,
+    HistoryCursorStalled,
+    HistoryPageLimit,
+    HistoryWindowMismatch,
+    HistoryNetwork,
+    HistoryTimeout,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VenueError {
@@ -93,6 +111,9 @@ pub struct VenueError {
     pub outcome: Option<Outcome>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub venue_code: Option<String>,
+    /// Closed, SDK-owned diagnostic classification, distinct from the venue's code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause_code: Option<ErrorCause>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub venue_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +169,11 @@ impl VenueError {
 
     pub fn venue_code(mut self, code: impl Into<String>) -> Self {
         self.venue_code = Some(code.into());
+        self
+    }
+
+    pub fn cause_code(mut self, code: ErrorCause) -> Self {
+        self.cause_code = Some(code);
         self
     }
 
@@ -638,6 +664,18 @@ mod tests {
             serde_json::to_string(&error).unwrap(),
             r#"{"message":"Too many requests","kind":"rateLimited","outcome":"notSent","venueCode":"10006","venueMessage":"Too many visits","retryAfterMs":1000.0}"#
         );
+    }
+
+    #[test]
+    fn a_closed_cause_serializes_separately_from_the_venue_code() {
+        let error = VenueError::new("read refused")
+            .kind(ErrorKind::RateLimited)
+            .cause_code(ErrorCause::HistoryRateLimited)
+            .venue_code("100410");
+        let json = serde_json::to_value(error).unwrap();
+        assert_eq!(json["causeCode"], "HISTORY_RATE_LIMITED");
+        assert_eq!(json["venueCode"], "100410");
+        assert!(std::mem::size_of::<VenueError>() < 128);
     }
 
     #[test]

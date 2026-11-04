@@ -1164,6 +1164,25 @@ impl Venue for Kraken {
             _ => unreachable!(),
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        match pending {
+            Pending::History(request) => self.history_stream_error(cx, *request, response),
+            pending => self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            ),
+        }
+    }
+
     fn on_http_preparation_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,

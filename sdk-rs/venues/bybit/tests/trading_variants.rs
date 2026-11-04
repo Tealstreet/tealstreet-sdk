@@ -4024,6 +4024,140 @@ fn a_spot_read_shows_rows_that_carry_no_category_of_their_own() {
     assert!(h.engine.store().order("s1").is_some());
 }
 
+fn managed_cancel_pair(reply: &str) -> Harness {
+    let mut h = ready(Variant::Demo);
+    let row = r#"{"symbol":"BTCUSDT","orderId":"one","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}"#;
+    h.message(
+        "/v5/private",
+        &format!(
+            r#"{{"topic":"order","data":[{},{}]}}"#,
+            row,
+            row.replace("one", "two")
+        ),
+    );
+    h.command(Command::CancelOrders {
+        command: 120,
+        ids: vec!["one".into(), "two".into()],
+    });
+    let request = h.take("/v5/order/cancel-batch");
+    h.reply(request.id, 200, reply);
+    h
+}
+
+#[test]
+fn managed_cancel_batch_reordered_echoes_resolve_without_a_false_unknown() {
+    let h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"two","orderLinkId":""},{"orderId":"one","orderLinkId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":0,"msg":"OK"}]}}"#,
+    );
+    assert_eq!(h.result(120), Some(&Ok("[]".into())));
+    for id in ["one", "two"] {
+        assert!(h.engine.store().order(id).is_none());
+    }
+    assert!(!h.unknown.contains(&120));
+    assert!(!h.has_request("/v5/order/cancel-batch"));
+}
+
+#[test]
+fn managed_cancel_batch_reordered_partial_success_only_retires_the_accepted_order() {
+    let h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"two"},{"orderId":"one"}]},"retExtInfo":{"list":[{"code":10005,"msg":"permission denied"},{"code":0,"msg":"OK"}]}}"#,
+    );
+    assert!(h.result(120).unwrap().is_err());
+    assert!(h.engine.store().order("one").is_none());
+    assert_eq!(
+        h.engine.store().order("two").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    assert!(
+        !h.unknown.contains(&120),
+        "a proven refusal stays a refusal"
+    );
+    assert!(!h.has_request("/v5/order/cancel-batch"));
+}
+
+#[test]
+fn managed_cancel_batch_anonymous_already_gone_row_waits_for_reconciliation() {
+    let mut h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"one"},{"orderId":"","orderLinkId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110001,"msg":"order not exists"}]}}"#,
+    );
+    assert_eq!(h.result(120), Some(&Ok("[]".into())));
+    assert!(h.engine.store().order("one").is_none());
+    assert!(
+        h.engine.store().order("two").is_some(),
+        "absence code does not fabricate a cancellation event"
+    );
+    answer_reconcile(&mut h);
+    assert!(h.engine.store().order("two").is_none());
+    assert!(!h.unknown.contains(&120));
+}
+
+#[test]
+fn managed_single_cancel_batch_accepts_a_single_status_with_an_empty_identity() {
+    for variant in [Variant::Linear, Variant::Demo] {
+        let mut h = ready(variant);
+        h.message("/v5/private", r#"{"topic":"order","data":[{"symbol":"BTCUSDT","orderId":"one","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+        h.command(Command::CancelOrders {
+            command: 121,
+            ids: vec!["one".into()],
+        });
+        h.respond("/v5/order/cancel-batch", 200, r#"{"retCode":0,"result":{"list":[{"orderId":"","orderLinkId":""}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+        assert_eq!(h.result(121), Some(&Ok("[]".into())));
+        assert!(!h.unknown.contains(&121));
+    }
+}
+
+#[test]
+fn managed_cancel_batch_unproven_reply_is_actionable_and_diagnoses_shape_without_values() {
+    let h = managed_cancel_pair(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"one","orderLinkId":"private-client-needle"},{"orderId":"two"}]},"retExtInfo":{"list":[{"code":0,"msg":"private-status-needle"}]}}"#,
+    );
+    let error = h.result(120).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("check open orders on Bybit before retrying"));
+    assert!(error.contains("targets=2; result.list=array/2; retExtInfo.list=array/1"));
+    assert!(!error.contains("private-client-needle"));
+    assert!(!error.contains("private-status-needle"));
+    for id in ["one", "two"] {
+        assert!(h.engine.store().order(id).is_some());
+    }
+    assert!(h.unknown.contains(&120));
+    assert!(!h.has_request("/v5/order/cancel-batch"));
+}
+
+#[test]
+fn managed_cancel_batch_foreign_duplicate_and_ambiguous_echoes_leave_live_orders_unchanged() {
+    for list in [
+        r#"[{"orderId":"one"},{"orderId":"one"}]"#,
+        r#"[{"orderId":"foreign"},{"orderId":"two"}]"#,
+        r#"[{},{}]"#,
+    ] {
+        assert_invalid_managed_cancel_batch_preserves_rows(&format!(
+            r#"{{"retCode":0,"result":{{"list":{list}}},"retExtInfo":{{"list":[{{"code":0}},{{"code":0}}]}}}}"#
+        ));
+    }
+}
+
+#[test]
+fn managed_single_cancel_batch_already_gone_empty_list_is_satisfied_after_a_fresh_read() {
+    for code in [110001, 170213] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", r#"{"topic":"order","data":[{"symbol":"BTCUSDT","orderId":"one","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","leavesQty":"1"}]}"#);
+        h.command(Command::CancelOrders {
+            command: 122,
+            ids: vec!["one".into()],
+        });
+        h.respond("/v5/order/cancel-batch", 200, &format!(r#"{{"retCode":0,"result":{{"list":[]}},"retExtInfo":{{"list":[{{"code":{code},"msg":"order does not exist"}}]}}}}"#));
+        assert_eq!(h.result(122), Some(&Ok("[]".into())));
+        assert_eq!(
+            h.engine.store().order("one").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+        answer_reconcile(&mut h);
+        assert!(h.engine.store().order("one").is_none());
+        assert!(!h.unknown.contains(&122));
+        assert!(!h.has_request("/v5/order/cancel-batch"));
+    }
+}
+
 /// An Unknown placement on Bybit Inverse fences its symbol until the engine's
 /// reconcile reads the INVERSE category's orders and the clean read releases it
 /// (one user hit the fence on bybitinverse; the fence must not outlive the read).

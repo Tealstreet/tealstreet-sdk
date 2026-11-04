@@ -134,7 +134,17 @@ fn cancelled_rows_need_one_status_per_order_and_the_requested_target() {
             }
         ])
     );
-    assert_eq!(cancelled_rows(result, ext, &["b", "a"]), Err(Malformed));
+    // Native ID evidence, rather than original request position, binds each per-row status.
+    assert_eq!(
+        cancelled_rows(result, ext, &["b", "a"]),
+        Ok(vec![
+            Row::Refused {
+                code: 110001,
+                message: "order not exists".into()
+            },
+            Row::Accepted("a".into()),
+        ])
+    );
     // A short status list never marks the unmatched order cancelled (#4).
     let (short, short_ext) = success(
         r#"{"retCode":0,"result":{"list":[{"orderId":"a"},{"orderId":"b"}]},"retExtInfo":{"list":[{"code":0}]}}"#,
@@ -325,4 +335,107 @@ fn field_decoding_keeps_its_strictness() {
         margin_applied(raw(r#"{"reasons":[{"reasonCode":1}]}"#)),
         Err(Malformed)
     );
+}
+
+#[test]
+fn cancelled_rows_match_complete_echoes_by_native_id_instead_of_request_position() {
+    let (result, ext) = success(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"b"},{"orderId":"a"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
+    );
+    assert_eq!(
+        cancelled_rows(result, ext, &["a", "b"]),
+        Ok(vec![Row::Accepted("a".into()), Row::Accepted("b".into())])
+    );
+}
+
+#[test]
+fn cancelled_rows_keep_reordered_statuses_attached_to_their_echoed_order() {
+    let (result, ext) = success(
+        r#"{"retCode":0,"result":{"list":[{"orderId":"b"},{"orderId":"a"}]},"retExtInfo":{"list":[{"code":110020,"msg":"permission denied"},{"code":0}]}}"#,
+    );
+    assert_eq!(
+        cancelled_rows(result, ext, &["a", "b"]),
+        Ok(vec![
+            Row::Accepted("a".into()),
+            Row::Refused {
+                code: 110020,
+                message: "permission denied".into()
+            }
+        ])
+    );
+}
+
+#[test]
+fn one_cancel_with_an_empty_echo_still_has_one_unambiguous_success_status() {
+    for result in [
+        r#"{"list":[{}]}"#,
+        r#"{"list":[{"orderId":""}]}"#,
+        r#"{"list":[]}"#,
+    ] {
+        let body =
+            format!(r#"{{"retCode":0,"result":{result},"retExtInfo":{{"list":[{{"code":0}}]}}}}"#);
+        let (result, ext) = success(&body);
+        assert_eq!(
+            cancelled_rows(result, ext, &["a"]),
+            Ok(vec![Row::Accepted("a".into())])
+        );
+    }
+}
+
+#[test]
+fn cancelled_rows_refuse_foreign_duplicate_and_ambiguous_echoes() {
+    for results in [
+        r#"[{"orderId":"a"},{"orderId":"a"}]"#,
+        r#"[{"orderId":"a"},{"orderId":"foreign"}]"#,
+        r#"[{},{}]"#,
+    ] {
+        let body = format!(
+            r#"{{"retCode":0,"result":{{"list":{results}}},"retExtInfo":{{"list":[{{"code":0}},{{"code":0}}]}}}}"#
+        );
+        let (result, ext) = success(&body);
+        assert_eq!(cancelled_rows(result, ext, &["a", "b"]), Err(Malformed));
+    }
+}
+
+#[test]
+fn cancel_shape_diagnostic_never_contains_response_values() {
+    let body = r#"{"retCode":0,"retMsg":"private-ret-message","result":{"list":[{"orderId":"private-native-needle","orderLinkId":"private-client-needle"}]},"retExtInfo":{"list":[{"code":10005,"msg":"private-status-needle"}]}}"#;
+    let (result, ext) = success(body);
+    let diagnostic = cancel_diagnostic(result, ext, &["private-native-needle", "other"]);
+    assert_eq!(
+        diagnostic,
+        "targets=2; result.list=array/1; retExtInfo.list=array/1; orderId fields/nonempty/matched=1/1/1; orderLinkId fields/nonempty=1/1; statuses success/failed/invalid=0/1/0"
+    );
+    for value in [
+        "private-ret-message",
+        "private-native-needle",
+        "private-client-needle",
+        "private-status-needle",
+        "10005",
+    ] {
+        assert!(!diagnostic.contains(value));
+    }
+}
+
+#[test]
+fn cancelled_rows_match_a_sole_unnamed_reordered_status_by_elimination() {
+    for (code, expected) in [
+        (0, Row::Accepted("a".into())),
+        (
+            110001,
+            Row::Refused {
+                code: 110001,
+                message: String::new(),
+            },
+        ),
+    ] {
+        let body = format!(
+            r#"{{"retCode":0,"result":{{"list":[{{}},{{"orderId":"b"}}]}},"retExtInfo":{{"list":[{{"code":{code}}},{{"code":0}}]}}}}"#
+        );
+        let (result, ext) = success(&body);
+        assert_eq!(
+            cancelled_rows(result, ext, &["b", "a"]),
+            Ok(vec![Row::Accepted("b".into()), expected])
+        );
+    }
 }

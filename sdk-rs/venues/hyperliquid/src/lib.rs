@@ -133,6 +133,9 @@ struct Connection {
     feed: Option<FeedId>,
     // Native topic eligibility, updated only by accepted shared lifecycle events.
     open: bool,
+    private_bootstrap: socket_codec::PrivateBootstrap,
+    // Transport liveness and epoch retirement cannot forgive a missing private bootstrap.
+    private_bootstrap_misses: u8,
 }
 #[derive(Default)]
 struct Ladder {
@@ -172,6 +175,7 @@ pub struct Hyperliquid {
     dex_names: Vec<String>,
     advanced_scopes: HashSet<String>,
     core_discovery_incomplete: bool,
+    http_429_count: u32,
     /// Lowercase coins of catalogue rows excluded by design: never published,
     /// and owned exposure on them is hidden rather than freezing the account.
     excluded: HashSet<String>,
@@ -209,6 +213,7 @@ impl Hyperliquid {
             dex_names: Vec::new(),
             advanced_scopes: HashSet::new(),
             core_discovery_incomplete: true,
+            http_429_count: 0,
             excluded: HashSet::new(),
             startup: Default::default(),
             info_completing: false,
@@ -1164,6 +1169,34 @@ impl Venue for Hyperliquid {
     ) {
         self.trade_plan_ready(cx, owner);
     }
+    fn startup_diagnostics(
+        &self,
+        store: &safe_cex_engine::Store,
+    ) -> Vec<(&'static str, safe_cex_engine::log::Value)> {
+        let loaded = store.loaded();
+        let stage = if !loaded.markets {
+            if self.spot {
+                "spotMetaAndAssetCtxs"
+            } else {
+                "metaAndAssetCtxs"
+            }
+        } else if self.options.public_data_only {
+            "tickers"
+        } else if self.user().is_none() {
+            "userRole"
+        } else if !loaded.orders {
+            "frontendOpenOrders"
+        } else if !loaded.balance || !loaded.positions {
+            self.startup_private_stage()
+        } else {
+            "tickers"
+        };
+        vec![
+            ("stage", stage.into()),
+            ("readTimeoutMs", 20_000.0.into()),
+            ("http429Count", f64::from(self.http_429_count).into()),
+        ]
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.credentials = safe_cex_engine::credential_selection::Slots::new(
             cx.address_nonce_identities().primary.clone(),
@@ -1251,10 +1284,11 @@ impl Venue for Hyperliquid {
     fn on_socket_interests_released(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        _epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
         pending: Pending,
     ) -> Result<(), SocketError> {
         if let Pending::SocketRefresh { mode_ready } = pending {
+            self.watch_private_snapshots(cx, epoch);
             self.finish_socket_refresh(cx, mode_ready);
         }
         Ok(())
@@ -1287,6 +1321,9 @@ impl Venue for Hyperliquid {
         {
             return;
         }
+        if !self.observe_private_snapshot(cx, text) {
+            return;
+        }
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             self.public_frame(cx, text);
         }
@@ -1310,8 +1347,12 @@ impl Venue for Hyperliquid {
         if !(200..300).contains(&response.status) && !matches!(pending, Pending::Trade(_)) {
             let message = format!("Hyperliquid HTTP {}: {}", response.status, response.body);
             if response.status == 429 {
+                self.http_429_count = self.http_429_count.saturating_add(1);
                 let error = safe_cex_engine::VenueError::new(message.clone())
-                    .kind(safe_cex_engine::ErrorKind::RateLimited);
+                    .kind(safe_cex_engine::ErrorKind::RateLimited)
+                    .retry_after_ms(
+                        safe_cex_engine::classify::retry_after_ms(&response).unwrap_or(5000.0),
+                    );
                 self.account.read_error = Some(error);
             }
             self.on_request_failed(cx, pending, &message);
@@ -1678,6 +1719,7 @@ impl Venue for Hyperliquid {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.private_snapshot_timer(cx, timer);
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
         if let Some((dex, offset)) = self.startup.on_timer(timer) {

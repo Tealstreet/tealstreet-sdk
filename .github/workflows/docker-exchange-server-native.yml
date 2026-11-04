@@ -1,0 +1,92 @@
+# Native exchange server image, built on this PUBLIC mirror's free runners instead of
+# tealstreet-next's self-hosted pool (runner migration, 2026-11-03). Keep every step
+# GitHub-owned or plain shell: this repo's Actions policy allows only GitHub-owned
+# actions, and no third-party action should hold a token that signs images for
+# boxes holding users' keys.
+#
+# STAGE 1: pushes and signs `:sdk-<sha>` only. `:latest` still moves from
+# tealstreet-next's docker-exchange-server-rust.yml until the Vultr units trust this
+# workflow's exact identity (infra/tofu/exchange-services `cosign_identity_regexp`).
+# Cutting over = add the `:latest` step here, then delete the monorepo workflow.
+#
+# Push-to-master only, never pull_request: a fork PR never gets packages: write
+# or id-token: write.
+name: Native exchange server image
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'sdk-rs/**'
+      - 'packages/safe-cex/src/exchanges/rust/construction-rules.json'
+      - '.github/workflows/docker-exchange-server-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-exchange-server-native
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/tealstreet/exchange-server-native
+  COSIGN_VERSION: v3.1.4
+  COSIGN_SHA256: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust 1.99.0
+        run: rustup toolchain install 1.99.0 --profile minimal && rustup default 1.99.0
+      - name: Test native exchange server
+        run: cargo test --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-exchange-server
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Login to GHCR
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: docker login ghcr.io -u "${{ github.actor }}" --password-stdin <<<"$REGISTRY_TOKEN"
+      - name: Build and push sdk-<sha>
+        run: |
+          docker buildx create --use --name native >/dev/null
+          docker buildx build . \
+            --file sdk-rs/hosts/server/Dockerfile \
+            --platform linux/amd64 \
+            --tag "$IMAGE:sdk-${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=https://github.com/Tealstreet/tealstreet-sdk" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --cache-from "type=registry,ref=$IMAGE:buildcache-sdk" \
+            --cache-to "type=registry,ref=$IMAGE:buildcache-sdk,mode=max" \
+            --metadata-file "$RUNNER_TEMP/build.json" \
+            --push
+          digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/build.json")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest in build metadata"; exit 1; }
+          echo "DIGEST=$digest" >> "$GITHUB_ENV"
+      - name: Install cosign (pinned binary)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/cosign" "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          sha256sum -c - <<<"${COSIGN_SHA256}  $RUNNER_TEMP/cosign"
+          chmod 0755 "$RUNNER_TEMP/cosign"
+      - name: Sign the pushed digest (keyless)
+        run: '"$RUNNER_TEMP/cosign" sign --yes "$IMAGE@$DIGEST"'
+      - name: Verify against this workflow's exact identity
+        run: |
+          "$RUNNER_TEMP/cosign" verify \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/docker-exchange-server-native.yml@refs/heads/master" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE@$DIGEST" >/dev/null
+          printf 'signed and verified %s@%s (sdk-%s)\n' "$IMAGE" "$DIGEST" "$GITHUB_SHA"

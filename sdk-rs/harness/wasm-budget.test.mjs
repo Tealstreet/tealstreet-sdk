@@ -28,7 +28,8 @@ test('the approved combined ceiling accepts 16 MiB exactly and rejects the next 
 test('shared broker-role setup caps retain CI headroom and reject the next byte', () => {
   for (const [venue, measured, cap] of [
     ['blofin', 1_923_215, 1_934_336],
-    ['bybit', 2_148_560, 2_159_616],
+    // Bybit's later shared-core growth is measured by master run 41783084277 below.
+    ['bybit', 2_163_030, 2_173_952],
     ['okx', 1_910_027, 1_921_024],
     ['kraken', 2_097_992, 2_108_416],
     ['krakenspot', 2_097_992, 2_108_416],
@@ -52,6 +53,27 @@ test('KuCoin custody caps retain the approved CI headroom and exact boundary', (
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+});
+
+test('master 41783084277 caps retain the ruled headroom and shared-family boundary', () => {
+  for (const [venue, measured, cap] of [
+    ['apexomni', 1_959_768, 1_970_176],
+    ['asterdex', 2_099_176, 2_109_440],
+    ['backpack', 1_860_786, 1_871_872],
+    ['binance', 2_157_319, 2_167_808],
+    ['bybit', 2_163_030, 2_173_952],
+    ['coinbase', 1_800_411, 1_811_456],
+    ['hyperliquid', 2_069_390, 2_079_744],
+    ['hyperliquidspot', 2_069_390, 2_079_744],
+    ['weex', 1_909_946, 1_921_024],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
 });
 
 test('WOO attribution cap retains the approved CI headroom and exact boundary', () => {

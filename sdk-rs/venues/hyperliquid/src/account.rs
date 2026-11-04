@@ -146,7 +146,7 @@ pub struct Account {
     asset_retry_timer: Option<TimerId>,
     /// The next queued read is a fence reconcile.
     fence_read: bool,
-    orders_retry_timer: Option<TimerId>,
+    orders_retry: safe_cex_engine::startup::Backoff<String>,
     pub(crate) builder_read_at: f64,
     state_time: HashMap<String, f64>,
     position_time: HashMap<String, f64>,
@@ -448,6 +448,20 @@ impl Hyperliquid {
             } else {
                 MarginType::Cross
             }),
+        }
+    }
+    pub(crate) fn startup_private_stage(&self) -> &'static str {
+        if self.spot {
+            "spotClearinghouseState"
+        } else if !self.account.mode_resolved {
+            "userAbstraction"
+        } else if self.account.core_loaded
+            && self.account.mode != Mode::Standard
+            && self.account.spot.is_none()
+        {
+            "spotClearinghouseState"
+        } else {
+            "clearinghouseState"
         }
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1092,9 +1106,13 @@ impl Hyperliquid {
             } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
                 if !valid {
+                    self.account
+                        .orders_retry
+                        .failed_after(cx, dex.clone(), 5000.0);
                     self.refresh_owed_orders(cx, &dex);
                     return;
                 }
+                self.account.orders_retry.succeeded(cx, &dex);
                 if self.account.orders_revision.get(&dex).copied().unwrap_or(0) != revision {
                     self.schedule_orders(cx);
                     self.refresh_owed_orders(cx, &dex);
@@ -1128,7 +1146,46 @@ impl Hyperliquid {
                         merged.push(order);
                     }
                 }
-                cx.store.set_orders(merged);
+                // This dex's rows and the cover its read proves, together. The
+                // account is every dex, and no account cover is proved before
+                // discovery has named them all.
+                let market_dex: HashMap<String, String> = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .map(|market| {
+                        (
+                            market.symbol.clone(),
+                            self.dex_of(cx, &market.symbol).to_owned(),
+                        )
+                    })
+                    .collect();
+                let in_dex =
+                    |symbol: &str| market_dex.get(symbol).map_or("", String::as_str) == dex;
+                let mut account: Vec<&str> = std::iter::once("")
+                    .chain(self.dex_names.iter().map(String::as_str))
+                    .collect();
+                if !self.discovery_settled() {
+                    account.push(DEXES_UNSETTLED);
+                }
+                let unproven = if coverage.rejected() == 0 {
+                    Vec::new()
+                } else {
+                    vec![String::new()]
+                };
+                cx.commit_orders_read(
+                    safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                        key: &dex,
+                        account: &account,
+                    },
+                    in_dex,
+                    merged
+                        .into_iter()
+                        .filter(|order| in_dex(&order.symbol))
+                        .collect(),
+                    &unproven,
+                );
+                cx.store.set_orders_loaded();
                 if coverage.rejected() == 0 {
                     let symbols: Vec<_> = cx
                         .store
@@ -1301,9 +1358,14 @@ impl Hyperliquid {
             Request::Orders { dex, .. } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
                 self.refresh_owed_orders(cx, &dex);
-                if !cx.store.loaded().orders && self.account.orders_retry_timer.is_none() {
-                    self.account.orders_retry_timer = Some(cx.set_timer(5000.0));
-                }
+                let pause = self
+                    .account
+                    .read_error
+                    .as_ref()
+                    .and_then(|error| error.retry_after_ms)
+                    .unwrap_or(5000.0)
+                    .max(5000.0);
+                self.account.orders_retry.failed_after(cx, dex, pause);
             }
             Request::Spot { .. } => self.account.spot_inflight = false,
             Request::Asset { symbol, .. } => {
@@ -1402,9 +1464,8 @@ impl Hyperliquid {
                 }
             }
         }
-        if self.account.orders_retry_timer == Some(timer) {
-            self.account.orders_retry_timer = None;
-            self.refresh_orders(cx);
+        if let Some(dex) = self.account.orders_retry.on_timer(timer) {
+            self.refresh_orders_scope(cx, &dex);
         }
         if self.account.asset_retry_timer == Some(timer) {
             self.account.asset_retry_timer = None;
@@ -2784,6 +2845,10 @@ fn failed_protective_status(status: &str) -> bool {
 }
 
 /// The oldest epoch once every dex has a clean census: an all-symbol fence needs them all.
+/// A read-cover scope no read commits: the account waits while dexes are
+/// still being discovered.
+const DEXES_UNSETTLED: &str = "\u{0}dexes-unsettled";
+
 fn every_dex_clean(names: &[String], clean: &HashMap<String, u64>) -> Option<u64> {
     let main = clean.get("")?;
     names.iter().try_fold(*main, |oldest, name| {

@@ -1166,7 +1166,11 @@ prepared interface fails explicitly instead of invoking its legacy sender.
 Preparation and binding never send HTTP. Binding preserves signed URL/query/body
 bytes and rejects conflicting host headers; `ready()` rechecks the original
 request deadline and resource, and `dispatch()` invokes fetch/WebSocket.send
-synchronously after the engine release claim. Cancellation releases only that
+synchronously after the engine release claim. A bound resource with `admitDispatch`
+first checks shared admission asynchronously, then invokes claim plus dispatch
+synchronously within its handoff callback. Grouped sends refuse these individual
+guards before claim. Direct callers of guarded dispatch perform the same check.
+Cancellation releases only that
 request's prepared/bound resources. Opaque legacy requests share the executor but
 retain their older routing and carry no managed release/outcome guarantee.
 
@@ -1661,3 +1665,19 @@ MEXC venue execution reads only installed metadata, never hashes credentials.
 Chart consumers must honor `exchangeMetadata.supportsKlineSeconds` and optional
 `supportedCandleIntervals`. Hyperliquid and HyperliquidSpot share their native
 interval set, which excludes seconds and 6h; neither may reach a candle subscription.
+
+### Candle history across account-worker replacement
+
+`fetchOHLCVInWorker` is authoritative for Rust mirrors as well as CandleCache.
+Only Bitrue, Lighter and LighterRobinhood opt in. Other mirrors lazily own a
+credential-free public source using the same endpoint/routing options, disposed
+with the mirror. Frame-fed account engines execute only writes; candle reads
+never run on them. The real-WASM candle-routing test pins this boundary.
+Candle reads do not wait for private reconciliation or lift an order fence.
+
+A detached bridge fails pending reads with `WORKER_STOPPED`. Reads name the
+read interruption; uncertain writes retain their existing code, reconciliation
+warning and outcome. Worker candle reads alone retry once through the replacement bridge,
+using its existing 30-second attachment bound. No write is replayed. Tests in
+`rust.candle-routing.test.ts` and `rust.worker-command-contract.test.ts` pin
+page routing, replacement replies, the bound and zero write replay.

@@ -1723,9 +1723,14 @@ struct IoCore {
     #[cfg(feature = "order-locks")]
     active_commands: std::collections::HashSet<CommandId>,
     #[cfg(feature = "order-locks")]
-    order_read_tokens: crate::IdMap<RequestId, u64>,
+    /// Each order read's order-lock epoch and its release (row sequence, send).
+    order_read_tokens: crate::IdMap<RequestId, (u64, crate::order_read_cover::OrderReadMark)>,
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
+    /// The release of the read this response answers, with its epoch: it
+    /// authorizes a commit only while `order_response_token` is that epoch.
+    #[cfg(feature = "order-locks")]
+    order_response_read: Option<(u64, crate::order_read_cover::OrderReadMark)>,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -1930,6 +1935,8 @@ impl Default for IoCore {
             order_read_tokens: Default::default(),
             #[cfg(feature = "order-locks")]
             order_response_token: None,
+            #[cfg(feature = "order-locks")]
+            order_response_read: None,
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -2523,10 +2530,14 @@ impl<P> Cx<'_, P> {
             if method != Method::Get {
                 self.io.core.order_locks.note_write();
             }
+            let read = crate::order_read_cover::OrderReadMark {
+                seq: self.store.order_read_sequence(),
+                sent: self.now,
+            };
             self.io
                 .core
                 .order_read_tokens
-                .insert(id, self.io.core.order_locks.token());
+                .insert(id, (self.io.core.order_locks.token(), read));
         }
         self.io.pending.insert(
             id,
@@ -2932,11 +2943,7 @@ impl<P> Cx<'_, P> {
         {
             return false;
         }
-        self.notice(
-            Level::Error,
-            log_code::for_startup_error(error),
-            &error.message,
-        );
+        self.notice_error(Level::Error, log_code::for_startup_error(error), error);
         self.startup_failed(error.clone());
         let now = self.now;
         let (polls, mut sink) = self.io.polls();
@@ -3044,6 +3051,85 @@ impl<P> Cx<'_, P> {
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = (unproven, epoch);
+    }
+
+    /// Commit the rows of the order read this response answers, atomically with
+    /// the cover it proves (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1). Rows
+    /// changed after the read was released are kept, and an account scope
+    /// committed since refuses it whole (`None`). Outside a read response
+    /// nothing is committed.
+    #[cfg(feature = "order-locks")]
+    pub fn commit_orders_read(
+        &mut self,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: Vec<crate::model::Order>,
+        unproven: &[String],
+    ) -> Option<Vec<String>> {
+        // Only inside the response event that answered this read: a boundary
+        // that takes the token, or any later event, leaves no authority.
+        let (epoch, read) = self.io.core.order_response_read?;
+        if self.io.core.order_response_token != Some(epoch) {
+            return None;
+        }
+        self.store
+            .commit_orders_read(read, scope, in_scope, rows, unproven)
+    }
+
+    /// The release of the read this response answers, only inside that response.
+    /// A venue whose census spans independent reads keeps the earliest of its
+    /// legs' marks and commits from it (`commit_orders_read_from`).
+    #[cfg(feature = "order-locks")]
+    pub fn order_read_mark(&self) -> Option<crate::order_read_cover::OrderReadMark> {
+        let (epoch, read) = self.io.core.order_response_read?;
+        (self.io.core.order_response_token == Some(epoch)).then_some(read)
+    }
+
+    /// `commit_orders_read` for rows drawn from several independent reads: the
+    /// cover and the refusals go by the earliest of `earliest` and this
+    /// response's own release, never the last leg's alone (H9).
+    #[cfg(feature = "order-locks")]
+    pub fn commit_orders_read_from(
+        &mut self,
+        earliest: crate::order_read_cover::OrderReadMark,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: Vec<crate::model::Order>,
+        unproven: &[String],
+    ) -> Option<Vec<String>> {
+        let read = self.order_read_mark()?.earliest(earliest);
+        self.store
+            .commit_orders_read(read, scope, in_scope, rows, unproven)
+    }
+
+    /// `orders_read_refusals` for rows drawn from several independent reads.
+    #[cfg(feature = "order-locks")]
+    pub fn orders_read_refusals_from(
+        &self,
+        earliest: crate::order_read_cover::OrderReadMark,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: &[crate::model::Order],
+    ) -> Option<Vec<String>> {
+        let read = self.order_read_mark()?.earliest(earliest);
+        self.store.orders_read_refusals(read, scope, in_scope, rows)
+    }
+
+    /// What `commit_orders_read` with these rows would refuse, without changing
+    /// anything (`None`: the whole read, or no read response to commit). A venue
+    /// updates its own per-order state only for the symbols this admits.
+    #[cfg(feature = "order-locks")]
+    pub fn orders_read_refusals(
+        &self,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: &[crate::model::Order],
+    ) -> Option<Vec<String>> {
+        let (epoch, read) = self.io.core.order_response_read?;
+        if self.io.core.order_response_token != Some(epoch) {
+            return None;
+        }
+        self.store.orders_read_refusals(read, scope, in_scope, rows)
     }
 
     /// Call only after accepting a complete, fresh authoritative order read.
@@ -4029,6 +4115,10 @@ pub trait Venue {
     ) {
         self.on_request_failed(cx, pending, &error.message);
     }
+    /// Optional public stage facts for the nonterminal startup watchdog.
+    fn startup_diagnostics(&self, _store: &Store) -> Vec<(&'static str, Value)> {
+        Vec::new()
+    }
     fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
@@ -4055,7 +4145,12 @@ const STARTUP_WATCH_MS: f64 = 60_000.0;
 const EMPTY_CATALOGUE_WARNING: &str = "Venue returned an empty market catalogue; it was not applied and the previous catalogue is kept";
 const STARTUP_REPEAT_MS: f64 = 300_000.0;
 
-fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
+fn watch_startup<P>(
+    cx: &mut Cx<'_, P>,
+    account: bool,
+    started_at: f64,
+    mut fields: Vec<(&'static str, Value)>,
+) -> bool {
     let loaded = cx.store.loaded();
     let tickers = cx.io.core.public_feed_policy != PublicFeedPolicy::Disabled;
     let missing: Vec<&str> = [
@@ -4077,13 +4172,20 @@ fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
     } else {
         Level::Error
     };
-    cx.notice(
+    let elapsed = cx.now - started_at;
+    // Invalid transport clocks cannot introduce nonfinite diagnostic fields.
+    if cx.now.is_finite() && elapsed.is_finite() {
+        fields.push(("elapsedMs", elapsed.max(0.0).into()));
+        fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
+    }
+    cx.event(
         level,
         log_code::STARTUP_INCOMPLETE,
         format!(
             "Startup incomplete: still waiting for {}",
             missing.join(", ")
         ),
+        fields,
     );
     true
 }
@@ -4096,6 +4198,7 @@ pub struct Engine<V: Venue> {
     started: bool,
     /// Checked on handled events, so it adds no timer of its own.
     startup_watch_at: Option<f64>,
+    startup_started_at: f64,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
     #[cfg(feature = "order-locks")]
@@ -4198,6 +4301,7 @@ impl<V: Venue> Engine<V> {
             },
             started: false,
             startup_watch_at: None,
+            startup_started_at: 0.0,
             ack_timer: None,
             #[cfg(feature = "order-locks")]
             reconcile_timer: None,
@@ -4714,6 +4818,7 @@ impl<V: Venue> Engine<V> {
         self.process_socket_work(now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
+        self.startup_started_at = now;
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
         self.flush_http_owner_retirements();
@@ -5153,8 +5258,14 @@ impl<V: Venue> Engine<V> {
         if let Some(at) = self.startup_watch_at
             && now >= at
         {
-            self.startup_watch_at =
-                watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
+            let fields = self.venue.startup_diagnostics(cx.store);
+            self.startup_watch_at = watch_startup(
+                &mut cx,
+                self.account_startup,
+                self.startup_started_at,
+                fields,
+            )
+            .then_some(now + STARTUP_REPEAT_MS);
         }
         #[cfg(feature = "managed-sockets")]
         if V::managed_sockets() && self.io.managed_socket_active() {
@@ -5617,6 +5728,7 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "order-locks")]
         {
             self.io.core.order_response_token = None;
+            self.io.core.order_response_read = None;
         }
         self.io.core.auth_failure_counted = false;
     }
@@ -5868,7 +5980,9 @@ impl<V: Venue> Engine<V> {
     fn http_end(&mut self, now: f64, request: RequestId) {
         #[cfg(feature = "order-locks")]
         {
-            self.io.core.order_response_token = self.io.core.order_read_tokens.remove(&request);
+            let read = self.io.core.order_read_tokens.remove(&request);
+            self.io.core.order_response_token = read.map(|(epoch, _)| epoch);
+            self.io.core.order_response_read = read;
         }
         let (Some(incoming), Some(pending)) = (
             self.io.core.incoming.remove(&request),

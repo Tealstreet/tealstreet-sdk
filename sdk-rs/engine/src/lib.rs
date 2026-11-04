@@ -27,6 +27,7 @@ pub mod nonce;
 pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
+pub mod order_read_cover;
 pub mod paging;
 pub mod protective_amend;
 mod placement_acks;
@@ -78,7 +79,8 @@ pub use engine::{
     unsupported_venue_action,
 };
 pub use error::{
-    BuilderAuthorization, BuilderAuthorizationReason, ErrorKind, Outcome, Partial, VenueError,
+    BuilderAuthorization, BuilderAuthorizationReason, ErrorCause, ErrorKind, Outcome, Partial,
+    VenueError,
 };
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};

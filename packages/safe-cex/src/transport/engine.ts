@@ -19,6 +19,7 @@ import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } 
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { directTransport } from './direct';
+import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
 import {
@@ -468,6 +469,8 @@ const httpTransport = (
       })
     : undefined;
   let disposed = false;
+  const infoBudget =
+    exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidInfoBudget() : undefined;
   const pending = new Set<AbortController>();
   // While this realm's tunnel is unreachable, REST goes through the HTTP proxy, which
   // egresses from the same fleet. Decided per request at prepare: a prepared request keeps its path.
@@ -716,6 +719,10 @@ const httpTransport = (
         );
       }
       signal.throwIfAborted();
+      const budgetGeneration =
+        infoBudget && request.method === 'POST' && original.pathname === '/info'
+          ? await untilAborted(infoBudget.wait(original.origin, request.body, started + deadlineMs, signal), signal)
+          : undefined;
       if (intent !== undefined && (!prepared || typeof prepared.bind !== 'function'))
         throw new HttpPreparationError('invalid');
       const validateBound = <T extends { ready(): boolean; dispatch(): unknown; cancel?(): void }>(
@@ -795,11 +802,41 @@ const httpTransport = (
           }
           bound = true;
           let sent = false;
+          let admitting = false;
+          let admitted = false;
+          const admitDispatch = async <T>(handoff: () => T): Promise<Awaited<T>> => {
+            beforeRelease(() => {
+              if (sent || admitting) throw new HttpPreparationError('invalid');
+            });
+            admitting = true;
+            try {
+              const result = await untilAborted(
+                infoBudget!.admitDispatch(original.origin, budgetGeneration!, started + deadlineMs, signal, () => {
+                  active();
+                  admitted = true;
+                  try {
+                    return { value: handoff() };
+                  } finally {
+                    admitted = false;
+                  }
+                }),
+                signal,
+              );
+              return await result.value;
+            } catch (error) {
+              cancel();
+              throw error;
+            } finally {
+              admitting = false;
+            }
+          };
           return {
+            ...(budgetGeneration === undefined ? {} : { admitDispatch }),
             ready() {
               return beforeRelease(() => !sent && ready());
             },
             dispatch() {
+              if (budgetGeneration !== undefined && !admitted) return admitDispatch(() => this.dispatch());
               beforeRelease(() => {
                 if (sent) throw new HttpPreparationError('invalid');
               });
@@ -810,6 +847,19 @@ const httpTransport = (
                   .then((value) =>
                     route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
                   )
+                  .then(async (value) => {
+                    if (infoBudget && request.method === 'POST' && original.pathname === '/info') {
+                      const reportFailure = () => {
+                        if (!signal.aborted) warnHyperliquidInfoBudgetUnavailable();
+                      };
+                      const recorded = Promise.resolve()
+                        .then(() => infoBudget.response(original.origin, value.status, value.headers ?? ''))
+                        .catch(reportFailure);
+                      // Only a 429 must publish its pause before Rust can enqueue its retry.
+                      if (value.status === 429) await untilAborted(recorded, signal).catch(reportFailure);
+                    }
+                    return value;
+                  })
                   .then(wrap)
                   .catch((error) => {
                     // No answer through the relay, and nobody called it off: the relay is down.
