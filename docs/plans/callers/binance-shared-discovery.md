@@ -11,6 +11,11 @@ Binance success TTL is 5 s, reply limit 8 MiB, entry limit 64 and lease limit 25
 clamped to the original managed deadline. Its shared failure cooldown grows
 1/2/4/8/16/30 s; Retry-After can extend it to at most five minutes. No follower
 bypasses a live lease or cooldown, and stale leases refuse before claim/handoff.
+Future-dated strict leases/cooldowns remain blocking; rollback never authorizes
+an election or cached-byte reuse. Expired leases retain their minimum failure
+window while the owner settles its deadline. A dispatched deadline starts an
+owner-fenced cooldown before abort cleanup, without delaying the caller;
+never-dispatched expiry and user/follower cancellation do not publish failures.
 Cancellation and late completion are owner-fenced.
 
 Without working storage at startup, workers keep independent discovery and native

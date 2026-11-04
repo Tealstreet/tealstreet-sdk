@@ -564,6 +564,11 @@ const httpTransport = (
     let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
     let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
     let catalogueRead: CatalogueRead | undefined;
+    let physicalRequest = false;
+    const settleDeadline = () => {
+      if (physicalRequest && remaining() <= 0 && !disposed && !request.signal?.aborted && !reroute.abandon?.aborted)
+        catalogueRead?.timedOut?.();
+    };
     let bound = false;
     let cancelBound: (() => void) | undefined;
     const cleanup = () => {
@@ -594,12 +599,17 @@ const httpTransport = (
       }
     };
     const onAbort = () => {
+      settleDeadline();
       releaseResources();
       cleanup();
     };
-    const timer = setTimeout(() => controller.abort(new HttpPreparationError('timedOut')), remaining());
+    const timer = setTimeout(() => {
+      settleDeadline();
+      controller.abort(new HttpPreparationError('timedOut'));
+    }, remaining());
     signal.addEventListener('abort', onAbort, { once: true });
     const cancel = () => {
+      settleDeadline();
       controller.abort();
       releaseResources();
       cleanup();
@@ -945,6 +955,7 @@ const httpTransport = (
               if (!cached) infoRead?.sent();
               try {
                 const response = send();
+                physicalRequest = true;
                 return untilAborted(response, signal)
                   .then((value) =>
                     route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
@@ -961,7 +972,7 @@ const httpTransport = (
                       // Only a 429 must publish its pause before Rust can enqueue its retry.
                       if (value.status === 429) await untilAborted(recorded, signal).catch(reportFailure);
                     }
-                    return catalogueRead && !cached ? catalogueRead.complete(value) : value;
+                    return catalogueRead && !cached ? untilAborted(catalogueRead.complete(value), signal) : value;
                   })
                   .then(wrap)
                   .catch((error) => {
@@ -975,7 +986,7 @@ const httpTransport = (
                       throw error;
                     };
                     const failed = catalogueRead?.failed?.();
-                    return failed ? failed.then(report) : report();
+                    return failed ? untilAborted(failed, signal).then(report, report) : report();
                   });
               } catch (error) {
                 cancel();

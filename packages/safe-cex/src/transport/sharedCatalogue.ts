@@ -36,6 +36,7 @@ export interface CatalogueRead {
   leaseStartedAt?: number;
   complete(response: HttpResponse): Promise<HttpResponse>;
   failed?(headers?: string): Promise<void>;
+  timedOut?(): void;
   cancel(): void;
 }
 
@@ -64,11 +65,19 @@ export class SharedCatalogue {
   ) {}
 
   private live(entry?: Entry): boolean {
-    if (!entry || !Number.isFinite(entry.at) || Date.now() < entry.at) return false;
+    if (!entry || !Number.isFinite(entry.at)) return false;
+    if (Date.now() < entry.at) return this.policy.strict === true && !entry.bytes;
     const until = entry.bytes
       ? entry.at + this.policy.ttlMs
       : (entry.cooldownUntil ?? entry.leaseUntil ?? entry.at + this.policy.leaseMs);
-    return Number.isFinite(until) && until <= entry.at + Math.max(this.policy.leaseMs, 300_000) && Date.now() < until;
+    // Retain an expired lease through its failure window while its owner settles the deadline.
+    const grace =
+      this.policy.strict && !entry.bytes && entry.cooldownUntil === undefined
+        ? (this.policy.failureDelay?.(Math.min(6, (entry.failures ?? 0) + 1), '', until) ?? 0)
+        : 0;
+    return (
+      Number.isFinite(until) && until <= entry.at + Math.max(this.policy.leaseMs, 300_000) && Date.now() < until + grace
+    );
   }
 
   private open(): Promise<IDBDatabase> {
@@ -302,8 +311,8 @@ export class SharedCatalogue {
       signal.removeEventListener('abort', cancel);
       void remove();
     };
-    const failed = async (headers = '') => {
-      if (!this.policy.failureDelay || finished || signal.aborted) {
+    const failed = async (headers = '', timedOut = false) => {
+      if (!this.policy.failureDelay || finished || (signal.aborted && !timedOut)) {
         cancel();
         return;
       }
@@ -320,7 +329,14 @@ export class SharedCatalogue {
     signal.addEventListener('abort', cancel, { once: true });
     return {
       cancel,
-      ...(this.policy.failureDelay ? { failed } : {}),
+      ...(this.policy.failureDelay
+        ? {
+            failed,
+            timedOut: () => {
+              void failed('', true);
+            },
+          }
+        : {}),
       ...(this.policy.strict ? { leaseExpiresAt: lease.leaseUntil, leaseStartedAt: lease.at } : {}),
       complete: async (response) => {
         try {

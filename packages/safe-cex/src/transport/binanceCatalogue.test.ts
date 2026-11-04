@@ -139,7 +139,7 @@ it.each(['network', 'http', 'invalid'])('a %s failure installs cooldown before f
 
 it('a late failed owner cannot replace a newer success or remove its lease', async () => {
   const old = await prepare(client(), undefined, Date.now() + 100_000);
-  await vi.advanceTimersByTimeAsync(25_001);
+  await vi.advanceTimersByTimeAsync(26_001);
   const next = await prepare(client());
   await next!.complete(response());
   await flush();
@@ -193,6 +193,9 @@ it('copies cache bytes, keeps exact invalid response bytes and rejects rollback/
   const bad = new TextEncoder().encode('{"symbols":[{}]}');
   const answer = await fresh!.complete({ ...response(), body: bad });
   expect(answer.body).toEqual(bad);
+  await advance(1001);
+  await (await prepare(client()))!.complete(response());
+  await flush();
   vi.setSystemTime(900_000);
   expect((await prepare(client()))?.cached).toBeUndefined();
 });
@@ -285,3 +288,263 @@ it.each([
     await flush();
   }
 });
+
+it.each(['lease', 'cooldown'])(
+  'review strict %s survives clock rollback without a second physical request',
+  async (phase) => {
+    vi.stubGlobal('indexedDB', factory);
+    vi.resetModules();
+    const { createEngineTransport } = await import('./engine');
+    const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+    const send = vi.fn(async () => (phase === 'cooldown' ? response(503) : new Promise<HttpResponse>(() => {})));
+    const raw: Transport = {
+      now: Date.now,
+      setTimeout,
+      clearTimeout: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+      prepareHttp: prepareRecordedHttp,
+      request: send,
+      connect: () => ({ send() {}, close() {} }),
+    };
+    const a = createEngineTransport('binance', { key: '', secret: '' }, raw);
+    const b = createEngineTransport('binance', { key: '', secret: '' }, raw);
+    const packet = (id: number) => ({ ...request(), request: id, route: 'direct' as const, timeoutMs: 20000 });
+    const pending: Promise<unknown>[] = [];
+    try {
+      const p = packet(1);
+      const leader = await a.prepareHttp!(p);
+      const physical = leader.bind(p).dispatch();
+      const first = Promise.allSettled([physical]);
+      pending.push(first);
+      await flush();
+      expect(send).toHaveBeenCalledTimes(1);
+      if (phase === 'cooldown') {
+        await first;
+        await flush();
+      }
+      vi.setSystemTime(Date.now() - 1);
+      let follower: Awaited<ReturnType<NonNullable<Transport['prepareHttp']>>> | undefined;
+      const q = packet(2);
+      pending.push(
+        Promise.allSettled([
+          Promise.resolve(b.prepareHttp!(q)).then((p) => {
+            follower = p;
+          }),
+        ]),
+      );
+      await flush();
+      if (follower) pending.push(Promise.allSettled([follower.bind(q).dispatch()]));
+      await flush();
+      expect(send, 'rollback must not bypass the outstanding lease/cooldown').toHaveBeenCalledTimes(1);
+    } finally {
+      a.dispose?.();
+      b.dispose?.();
+      await flush();
+      await Promise.all(pending);
+    }
+  },
+);
+
+it('review physically dispatched timeout installs cooldown before a follower sends', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  vi.resetModules();
+  const { createEngineTransport } = await import('./engine');
+  const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+  const send = vi.fn(async () => new Promise<HttpResponse>(() => {}));
+  const raw: Transport = {
+    now: Date.now,
+    setTimeout,
+    clearTimeout: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+    prepareHttp: prepareRecordedHttp,
+    request: send,
+    connect: () => ({ send() {}, close() {} }),
+  };
+  const a = createEngineTransport('binance', { key: '', secret: '' }, raw),
+    b = createEngineTransport('binance', { key: '', secret: '' }, raw);
+  const pending: Promise<unknown>[] = [];
+  try {
+    const p = { ...request(), request: 1, route: 'direct' as const, timeoutMs: 500 };
+    pending.push(Promise.allSettled([(await a.prepareHttp!(p)).bind(p).dispatch()]));
+    await flush();
+    expect(send).toHaveBeenCalledTimes(1);
+    const q = { ...request(), request: 2, route: 'direct' as const, timeoutMs: 5000 };
+    pending.push(Promise.allSettled([Promise.resolve(b.prepareHttp!(q)).then((p) => p.bind(q).dispatch())]));
+    for (let n = 0; n < 7; n++) {
+      await advance(100);
+    }
+    expect(send, 'timed-out physical leader must impose the first 1s shared failure cooldown').toHaveBeenCalledTimes(1);
+  } finally {
+    a.dispose?.();
+    b.dispose?.();
+    await flush();
+    await Promise.all(pending);
+  }
+});
+
+it.each(['never-dispatched', 'user-cancelled'])(
+  'does not publish a failure cooldown for a %s preparation',
+  async (mode) => {
+    vi.stubGlobal('indexedDB', factory);
+    vi.resetModules();
+    const { createEngineTransport } = await import('./engine');
+    const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+    const send = vi.fn(async () =>
+      mode === 'user-cancelled' && send.mock.calls.length === 1 ? new Promise<HttpResponse>(() => {}) : response(),
+    );
+    const raw: Transport = {
+      now: Date.now,
+      setTimeout,
+      clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+      prepareHttp: prepareRecordedHttp,
+      request: send,
+      connect: () => ({ send() {}, close() {} }),
+    };
+    const a = createEngineTransport('binance', { key: '', secret: '' }, raw);
+    const b = createEngineTransport('binance', { key: '', secret: '' }, raw);
+    const pending: Promise<unknown>[] = [];
+    try {
+      const p = { ...request(), request: 1, route: 'direct' as const, timeoutMs: 500 };
+      const read = await a.prepareHttp!(p);
+      const bound = read.bind(p);
+      if (mode === 'user-cancelled') pending.push(Promise.allSettled([bound.dispatch()]));
+      const q = { ...p, request: 2, timeoutMs: 5000 };
+      pending.push(Promise.allSettled([Promise.resolve(b.prepareHttp!(q)).then((next) => next.bind(q).dispatch())]));
+      await advance(100);
+      if (mode === 'user-cancelled') bound.cancel?.();
+      await advance(600);
+      expect(send).toHaveBeenCalledTimes(mode === 'never-dispatched' ? 1 : 2);
+      expect(await pending.at(-1)!).toMatchObject([{ status: 'fulfilled', value: { status: 200 } }]);
+    } finally {
+      a.dispose?.();
+      b.dispose?.();
+      await flush();
+      await Promise.all(pending);
+    }
+  },
+);
+
+it('holds an expired peer lease while a delayed owner deadline has not published its failure yet', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  vi.resetModules();
+  const { createEngineTransport } = await import('./engine');
+  const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+  const send = vi.fn(async () => new Promise<HttpResponse>(() => {}));
+  const raw: Transport = {
+    now: Date.now,
+    setTimeout,
+    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    prepareHttp: prepareRecordedHttp,
+    request: send,
+    connect: () => ({ send() {}, close() {} }),
+  };
+  const a = createEngineTransport('binance', { key: '', secret: '' }, raw);
+  const b = createEngineTransport('binance', { key: '', secret: '' }, raw);
+  const pending: Promise<unknown>[] = [];
+  try {
+    const p = { ...request(), request: 1, route: 'direct' as const, timeoutMs: 500 };
+    pending.push(Promise.allSettled([(await a.prepareHttp!(p)).bind(p).dispatch()]));
+    await flush();
+    // Advance the wall clock without running the original owner's timer.
+    vi.setSystemTime(Date.now() + 500);
+    const q = { ...p, request: 2, timeoutMs: 5000 };
+    pending.push(Promise.allSettled([Promise.resolve(b.prepareHttp!(q)).then((next) => next.bind(q).dispatch())]));
+    await flush();
+    expect(send).toHaveBeenCalledTimes(1);
+    await advance(900);
+    expect(send).toHaveBeenCalledTimes(1);
+    await advance(800);
+    expect(send).toHaveBeenCalledTimes(2);
+  } finally {
+    a.dispose?.();
+    b.dispose?.();
+    await flush();
+    await Promise.all(pending);
+  }
+});
+
+it('settles the dispatched caller at its deadline without awaiting stalled cooldown storage', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  vi.resetModules();
+  const { createEngineTransport } = await import('./engine');
+  const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+  const raw: Transport = {
+    now: Date.now,
+    setTimeout,
+    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    prepareHttp: prepareRecordedHttp,
+    request: () => new Promise<HttpResponse>(() => {}),
+    connect: () => ({ send() {}, close() {} }),
+  };
+  const a = createEngineTransport('binance', { key: '', secret: '' }, raw);
+  let observed: unknown;
+  try {
+    const p = { ...request(), request: 1, route: 'direct' as const, timeoutMs: 500 };
+    const caller = Promise.allSettled([(await a.prepareHttp!(p)).bind(p).dispatch()]).then((value) => {
+      observed = value;
+    });
+    await flush();
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(
+      () =>
+        ({
+          objectStore: () => ({ get: () => ({}) }),
+          abort() {},
+        }) as unknown as IDBTransaction,
+    );
+    await advance(500);
+    expect(observed).toMatchObject([{ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } }]);
+    await caller;
+    await advance(300);
+  } finally {
+    a.dispose?.();
+    await flush();
+  }
+});
+
+it.each(['network', 'http'])(
+  'keeps the original deadline while a %s failure publication is already stalled',
+  async (kind) => {
+    vi.stubGlobal('indexedDB', factory);
+    vi.resetModules();
+    const { createEngineTransport } = await import('./engine');
+    const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+    let resolve!: (response: HttpResponse) => void;
+    let reject!: (error: Error) => void;
+    const responsePending = new Promise<HttpResponse>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    const raw: Transport = {
+      now: Date.now,
+      setTimeout,
+      clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+      prepareHttp: prepareRecordedHttp,
+      request: () => responsePending,
+      connect: () => ({ send() {}, close() {} }),
+    };
+    const a = createEngineTransport('binance', { key: '', secret: '' }, raw);
+    let observed: unknown;
+    try {
+      const p = { ...request(), request: 1, route: 'direct' as const, timeoutMs: 500 };
+      const caller = Promise.allSettled([(await a.prepareHttp!(p)).bind(p).dispatch()]).then((value) => {
+        observed = value;
+      });
+      await advance(400);
+      vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(
+        () =>
+          ({
+            objectStore: () => ({ get: () => ({}) }),
+            abort() {},
+          }) as unknown as IDBTransaction,
+      );
+      if (kind === 'network') reject(new Error('network failed'));
+      else resolve(response(503));
+      await flush();
+      await advance(100);
+      expect(observed).toMatchObject([{ status: 'rejected' }]);
+      await advance(300);
+      await caller;
+    } finally {
+      a.dispose?.();
+      await flush();
+    }
+  },
+);

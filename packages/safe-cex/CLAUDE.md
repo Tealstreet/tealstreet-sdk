@@ -1734,6 +1734,9 @@ Unavailable storage from startup preserves independent native discovery/backoff.
 After a successful coordination transaction, storage loss refuses preparation
 instead of bypassing an unknown lease. Waiter cancellation never deletes a peer's
 lease/cooldown; each engine still parses and publishes its own catalogue.
+Future-dated strict ownership stays blocking. A dispatched timeout publishes a
+cooldown before abort cleanup without delaying the caller; expired ownership
+retains its minimum failure window until that publication can settle.
 
 Rust account `socketHealth.reconnectDiagnostics` carries bounded last-close
 snapshots for public/private/business channels and the primary HOW adapter,
