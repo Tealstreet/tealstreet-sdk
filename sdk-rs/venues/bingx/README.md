@@ -6,6 +6,12 @@ internal public feed sends descending asks, which are sorted before delivery.
 Account polling supplements the private stream. Listen keys recover separately
 from socket liveness, with epoch guards on old requests and timers.
 
+REST open-order rows with readable identity, symbol, side and quantity remain
+visible and cancellable when optional fields fail to parse. Diagnostics name
+the malformed fields without their values. Degraded rows do not authorize
+amendments or clear uncertainty fences; a clean snapshot restores metadata.
+Private execution frames retain their strict decoder.
+
 Hosts connect directly to REST `open-api.bingx.com`, internal public WebSocket
 `ws-market-swap.qq-os.com`, and private WebSocket `open-api-swap.bingx.com`.
 Gzip/deflate frames are inflated by the browser/Worker/native transport before

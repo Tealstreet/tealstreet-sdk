@@ -16,6 +16,15 @@ The matching BaseExchange receiver restores it before resolving or notifying
 result observers; senders and receivers must upgrade together. Never infer a
 complete window from missing metadata or attach a notice to another request.
 
+## Nuke flatness proof reads
+
+A frame-fed page closes positions locally, then forwards `readPositions` to the
+worker's engine for a fresh `{ skipped, open }` proof, even when its mirrored store
+is empty. Keep that RPC in both `WORKER_OPTIONAL_METHODS` and `WORKER_READ_METHODS`:
+a failed read cannot confirm flatness and is never an interrupted write.
+Unknown or unimplemented RPCs return a serialized `unsupported`/`notSent` error
+naming the venue and method; a failed reply without a cause becomes `Error('undefined')`.
+
 ## Write timing marks
 
 User-write `callMethod` requests carry optional `data.timing` (write stage

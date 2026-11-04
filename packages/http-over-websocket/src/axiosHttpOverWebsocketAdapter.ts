@@ -6,7 +6,7 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
 import { bindProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from './config';
-import { tunnelEgressUrl } from './tunnelEndpoints';
+import { tunnelEgressUrl, tunnelLanePort, tunnelOutage } from './tunnelEndpoints';
 import { isTokyoEgress } from './egressRegion';
 import { HOWWebSocket } from './HOWWebSocket';
 import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, LatencyEntry } from './types';
@@ -57,13 +57,53 @@ export class TradeTunnelTimeoutError extends Error {
   }
 }
 
+/** Which readiness step a request was still waiting on, and the connection's state then. */
+export type TradeTunnelReadiness = {
+  stage: 'connect' | 'timeSync' | 'authReply';
+  /** The reconnect loop's phase (`connecting`, `retry-scheduled`, ...) and seconds spent in it. */
+  socketPhase?: string;
+  socketPhaseSeconds?: number;
+  lanePort: string;
+  tunnelOutage: boolean;
+};
+
+const READINESS_WAITING_FOR: Record<TradeTunnelReadiness['stage'], string> = {
+  connect: 'the socket to open',
+  timeSync: 'the tunnel clock sync',
+  authReply: 'the tunnel to accept the proxy token',
+};
+
 /** Readiness exhausted its cap; timeout callers retain their existing retry classification. */
 export class TradeTunnelReadinessError extends TradeTunnelTimeoutError {
-  constructor(message: string, context: { config: any; method: string; route: TradeTunnelRouteContext; url: string }) {
-    super(message, context);
+  readonly readiness?: TradeTunnelReadiness;
+
+  constructor(
+    message: string,
+    context: { config: any; method: string; route: TradeTunnelRouteContext; url: string },
+    readiness?: TradeTunnelReadiness,
+  ) {
+    const socket =
+      readiness?.socketPhase !== undefined
+        ? `; socket ${readiness.socketPhase} for ${readiness.socketPhaseSeconds} s`
+        : '';
+    super(
+      readiness
+        ? `${message} (waiting for ${READINESS_WAITING_FOR[readiness.stage]}${socket}, lane ${readiness.lanePort}${readiness.tunnelOutage ? ', tunnel unreachable' : ''})`
+        : message,
+      context,
+    );
     this.name = 'TradeTunnelReadinessError';
+    if (readiness) this.readiness = readiness;
   }
 }
+
+const proxyTokenMissingBeforeDeadline = (config: any) =>
+  Object.assign(
+    new Error(
+      `Tealstreet proxy authorization missing: no valid proxy token before the request deadline (${config.url})`,
+    ),
+    { name: 'ProxyTokenUnavailableError', config },
+  );
 
 /** The most of a request's deadline spent waiting for the socket to open and authorize. */
 export const READINESS_CAP_MS = 30_000;
@@ -448,10 +488,22 @@ const createAxiosHttpOverWebsocketAdapter = (
       // reconnect cannot spend the request's time; a long read (discovery) keeps the rest.
       const readinessDeadline = Math.min(deadline, Date.now() + READINESS_CAP_MS);
       let readying = true;
+      const readinessState = (): TradeTunnelReadiness => {
+        const loop = howWebSocket.ws?.loopState;
+        return {
+          stage: !howWebSocket.isOpen ? 'connect' : !howWebSocket.isTimeSynced ? 'timeSync' : 'authReply',
+          ...(loop
+            ? { socketPhase: loop.phase, socketPhaseSeconds: Math.round((Date.now() - loop.since) / 1000) }
+            : {}),
+          lanePort: tunnelLanePort(),
+          tunnelOutage: tunnelOutage() !== undefined,
+        };
+      };
       const createReadinessError = (route: TradeTunnelRouteContext = baseRouteContext) =>
         new TradeTunnelReadinessError(
           `HTTP tunnel was not ready within ${Math.round((readinessDeadline - (deadline - timeoutMs)) / 1000)} s: ${config.url}`,
           { config, method: websocketRequest.method, route, url: websocketRequest.url },
+          readinessState(),
         );
       const createTimeoutError = (route: TradeTunnelRouteContext = baseRouteContext) =>
         new TradeTunnelTimeoutError(`WSoverHTTP request timed out: ${config.url}`, {
@@ -560,7 +612,18 @@ const createAxiosHttpOverWebsocketAdapter = (
         // Propagating also skips the post-loop `getProxyToken()` below. That
         // call is a last-chance re-read for the warming hosts, not a cache, and
         // for a throwing provider it would only throw again.
+        // A deadline spent waiting on our own token, polling or mid-fetch, is our
+        // authorization, not the tunnel's readiness.
         const getValidToken = async (): Promise<string> => {
+          try {
+            return await pollValidToken();
+          } catch (error) {
+            if (error instanceof TradeTunnelTimeoutError && error.config === config)
+              throw proxyTokenMissingBeforeDeadline(config);
+            throw error;
+          }
+        };
+        const pollValidToken = async (): Promise<string> => {
           for (let i = 0; i < MAX_TOKEN_RETRIES; i++) {
             const token = await awaitWithinDeadline(getProxyToken());
             if (token && !isTokenExpired(token)) {
@@ -571,18 +634,7 @@ const createAxiosHttpOverWebsocketAdapter = (
               if (i % 10 === 0) {
                 console.log(`[HOW] Waiting for valid token... (attempt ${i + 1}/${MAX_TOKEN_RETRIES})`);
               }
-              try {
-                await sleepWithinDeadline(500);
-              } catch (error) {
-                // A deadline spent waiting on our own token is our authorization, not the network.
-                if (!(error instanceof TradeTunnelTimeoutError)) throw error;
-                throw Object.assign(
-                  new Error(
-                    `Tealstreet proxy authorization missing: no valid proxy token before the request deadline (${config.url})`,
-                  ),
-                  { name: 'ProxyTokenUnavailableError', config },
-                );
-              }
+              await sleepWithinDeadline(500);
             }
           }
           // Return whatever we have after max retries
@@ -636,7 +688,10 @@ const createAxiosHttpOverWebsocketAdapter = (
         if (!howWebSocket.isInitialized) {
           howWebSocket.connectAndSubscribe();
         }
+        // One immediate redial per wait, rather than sitting out a backoff a wake left behind.
+        let redialed = false;
         while (!howWebSocket.isOpen || !howWebSocket.isTimeSynced) {
+          if (!redialed) redialed = howWebSocket.redialIfBackingOff?.() ?? false;
           await sleepWithinDeadline(25);
         }
 
@@ -692,7 +747,9 @@ const createAxiosHttpOverWebsocketAdapter = (
             } catch (error) {
               // An owner's deadline or disposal must not cancel other accounts
               // sharing this connection. Survivors elect a fresh token attempt.
-              const foreignTimeout = error instanceof TradeTunnelTimeoutError && error.config !== config;
+              const foreignTimeout =
+                (error instanceof TradeTunnelTimeoutError || (error as Error)?.name === 'ProxyTokenUnavailableError') &&
+                (error as { config?: unknown }).config !== config;
               const foreignDisposal = error instanceof TradeTunnelDisposedError && error.owner !== owner;
               const foreignCancellation = error instanceof TradeTunnelCanceledError && error.owner !== requestOwner;
               if (foreignTimeout || foreignDisposal || foreignCancellation) continue;

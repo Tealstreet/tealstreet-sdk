@@ -10,9 +10,15 @@ the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, and
 Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
-policy, with no separate beta override.
+policy, with no separate beta override. Robinhood is admitted through the existing Lighter
+family and remote-signing policy; its preview/production visibility flags are unchanged.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
+
+`exchangeMetadata.orderAmendment` declares public order-shape restrictions for UI
+eligibility through `getOrderAmendmentError`. BingX permits unfilled GTC/PostOnly
+limit price or size edits, preserves attached protection on size edits only, and
+permits SL/TP price edits. Native reconciliation and wire-kind checks still run.
 
 Core exchange integration library. See also exchange-specific `CLAUDE.md` files in `src/exchanges/*/`.
 
@@ -1408,7 +1414,8 @@ Is requiresCors true?
   browser SharedWorker and the CLI answer `''` while their token warms; the
   provider's `authorize` polls for up to `PROXY_TOKEN_WAIT_MS` (15 s), then
   throws `ProxyTokenUnavailableError` ("Tealstreet proxy authorization
-  missing"). The edge's plain-text 401 (`Authorization header is missing` /
+  missing"), naming the last `/api/proxykey` failure when there is one
+  (`lastProxyKeyFailure`: HTTP status, timeout, network error or no token). The edge's plain-text 401 (`Authorization header is missing` /
   `Invalid JWT`) reaches a Rust engine as a transport failure, after a token
   refresh, never as a 401: venues classify a 401 as a refused key
   (`auth.rejected`). The engine transport reports either failure once per
@@ -1632,3 +1639,8 @@ MEXC trusted compatibility setup preserves its existing persisted account IDs:
 explicit Primary stableId before provider trimming. JS/native setup reject a
 conflicting supplied mapping. Generic LocalSigner never derives stable IDs;
 MEXC venue execution reads only installed metadata, never hashes credentials.
+
+
+Chart consumers must honor `exchangeMetadata.supportsKlineSeconds` and optional
+`supportedCandleIntervals`. Hyperliquid and HyperliquidSpot share their native
+interval set, which excludes seconds and 6h; neither may reach a candle subscription.

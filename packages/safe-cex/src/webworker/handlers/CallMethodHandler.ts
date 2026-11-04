@@ -1,8 +1,11 @@
+import type { WriteMarks } from '../../writeTiming';
+
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { serializeCommandError } from '../../commandOutcome';
-import { historyCompletenessOf } from '../../historyCompleteness';
 import { CallableMethodsInWorker, WORKER_FORWARDED_METHODS, WORKER_OPTIONAL_METHODS } from '../../exchanges/base';
 import { encodeWorkerOrderIds } from '../../exchanges/clientOrderId';
-import { runWithWriteTiming, WriteTiming, type WriteMarks } from '../../writeTiming';
+import { historyCompletenessOf } from '../../historyCompleteness';
+import { runWithWriteTiming, WriteTiming } from '../../writeTiming';
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
 import { BaseHandler } from './BaseHandler';
 import { ThrottleManager } from './ThrottleManager';
@@ -36,7 +39,17 @@ export class CallMethodHandler extends BaseHandler {
     });
   };
 
-  handleCallMethod = async (requestId: string, method: CallableMethodsInWorker, args: any[], marks?: WriteMarks) => {
+  private unsupportedMethod = (method: string) => {
+    const message = `${this._exchange.name} does not support ${method}`;
+    return new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+  };
+
+  handleCallMethod = async (
+    requestId: string,
+    method: CallableMethodsInWorker | (typeof WORKER_OPTIONAL_METHODS)[number],
+    args: any[],
+    marks?: WriteMarks,
+  ) => {
     let result: any = null;
     // The caller's write timing: the exchange stamps the engine stages and the caller emits.
     const timing = marks ? new WriteTiming(method, { ...marks }) : undefined;
@@ -53,7 +66,7 @@ export class CallMethodHandler extends BaseHandler {
       }
       if ([...WORKER_FORWARDED_METHODS, ...WORKER_OPTIONAL_METHODS].includes(method as never)) {
         const call = (this._exchange as unknown as Record<string, unknown>)[method];
-        if (typeof call !== 'function') throw new Error(`${this._exchange.name} does not support ${method}`);
+        if (typeof call !== 'function') throw this.unsupportedMethod(method);
         const start = () => (call as (...callArgs: unknown[]) => Promise<unknown>)(...args);
         result = await (timing ? runWithWriteTiming(timing, start) : start());
         if (method === 'updateOrder') result = encodeWorkerOrderIds(result as string[]);
@@ -119,9 +132,7 @@ export class CallMethodHandler extends BaseHandler {
           );
           break;
         default:
-          console.error('Unknown method', method);
-          this._ctx.postMessage({ op: 'callMethod:done', data: { requestId, success: false } });
-          return;
+          throw this.unsupportedMethod(method);
       }
       if (logging) {
         console.log('Method called', method, result);

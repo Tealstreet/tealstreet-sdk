@@ -694,8 +694,9 @@ it('attaches caller config (with custom keys + headers) to the resolved tunnel r
       const longResult = adapter(longConfig);
 
       await vi.advanceTimersByTimeAsync(600);
+      // Its deadline ran out waiting on its own token fetch: our authorization, not the tunnel.
       await expect(shortResult).resolves.toMatchObject({
-        name: 'TradeTunnelTimeoutError',
+        name: 'ProxyTokenUnavailableError',
         config: shortConfig,
       });
 

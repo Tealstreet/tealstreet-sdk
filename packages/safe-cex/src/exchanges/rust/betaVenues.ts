@@ -27,6 +27,8 @@ export const BETA_VENUES = Object.freeze([
   'hyperliquid',
   'hyperliquidspot',
   'lighter',
+  // Robinhood shares Lighter's beta family and existing Hosted signing policy.
+  'lighter-robinhood',
   'paradex',
   'bitunix',
   'phemex',
