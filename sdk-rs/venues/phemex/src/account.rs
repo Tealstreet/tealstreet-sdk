@@ -2059,6 +2059,15 @@ impl PhemexPerpetuals {
             self.orders_read_failed(cx, read, "malformed open-order envelope");
             return;
         };
+        // Before this response's own writes: whether the stream changed the
+        // symbol after the read went out, so its census is older than the rows.
+        let outran = cx
+            .orders_read_refusals(
+                safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&[&read.symbol]),
+                |_| true,
+                &[],
+            )
+            .is_some_and(|refused| !refused.is_empty());
         let data = envelope
             .data
             .map(RawValue::get)
@@ -2183,9 +2192,23 @@ impl PhemexPerpetuals {
         }
         if let Some(entry) = self.account.reconcile.get_mut(&symbol) {
             entry.reading = false;
-            entry.failures = 0;
-            let mut gone = std::mem::take(&mut entry.unconfirmed);
-            let resting = std::mem::take(&mut entry.resting);
+            if outran {
+                // Its absences prove nothing: the rows stay owed, read again on the
+                // failure backoff, and a clean read removes the genuinely gone ones.
+                entry.generation += 1;
+                entry.failures = entry.failures.saturating_add(1);
+                let wait =
+                    cx.jittered(Backoff::new(1_000.0, 5, f64::INFINITY).delay(entry.failures));
+                entry.not_before = entry.not_before.max(cx.now + wait);
+            } else {
+                entry.failures = 0;
+            }
+            let (mut gone, resting) = if outran {
+                (Vec::new(), Vec::new())
+            } else {
+                let unconfirmed = std::mem::take(&mut entry.unconfirmed);
+                (unconfirmed, std::mem::take(&mut entry.resting))
+            };
             if list_len < RESTING_LIST_MAX_ROWS {
                 gone.extend(resting);
             }

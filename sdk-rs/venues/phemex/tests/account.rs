@@ -2127,3 +2127,226 @@ fn an_ip_mismatch_on_positions_ends_the_start() {
         );
     }
 }
+
+/// `resting_read` with the private stream alive (pongs) throughout.
+fn live_resting_read(rows: &str) -> (Engine<PhemexPerpetuals>, HttpRequest, SocketId) {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let _: Vec<_> = e.drain_actions().collect();
+    push_orders(&mut e, s, "snapshot", 1, rows);
+    let _: Vec<_> = e.drain_actions().collect();
+    let pongs = |e: &mut Engine<PhemexPerpetuals>, from: u32, to: u32| {
+        for at in (from..to).step_by(5_000) {
+            e.handle(
+                NOW + f64::from(at),
+                Event::WsMessage {
+                    socket: s,
+                    text: r#"{"id":1201,"error":null,"result":"pong"}"#,
+                },
+            );
+            e.drain_actions().for_each(drop);
+        }
+    };
+    pongs(&mut e, 5_000, 60_000);
+    e.handle(
+        NOW + 60_000.,
+        Event::TimerFired {
+            timer: timer(&a, NOW + 60_000.),
+        },
+    );
+    let first: Vec<_> = e.drain_actions().collect();
+    pongs(&mut e, 65_000, 120_000);
+    e.handle(
+        NOW + 120_000.,
+        Event::TimerFired {
+            timer: timer(&first, NOW + 120_000.),
+        },
+    );
+    let second: Vec<_> = e.drain_actions().collect();
+    let read = requests(&second)
+        .into_iter()
+        .find(|r| r.url.contains("/g-orders/activeList"))
+        .expect("the resting row is checked");
+    (e, read, s)
+}
+
+/// codex-hcmq3f: the stream updates a resting row after the periodic read went
+/// out; that read's older empty list must not delete the live order.
+#[test]
+fn a_stream_update_to_a_resting_row_survives_an_older_empty_read() {
+    let (mut e, read, socket) = live_resting_read(&order("New", 1_700_000_000_000_000_001));
+    let newer = order("New", 1_700_000_120_005_000_000).replace("69000", "69001");
+    e.handle(
+        NOW + 120_005.,
+        Event::WsMessage {
+            socket,
+            text: &format!(r#"{{"type":"incremental","sequence":2,"orders_p":[{newer}]}}"#),
+        },
+    );
+    assert_eq!(e.store().order("one").unwrap().price, 69001.);
+    let body = r#"{"code":10002,"msg":"OM_ORDER_NOT_FOUND","data":null}"#;
+    response(&mut e, NOW + 120_010., read.id, 200, body);
+    assert_eq!(
+        e.store().order("one").map(|row| row.price),
+        Some(69001.),
+        "an older census cannot erase the newer stream row"
+    );
+}
+
+fn later_clean_source(rows: &str) -> (Engine<PhemexPerpetuals>, HttpRequest, SocketId, TimerId) {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let _: Vec<_> = e.drain_actions().collect();
+    push_orders(&mut e, s, "snapshot", 1, rows);
+    let _: Vec<_> = e.drain_actions().collect();
+    let pongs = |e: &mut Engine<PhemexPerpetuals>, from: u32, to: u32| {
+        for at in (from..to).step_by(5_000) {
+            e.handle(
+                NOW + f64::from(at),
+                Event::WsMessage {
+                    socket: s,
+                    text: r#"{"id":1201,"error":null,"result":"pong"}"#,
+                },
+            );
+            e.drain_actions().for_each(drop);
+        }
+    };
+    pongs(&mut e, 5_000, 60_000);
+    e.handle(
+        NOW + 60_000.,
+        Event::TimerFired {
+            timer: timer(&a, NOW + 60_000.),
+        },
+    );
+    let first: Vec<_> = e.drain_actions().collect();
+    pongs(&mut e, 65_000, 120_000);
+    e.handle(
+        NOW + 120_000.,
+        Event::TimerFired {
+            timer: timer(&first, NOW + 120_000.),
+        },
+    );
+    let second: Vec<_> = e.drain_actions().collect();
+    let read = requests(&second)
+        .into_iter()
+        .find(|r| r.url.contains("/g-orders/activeList"))
+        .expect("the resting row is checked");
+    (e, read, s, timer(&second, NOW + 180_000.))
+}
+
+#[test]
+fn a_later_clean_periodic_read_removes_the_row_saved_from_a_stale_read() {
+    let (mut e, read, socket, next) = later_clean_source(&order("New", 1_700_000_000_000_000_001));
+    let newer = order("New", 1_700_000_120_005_000_000).replace("69000", "69001");
+    e.handle(
+        NOW + 120_005.,
+        Event::WsMessage {
+            socket,
+            text: &format!(r#"{{"type":"incremental","sequence":2,"orders_p":[{newer}]}}"#),
+        },
+    );
+    assert_eq!(e.store().order("one").unwrap().price, 69001.);
+    let empty = r#"{"code":10002,"msg":"OM_ORDER_NOT_FOUND","data":null}"#;
+    response(&mut e, NOW + 120_010., read.id, 200, empty);
+    assert_eq!(e.store().order("one").map(|row| row.price), Some(69001.));
+    e.drain_actions().for_each(drop);
+    for at in (125_000..180_000).step_by(5_000) {
+        e.handle(
+            NOW + at as f64,
+            Event::WsMessage {
+                socket,
+                text: r#"{"id":1201,"error":null,"result":"pong"}"#,
+            },
+        );
+        e.drain_actions().for_each(drop);
+    }
+    e.handle(NOW + 180_000., Event::TimerFired { timer: next });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let clean: Vec<_> = requests(&actions)
+        .into_iter()
+        .filter(|r| r.url.contains("/g-orders/activeList"))
+        .collect();
+    assert_eq!(
+        clean.len(),
+        1,
+        "the real next periodic read must not be lost"
+    );
+    response(&mut e, NOW + 180_010., clean[0].id, 200, empty);
+    assert!(
+        e.store().order("one").is_none(),
+        "a fresh clean absence removes a genuinely gone order"
+    );
+}
+
+#[test]
+fn an_unconfirmed_market_row_outrun_by_the_stream_is_eventually_checked_again() {
+    let (mut e, startup, socket) = started();
+    seed(&mut e, &startup);
+    authenticate(&mut e, socket);
+    e.drain_actions().for_each(drop);
+    push_orders(
+        &mut e,
+        socket,
+        "snapshot",
+        1,
+        &execution("PartiallyFilled", "4", "10.4", 1_700_000_000_000_000_001),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let first = request(&actions, "/g-orders/activeList");
+    let newer = execution("PartiallyFilled", "5", "9.4", 1_700_000_000_150_000_000);
+    e.handle(
+        NOW + 150.,
+        Event::WsMessage {
+            socket,
+            text: &format!(r#"{{"type":"incremental","sequence":2,"orders_p":[{newer}]}}"#),
+        },
+    );
+    assert_eq!(e.store().order("one").unwrap().filled, 5.);
+    response(
+        &mut e,
+        NOW + 200.,
+        first.id,
+        200,
+        r#"{"code":10002,"msg":"OM_ORDER_NOT_FOUND","data":null}"#,
+    );
+    assert_eq!(
+        e.store().order("one").unwrap().filled,
+        5.,
+        "the first stale read must keep the live row"
+    );
+    let after: Vec<_> = e.drain_actions().collect();
+    let mut later = requests(&after)
+        .into_iter()
+        .filter(|r| r.url.contains("/g-orders/activeList"))
+        .count();
+    let mut next = timer(&startup, NOW + 60_000.);
+    for tick in [60_000, 120_000, 180_000] {
+        for at in (tick - 55_000..tick).step_by(5_000) {
+            e.handle(
+                NOW + at as f64,
+                Event::WsMessage {
+                    socket,
+                    text: r#"{"id":1201,"error":null,"result":"pong"}"#,
+                },
+            );
+            let a: Vec<_> = e.drain_actions().collect();
+            later += requests(&a)
+                .iter()
+                .filter(|r| r.url.contains("/g-orders/activeList"))
+                .count();
+        }
+        e.handle(NOW + tick as f64, Event::TimerFired { timer: next });
+        let a: Vec<_> = e.drain_actions().collect();
+        later += requests(&a)
+            .iter()
+            .filter(|r| r.url.contains("/g-orders/activeList"))
+            .count();
+        next = timer(&a, NOW + tick as f64 + 60_000.);
+    }
+    assert!(
+        later > 0,
+        "a saved unconfirmed Market row must not be forgotten forever; no later activeList read was issued"
+    );
+}
