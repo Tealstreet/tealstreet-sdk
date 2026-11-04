@@ -432,6 +432,8 @@ it('attaches caller config (with custom keys + headers) to the resolved tunnel r
     'keeps signed queries on the wire and off %s diagnostics',
     async (mode) => {
       vi.useFakeTimers();
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      if (mode === 'relay') vi.stubEnv('DEBUG', '1');
       const adapter = createAxiosHttpOverWebsocketAdapter();
       const url = 'https://example.com/private?timestamp=123&signature=fixture-signature&sign=fixture-sign';
       const config: any = { url, method: 'GET', headers: {}, timeout: mode === 'readiness' ? 35_000 : 100 };
@@ -452,6 +454,7 @@ it('attaches caller config (with custom keys + headers) to the resolved tunnel r
         expect(error.message).toContain('https://example.com/private');
         expect(error.message).not.toContain('?');
         expect(error.message).not.toContain('fixture-signature');
+        expect(JSON.stringify(log.mock.calls)).not.toContain('fixture-signature');
         if (error.url) expect(error.url).toBe('https://example.com/private');
         expect(error.config).toBe(config);
         expect(config.url).toBe(url);

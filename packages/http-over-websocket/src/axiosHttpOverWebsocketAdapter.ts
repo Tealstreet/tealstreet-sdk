@@ -165,8 +165,9 @@ function sanitizeForTradeTunnelLog(value: unknown, depth = 0, seen = new WeakSet
   if (typeof value === 'number' || typeof value === 'boolean') return value;
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'string') {
-    if (value.length <= MAX_LOG_STRING_LENGTH) return value;
-    return `${value.slice(0, MAX_LOG_STRING_LENGTH)}...${TRUNCATED}`;
+    const diagnostic = stripDiagnosticUrlQueries(value);
+    if (diagnostic.length <= MAX_LOG_STRING_LENGTH) return diagnostic;
+    return `${diagnostic.slice(0, MAX_LOG_STRING_LENGTH)}...${TRUNCATED}`;
   }
   if (typeof value !== 'object') return String(value);
   if (seen.has(value)) return '[CIRCULAR]';
