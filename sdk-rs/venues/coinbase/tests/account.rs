@@ -1471,6 +1471,64 @@ fn portfolio_probe_advances_past_a_missing_portfolio() {
     let r = s.next_request();
     assert!(r.url.ends_with("/portfolios/portfolio-one"), "{}", r.url);
 }
+
+fn no_cfm_account_still_finishes_private_startup(body: &str) {
+    let mut s = Session::new("DEFAULT", false);
+    s.breakdown = Some(r#"{"breakdown":{"spot_positions":[{"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400}],"futures_positions":null,"perp_positions":null}}"#.into());
+    let probe = next_read(&mut s, "/cfm/balance_summary");
+    s.reply(probe, 200, body);
+    let mut s = s.ready();
+    let loaded = s.e.store().loaded();
+    assert!(loaded.markets && loaded.tickers && loaded.balance && loaded.orders && loaded.positions);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&fetch_account(&mut s).unwrap()).unwrap()["userId"], "portfolio-one");
+    assert_eq!(s.e.store().balance().total, 2600.);
+    assert!(s.e.store().markets().iter().all(|m| m.is_spot == Some(true)));
+    assert!(!s.urls.iter().any(|url| url.contains("/cfm/positions") || url.contains("/intx/")));
+    assert_eq!(s.urls.iter().filter(|url| url.contains("/cfm/balance_summary")).count(), 1);
+    assert!(!s.logs.iter().any(|log| log.contains("discovery failed") || log.contains("invalid type")));
+}
+
+#[test]
+fn top_level_null_cfm_probe_means_no_us_futures_account() {
+    no_cfm_account_still_finishes_private_startup("null");
+}
+
+#[test]
+fn null_cfm_summary_means_no_us_futures_account() {
+    no_cfm_account_still_finishes_private_startup(r#"{"balance_summary":null}"#);
+}
+
+#[test]
+fn malformed_cfm_probe_names_the_endpoint_and_field_without_selecting_spot() {
+    for body in ["{}", "[]", r#"{"balance_summary":[]}"#, r#"{"balance_summary":{"total_usd_balance":null}}"#] {
+        let mut s = Session::new("DEFAULT", false);
+        let probe = next_read(&mut s, "/cfm/balance_summary");
+        s.reply(probe, 200, body);
+        s.collect();
+        assert!(!s.e.store().loaded().markets);
+        assert!(!s.e.store().loaded().balance);
+        assert!(s.logs.iter().any(|log| log.contains("/api/v3/brokerage/cfm/balance_summary") && log.contains("field `balance_summary`")));
+    }
+}
+
+#[test]
+fn a_selected_cfm_accounts_null_balance_is_unknown_and_keeps_its_cash() {
+    for body in ["null", r#"{"balance_summary":null}"#] {
+        let mut s = Session::new("DEFAULT", false).ready();
+        let before = s.e.store().balance().clone();
+        assert_eq!(before.total, 10.);
+        let read = next_read(&mut s, "/cfm/balance_summary");
+        s.reply(read, 200, body);
+        s.collect();
+        assert_eq!(s.e.store().balance(), &before);
+        assert!(s.logs.iter().any(|log| log.contains("unknown") && log.contains("/api/v3/brokerage/cfm/balance_summary") && log.contains("field `balance_summary`")));
+        let retry = next_read(&mut s, "/cfm/balance_summary");
+        s.answer(retry);
+        s.collect();
+        assert_eq!(s.e.store().balance(), &before);
+    }
+}
+
 #[test]
 fn portfolio_probe_retries_the_same_portfolio_on_server_failure() {
     let mut s = Session::new("INTX", false);
