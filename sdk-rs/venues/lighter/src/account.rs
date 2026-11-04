@@ -54,6 +54,7 @@ pub enum Request {
         market: Option<String>,
         orders: Vec<Order>,
         coverage: SnapshotCoverage<String>,
+        census: CensusRead,
         valid: bool,
     },
     Backfill {
@@ -62,6 +63,18 @@ pub enum Request {
         oldest: f64,
         count: usize,
     },
+}
+/// What an open-order census (one read, or one per market) has proved so far.
+#[derive(Default)]
+pub struct CensusRead {
+    /// The earliest release among its reads.
+    read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+    /// A read answered outside a read response: the census proves no cover.
+    lost: bool,
+    started: f64,
+    /// Rows naming a client order index (client, native, symbol), applied only
+    /// once their symbol's rows are admitted.
+    observed: Vec<(String, String, String)>,
 }
 #[derive(Clone)]
 pub struct Backfill {
@@ -116,6 +129,10 @@ struct OrderBatch {
     orders: Vec<Order>,
 }
 const STREAMED_POLL_MS: f64 = 5_000.0;
+/// The open-order census's read-cover scope: one census reads the whole account.
+const ORDERS_SCOPE: &str = "orders";
+/// A census the stream outran is read again no sooner than this after it began.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.0;
 const RATE_LIMITED_POLL_HOLD_MS: f64 = 30_000.0;
 /// How soon `readPositions` tries again after a read a newer stream frame held.
 const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
@@ -159,6 +176,7 @@ pub struct Account {
     /// predate the write, so another follows once it settles.
     orders_again: bool,
     batch: Option<OrderBatch>,
+    census_follow_up: Option<TimerId>,
     sync: Option<TimerId>,
     polls_held_until: f64,
     polled_at: f64,
@@ -1013,7 +1031,17 @@ impl Lighter {
             return;
         }
         self.account.orders_inflight = true;
-        self.request_orders(cx, None, self.account.revision, SnapshotCoverage::default());
+        let census = CensusRead {
+            started: cx.now,
+            ..CensusRead::default()
+        };
+        self.request_orders(
+            cx,
+            None,
+            self.account.revision,
+            SnapshotCoverage::default(),
+            census,
+        );
     }
     /// An uncertainty reconcile needs a read requested after the write: one
     /// already in flight may predate it, so another follows once it settles.
@@ -1034,6 +1062,7 @@ impl Lighter {
         market: Option<String>,
         revision: u64,
         coverage: SnapshotCoverage<String>,
+        census: CensusRead,
     ) {
         let id = market.as_deref().unwrap_or("255");
         let account = self.account.account_index.unwrap();
@@ -1056,6 +1085,7 @@ impl Lighter {
                 market,
                 orders: Vec::new(),
                 coverage,
+                census,
                 valid: true,
             },
             Some(sign::AuthPlacement::Query),
@@ -1321,6 +1351,14 @@ impl Lighter {
         {
             let (_, run) = self.account.backfill_retry.take().unwrap();
             self.request_backfill(cx, run);
+            return true;
+        }
+        if self.account.census_follow_up == Some(timer) {
+            self.account.census_follow_up = None;
+            // Within the poll's budget; a held poll reads it later.
+            if !self.trade_running() && cx.now >= self.account.polls_held_until {
+                self.refresh_orders(cx);
+            }
             return true;
         }
         if self.account.heal == Some(timer) {
@@ -1683,6 +1721,7 @@ impl Lighter {
         market_hint: Option<&str>,
         orders: &mut Vec<Order>,
         coverage: &mut SnapshotCoverage<String>,
+        observed: &mut Vec<(String, String, String)>,
     ) {
         match self.map_order_row(cx, raw, market_hint, true) {
             Ok(order) => {
@@ -1690,8 +1729,7 @@ impl Lighter {
                 if let Some(order) = &order
                     && let Some(client_index) = client_order_index(raw)
                 {
-                    self.note_client_order(&client_index, &order.id);
-                    self.trade_group_observed(cx, &client_index);
+                    observed.push((client_index, order.id.clone(), order.symbol.clone()));
                 }
                 return orders.extend(order);
             }
@@ -2022,11 +2060,19 @@ impl Lighter {
             Request::Orders {
                 orders,
                 coverage,
+                census,
                 valid,
                 market,
                 ..
             } => match serde_json::from_str::<&RawValue>(item) {
-                Ok(raw) => self.snapshot_order(cx, raw, market.as_deref(), orders, coverage),
+                Ok(raw) => self.snapshot_order(
+                    cx,
+                    raw,
+                    market.as_deref(),
+                    orders,
+                    coverage,
+                    &mut census.observed,
+                ),
                 Err(_) => *valid = false,
             },
         }
@@ -2182,6 +2228,7 @@ impl Lighter {
         revision: u64,
         orders: Vec<Order>,
         coverage: &SnapshotCoverage<String>,
+        census: CensusRead,
         paged: bool,
     ) {
         let mut ids = HashSet::new();
@@ -2204,16 +2251,69 @@ impl Lighter {
                 })
                 .cloned(),
         );
-        let active = merged.iter().map(|o| o.id.as_str()).collect::<HashSet<_>>();
+        // What this census may replace, decided before any per-order state moves
+        // (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+        let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+            key: ORDERS_SCOPE,
+            account: &[ORDERS_SCOPE],
+        };
+        let refused = census.read.filter(|_| !census.lost).and_then(|earliest| {
+            cx.orders_read_refusals_from(earliest, scope, |_| true, &merged)
+                .map(|refused| (earliest, refused))
+        });
+        let Some((earliest, refused)) = refused else {
+            // Refused whole, or unprovable: newer rows already stand, and another
+            // census follows to prove what they cannot (absences).
+            self.census_follow_up(cx, census.started);
+            return;
+        };
+        if !refused.is_empty() {
+            self.census_follow_up(cx, census.started);
+        }
+        for (client_index, id, symbol) in census.observed {
+            if !refused.contains(&symbol) {
+                self.note_client_order(&client_index, &id);
+                self.trade_group_observed(cx, &client_index);
+            }
+        }
+        // Any rejected row proves the account nothing.
+        let mut cover_unproven = coverage.unproven().to_vec();
+        if coverage.rejected() != 0 {
+            cover_unproven.push(String::new());
+        }
+        if cx
+            .commit_orders_read_from(earliest, scope, |_| true, merged, &cover_unproven)
+            .is_none()
+        {
+            self.census_follow_up(cx, census.started);
+            return;
+        }
+        cx.store.set_orders_loaded();
+        let active = cx
+            .store
+            .orders()
+            .iter()
+            .map(|o| o.id.as_str())
+            .collect::<HashSet<_>>();
         self.account
             .records
             .retain(|id, _| active.contains(id.as_str()));
-        cx.store.set_orders(merged);
         // Each per-market page carries its own read token, so the last one cannot
         // vouch for the first: a paged census owed a successor may predate the write.
         if revision == self.account.revision && !(paged && self.account.orders_again) {
-            cx.orders_reconciled_except(coverage.unproven(), u64::MAX);
+            let mut unproven = coverage.unproven().to_vec();
+            unproven.extend(refused);
+            cx.orders_reconciled_except(&unproven, u64::MAX);
         }
+    }
+    /// Owe a census after one the stream outran, `CENSUS_FOLLOW_UP_MS` after
+    /// that one started at the earliest.
+    fn census_follow_up(&mut self, cx: &mut Cx<'_, Pending>, started: f64) {
+        if self.account.census_follow_up.is_some() {
+            return;
+        }
+        let wait = (started + CENSUS_FOLLOW_UP_MS - cx.now).max(0.0);
+        self.account.census_follow_up = Some(cx.set_timer(wait));
     }
     pub(crate) fn account_response(
         &mut self,
@@ -2356,22 +2456,37 @@ impl Lighter {
                 market,
                 orders,
                 coverage,
+                mut census,
                 valid,
             } => {
+                match cx.order_read_mark() {
+                    Some(mark) => {
+                        census.read =
+                            Some(census.read.map_or(mark, |earliest| earliest.earliest(mark)));
+                    }
+                    None => census.lost = true,
+                }
                 if ok && valid {
                     if let Some(batch) = self.account.batch.as_mut() {
                         batch.orders.extend(orders);
                         if let Some(market) = batch.markets.pop_front() {
                             let revision = batch.revision;
                             // The batch's skipped rows ride along to its commit.
-                            self.request_orders(cx, Some(market), revision, coverage);
+                            self.request_orders(cx, Some(market), revision, coverage, census);
                         } else {
                             let batch = self.account.batch.take().unwrap();
-                            self.commit_orders(cx, batch.revision, batch.orders, &coverage, true);
+                            self.commit_orders(
+                                cx,
+                                batch.revision,
+                                batch.orders,
+                                &coverage,
+                                census,
+                                true,
+                            );
                             self.orders_settled(cx);
                         }
                     } else {
-                        self.commit_orders(cx, revision, orders, &coverage, false);
+                        self.commit_orders(cx, revision, orders, &coverage, census, false);
                         self.orders_settled(cx);
                     }
                 } else if market.is_none()
@@ -2392,11 +2507,17 @@ impl Lighter {
                             markets,
                             orders: Vec::new(),
                         });
+                        // The failed all-market read stays the census's earliest leg.
+                        let census = CensusRead {
+                            observed: Vec::new(),
+                            ..census
+                        };
                         self.request_orders(
                             cx,
                             Some(market),
                             revision,
                             SnapshotCoverage::default(),
+                            census,
                         );
                     } else {
                         self.orders_settled(cx);
@@ -2423,6 +2544,7 @@ impl Lighter {
             valid,
             orders,
             coverage,
+            census,
             market,
             ..
         } = &mut request
@@ -2438,7 +2560,14 @@ impl Lighter {
                 && raw.get().starts_with('{')
             {
                 let result = each_row(raw, |row: &RawValue, hint| {
-                    self.snapshot_order(cx, row, hint.or(market.as_deref()), orders, coverage)
+                    self.snapshot_order(
+                        cx,
+                        row,
+                        hint.or(market.as_deref()),
+                        orders,
+                        coverage,
+                        &mut census.observed,
+                    )
                 });
                 *valid = result.is_ok();
             }

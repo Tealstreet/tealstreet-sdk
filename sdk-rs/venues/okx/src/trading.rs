@@ -153,7 +153,7 @@ pub struct TradingState {
     pub acknowledged: HashMap<String, Acknowledged>,
 }
 pub struct Acknowledged {
-    symbol: String,
+    pub(crate) symbol: String,
     inst_id: String,
     algo: bool,
     pub version: u64,

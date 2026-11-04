@@ -194,6 +194,36 @@ pub struct Applied {
     pub settings: bool,
     /// The source's VENUE_STATE payload, for `Venue::apply_venue_state`.
     pub venue_state: Option<Vec<u8>>,
+    /// The source's `order_read_covers` bit, from a frame carrying CAPABILITIES.
+    pub read_covers: Option<bool>,
+    /// A valid `ORDERS_READ` revision 1; malformed or another revision reads as absent.
+    pub orders_read: Option<ReadCovers>,
+}
+
+/// The source's read covers (`Store::write_orders_read`), on its clock: the
+/// account cover, and each symbol's newer one. A full table each frame.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ReadCovers {
+    pub account: Option<f64>,
+    pub symbols: Vec<(String, f64)>,
+}
+
+impl ReadCovers {
+    /// What speaks for `symbol` (`""`: every symbol, so the account alone).
+    pub fn cover(&self, symbol: &str) -> Option<f64> {
+        if symbol.is_empty() {
+            return self.account;
+        }
+        let own = self
+            .symbols
+            .iter()
+            .find(|(covered, _)| covered == symbol)
+            .map(|(_, sent)| *sent);
+        match (self.account, own) {
+            (Some(account), Some(own)) => Some(account.max(own)),
+            (account, own) => account.or(own),
+        }
+    }
 }
 
 /// Apply one parsed frame. `snapshot` resets the account sections first.
@@ -240,12 +270,51 @@ pub fn apply(
             section::VENUE_STATE => {
                 applied.venue_state = Some(venue_state(section)?.to_vec());
             }
+            section::CAPABILITIES => {
+                applied.read_covers = Cursor::new(section.payload)
+                    .u32()
+                    .ok()
+                    .map(|flags| flags & 1 << crate::Capabilities::ORDER_READ_COVERS_BIT != 0);
+            }
+            section::ORDERS_READ => applied.orders_read = orders_read(frame, section),
             // Books, candles, fills and the rest are the data source's display
             // data: the UI takes them from the source, a writer never reads them.
             _ => {}
         }
     }
     Ok(applied)
+}
+
+/// `ORDERS_READ` revision 1 (`Store::write_orders_read`). `None` for anything
+/// else: a source bug must not stall the page's frames, and absent lifts nothing.
+fn orders_read(frame: &Frame<'_>, section: &Section<'_>) -> Option<ReadCovers> {
+    if section.revision != 1 {
+        return None;
+    }
+    let mut cursor = Cursor::new(section.payload);
+    let count = cursor.u32().ok()? as usize;
+    if count > section.payload.len() / 12 {
+        return None;
+    }
+    cursor.align8();
+    let account = match cursor.f64().ok()? {
+        sent if sent.is_nan() => None,
+        sent if sent.is_finite() => Some(sent),
+        _ => return None,
+    };
+    let mut symbols = Vec::with_capacity(count);
+    for _ in 0..count {
+        let symbol = frame.strings.required(cursor.u32().ok()?).ok()?;
+        symbols.push((symbol.to_owned(), 0.0));
+    }
+    cursor.align8();
+    for (symbol, sent) in &mut symbols {
+        *sent = cursor.f64().ok().filter(|sent| sent.is_finite())?;
+        if symbol.is_empty() {
+            return None;
+        }
+    }
+    (cursor.at == section.payload.len()).then_some(ReadCovers { account, symbols })
 }
 
 /// `VENUE_STATE`: a u32 length, then the venue's own encoding.
@@ -864,7 +933,7 @@ pub(crate) mod tests {
     /// before step 2 takes the orders beside an ORDERS_READ section and
     /// ignores the section, so a page that predates covers is unchanged.
     #[test]
-    fn an_orders_read_section_is_ignored_beside_its_orders() {
+    fn an_orders_read_section_parses_beside_its_orders() {
         use crate::order_read_cover::{OrderReadMark, OrderReadScope};
         let mut source = Store::default();
         let read = OrderReadMark {
@@ -907,6 +976,123 @@ pub(crate) mod tests {
         assert!(applied.orders);
         let ids: Vec<&str> = store.orders().iter().map(|o| o.id.as_str()).collect();
         assert_eq!(ids, ["a"]);
+        assert_eq!(
+            applied.orders_read,
+            Some(ReadCovers {
+                account: Some(7.),
+                symbols: vec![]
+            })
+        );
+    }
+
+    /// One frame of an `ORDERS_READ` payload the test writes by hand.
+    fn orders_read_frame(revision: u16, write: impl FnOnce(&mut FrameWriter<'_>)) -> Vec<u8> {
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.begin_revision(section::ORDERS_READ, revision);
+        write(&mut writer);
+        writer.end();
+        writer.finish()
+    }
+
+    fn read_covers_of(frame: &[u8]) -> Option<ReadCovers> {
+        let mut store = Store::default();
+        let mut state = IngestState::default();
+        apply(&mut store, &mut state, &parse(frame).unwrap(), false)
+            .expect("a bad ORDERS_READ is never an ingest error")
+            .orders_read
+    }
+
+    #[test]
+    fn symbol_covers_parse_and_a_symbol_takes_the_newer_of_its_own_and_the_accounts() {
+        let frame = orders_read_frame(1, |w| {
+            w.u32(2);
+            w.pad();
+            w.f64(5.);
+            let refs = [w.string("BTCUSDT"), w.string("ETHUSDT")];
+            w.u32s(refs);
+            w.pad();
+            w.f64s([9., 3.]);
+        });
+        let covers = read_covers_of(&frame).unwrap();
+        assert_eq!(covers.cover("BTCUSDT"), Some(9.));
+        assert_eq!(covers.cover("ETHUSDT"), Some(5.));
+        assert_eq!(covers.cover("SOLUSDT"), Some(5.));
+        assert_eq!(
+            covers.cover(""),
+            Some(5.),
+            "every symbol: the account alone"
+        );
+    }
+
+    #[test]
+    fn a_malformed_or_other_revision_orders_read_reads_as_absent() {
+        let valid = |w: &mut FrameWriter<'_>| {
+            w.u32(0);
+            w.pad();
+            w.f64(5.);
+        };
+        assert!(read_covers_of(&orders_read_frame(1, valid)).is_some());
+        assert_eq!(read_covers_of(&orders_read_frame(0, valid)), None);
+        assert_eq!(read_covers_of(&orders_read_frame(2, valid)), None);
+        // A count the section cannot hold.
+        let frame = orders_read_frame(1, |w| {
+            w.u32(1_000);
+            w.pad();
+            w.f64(5.);
+        });
+        assert_eq!(read_covers_of(&frame), None);
+        // A cover that is not a time.
+        let frame = orders_read_frame(1, |w| {
+            w.u32(0);
+            w.pad();
+            w.f64(f64::INFINITY);
+        });
+        assert_eq!(read_covers_of(&frame), None);
+        let frame = orders_read_frame(1, |w| {
+            w.u32(1);
+            w.pad();
+            w.f64(f64::NAN);
+            let refs = [w.string("BTCUSDT")];
+            w.u32s(refs);
+            w.pad();
+            w.f64s([f64::NAN]);
+        });
+        assert_eq!(read_covers_of(&frame), None);
+        // A symbol reference outside the string table.
+        let frame = orders_read_frame(1, |w| {
+            w.u32(1);
+            w.pad();
+            w.f64(5.);
+            w.u32s([77]);
+            w.pad();
+            w.f64s([6.]);
+        });
+        assert_eq!(read_covers_of(&frame), None);
+        // Truncated.
+        let frame = orders_read_frame(1, |w| w.u32(0));
+        assert_eq!(read_covers_of(&frame), None);
+    }
+
+    #[test]
+    fn the_read_covers_bit_comes_only_from_a_capabilities_record() {
+        let bit = |record: crate::Capabilities| {
+            let mut writer = FrameWriter::new(Vec::new(), 0.0);
+            record.write(&mut writer);
+            let frame = writer.finish();
+            let mut store = Store::default();
+            let mut state = IngestState::default();
+            apply(&mut store, &mut state, &parse(&frame).unwrap(), true)
+                .unwrap()
+                .read_covers
+        };
+        let on = crate::Capabilities {
+            order_read_covers: true,
+            ..crate::Capabilities::BASE
+        };
+        assert_eq!(bit(on), Some(true));
+        assert_eq!(bit(crate::Capabilities::BASE), Some(false));
+        let (_, applied) = round_trip(&Store::default());
+        assert_eq!(applied.read_covers, None, "no record, no answer");
     }
 
     use crate::model::{Balance, CoinBalance, CurrencyBalance, MarginType};

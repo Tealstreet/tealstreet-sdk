@@ -2236,12 +2236,7 @@ fn a_rejected_row_with_a_stored_copy_still_releases_the_fence() {
                 _ => None,
             })
             .expect("retry timer");
-        e.handle(5_007.0, Event::TimerFired { timer: retry });
-        let mut reads: Vec<_> = prepared(&mut e, 5_007.0)
-            .into_iter()
-            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
-            .collect();
-        assert!(!reads.is_empty(), "the retry reads orders again");
+        // The stored copy predates the retry census, as a stream row would.
         e.store_mut().upsert_order(safe_cex_engine::model::Order {
             id: "maybe".into(),
             parent_id: None,
@@ -2263,6 +2258,12 @@ fn a_rejected_row_with_a_stored_copy_still_releases_the_fence() {
             stop_loss: None,
             extra: None,
         });
+        e.handle(5_007.0, Event::TimerFired { timer: retry });
+        let mut reads: Vec<_> = prepared(&mut e, 5_007.0)
+            .into_iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/trade/orders")))
+            .collect();
+        assert!(!reads.is_empty(), "the retry reads orders again");
         let mut first = malformed;
         while let Some(read) = reads.pop() {
             let body = if std::mem::take(&mut first) {
