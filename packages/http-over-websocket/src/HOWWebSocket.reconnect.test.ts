@@ -343,6 +343,38 @@ describe('HOWWebSocket reconnect recovery (real socket stack, fake tunnel)', () 
     expect(String(unanswered.error().message)).toContain('waiting for the tunnel to accept the proxy token');
   });
 
+  it.each(['legacy', 'managed'] as const)(
+    '%s request entry abandons an over-age CONNECTING without waiting for a timer',
+    async (mode) => {
+      FakeTunnelSocket.nextModes = [{ neverOpen: true }];
+      const cancel = new AbortController();
+      const first = track(adapter({ ...instrumentsInfo(90_000), signal: cancel.signal }));
+      await advance(100);
+      const socket = FakeTunnelSocket.latest();
+      cancel.abort();
+      await advance(1);
+      expect(first.state()).toBe('rejected');
+      vi.setSystemTime(Date.now() + 997_000);
+      const next = track<unknown>(
+        mode === 'managed' ? adapter.prepare(instrumentsInfo(90_000)) : adapter(instrumentsInfo(90_000)),
+      );
+      // Flush request setup, while leaving every timer (including the connect timeout) held.
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      expect(socket.readyState).toBe(FakeTunnelSocket.CLOSED);
+      // Recovery retains the existing randomized 1–5 s backoff, plus time sync.
+      await advance(6_100);
+      expect(next.state(), String(next.error()?.message)).toBe('resolved');
+      expect(FakeTunnelSocket.instances).toHaveLength(2);
+      if (mode === 'managed') {
+        const prepared = (await next.promise) as { cancel(): void };
+        prepared.cancel();
+        expect(
+          FakeTunnelSocket.instances.flatMap((peer) => peer.sent).filter((frame) => frame.type === 'rpc.http'),
+        ).toHaveLength(0);
+      }
+    },
+  );
+
   it('a request waiting on a socket that is backing off redials it at once, once per wait', async () => {
     FakeTunnelSocket.defaultMode = { neverOpen: true };
     const read = track(adapter(instrumentsInfo(90_000)));

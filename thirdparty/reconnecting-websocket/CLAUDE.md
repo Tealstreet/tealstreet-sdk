@@ -22,3 +22,8 @@ Vendored auto-reconnecting WebSocket wrapper. Used as the WS transport for sever
   retry count before reconnecting, so that one reconnect has no backoff wait;
   later failures back off as usual. The exchange-server worker uses it for a
   draining box's 4100.
+
+- **Supervisor handshake recovery**: `timeoutConnecting()` retires only a
+  connecting attempt through the normal timeout path, preserving retry count and
+  backoff. It invalidates pending URL work; close notification still runs when
+  there is no native socket or native close throws. The caller owns its age bound.
