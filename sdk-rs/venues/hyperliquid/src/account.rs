@@ -295,35 +295,35 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         body: String,
-        request: Request,
+        account_request: Request,
         streamed: bool,
     ) {
         // Frame-fed: account state arrives as frames; only an unknown builder
         // approval is read, once, before the first placement.
         if cx.frame_fed() {
-            match &request {
+            match &account_request {
                 Request::Builder | Request::AmendSource { .. } | Request::AmendRole { .. } => {}
                 _ => return,
             }
         }
-        let weight = match &request {
+        let weight = match &account_request {
             Request::Role => 60,
             Request::State { .. } | Request::Spot { .. } => 2,
             _ => 20,
         };
         let urgent = std::mem::take(&mut self.account.fence_read)
             || matches!(
-                &request,
+                &account_request,
                 Request::AmendSource { .. } | Request::AmendRole { .. } | Request::Asset { .. }
             );
-        let core = match &request {
+        let core = match &account_request {
             Request::Role | Request::Mode | Request::Spot { .. } => true,
             Request::State { dex, .. } | Request::Orders { dex, .. } => dex.is_empty(),
             _ => false,
         };
         let read = QueuedRead {
             body,
-            continuation: ReadContinuation::Account(request),
+            continuation: ReadContinuation::Account(account_request),
             streamed,
             weight,
             priority: if urgent {

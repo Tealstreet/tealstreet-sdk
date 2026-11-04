@@ -1037,3 +1037,10 @@ it.each(['expired', 'cancelled'] as const)('a %s dispatch waiter cannot block a 
   await peer;
   expect(sent).toEqual(['peer']);
 });
+
+it('does not require crypto.randomUUID to schedule ordinary reads', async () => {
+  vi.stubGlobal('crypto', {});
+  const sent = vi.fn();
+  await client().admitDispatch(ORIGIN, { generation: 0, weight: 20 }, Date.now() + 20_000, signal(), sent);
+  expect(sent).toHaveBeenCalledOnce();
+});

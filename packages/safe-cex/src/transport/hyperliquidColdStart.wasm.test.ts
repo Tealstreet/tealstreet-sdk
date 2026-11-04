@@ -42,7 +42,7 @@ const state = (account = 0) => ({
 });
 
 it.each([0, 8000])(
-  'shares twelve catalogue reads across four cold engines (%i ms role response)',
+  'fairly completes every private scope across four cold engines (%i ms role response)',
   async (roleLatencyMs) => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     vi.setSystemTime(1_000_000);
@@ -178,7 +178,11 @@ it.each([0, 8000])(
               .size === 11,
         ),
       );
-      if (allScopesRead && stores.every((store) => Object.values(store.loaded).every(Boolean))) break;
+      const ancillaryComplete = ['userFees', 'maxBuilderFee'].every(
+        (type) => completed.filter((row) => row.type === type).length === 4,
+      );
+      if (allScopesRead && ancillaryComplete && stores.every((store) => Object.values(store.loaded).every(Boolean)))
+        break;
     }
     expect(sends.length).toBeGreaterThan(0);
     expect(stores.map((store) => store.loaded)).toEqual(
@@ -192,6 +196,8 @@ it.each([0, 8000])(
       const sent = sends.filter((row) => row.account === account);
       expect(sent.filter((row) => row.type === 'userRole')).toHaveLength(1);
       expect(sent.filter((row) => row.type === 'userAbstraction')).toHaveLength(1);
+      for (const type of ['userFees', 'maxBuilderFee'])
+        expect(completed.filter((row) => row.account === account && row.type === type)).toHaveLength(1);
       for (const type of ['clearinghouseState', 'frontendOpenOrders'])
         expect(
           new Set(completed.filter((row) => row.account === account && row.type === type).map((row) => row.dex)),

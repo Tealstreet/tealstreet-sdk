@@ -9,6 +9,8 @@ const STORAGE_COOLDOWN_MS = 30_000;
 const DISPATCH_POLL_MS = 100;
 const DISPATCH_LEASE_MS = 2000;
 const MAX_DISPATCH_WAITERS = 128;
+const dispatchRealm = Math.random().toString(36).slice(2);
+let dispatchSequence = 0;
 type DispatchWaiter = { id: string; until: number };
 let indexedDBOpenedInRealm = false;
 type BudgetState = {
@@ -344,7 +346,7 @@ export class HyperliquidInfoBudget {
     wasSent: () => boolean = () => true,
   ): Promise<T> {
     const cost = grant.weight * MS_PER_WEIGHT;
-    const waiterId = crypto.randomUUID();
+    const waiterId = `${dispatchRealm}:${++dispatchSequence}`;
     let charged = false;
     let dispatched = false;
     const active = () => {
