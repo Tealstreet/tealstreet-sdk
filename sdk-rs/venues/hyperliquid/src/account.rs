@@ -108,8 +108,9 @@ pub struct Account {
     mode: Mode,
     mode_resolved: bool,
     pub(crate) mode_refresh_due: bool,
-    mode_timer: Option<TimerId>,
-    role_timer: Option<TimerId>,
+    // Managed read completion/deadline owns retries, including host quota waits.
+    mode_pending: bool,
+    role_pending: bool,
     // A failed lookup is retried with backoff; its timer and the tries so far.
     role_retry: Option<TimerId>,
     role_attempts: u32,
@@ -546,6 +547,9 @@ impl Hyperliquid {
         self.private_bootstrap(cx);
     }
     fn send_role(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.role_pending {
+            return;
+        }
         let Some(key) = self.options.key.as_deref() else {
             return;
         };
@@ -560,11 +564,12 @@ impl Hyperliquid {
         })
         .unwrap();
         self.account.role_attempts += 1;
+        self.account.role_pending = true;
         self.read_body(cx, body, Request::Role);
-        self.account.role_timer = Some(cx.set_timer(6000.0));
     }
     /// Retries with backoff; once spent, the user is told the rows are not shown.
     fn role_failed(&mut self, cx: &mut Cx<'_, Pending>, why: &str) {
+        self.account.role_pending = false;
         if self.user().is_some() || self.account.role_retry.is_some() {
             return;
         }
@@ -582,6 +587,7 @@ impl Hyperliquid {
         );
     }
     fn mode_failed(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.mode_pending = false;
         if !self.account.mode_resolved {
             self.mode_ready(cx);
         }
@@ -590,11 +596,17 @@ impl Hyperliquid {
                 Some(cx.set_timer(backoff_ms(self.account.mode_attempts.max(1))));
         }
     }
+    fn send_mode(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.mode_pending {
+            return;
+        }
+        self.account.mode_pending = true;
+        self.account.mode_attempts += 1;
+        self.account_read(cx, "userAbstraction", None, Request::Mode, false);
+    }
     fn private_bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account_read(cx, "userFees", None, Request::Fees, false);
-        self.account_read(cx, "userAbstraction", None, Request::Mode, false);
-        self.account.mode_attempts += 1;
-        self.account.mode_timer = Some(cx.set_timer(6000.0));
+        self.send_mode(cx);
         self.check_builder(cx);
         self.refresh_account(cx);
         if !self.dex_names.is_empty() {
@@ -844,9 +856,6 @@ impl Hyperliquid {
     }
     fn mode_ready(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.mode_resolved = true;
-        if let Some(t) = self.account.mode_timer.take() {
-            cx.clear_timer(t);
-        }
         self.account.mode_refresh_due = true;
         self.schedule_socket_refresh(cx, true);
     }
@@ -973,9 +982,7 @@ impl Hyperliquid {
                 if self.user().is_some() {
                     return;
                 }
-                if let Some(t) = self.account.role_timer.take() {
-                    cx.clear_timer(t);
-                }
+                self.account.role_pending = false;
                 if let Some(t) = self.account.role_retry.take() {
                     cx.clear_timer(t);
                 }
@@ -991,6 +998,7 @@ impl Hyperliquid {
                 }
             }
             Request::Mode => {
+                self.account.mode_pending = false;
                 let mode = match serde_json::from_str::<&str>(raw).unwrap_or("") {
                     "unifiedAccount" => Mode::Unified,
                     "portfolioMargin" => Mode::Portfolio,
@@ -1338,12 +1346,7 @@ impl Hyperliquid {
     ) {
         match request {
             Request::Mode => self.mode_failed(cx),
-            Request::Role => {
-                if let Some(t) = self.account.role_timer.take() {
-                    cx.clear_timer(t);
-                }
-                self.role_failed(cx, error);
-            }
+            Request::Role => self.role_failed(cx, error),
             Request::State { dex, read, .. } => {
                 self.account.inflight.remove(&format!("state:{dex}"));
                 let fresh = self
@@ -1493,18 +1496,9 @@ impl Hyperliquid {
             self.account.read_timer = None;
             self.pump_reads(cx);
         }
-        if self.account.mode_timer == Some(timer) {
-            self.account.mode_timer = None;
-            self.mode_failed(cx);
-        }
         if self.account.mode_retry == Some(timer) {
             self.account.mode_retry = None;
-            self.account_read(cx, "userAbstraction", None, Request::Mode, false);
-            self.account.mode_attempts += 1;
-        }
-        if self.account.role_timer == Some(timer) {
-            self.account.role_timer = None;
-            self.role_failed(cx, "timed out");
+            self.send_mode(cx);
         }
         if self.account.role_retry == Some(timer) {
             self.account.role_retry = None;
