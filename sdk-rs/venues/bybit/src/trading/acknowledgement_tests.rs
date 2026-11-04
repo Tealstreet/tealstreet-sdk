@@ -536,3 +536,16 @@ fn cancel_diagnostic_names_failure_codes_and_duplicated_targets() {
         "targets=2; result.list=array/3; retExtInfo.list=array/3; orderId fields/nonempty/matched=3/3/3; orderLinkId fields/nonempty=0/0; statuses success/failed/invalid=1/2/0; failure codes=110020,110001; duplicated targets=1"
     );
 }
+
+#[test]
+fn an_over_count_accepts_a_twin_whose_rows_are_all_successes() {
+    // ddi2il ruling: repeated success rows agree; only a twin mixing in a failure needs 110001.
+    assert_eq!(
+        over_count(
+            r#"[{"orderId":"b"},{"orderId":"a"},{"orderId":"b"}]"#,
+            r#"[{"code":0},{"code":0},{"code":0}]"#,
+            &["a", "b"],
+        ),
+        Ok(vec![Row::Accepted("a".into()), Row::Accepted("b".into())])
+    );
+}
