@@ -6,7 +6,6 @@ const BUCKET_WINDOW_MS = 60_000;
 const MAX_PAUSE_MS = 300_000;
 const STORAGE_TIMEOUT_MS = 1500;
 const STORAGE_COOLDOWN_MS = 30_000;
-const DEGRADED_PACING_MULTIPLIER = 4;
 let indexedDBOpenedInRealm = false;
 type BudgetState = { nextAt: number; pausedUntil: number; generation: number; failures: number };
 const emptyState = (): BudgetState => ({ nextAt: 0, pausedUntil: 0, generation: 0, failures: 0 });
@@ -77,7 +76,7 @@ function storageAttempt<T>(
 }
 
 export interface InfoBudgetStorage {
-  update<T>(key: string, change: (state: BudgetState, msPerWeight: number) => T): Promise<T>;
+  update<T>(key: string, change: (state: BudgetState, shared: boolean) => T): Promise<T>;
 }
 
 /** One origin database coordinates separate account workers without retaining account data. */
@@ -117,7 +116,7 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
     });
     return attempt;
   }
-  async update<T>(key: string, change: (state: BudgetState, msPerWeight: number) => T): Promise<T> {
+  async update<T>(key: string, change: (state: BudgetState, shared: boolean) => T): Promise<T> {
     const local = () => {
       const snapshot = this.snapshots.get(key);
       if (snapshot) {
@@ -126,8 +125,7 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
       }
       this.localKeys.add(key);
       this.localRevision += 1;
-      const multiplier = indexedDBOpenedInRealm ? DEGRADED_PACING_MULTIPLIER : 1;
-      return memoryStorage.update(key, change, MS_PER_WEIGHT * multiplier);
+      return memoryStorage.update(key, change);
     };
     this.retryAt = Math.min(this.retryAt, Date.now() + STORAGE_COOLDOWN_MS);
     if (this.retryAt > Date.now()) return local();
@@ -142,6 +140,7 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
           const store = transaction.objectStore('budgets');
           const read = store.get(key);
           let value: T;
+          let saved: BudgetState | undefined;
           let expired = false;
           let mergedRevision = this.localRevision;
           read.onsuccess = () => {
@@ -155,20 +154,20 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
               }
               const changed = { ...state };
               try {
-                value = change(changed, MS_PER_WEIGHT);
+                value = change(changed, true);
               } catch (error) {
                 callbackFailed = true;
                 callbackError = error;
               }
               // Commit clock normalization even when admission refuses this read.
-              const saved = callbackFailed ? state : changed;
-              this.snapshots.set(key, { ...saved });
+              saved = callbackFailed ? state : changed;
               store.put(saved, key);
             } catch (error) {
               fail(error);
             }
           };
           transaction.oncomplete = () => {
+            if (saved) this.snapshots.set(key, { ...saved });
             // An earlier transaction cannot clear newer fallback admissions.
             if (mergedRevision === this.localRevision) {
               this.retryAt = 0;
@@ -205,15 +204,11 @@ class MemoryInfoBudgetStorage implements InfoBudgetStorage {
   snapshot(key: string): BudgetState {
     return boundedState(this.states.get(key));
   }
-  async update<T>(
-    key: string,
-    change: (state: BudgetState, msPerWeight: number) => T,
-    msPerWeight = MS_PER_WEIGHT,
-  ): Promise<T> {
+  async update<T>(key: string, change: (state: BudgetState, shared: boolean) => T): Promise<T> {
     const state = this.snapshot(key);
     this.states.set(key, state);
     const changed = { ...state };
-    const result = change(changed, msPerWeight);
+    const result = change(changed, false);
     this.states.set(key, changed);
     return result;
   }
@@ -304,9 +299,9 @@ export class HyperliquidInfoBudget {
     const weight = hyperliquidInfoWeight(body);
     for (;;) {
       signal.throwIfAborted();
-      const grant = await this.backend.update(origin, (state, msPerWeight) => {
+      const grant = await this.backend.update(origin, (state) => {
         signal.throwIfAborted();
-        const cost = weight * msPerWeight;
+        const cost = weight * MS_PER_WEIGHT;
         // Virtual finish time allows one minute's tokens to burst, then refills by weight.
         const at = Math.max(Date.now(), state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
         if (at >= deadline) throw new HttpPreparationError('timedOut');
@@ -328,40 +323,72 @@ export class HyperliquidInfoBudget {
     send: () => T,
     wasSent: () => boolean = () => true,
   ): Promise<T> {
-    let handedOff = false;
-    for (;;) {
-      const decision = await new Promise<{ at: number } | { value: T }>((resolve, reject) => {
-        void this.backend
-          .update(origin, (state, msPerWeight) => {
-            // Storage recovery may repeat the callback; a transport handoff is single-use.
-            if (handedOff) return;
-            signal.throwIfAborted();
-            const now = Date.now();
-            const cost = grant.weight * msPerWeight;
-            const at = Math.max(now, state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
-            if (at >= deadline || state.generation !== grant.generation) throw new HttpPreparationError('timedOut');
-            if (at > now) return { at };
-            handedOff = true;
-            try {
-              resolve({ value: send() });
-            } catch (error) {
-              reject(error);
-            } finally {
-              // Claim may wait or refuse without calling dispatch. Never charge that path.
-              if (wasSent()) state.nextAt = Math.max(now, state.nextAt) + cost;
-            }
+    const cost = grant.weight * MS_PER_WEIGHT;
+    let charged = false;
+    let dispatched = false;
+    const active = () => {
+      signal.throwIfAborted();
+      if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
+    };
+    const retryStorageAt = () => Math.min(deadline, Date.now() + 1000);
+    try {
+      for (;;) {
+        const reservation = await this.backend.update(origin, (state, shared) => {
+          active();
+          // Once this realm joined IDB, local-only sends could exceed the peers' budget.
+          if (!shared && indexedDBOpenedInRealm) return { at: retryStorageAt() };
+          const now = Date.now();
+          const at = Math.max(now, state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
+          if (at >= deadline || state.generation !== grant.generation) throw new HttpPreparationError('timedOut');
+          if (at > now) return { at };
+          state.nextAt = Math.max(now, state.nextAt) + cost;
+          return undefined;
+        });
+        if (!reservation) {
+          charged = true;
+          break;
+        }
+        await waitUntil(reservation.at, signal);
+      }
+      for (;;) {
+        let handoffCalled = false;
+        const decision = await new Promise<{ at: number } | { value: T }>((resolve, reject) => {
+          void this.backend
+            .update(origin, (state, shared) => {
+              if (handoffCalled) return;
+              active();
+              if (!shared && indexedDBOpenedInRealm) return { at: retryStorageAt() };
+              if (state.pausedUntil > Date.now() || state.generation !== grant.generation)
+                throw new HttpPreparationError('timedOut');
+              handoffCalled = true;
+              try {
+                resolve({ value: send() });
+              } catch (error) {
+                reject(error);
+              } finally {
+                dispatched = wasSent();
+              }
+            })
+            .then((waiting) => {
+              if (!handoffCalled && waiting) resolve(waiting);
+            })
+            .catch((error) => {
+              if (!handoffCalled) reject(error);
+              else warnHyperliquidInfoBudgetUnavailable();
+            });
+        });
+        if ('value' in decision) return await decision.value;
+        await waitUntil(decision.at, signal);
+      }
+    } finally {
+      if (charged && !dispatched) {
+        await this.backend
+          .update(origin, (state) => {
+            // A 429 replaced the old token generation; refunds cannot weaken that floor.
+            if (state.generation === grant.generation) state.nextAt = Math.max(Date.now(), state.nextAt - cost);
           })
-          .then((waiting) => {
-            if (!handedOff && waiting) resolve(waiting);
-          })
-          .catch((error) => {
-            if (!handedOff) reject(error);
-            // A transaction failure after handoff cannot invalidate or repeat the send.
-            else warnHyperliquidInfoBudgetUnavailable();
-          });
-      });
-      if ('value' in decision) return decision.value;
-      await waitUntil(decision.at, signal);
+          .catch(() => warnHyperliquidInfoBudgetUnavailable());
+      }
     }
   }
 

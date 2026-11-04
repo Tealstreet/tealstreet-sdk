@@ -1681,10 +1681,13 @@ response, routing or retry behavior; the Rust venue's local kline pause remains.
 
 
 Hyperliquid `/info` admission shares a token bucket across account workers through
-IndexedDB. Prepare may wait but reserves no weight; the final atomic admission
-charges only if managed Claim actually dispatches. Cancellation, stale Claim and
-unbound preparation consume no tokens; a request handed to fetch is never refunded.
-Retry-After and generation checks still apply at dispatch. Role/mode startup reads
+IndexedDB. Prepare may wait but reserves no weight. Admission durably reserves
+weight before the final shared Retry-After/generation gate and physical handoff.
+Cancellation or Claim without dispatch refunds only that token generation; a
+request handed to fetch is never refunded. Once IDB has worked in a realm,
+storage failure waits within the original read deadline rather than sending from
+an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
+Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
 
 The worker's unchanged 120 s timeout preserves closed native startup fields and
