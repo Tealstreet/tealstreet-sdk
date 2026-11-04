@@ -950,6 +950,8 @@ fn expiry_marks_every_due_owner_before_a_panicking_retirement_hook() {
     receive(&mut e, 0., 9, 2_000);
     let requests = released(&mut e, 0.);
     assert_eq!(requests.len(), 3);
+    #[cfg(feature = "order-locks")]
+    assert_eq!(e.io.core.order_read_tokens.len(), 3);
     let owners: Vec<_> = [7, 8, 9].map(|id| e.venue.roots[&id].owner()).into();
     let ran = catch_unwind(AssertUnwindSafe(|| tick(&mut e, 1_000.)));
     assert!(ran.is_err());
@@ -977,6 +979,8 @@ fn expiry_marks_every_due_owner_before_a_panicking_retirement_hook() {
         2,
         "only the first owner's request was discarded"
     );
+    #[cfg(feature = "order-locks")]
+    assert_eq!(e.io.core.order_read_tokens.len(), 2);
     let reserved = e.io.core.read_root_sweep_capacity.unwrap();
     assert_eq!(reserved, e.io.core.actions.capacity());
     assert!(catch_unwind(AssertUnwindSafe(|| tick(&mut e, 1_001.))).is_err());
@@ -1003,6 +1007,8 @@ fn expiry_ignores_nonfinite_time_and_preserves_exact_action_order_at_equality() 
         .find(|(_, held)| held.delivery().context.owner() == owner)
         .unwrap()
         .0;
+    #[cfg(feature = "order-locks")]
+    assert!(e.io.core.order_read_tokens.contains_key(&request));
     let leg_timer = e.io.core.managed_http[&request].timer;
     let root_timer =
         e.io.core
@@ -1042,6 +1048,11 @@ fn expiry_ignores_nonfinite_time_and_preserves_exact_action_order_at_equality() 
         ["clear-leg", "cancel-prepared", "clear-root", "timeout"]
     );
     assert_eq!(e.venue.retired, [(owner, 1)]);
+    #[cfg(feature = "order-locks")]
+    {
+        assert!(!e.io.core.order_read_tokens.contains_key(&request));
+        assert_eq!(e.io.core.order_read_tokens.len(), 1);
+    }
     assert_eq!(e.io.core.managed_http.len(), 1);
     assert!(outcome(&actions, 8).0.is_empty());
     assert!(!e.io.core.read_roots_expiring);
