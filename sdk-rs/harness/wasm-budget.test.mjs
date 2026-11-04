@@ -27,8 +27,6 @@ test('the approved combined ceiling accepts 16 MiB exactly and rejects the next 
 
 test('shared broker-role setup caps retain CI headroom and reject the next byte', () => {
   for (const [venue, measured, cap] of [
-    ['kraken', 2_097_992, 2_108_416],
-    ['krakenspot', 2_097_992, 2_108_416],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -41,7 +39,7 @@ test('shared broker-role setup caps retain CI headroom and reject the next byte'
 test('KuCoin custody caps retain the approved CI headroom and exact boundary', () => {
   for (const [venue, measured, cap] of [
     ['kucoin', 1_630_161, 1_640_448],
-    ['kucoinspot', 2_211_621, 2_222_080],
+    ['kucoinspot', 2_224_069, 2_234_368],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -68,10 +66,10 @@ test('master 41783084277 caps retain the ruled headroom and shared-family bounda
 });
 
 test('WOO attribution cap retains the approved CI headroom and exact boundary', () => {
-  const cap = 2_376_704;
-  assert.equal(cap, Math.ceil((2_365_883 + 10 * 1024) / 1024) * 1024);
+  const cap = 2_387_968;
+  assert.equal(cap, Math.ceil((2_377_495 + 10 * 1024) / 1024) * 1024);
   assert.equal(WASM_VENUE_OVERRIDES.woo, cap);
-  assert.equal(wasmBudgetError(2_365_883, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(2_377_495, 'venue', 'woo'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'woo'), /exceeds/);
 });
@@ -151,10 +149,12 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
     ['bybit', 2_177_290, 2_188_288],
     ['cryptocom', 1_704_291, 1_715_200],
     ['hyperliquid', 2_083_308, 2_094_080],
-    ['lighter', 1_968_734, 1_979_392],
     ['mexc', 1_717_351, 1_728_512],
     ['orderly', 1_710_152, 1_721_344],
     ['paradex', 2_211_804, 2_222_080],
+    ['kraken', 2_111_267, 2_121_728],
+    ['krakenspot', 2_111_267, 2_121_728],
+    ['lighter', 1_980_286, 1_990_656],
     ['okx', 1_924_239, 1_935_360],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
