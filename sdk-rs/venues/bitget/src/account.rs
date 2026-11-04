@@ -1168,11 +1168,7 @@ impl BitgetFutures {
         if let Some(socket) = self.sockets[3].socket.take() {
             cx.close(socket);
         }
-        cx.notice(
-            Level::Error,
-            code::for_startup_error(&error),
-            &error.message,
-        );
+        cx.notice_error(Level::Error, code::for_startup_error(&error), &error);
         cx.startup_failed(error);
         // As Bybit: a refused trading key also stops the host's login loop.
         if trading_key_refused {
