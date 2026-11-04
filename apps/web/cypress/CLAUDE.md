@@ -2,6 +2,7 @@
 
 End-to-end tests for the Tealstreet trading platform — exercises real exchange connections, order placement, position management, and audit flows.
 
+- **Hosted account isolation:** the spec names accounts `e2e-<exchange>` because the hosted server keys ownership by login user plus account name. Parallel venue jobs must not reuse one name with different credentials or venues. The workflow serializes all runs across branches/targets without canceling active cleanup; its setup runs the dependency-free `scripts/account-isolation.test.js` guard before credentials or browser work.
 - **Layout**: `e2e/`, `support/`, `fixtures/`, `config/`
 - **Exchange credentials**: `cypress.env.json` and `cypress/config/exchanges.js` (local-only, never committed)
 - **`apps/web/.gitignore` ignores `cypress.env.json*`, not just the exact name.** A `cypress.env.json.bak` was committed on 2026-08-09 and untracked later; history was deliberately not rewritten, so it remains in old commits. Keep backups and variants of the credentials file out of git — the widened pattern exists for that.
