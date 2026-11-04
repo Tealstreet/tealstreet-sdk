@@ -57,7 +57,6 @@ import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
-import { startupDiagnosticTags } from './startupDiagnostics';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
@@ -67,10 +66,10 @@ import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
-import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { bybitPublicRateLimitReport } from '../../transport/bybitPublicRateLimitTelemetry';
-import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
+import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { withRequestsLog } from '../../transport/requestsLog';
+import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
@@ -144,6 +143,7 @@ import {
   serveInProcessPublicData,
 } from './publicFeed';
 import { RustSocketHandle } from './rustSockets';
+import { startupDiagnosticTags } from './startupDiagnostics';
 
 /** The public registry and direct construction share the same beta policy. */
 export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set(BETA_VENUES);
@@ -471,6 +471,7 @@ export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private readonly defaultHistoricalPositions = (this as BaseExchange).fetchHistoricalPositions;
   private host?: EngineHostType;
+  private readReconnectDiagnostics?: ReturnType<typeof createEngineTransport>['reconnectDiagnostics'];
   private engineNow = (): number => virtualClock.getCurrentTimeMs();
   private engineFailure?: Error;
   private publicFeedDisabled = false;
@@ -1479,25 +1480,25 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = options;
     const publicDataOnly = this.isPublicDataOnly;
-    const transport = withRequestsLog(
-      createEngineTransport(
-        this.name,
-        options,
-        (transportFactory ?? synchronizedEngineTransport)(),
-        this.signerSetup,
-        (message) => this.emitAndLogError(message),
-        (notice) => {
-          // Sentry and the log only: the account keeps working, degraded, so no toast.
-          const { message, sentryData } = tunnelProxyFallbackReport(this.name, notice);
-          this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
-        },
-        (notice) => {
-          const { message, sentryData } = bybitPublicRateLimitReport(this.name, notice);
-          this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
-        },
-      ),
+    const routedTransport = createEngineTransport(
       this.name,
-      (event, message) => this.emitter.emit(event, message),
+      options,
+      (transportFactory ?? synchronizedEngineTransport)(),
+      this.signerSetup,
+      (message) => this.emitAndLogError(message),
+      (notice) => {
+        // Sentry and the log only: the account keeps working, degraded, so no toast.
+        const { message, sentryData } = tunnelProxyFallbackReport(this.name, notice);
+        this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
+      },
+      (notice) => {
+        const { message, sentryData } = bybitPublicRateLimitReport(this.name, notice);
+        this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
+      },
+    );
+    this.readReconnectDiagnostics = routedTransport.reconnectDiagnostics;
+    const transport = withRequestsLog(routedTransport, this.name, (event, message) =>
+      this.emitter.emit(event, message),
     );
     const engine = constructEngine(
       WasmEngine,
@@ -2217,7 +2218,11 @@ export class RustEngineExchange extends BaseExchange {
     const shared = this.sharedPublicFeed
       ? { isInitialized: this.sharedPublicReady, isHealthy: this.sharedPublicReady }
       : undefined;
-    const health = summarizeSocketHealth(this.getPublicSockets(), this.getPrivateSockets(), shared);
+    const diagnostics = this.readReconnectDiagnostics?.();
+    const health = {
+      ...summarizeSocketHealth(this.getPublicSockets(), this.getPrivateSockets(), shared),
+      ...(diagnostics ? { reconnectDiagnostics: diagnostics } : {}),
+    };
     const current = this.store.socketHealth;
     // A private stream delivering again proves the key; later rejections still count.
     if (health.privateInitialized && !current?.privateInitialized) this.recordAuthSuccess();
