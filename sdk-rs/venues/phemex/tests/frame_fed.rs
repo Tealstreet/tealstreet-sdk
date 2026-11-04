@@ -647,3 +647,48 @@ fn a_create_ack_does_not_reopen_an_order_an_orders_frame_showed_closed() {
         Some(OrderStatus::Closed)
     );
 }
+
+#[test]
+fn a_foreign_symbol_cover_cannot_release_the_lost_btc_placement() {
+    let (mut e, mut source) = lost_and_canceled();
+    let late = 10_000_000.;
+    let store = source.store_mut();
+    let read = safe_cex_engine::order_read_cover::OrderReadMark {
+        seq: store.order_read_sequence(),
+        sent: late,
+        epoch: 0,
+    };
+    store.commit_orders_read(
+        read,
+        safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&["ETHUSDC"]),
+        |_| true,
+        vec![],
+        &[],
+    );
+    e.apply_frame(late, source.snapshot_frame(late), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 3,
+            orders: vec![order("caller-1")],
+        },
+    );
+    assert!(
+        requests(&a).is_empty(),
+        "ETH's cover cannot forget BTC's lost placement"
+    );
+    read_orders(&mut source, late + 1_000., vec![]);
+    e.apply_frame(late + 1_000., source.snapshot_frame(late + 1_000.), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 4,
+            orders: vec![order("caller-1")],
+        },
+    );
+    assert_eq!(requests(&a).len(), 1, "BTC's own fresh cover retires it");
+}

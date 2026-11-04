@@ -2091,6 +2091,8 @@ impl PhemexPerpetuals {
             return;
         };
         let mut complete = true;
+        // Another symbol's rows: the answer is not this symbol's list.
+        let mut foreign = false;
         let mut published = Vec::new();
         let mut listed = HashSet::new();
         let list_len = rows.len();
@@ -2107,7 +2109,11 @@ impl PhemexPerpetuals {
                 complete = false;
                 continue;
             };
-            if row.symbol.to_ascii_uppercase() != read.symbol || row.terminal() {
+            if row.symbol.to_ascii_uppercase() != read.symbol {
+                foreign = true;
+                continue;
+            }
+            if row.terminal() {
                 continue;
             }
             listed.insert(row.order_id.to_string());
@@ -2162,7 +2168,14 @@ impl PhemexPerpetuals {
             None
         };
         if receipt.is_none()
-            && !self.commit_orders_read(cx, &read.symbol, &published, &listed, complete, list_len)
+            && !self.commit_orders_read(
+                cx,
+                &read.symbol,
+                &published,
+                &listed,
+                (complete, !foreign),
+                list_len,
+            )
         {
             for order in published {
                 cx.store.upsert_order(order);
@@ -2223,7 +2236,8 @@ impl PhemexPerpetuals {
         self.orders_reconcile(cx);
     }
     /// Commits a read's rows with the cover its send time proves: the symbol's rows,
-    /// less those it shows gone, plus the ones it found. False when the stream changed
+    /// less those it shows gone, plus the ones it found. A read that is not
+    /// complete, or not this symbol's list (`proves`), commits them with no cover. False when the stream changed
     /// the symbol after the read went out: its rows stand, and the read proves nothing.
     fn commit_orders_read(
         &self,
@@ -2231,7 +2245,7 @@ impl PhemexPerpetuals {
         symbol: &str,
         published: &[Order],
         listed: &HashSet<String>,
-        complete: bool,
+        (complete, proves): (bool, bool),
         list_len: usize,
     ) -> bool {
         let entry = self.account.reconcile.get(symbol);
@@ -2251,7 +2265,7 @@ impl PhemexPerpetuals {
             .cloned()
             .collect();
         rows.extend_from_slice(published);
-        let unproven = if complete && !cut {
+        let unproven = if complete && proves && !cut {
             vec![]
         } else {
             vec![symbol.to_owned()]
