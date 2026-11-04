@@ -1,3 +1,4 @@
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
@@ -308,11 +309,11 @@ test('paired Bitget validates the sealed old source while executing from clean c
   assert.throws(() => validatePairedCiWasm(args), /dirty or untracked/);
 });
 
-test('paired source cannot be selected outside the dedicated nine-pair Bitget CI measurement', t => {
+test('paired source cannot be selected outside the dedicated fixed-budget Bitget CI measurement', t => {
   const f = fixture(t), gate = new URL('./gate.mjs', import.meta.url);
-  for (const args of [[], ['--ci-wasm', f.directory, '--venue', 'binance', '--runs', '9'],
+  for (const args of [[], ['--ci-wasm', f.directory, '--venue', 'binance', '--runs', String(PUBLIC_REPLAY_PAIRS)],
     ['--ci-wasm', f.directory, '--venue', 'bitget', '--runs', '1'],
-    ['--ci-wasm', f.directory, '--venue', 'bitget', '--runs', '9']]) {
+    ['--ci-wasm', f.directory, '--venue', 'bitget', '--runs', String(PUBLIC_REPLAY_PAIRS)]]) {
     const result = spawnSync(process.execPath, [gate.pathname, '--paired-source', f.metadata.sourceHead, ...args],
       { cwd: f.root, encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: 'false' } });
     assert.notEqual(result.status, 0);

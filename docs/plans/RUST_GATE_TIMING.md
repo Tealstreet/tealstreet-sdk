@@ -54,3 +54,46 @@ CPU and memory keep it at every size. This subsumes the sub-10 ms 1 ms
 allowance above. It cannot catch a regression that leaves Rust within 5% of TS
 on a small window (#1356 on Hyperliquid Spot was one); a per-message slowdown
 on Bybit and Hyperliquid still fails (evidence on PR #1461).
+
+
+## Fixed balanced public budget (2026-11-04)
+
+`fix/replay-cpu-counterbalance` replaces the timing-dependent seven-to-nine
+extension with sixteen fixed pairs for every public case. Eight pairs run TS
+first and eight run Rust first. The same budget applies to the independently
+sealed remeasurement and each Bitget paired cohort; their validators require
+all 34 original slots (one audited pair plus sixteen performance pairs).
+Bitget retains its eight-cohort order, frozen calibration and tolerance; the
+protocol digest records the new sample inventory. Private correctness counts
+are unchanged.
+
+Main/steady small-window allowances, process/memory objectives, independent
+per-implementation medians and the strict 1.05 remeasurement eligibility bound
+are unchanged. There is no stop-on-pass, sample removal, runner-class baseline
+or tolerance adjustment. CPU model, guest topology and frequency observations
+are retained outside the child CPU interval, with the physical sample order
+and elapsed time. Missing topology/frequency is explicitly unavailable;
+`os.cpus()` speed is labelled nominal. A sibling `measurement.json` also
+survives an interrupted replay child. Offline verification does not invent
+current-machine metadata for an old measurement.
+
+The optional dispatch-only diagnostic uses identical source and one immutable
+TxFlow module in both arms. Each original runner collects all sixteen pairs
+per arm in a fixed ABBA/ABBA block order, with equal TS-first/Rust-first pairs.
+Its predeclared twelve-pair prefix is diagnostic only, and every sixteen-pair
+original remains in the artifact. Optional GC/tiering traces run afterward,
+outside the timed cohorts. These artifacts grant no CPU certification.
+
+Run `41874645362` captured Intel 8370C and AMD EPYC 7763, 9V74 and 9V45.
+The twelve-pair prefix gave conflicting strict verdicts between identical-code
+arms on EPYC 7763; sixteen pairs gave matching verdicts on all four runners.
+Raw ratios still varied by 7.4% on 9V74, so matching verdicts do not establish
+that all timing variance is below 5%. EPYC 7763 remained a genuine failure:
+TS steady medians 18.3535/18.243 ms versus Rust 19.387/19.5505 ms.
+The measurement change does not waive that failure.
+
+Measured child wall costs were 65–73 s per twelve-pair case and 87–97 s per
+sixteen-pair case. Relative to nine pairs on these same runners, sixteen adds
+about 39–42 s per case, or 28–30 aggregate runner-minutes over the 43 public
+cases before any eligible second measurements. The overseer approved that
+cost. Twenty-four pairs would cost another 44–48 s per case over sixteen.
