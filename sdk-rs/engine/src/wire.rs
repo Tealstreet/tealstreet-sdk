@@ -51,6 +51,11 @@ pub mod section {
     /// A venue's private state for frame-fed engines (`Venue::export_venue_state`):
     /// a u32 length, then the venue's own bytes, padded.
     pub const VENUE_STATE: u16 = 22;
+    /// Directly after ORDERS, once a read has proven a cover: how fresh the
+    /// order rows are (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.2). Revision 1:
+    /// u32 count, pad, f64 account cover (NaN when none), count u32 symbol
+    /// refs, pad, count f64 symbol covers, on the writer's clock.
+    pub const ORDERS_READ: u16 = 23;
 }
 
 pub mod status_flag {

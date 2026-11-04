@@ -1723,9 +1723,13 @@ struct IoCore {
     #[cfg(feature = "order-locks")]
     active_commands: std::collections::HashSet<CommandId>,
     #[cfg(feature = "order-locks")]
-    order_read_tokens: crate::IdMap<RequestId, u64>,
+    /// Each order read's order-lock epoch and its release (row sequence, send).
+    order_read_tokens: crate::IdMap<RequestId, (u64, crate::order_read_cover::OrderReadMark)>,
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
+    /// The release of the read `order_response_token` belongs to.
+    #[cfg(feature = "order-locks")]
+    order_response_read: Option<crate::order_read_cover::OrderReadMark>,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -1930,6 +1934,8 @@ impl Default for IoCore {
             order_read_tokens: Default::default(),
             #[cfg(feature = "order-locks")]
             order_response_token: None,
+            #[cfg(feature = "order-locks")]
+            order_response_read: None,
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -2523,10 +2529,14 @@ impl<P> Cx<'_, P> {
             if method != Method::Get {
                 self.io.core.order_locks.note_write();
             }
+            let read = crate::order_read_cover::OrderReadMark {
+                seq: self.store.order_read_sequence(),
+                sent: self.now,
+            };
             self.io
                 .core
                 .order_read_tokens
-                .insert(id, self.io.core.order_locks.token());
+                .insert(id, (self.io.core.order_locks.token(), read));
         }
         self.io.pending.insert(
             id,
@@ -3044,6 +3054,22 @@ impl<P> Cx<'_, P> {
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = (unproven, epoch);
+    }
+
+    /// Commit the rows of the order read this response answers, atomically with
+    /// the cover it proves (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1). Rows
+    /// changed after the read was released are kept, and an account scope
+    /// committed since refuses it whole (`None`). Outside a read response
+    /// nothing is committed.
+    #[cfg(feature = "order-locks")]
+    pub fn commit_orders_read(
+        &mut self,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: Vec<crate::model::Order>,
+    ) -> Option<Vec<String>> {
+        let read = self.io.core.order_response_read?;
+        self.store.commit_orders_read(read, scope, in_scope, rows)
     }
 
     /// Call only after accepting a complete, fresh authoritative order read.
@@ -5833,7 +5859,9 @@ impl<V: Venue> Engine<V> {
     fn http_end(&mut self, now: f64, request: RequestId) {
         #[cfg(feature = "order-locks")]
         {
-            self.io.core.order_response_token = self.io.core.order_read_tokens.remove(&request);
+            let read = self.io.core.order_read_tokens.remove(&request);
+            self.io.core.order_response_token = read.map(|(epoch, _)| epoch);
+            self.io.core.order_response_read = read.map(|(_, read)| read);
         }
         let (Some(incoming), Some(pending)) = (
             self.io.core.incoming.remove(&request),
