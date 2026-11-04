@@ -47,6 +47,8 @@ parser.add_argument('--authority', required=True)
 parser.add_argument('--module-path', required=True)
 args = parser.parse_args()
 root = Path.cwd()
+pairs = int(output('node', '--input-type=module', '-e',
+                   "import { PUBLIC_REPLAY_PAIRS } from './sdk-rs/harness/performance-policy.mjs'; console.log(PUBLIC_REPLAY_PAIRS)"))
 refs = {'baseline': args.baseline, 'candidate': args.candidate}
 for arm, ref in refs.items():
     insist(len(ref) == 40 and all(c in '0123456789abcdef' for c in ref), f'invalid {arm} ref')
@@ -63,7 +65,7 @@ plan = {'refs': refs, 'witness': authority['witness'],
         'measurementFiles': authority['measurementFiles'],
         'order': ['baseline', 'candidate', 'candidate', 'baseline',
                   'candidate', 'baseline', 'baseline', 'candidate'],
-        'blockOrders': ['ABBA', 'BAAB'], 'pairsPerCohort': 9,
+        'blockOrders': ['ABBA', 'BAAB'], 'pairsPerCohort': pairs,
         'venue': 'bitget', 'tape': 'sdk-rs/harness/fixtures/bitget-public.jsonl.gz',
         'books': 'BTCUSDT,ETHUSDT', 'collectionOnly': True,
         'protocolSha256': authority['protocolSha256'],
@@ -209,7 +211,7 @@ for number, arm in enumerate(plan['order'], 1):
     print('\nCPU_CASE_BEGIN ' + before['measurementKey'] + ' ' + before['startedAt'], flush=True)
     report_path = phase / 'gate.json'
     command = ['node', 'sdk-rs/harness/gate.mjs', '--venue', plan['venue'],
-               '--tape', plan['tape'], '--books', plan['books'], '--runs', '9',
+               '--tape', plan['tape'], '--books', plan['books'], '--runs', str(pairs),
                '--ci-wasm', str(active_module), '--paired-source', refs[arm], '--report', str(report_path)]
     exit_code = logged(command, phase / 'gate.log', allowed=(0, 1))
     insist(report_path.exists(), f'cohort {number} produced no report')
@@ -221,7 +223,7 @@ for number, arm in enumerate(plan['order'], 1):
            'report did not use the exact selected module seal')
     for name, seal in module_seals.items():
         insist(sha(active_module / name) == seal, 'active module changed during cohort')
-    insist(report['runs'] == 9 and not report['private'], 'public pair contract changed')
+    insist(report['runs'] == pairs and not report['private'], 'public pair contract changed')
     insist(report['venue'] == plan['venue'] and report['books'] == plan['books'] and report['tapeSha256'] == tape_sha256, 'case fingerprint changed')
     insist(report['correctnessRuns'] == 1 and report['requiredImprovement'] == 0.1,
            'correctness/threshold contract changed')
@@ -259,10 +261,10 @@ def pool(indices):
     medians = {}
     for impl in ('ts', 'rust'):
         samples = [s['steadyCpuMs'] for index in indices for s in reports[index]['samples'][impl]]
-        insist(len(samples) == 9 * len(indices) and
+        insist(len(samples) == pairs * len(indices) and
                all(math.isfinite(x) and x > 0 for x in samples), 'invalid pooled samples')
         medians[impl] = statistics.median(samples)
-    return {'cohorts': [index + 1 for index in indices], 'pairs': 9 * len(indices),
+    return {'cohorts': [index + 1 for index in indices], 'pairs': pairs * len(indices),
             'tsMedianMs': medians['ts'], 'rustMedianMs': medians['rust'],
             'rustTsRatio': medians['rust'] / medians['ts']}
 pooled = {arm: pool([i for i, c in enumerate(cohorts) if c['arm'] == arm]) for arm in refs}

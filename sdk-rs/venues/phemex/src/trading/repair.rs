@@ -76,17 +76,21 @@ impl PhemexPerpetuals {
     /// its lost placements; one it does not show never landed, and its late
     /// cancel authority retires.
     pub(crate) fn expire_lost_from_frames(&mut self, cx: &mut Cx<'_, Pending>) {
-        let Some(cover) = cx
-            .source_orders_cover()
+        let Some(covers) = cx
+            .source_orders_covers()
             .filter(|_| cx.store.loaded().orders)
+            .cloned()
         else {
             return;
         };
-        for (symbol, since) in self.account.take_proven_lost(cover) {
+        for (symbol, since) in self.account.take_proven_lost(|symbol| covers.cover(symbol)) {
             for grant in &mut self.trading.repair.grants {
                 if grant.symbol == symbol {
                     grant.subjects.retain(|subject| {
-                        let proof = Retire::SourceOrders { since };
+                        let proof = Retire::SourceOrders {
+                            since,
+                            symbol: &symbol,
+                        };
                         cx.retire_repair_subject(&grant.entitlement, &subject.key, proof)
                             .is_err()
                     });
