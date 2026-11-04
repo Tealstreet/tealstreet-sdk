@@ -122,3 +122,79 @@ fn an_unmappable_open_order_proves_no_cover() {
     );
     assert_eq!(account_cover(&mut h).1, None);
 }
+
+#[test]
+fn split_reads_cover_uses_earliest_actual_claim() {
+    let mut h = Harness::started_deferred(credentials());
+    h.hold_signatures(true);
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.sign("/fapi/v1/openOrders");
+    let early = h.now;
+    h.respond("/fapi/v1/openOrders", 200, "[]");
+    h.now += 1000.;
+    h.sign("/fapi/v1/openAlgoOrders");
+    h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
+    assert_eq!(
+        account_cover(&mut h).1,
+        Some(early),
+        "all rows are only as fresh as the earliest actual leg release"
+    );
+}
+fn live_stop(h: &mut Harness) {
+    let stop = NEW_ORDER
+        .replace(r#""o":"LIMIT""#, r#""o":"STOP""#)
+        .replace(r#""ot":"LIMIT""#, r#""ot":"STOP""#)
+        .replace(r#""sp":"0""#, r#""sp":"90000""#);
+    h.message("/private/ws", &stop);
+    assert_eq!(
+        h.engine.store().order("8886774").unwrap().kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+}
+fn amend_must_stay_refused(h: &mut Harness) {
+    h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+        command: 900,
+        id: "8886774".into(),
+        price: Some(91000.),
+        amount: None,
+    }));
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method != safe_cex_engine::Method::Get),
+        "refused stale read cannot remove stop-limit protection: {:?}",
+        h.paths()
+    );
+    assert!(
+        h.failures
+            .iter()
+            .any(|(id, e)| *id == 900 && e.kind == Some(safe_cex_engine::ErrorKind::Unsupported))
+    );
+}
+#[test]
+fn stream_stop_limit_amend_is_refused_control() {
+    let mut h = orders_read_out();
+    live_stop(&mut h);
+    amend_must_stay_refused(&mut h);
+}
+#[test]
+fn refused_old_read_cannot_change_stop_limit_classification() {
+    let mut h = orders_read_out();
+    live_stop(&mut h);
+    answer_orders(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","orderId":8886774,"clientOrderId":"TEST","price":"97000","origQty":"0.002","executedQty":"0","side":"SELL","positionSide":"BOTH","status":"NEW","type":"STOP_MARKET","timeInForce":"GTC","stopPrice":"90000","reduceOnly":false,"closePosition":false,"workingType":"CONTRACT_PRICE","updateTime":1}]"#,
+    );
+    assert_eq!(
+        h.engine.store().order("8886774").unwrap().kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+    assert_eq!(account_cover(&mut h).1, None);
+    amend_must_stay_refused(&mut h);
+}
+#[test]
+fn unidentified_row_grants_no_cover() {
+    let mut h = orders_read_out();
+    answer_orders(&mut h, r#"[{"broken":true}]"#);
+    assert_eq!(account_cover(&mut h).1, None);
+}

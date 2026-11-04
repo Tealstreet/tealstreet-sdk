@@ -3795,3 +3795,73 @@ fn an_open_order_of_an_unknown_type_proves_no_newer_cover() {
     assert!(h.engine.store().order(ORDER_ID).is_some());
     assert_eq!(account_cover(&mut h), before);
 }
+
+#[test]
+fn unidentified_row_cannot_advance_cover() {
+    let mut h = Harness::ready();
+    let before = account_cover(&mut h);
+    h.poll_late(26000.);
+    let read = h.take(ORDERS);
+    h.reply(
+        read.id,
+        200,
+        r#"{"code":0,"data":{"orders":[{"broken":true}]}}"#,
+    );
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    assert_eq!(account_cover(&mut h), before);
+}
+#[test]
+fn named_malformed_row_cannot_advance_cover() {
+    let mut h = Harness::ready();
+    let before = account_cover(&mut h);
+    h.poll_late(26000.);
+    let read = h.take(ORDERS);
+    h.reply(
+        read.id,
+        200,
+        &OPEN.replace(r#""origQty":"0.2""#, r#""origQty":"NaN""#),
+    );
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().amount, 0.2);
+    assert_eq!(account_cover(&mut h), before);
+}
+#[test]
+fn same_clock_stream_then_old_read_keeps_classification() {
+    let mut h = Harness::ready();
+    let before = account_cover(&mut h);
+    h.poll_late(26000.);
+    let read = h.take(ORDERS);
+    h.event(Event::WsMessage { socket: h.private(), text: r#"{"e":"ORDER_TRADE_UPDATE","E":1001,"o":{"i":4242,"s":"BTC-USDT","o":"STOP_MARKET","S":"SELL","X":"NEW","q":"0.1","z":"0","p":"0","sp":"58000","R":true}}"# });
+    let old = h.engine.store().order("4242").unwrap().clone();
+    assert_eq!(old.kind, safe_cex_engine::model::OrderType::StopLoss);
+    let before_frame = h.engine.snapshot_frame(h.now).to_vec();
+    let before_meta = wire::sections(&before_frame)
+        .find(|(k, _)| *k == wire::section::VENUE_STATE)
+        .unwrap()
+        .1
+        .to_vec();
+    h.reply(read.id, 200, OPEN);
+    let after_frame = h.engine.snapshot_frame(h.now).to_vec();
+    let after_meta = wire::sections(&after_frame)
+        .find(|(k, _)| *k == wire::section::VENUE_STATE)
+        .unwrap()
+        .1
+        .to_vec();
+    assert_eq!(
+        after_meta, before_meta,
+        "refused rows retain their native classification too"
+    );
+    assert_eq!(h.engine.store().order("4242"), Some(&old));
+    assert_eq!(account_cover(&mut h), before);
+}
+#[test]
+fn old_delivery_after_fresh_commit_is_inert() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.);
+    let read = h.take(ORDERS);
+    h.reply(read.id, 200, &OPEN.replace("59000", "59001"));
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().price, 59001.);
+    let cover = account_cover(&mut h);
+    h.reply(read.id, 200, OPEN);
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().price, 59001.);
+    assert_eq!(account_cover(&mut h), cover);
+}
