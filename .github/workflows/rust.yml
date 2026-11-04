@@ -123,7 +123,12 @@ jobs:
         with:
           node-version: 22.23.4
       - uses: ./.github/actions/prepare-yarn
-      - run: corepack yarn install --frozen-lockfile --ignore-scripts
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - name: Download the immutable original TxFlow module
         env:
           GH_TOKEN: ${{ github.token }}
