@@ -332,6 +332,61 @@ fn an_unknown_placement_requires_a_fresh_order_read_before_retrying() {
 }
 
 #[test]
+fn a_degraded_open_order_snapshot_does_not_clear_a_placement_fence() {
+    let mut h = Harness::ready_with_orders(r#"{"code":0,"data":[]}"#);
+    let place = |command| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol":"BTCUSDT", "type":"limit", "side":"buy",
+                "amount":0.01, "price":60000
+            }))
+            .unwrap(),
+        ],
+    };
+    h.now += 1.;
+    h.event(Event::Command(place(700)));
+    let first = h.take("/openApi/swap/v2/trade/order");
+    h.reply(first.id, 503, "Service Unavailable");
+    assert!(
+        h.failures
+            .iter()
+            .any(|(id, error)| *id == 700
+                && error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+    );
+    let fresh = h.take(ORDERS);
+    let assert_refused =
+        |h: &mut Harness, id| {
+            h.now += 1.;
+            h.event(Event::Command(place(id)));
+            assert!(h.failures.iter().any(|(command, error)| *command == id
+                && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.message.contains("uncertain")));
+            assert!(h.requests.iter().all(
+                |r| r.method != Method::Post || !r.url.contains("/openApi/swap/v2/trade/order")
+            ));
+        };
+    assert_refused(&mut h, 701);
+    h.reply(
+        fresh.id,
+        200,
+        r#"{"code":0,"data":{"orders":[{"orderId":77,"symbol":"BTC-USDT","type":"LIMIT","side":"BUY","origQty":"0.2","executedQty":"0","price":"NaN","positionSide":"BOTH"}]}}"#,
+    );
+    let order = h
+        .engine
+        .store()
+        .order("77")
+        .expect("degraded row stays visible");
+    assert_eq!((order.symbol.as_str(), order.amount), ("BTCUSDT", 0.2));
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("row 77") && log.contains("price"))
+    );
+    assert_refused(&mut h, 702);
+}
+
+#[test]
 fn private_startup_preserves_big_ids_unsigned_key_and_primary_balance() {
     let mut h = Harness::new();
     let key = h.take(KEY);
@@ -1350,6 +1405,166 @@ fn one_malformed_position_row_is_skipped_and_never_closes_its_known_position() {
         h.respond(POSITIONS, 200, snapshot);
         assert_eq!(h.engine.store().positions().len(), 1);
         assert_eq!(h.engine.store().positions()[0].contracts, 0.2);
+    }
+}
+
+#[test]
+fn malformed_optional_open_order_fields_do_not_hide_a_cancellable_order() {
+    for field in [
+        "price",
+        "stopPrice",
+        "executedQty",
+        "lastQuantity",
+        "lastPrice",
+        "avgPrice",
+        "reduceOnly",
+        "closePosition",
+        "postOnly",
+        "clientOrderId",
+        "timeInForce",
+        "workingType",
+        "positionSide",
+        "tradeId",
+        "time",
+        "type",
+        "status",
+    ] {
+        let mut h = Harness::ready();
+        h.poll_late(26000.0);
+        let mut body: serde_json::Value = serde_json::from_str(OPEN).unwrap();
+        let row = &mut body["data"]["orders"][0];
+        row["orderId"] = serde_json::json!(77);
+        row[field] = serde_json::json!({"private-field-marker": true});
+        h.respond(ORDERS, 200, &body.to_string());
+        let order = h
+            .engine
+            .store()
+            .order("77")
+            .unwrap_or_else(|| panic!("{field} hid the order"));
+        assert_eq!(order.symbol, "BTCUSDT");
+        assert_eq!(order.amount, 0.2);
+        assert_eq!(order.status, OrderStatus::Open);
+        assert!(
+            h.logs
+                .iter()
+                .any(|log| log.contains("row 77") && log.contains(field)),
+            "missing {field} diagnostic: {:?}",
+            h.logs
+        );
+        assert!(
+            !h.logs
+                .iter()
+                .any(|log| log.contains("private-field-marker"))
+        );
+        h.event(Event::Command(Command::CancelOrders {
+            command: 87,
+            ids: vec!["77".into()],
+        }));
+        let cancel = h.take("/trade/order");
+        assert_eq!(cancel.method, Method::Delete);
+        assert!(cancel.url.contains("orderId=77"));
+        assert!(cancel.url.contains("symbol=BTC-USDT"));
+    }
+}
+
+#[test]
+fn multiple_optional_failures_preserve_the_exact_large_order_identity() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    h.respond(ORDERS, 200, r#"{"code":0,"data":{"orders":[{"orderId":2117802140764430336,"symbol":"BTC-USDT","type":"LIMIT","side":"BUY","origQty":"0.2","price":"NaN","timeInForce":17,"executedQty":{}}]}}"#);
+    let id = "2117802140764430336";
+    let order = h
+        .engine
+        .store()
+        .order(id)
+        .expect("large identity stays exact");
+    assert_eq!(
+        (order.amount, order.filled, order.remaining),
+        (0.2, 0.0, 0.2)
+    );
+    let message = h.logs.iter().find(|log| log.contains(id)).unwrap();
+    for field in ["price", "timeInForce", "executedQty"] {
+        assert!(message.contains(field));
+    }
+    assert!(!message.contains("NaN"));
+    h.event(Event::Command(Command::CancelOrders {
+        command: 89,
+        ids: vec![id.into()],
+    }));
+    assert!(
+        h.take("/trade/order")
+            .url
+            .contains(&format!("orderId={id}"))
+    );
+}
+
+#[test]
+fn malformed_quantities_are_not_repaired_even_for_full_position_rows() {
+    for quantity in [r#""NaN""#, "null", "-1", r#""""#, "{}"] {
+        let mut h = Harness::ready();
+        h.poll_late(26000.0);
+        h.respond(ORDERS, 200, &format!(r#"{{"code":0,"data":{{"orders":[{{"orderId":77,"symbol":"BTC-USDT","type":"LIMIT","side":"BUY","origQty":{quantity},"price":{{}}}}]}}}}"#));
+        assert!(
+            h.engine.store().order("77").is_none(),
+            "invalid quantity {quantity} published"
+        );
+        assert!(h.logs.iter().any(|log| log.contains("origQty")));
+    }
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    h.respond(ORDERS, 200, r#"{"code":0,"data":{"orders":[{"orderId":77,"symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL","origQty":"NaN","closePosition":true,"price":{}}]}}"#);
+    assert!(h.engine.store().order("77").is_none());
+    assert!(h.logs.iter().any(|log| log.contains("origQty")));
+}
+
+#[test]
+fn degraded_open_order_metadata_does_not_authorize_an_amendment() {
+    let mut h = Harness::ready();
+    h.poll_late(26000.0);
+    let body = OPEN.replace("\"timeInForce\":\"GTC\"", "\"timeInForce\":{}");
+    h.respond(ORDERS, 200, &body);
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    h.event(Event::Command(Command::AmendOrder {
+        command: 88,
+        id: ORDER_ID.into(),
+        price: Some(58000.0),
+        amount: None,
+    }));
+    assert!(h.failures.iter().any(|(command, _)| *command == 88));
+    assert!(!h.requests.iter().any(|r| r.method == Method::Post
+        || r.method == Method::Delete
+        || r.method == Method::Put));
+}
+
+#[test]
+fn required_open_order_fields_still_refuse_the_row_and_name_the_field() {
+    for field in ["orderId", "symbol", "side", "origQty"] {
+        let mut h = Harness::ready();
+        h.poll_late(26000.0);
+        let mut body: serde_json::Value = serde_json::from_str(OPEN).unwrap();
+        let good = body["data"]["orders"][0].clone();
+        let row = &mut body["data"]["orders"][0];
+        row["orderId"] = serde_json::json!(77);
+        row[field] = serde_json::json!({"private-field-marker": true});
+        body["data"]["orders"].as_array_mut().unwrap().push(good);
+        h.respond(ORDERS, 200, &body.to_string());
+        assert!(
+            h.engine.store().order("77").is_none(),
+            "invalid {field} published"
+        );
+        assert!(h.engine.store().order(ORDER_ID).is_some());
+        assert!(
+            h.logs
+                .iter()
+                .any(|log| log.contains("skipped malformed open order") && log.contains(field)),
+            "missing {field} diagnostic: {:?}",
+            h.logs
+        );
+        assert!(
+            !h.logs
+                .iter()
+                .any(|log| log.contains("private-field-marker"))
+        );
     }
 }
 
