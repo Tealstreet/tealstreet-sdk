@@ -107,6 +107,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // Read-cover batch (#3010/#3016/#3005/#3007 engine plus venue covers) at SDK 3b9f6b0fe2b: cut run 41796230942
 // measured binance 2,172,329, bingx 2,002,885, bitget 2,293,016, bitunix 1,826,666, blofin 1,939,942, bybit 2,177,290, cryptocom 1,704,291, hyperliquid 2,083,308, lighter 1,968,734, mexc 1,717,351, orderly 1,710,152, paradex 2,198,375 B;
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB, shared-family siblings set equal.
+// #3020 OKX read covers: cut run 41797896337 at e7e0251a87d measured okx 1,924,239 B;
+// ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_970_176,
   asterdex: 2_109_440,
@@ -132,7 +134,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   lighter: 1_979_392,
   'lighter-robinhood': 1_979_392,
   mexc: 1_728_512,
-  okx: 1_921_024,
+  okx: 1_935_360,
   orderly: 1_721_344,
   paradex: 2_208_768,
   phemex: 2_034_688,
