@@ -1537,7 +1537,10 @@ impl BybitLinear {
                     return Self::unproven(
                         cx,
                         context,
-                        "Bybit cancel acknowledgement does not prove its orders",
+                        &format!(
+                            "Bybit batch cancel could not be confirmed; check open orders on Bybit before retrying ({})",
+                            ack::cancel_diagnostic(result, ext, &targets),
+                        ),
                         &[],
                     );
                 };
