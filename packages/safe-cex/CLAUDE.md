@@ -1699,7 +1699,9 @@ No request bodies, account addresses, headers or URLs enter these facts.
 Public Hyperliquid catalogue reads (`perpDexs`, `metaAndAssetCtxs` and
 `spotMetaAndAssetCtxs`) share byte-exact replies across engines through a separate
 IndexedDB cache. Entries expire after 5 s; a 3 s leader lease bounds follower
-waiting and fences late leaders. Cache storage attempts are bounded to 250 ms;
+waiting and fences late leaders. Cached preparations recheck payload expiry at
+readiness and handoff; asynchronous publication owns a separate byte buffer.
+Cache storage attempts are bounded to 250 ms;
 unavailable storage bypasses the cache while retaining ordinary quota admission.
 Only anonymous public requests with the exact catalogue shape qualify. Account
 reads, candles and writes are never cached. Typed discovery failures invalidate

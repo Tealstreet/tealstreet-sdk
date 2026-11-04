@@ -101,3 +101,80 @@ it('invalidating an origin forces a new physical catalogue read', async () => {
   await read(packet(2));
   expect(raw.request).toHaveBeenCalledTimes(2);
 });
+
+it('returned network bytes cannot be mutated into the shared cache', async () => {
+  const { read, answer } = await setup();
+  const first = await read();
+  expect(first.body).toEqual(answer);
+  (first.body as Uint8Array).set(new TextEncoder().encode('[null,{"name":"abc"}]'));
+  await flush();
+  const next = await read(packet(2));
+  expect(next.body).toEqual(answer);
+});
+it('cached preparation does not serve bytes after the payload TTL', async () => {
+  const { read, transport, raw } = await setup();
+  await read();
+  await flush();
+  const req = packet(2);
+  const prepared = await transport.prepareHttp!({ ...req, intent: 'public' });
+  const bound = prepared.bind(req);
+  await vi.advanceTimersByTimeAsync(5001);
+  expect(bound.ready()).toBe(false);
+  expect(() => bound.dispatch()).toThrow();
+  expect(raw.request).toHaveBeenCalledTimes(1);
+});
+
+it('ordinary TTL lookup refreshes and unchanged returned bytes replay exactly', async () => {
+  const { read, answer, raw } = await setup();
+  expect((await read()).body).toEqual(answer);
+  await flush();
+  await vi.advanceTimersByTimeAsync(4999);
+  expect((await read(packet(2))).body).toEqual(answer);
+  expect(raw.request).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(2);
+  expect((await read(packet(3))).body).toEqual(answer);
+  expect(raw.request).toHaveBeenCalledTimes(2);
+});
+it('real transport follower bypasses a stalled leader within the lease bound', async () => {
+  const { read, answer, raw } = await setup();
+  let release!: (r: { status: number; body: Uint8Array }) => void;
+  (raw.request as ReturnType<typeof vi.fn>).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const first = read();
+  const firstOutcome = Promise.allSettled([first]);
+  for (let i = 0; i < 8 && (raw.request as ReturnType<typeof vi.fn>).mock.calls.length === 0; i++) await flush();
+  expect(raw.request).toHaveBeenCalledTimes(1);
+  let done = false;
+  const second = read(packet(2)).then((r) => {
+    done = true;
+    return r;
+  });
+  for (let i = 0; i < 31; i++) {
+    await flush();
+    await vi.advanceTimersByTimeAsync(100);
+  }
+  expect(done).toBe(true);
+  expect((await second).body).toEqual(answer);
+  expect(raw.request).toHaveBeenCalledTimes(2);
+  release({ status: 200, body: new TextEncoder().encode('[null,{"name":"old"}]') });
+  expect((await firstOutcome)[0].status).toBe('fulfilled');
+  await flush();
+  expect((await read(packet(3))).body).toEqual(answer);
+  expect(raw.request).toHaveBeenCalledTimes(2);
+});
+
+it('refuses a cached handoff after the wall clock rolls behind its publication', async () => {
+  const { read, transport, raw } = await setup();
+  await read();
+  await flush();
+  const request = packet(2);
+  const bound = (await transport.prepareHttp!({ ...request, intent: 'public' })).bind(request);
+  vi.setSystemTime(Date.now() - 1000);
+  expect(bound.ready()).toBe(false);
+  expect(() => bound.dispatch()).toThrow();
+  expect(raw.request).toHaveBeenCalledTimes(1);
+});

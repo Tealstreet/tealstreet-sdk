@@ -333,3 +333,18 @@ it('does not hold a good HTTP answer behind stalled cache publication', async ()
   await vi.advanceTimersByTimeAsync(251);
   expect(abort).toHaveBeenCalledTimes(1);
 });
+
+it('rechecks freshness after an asynchronous storage observation crosses the TTL', async () => {
+  const a = new HyperliquidCatalogue(factory);
+  await (await a.prepare(request(), controller().signal, Date.now() + 20_000))!.complete(response());
+  await flush();
+  const get = IDBObjectStore.prototype.get;
+  vi.spyOn(IDBObjectStore.prototype, 'get').mockImplementationOnce(function (this: IDBObjectStore, ...args) {
+    const read = get.apply(this, args);
+    read.addEventListener('success', () => queueMicrotask(() => vi.setSystemTime(Date.now() + 5001)));
+    return read;
+  });
+  const next = await a.prepare(request(), controller().signal, Date.now() + 20_000);
+  expect(next?.cached).toBeUndefined();
+  next!.cancel();
+});

@@ -718,6 +718,8 @@ const httpTransport = (
         if (catalogueRead) catalogueOrigins.add(original.origin);
       }
       const cached = catalogueRead?.cached;
+      const cacheFresh = () =>
+        !cached || (Date.now() >= catalogueRead!.cachedAt! && Date.now() < catalogueRead!.expiresAt!);
       const how = tunnelAdapter as Partial<DisposableAxiosAdapter> | undefined;
       if (!cached && tunnelAdapter) {
         const prepareTunnel = intent === undefined ? how?.prepareLegacy : how?.prepare;
@@ -810,8 +812,11 @@ const httpTransport = (
           let send: () => Promise<HttpResponse>;
           let ready: () => boolean;
           if (cached) {
-            ready = () => true;
-            send = async () => cached;
+            ready = cacheFresh;
+            send = () => {
+              if (!cacheFresh()) throw new HttpPreparationError('timedOut');
+              return Promise.resolve(cached);
+            };
           } else if (tunnelAdapter) {
             const tunnel = prepared as Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
             const inner = beforeRelease(() => validateBound(tunnel?.bind(finalConfig)));

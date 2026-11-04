@@ -12,6 +12,8 @@ type Entry = { owner: string; at: number; bytes?: Uint8Array };
 type Decision<T> = { value: T; write?: Entry | null };
 export interface CatalogueRead {
   cached?: HttpResponse;
+  cachedAt?: number;
+  expiresAt?: number;
   complete(response: HttpResponse): Promise<HttpResponse>;
   cancel(): void;
 }
@@ -303,9 +305,16 @@ export class HyperliquidCatalogue {
           signal.throwIfAborted();
           throw new HttpPreparationError('timedOut');
         }
+        if (entry.bytes && !live(entry)) continue;
         if (entry.bytes && valid(key, entry.bytes)) {
           const cached = { status: 200, headers: 'content-type: application/json', body: entry.bytes };
-          return { cached, complete: async () => cached, cancel: () => {} };
+          return {
+            cached,
+            cachedAt: entry.at,
+            expiresAt: entry.at + TTL_MS,
+            complete: async () => cached,
+            cancel: () => {},
+          };
         }
         if (entry.owner === owner) return this.leader(key, owner, signal);
         if (entry.bytes)
@@ -353,10 +362,12 @@ export class HyperliquidCatalogue {
           if (!finished && !signal.aborted) {
             finished = true;
             signal.removeEventListener('abort', cancel);
-            // Cache publication must never delay a good HTTP answer to its deadline.
+            const publicationBytes = captured.slice();
+            const publishedAt = Date.now();
+            // Cache publication owns its bytes and never delays a good HTTP answer.
             void this.edit(key, (entry) => ({
               value: undefined,
-              write: entry?.owner === owner ? { owner, at: Date.now(), bytes: captured } : undefined,
+              write: entry?.owner === owner ? { owner, at: publishedAt, bytes: publicationBytes } : undefined,
             })).catch(() => undefined);
           }
           signal.throwIfAborted();
