@@ -42,6 +42,11 @@ enum Resync {
     Page(Option<Replay>),
     Clock { page: Replay },
 }
+impl Resync {
+    fn is_clock(&self) -> bool {
+        matches!(self, Self::Clock { .. })
+    }
+}
 
 enum Root {
     Signed(ReadRoot),
@@ -1051,9 +1056,7 @@ impl BinanceFutures {
         let custody = match (&owned.root, &request.leg) {
             (Root::Signed(root), Leg::Signed(leg)) => root.validate_delivery(cx, leg),
             (Root::Public(root), Leg::Public(leg)) => cx.validate_read_http_delivery(root, leg),
-            (Root::Signed(root), Leg::Public(leg))
-                if matches!(request.resync, Resync::Clock { .. }) =>
-            {
+            (Root::Signed(root), Leg::Public(leg)) if request.resync.is_clock() => {
                 cx.validate_read_http_delivery(root.context(), leg)
             }
             _ => Err(Error::Revoked),
@@ -1072,7 +1075,10 @@ impl BinanceFutures {
     ) {
         // A failure carries no body, so its root's owner decides custody. One leg per
         // query is in flight, so a failed leg of this root is the current one.
-        let strict = strict || matches!(request.resync, Resync::Clock { .. });
+        let strict = match request.resync {
+            Resync::Clock { .. } => true,
+            Resync::Page(_) => strict,
+        };
         let current = self
             .history
             .reads
