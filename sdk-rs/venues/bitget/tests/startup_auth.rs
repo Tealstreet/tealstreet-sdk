@@ -158,6 +158,15 @@ fn rejected_key_fails_startup_once_and_stops_retrying() {
     assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
     assert_eq!(error.venue_code.as_deref(), Some("40006"));
     assert!(error.message.contains("Bitget rejected the API key"));
+    let notice = h
+        .events
+        .iter()
+        .find(|event| event.code == safe_cex_engine::log::code::AUTH_REJECTED)
+        .unwrap();
+    assert!(
+        notice.fields.contains(&("venueCode", "40006".into())),
+        "{notice:?}"
+    );
     assert_eq!(h.deactivations, 1);
 }
 
@@ -213,6 +222,15 @@ fn rejected_read_only_ip_fails_startup_without_deactivating() {
             .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT),
         "{}",
         h.startup_failures[0].message
+    );
+    let notice = h
+        .events
+        .iter()
+        .find(|event| event.code == safe_cex_engine::log::code::AUTH_REJECTED)
+        .unwrap();
+    assert!(
+        notice.fields.contains(&("venueCode", "40018".into())),
+        "{notice:?}"
     );
     assert_eq!(h.deactivations, 0);
 }

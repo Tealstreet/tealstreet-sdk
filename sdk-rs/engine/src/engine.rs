@@ -2932,11 +2932,7 @@ impl<P> Cx<'_, P> {
         {
             return false;
         }
-        self.notice(
-            Level::Error,
-            log_code::for_startup_error(error),
-            &error.message,
-        );
+        self.notice_error(Level::Error, log_code::for_startup_error(error), error);
         self.startup_failed(error.clone());
         let now = self.now;
         let (polls, mut sink) = self.io.polls();

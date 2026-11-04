@@ -10,6 +10,47 @@ const HOST_SLOW_MS: f64 = 30_000.0;
 const REFUSED: &str =
     r#"{"success":false,"ret_msg":"Params Error","op":"auth","conn_id":"cejreaspqfh3sjdnldmg-p"}"#;
 
+#[test]
+fn an_auth_notice_preserves_a_supplied_integer_code_and_leaves_missing_codes_absent() {
+    for (metadata, expected) in [
+        (r#", "ret_code":10003"#, Some("10003")),
+        (r#", "retCode":"10004""#, Some("10004")),
+        ("", None),
+        (r#", "ret_code":10003.1"#, None),
+        (r#", "ret_code":"not-a-code""#, None),
+        (r#", "ret_code":{"unexpected":10003}"#, None),
+        (r#", "ret_code":10003,"retCode":10004"#, None),
+    ] {
+        let mut h = startup(Variant::Linear, None);
+        open_private(&mut h);
+        let frame =
+            format!(r#"{{"success":false,"ret_msg":"Params Error","op":"auth"{metadata}}}"#);
+        h.message("/v5/private", &frame);
+        let notice = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::Event(event)
+                    if event.code == safe_cex_engine::log::code::AUTH_REJECTED =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .expect("auth failure remains visible");
+        let code = notice
+            .fields
+            .iter()
+            .find_map(|(name, value)| match (*name, value) {
+                ("venueCode", safe_cex_engine::log::Value::Str(value)) => Some(value.as_str()),
+                _ => None,
+            });
+        assert_eq!(code, expected, "{notice:?}");
+        assert_eq!(notice.message, "[WS]auth:Params Error");
+        assert_eq!(time_reads(&h), 1, "existing clock repair remains");
+    }
+}
+
 fn stamped(body: &str, time: f64) -> String {
     let body = untimed(body);
     format!("{},\"time\":{time}}}", &body[..body.len() - 1])
