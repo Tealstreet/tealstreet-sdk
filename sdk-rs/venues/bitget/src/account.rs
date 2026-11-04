@@ -70,7 +70,15 @@ pub struct OrderSnapshot {
     started: f64,
     stream_revision: u64,
     virtual_only: bool,
+    /// The earliest release among the census's pages and sources, each its own
+    /// read; its rows are that old. `None` until a page answers.
+    read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+    /// A page answered outside its read response: the census proves nothing.
+    read_lost: bool,
 }
+
+/// The one read-cover scope of Bitget's account-wide open-order census.
+const ORDERS_SCOPE: &str = "orders";
 
 /// Symbol and side of a position row; a `None` side covers both legs.
 type PositionKey = (String, Option<PositionSide>);
@@ -537,6 +545,8 @@ impl BitgetFutures {
                 started: cx.now,
                 stream_revision: self.order_revision_clock(),
                 virtual_only,
+                read: None,
+                read_lost: false,
             }),
         );
     }
@@ -831,6 +841,16 @@ impl BitgetFutures {
                     self.refresh_orders(cx, false);
                     return;
                 }
+                match cx.order_read_mark() {
+                    Some(read) => {
+                        snapshot.read = Some(
+                            snapshot
+                                .read
+                                .map_or(read, |earliest| earliest.earliest(read)),
+                        );
+                    }
+                    None => snapshot.read_lost = true,
+                }
                 #[derive(Deserialize)]
                 #[serde(untagged)]
                 enum Meta {
@@ -886,29 +906,7 @@ impl BitgetFutures {
                     self.order_page(cx, snapshot);
                 } else {
                     self.account.orders_in_flight = false;
-                    for (id, state) in snapshot.trailing {
-                        if self.order_metadata_current(
-                            cx,
-                            &id,
-                            snapshot.started,
-                            snapshot.stream_revision,
-                        ) {
-                            self.account.trailing.insert(id, state);
-                        }
-                    }
-                    for (id, plan) in snapshot.plans {
-                        if self.order_metadata_current(
-                            cx,
-                            &id,
-                            snapshot.started,
-                            snapshot.stream_revision,
-                        ) {
-                            self.account.plans.insert(id, plan);
-                        }
-                    }
-                    // A rejected row keeps its market's fence; the rest of the census counts.
-                    let unproven = snapshot.skipped.unproven().to_vec();
-                    self.commit_orders(
+                    let rows = self.census_rows(
                         cx,
                         snapshot.rows,
                         &snapshot.skipped,
@@ -916,8 +914,78 @@ impl BitgetFutures {
                         snapshot.started,
                         snapshot.stream_revision,
                     );
-                    if !snapshot.virtual_only {
-                        cx.orders_reconciled_except(&unproven, u64::MAX);
+                    // What this census may replace, decided before any per-order state
+                    // moves (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+                    let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                        key: ORDERS_SCOPE,
+                        account: &[ORDERS_SCOPE],
+                    };
+                    let refused =
+                        snapshot
+                            .read
+                            .filter(|_| !snapshot.read_lost)
+                            .and_then(|earliest| {
+                                cx.orders_read_refusals_from(earliest, scope, |_| true, &rows)
+                                    .map(|refused| (earliest, refused))
+                            });
+                    let Some((earliest, refused)) = refused else {
+                        // Refused whole, or unprovable: newer rows already stand, and
+                        // another read follows to prove what they cannot (absences).
+                        self.account.orders_dirty = true;
+                        self.refresh_orders(cx, false);
+                        return;
+                    };
+                    // Rows the stream changed after this census went out stay as
+                    // they are; another read follows for what only a read proves.
+                    if !refused.is_empty() {
+                        self.account.orders_dirty = true;
+                    }
+                    let admitted = |id: &str| {
+                        rows.iter()
+                            .find(|row| row.id == id)
+                            .is_some_and(|row| !refused.contains(&row.symbol))
+                    };
+                    for (id, state) in snapshot.trailing {
+                        if admitted(&id)
+                            && self.order_metadata_current(
+                                cx,
+                                &id,
+                                snapshot.started,
+                                snapshot.stream_revision,
+                            )
+                        {
+                            self.account.trailing.insert(id, state);
+                        }
+                    }
+                    for (id, plan) in snapshot.plans {
+                        if admitted(&id)
+                            && self.order_metadata_current(
+                                cx,
+                                &id,
+                                snapshot.started,
+                                snapshot.stream_revision,
+                            )
+                        {
+                            self.account.plans.insert(id, plan);
+                        }
+                    }
+                    // A rejected row keeps its market's fence; the rest of the census counts.
+                    let mut unproven = snapshot.skipped.unproven().to_vec();
+                    // Any unmapped row, or a virtual-only read of part of the account,
+                    // proves the account nothing.
+                    let mut cover_unproven = unproven.clone();
+                    if snapshot.skipped.rejected() > 0 || snapshot.virtual_only {
+                        cover_unproven.push(String::new());
+                    }
+                    if cx
+                        .commit_orders_read_from(earliest, scope, |_| true, rows, &cover_unproven)
+                        .is_some()
+                    {
+                        cx.store.set_orders_loaded();
+                        if !snapshot.virtual_only {
+                            unproven.extend(refused);
+                            cx.orders_reconciled_except(&unproven, u64::MAX);
+                        }
                     }
                     if self.account.orders_dirty {
                         self.refresh_orders(cx, false);
@@ -1572,7 +1640,8 @@ impl BitgetFutures {
         !newer && !terminal
     }
 
-    fn commit_orders(
+    /// The census's rows: the read's, plus every current row it cannot prove gone.
+    fn census_rows(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         mut rows: Vec<Order>,
@@ -1580,7 +1649,7 @@ impl BitgetFutures {
         virtual_only: bool,
         started: f64,
         stream_revision: u64,
-    ) {
+    ) -> Vec<Order> {
         self.account.terminal.retain(|_, until| *until > cx.now);
         self.account.opened.retain(|_, until| *until > cx.now);
         let mut seen = HashSet::new();
@@ -1661,7 +1730,7 @@ impl BitgetFutures {
                 rows.push(current.clone());
             }
         }
-        cx.store.set_orders(rows);
+        rows
     }
 
     fn inverse_asset(&self, cx: &Cx<'_, Pending>, raw: &AccountRow<'_>) -> Option<InverseAsset> {

@@ -239,6 +239,19 @@ fn unmapped_owned_rest_rows_keep_their_own_position_and_protection_while_peers_u
         } else {
             (vec![normal, unknown_normal], vec![known, unknown])
         };
+        // Read covers: the setup above replaced the store's rows after the pending
+        // census went out, so that census is refused and another follows it.
+        h.respond(
+            "/orders-pending",
+            200,
+            r#"{"code":"00000","data":{"entrustedList":[]}}"#,
+        );
+        h.respond(
+            "planType=profit_loss",
+            200,
+            r#"{"code":"00000","data":{"entrustedList":[]}}"#,
+        );
+        h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
         h.respond(
             "/orders-pending",
             200,
