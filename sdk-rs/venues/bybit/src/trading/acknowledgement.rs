@@ -9,6 +9,8 @@ use serde_json::value::RawValue;
 const MAX_ROWS: usize = 500;
 /// The engine's native ID bound; a longer ID is never admitted evidence.
 const MAX_ID_BYTES: usize = 1024;
+/// Bybit's per-order "order not exists or too late to cancel" code.
+const ORDER_NOT_FOUND: i64 = 110001;
 
 /// The envelope's native answer.
 #[derive(Debug)]
@@ -307,6 +309,12 @@ pub(crate) fn cancelled_rows(
     if expected == 1 && results.as_ref().is_some_and(Vec::is_empty) {
         results = None;
     }
+    if let Some(rows) = &results
+        && rows.len() > expected
+        && rows.len() == statuses.len()
+    {
+        return over_counted_rows(rows, statuses, order_ids);
+    }
     if expected == 0
         || statuses.len() != expected
         || results.as_ref().is_some_and(|rows| rows.len() != expected)
@@ -362,24 +370,65 @@ pub(crate) fn cancelled_rows(
         .zip(targets)
         .map(|(status, target)| {
             let target = target.ok_or(Malformed)?;
-            Ok((
-                target,
-                if status.code == 0 {
-                    Row::Accepted(order_ids[target].to_owned())
-                } else {
-                    Row::Refused {
-                        code: status.code,
-                        message: status.msg.unwrap_or_default(),
-                    }
-                },
-            ))
+            Ok((target, status_row(status, order_ids[target])))
         })
         .collect::<Result<_, Malformed>>()?;
     rows.sort_unstable_by_key(|(target, _)| *target);
     Ok(rows.into_iter().map(|(_, row)| row).collect())
 }
 
-/// Counts and field presence only: no order IDs, client IDs, native messages or raw response.
+fn status_row(status: Status, order_id: &str) -> Row {
+    if status.code == 0 {
+        Row::Accepted(order_id.to_owned())
+    } else {
+        Row::Refused {
+            code: status.code,
+            message: status.msg.unwrap_or_default(),
+        }
+    }
+}
+
+/// More echoes than targets: every row must name a requested order and every
+/// order must appear. A repeated order is cancelled only by a success whose
+/// other rows are all order-not-found; anything else proves nothing.
+fn over_counted_rows(
+    results: &[Identity],
+    statuses: Vec<Status>,
+    order_ids: &[&str],
+) -> Result<Vec<Row>, Malformed> {
+    let mut grouped: Vec<Vec<Status>> = order_ids.iter().map(|_| Vec::new()).collect();
+    for (row, status) in results.iter().zip(statuses) {
+        let id = row
+            .order_id
+            .as_deref()
+            .filter(|id| !id.is_empty() && id.len() <= MAX_ID_BYTES)
+            .ok_or(Malformed)?;
+        let target = order_ids
+            .iter()
+            .position(|target| *target == id)
+            .ok_or(Malformed)?;
+        grouped[target].push(status);
+    }
+    grouped
+        .into_iter()
+        .zip(order_ids)
+        .map(|(mut rows, order_id)| match rows.len() {
+            0 => Err(Malformed),
+            1 => Ok(status_row(rows.remove(0), order_id)),
+            _ if rows.iter().any(|status| status.code == 0)
+                && rows
+                    .iter()
+                    .all(|status| status.code == 0 || status.code == ORDER_NOT_FOUND) =>
+            {
+                Ok(Row::Accepted((*order_id).to_owned()))
+            }
+            _ => Err(Malformed),
+        })
+        .collect()
+}
+
+/// Counts, field presence and Bybit status codes only: no order IDs, client IDs, native
+/// messages or raw response.
 pub(crate) fn cancel_diagnostic(
     result: Option<&RawValue>,
     ext: Option<&RawValue>,
@@ -389,6 +438,7 @@ pub(crate) fn cancel_diagnostic(
     let (status_shape, statuses) = list_shape(ext);
     let (mut native_fields, mut native_ids, mut target_matches, mut client_fields, mut client_ids) =
         (0, 0, 0, 0, 0);
+    let mut echoed_targets = vec![0usize; order_ids.len()];
     for raw in results.iter().flatten() {
         if let Ok(fields) = object(raw) {
             native_fields += usize::from(fields.raw("orderId").ok().flatten().is_some());
@@ -397,7 +447,10 @@ pub(crate) fn cancel_diagnostic(
                 && !id.is_empty()
             {
                 native_ids += 1;
-                target_matches += usize::from(order_ids.contains(&id.as_str()));
+                if let Some(target) = order_ids.iter().position(|target| *target == id) {
+                    target_matches += 1;
+                    echoed_targets[target] += 1;
+                }
             }
             if let Ok(Some(id)) = fields.text("orderLinkId")
                 && !id.is_empty()
@@ -407,18 +460,24 @@ pub(crate) fn cancel_diagnostic(
         }
     }
     let (mut success, mut failed, mut invalid) = (0, 0, 0);
+    let mut failure_codes = Vec::new();
     for raw in statuses.iter().flatten() {
         match Status::read(raw) {
             Ok(status) if status.code == 0 => success += 1,
-            Ok(_) => failed += 1,
+            Ok(status) => {
+                failed += 1;
+                failure_codes.push(status.code.to_string());
+            }
             Err(_) => invalid += 1,
         }
     }
     format!(
-        "targets={}; result.list={result_shape}/{}; retExtInfo.list={status_shape}/{}; orderId fields/nonempty/matched={native_fields}/{native_ids}/{target_matches}; orderLinkId fields/nonempty={client_fields}/{client_ids}; statuses success/failed/invalid={success}/{failed}/{invalid}",
+        "targets={}; result.list={result_shape}/{}; retExtInfo.list={status_shape}/{}; orderId fields/nonempty/matched={native_fields}/{native_ids}/{target_matches}; orderLinkId fields/nonempty={client_fields}/{client_ids}; statuses success/failed/invalid={success}/{failed}/{invalid}; failure codes={}; duplicated targets={}",
         order_ids.len(),
         results.as_ref().map_or(0, Vec::len),
         statuses.as_ref().map_or(0, Vec::len),
+        failure_codes.join(","),
+        echoed_targets.iter().filter(|count| **count > 1).count(),
     )
 }
 
