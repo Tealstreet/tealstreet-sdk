@@ -38,8 +38,6 @@ test('shared broker-role setup caps retain CI headroom and reject the next byte'
 
 test('KuCoin 400002 resync caps retain the approved CI headroom and exact boundary', () => {
   for (const [venue, measured, cap] of [
-    ['kucoin', 1_657_796, 1_668_096],
-    ['kucoinspot', 2_237_656, 2_248_704],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -127,13 +125,9 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
 
 test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['bitunix', 1_826_666, 1_837_056],
-    ['cryptocom', 1_704_291, 1_715_200],
-    ['mexc', 1_717_351, 1_728_512],
     ['orderly', 1_710_152, 1_721_344],
     ['kraken', 2_111_267, 2_121_728],
     ['krakenspot', 2_111_267, 2_121_728],
-    ['lighter', 1_980_286, 1_990_656],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -179,4 +173,22 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
   }
   assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
   assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
+});
+
+test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain headroom and siblings match', () => {
+  for (const [venue, measured, cap] of [
+    ['bitunix', 1_838_517, 1_849_344],
+    ['cryptocom', 1_716_657, 1_727_488],
+    ['kucoin', 1_670_273, 1_681_408],
+    ['kucoinspot', 2_253_260, 2_264_064],
+    ['lighter', 1_991_579, 2_001_920],
+    ['mexc', 1_729_817, 1_740_800],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });
