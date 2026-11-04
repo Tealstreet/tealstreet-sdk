@@ -2704,6 +2704,10 @@ impl Venue for BybitLinear {
         }
     }
 
+    // Every complete orders read reports with no symbol.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_ordinary(cx);
     }

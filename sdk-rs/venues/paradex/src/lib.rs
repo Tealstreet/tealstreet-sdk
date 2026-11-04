@@ -189,6 +189,10 @@ impl Venue for Paradex {
     fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
         self.account.session_bearer_revision(generation)
     }
+    // Every complete orders read reports with no symbol.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.account.reconcile_orders(cx);
         self.failures(cx);

@@ -929,6 +929,10 @@ impl Venue for Okx {
 
     /// The engine asks once per uncertain seal; the fresh account snapshot
     /// reports through `orders_reconciled`.
+    // Every complete orders read reports with no symbol.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.account_after_uncertain_write(cx);
     }

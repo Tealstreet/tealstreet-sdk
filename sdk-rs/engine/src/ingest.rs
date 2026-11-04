@@ -194,6 +194,8 @@ pub struct Applied {
     pub settings: bool,
     /// The source's VENUE_STATE payload, for `Venue::apply_venue_state`.
     pub venue_state: Option<Vec<u8>>,
+    /// ORDERS_READ: when the read behind this frame's order rows was sent.
+    pub orders_read: Option<f64>,
 }
 
 /// Apply one parsed frame. `snapshot` resets the account sections first.
@@ -239,6 +241,9 @@ pub fn apply(
             }
             section::VENUE_STATE => {
                 applied.venue_state = Some(venue_state(section)?.to_vec());
+            }
+            section::ORDERS_READ => {
+                applied.orders_read = Some(Cursor::new(section.payload).f64()?);
             }
             // Books, candles, fills and the rest are the data source's display
             // data: the UI takes them from the source, a writer never reads them.

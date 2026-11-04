@@ -23,6 +23,8 @@ type Fake = {
   started: number;
   constructed: number;
   refuseNext?: boolean;
+  /** The next placement leaves an uncertain write: its engine says when source orders lift it. */
+  holdOrdersFor?: number;
   offsets: Array<number | undefined>;
 };
 
@@ -62,7 +64,17 @@ const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as Exch
       if (command.command === undefined) return '[]';
       const done = { op: 'done', command: command.command, result: JSON.stringify(result) };
       // A confirmed settings write holds it over the source, as a frame-fed venue does.
-      const held = { op: 'event', level: 'info', code: 'settings.held', message: 'held', fields: { symbol: 'BTCUSDT' } };
+      const held = {
+        op: 'event',
+        level: 'info',
+        code: 'settings.held',
+        message: 'held',
+        fields: { symbol: 'BTCUSDT' },
+      };
+      if (command.op === 'placeOrders' && fake.holdOrdersFor !== undefined) {
+        const fields = { liftAfterMs: fake.holdOrdersFor };
+        return JSON.stringify([{ op: 'event', level: 'info', code: 'orders.held', message: 'held', fields }, done]);
+      }
       return JSON.stringify(command.op === 'setPositionMode' ? [held, done] : [done]);
     },
     applyFrame: (bytes: Uint8Array, snapshot: boolean) => {
@@ -247,7 +259,11 @@ describe('frame-fed main-thread mirror', () => {
       return bridge;
     };
     const mirrorOnly = () =>
-      new RustEngineExchange('bybit', { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false }, new DefaultStore());
+      new RustEngineExchange(
+        'bybit',
+        { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
+        new DefaultStore(),
+      );
 
     it('rejects a kept engine at once when the bridge is removed, a write as unknown', async () => {
       vi.useFakeTimers();
@@ -337,7 +353,11 @@ describe('frame-fed main-thread mirror', () => {
     try {
       fakeEngine({ supported: false });
       const store = new DefaultStore();
-      exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false }, store);
+      exchange = new RustEngineExchange(
+        'bybit',
+        { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
+        store,
+      );
       const bridged: unknown[] = [];
       exchange.on('chaser:terminate', (id: unknown) => bridged.push(id));
       const errors: unknown[] = [];
@@ -406,6 +426,77 @@ describe('frame-fed main-thread mirror', () => {
     exchange.ingestSourceFrame(new ArrayBuffer(4), false);
     exchange.ingestSourceFrame(new ArrayBuffer(32), true);
     expect(fake.applied.map((frame) => frame.bytes)).toEqual([16, 32]);
+  });
+
+  // Bravulasco: a lost page placement fenced its symbol, and the source, which never saw it,
+  // never sent the orders that lift a fence. The page asks once its grace has passed, for
+  // orders from a fresh read: a snapshot's rows can predate the write.
+  it('asks its data source for freshly read orders once an uncertain write can be lifted, and only once', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeEngine();
+      const mirror = mirrorWith(fake);
+      exchange = mirror.exchange;
+      await exchange.frameFedReady;
+      const needsSnapshot = vi.fn();
+      exchange.on('frameFed:needsSnapshot', needsSnapshot);
+      const asks = () => mirror.calls.filter((method) => method === 'refreshAccountOrders').length;
+      fake.holdOrdersFor = 3_000;
+      await exchange.placeOrder(order);
+      await exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(asks()).toBe(0);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(asks()).toBe(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(asks()).toBe(1);
+      expect(needsSnapshot).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not ask again while a fresh orders read is still in flight', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeEngine();
+      exchange = new RustEngineExchange(
+        'bybit',
+        { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
+        new DefaultStore(),
+      );
+      const asked: string[] = [];
+      // The source never answers: the first ask stays in flight.
+      exchange.on('callMethod', (event: { method: string }) => asked.push(event.method));
+      void fake;
+      await exchange.frameFedReady;
+      fake.holdOrdersFor = 3_000;
+      await exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(3_500);
+      fake.holdOrdersFor = 0;
+      await exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(asked.filter((method) => method === 'refreshAccountOrders')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks nothing after disposal', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeEngine();
+      const mirror = mirrorWith(fake);
+      const held = mirror.exchange;
+      await held.frameFedReady;
+      fake.holdOrdersFor = 30_000;
+      await held.placeOrder(order);
+      held.dispose();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mirror.calls).not.toContain('refreshAccountOrders');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("measures its data source's clock from the frames it ingests", async () => {

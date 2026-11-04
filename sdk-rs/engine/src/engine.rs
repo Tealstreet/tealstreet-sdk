@@ -572,6 +572,10 @@ pub enum VenueAction {
     /// Data source: re-read the account settings a frame-fed engine changed
     /// (position mode, margin, leverage, venue keys), for `symbol` or the account.
     RefreshSettings { symbol: Option<String> },
+    /// Data source: a frame-fed engine holds an uncertain write. The next complete
+    /// orders read sent after this command forces ORDERS into the following frame,
+    /// so the frame that lifts the fence carries orders read after the ask.
+    RefreshOrders,
     /// Succeeds only once a positions read issued after this command has
     /// committed to the store; `Capabilities::fresh_positions` advertises it.
     ReadPositions,
@@ -1723,9 +1727,16 @@ struct IoCore {
     #[cfg(feature = "order-locks")]
     active_commands: std::collections::HashSet<CommandId>,
     #[cfg(feature = "order-locks")]
-    order_read_tokens: crate::IdMap<RequestId, u64>,
+    /// Each order read's order-lock epoch and send time (this engine's clock).
+    order_read_tokens: crate::IdMap<RequestId, (u64, f64)>,
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
+    /// Data source: the order-lock epoch the latest `RefreshOrders` opened.
+    #[cfg(feature = "order-locks")]
+    orders_refresh: Option<u64>,
+    /// The send time of the read `order_response_token` belongs to.
+    #[cfg(feature = "order-locks")]
+    order_response_sent: f64,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -1930,6 +1941,10 @@ impl Default for IoCore {
             order_read_tokens: Default::default(),
             #[cfg(feature = "order-locks")]
             order_response_token: None,
+            #[cfg(feature = "order-locks")]
+            orders_refresh: None,
+            #[cfg(feature = "order-locks")]
+            order_response_sent: f64::NEG_INFINITY,
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -2526,7 +2541,7 @@ impl<P> Cx<'_, P> {
             self.io
                 .core
                 .order_read_tokens
-                .insert(id, self.io.core.order_locks.token());
+                .insert(id, (self.io.core.order_locks.token(), self.now));
         }
         self.io.pending.insert(
             id,
@@ -3026,6 +3041,7 @@ impl<P> Cx<'_, P> {
                 .core
                 .order_locks
                 .reconciled(symbol, token.min(epoch));
+            self.orders_read(symbol.is_none(), token.min(epoch));
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = (symbol, epoch);
@@ -3041,6 +3057,7 @@ impl<P> Cx<'_, P> {
                 .core
                 .order_locks
                 .reconciled_except(unproven, token.min(epoch));
+            self.orders_read(unproven.is_empty(), token.min(epoch));
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = (unproven, epoch);
@@ -3052,9 +3069,29 @@ impl<P> Cx<'_, P> {
         #[cfg(feature = "order-locks")]
         if let Some(token) = self.io.core.order_response_token {
             self.io.core.order_locks.reconciled(symbol, token);
+            self.orders_read(symbol.is_none(), token);
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = symbol;
+    }
+
+    /// The rows of an orders read just reached the store, as old as its send.
+    /// A complete read sent at or after a `RefreshOrders` answers it: its rows go
+    /// out as ORDERS in the next frame, changed or not. An older one cannot, and
+    /// asks for another read.
+    #[cfg(feature = "order-locks")]
+    fn orders_read(&mut self, complete: bool, token: u64) {
+        self.store
+            .note_orders_read(self.io.core.order_response_sent, complete);
+        let Some(epoch) = self.io.core.orders_refresh.filter(|_| complete) else {
+            return;
+        };
+        if token >= epoch {
+            self.io.core.orders_refresh = None;
+            self.store.mark_orders_read();
+        } else {
+            self.io.queue_reconcile(None, self.now);
+        }
     }
 
     /// Queue a live candle for the next frame; a newer update of the same
@@ -3779,6 +3816,12 @@ pub trait Venue {
     /// Data source: re-read the settings a frame-fed engine changed, for
     /// `symbol` or (`None`) the account, through the venue's own config reads.
     fn refresh_settings(&mut self, _cx: &mut Cx<'_, Self::Pending>, _symbol: Option<&str>) {}
+    /// Every complete orders read reports through `orders_reconciled*` with no
+    /// symbol, so a data source can answer `RefreshOrders` and a frame-fed engine
+    /// may ask for it. A venue reporting per symbol only keeps its fence instead.
+    fn refreshes_orders(&self) -> bool {
+        false
+    }
     /// Cancel and amend route only through stored orders: hold one naming an
     /// acknowledged placement until the store has it (`placement_acks`).
     fn cancel_needs_stored_order(&self) -> bool {
@@ -4104,6 +4147,9 @@ pub struct Engine<V: Venue> {
     /// host time); a source frame lifts it only once written well after.
     #[cfg(feature = "order-locks")]
     fence_marks: Vec<(u64, f64)>,
+    /// Frame-fed: `orders.held` was emitted for the uncertainty still standing.
+    #[cfg(feature = "order-locks")]
+    orders_held_asked: bool,
     /// Frame-fed: the data source's clock minus this host's, in ms, as the
     /// host measured it (`None` until it has).
     source_clock_offset: Option<f64>,
@@ -4200,6 +4246,8 @@ impl<V: Venue> Engine<V> {
             ingest: Default::default(),
             #[cfg(feature = "order-locks")]
             fence_marks: Vec::new(),
+            #[cfg(feature = "order-locks")]
+            orders_held_asked: false,
             source_clock_offset: None,
             venue_state_sent: None,
             shared_books: HashMap::new(),
@@ -4444,8 +4492,12 @@ impl<V: Venue> Engine<V> {
         // write can predate the venue showing it, and acting then would let a
         // retry place twice. On this host's clock when the offset is known;
         // otherwise a grace long enough to absorb the unmeasured skew.
-        let cover = applied.orders.then(|| {
+        // A snapshot's rows may be old reads re-sent: without their read time
+        // (an older source) they lift nothing.
+        let cover = (applied.orders && (!snapshot || applied.orders_read.is_some())).then(|| {
             let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
+            // Rows from a venue read are as old as that read, however late it landed.
+            let stamp = applied.orders_read.map_or(stamp, |sent| stamp.min(sent));
             match self.source_clock_offset {
                 Some(offset) => stamp - offset - crate::frame_fed::FENCE_GRACE_MS,
                 None => stamp - crate::frame_fed::UNSYNCED_FENCE_GRACE_MS,
@@ -4466,6 +4518,9 @@ impl<V: Venue> Engine<V> {
                 if let Some(token) = lifted {
                     self.io.core.order_locks.reconciled(None, token);
                     self.fence_marks.retain(|(mark, _)| *mark > token);
+                    // A later fence the frame could not lift needs its own ask.
+                    self.orders_held_asked = false;
+                    self.announce_orders_held(now);
                 }
             }
             // Holds waiting for an acknowledged order may now release.
@@ -5316,6 +5371,19 @@ impl<V: Venue> Engine<V> {
                 self.venue.refresh_settings(&mut cx, symbol.as_deref());
                 cx.done(command, "null".into());
             }
+            Event::Command(Command::Venue {
+                command,
+                action: VenueAction::RefreshOrders,
+            }) => {
+                // Every ask opens a newer epoch: a read already out, sent before
+                // a later lost write, can never answer it.
+                #[cfg(feature = "order-locks")]
+                if self.venue.refreshes_orders() {
+                    cx.io.core.orders_refresh = Some(cx.io.core.order_locks.advance());
+                    cx.io.queue_reconcile(None, now);
+                }
+                cx.done(command, "null".into());
+            }
             Event::Command(Command::Venue { command, action }) => {
                 cx.io.begin_command_entry(Some(command));
                 let intent = Command::Venue {
@@ -5665,6 +5733,40 @@ impl<V: Venue> Engine<V> {
         self.restore_shared_tickers(false, now);
     }
 
+    /// Frame-fed: the source never saw an uncertain write, so its orders may never
+    /// change. Ask for them once per standing uncertainty, timed for when a frame
+    /// could lift the oldest fence still up.
+    #[cfg(feature = "order-locks")]
+    fn announce_orders_held(&mut self, now: f64) {
+        if !self.venue.refreshes_orders() || !self.io.core.order_locks.uncertain("") {
+            self.orders_held_asked = false;
+            return;
+        }
+        let Some(&(_, mark)) = self.fence_marks.first() else {
+            return;
+        };
+        if self.orders_held_asked {
+            return;
+        }
+        self.orders_held_asked = true;
+        let grace = if self.source_clock_offset.is_some() {
+            crate::frame_fed::FENCE_GRACE_MS
+        } else {
+            crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
+        };
+        Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        }
+        .event(
+            Level::Info,
+            crate::log::code::ORDERS_HELD,
+            "Holding an uncertain write until the data source sends its orders",
+            vec![("liftAfterMs", Value::Num((mark + grace - now).max(0.0)))],
+        );
+    }
+
     /// Ask the venue once for each due uncertain-write reconcile read, then
     /// re-arm one wake-up for deferred ones. A fresh read the venue reports
     /// through `orders_reconciled` clears the order-lock fence as before.
@@ -5689,6 +5791,7 @@ impl<V: Venue> Engine<V> {
             {
                 self.fence_marks.push((token, now));
             }
+            self.announce_orders_held(now);
             if let Some((timer, _)) = self.reconcile_timer.take() {
                 self.io.core.actions.push(Action::ClearTimer { timer });
             }
@@ -5833,7 +5936,9 @@ impl<V: Venue> Engine<V> {
     fn http_end(&mut self, now: f64, request: RequestId) {
         #[cfg(feature = "order-locks")]
         {
-            self.io.core.order_response_token = self.io.core.order_read_tokens.remove(&request);
+            let read = self.io.core.order_read_tokens.remove(&request);
+            self.io.core.order_response_token = read.map(|(epoch, _)| epoch);
+            self.io.core.order_response_sent = read.map_or(f64::NEG_INFINITY, |(_, sent)| sent);
         }
         let (Some(incoming), Some(pending)) = (
             self.io.core.incoming.remove(&request),

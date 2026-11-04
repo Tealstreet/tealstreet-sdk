@@ -626,6 +626,13 @@ impl OrderLocks {
         self.epoch
     }
 
+    /// Start a new epoch with nothing sealed: reads sent from now on are newer
+    /// than any already out.
+    pub fn advance(&mut self) -> u64 {
+        self.epoch = self.epoch.saturating_add(1);
+        self.epoch
+    }
+
     /// A whole-account read cleared every fence up to `token` but `unproven`
     /// symbols; an empty symbol there means any fence may be its row's.
     pub fn reconciled_except(&mut self, unproven: &[String], token: u64) {

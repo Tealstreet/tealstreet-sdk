@@ -1588,6 +1588,8 @@ fn section_parent(kind: u16) -> Option<u16> {
         | section::INSTRUMENT_CLASSIFICATIONS
         | section::DERIVATIVE_PRODUCTS => Some(section::MARKETS),
         section::POSITION_GREEKS | section::PREDICTION_HOLDINGS => Some(section::POSITIONS),
+        // A segment of ORDERS must never arrive without its read time.
+        section::ORDERS_READ => Some(section::ORDERS),
         _ => None,
     }
 }
@@ -2708,6 +2710,26 @@ mod tests {
         assert!(segment_frame(&frame, 1_000).is_none());
         let orphan = kinded_frame(&[(TICKERS, 400), (POSITION_GREEKS, 400), (BOOK, 400)]);
         assert!(segment_frame(&orphan, 900).is_none());
+    }
+
+    /// codex-hcmq3f: a segment carrying ORDERS without ORDERS_READ lifts a page
+    /// fence on its stamp before the read time arrives in the next segment.
+    #[test]
+    fn orders_never_segment_apart_from_their_read_time() {
+        use safe_cex_engine::wire::section::*;
+        let frame = kinded_frame(&[(TICKERS, 400), (ORDERS, 400), (ORDERS_READ, 8), (BOOK, 400)]);
+        let segments = segment_frame(&frame, 700).expect("units fit");
+        assert!(segments.len() >= 2);
+        for segment in &segments {
+            let kinds: Vec<u16> = safe_cex_engine::wire::sections(segment)
+                .map(|(kind, _)| kind)
+                .collect();
+            assert_eq!(
+                kinds.contains(&ORDERS),
+                kinds.contains(&ORDERS_READ),
+                "ORDERS travels with its read time: {kinds:?}"
+            );
+        }
     }
 
     fn peer(

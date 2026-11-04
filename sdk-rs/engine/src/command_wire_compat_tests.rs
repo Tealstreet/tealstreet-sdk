@@ -149,6 +149,9 @@ mod legacy {
             #[serde(default)]
             symbol: Option<String>,
         },
+        RefreshOrders {
+            command: u32,
+        },
         ReadPositions {
             command: u32,
         },
@@ -365,6 +368,10 @@ mod legacy {
                     command,
                     action: crate::VenueAction::RefreshSettings { symbol },
                 },
+                CommandIn::RefreshOrders { command } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::RefreshOrders,
+                },
                 CommandIn::ReadPositions { command } => Self::Venue {
                     command,
                     action: crate::VenueAction::ReadPositions,
@@ -577,6 +584,7 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
             ("command", "12"),
             ("symbol", r#""BTCUSDT""#),
         ],
+        vec![("op", r#""refreshOrders""#), ("command", "12")],
         vec![("op", r#""readPositions""#), ("command", "12")],
         vec![("op", r#""cancelAccountOrders""#), ("command", "12")],
         vec![

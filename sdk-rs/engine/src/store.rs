@@ -40,6 +40,11 @@ pub struct Store {
     orders_revision: u64,
     /// Selective read fence: only `invalidate_order_snapshots` advances it.
     order_snapshot_epoch: Epoch,
+    /// The order rows are no fresher than this read send (writer's clock): the
+    /// last complete read, or earlier if a partial read touched them since.
+    orders_read_at: Option<f64>,
+    /// The same bound for reads that landed since the last drained frame.
+    orders_read_unflushed: Option<f64>,
     #[cfg(feature = "repair-mutations")]
     snapshot_begins: u64,
     positions: Vec<Position>,
@@ -145,6 +150,9 @@ pub struct Pending {
     changes: Changes,
     /// `(ticker index, changed-field mask)`.
     ticker_deltas: Vec<(u32, u16)>,
+    /// ORDERS_READ beside ORDERS: a delta's reads since the last frame, or a
+    /// snapshot's whole-row bound (negative infinity when no read is known).
+    orders_read: Option<f64>,
 }
 
 impl Store {
@@ -568,6 +576,11 @@ impl Store {
         self.set_loaded(|loaded| loaded.orders = true);
     }
 
+    /// A fresh orders read confirmed the current rows: send them in the next frame.
+    pub fn mark_orders_read(&mut self) {
+        self.changes.orders = true;
+    }
+
     /// Insert or replace by id. A closed or canceled row stays, with its
     /// status, until the next snapshot replaces the list.
     pub fn upsert_order(&mut self, order: Order) {
@@ -958,6 +971,7 @@ impl Store {
                 status: true,
             },
             ticker_deltas: Vec::new(),
+            orders_read: Some(self.orders_read_bound()),
         }
     }
 
@@ -975,7 +989,25 @@ impl Store {
                 ..Changes::default()
             },
             ticker_deltas: Vec::new(),
+            orders_read: Some(self.orders_read_bound()),
         }
+    }
+
+    /// A snapshot's rows are as old as the reads behind them; with no read known,
+    /// so old that they can lift nothing.
+    fn orders_read_bound(&self) -> f64 {
+        self.orders_read_at.unwrap_or(f64::NEG_INFINITY)
+    }
+
+    /// An orders read sent at `sent` just reached these rows. A complete read
+    /// replaces them all; a partial one leaves older rows beside its own.
+    pub fn note_orders_read(&mut self, sent: f64, complete: bool) {
+        let bound = |earlier: Option<f64>| match earlier {
+            Some(earlier) if !complete => earlier.min(sent),
+            _ => sent,
+        };
+        self.orders_read_at = Some(bound(self.orders_read_at));
+        self.orders_read_unflushed = Some(bound(self.orders_read_unflushed));
     }
 
     /// Drain change tracking for one frame.
@@ -995,6 +1027,7 @@ impl Store {
         Pending {
             changes,
             ticker_deltas,
+            orders_read: self.orders_read_unflushed.take(),
         }
     }
 
@@ -1065,6 +1098,10 @@ impl Store {
         }
         if changes.orders {
             self.write_orders(w);
+            // Directly after ORDERS: a segmenting host keeps the two together.
+            if let Some(sent) = pending.orders_read {
+                w.orders_read(sent);
+            }
         }
         if changes.positions {
             self.write_positions(w);

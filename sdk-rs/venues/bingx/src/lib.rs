@@ -1291,6 +1291,10 @@ impl Venue for Bingx {
     ) {
         self.trading.retired(owner);
     }
+    // Every complete orders read reports with no symbol.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
         if let Some(credentials) = &self.credentials {
             self.account.reconcile_orders(cx, credentials);

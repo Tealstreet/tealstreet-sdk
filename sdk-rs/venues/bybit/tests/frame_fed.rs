@@ -575,3 +575,313 @@ fn a_confirmed_margin_switch_outlasts_a_stale_source_and_reads_nothing() {
     h.collect();
     assert_eq!(margin(&h), Some(Cross));
 }
+
+/// The source never sees a page write, so nothing would send the ORDERS frame
+/// that lifts its fence: the engine says it is held, and when a frame would qualify.
+fn orders_held(h: &Harness) -> Vec<f64> {
+    h.notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event)
+                if event.code == safe_cex_engine::log::code::ORDERS_HELD =>
+            {
+                event
+                    .fields
+                    .iter()
+                    .find_map(|(name, value)| match (name, value) {
+                        (&"liftAfterMs", safe_cex_engine::Value::Num(ms)) => Some(*ms),
+                        _ => None,
+                    })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_fence_asks_once_for_the_source_orders_after_its_grace() {
+    let measured = fenced(Some(0.0));
+    assert_eq!(orders_held(&measured), vec![3_000.0]);
+    let unmeasured = fenced(None);
+    assert_eq!(orders_held(&unmeasured), vec![30_000.0]);
+}
+
+#[test]
+fn a_fence_already_waiting_does_not_ask_again() {
+    let mut h = fenced(Some(0.0));
+    h.advance(250.0);
+    // A second lost write before any frame: the same wait covers it.
+    assert!(!retry_after(&mut h, 0.0, 2));
+    h.advance(60_000.0);
+    assert_eq!(orders_held(&h), vec![3_000.0]);
+}
+
+#[test]
+fn a_new_fence_after_a_lift_asks_again() {
+    let mut h = fenced(Some(0.0));
+    h.advance(3_500.0);
+    h.engine
+        .apply_frame(h.now, &source_frame_at(h.now), false)
+        .unwrap();
+    h.collect();
+    h.command(Command::PlaceOrders {
+        command: 2,
+        orders: vec![support::order()],
+    });
+    // The qualifying frame lifted it; this placement is lost too.
+    let lost = h.take("/v5/order/create");
+    h.event(safe_cex_engine::Event::HttpFailed {
+        request: lost.id,
+        error: "connection reset",
+    });
+    assert_eq!(orders_held(&h), vec![3_000.0, 3_000.0]);
+}
+
+/// A source frame written now, as the data source answers an `orders.held` ask.
+fn ingest_now(h: &mut Harness) {
+    h.engine
+        .apply_frame(h.now, &source_frame_at(h.now), false)
+        .unwrap();
+    h.collect();
+}
+
+const ETH_FLAT: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"ETHUSDT","positionIdx":0,"side":"","size":"0","avgPrice":"0","markPrice":"3000","positionValue":"0","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}],"nextPageCursor":""}}"#;
+
+/// Send an ETHUSDT placement, answering the mode read the source frame left unknown.
+fn place_eth(h: &mut Harness, command: u32) -> safe_cex_engine::HttpRequest {
+    let mut order = support::order();
+    order.symbol = "ETHUSDT".into();
+    h.command(Command::PlaceOrders {
+        command,
+        orders: vec![order],
+    });
+    if h.paths()
+        .iter()
+        .any(|path| path.contains("/v5/position/list"))
+    {
+        h.respond("/v5/position/list", 200, ETH_FLAT);
+    }
+    h.take("/v5/order/create")
+}
+
+fn lose_eth_placement(h: &mut Harness, command: u32) {
+    let lost = place_eth(h, command);
+    h.event(safe_cex_engine::Event::HttpFailed {
+        request: lost.id,
+        error: "connection reset",
+    });
+}
+
+#[test]
+fn a_fence_the_lifting_frame_could_not_lift_is_asked_for_again() {
+    let mut h = fenced(Some(0.0));
+    h.advance(2_000.0);
+    // Another symbol's write is lost while the first ask still waits.
+    lose_eth_placement(&mut h, 2);
+    assert_eq!(orders_held(&h), vec![3_000.0]);
+    h.advance(1_500.0);
+    // The frame that answers the first ask lifts only the first fence.
+    ingest_now(&mut h);
+    assert_eq!(orders_held(&h), vec![3_000.0, 1_500.0]);
+    h.advance(1_500.0);
+    ingest_now(&mut h);
+    place_eth(&mut h, 3);
+    assert_eq!(orders_held(&h).len(), 2, "both fences lifted");
+}
+
+#[test]
+fn a_fence_sealed_right_after_a_full_lift_is_announced() {
+    let mut h = fenced(Some(0.0));
+    h.advance(100.0);
+    h.command(Command::CancelOrders {
+        command: 2,
+        ids: vec!["server-order".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    h.advance(3_400.0);
+    ingest_now(&mut h);
+    // The cancel sent before the lift finds no order in the very next event,
+    // which fences the symbol again.
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel","result":{},"retExtInfo":{},"time":1}"#,
+    );
+    assert_eq!(orders_held(&h), vec![3_000.0, 3_000.0]);
+}
+
+const NO_ROWS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
+const WALLET: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"accountType":"UNIFIED","totalEquity":"1100","totalWalletBalance":"1000","totalInitialMargin":"10","totalMaintenanceMargin":"1","totalAvailableBalance":"900","coin":[]}]}}"#;
+/// The page's lost placement, as the venue lists it once it rests.
+const LOST_ORDER_RESTING: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTCUSDT","orderId":"lost-order","side":"Buy","orderType":"Limit","orderStatus":"New","price":"100","qty":"0.01","leavesQty":"0.01","cumExecQty":"0"}],"nextPageCursor":""}}"#;
+
+fn answer_all(h: &mut Harness, path: &str, body: &str) {
+    while h.has_request(path) {
+        h.respond(path, 200, body);
+    }
+}
+
+/// A loaded keyed source, and a frame-fed page fed by it that has just lost a
+/// BTCUSDT placement. Nothing reaches the source's private stream: it is stalled.
+fn source_and_fenced_page() -> (Harness, Harness) {
+    let mut source = source();
+    answer_all(&mut source, "/v5/order/realtime", NO_ROWS);
+    // One-way BTCUSDT: the page learns the mode from the source's venue state.
+    answer_all(
+        &mut source,
+        "/v5/position/list",
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTCUSDT","positionIdx":0,"side":"","size":"0","avgPrice":"0","markPrice":"100","positionValue":"0","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}],"nextPageCursor":""}}"#,
+    );
+    answer_all(&mut source, "/v5/account/wallet-balance", WALLET);
+    source.engine.take_frame(source.now);
+    let mut page = frame_fed();
+    load(&mut page);
+    page.engine.set_source_clock_offset(Some(0.0));
+    page.now = source.now;
+    let snapshot = source.engine.snapshot_frame(source.now).to_vec();
+    page.engine.apply_frame(page.now, &snapshot, true).unwrap();
+    page.collect();
+    page.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![support::order()],
+    });
+    let lost = page.take("/v5/order/create");
+    page.event(safe_cex_engine::Event::HttpFailed {
+        request: lost.id,
+        error: "connection reset",
+    });
+    assert_eq!(page.unknown, vec![1]);
+    (source, page)
+}
+
+fn advance_both(source: &mut Harness, page: &mut Harness, ms: f64) {
+    source.advance(ms);
+    page.advance(ms);
+}
+
+/// Forward the source's next frame to the page; false when it had none.
+fn forward(source: &mut Harness, page: &mut Harness) -> bool {
+    let Some(frame) = source.engine.take_frame(source.now).map(<[u8]>::to_vec) else {
+        return false;
+    };
+    page.engine.apply_frame(page.now, &frame, false).unwrap();
+    page.collect();
+    true
+}
+
+/// The page's ask, as its host sends it once `orders.held` says a frame could lift.
+fn refresh_orders(source: &mut Harness, command: u32) {
+    source.requests.clear();
+    source.command(Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::RefreshOrders,
+    });
+    assert!(
+        source.has_request("/v5/order/realtime"),
+        "a fresh orders read: {:?}",
+        source.paths()
+    );
+}
+
+fn btc_place_goes_out(page: &mut Harness, command: u32) -> bool {
+    page.requests.clear();
+    page.command(Command::PlaceOrders {
+        command,
+        orders: vec![support::order()],
+    });
+    page.has_request("/v5/order/create")
+}
+
+#[test]
+fn a_stalled_source_lifts_nothing_until_its_fresh_orders_read_lands() {
+    let (mut source, mut page) = source_and_fenced_page();
+    advance_both(&mut source, &mut page, 3_500.0);
+    assert_eq!(orders_held(&page), vec![3_000.0]);
+    refresh_orders(&mut source, 90);
+    // The ask alone sends nothing: a stalled source has nothing new to say.
+    assert!(!forward(&mut source, &mut page));
+    assert!(!btc_place_goes_out(&mut page, 2));
+    // The fresh read finds no such order: its rows go out, and they lift the fence.
+    answer_all(&mut source, "/v5/order/realtime", NO_ROWS);
+    assert!(
+        forward(&mut source, &mut page),
+        "the read's orders are sent unchanged"
+    );
+    assert!(btc_place_goes_out(&mut page, 3));
+}
+
+#[test]
+fn a_fresh_read_that_finds_the_lost_order_brings_its_row() {
+    let (mut source, mut page) = source_and_fenced_page();
+    advance_both(&mut source, &mut page, 3_500.0);
+    refresh_orders(&mut source, 90);
+    source.respond("settleCoin=USDT", 200, LOST_ORDER_RESTING);
+    answer_all(&mut source, "/v5/order/realtime", NO_ROWS);
+    assert!(forward(&mut source, &mut page));
+    assert!(
+        page.engine
+            .store()
+            .orders()
+            .iter()
+            .any(|order| order.id == "lost-order" && order.symbol == "BTCUSDT"),
+        "the placement did land; the page now shows it"
+    );
+}
+
+/// codex-hcmq3f's repro: a read the source already had out, released before a
+/// later lost write, answered a newer ask and lifted that write's fence.
+#[test]
+fn an_older_refresh_read_cannot_lift_a_later_lost_write() {
+    let (mut source, mut page) = source_and_fenced_page();
+    refresh_orders(&mut source, 90);
+    advance_both(&mut source, &mut page, 100.0);
+    lose_eth_placement(&mut page, 2);
+    advance_both(&mut source, &mut page, 3_500.0);
+    let old: Vec<_> = source
+        .requests
+        .iter()
+        .filter(|request| request.url.contains("/v5/order/realtime"))
+        .map(|request| (request.id, request.url.contains("settleCoin=USDT")))
+        .collect();
+    source.command(Command::Venue {
+        command: 91,
+        action: safe_cex_engine::VenueAction::RefreshOrders,
+    });
+    assert!(
+        !btc_place_goes_out(&mut page, 3),
+        "working control: fence holds before old data"
+    );
+    // Only the read refresh 90 sent, before the ETH write, lands now.
+    assert!(!old.is_empty());
+    source
+        .requests
+        .retain(|request| !old.iter().any(|(id, _)| *id == request.id));
+    for (id, usdt) in old {
+        source.reply(id, 200, if usdt { LOST_ORDER_RESTING } else { NO_ROWS });
+    }
+    forward(&mut source, &mut page);
+    let place_eth = |page: &mut Harness, command| {
+        let mut order = support::order();
+        order.symbol = "ETHUSDT".into();
+        page.requests.clear();
+        page.command(Command::PlaceOrders {
+            command,
+            orders: vec![order],
+        });
+        page.has_request("/v5/order/create")
+    };
+    assert!(
+        !place_eth(&mut page, 4),
+        "the orders read was released before the lost ETH write; it cannot authorize a second placement"
+    );
+    // The old read could not answer ask 91, so the source reads again; that read,
+    // sent well after the ETH write and finding no such order, lifts its fence.
+    assert!(
+        source.has_request("/v5/order/realtime"),
+        "{:?}",
+        source.paths()
+    );
+    answer_all(&mut source, "/v5/order/realtime", NO_ROWS);
+    assert!(forward(&mut source, &mut page));
+    assert!(place_eth(&mut page, 5));
+}

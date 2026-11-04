@@ -140,6 +140,9 @@ pub mod code {
     pub const ROW_SKIPPED: &str = "row.skipped";
     /// Frame-fed: a confirmed settings write now outlasts the data source until it agrees.
     pub const SETTINGS_HELD: &str = "settings.held";
+    /// A frame-fed engine fenced a write whose outcome is unknown: its data source
+    /// should send a fresh orders snapshot once `liftAfterMs` has passed.
+    pub const ORDERS_HELD: &str = "orders.held";
     /// Frame-fed: the data source never agreed with a held setting; its value now applies.
     pub const SETTINGS_HOLD_EXPIRED: &str = "settings.hold_expired";
 

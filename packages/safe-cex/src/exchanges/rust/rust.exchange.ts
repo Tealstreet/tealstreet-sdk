@@ -67,8 +67,8 @@ import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
-import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { withRequestsLog } from '../../transport/requestsLog';
+import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
@@ -153,6 +153,10 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const LIGHTER_TIER_SYNC_MS = 15_000;
+/** Past an uncertain write's grace, so the source frame it asks for is one that lifts the fence. */
+const SOURCE_ORDERS_SLACK_MS = 500;
+/** The engine's unsynced grace, for an `orders.held` event that names none. */
+const UNSYNCED_FENCE_GRACE_MS = 30_000;
 /** TS replaces `balance.info` on each REST balance tick; the engine caches the same payload. */
 const BALANCE_INFO_SYNC_MS = 2_000;
 // ApeX and KuCoin Spot retain their existing getAccount command aliases below.
@@ -1151,6 +1155,45 @@ export class RustEngineExchange extends BaseExchange {
     });
   };
 
+  private sourceOrdersTimer: ReturnType<typeof setTimeout> | undefined;
+  private sourceOrdersRefreshing = false;
+
+  /**
+   * A page write whose outcome is unknown fences its symbol until the source sends orders written
+   * after its grace. The source never saw that write, so its orders may never change on their
+   * own: once the grace has passed, ask it for orders from a fresh read. A snapshot would not do:
+   * its rows can predate the write when the source's stream has stalled.
+   */
+  private askSourceForOrders = (liftAfterMs: unknown) => {
+    if (this.sourceOrdersTimer !== undefined) return;
+    const grace =
+      typeof liftAfterMs === 'number' && Number.isFinite(liftAfterMs) && liftAfterMs >= 0
+        ? liftAfterMs
+        : UNSYNCED_FENCE_GRACE_MS;
+    this.sourceOrdersTimer = setTimeout(() => {
+      this.sourceOrdersTimer = undefined;
+      if (this.isDisposed || this.engineFailure || this.sourceOrdersRefreshing) return;
+      this.sourceOrdersRefreshing = true;
+      void this.refreshAccountOrders()
+        .catch((error: unknown) => {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
+        })
+        .finally(() => {
+          this.sourceOrdersRefreshing = false;
+        });
+    }, grace + SOURCE_ORDERS_SLACK_MS);
+  };
+
+  /** Data source: send orders from a read sent after this call in a following frame. */
+  refreshAccountOrders = async (): Promise<void> => {
+    if (this.routesToWorker) {
+      await this.callWorker('refreshAccountOrders');
+      return;
+    }
+    await this.command({ op: 'refreshOrders' }, { report: false });
+  };
+
   /** Data source: re-read the settings a frame-fed engine changed, for one symbol or the account. */
   refreshAccountSettings = async (symbol?: string): Promise<void> => {
     if (this.routesToWorker) {
@@ -2109,6 +2152,7 @@ export class RustEngineExchange extends BaseExchange {
     if (event.code === 'request.failed' || event.code === 'auth.rejected') this.lastReadFailure = event.message;
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
+    if (event.code === 'orders.held' && this.frameFed) this.askSourceForOrders(event.fields?.liftAfterMs);
     this.emitter.emit('engine-event', event);
     if (event.level === 'error')
       this.emitAndLogError(
@@ -3342,6 +3386,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    clearTimeout(this.sourceOrdersTimer);
+    this.sourceOrdersTimer = undefined;
     this.algoControlWatch?.dispose();
     this.signerSetup?.dispose();
     this.stopWorkerCapabilitySync?.();

@@ -798,6 +798,10 @@ impl Venue for BitgetFutures {
     fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         true
     }
+    // Every complete orders read reports with no symbol.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_orders(cx);
     }

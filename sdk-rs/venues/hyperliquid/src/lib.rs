@@ -1071,6 +1071,10 @@ impl Venue for Hyperliquid {
         !self.spot && store.market(symbol).is_none_or(|m| m.is_spot != Some(true))
     }
 
+    // Every complete orders read reports with no symbol.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.reconcile_order_scopes(cx, symbols);
         self.reconcile_settings(cx);

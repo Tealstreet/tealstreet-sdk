@@ -2335,11 +2335,11 @@ impl<V: Venue> Engine<V> {
                 }
                 if managed.lifecycle.context().operation() == Operation::Read {
                     let owner = managed.lifecycle.context().owner();
-                    let token = self
-                        .io
-                        .core
-                        .request_contexts
-                        .read_mark(owner, self.io.core.order_locks.token());
+                    let token = self.io.core.request_contexts.read_mark(
+                        owner,
+                        self.io.core.order_locks.token(),
+                        now,
+                    );
                     self.io.core.order_read_tokens.insert(request, token);
                 }
             }
@@ -3456,6 +3456,10 @@ mod tests {
             } else {
                 panic!("unexpected transport failure");
             }
+        }
+        #[cfg(feature = "order-locks")]
+        fn refreshes_orders(&self) -> bool {
+            self.reconcile_reads
         }
         fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
             self.reconciles.push(symbols.map(<[String]>::to_vec));
@@ -7148,6 +7152,48 @@ mod tests {
     #[cfg(feature = "order-locks")]
     fn fenced(engine: &mut Engine<Probe>) {
         engine.io.core.order_locks.fence(Some(&["BTCUSDT".into()]));
+    }
+
+    /// A data source's `RefreshOrders` is answered only by a complete orders read
+    /// sent after it, whose rows then go out as ORDERS even though none changed.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_refresh_is_answered_only_by_a_read_sent_after_it() {
+        let orders_sent = |engine: &mut Engine<Probe>, at: f64| {
+            engine.take_frame(at).is_some_and(|frame| {
+                crate::wire::sections(frame).any(|(kind, _)| kind == crate::wire::section::ORDERS)
+            })
+        };
+        for fresh in [false, true] {
+            let (mut engine, tokens) = start(Probe {
+                count: 1,
+                reconcile_reads: true,
+                ..Probe::default()
+            });
+            if !fresh {
+                release(&mut engine, tokens[0], 1.);
+            }
+            engine.take_frame(1.);
+            engine.handle(
+                2.,
+                Event::Command(Command::Venue {
+                    command: 9,
+                    action: crate::VenueAction::RefreshOrders,
+                }),
+            );
+            assert_eq!(engine.venue.reconciles, vec![None], "the ask starts a read");
+            if fresh {
+                release(&mut engine, tokens[0], 3.);
+            }
+            response(&mut engine, tokens[0], 4.);
+            assert_eq!(engine.venue.responses, 1);
+            assert_eq!(
+                orders_sent(&mut engine, 4.),
+                fresh,
+                "only a read sent after the ask sends its rows unchanged"
+            );
+            assert!(!orders_sent(&mut engine, 5.), "once");
+        }
     }
 
     /// One logical order read spans several physical attempts (pages, coins);
