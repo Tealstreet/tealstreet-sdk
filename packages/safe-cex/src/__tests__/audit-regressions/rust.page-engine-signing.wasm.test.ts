@@ -79,19 +79,22 @@ const paradex = (): SigningCase => {
 };
 
 /** Lighter: the native server sends canonical statements as `lighter-tx`; answers are 80-byte Schnorr signatures. */
-const lighter = (): SigningCase => {
+const lighter = (robinhood = false): SigningCase => {
+  const chainId = robinhood ? 466_324 : 300;
   // The device checks Lighter deadlines against its own wall clock.
   const deadline = Math.floor(Date.now() / 1000) + 60;
-  const auth = (account: number) => `{"kind":"auth","chainId":300,"accountIndex":${account},"apiKeyIndex":0,"deadline":${deadline}}`;
+  const auth = (account: number) => `{"kind":"auth","chainId":${chainId},"accountIndex":${account},"apiKeyIndex":0,"deadline":${deadline}}`;
   return {
     now: Date.now(),
-    options: { key: '', secret: `01${'00'.repeat(39)}`, apiKeyIndex: '0', applicationId: '718895', testnet: true },
+    options: { key: '', secret: `01${'00'.repeat(39)}`, apiKeyIndex: '0', applicationId: '718895', testnet: !robinhood },
     requests: [{ outputFormat: 'lighter-tx', toSign: auth(718895), expected: /^0x[0-9a-f]{160}$/ }],
   };
 };
 
 const CASES: Partial<Record<ExchangeName, () => SigningCase>> = {
   lighter,
+  // Robinhood is beta-admitted and signs on its production chain.
+  'lighter-robinhood': () => lighter(true),
   paradex,
   bybit: () => hmac('bybit'),
   bybitinverse: () => hmac('bybitinverse'),
@@ -148,7 +151,7 @@ const pageEngine = async (name: ExchangeName, options: Partial<ExchangeOptions>,
 
 describe('every frame-fed family signs its COSIGNED sign-reqs on the page engine', () => {
   it('the registry lists frame-fed families, and each has a signing case', () => {
-    expect(frameFed).toContain('hyperliquid');
+    expect(frameFed).toEqual(expect.arrayContaining(['hyperliquid', 'lighter-robinhood']));
     expect(frameFed.filter((name) => !CASES[name])).toEqual([]);
   });
 
