@@ -56,6 +56,7 @@ struct Probe {
     sibling: Option<Result<Context, crate::request_context::Error>>,
     /// Each retirement hook call: the owner and how many continuations.
     retired: Vec<(crate::request_context::Owner, usize)>,
+    panic_on_retirement: bool,
     pacing: Option<crate::request_context::Pacing>,
     /// After admission, try to found an execution on the tracked root.
     convert: bool,
@@ -106,6 +107,7 @@ impl Venue for Probe {
     fn read_root_retired(&mut self, owner: crate::request_context::Owner, pending: Vec<Box<Walk>>) {
         self.parked.retain(|_, walk| walk.root.owner() != owner);
         self.retired.push((owner, pending.len()));
+        assert!(!self.panic_on_retirement, "retirement hook panic");
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Box<Walk>>, command: Command) {
         let id = command.completion_id().unwrap();
@@ -932,4 +934,115 @@ fn the_sweep_reserves_all_cleanup_actions_before_marking() {
         reserved,
         "no growth after marking"
     );
+}
+
+#[test]
+fn expiry_marks_every_due_owner_before_a_panicking_retirement_hook() {
+    use super::request_context_registry::Seal;
+    use crate::request_context::Owner;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let mut e = engine(Probe {
+        panic_on_retirement: true,
+        ..Default::default()
+    });
+    receive(&mut e, 0., 7, 1_000);
+    receive(&mut e, 0., 8, 1_000);
+    receive(&mut e, 0., 9, 2_000);
+    let requests = released(&mut e, 0.);
+    assert_eq!(requests.len(), 3);
+    let owners: Vec<_> = [7, 8, 9].map(|id| e.venue.roots[&id].owner()).into();
+    let ran = catch_unwind(AssertUnwindSafe(|| tick(&mut e, 1_000.)));
+    assert!(ran.is_err());
+    assert!(e.io.core.http_owner_poison, "a half-run sweep poisons");
+    assert!(e.io.core.read_roots_expiring);
+    assert_eq!(e.venue.retired, vec![(owners[0], 1)]);
+    for &owner in &owners[..2] {
+        let Owner::Command { id, generation } = owner else {
+            unreachable!()
+        };
+        assert!(
+            matches!(e.io.core.request_contexts.seal_expired_root(id, generation),
+            Seal::Legacy(Some(error)) if error.kind == Some(ErrorKind::Timeout))
+        );
+    }
+    let Owner::Command { id, generation } = owners[2] else {
+        unreachable!()
+    };
+    assert!(matches!(
+        e.io.core.request_contexts.seal_expired_root(id, generation),
+        Seal::Stale
+    ));
+    assert_eq!(
+        e.io.core.managed_http.len(),
+        2,
+        "only the first owner's request was discarded"
+    );
+    let reserved = e.io.core.read_root_sweep_capacity.unwrap();
+    assert_eq!(reserved, e.io.core.actions.capacity());
+    assert!(catch_unwind(AssertUnwindSafe(|| tick(&mut e, 1_001.))).is_err());
+    assert_eq!(
+        e.venue.retired.len(),
+        1,
+        "a poisoned engine never resumes cleanup"
+    );
+}
+
+#[test]
+fn expiry_ignores_nonfinite_time_and_preserves_exact_action_order_at_equality() {
+    let mut e = engine(Probe::default());
+    receive(&mut e, 0., 7, 1_000);
+    receive(&mut e, 0., 8, 2_000);
+    let requests = released(&mut e, 0.);
+    assert_eq!(requests.len(), 2);
+    let owner = e.venue.roots[&7].owner();
+    let request = *e
+        .io
+        .core
+        .managed_http
+        .iter()
+        .find(|(_, held)| held.delivery().context.owner() == owner)
+        .unwrap()
+        .0;
+    let leg_timer = e.io.core.managed_http[&request].timer;
+    let root_timer =
+        e.io.core
+            .read_roots
+            .iter()
+            .find(|(_, id, ..)| *id == 7)
+            .unwrap()
+            .3;
+    for now in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 999.5] {
+        e.expire_read_roots(now);
+        assert!(e.io.core.actions.is_empty());
+        assert!(e.venue.retired.is_empty());
+        assert_eq!(e.io.core.managed_http.len(), 2);
+        assert!(!e.io.core.read_roots_expiring);
+    }
+    e.expire_read_roots(1_000.);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let shape: Vec<_> = actions
+        .iter()
+        .map(|action| match action {
+            Action::ClearTimer { timer } if *timer == leg_timer => "clear-leg",
+            Action::ManagedHttp(action)
+                if matches!(
+                    action.as_ref(),
+                    crate::request_context::HttpAction::Cancel { .. }
+                ) =>
+            {
+                "cancel-prepared"
+            }
+            Action::ClearTimer { timer } if *timer == root_timer => "clear-root",
+            Action::Notice(Notice::CommandFailed { command: 7, .. }) => "timeout",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        ["clear-leg", "cancel-prepared", "clear-root", "timeout"]
+    );
+    assert_eq!(e.venue.retired, [(owner, 1)]);
+    assert_eq!(e.io.core.managed_http.len(), 1);
+    assert!(outcome(&actions, 8).0.is_empty());
+    assert!(!e.io.core.read_roots_expiring);
 }
