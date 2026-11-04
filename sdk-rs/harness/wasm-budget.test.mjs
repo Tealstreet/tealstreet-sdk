@@ -125,7 +125,6 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
 
 test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['orderly', 1_710_152, 1_721_344],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -141,10 +140,8 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
 test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
     ['apexomni', 1_974_257, 1_984_512],
-    ['asterdex', 2_113_727, 2_124_800],
     ['backpack', 1_876_304, 1_887_232],
     ['binance', 2_184_476, 2_195_456],
-    ['bingx', 2_015_091, 2_025_472],
     ['bitget', 2_306_497, 2_317_312],
     ['bitgetusdc', 2_306_497, 2_317_312],
     ['bitrue', 1_810_954, 1_821_696],
@@ -204,7 +201,6 @@ test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain he
     ['kucoin', 1_670_273, 1_681_408],
     ['kucoinspot', 2_253_260, 2_264_064],
     ['lighter', 1_991_579, 2_001_920],
-    ['mexc', 1_729_817, 1_740_800],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -226,4 +222,19 @@ test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
+
+test('#3018 after merging d171fbb0e31 (run 41893192741 at b94d76fa368) retains the ruled headroom', () => {
+  for (const [venue, measured, cap] of [
+    ['asterdex', 2_125_918, 2_137_088],
+    ['bingx', 2_026_253, 2_036_736],
+    ['mexc', 1_743_880, 1_755_136],
+    ['orderly', 1_721_849, 1_732_608],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
