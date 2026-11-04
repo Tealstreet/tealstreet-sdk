@@ -1644,3 +1644,18 @@ MEXC venue execution reads only installed metadata, never hashes credentials.
 Chart consumers must honor `exchangeMetadata.supportsKlineSeconds` and optional
 `supportedCandleIntervals`. Hyperliquid and HyperliquidSpot share their native
 interval set, which excludes seconds and 6h; neither may reach a candle subscription.
+
+### Candle history across account-worker replacement
+
+`fetchOHLCVInWorker` is authoritative for Rust mirrors as well as CandleCache.
+Only Bitrue, Lighter and LighterRobinhood opt in. Other mirrors query their
+frame-fed page engine; mirrors without one lazily own a credential-free public
+source using the same endpoint/routing options, disposed with the mirror.
+Candle reads do not wait for private reconciliation or lift an order fence.
+
+A detached bridge fails pending reads with `WORKER_STOPPED`. Reads name the
+read interruption; uncertain writes retain their existing code, reconciliation
+warning and outcome. Worker candle reads alone retry once through the replacement bridge,
+using its existing 30-second attachment bound. No write is replayed. Tests in
+`rust.candle-routing.test.ts` and `rust.worker-command-contract.test.ts` pin
+page routing, replacement replies, the bound and zero write replay.

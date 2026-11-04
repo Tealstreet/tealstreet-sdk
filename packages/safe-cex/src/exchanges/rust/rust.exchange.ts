@@ -929,7 +929,9 @@ export class RustEngineExchange extends BaseExchange {
     this.callMethodInWorker = ((method: string, ...args: unknown[]) =>
       this.frameFed && FRAME_FED_WRITES.has(method)
         ? members[method](...args)
-        : (viaWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args)) as typeof viaWorker;
+        : method === 'fetchOHLCV'
+          ? this.callCandleWorker(viaWorker, args)
+          : (viaWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args)) as typeof viaWorker;
     this.stopWorkerCapabilitySync = this.store.subscribe(this.syncWorkerCapabilities);
   }
 
@@ -1601,7 +1603,9 @@ export class RustEngineExchange extends BaseExchange {
     const clientOrderIds = workerCallClientOrderIds(method, args);
     const message = this.isWorkerReadDuringLoad(method)
       ? `${this.name} ${method} got no answer: the account has not finished loading. Retry once it loads.`
-      : 'Rust worker command timed out; reconcile interrupted writes before retrying';
+      : WORKER_WRITE_METHODS.has(method)
+        ? 'Rust worker command timed out; reconcile interrupted writes before retrying'
+        : 'Rust worker read timed out; retry after the account reconnects';
     return Object.assign(new Error(message), {
       code: 'COMMAND_TIMEOUT',
       command: method,
@@ -1631,6 +1635,20 @@ export class RustEngineExchange extends BaseExchange {
     await this.untilWorkerBridge();
     const call = () => (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args);
     return timing ? runWithWriteTiming(timing, call) : call();
+  };
+
+  private callCandleWorker = async (call: typeof this.callMethodInWorker, args: unknown[]): Promise<unknown> => {
+    const read = async () => {
+      await this.untilWorkerBridge();
+      return (call as (method: string, ...args: unknown[]) => Promise<unknown>)('fetchOHLCV', ...args);
+    };
+    try {
+      return await read();
+    } catch (error) {
+      if (this.isDisposed || (error as { code?: string })?.code !== 'WORKER_STOPPED') throw error;
+      // Only this idempotent public read may cross a replaced bridge, once.
+      return read();
+    }
   };
 
   /**
@@ -1696,6 +1714,8 @@ export class RustEngineExchange extends BaseExchange {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
+        if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
+          return this.fetchPageCandles(args[0] as OHLCVOptions, local);
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
         const viaWorker = () =>
           this.callWorker(method, ...args).then(
@@ -3013,6 +3033,28 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<OrderBook>({ op: 'fetchOrderBook', symbol, limit });
   };
 
+  private candleSource?: RustEngineExchange;
+
+  private fetchPageCandles = async (opts: OHLCVOptions, local: (...args: unknown[]) => Promise<unknown>) => {
+    await this.frameFedReady;
+    if (this.isDisposed) throw new Error('Exchange disposed before candle read');
+    if (!this.isWorkerMirror || this.frameFed) return local(opts);
+    // Mirrors without a page engine own a credential-free public source, never a worker RPC.
+    this.candleSource ??= new RustEngineExchange(
+      this.name,
+      {
+        ...withoutDelegatedSigning(this.engineOptions),
+        workerMirror: false,
+        publicDataOnly: true,
+        privateOnly: false,
+        publicFeed: undefined,
+        externalPublicData: undefined,
+      },
+      new DefaultStore(),
+    );
+    return this.candleSource.fetchOHLCV(opts);
+  };
+
   fetchOHLCV = async (opts: OHLCVOptions) => {
     // Before its market list an engine refuses the symbol or sends an unmapped id.
     if (!(this.nativeLoaded & LOADED_FLAG.MARKETS)) await this.untilNativeData(LOADED_FLAG.MARKETS, 'markets');
@@ -3342,6 +3384,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.candleSource?.dispose();
+    this.candleSource = undefined;
     this.algoControlWatch?.dispose();
     this.signerSetup?.dispose();
     this.stopWorkerCapabilitySync?.();
