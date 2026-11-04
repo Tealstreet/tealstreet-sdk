@@ -10386,3 +10386,25 @@ setting-success authority.
 References: [Binance USD-M error codes](https://developers.binance.com/docs/derivatives/usds-margined-futures/error-code),
 [Binance COIN-M error codes](https://developers.binance.com/docs/derivatives/coin-margined-futures/error-code),
 [Bybit V5 error codes](https://bybit-exchange.github.io/docs/v5/error).
+
+
+### Bybit terminal-history lookup coverage (November 12, 2026)
+
+HyroTrader's Background reconciliation and caller Preflight lookup both read
+realtime, default history, then explicit Cancelled, Rejected and Deactivated
+history only while earlier axes are empty. A failed or unfinished axis never
+proves absence. Empty status results also prove nothing once the earliest
+possible send is 24 hours old, including a walk crossing that boundary; a later
+send never renews coverage. Expired coverage gives explicit Unknown guidance
+to check broker order/fill history. Positive terminal evidence may still resolve.
+The Background walk shares the original two 20 s windows;
+caller reads capture the genuine command_wait receipt at entry and cap every
+Read and final Plan admission to that lookup deadline. Expiry seals typed
+Timeout/Unknown. Shared execution/observer deadlines after admission stay native.
+Cancelled and Deactivated recover the original order ID without another create.
+A proven Rejected row retains the existing new-identity remint contract.
+
+Bybit's [announcement](https://t.me/Bybit_API_Announcements/464) does not exempt
+orderLinkId or orderId. The [endpoint documentation](https://bybit-exchange.github.io/docs/v5/order/order-list)
+limits these three terminal statuses to 24 hours; older missing orders cannot
+be recovered from this API. The historical-orders collection is a separate change.

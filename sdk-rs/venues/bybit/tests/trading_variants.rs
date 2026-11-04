@@ -4207,3 +4207,453 @@ fn an_unknown_inverse_placement_reconciles_on_the_inverse_category_and_releases(
         h.result(3)
     );
 }
+
+// The November 12 default-history change also affects link-filtered lookups.
+fn answer_terminal_link(h: &mut Harness, id: &str, status: &str) {
+    let filter = format!("orderLinkId={id}");
+    for expected in [
+        None,
+        None,
+        Some("Cancelled"),
+        Some("Rejected"),
+        Some("Deactivated"),
+    ] {
+        let read = h.take(&filter);
+        assert!(read.url.starts_with("https://hyro.example/"));
+        match expected {
+            None => assert!(!read.url.contains("orderStatus=")),
+            Some(value) => assert!(read.url.contains(&format!("orderStatus={value}"))),
+        }
+        assert!(!h.has_request("/v5/order/create"));
+        if expected == Some(status) {
+            h.reply(read.id, 200, &lookup_row(id, status));
+            return;
+        }
+        h.reply(read.id, 200, EMPTY);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "empty earlier axis is no proof"
+        );
+    }
+    panic!("terminal status was not queried");
+}
+
+#[test]
+fn hyro_background_explicit_terminal_history_preserves_original_identity() {
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        answer_terminal_link(&mut h, &id, status);
+        assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+        assert!(!h.has_request("/v5/order/create"));
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        if status == "Rejected" {
+            assert_ne!(
+                link(&h.take("/v5/order/create")),
+                id,
+                "positive rejection remints"
+            );
+        } else {
+            assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+            assert!(!h.has_request("/v5/order/create"));
+            assert!(h.engine.store().order("recovered").is_none());
+        }
+    }
+}
+
+#[test]
+fn hyro_preflight_explicit_terminal_history_preserves_original_identity() {
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        answer_terminal_link(&mut h, &id, status);
+        if status == "Rejected" {
+            assert_ne!(
+                link(&h.take("/v5/order/create")),
+                id,
+                "positive rejection remints"
+            );
+        } else {
+            assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+            assert!(!h.has_request("/v5/order/create"));
+        }
+    }
+}
+
+#[test]
+fn hyro_terminal_history_failure_never_proves_absence() {
+    for body in [
+        "unavailable",
+        r#"{"retCode":0,"result":{"list":[],"nextPageCursor":"more"}}"#,
+    ] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+        h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+        let terminal = h.take("orderStatus=Cancelled");
+        h.reply(terminal.id, 200, body);
+        assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(!h.has_request(&format!("orderLinkId={id}")));
+    }
+}
+
+#[test]
+fn hyro_explicit_terminal_reads_share_the_original_background_deadline() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    let started = h.now;
+    let filter = format!("orderLinkId={id}");
+    for _ in 0..4 {
+        let read = h.take(&filter);
+        h.advance(9_000.0);
+        h.reply(read.id, 200, EMPTY);
+    }
+    let last = h.take("orderStatus=Deactivated");
+    h.advance(started + 40_000.0 - h.now);
+    h.reply(last.id, 200, &lookup_row(&id, "Deactivated"));
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request(&filter),
+        "late DATA did not resolve the expired lookup"
+    );
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(h.result(2).is_none());
+}
+
+#[test]
+fn review_terminal_history_retention_expiry_is_not_complete_absence() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request("/v5/order/create"),
+        "initial create: {:?}",
+        h.done
+    );
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost after reaching venue",
+    });
+    h.respond(&format!("orderLinkId={id}"), 500, "lookup unavailable");
+    // The actual original order was Cancelled. All its status-filtered history
+    // axes cease returning it after the documented 24-hour retention window.
+    h.advance(24.0 * 60.0 * 60.0 * 1000.0 + 1.0);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    for op in ["auth", "subscribe"] {
+        let frame = h
+            .sent_on("/v5/private")
+            .into_iter()
+            .rev()
+            .find(|m| m.contains(&format!("\"op\":\"{op}\"")))
+            .unwrap();
+        let frame: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        h.message(
+            "/v5/private",
+            &serde_json::json!({"op":op,"success":true,"req_id":frame["req_id"]}).to_string(),
+        );
+    }
+    for (path, body) in [
+        ("/v5/order/realtime", EMPTY),
+        ("/v5/position/list", EMPTY),
+        ("/v5/account/wallet-balance", WALLET),
+    ] {
+        while h.has_request(path) {
+            h.respond(path, 200, body);
+        }
+    }
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request(&format!("orderLinkId={id}")),
+        "retry genuinely enters reconciliation"
+    );
+    while h.has_request(&format!("orderLinkId={id}")) {
+        h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+    }
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "expired terminal coverage cannot authorize a second physical create"
+    );
+    assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+    let error = h.result(2).unwrap().as_ref().unwrap_err();
+    assert!(
+        error.contains("24-hour") && error.contains("broker"),
+        "{error}"
+    );
+}
+
+#[test]
+fn review_extra_status_reads_cannot_create_after_the_original_caller_deadline() {
+    for wait in [120_000, 40_000] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+        let began = h.now;
+        h.engine
+            .handle_command(
+                h.now,
+                Command::PlaceOrders {
+                    command: 2,
+                    orders: vec![order("BTCUSDT", 1.0)],
+                },
+                Some(wait),
+            )
+            .unwrap();
+        h.collect();
+        for _ in 0..5 {
+            let filter = format!("orderLinkId={id}");
+            let read = h.has_request(&filter).then(|| h.take(&filter));
+            for _ in 0..2 {
+                h.advance(9_500.);
+                h.message("/v5/private", r#"{"op":"pong"}"#);
+                for (path, body) in [
+                    ("/v5/order/realtime", EMPTY),
+                    ("/v5/position/list", EMPTY),
+                    ("/v5/account/wallet-balance", WALLET),
+                ] {
+                    loop {
+                        let next = h
+                            .requests
+                            .iter()
+                            .find(|r| r.url.contains(path) && !r.url.contains("orderLinkId="))
+                            .map(|r| r.id);
+                        let Some(id) = next else {
+                            break;
+                        };
+                        h.requests.retain(|r| r.id != id);
+                        h.reply(id, 200, body);
+                    }
+                }
+            }
+            if let Some(read) = read {
+                h.reply(read.id, 200, EMPTY);
+            }
+        }
+        assert_eq!(h.now - began, 95_000.);
+        if wait == 40_000 {
+            assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+            assert!(
+                h.notices.iter().any(|notice| matches!(notice,
+                    safe_cex_engine::Notice::CommandFailed { command: 2, error }
+                    if error.kind == Some(safe_cex_engine::ErrorKind::Timeout)
+                )),
+                "expiry keeps its typed Timeout cause"
+            );
+            assert!(
+                h.result(2).unwrap().is_err(),
+                "expired caller is visibly settled"
+            );
+            assert_eq!(h.done.iter().filter(|(id, _)| *id == 2).count(), 1);
+        }
+        let late = h
+            .requests
+            .iter()
+            .find(|r| r.url.contains("/v5/order/create"));
+        assert_eq!(
+            late.is_some(),
+            wait == 120_000,
+            "caller wait={wait},elapsed95s; create link={:?}, result={:?}",
+            late.map(link),
+            h.result(2)
+        );
+    }
+}
+
+#[test]
+fn review_every_incomplete_axis_fails_closed_for_both_lookup_owners() {
+    for preflight in [false, true] {
+        for axis in 0..5 {
+            for body in [
+                r#"{"retCode":0,"result":{"list":[],"nextPageCursor":"more"}}"#,
+                r#"{"retCode":0,"result":{"list":null}}"#,
+                r#"{"retCode":0,"result":{}}"#,
+                r#"{"retCode":10001,"result":{"list":[]}}"#,
+            ] {
+                let mut h = ready(Variant::Hyrotrader);
+                place(&mut h, 1, vec![order("BTCUSDT", 1.)]);
+                let create = h.take("/v5/order/create");
+                let id = link(&create);
+                h.event(Event::HttpFailed {
+                    request: create.id,
+                    error: "lost",
+                });
+                if preflight {
+                    h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+                    place(&mut h, 2, vec![order("BTCUSDT", 1.)]);
+                }
+                for _ in 0..axis {
+                    h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+                    assert!(!h.has_request("/v5/order/create"));
+                }
+                h.respond(&format!("orderLinkId={id}"), 200, body);
+                assert!(
+                    !h.has_request("/v5/order/create"),
+                    "preflight={preflight} axis={axis} body={body}"
+                );
+                assert!(
+                    !h.has_request(&format!("orderLinkId={id}")),
+                    "incomplete axis stops the walk"
+                );
+                assert_eq!(
+                    outcome(&h, if preflight { 2 } else { 1 }),
+                    Some(safe_cex_engine::Outcome::Unknown)
+                );
+            }
+        }
+    }
+}
+
+fn retained_hyro_link_after(age_ms: f64) -> (Harness, String) {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost after dispatch",
+    });
+    h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+    h.advance(age_ms);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    for op in ["auth", "subscribe"] {
+        let frame = h
+            .sent_on("/v5/private")
+            .into_iter()
+            .rev()
+            .find(|m| m.contains(&format!("\"op\":\"{op}\"")))
+            .unwrap();
+        let frame: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        h.message(
+            "/v5/private",
+            &serde_json::json!({"op":op,"success":true,"req_id":frame["req_id"]}).to_string(),
+        );
+    }
+    for (path, body) in [
+        ("/v5/order/realtime", EMPTY),
+        ("/v5/position/list", EMPTY),
+        ("/v5/account/wallet-balance", WALLET),
+    ] {
+        while h.has_request(path) {
+            h.respond(path, 200, body);
+        }
+    }
+    (h, id)
+}
+
+#[test]
+fn hyro_absence_coverage_expires_at_equality_and_when_the_last_axis_crosses_it() {
+    let day = 86_400_000.0;
+    for (age, last_delay, may_create) in [
+        (day - 1.0, 0.0, true),
+        (day, 0.0, false),
+        (day - 1.0, 1.0, false),
+    ] {
+        let (mut h, id) = retained_hyro_link_after(age);
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        for axis in 0..5 {
+            let read = h.take(&format!("orderLinkId={id}"));
+            if axis == 4 {
+                h.advance(last_delay);
+            }
+            h.reply(read.id, 200, EMPTY);
+        }
+        assert_eq!(
+            h.has_request("/v5/order/create"),
+            may_create,
+            "age={age} delay={last_delay}"
+        );
+        if !may_create {
+            assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+            assert!(
+                h.result(2)
+                    .unwrap()
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("24-hour")
+            );
+        }
+    }
+}
+
+#[test]
+fn hyro_positive_terminal_evidence_still_resolves_expired_absence_coverage() {
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let (mut h, id) = retained_hyro_link_after(86_400_001.0);
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        answer_terminal_link(&mut h, &id, status);
+        if status == "Rejected" {
+            assert_ne!(
+                link(&h.take("/v5/order/create")),
+                id,
+                "positive rejection retains remint"
+            );
+        } else {
+            assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+            assert!(!h.has_request("/v5/order/create"));
+        }
+    }
+}
+
+#[test]
+fn hyro_a_second_send_cannot_renew_the_earliest_send_retention_window() {
+    let (mut h, id) = retained_hyro_link_after(86_399_999.0);
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    answer_link_absent(&mut h, &id);
+    let second = h.take("/v5/order/create");
+    assert_eq!(link(&second), id);
+    h.event(Event::HttpFailed {
+        request: second.id,
+        error: "second acknowledgement lost",
+    });
+    h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+    h.advance(2.0);
+    place(&mut h, 3, vec![order("BTCUSDT", 1.0)]);
+    answer_link_absent(&mut h, &id);
+    assert!(!h.has_request("/v5/order/create"));
+    assert_eq!(outcome(&h, 3), Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        h.result(3)
+            .unwrap()
+            .as_ref()
+            .unwrap_err()
+            .contains("24-hour"),
+        "coverage is measured from the first send, not the second"
+    );
+}
