@@ -1007,12 +1007,23 @@ impl BybitLinear {
                             *kind,
                             error.outcome == Some(Outcome::Unknown),
                         );
+                        // A put-back of unknown outcome may have landed: claim neither.
+                        let unknown = error.outcome == Some(Outcome::Unknown);
                         let presented = VenueError {
-                            protection: Some(safe_cex_engine::error::Protection::Unprotected),
-                            ..VenueError::new(format!(
-                                "{gone}: {refusal}; putting it back failed too: {}",
-                                error.message
-                            ))
+                            protection: (!unknown)
+                                .then_some(safe_cex_engine::error::Protection::Unprotected),
+                            presents: true,
+                            ..VenueError::new(if unknown {
+                                format!(
+                                    "{gone}: {refusal}; putting it back has an unknown outcome: {}",
+                                    error.message
+                                )
+                            } else {
+                                format!(
+                                    "{gone}: {refusal}; putting it back failed too: {}",
+                                    error.message
+                                )
+                            })
                         };
                         if entry.hyro.is_none() {
                             cx.command_error(id, error.message.clone());

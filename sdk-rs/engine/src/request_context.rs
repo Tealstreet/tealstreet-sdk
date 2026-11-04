@@ -2011,9 +2011,8 @@ impl CommandWrites {
         if self.sealed {
             return Err(Error::State);
         }
-        let presented = fallback
-            .protection
-            .map(|protection| (fallback.message.clone(), protection));
+        let presented = (fallback.protection.is_some() || fallback.presents)
+            .then(|| (fallback.message.clone(), fallback.protection));
         let mut projected_budget = self.evidence;
         #[cfg(feature = "serial-plans")]
         let any_released = self.streamed().is_some_and(|stream| stream.settled > 0)
@@ -2174,7 +2173,7 @@ impl CommandWrites {
         }
         if let Some((message, protection)) = presented {
             error.message = message;
-            error.protection = Some(protection);
+            error.protection = protection;
         }
         #[cfg(feature = "http-plans")]
         if let Some(note) = note {

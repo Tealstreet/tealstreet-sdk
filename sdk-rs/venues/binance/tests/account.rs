@@ -2248,3 +2248,19 @@ fn review_3018_stale_mark_stream_working_control() {
     let cancel = h.take("/fapi/v1/algoOrder");
     assert_eq!(cancel.method, Method::Delete);
 }
+
+/// A put-back whose own outcome is unknown may have landed: neither restored nor unprotected.
+#[test]
+fn a_put_back_of_unknown_outcome_claims_no_protection() {
+    let h = refused_after_cancel(Some(
+        r#"{"code":-1007,"msg":"Timeout waiting for response from backend server. Send status unknown; execution status unknown."}"#,
+    ));
+    let error = failure(&h);
+    assert_eq!(error.protection, None, "{error:?}");
+    assert!(
+        error.message.contains("unknown outcome"),
+        "{}",
+        error.message
+    );
+    assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
+}

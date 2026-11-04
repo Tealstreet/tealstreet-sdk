@@ -125,6 +125,10 @@ pub struct VenueError {
     /// A stop or take-profit edit whose replacement was refused after its cancel landed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub protection: Option<Protection>,
+    /// A command's fallback whose words describe its outcome better than its first
+    /// failed leg, without claiming `protection` (a put-back of unknown outcome).
+    #[serde(skip)]
+    pub presents: bool,
 }
 
 /// What a refused protective replacement left the position with.

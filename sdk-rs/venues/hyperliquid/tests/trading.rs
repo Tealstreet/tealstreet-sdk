@@ -1744,3 +1744,102 @@ fn review_3018_mixed_references_cannot_bypass_tp_to_sl_guard() {
 fn review_3018_consistent_tp_to_sl_working_control() {
     amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only();
 }
+
+// codex-mxb4mq #3018 recheck: an allMids repeat of an unchanged price is an observation.
+#[test]
+fn review_recheck_same_price_hl_observation_keeps_stop_guard_fresh() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Stop Market","triggerPx":"80"},"status":"open"}]}"#,
+    );
+    assert_eq!(
+        e.store().order("9").unwrap().kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+    message(
+        &mut e,
+        s,
+        12000.,
+        r#"{"channel":"allMids","data":{"mids":{"BTC":"100"}}}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-PERP").unwrap().last, 100.);
+    e.handle(
+        12001.,
+        Event::Command(Command::AmendOrder {
+            command: 92,
+            id: "9".into(),
+            price: Some(110.),
+            amount: None,
+        }),
+    );
+    let mut actions = Vec::new();
+    for _ in 0..3 {
+        let next = fire_timers(&mut e);
+        for a in &next {
+            if let Action::Http(r) = a {
+                if kind(r) == "orderStatus" {
+                    answer_order_status(&mut e, r);
+                }
+            }
+        }
+        actions.extend(next);
+    }
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/exchange"))),
+        "fresh last100 must refuse immediately firing sell SL110, {actions:?}"
+    );
+}
+
+#[test]
+fn review_recheck_changed_price_hl_observation_working_control() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Stop Market","triggerPx":"80"},"status":"open"}]}"#,
+    );
+    assert_eq!(
+        e.store().order("9").unwrap().kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+    message(
+        &mut e,
+        s,
+        12000.,
+        r#"{"channel":"allMids","data":{"mids":{"BTC":"100.1"}}}"#,
+    );
+    assert_eq!(e.store().ticker("BTC-PERP").unwrap().last, 100.1);
+    e.handle(
+        12001.,
+        Event::Command(Command::AmendOrder {
+            command: 92,
+            id: "9".into(),
+            price: Some(110.),
+            amount: None,
+        }),
+    );
+    let mut actions = Vec::new();
+    for _ in 0..3 {
+        let next = fire_timers(&mut e);
+        for a in &next {
+            if let Action::Http(r) = a {
+                if kind(r) == "orderStatus" {
+                    answer_order_status(&mut e, r);
+                }
+            }
+        }
+        actions.extend(next);
+    }
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/exchange"))),
+        "fresh last100 must refuse immediately firing sell SL110, {actions:?}"
+    );
+}

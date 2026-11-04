@@ -1413,3 +1413,58 @@ fn review_3018_limit_partial_restore_preserves_execution_type_and_price() {
         body(&restore)
     );
 }
+
+// codex-mxb4mq #3018 recheck: a put-back of unknown outcome claims no protection.
+
+fn review_recheck_restore_failure(code: i64) -> safe_cex_engine::VenueError {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    amend(&mut h, Some(95.), None);
+    accept_cancel(&mut h, profile);
+    let replacement = h.take("/v5/position/trading-stop");
+    h.reply(
+        replacement.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
+    );
+    let restore = h.take("/v5/position/trading-stop");
+    let payload = format!(r#"{{"retCode":{code},"retMsg":"put back failed","result":{{}}}}"#);
+    h.reply(restore.id, 200, &payload);
+    let errors = h
+        .notices
+        .iter()
+        .filter_map(|a| match a {
+            safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1, "{:?}", h.notices);
+    assert!(!h.has_request("/v5/position/trading-stop"), "no loops");
+    errors.into_iter().next().unwrap()
+}
+#[test]
+fn review_recheck_unknown_restore_does_not_claim_proven_unprotected() {
+    let error = review_recheck_restore_failure(10000);
+    assert_eq!(
+        error.protection, None,
+        "an uncertain restoration may be live; {error:?}"
+    );
+}
+#[test]
+fn review_recheck_definitive_restore_refusal_is_unprotected_control() {
+    let error = review_recheck_restore_failure(10001);
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected),
+        "{error:?}"
+    );
+}

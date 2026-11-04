@@ -615,6 +615,8 @@ impl Hyperliquid {
                                 t.last = mid;
                                 t.mid_price = Some(mid);
                             });
+                            // A repeated mid is still an observation of last.
+                            cx.store.observe_ticker_fields(symbol, 1 << 2);
                         }
                     }
                 }
@@ -628,6 +630,11 @@ impl Hyperliquid {
                 {
                     for (coin, context) in contexts {
                         if let Some(symbol) = self.symbol(coin) {
+                            let usable =
+                                |v: Option<f64>| v.is_some_and(|v| v.is_finite() && v > 0.0);
+                            // The references this context carries, changed or not (bits: last, mark).
+                            let observed = (u16::from(usable(context.mid_px)) << 2)
+                                | (u16::from(usable(context.mark_px)) << 3);
                             cx.store.update_ticker(symbol, |t| {
                                 if let Some(mark) =
                                     context.mark_px.filter(|v| v.is_finite() && *v > 0.0)
@@ -641,6 +648,7 @@ impl Hyperliquid {
                                     t.mid_price = Some(mid);
                                 }
                             });
+                            cx.store.observe_ticker_fields(symbol, observed);
                         }
                     }
                 }

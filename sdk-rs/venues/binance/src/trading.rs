@@ -1156,6 +1156,15 @@ impl BinanceFutures {
                         Some(_) => self.fail_unprotected(command, &told),
                         None => restore_planned = self.plan_restore(cx, command, &gone, &message),
                     }
+                } else if gone.is_some()
+                    && restoring.is_some()
+                    && let Some(job) = self.trading.jobs.get_mut(&command)
+                {
+                    // The put-back may have landed: these words, and no protection claim.
+                    job.planning_error = Some(VenueError {
+                        presents: true,
+                        ..VenueError::new(told.clone())
+                    });
                 }
                 let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &told) else {
                     return;
