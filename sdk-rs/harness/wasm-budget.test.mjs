@@ -141,7 +141,6 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
   for (const [venue, measured, cap] of [
     ['apexomni', 1_974_257, 1_984_512],
     ['backpack', 1_876_304, 1_887_232],
-    ['binance', 2_184_476, 2_195_456],
     ['bitget', 2_306_497, 2_317_312],
     ['bitgetusdc', 2_306_497, 2_317_312],
     ['bitrue', 1_810_954, 1_821_696],
@@ -237,4 +236,13 @@ test('#3018 after merging d171fbb0e31 (run 41893192741 at b94d76fa368) retains t
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+});
+
+test('master b0d2122742d release cut (run 41901638294) retains the ruled binance headroom', () => {
+  const [measured, cap] = [2_195_793, 2_206_720];
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.binance, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'binance'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'binance'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'binance'), /exceeds/);
 });
