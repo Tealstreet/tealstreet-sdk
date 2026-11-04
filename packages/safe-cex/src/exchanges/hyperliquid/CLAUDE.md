@@ -42,8 +42,10 @@ origin, including metadata, candles and history. Atomic IndexedDB transactions
 share admission and 429 pauses across account workers/tabs; runtimes without
 IndexedDB share a budget within their JS realm. Storage operations have a 1.5-second
 timeout and retry once on timeout before degrading. Hard errors or repeated
-timeouts use a shared local budget at one-quarter speed, retaining known pacing
-state. After a 30-second cooldown, reads retry IndexedDB and max-merge local
+timeouts use a shared local budget, retaining known pacing state. Local admission
+keeps normal speed until IndexedDB has opened successfully in this realm; later
+storage failures use one-quarter speed because shared and local budgets may split.
+After a 30-second cooldown, reads retry IndexedDB and max-merge local
 reservations and 429 pauses back into shared state, invalidating prior grants.
 While storage is unavailable, independent realms cannot share their 429 pauses.
 Only pacing timestamps and retry counters are stored, never account or request

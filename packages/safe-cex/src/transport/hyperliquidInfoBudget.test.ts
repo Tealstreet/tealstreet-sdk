@@ -30,6 +30,48 @@ afterEach(() => {
 });
 
 describe('unavailable shared storage', () => {
+  it.each([false, true])(
+    'uses normal pacing for never-opened storage unless another client opened it: %s',
+    async (opened) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      if (opened) await client().response(ORIGIN, 200, '');
+      const unavailable = {
+        open: () => {
+          throw new DOMException('storage disabled', 'SecurityError');
+        },
+      } as unknown as IDBFactory;
+      const a = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
+      await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+      let admitted = false;
+      const next = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+        admitted = true;
+      });
+      const delay = opened ? 4800 : 1200;
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(admitted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await next;
+      expect(admitted).toBe(true);
+    },
+  );
+
+  it('admits a startup metadata burst within the read window when storage never opened', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const unavailable = {
+      open: () => {
+        throw new DOMException('storage disabled', 'SecurityError');
+      },
+    } as unknown as IDBFactory;
+    const a = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
+    const reads = Promise.allSettled(
+      Array.from({ length: 16 }, () =>
+        a.wait(ORIGIN, JSON.stringify({ type: 'metaAndAssetCtxs' }), Date.now() + 20_000, signal()),
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect((await reads).every((result) => result.status === 'fulfilled')).toBe(true);
+  });
+
   it('recovers a denied IndexedDB global accessor after the cooldown', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const opened = vi.spyOn(factory, 'open');

@@ -6,6 +6,7 @@ const MAX_PAUSE_MS = 300_000;
 const STORAGE_TIMEOUT_MS = 1500;
 const STORAGE_COOLDOWN_MS = 30_000;
 const DEGRADED_PACING_MULTIPLIER = 4;
+let indexedDBOpenedInRealm = false;
 type BudgetState = { nextAt: number; pausedUntil: number; generation: number; failures: number };
 const emptyState = (): BudgetState => ({ nextAt: 0, pausedUntil: 0, generation: 0, failures: 0 });
 const mergeState = (a: BudgetState, b: BudgetState): BudgetState => ({
@@ -100,6 +101,7 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
         }
       };
       open.onsuccess = () => {
+        indexedDBOpenedInRealm = true;
         if (!done(open.result)) open.result.close();
       };
       open.onerror = () => fail(open.error);
@@ -123,7 +125,8 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
       }
       this.localKeys.add(key);
       this.localRevision += 1;
-      return memoryStorage.update(key, change, MS_PER_WEIGHT * DEGRADED_PACING_MULTIPLIER);
+      const multiplier = indexedDBOpenedInRealm ? DEGRADED_PACING_MULTIPLIER : 1;
+      return memoryStorage.update(key, change, MS_PER_WEIGHT * multiplier);
     };
     this.retryAt = Math.min(this.retryAt, Date.now() + STORAGE_COOLDOWN_MS);
     if (this.retryAt > Date.now()) return local();
