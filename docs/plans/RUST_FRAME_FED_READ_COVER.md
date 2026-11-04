@@ -346,6 +346,102 @@ Bravulasco needs.
 
 Wasm grows on every frame-fed family. Budget raises go in the overseer's cap PR.
 
+## 9. Step 2 notes: the page lift rule and the capability bit
+
+Design notes for step 2, written while steps 1a (#3004) and 1b (#3005) are in
+review. No code yet. They refine §4.3 and §4.4.
+
+### 9.1 The capability bit
+
+- `Capabilities::order_read_covers`, flag bit 30 of the CAPABILITIES record's
+  first word. Bits 0–29 are in use; 14 is reserved.
+- It's written in every `snapshot_frame`, which is what a page always starts
+  from. Deltas before the first snapshot are dropped. The hosted server sends
+  `snapshot_frame` (`hosts/native/src/server.rs`), and the local worker forwards
+  its own.
+- **A venue sets it only once its source both commits covers (step 1b..n) and
+  answers a refresh ask (step 3).** Covers without the ask would make a
+  migrated page strictly slower to lift. Bybit, for one, issues no periodic
+  orders read: a fence would wait for the next startup or reconnect read.
+  So step 2 ships dormant, with no venue setting the bit, and each venue turns
+  it on in its step-3 PR.
+- Rust ingest learns to read just this bit from CAPABILITIES. Today it ignores
+  the section; `Applied` gains `read_covers: Option<bool>`, set only by a frame
+  carrying the section. The page keeps the bit from its latest snapshot. It
+  never infers it from section 23's presence: the write is gated on a cover
+  existing, so a new source sends no 23 before its first read.
+- The JS decoder names only known flags (`CAPABILITY_FLAGS` in `wire.mjs`), so
+  bit 30 is ignored there. A test pins that.
+
+### 9.2 Parsing section 23 on the page
+
+- Revision 1 only: u32 count, pad, f64 account (NaN = none), count u32 string
+  refs, pad, count f64.
+- Validation: count is bounded by the section length; refs resolve in the
+  frame's string table; every cover is finite. A malformed section, or another
+  revision, is read as **absent**, and with the bit set, absent lifts nothing.
+  It is never an ingest error, so a source bug can't stall the page's frames.
+- `Applied` gains `orders_read: Option<Covers { account: Option<f64>, symbols:
+  Vec<(String, f64)> }>`. Covers are absolute, a full table each time, so the
+  page stores nothing between frames.
+
+### 9.3 The lift rule
+
+`apply_frame`, when the frame applied ORDERS:
+
+- **The source's last snapshot lacked the bit:** master's stamp rule,
+  unchanged. This covers old sources and venues not yet migrated.
+- **It had the bit, but this frame has no valid 23:** lift nothing. That
+  includes snapshots, a segment split by a regressed server, and a malformed
+  section.
+- **It had the bit, and 23 is present:** for each uncertain symbol S
+  (`order_locks.uncertain`, keyed by symbol with the epoch that sealed it):
+  - Its mark time `t(S)` is the time of the first fence mark whose token is at
+    or above S's epoch. `fence_marks` stays a token→time list, recorded as
+    today when a seal happens.
+  - `cover(S) = max(account, symbols[S])`, or none.
+  - Lift S when `cover(S) - offset >= t(S) + grace`, through
+    `order_locks.reconciled(Some(S), epoch(S))`. Grace and offset are the same
+    as today (3 s with a measured offset, 30 s without). The placing guard in
+    `reconciled` still applies.
+  - The all-symbols fence (`""`) lifts only on the account cover. A symbol
+    cover can't speak for every symbol.
+- Marks no uncertainty still uses are pruned after the lift, as today.
+- The `orders.held` re-announce for fences still standing (gap 2, from #2990)
+  moves into step 3 with the ask.
+
+### 9.4 What step 2 does not change
+
+- No source behavior: covers come from step 1, asks from step 3.
+- Non-migrated venues and old sources keep the stamp rule exactly, H2 included.
+- Old pages ignore 23 and bit 30, and keep master's behavior against new
+  sources.
+
+### 9.5 Acceptance tests for step 2
+
+All page-level tests run on a real Bybit source feeding a real frame-fed page,
+with the bit forced on in the test harness, since step 2 ships dormant:
+
+- **H2:** a read sent before the lost write lands more than 3 s later; its
+  ORDERS frame with 23 lifts nothing.
+- **H4:** the same stale rows in `snapshot_frame` and in
+  `account_snapshot_frame`, which carries no CAPABILITIES (the bit comes from
+  the last snapshot), lift nothing.
+- **H8 and H10 at page level:** the source's refused reads publish no cover,
+  so the page's fence stands.
+- **A fresh read lifts:** sent after mark + grace, with no order found, it
+  lifts the fence. With the order found, the row arrives and the fence lifts.
+- **Per symbol:** a BTC read cover lifts BTC's fence and leaves ETH's.
+- **The all-symbols fence** lifts only on an account cover.
+- **Mixed versions:**
+  - A source without the bit keeps the stamp rule (H2 reproduces there, as on
+    master).
+  - A source with the bit sending ORDERS without 23, or with a malformed 23,
+    lifts nothing.
+  - JS ignores bit 30.
+- **H6 at page level:** a frame segmented by the hosted server lifts only via
+  the segment that carries ORDERS and 23 together.
+
 ## 8. Out of scope
 
 - Positions and settings holds (`settings.held`), which have their own source
