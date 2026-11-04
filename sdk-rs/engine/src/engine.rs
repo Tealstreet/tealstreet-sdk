@@ -4471,6 +4471,9 @@ impl<V: Venue> Engine<V> {
                 if let Some(token) = lifted {
                     self.io.core.order_locks.reconciled(None, token);
                     self.fence_marks.retain(|(mark, _)| *mark > token);
+                    // A later fence the frame could not lift needs its own ask.
+                    self.orders_held_asked = false;
+                    self.announce_orders_held(now);
                 }
             }
             // Holds waiting for an acknowledged order may now release.
@@ -5670,6 +5673,40 @@ impl<V: Venue> Engine<V> {
         self.restore_shared_tickers(false, now);
     }
 
+    /// Frame-fed: the source never saw an uncertain write, so its orders may never
+    /// change. Ask for them once per standing uncertainty, timed for when a frame
+    /// could lift the oldest fence still up.
+    #[cfg(feature = "order-locks")]
+    fn announce_orders_held(&mut self, now: f64) {
+        if !self.io.core.order_locks.uncertain("") {
+            self.orders_held_asked = false;
+            return;
+        }
+        let Some(&(_, mark)) = self.fence_marks.first() else {
+            return;
+        };
+        if self.orders_held_asked {
+            return;
+        }
+        self.orders_held_asked = true;
+        let grace = if self.source_clock_offset.is_some() {
+            crate::frame_fed::FENCE_GRACE_MS
+        } else {
+            crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
+        };
+        Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        }
+        .event(
+            Level::Info,
+            crate::log::code::ORDERS_HELD,
+            "Holding an uncertain write until the data source sends its orders",
+            vec![("liftAfterMs", Value::Num((mark + grace - now).max(0.0)))],
+        );
+    }
+
     /// Ask the venue once for each due uncertain-write reconcile read, then
     /// re-arm one wake-up for deferred ones. A fresh read the venue reports
     /// through `orders_reconciled` clears the order-lock fence as before.
@@ -5694,30 +5731,7 @@ impl<V: Venue> Engine<V> {
             {
                 self.fence_marks.push((token, now));
             }
-            // The source never saw this write, so its orders may never change: ask
-            // for them once per standing uncertainty, when a frame written then lifts it.
-            let uncertain = self.io.core.order_locks.uncertain("");
-            if !uncertain {
-                self.orders_held_asked = false;
-            } else if !self.orders_held_asked {
-                self.orders_held_asked = true;
-                let lift_after = if self.source_clock_offset.is_some() {
-                    crate::frame_fed::FENCE_GRACE_MS
-                } else {
-                    crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
-                };
-                Cx {
-                    now,
-                    store: &mut self.store,
-                    io: &mut self.io,
-                }
-                .event(
-                    Level::Info,
-                    crate::log::code::ORDERS_HELD,
-                    "Holding an uncertain write until the data source sends its orders",
-                    vec![("liftAfterMs", Value::Num(lift_after))],
-                );
-            }
+            self.announce_orders_held(now);
             if let Some((timer, _)) = self.reconcile_timer.take() {
                 self.io.core.actions.push(Action::ClearTimer { timer });
             }

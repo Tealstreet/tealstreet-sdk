@@ -636,3 +636,76 @@ fn a_new_fence_after_a_lift_asks_again() {
     });
     assert_eq!(orders_held(&h), vec![3_000.0, 3_000.0]);
 }
+
+/// A source frame written now, as the data source answers an `orders.held` ask.
+fn ingest_now(h: &mut Harness) {
+    h.engine
+        .apply_frame(h.now, &source_frame_at(h.now), false)
+        .unwrap();
+    h.collect();
+}
+
+const ETH_FLAT: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"ETHUSDT","positionIdx":0,"side":"","size":"0","avgPrice":"0","markPrice":"3000","positionValue":"0","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}],"nextPageCursor":""}}"#;
+
+/// Send an ETHUSDT placement, answering the mode read the source frame left unknown.
+fn place_eth(h: &mut Harness, command: u32) -> safe_cex_engine::HttpRequest {
+    let mut order = support::order();
+    order.symbol = "ETHUSDT".into();
+    h.command(Command::PlaceOrders {
+        command,
+        orders: vec![order],
+    });
+    if h.paths()
+        .iter()
+        .any(|path| path.contains("/v5/position/list"))
+    {
+        h.respond("/v5/position/list", 200, ETH_FLAT);
+    }
+    h.take("/v5/order/create")
+}
+
+fn lose_eth_placement(h: &mut Harness, command: u32) {
+    let lost = place_eth(h, command);
+    h.event(safe_cex_engine::Event::HttpFailed {
+        request: lost.id,
+        error: "connection reset",
+    });
+}
+
+#[test]
+fn a_fence_the_lifting_frame_could_not_lift_is_asked_for_again() {
+    let mut h = fenced(Some(0.0));
+    h.advance(2_000.0);
+    // Another symbol's write is lost while the first ask still waits.
+    lose_eth_placement(&mut h, 2);
+    assert_eq!(orders_held(&h), vec![3_000.0]);
+    h.advance(1_500.0);
+    // The frame that answers the first ask lifts only the first fence.
+    ingest_now(&mut h);
+    assert_eq!(orders_held(&h), vec![3_000.0, 1_500.0]);
+    h.advance(1_500.0);
+    ingest_now(&mut h);
+    place_eth(&mut h, 3);
+    assert_eq!(orders_held(&h).len(), 2, "both fences lifted");
+}
+
+#[test]
+fn a_fence_sealed_right_after_a_full_lift_is_announced() {
+    let mut h = fenced(Some(0.0));
+    h.advance(100.0);
+    h.command(Command::CancelOrders {
+        command: 2,
+        ids: vec!["server-order".into()],
+    });
+    let cancel = h.take("/v5/order/cancel");
+    h.advance(3_400.0);
+    ingest_now(&mut h);
+    // The cancel sent before the lift finds no order in the very next event,
+    // which fences the symbol again.
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"retCode":110001,"retMsg":"order not exists or too late to cancel","result":{},"retExtInfo":{},"time":1}"#,
+    );
+    assert_eq!(orders_held(&h), vec![3_000.0, 3_000.0]);
+}
