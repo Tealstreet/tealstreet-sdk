@@ -1736,7 +1736,10 @@ instead of bypassing an unknown lease. Waiter cancellation never deletes a peer'
 lease/cooldown; each engine still parses and publishes its own catalogue.
 Future-dated strict ownership stays blocking. A dispatched timeout publishes a
 cooldown before abort cleanup without delaying the caller; expired ownership
-retains its minimum failure window until that publication can settle.
+retains its minimum failure window until that publication can settle. The original
+deadline callback remains authoritative after wall-clock rollback. Queued Binance
+publications check the transport lifetime at the storage write, including after
+a timeout has already completed request cleanup.
 
 Rust account `socketHealth.reconnectDiagnostics` carries bounded last-close
 snapshots for public/private/business channels and the primary HOW adapter,

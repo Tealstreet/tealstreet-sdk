@@ -16,6 +16,9 @@ an election or cached-byte reuse. Expired leases retain their minimum failure
 window while the owner settles its deadline. A dispatched deadline starts an
 owner-fenced cooldown before abort cleanup, without delaying the caller;
 never-dispatched expiry and user/follower cancellation do not publish failures.
+The original deadline callback is authoritative even if wall time rolls back.
+Queued failure and success publications recheck the transport lifetime at the
+storage write, independently of the timed-out request's cleanup signal.
 Cancellation and late completion are owner-fenced.
 
 Without working storage at startup, workers keep independent discovery and native

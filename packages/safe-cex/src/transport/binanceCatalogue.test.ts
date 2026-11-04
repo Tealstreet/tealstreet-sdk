@@ -548,3 +548,183 @@ it.each(['network', 'http'])(
     }
   },
 );
+
+it('review deadline timer after clock rollback still installs a physical failure cooldown', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  vi.resetModules();
+  const { createEngineTransport } = await import('./engine');
+  const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+  const send = vi.fn(async () => new Promise<HttpResponse>(() => {}));
+  const raw: Transport = {
+    now: Date.now,
+    setTimeout,
+    clearTimeout: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+    prepareHttp: prepareRecordedHttp,
+    request: send,
+    connect: () => ({ send() {}, close() {} }),
+  };
+  const a = createEngineTransport('binance', { key: '', secret: '' }, raw),
+    b = createEngineTransport('binance', { key: '', secret: '' }, raw);
+  const pending: Promise<unknown>[] = [];
+  try {
+    const p = { ...request(), request: 1, route: 'direct' as const, timeoutMs: 500 };
+    pending.push(Promise.allSettled([(await a.prepareHttp!(p)).bind(p).dispatch()]));
+    await flush();
+    expect(send).toHaveBeenCalledTimes(1);
+    const q = { ...request(), request: 2, route: 'direct' as const, timeoutMs: 5000 };
+    pending.push(Promise.allSettled([Promise.resolve(b.prepareHttp!(q)).then((p) => p.bind(q).dispatch())]));
+    await flush();
+    vi.setSystemTime(Date.now() - 1000);
+    for (let n = 0; n < 7; n++) {
+      await advance(100);
+    }
+    expect(send, 'timed-out physical leader must impose the first 1s shared failure cooldown').toHaveBeenCalledTimes(1);
+  } finally {
+    a.dispose?.();
+    b.dispose?.();
+    await flush();
+    await Promise.all(pending);
+  }
+});
+
+it('review dead owner lease releases after exactly its first nominal grace', async () => {
+  const a = client();
+  const first = await prepare(a, undefined, Date.now() + 500);
+  let second: Awaited<ReturnType<typeof prepare>>;
+  const waiting = prepare(client(), undefined, Date.now() + 5000).then((r) => {
+    second = r;
+  });
+  await advance(1400);
+  expect(second).toBeUndefined();
+  await advance(100);
+  await waiting;
+  expect(second).toBeDefined();
+  second!.cancel();
+  first!.cancel();
+  await flush();
+});
+it('review disposed engine revokes a queued timeout cooldown publication', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  vi.resetModules();
+  const { createEngineTransport } = await import('./engine');
+  const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+  const send = vi.fn(async () => new Promise<HttpResponse>(() => {}));
+  const raw: Transport = {
+    now: Date.now,
+    setTimeout,
+    clearTimeout: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+    prepareHttp: prepareRecordedHttp,
+    request: send,
+    connect: () => ({ send() {}, close() {} }),
+  };
+  const a = createEngineTransport('binance', { key: '', secret: '' }, raw);
+  let holding = true;
+  const opened = () =>
+    new Promise<IDBDatabase>((resolve, reject) => {
+      const r = factory.open(binanceCataloguePolicy.database, 1);
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  let database: IDBDatabase | undefined;
+  let blocker: IDBTransaction | undefined;
+  try {
+    const p = { ...request(), request: 1, route: 'direct' as const, timeoutMs: 500 };
+    const caller = Promise.allSettled([(await a.prepareHttp!(p)).bind(p).dispatch()]);
+    await flush();
+    database = await opened();
+    blocker = database.transaction('catalogues', 'readwrite');
+    const store = blocker.objectStore('catalogues');
+    const keepAlive = () => {
+      const r = store.get('review-blocker');
+      r.onsuccess = () => {
+        if (holding) keepAlive();
+      };
+    };
+    keepAlive();
+    await advance(500);
+    expect(await caller).toMatchObject([{ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } }]);
+    a.dispose?.();
+    holding = false;
+    await flush();
+    const entries = await new Promise<unknown[]>((resolve, reject) => {
+      const r = database!.transaction('catalogues').objectStore('catalogues').getAll();
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    expect(
+      entries.some((e) => Boolean((e as { cooldownUntil?: number }).cooldownUntil)),
+      'disposal must revoke the queued async failure write',
+    ).toBe(false);
+  } finally {
+    holding = false;
+    a.dispose?.();
+    await flush();
+    database?.close();
+  }
+});
+
+it.each([
+  ['timeout', 'alive'],
+  ['timeout', 'disposed'],
+  ['success', 'alive'],
+  ['success', 'disposed'],
+])('checks owner lifetime when a queued %s publication executes (%s)', async (kind, lifecycle) => {
+  vi.stubGlobal('indexedDB', factory);
+  vi.resetModules();
+  const { createEngineTransport } = await import('./engine');
+  const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+  let release!: (value: HttpResponse) => void;
+  const network = new Promise<HttpResponse>((resolve) => {
+    release = resolve;
+  });
+  const raw: Transport = {
+    now: Date.now,
+    setTimeout,
+    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    prepareHttp: prepareRecordedHttp,
+    request: () => network,
+    connect: () => ({ send() {}, close() {} }),
+  };
+  const transport = createEngineTransport('binance', { key: '', secret: '' }, raw);
+  let holding = true;
+  let database: IDBDatabase | undefined;
+  try {
+    const packet = { ...request(), request: 1, route: 'direct' as const, timeoutMs: 500 };
+    const caller = Promise.allSettled([(await transport.prepareHttp!(packet)).bind(packet).dispatch()]);
+    await flush();
+    database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = factory.open(binanceCataloguePolicy.database, 1);
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    const store = database.transaction('catalogues', 'readwrite').objectStore('catalogues');
+    const keepAlive = () => {
+      const read = store.get('held-publication');
+      read.onsuccess = () => {
+        if (holding) keepAlive();
+      };
+    };
+    keepAlive();
+    if (kind === 'timeout') {
+      await advance(500);
+      expect(await caller).toMatchObject([{ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } }]);
+    } else {
+      release(response());
+      expect(await caller).toMatchObject([{ status: 'fulfilled', value: { status: 200 } }]);
+    }
+    if (lifecycle === 'disposed') transport.dispose?.();
+    holding = false;
+    await flush();
+    const rows = await new Promise<Array<{ bytes?: Uint8Array; cooldownUntil?: number }>>((resolve, reject) => {
+      const read = database!.transaction('catalogues').objectStore('catalogues').getAll();
+      read.onsuccess = () => resolve(read.result);
+      read.onerror = () => reject(read.error);
+    });
+    expect(rows.some((row) => Boolean(kind === 'timeout' ? row.cooldownUntil : row.bytes))).toBe(lifecycle === 'alive');
+  } finally {
+    holding = false;
+    transport.dispose?.();
+    await flush();
+    database?.close();
+  }
+});

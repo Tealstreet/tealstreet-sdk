@@ -565,8 +565,14 @@ const httpTransport = (
     let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
     let catalogueRead: CatalogueRead | undefined;
     let physicalRequest = false;
-    const settleDeadline = () => {
-      if (physicalRequest && remaining() <= 0 && !disposed && !request.signal?.aborted && !reroute.abandon?.aborted)
+    const settleDeadline = (deadlineFired = false) => {
+      if (
+        physicalRequest &&
+        (deadlineFired || remaining() <= 0) &&
+        !disposed &&
+        !request.signal?.aborted &&
+        !reroute.abandon?.aborted
+      )
         catalogueRead?.timedOut?.();
     };
     let bound = false;
@@ -604,7 +610,7 @@ const httpTransport = (
       cleanup();
     };
     const timer = setTimeout(() => {
-      settleDeadline();
+      settleDeadline(true);
       controller.abort(new HttpPreparationError('timedOut'));
     }, remaining());
     signal.addEventListener('abort', onAbort, { once: true });
@@ -751,14 +757,20 @@ const httpTransport = (
           !(routeEndpoint.username || routeEndpoint.password || routeEndpoint.search || routeEndpoint.hash)
         ) {
           catalogueRead = await untilAborted(
-            sharedBinanceCatalogue.prepare({ ...request, intent }, signal, started + deadlineMs, {
-              network: options.testnet ? 'testnet' : 'mainnet',
-              route: tunnelAdapter
-                ? `how:${routing.howEgress}:${routeEndpoint!.href}`
-                : routeEndpoint
-                  ? `proxy:${routeEndpoint.href}`
-                  : 'direct',
-            }),
+            sharedBinanceCatalogue.prepare(
+              { ...request, intent },
+              signal,
+              started + deadlineMs,
+              {
+                network: options.testnet ? 'testnet' : 'mainnet',
+                route: tunnelAdapter
+                  ? `how:${routing.howEgress}:${routeEndpoint!.href}`
+                  : routeEndpoint
+                    ? `proxy:${routeEndpoint.href}`
+                    : 'direct',
+              },
+              () => !disposed,
+            ),
             signal,
           );
         }

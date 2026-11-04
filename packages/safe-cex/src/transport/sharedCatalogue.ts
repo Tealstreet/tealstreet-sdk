@@ -238,6 +238,7 @@ export class SharedCatalogue {
     signal: AbortSignal,
     deadline: number,
     route?: CatalogueRoute,
+    ownerAlive: () => boolean = () => true,
   ): Promise<CatalogueRead | undefined> {
     const key = this.policy.keyFor(request, route);
     if (!key) return;
@@ -265,7 +266,7 @@ export class SharedCatalogue {
           return { value: next, write: next };
         });
         if (signal.aborted || Date.now() >= deadline) {
-          if (entry.owner === owner) this.leader(key, entry, signal).cancel();
+          if (entry.owner === owner) this.leader(key, entry, signal, ownerAlive).cancel();
           signal.throwIfAborted();
           throw new HttpPreparationError('timedOut');
         }
@@ -280,7 +281,8 @@ export class SharedCatalogue {
             cancel: () => {},
           };
         }
-        if (entry.owner === owner && entry.cooldownUntil === undefined) return this.leader(key, entry, signal);
+        if (entry.owner === owner && entry.cooldownUntil === undefined)
+          return this.leader(key, entry, signal, ownerAlive);
         if (entry.bytes)
           await this.edit(key, (current) => ({
             value: undefined,
@@ -297,7 +299,7 @@ export class SharedCatalogue {
     }
   }
 
-  private leader(key: string, lease: Entry, signal: AbortSignal): CatalogueRead {
+  private leader(key: string, lease: Entry, signal: AbortSignal, ownerAlive: () => boolean): CatalogueRead {
     const { owner } = lease;
     let finished = false;
     const remove = async () => {
@@ -323,7 +325,7 @@ export class SharedCatalogue {
       const until = at + this.policy.failureDelay(failures, headers, at);
       await this.edit(key, (entry) => ({
         value: undefined,
-        write: entry?.owner === owner ? { owner, at, failures, cooldownUntil: until } : undefined,
+        write: ownerAlive() && entry?.owner === owner ? { owner, at, failures, cooldownUntil: until } : undefined,
       })).catch(() => undefined);
     };
     signal.addEventListener('abort', cancel, { once: true });
@@ -359,7 +361,10 @@ export class SharedCatalogue {
             // Cache publication owns its bytes and never delays a good HTTP answer.
             void this.edit(key, (entry) => ({
               value: undefined,
-              write: entry?.owner === owner ? { owner, at: publishedAt, bytes: publicationBytes } : undefined,
+              write:
+                ownerAlive() && entry?.owner === owner
+                  ? { owner, at: publishedAt, bytes: publicationBytes }
+                  : undefined,
             })).catch(() => undefined);
           }
           signal.throwIfAborted();
