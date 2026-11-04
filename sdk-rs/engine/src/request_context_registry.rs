@@ -2965,7 +2965,11 @@ mod tests {
         let mut registry = ContextRegistry::default();
         let first = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
         let other = registry.issue(2, Scope::Background, policy(), 0.).unwrap();
-        let at = |seq, sent| crate::order_read_cover::OrderReadMark { seq, sent };
+        let at = |seq, sent| crate::order_read_cover::OrderReadMark {
+            seq,
+            sent,
+            epoch: 0,
+        };
         assert_eq!(
             registry.read_mark(first.owner(), 5, at(1, 1.)),
             (5, at(1, 1.))
@@ -2992,7 +2996,11 @@ mod tests {
         let Owner::Command { id, generation } = command.owner() else {
             panic!("a command scope has a command owner");
         };
-        let at = crate::order_read_cover::OrderReadMark { seq: 0, sent: 0. };
+        let at = crate::order_read_cover::OrderReadMark {
+            seq: 0,
+            sent: 0.,
+            epoch: 0,
+        };
         registry.read_mark(command.owner(), 1, at);
         registry.read_mark(background.owner(), 1, at);
         registry.read_mark(

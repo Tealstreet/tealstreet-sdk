@@ -26,6 +26,34 @@ enum StateApplied {
     Unusable(&'static str),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BootstrapRead {
+    State,
+    Spot,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrivateReadKind {
+    State,
+    Spot,
+    Orders,
+    Role,
+    Mode,
+    Discovery,
+}
+impl PrivateReadKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::Spot => "spot",
+            Self::Orders => "orders",
+            Self::Role => "role",
+            Self::Mode => "mode",
+            Self::Discovery => "discovery",
+        }
+    }
+}
+
 pub enum Request {
     Role,
     Mode,
@@ -147,6 +175,8 @@ pub struct Account {
     /// The next queued read is a fence reconcile.
     fence_read: bool,
     orders_retry: safe_cex_engine::startup::Backoff<String>,
+    bootstrap_retry: safe_cex_engine::startup::Backoff<BootstrapRead>,
+    pub(crate) last_failed_private_read_kind: Option<PrivateReadKind>,
     pub(crate) builder_read_at: f64,
     state_time: HashMap<String, f64>,
     position_time: HashMap<String, f64>,
@@ -1093,7 +1123,13 @@ impl Hyperliquid {
                     );
                     applied = StateApplied::Unusable("Malformed Hyperliquid account state");
                 }
+                if let StateApplied::Unusable(message) = &applied {
+                    self.private_read_failed(cx, PrivateReadKind::State, message);
+                }
                 self.settle_fresh_positions(cx, &dex, read, applied);
+                if dex.is_empty() {
+                    self.retry_bootstrap_read(cx, BootstrapRead::State);
+                }
             }
             Request::Orders {
                 epoch,
@@ -1217,12 +1253,17 @@ impl Hyperliquid {
             }
             Request::Spot { revision } => {
                 self.account.spot_inflight = false;
-                if revision != self.account.spot_revision {
-                    return;
+                if revision == self.account.spot_revision {
+                    match serde_json::from_str::<SpotState>(raw) {
+                        Ok(state) => self.apply_spot(cx, &state, false),
+                        Err(_) => self.private_read_failed(
+                            cx,
+                            PrivateReadKind::Spot,
+                            "Malformed Hyperliquid collateral state",
+                        ),
+                    }
                 }
-                if let Ok(state) = serde_json::from_str::<SpotState>(raw) {
-                    self.apply_spot(cx, &state, false);
-                }
+                self.retry_bootstrap_read(cx, BootstrapRead::Spot);
             }
             Request::Asset { symbol, revision } => {
                 self.account.inflight.remove(&format!("asset:{symbol}"));
@@ -1330,12 +1371,63 @@ impl Hyperliquid {
             }
         }
     }
+    pub(crate) fn private_read_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        kind: PrivateReadKind,
+        error: &str,
+    ) {
+        self.account.last_failed_private_read_kind = Some(kind);
+        cx.event(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            error,
+            vec![("lastFailedPrivateReadKind", kind.as_str().into())],
+        );
+    }
+    fn bootstrap_read_needed(&self, kind: BootstrapRead) -> bool {
+        if self.spot
+            || self.options.public_data_only
+            || !self.account.started
+            || self.user().is_none()
+        {
+            return false;
+        }
+        match kind {
+            BootstrapRead::State => !self.account.core_loaded,
+            BootstrapRead::Spot => {
+                self.account.mode_resolved
+                    && self.account.mode != Mode::Standard
+                    && self.account.spot.is_none()
+                    && self.account.pending_spot.is_none()
+            }
+        }
+    }
+    fn retry_bootstrap_read(&mut self, cx: &mut Cx<'_, Pending>, kind: BootstrapRead) {
+        if self.bootstrap_read_needed(kind) {
+            let pause = self
+                .account
+                .read_error
+                .as_ref()
+                .and_then(|e| e.retry_after_ms)
+                .unwrap_or(0.0);
+            self.account.bootstrap_retry.failed_after(cx, kind, pause);
+        }
+    }
     pub(crate) fn account_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: &str,
     ) {
+        let kind = match &request {
+            Request::State { .. } => Some(PrivateReadKind::State),
+            Request::Spot { .. } => Some(PrivateReadKind::Spot),
+            Request::Orders { .. } => Some(PrivateReadKind::Orders),
+            Request::Role => Some(PrivateReadKind::Role),
+            Request::Mode => Some(PrivateReadKind::Mode),
+            _ => None,
+        };
         match request {
             Request::Mode => self.mode_failed(cx),
             Request::Role => {
@@ -1346,6 +1438,9 @@ impl Hyperliquid {
             }
             Request::State { dex, read, .. } => {
                 self.account.inflight.remove(&format!("state:{dex}"));
+                if dex.is_empty() {
+                    self.retry_bootstrap_read(cx, BootstrapRead::State);
+                }
                 let fresh = self
                     .account
                     .read_error
@@ -1367,7 +1462,10 @@ impl Hyperliquid {
                     .max(5000.0);
                 self.account.orders_retry.failed_after(cx, dex, pause);
             }
-            Request::Spot { .. } => self.account.spot_inflight = false,
+            Request::Spot { .. } => {
+                self.account.spot_inflight = false;
+                self.retry_bootstrap_read(cx, BootstrapRead::Spot);
+            }
             Request::Asset { symbol, .. } => {
                 self.account.inflight.remove(&format!("asset:{symbol}"));
                 if self.settings_uncertain(&symbol) {
@@ -1383,7 +1481,11 @@ impl Hyperliquid {
             }
             Request::Fees => {}
         }
-        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        if let Some(kind) = kind {
+            self.private_read_failed(cx, kind, error);
+        } else {
+            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        }
     }
     /// `readPositions`: wait on each dex's next read. One already out may predate
     /// the close, so it is followed by a new read and never answers.
@@ -1454,6 +1556,14 @@ impl Hyperliquid {
         }
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(kind) = self.account.bootstrap_retry.on_timer(timer)
+            && self.bootstrap_read_needed(kind)
+        {
+            match kind {
+                BootstrapRead::State => self.refresh_state(cx, ""),
+                BootstrapRead::Spot => self.refresh_spot(cx, true),
+            }
+        }
         if self.account.fresh_positions_timer == Some(timer) {
             self.account.fresh_positions_timer = None;
             let mut dexes = vec![String::new()];
@@ -1847,6 +1957,9 @@ impl Hyperliquid {
                     .map(|p| p.unrealized_pnl)
                     .sum::<f64>();
                 self.account.core_loaded = true;
+                self.account
+                    .bootstrap_retry
+                    .succeeded(cx, &BootstrapRead::State);
                 self.account.core_value = summary.account_value - native - other_dexes;
             }
             self.account.core_used = summary.total_margin_used;
@@ -1939,13 +2052,16 @@ impl Hyperliquid {
     }
     fn commit_collateral(
         &mut self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         equity: f64,
         hold: f64,
         available: Option<f64>,
         ws: bool,
     ) {
         self.account.spot = Some((equity, hold));
+        self.account
+            .bootstrap_retry
+            .succeeded(cx, &BootstrapRead::Spot);
         if let Some(free) = available {
             self.account.authoritative =
                 Some((equity - self.current_upnl(cx), equity - free, free));
@@ -2197,6 +2313,9 @@ impl Hyperliquid {
                     "Hyperliquid collateral valuation unavailable; retaining previous USD balance",
                 );
             }
+            self.account
+                .bootstrap_retry
+                .succeeded(cx, &BootstrapRead::Spot);
             self.account.pending_spot = Some(PendingSpotCollateral {
                 balances: state
                     .balances
