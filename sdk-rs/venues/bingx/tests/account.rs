@@ -332,6 +332,61 @@ fn an_unknown_placement_requires_a_fresh_order_read_before_retrying() {
 }
 
 #[test]
+fn a_degraded_open_order_snapshot_does_not_clear_a_placement_fence() {
+    let mut h = Harness::ready_with_orders(r#"{"code":0,"data":[]}"#);
+    let place = |command| Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(serde_json::json!({
+                "symbol":"BTCUSDT", "type":"limit", "side":"buy",
+                "amount":0.01, "price":60000
+            }))
+            .unwrap(),
+        ],
+    };
+    h.now += 1.;
+    h.event(Event::Command(place(700)));
+    let first = h.take("/openApi/swap/v2/trade/order");
+    h.reply(first.id, 503, "Service Unavailable");
+    assert!(
+        h.failures
+            .iter()
+            .any(|(id, error)| *id == 700
+                && error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+    );
+    let fresh = h.take(ORDERS);
+    let assert_refused =
+        |h: &mut Harness, id| {
+            h.now += 1.;
+            h.event(Event::Command(place(id)));
+            assert!(h.failures.iter().any(|(command, error)| *command == id
+                && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+                && error.message.contains("uncertain")));
+            assert!(h.requests.iter().all(
+                |r| r.method != Method::Post || !r.url.contains("/openApi/swap/v2/trade/order")
+            ));
+        };
+    assert_refused(&mut h, 701);
+    h.reply(
+        fresh.id,
+        200,
+        r#"{"code":0,"data":{"orders":[{"orderId":77,"symbol":"BTC-USDT","type":"LIMIT","side":"BUY","origQty":"0.2","executedQty":"0","price":"NaN","positionSide":"BOTH"}]}}"#,
+    );
+    let order = h
+        .engine
+        .store()
+        .order("77")
+        .expect("degraded row stays visible");
+    assert_eq!((order.symbol.as_str(), order.amount), ("BTCUSDT", 0.2));
+    assert!(
+        h.logs
+            .iter()
+            .any(|log| log.contains("row 77") && log.contains("price"))
+    );
+    assert_refused(&mut h, 702);
+}
+
+#[test]
 fn private_startup_preserves_big_ids_unsigned_key_and_primary_balance() {
     let mut h = Harness::new();
     let key = h.take(KEY);
