@@ -27,7 +27,6 @@ test('the approved combined ceiling accepts 16 MiB exactly and rejects the next 
 
 test('shared broker-role setup caps retain CI headroom and reject the next byte', () => {
   for (const [venue, measured, cap] of [
-    ['okx', 1_910_027, 1_921_024],
     ['kraken', 2_097_992, 2_108_416],
     ['krakenspot', 2_097_992, 2_108_416],
   ]) {
@@ -156,6 +155,7 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
     ['mexc', 1_717_351, 1_728_512],
     ['orderly', 1_710_152, 1_721_344],
     ['paradex', 2_198_375, 2_208_768],
+    ['okx', 1_924_239, 1_935_360],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
