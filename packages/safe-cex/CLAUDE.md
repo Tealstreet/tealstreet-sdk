@@ -402,6 +402,13 @@ the engine's own frames fill the UI store. Books, candles and fills still come
 from the source's ops. It signs and sends `FRAME_FED_WRITES` (manual writes,
 settings, nuke, scheduleCancel) itself, including writes the web sends through
 `callMethodInWorker`; a nuke first asks the source for `stopAccountAlgos`. A
+write whose outcome is unknown fences its symbol until a source frame written
+after the grace carries ORDERS. On a venue whose orders reads report account-wide
+(`Venue::refreshes_orders`), the engine emits `orders.held` with `liftAfterMs`,
+and the page then asks the source for `refreshAccountOrders` (engine
+`refreshOrders`): the source's next complete orders read sent after the ask goes
+out as ORDERS, changed or not. Never answer it with a snapshot, whose rows can
+predate the write when the source's stream has stalled. A
 LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
 snapshot}`, after the `forwardFrames` op, and keeps posting fill ops.
 

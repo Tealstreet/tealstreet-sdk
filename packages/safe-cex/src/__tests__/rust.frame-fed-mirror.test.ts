@@ -423,24 +423,54 @@ describe('frame-fed main-thread mirror', () => {
   });
 
   // Bravulasco: a lost page placement fenced its symbol, and the source, which never saw it,
-  // never sent the orders that lift a fence. The page asks once its grace has passed.
-  it('asks its data source for a snapshot once an uncertain write can be lifted, and only once', async () => {
+  // never sent the orders that lift a fence. The page asks once its grace has passed, for
+  // orders from a fresh read: a snapshot's rows can predate the write.
+  it('asks its data source for freshly read orders once an uncertain write can be lifted, and only once', async () => {
     vi.useFakeTimers();
     try {
       const fake = fakeEngine();
-      exchange = mirrorWith(fake).exchange;
+      const mirror = mirrorWith(fake);
+      exchange = mirror.exchange;
       await exchange.frameFedReady;
       const needsSnapshot = vi.fn();
       exchange.on('frameFed:needsSnapshot', needsSnapshot);
+      const asks = () => mirror.calls.filter((method) => method === 'refreshAccountOrders').length;
       fake.holdOrdersFor = 3_000;
       await exchange.placeOrder(order);
       await exchange.placeOrder(order);
       await vi.advanceTimersByTimeAsync(3_000);
-      expect(needsSnapshot).not.toHaveBeenCalled();
+      expect(asks()).toBe(0);
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(needsSnapshot).toHaveBeenCalledOnce();
+      expect(asks()).toBe(1);
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(needsSnapshot).toHaveBeenCalledOnce();
+      expect(asks()).toBe(1);
+      expect(needsSnapshot).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not ask again while a fresh orders read is still in flight', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeEngine();
+      exchange = new RustEngineExchange(
+        'bybit',
+        { key: 'k', secret: 's', workerMirror: true, publicDataOnly: false },
+        new DefaultStore(),
+      );
+      const asked: string[] = [];
+      // The source never answers: the first ask stays in flight.
+      exchange.on('callMethod', (event: { method: string }) => asked.push(event.method));
+      void fake;
+      await exchange.frameFedReady;
+      fake.holdOrdersFor = 3_000;
+      await exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(3_500);
+      fake.holdOrdersFor = 0;
+      await exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(asked.filter((method) => method === 'refreshAccountOrders')).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
@@ -450,15 +480,14 @@ describe('frame-fed main-thread mirror', () => {
     vi.useFakeTimers();
     try {
       const fake = fakeEngine();
-      const held = mirrorWith(fake).exchange;
+      const mirror = mirrorWith(fake);
+      const held = mirror.exchange;
       await held.frameFedReady;
-      const needsSnapshot = vi.fn();
-      held.on('frameFed:needsSnapshot', needsSnapshot);
       fake.holdOrdersFor = 30_000;
       await held.placeOrder(order);
       held.dispose();
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(needsSnapshot).not.toHaveBeenCalled();
+      expect(mirror.calls).not.toContain('refreshAccountOrders');
     } finally {
       vi.useRealTimers();
     }

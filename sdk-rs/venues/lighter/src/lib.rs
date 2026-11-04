@@ -888,6 +888,10 @@ impl Venue for Lighter {
     ) {
         self.trade_condition_expired(cx, owner, error);
     }
+    // Every complete orders read reports with no symbol.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
         self.settle_retired_trades(cx);
         self.refresh_account(cx);

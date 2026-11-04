@@ -568,6 +568,11 @@ impl Store {
         self.set_loaded(|loaded| loaded.orders = true);
     }
 
+    /// A fresh orders read confirmed the current rows: send them in the next frame.
+    pub fn mark_orders_read(&mut self) {
+        self.changes.orders = true;
+    }
+
     /// Insert or replace by id. A closed or canceled row stays, with its
     /// status, until the next snapshot replaces the list.
     pub fn upsert_order(&mut self, order: Order) {

@@ -597,6 +597,10 @@ impl Venue for Blofin {
     }
     /// An uncertain or absent-order seal: a fresh order snapshot reports
     /// through `orders_reconciled`.
+    // Every complete orders read reports with no symbol.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_uncertain_orders(cx);
     }

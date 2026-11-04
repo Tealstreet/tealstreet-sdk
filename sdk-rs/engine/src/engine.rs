@@ -572,6 +572,10 @@ pub enum VenueAction {
     /// Data source: re-read the account settings a frame-fed engine changed
     /// (position mode, margin, leverage, venue keys), for `symbol` or the account.
     RefreshSettings { symbol: Option<String> },
+    /// Data source: a frame-fed engine holds an uncertain write. The next complete
+    /// orders read sent after this command forces ORDERS into the following frame,
+    /// so the frame that lifts the fence carries orders read after the ask.
+    RefreshOrders,
     /// Succeeds only once a positions read issued after this command has
     /// committed to the store; `Capabilities::fresh_positions` advertises it.
     ReadPositions,
@@ -599,6 +603,9 @@ const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this ven
 /// A repair on a feed that has carried no data this long reconnects it instead.
 #[cfg(feature = "managed-sockets")]
 const REPAIR_SILENCE_MS: f64 = 30_000.0;
+/// Data source: a `RefreshOrders` whose read never landed stops blocking a new one.
+#[cfg(feature = "order-locks")]
+const ORDERS_REFRESH_WAIT_MS: f64 = 30_000.0;
 /// The same topic repaired again within this window reconnects its feed.
 #[cfg(feature = "managed-sockets")]
 const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;
@@ -1726,6 +1733,9 @@ struct IoCore {
     order_read_tokens: crate::IdMap<RequestId, u64>,
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
+    /// Data source: the order-lock epoch a `RefreshOrders` asked from, and when.
+    #[cfg(feature = "order-locks")]
+    orders_refresh: Option<(u64, f64)>,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -1930,6 +1940,8 @@ impl Default for IoCore {
             order_read_tokens: Default::default(),
             #[cfg(feature = "order-locks")]
             order_response_token: None,
+            #[cfg(feature = "order-locks")]
+            orders_refresh: None,
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -3026,6 +3038,7 @@ impl<P> Cx<'_, P> {
                 .core
                 .order_locks
                 .reconciled(symbol, token.min(epoch));
+            self.orders_refreshed(symbol.is_none(), token.min(epoch));
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = (symbol, epoch);
@@ -3041,6 +3054,7 @@ impl<P> Cx<'_, P> {
                 .core
                 .order_locks
                 .reconciled_except(unproven, token.min(epoch));
+            self.orders_refreshed(unproven.is_empty(), token.min(epoch));
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = (unproven, epoch);
@@ -3052,9 +3066,26 @@ impl<P> Cx<'_, P> {
         #[cfg(feature = "order-locks")]
         if let Some(token) = self.io.core.order_response_token {
             self.io.core.order_locks.reconciled(symbol, token);
+            self.orders_refreshed(symbol.is_none(), token);
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = symbol;
+    }
+
+    /// Data source: a complete orders read sent after a `RefreshOrders` answers it.
+    /// Its rows go out as ORDERS in the next frame, changed or not.
+    #[cfg(feature = "order-locks")]
+    fn orders_refreshed(&mut self, complete: bool, token: u64) {
+        if complete
+            && self
+                .io
+                .core
+                .orders_refresh
+                .is_some_and(|(epoch, _)| token >= epoch)
+        {
+            self.io.core.orders_refresh = None;
+            self.store.mark_orders_read();
+        }
     }
 
     /// Queue a live candle for the next frame; a newer update of the same
@@ -3779,6 +3810,12 @@ pub trait Venue {
     /// Data source: re-read the settings a frame-fed engine changed, for
     /// `symbol` or (`None`) the account, through the venue's own config reads.
     fn refresh_settings(&mut self, _cx: &mut Cx<'_, Self::Pending>, _symbol: Option<&str>) {}
+    /// Every complete orders read reports through `orders_reconciled*` with no
+    /// symbol, so a data source can answer `RefreshOrders` and a frame-fed engine
+    /// may ask for it. A venue reporting per symbol only keeps its fence instead.
+    fn refreshes_orders(&self) -> bool {
+        false
+    }
     /// Cancel and amend route only through stored orders: hold one naming an
     /// acknowledged placement until the store has it (`placement_acks`).
     fn cancel_needs_stored_order(&self) -> bool {
@@ -5324,6 +5361,25 @@ impl<V: Venue> Engine<V> {
                 self.venue.refresh_settings(&mut cx, symbol.as_deref());
                 cx.done(command, "null".into());
             }
+            Event::Command(Command::Venue {
+                command,
+                action: VenueAction::RefreshOrders,
+            }) => {
+                #[cfg(feature = "order-locks")]
+                if self.venue.refreshes_orders()
+                    && cx
+                        .io
+                        .core
+                        .orders_refresh
+                        .is_none_or(|(_, at)| now - at >= ORDERS_REFRESH_WAIT_MS)
+                {
+                    // Reads sent from here on carry a newer epoch than any already out.
+                    let epoch = cx.io.core.order_locks.advance();
+                    cx.io.core.orders_refresh = Some((epoch, now));
+                    cx.io.queue_reconcile(None, now);
+                }
+                cx.done(command, "null".into());
+            }
             Event::Command(Command::Venue { command, action }) => {
                 cx.io.begin_command_entry(Some(command));
                 let intent = Command::Venue {
@@ -5678,7 +5734,7 @@ impl<V: Venue> Engine<V> {
     /// could lift the oldest fence still up.
     #[cfg(feature = "order-locks")]
     fn announce_orders_held(&mut self, now: f64) {
-        if !self.io.core.order_locks.uncertain("") {
+        if !self.venue.refreshes_orders() || !self.io.core.order_locks.uncertain("") {
             self.orders_held_asked = false;
             return;
         }

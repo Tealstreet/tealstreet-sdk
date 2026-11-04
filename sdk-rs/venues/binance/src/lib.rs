@@ -1372,6 +1372,10 @@ impl Venue for BinanceFutures {
     fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         !self.is_spot()
     }
+    // Every complete orders read reports with no symbol.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         if self.is_options() {
             self.options_reconcile(cx);

@@ -372,6 +372,8 @@ export const WORKER_OPTIONAL_METHODS = [
   'stopAccountAlgos',
   // ...and asks it to re-read the settings that engine just changed.
   'refreshAccountSettings',
+  // ...and, while it holds an uncertain write, for orders from a fresh read.
+  'refreshAccountOrders',
 ] as const;
 
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([

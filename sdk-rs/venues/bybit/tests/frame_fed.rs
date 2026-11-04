@@ -709,3 +709,135 @@ fn a_fence_sealed_right_after_a_full_lift_is_announced() {
     );
     assert_eq!(orders_held(&h), vec![3_000.0, 3_000.0]);
 }
+
+const NO_ROWS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#;
+const WALLET: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"accountType":"UNIFIED","totalEquity":"1100","totalWalletBalance":"1000","totalInitialMargin":"10","totalMaintenanceMargin":"1","totalAvailableBalance":"900","coin":[]}]}}"#;
+/// The page's lost placement, as the venue lists it once it rests.
+const LOST_ORDER_RESTING: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTCUSDT","orderId":"lost-order","side":"Buy","orderType":"Limit","orderStatus":"New","price":"100","qty":"0.01","leavesQty":"0.01","cumExecQty":"0"}],"nextPageCursor":""}}"#;
+
+fn answer_all(h: &mut Harness, path: &str, body: &str) {
+    while h.has_request(path) {
+        h.respond(path, 200, body);
+    }
+}
+
+/// A loaded keyed source, and a frame-fed page fed by it that has just lost a
+/// BTCUSDT placement. Nothing reaches the source's private stream: it is stalled.
+fn source_and_fenced_page() -> (Harness, Harness) {
+    let mut source = source();
+    answer_all(&mut source, "/v5/order/realtime", NO_ROWS);
+    // One-way BTCUSDT: the page learns the mode from the source's venue state.
+    answer_all(
+        &mut source,
+        "/v5/position/list",
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTCUSDT","positionIdx":0,"side":"","size":"0","avgPrice":"0","markPrice":"100","positionValue":"0","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}],"nextPageCursor":""}}"#,
+    );
+    answer_all(&mut source, "/v5/account/wallet-balance", WALLET);
+    source.engine.take_frame(source.now);
+    let mut page = frame_fed();
+    load(&mut page);
+    page.engine.set_source_clock_offset(Some(0.0));
+    page.now = source.now;
+    let snapshot = source.engine.snapshot_frame(source.now).to_vec();
+    page.engine.apply_frame(page.now, &snapshot, true).unwrap();
+    page.collect();
+    page.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![support::order()],
+    });
+    let lost = page.take("/v5/order/create");
+    page.event(safe_cex_engine::Event::HttpFailed {
+        request: lost.id,
+        error: "connection reset",
+    });
+    assert_eq!(page.unknown, vec![1]);
+    (source, page)
+}
+
+fn advance_both(source: &mut Harness, page: &mut Harness, ms: f64) {
+    source.advance(ms);
+    page.advance(ms);
+}
+
+/// Forward the source's next frame to the page; false when it had none.
+fn forward(source: &mut Harness, page: &mut Harness) -> bool {
+    let Some(frame) = source.engine.take_frame(source.now).map(<[u8]>::to_vec) else {
+        return false;
+    };
+    page.engine.apply_frame(page.now, &frame, false).unwrap();
+    page.collect();
+    true
+}
+
+/// The page's ask, as its host sends it once `orders.held` says a frame could lift.
+fn refresh_orders(source: &mut Harness, command: u32) {
+    source.requests.clear();
+    source.command(Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::RefreshOrders,
+    });
+    assert!(
+        source.has_request("/v5/order/realtime"),
+        "a fresh orders read: {:?}",
+        source.paths()
+    );
+}
+
+fn btc_place_goes_out(page: &mut Harness, command: u32) -> bool {
+    page.requests.clear();
+    page.command(Command::PlaceOrders {
+        command,
+        orders: vec![support::order()],
+    });
+    page.has_request("/v5/order/create")
+}
+
+#[test]
+fn a_stalled_source_lifts_nothing_until_its_fresh_orders_read_lands() {
+    let (mut source, mut page) = source_and_fenced_page();
+    advance_both(&mut source, &mut page, 3_500.0);
+    assert_eq!(orders_held(&page), vec![3_000.0]);
+    refresh_orders(&mut source, 90);
+    // The ask alone sends nothing: a stalled source has nothing new to say.
+    assert!(!forward(&mut source, &mut page));
+    assert!(!btc_place_goes_out(&mut page, 2));
+    // The fresh read finds no such order: its rows go out, and they lift the fence.
+    answer_all(&mut source, "/v5/order/realtime", NO_ROWS);
+    assert!(
+        forward(&mut source, &mut page),
+        "the read's orders are sent unchanged"
+    );
+    assert!(btc_place_goes_out(&mut page, 3));
+}
+
+#[test]
+fn a_fresh_read_that_finds_the_lost_order_brings_its_row() {
+    let (mut source, mut page) = source_and_fenced_page();
+    advance_both(&mut source, &mut page, 3_500.0);
+    refresh_orders(&mut source, 90);
+    source.respond("settleCoin=USDT", 200, LOST_ORDER_RESTING);
+    answer_all(&mut source, "/v5/order/realtime", NO_ROWS);
+    assert!(forward(&mut source, &mut page));
+    assert!(
+        page.engine
+            .store()
+            .orders()
+            .iter()
+            .any(|order| order.id == "lost-order" && order.symbol == "BTCUSDT"),
+        "the placement did land; the page now shows it"
+    );
+}
+
+#[test]
+fn a_refresh_in_flight_is_not_asked_again() {
+    let (mut source, mut page) = source_and_fenced_page();
+    advance_both(&mut source, &mut page, 3_500.0);
+    refresh_orders(&mut source, 90);
+    source.requests.clear();
+    source.command(Command::Venue {
+        command: 91,
+        action: safe_cex_engine::VenueAction::RefreshOrders,
+    });
+    assert!(!source.has_request("/v5/order/realtime"));
+    assert!(matches!(source.result(91), Some(Ok(_))));
+}
