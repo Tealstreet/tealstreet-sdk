@@ -282,3 +282,142 @@ fn a_market_without_a_default_fraction_falls_back_to_its_minimum() {
     let (e, _) = ready_unattributed();
     assert_eq!(e.store().setting("BTC").unwrap().leverage, 20.0);
 }
+
+#[test]
+fn defaults_clamp_to_limits_and_absent_or_nonpositive_defaults_keep_maximum() {
+    for (value, expected) in [
+        (json!(100), 20.0),
+        (json!(20000), 1.0),
+        (json!(5000), 2.0),
+        (json!(0), 20.0),
+        (json!(-1), 20.0),
+        (Value::Null, 20.0),
+    ] {
+        let mut meta: Value = serde_json::from_str(DEFAULTS_META).unwrap();
+        meta["order_book_details"][1]["default_initial_margin_fraction"] = value;
+        let (e, _) = ready_with_meta(options(), &meta.to_string());
+        assert_eq!(e.store().setting("BTC").unwrap().leverage, expected);
+        assert_eq!(e.store().market("BTC").unwrap().limits.leverage.max, 20.0);
+    }
+}
+
+#[test]
+fn explicit_account_imf_overrides_nonmax_default_on_rest_and_stream() {
+    for streamed in [false, true] {
+        let (mut e, socket) = ready_with_defaults();
+        if streamed {
+            message(
+                &mut e,
+                socket,
+                NOW,
+                r#"{"channel":"account_all:718895","positions":{"2":{"market_id":2,"position":"0","initial_margin_fraction":2000,"margin_mode":0}}}"#,
+            );
+        } else {
+            e.handle(NOW, Event::WsOpened { socket });
+            let reads = requests(&mut e);
+            let account = reads.iter().find(|r| r.url.contains("/account?")).unwrap();
+            let mut body: Value = serde_json::from_str(ACCOUNT).unwrap();
+            body["accounts"][0]["positions"] = json!([{"market_id":2,"position":"0","initial_margin_fraction":2000,"margin_mode":0}]);
+            reply(&mut e, account, 200, &body.to_string());
+        }
+        assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW,
+            Event::Command(Command::SetMarginType {
+                command: 101,
+                symbol: "BTC".into(),
+                isolated: true,
+            }),
+        );
+        let write = nonce(&mut e);
+        assert_eq!(
+            wire(&write)["InitialMarginFraction"],
+            2000,
+            "streamed={streamed}"
+        );
+    }
+}
+
+#[test]
+fn queued_margin_change_keeps_accepted_user_leverage_over_catalogue_default() {
+    let (mut e, _) = ready_with_defaults();
+    e.handle(
+        NOW,
+        Event::Command(Command::SetLeverage {
+            command: 100,
+            symbol: "BTC".into(),
+            leverage: 5.0,
+            side: None,
+        }),
+    );
+    let request = http(&mut e, "nextNonce");
+    e.handle(
+        NOW,
+        Event::Command(Command::SetMarginType {
+            command: 101,
+            symbol: "BTC".into(),
+            isolated: true,
+        }),
+    );
+    reply(&mut e, &request, 200, r#"{"code":200,"nonce":10}"#);
+    let leverage = http(&mut e, "sendTx");
+    assert_eq!(wire(&leverage)["InitialMarginFraction"], 2000);
+    ack(&mut e, &leverage);
+    let margin = http(&mut e, "sendTx");
+    assert_eq!(wire(&margin)["InitialMarginFraction"], 2000);
+    assert_eq!(wire(&margin)["MarginMode"], 1);
+    ack(&mut e, &margin);
+    assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
+}
+
+#[test]
+fn position_without_fraction_uses_default_and_no_row_refresh_keeps_explicit_setting() {
+    let (mut e, socket) = ready_with_defaults();
+    message(
+        &mut e,
+        socket,
+        NOW,
+        r#"{"channel":"account_all:718895","positions":{"2":{"market_id":2,"position":"1","avg_entry_price":"200","margin_mode":0}}}"#,
+    );
+    assert_eq!(
+        e.store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == "BTC")
+            .unwrap()
+            .leverage,
+        2.0
+    );
+    message(
+        &mut e,
+        socket,
+        NOW,
+        r#"{"channel":"account_all:718895","positions":{"2":{"market_id":2,"position":"0","initial_margin_fraction":2000,"margin_mode":0}}}"#,
+    );
+    assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
+    e.handle(NOW, Event::WsOpened { socket });
+    let reads = requests(&mut e);
+    let account = reads.iter().find(|r| r.url.contains("/account?")).unwrap();
+    reply(&mut e, account, 200, ACCOUNT);
+    assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
+}
+
+#[test]
+fn invalid_catalogue_bounds_do_not_panic_when_a_default_is_present() {
+    for has_default in [false, true] {
+        let mut meta: Value = serde_json::from_str(DEFAULTS_META).unwrap();
+        meta["order_book_details"][1]["min_initial_margin_fraction"] = json!(20000);
+        if !has_default {
+            meta["order_book_details"][1]
+                .as_object_mut()
+                .unwrap()
+                .remove("default_initial_margin_fraction");
+        }
+        let result = std::panic::catch_unwind(|| ready_with_meta(options(), &meta.to_string()));
+        assert!(
+            result.is_ok(),
+            "invalid venue leverage bounds must be refused without panicking; default={has_default}"
+        );
+    }
+}

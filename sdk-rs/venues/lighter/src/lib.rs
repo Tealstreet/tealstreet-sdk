@@ -219,9 +219,16 @@ impl Lighter {
         self.metadata
             .get(&market.symbol)
             .and_then(|meta| meta.default_leverage)
-            .map_or(market.limits.leverage.max, |default| {
-                default.clamp(market.limits.leverage.min, market.limits.leverage.max)
+            .and_then(|default| {
+                // Fallible: a malformed catalogue row (min above max) must not panic.
+                safe_cex_engine::num::clamp_leverage(
+                    default,
+                    market.limits.leverage.min,
+                    market.limits.leverage.max,
+                )
+                .ok()
             })
+            .unwrap_or(market.limits.leverage.max)
     }
     pub fn new(options: Options) -> Self {
         Self {
