@@ -1034,4 +1034,38 @@ it('attaches caller config (with custom keys + headers) to the resolved tunnel r
     expect(debugSpy).not.toHaveBeenCalled();
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[TradeTunnel]'), expect.anything());
   });
+
+
+  it.each([
+    [
+      'structured sign',
+      { message: 'bad upstream', details: { sign: 'fixture-secret', key: 'fixture-key', status: 503 } },
+    ],
+    ['header tuples', { message: 'bad upstream', headers: [['X-API-KEY', 'fixture-secret']] }],
+    ['relative', 'GET /private?signature=fixture-secret failed'],
+    ['encoded', encodeURIComponent('https://venue.example/private?signature=fixture-secret')],
+    ['JSON escaped', String.raw`lost https:\/\/venue.example\/private?signature=fixture-secret`],
+  ])('does not leak %s upstream relay error in display or verbose console', async (_, upstream) => {
+    vi.useFakeTimers();
+    vi.stubEnv('DEBUG', '1');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const url = 'https://venue.example/private?signature=wire-secret';
+    const config: any = { url, method: 'GET', headers: {}, timeout: 100 };
+    try {
+      mockWs.replyTo = (sent) => mockWs.emitter.emit('sub:' + sent.nonce, { error: upstream });
+      const pending = Promise.resolve(adapter(config)).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(10);
+      const error = await pending;
+      expect(error).toBeInstanceOf(Error);
+      expect(mockWs.sentMessages[0]?.arg.url).toBe(url);
+      expect(config.url).toBe(url);
+      expect(error.message + ' ' + JSON.stringify(log.mock.calls)).not.toContain('fixture-secret');
+      expect(JSON.stringify(log.mock.calls)).not.toContain('fixture-key');
+    } finally {
+      adapter.dispose();
+      vi.useRealTimers();
+    }
+  });
+
 });

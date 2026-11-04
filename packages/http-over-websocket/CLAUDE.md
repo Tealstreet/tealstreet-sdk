@@ -214,3 +214,6 @@ Relay failure, readiness, timeout and send-state diagnostics retain only URL
 origin/path; signed queries and outgoing frame bodies/headers are never copied
 into display messages or previews. Original Axios config and signed wire bytes
 remain intact for interceptors and dispatch.
+Diagnostic strings normalize percent/JSON escapes through at most four layers;
+newly exposed secrets or deeper encoding discard the whole string. Nested auth
+fields, header tuples and secret-bearing object keys are scrubbed before logging.

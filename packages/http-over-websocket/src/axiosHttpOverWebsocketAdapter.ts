@@ -8,7 +8,7 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { bindProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from './config';
 import { tunnelEgressUrl, tunnelLanePort, tunnelOutage } from './tunnelEndpoints';
 import { isTokyoEgress } from './egressRegion';
-import { diagnosticUrl, stripDiagnosticUrlQueries } from './diagnosticUrl';
+import { diagnosticUrl, isDiagnosticSecretKey, stripDiagnosticUrlQueries } from './diagnosticUrl';
 import { HOWWebSocket } from './HOWWebSocket';
 import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, LatencyEntry } from './types';
 
@@ -23,8 +23,6 @@ export const TRADE_TUNNEL_RPC_VERSION = 4;
 const AUTH_REPLY_TIMEOUT_MS = 5_000;
 const TRADE_TUNNEL_ACCEPT_ENCODING = ['gzip'] as const;
 const TRADE_TUNNEL_GZIP_BASE64_ENCODING = 'gzip+base64';
-const SENSITIVE_LOG_KEY_PATTERN =
-  /authorization|cookie|password|passphrase|secret|token|signature|api[-_]?key|apikey|access[-_]?key|x-mbx-apikey/i;
 
 type TradeTunnelRouteContext = {
   selectedRegion: 'JA' | 'SG';
@@ -192,7 +190,10 @@ function sanitizeForTradeTunnelLog(value: unknown, depth = 0, seen = new WeakSet
   }
 
   if (Array.isArray(value)) {
-    const values = value.slice(0, MAX_LOG_ARRAY_LENGTH).map((item) => sanitizeForTradeTunnelLog(item, depth + 1, seen));
+    const header = typeof value[0] === 'string' && isDiagnosticSecretKey(value[0], true);
+    const values = value
+      .slice(0, MAX_LOG_ARRAY_LENGTH)
+      .map((item, index) => (header && index === 1 ? REDACTED : sanitizeForTradeTunnelLog(item, depth + 1, seen)));
     if (value.length > MAX_LOG_ARRAY_LENGTH) {
       values.push(`${TRUNCATED} ${value.length - MAX_LOG_ARRAY_LENGTH} items`);
     }
@@ -202,7 +203,7 @@ function sanitizeForTradeTunnelLog(value: unknown, depth = 0, seen = new WeakSet
   const output: Record<string, unknown> = {};
   const entries = Object.entries(value as Record<string, unknown>);
   for (const [key, entryValue] of entries.slice(0, MAX_LOG_OBJECT_KEYS)) {
-    output[key] = SENSITIVE_LOG_KEY_PATTERN.test(key)
+    output[stripDiagnosticUrlQueries(key)] = isDiagnosticSecretKey(key, true)
       ? REDACTED
       : sanitizeForTradeTunnelLog(entryValue, depth + 1, seen);
   }
