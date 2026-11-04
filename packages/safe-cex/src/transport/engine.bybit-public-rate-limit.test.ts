@@ -162,7 +162,9 @@ describe('Bybit public diagnostics on managed host responses', () => {
       transport,
     );
     try {
-      await expect(host.command({ op: 'fetchCandles', symbol: 'BTCUSDT', interval: '1m' })).rejects.toMatchObject(detail);
+      await expect(host.command({ op: 'fetchCandles', symbol: 'BTCUSDT', interval: '1m' })).rejects.toMatchObject(
+        detail,
+      );
       expect(delivered).toBe(text);
       expect(report).toHaveBeenCalledExactlyOnceWith(expected);
     } finally {
