@@ -126,8 +126,6 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
 test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
     ['orderly', 1_710_152, 1_721_344],
-    ['kraken', 2_111_267, 2_121_728],
-    ['krakenspot', 2_111_267, 2_121_728],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -159,7 +157,6 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
     ['hyperliquidspot', 2_095_474, 2_106_368],
     ['okx', 1_936_660, 1_947_648],
     ['paradex', 2_223_483, 2_234_368],
-    ['phemex', 2_040_251, 2_051_072],
     ['polymarket', 1_587_809, 1_598_464],
     ['txflow', 1_827_125, 1_838_080],
     ['weex', 1_925_507, 1_936_384],
@@ -191,4 +188,19 @@ test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain he
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
+});
+
+test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom and siblings match', () => {
+  for (const [venue, measured, cap] of [
+    ['phemex', 2_054_401, 2_065_408],
+    ['kraken', 2_121_746, 2_132_992],
+    ['krakenspot', 2_121_746, 2_132_992],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
 });

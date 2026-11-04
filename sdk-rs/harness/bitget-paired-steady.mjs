@@ -3,19 +3,19 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseCohortJson } from './cpu-cohort.mjs';
 import { validatePublicEvidence } from './cpu-remeasure.mjs';
 import { assessGateReport, validateKnownFailures } from './known-failure-policy.mjs';
-import { median, performanceFailures, performanceObjectives, REQUIRED_IMPROVEMENT } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, median, performanceFailures, performanceObjectives, REQUIRED_IMPROVEMENT } from './performance-policy.mjs';
 
 export const BITGET_PAIRED_TOLERANCE = 1.023110;
 export const BITGET_PAIRED_FREEZE_SHA256 = 'ee6b8fd762184969b2eacf7a5ef030bc8872acfbc474ca229377f1b181e99b62';
 export const BITGET_CUMULATIVE_ANCHOR = '518d3953c09daf63c1345ea465bbc55bd313f53a';
-export const BITGET_MEASUREMENT_FILES = Object.freeze(['sdk-rs/harness/gate.mjs', 'sdk-rs/harness/replay.mjs',
+export const BITGET_MEASUREMENT_FILES = Object.freeze(['sdk-rs/harness/gate.mjs', 'sdk-rs/harness/replay.mjs', 'sdk-rs/harness/cpu-observation.mjs',
   'sdk-rs/harness/performance-policy.mjs', 'sdk-rs/harness/ci-wasm.mjs',
   'sdk-rs/harness/bitget-paired-steady.mjs', 'sdk-rs/harness/cpu-ci.mjs', 'sdk-rs/harness/revalidate-gate.mjs']);
 export const BITGET_COHORT_ORDER = Object.freeze(['baseline', 'candidate', 'candidate', 'baseline',
   'candidate', 'baseline', 'baseline', 'candidate']);
 export const BITGET_PAIRED_PROTOCOL_SHA256 = createHash('sha256').update(JSON.stringify({
-  order: BITGET_COHORT_ORDER, pairsPerCohort: 9, correctnessPairsPerCohort: 1, attempt: 1,
-  statistic: '(median(B Rust36)/median(B TS36))/(median(A Rust36)/median(A TS36))',
+  order: BITGET_COHORT_ORDER, pairsPerCohort: PUBLIC_REPLAY_PAIRS, correctnessPairsPerCohort: 1, attempt: 1,
+  statistic: `(median(B Rust${4 * PUBLIC_REPLAY_PAIRS})/median(B TS${4 * PUBLIC_REPLAY_PAIRS}))/(median(A Rust${4 * PUBLIC_REPLAY_PAIRS})/median(A TS${4 * PUBLIC_REPLAY_PAIRS}))`,
   scope: 'bitget:public:steadyCpuMs', freezeSha256: BITGET_PAIRED_FREEZE_SHA256,
   comparisons: ['tip', 'anchor'], cumulativeAnchor: BITGET_CUMULATIVE_ANCHOR,
   measurementCheckout: 'candidate', measurementFiles: BITGET_MEASUREMENT_FILES,
@@ -150,7 +150,7 @@ function assessContent(authority, evidence, manifest) {
     }
     for (const impl of ['ts', 'rust']) {
       const samples = report.samples[impl].map(sample => sample.steadyCpuMs);
-      insist(samples.length === 9 && samples.every(sample => Number.isFinite(sample) && sample > 0),
+      insist(samples.length === PUBLIC_REPLAY_PAIRS && samples.every(sample => Number.isFinite(sample) && sample > 0),
         'invalid or incomplete steady samples');
       pooled[arm][impl].push(...samples);
     }
@@ -158,7 +158,7 @@ function assessContent(authority, evidence, manifest) {
       reportSha256: sha256(value.reportBytes), raw: value.raw.map(({ impl, mode, run, sha256 }) => ({ impl, mode, run, sha256 })) });
   }
   const summary = Object.fromEntries(Object.entries(pooled).map(([arm, samples]) => {
-    insist(samples.ts.length === 36 && samples.rust.length === 36, 'missing pooled samples');
+    insist(samples.ts.length === 4 * PUBLIC_REPLAY_PAIRS && samples.rust.length === 4 * PUBLIC_REPLAY_PAIRS, 'missing pooled samples');
     const ts = median(samples.ts), rust = median(samples.rust);
     return [arm, { tsMedianMs: ts, rustMedianMs: rust, rustTsRatio: rust / ts }];
   }));

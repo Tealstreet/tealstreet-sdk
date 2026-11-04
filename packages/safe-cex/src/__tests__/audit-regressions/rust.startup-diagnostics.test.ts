@@ -73,6 +73,50 @@ it('does not turn arbitrary stage text or invalid counters into Sentry tags', ()
   ).toEqual({});
 });
 
+it('forwards bounded request failure facts with the actual venue and no additional error', () => {
+  vi.stubGlobal('window', undefined);
+  const exchange = new RustEngineExchange('bybit', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  accounts.push(exchange);
+  const events = vi.fn(),
+    errors = vi.fn();
+  exchange.on('engine-event', events);
+  exchange.on('error', errors);
+  (exchange as any).receiveEvent({
+    code: 'http.request_failed',
+    level: 'debug',
+    message: 'HTTP request failed',
+    fields: { method: 'GET', path: '/v5/market/instruments-info', kind: 'timeout', phase: 'preparing' },
+  });
+  expect(events).toHaveBeenCalledWith(
+    expect.objectContaining({
+      fields: {
+        venue: 'bybit',
+        method: 'GET',
+        path: '/v5/market/instruments-info',
+        kind: 'timeout',
+        phase: 'preparing',
+      },
+    }),
+  );
+  expect(errors).not.toHaveBeenCalled();
+});
+
+it('tags only host-templated deadline metadata on the original read error', () => {
+  const event = {
+    code: 'request.failed',
+    level: 'error' as const,
+    message: 'HTTP request timed out',
+    fields: { httpMethod: 'GET', httpPath: '/v5/order/:segment', httpPhase: 'released' },
+  };
+  expect(startupDiagnosticTags(event)).toEqual({
+    http_request_method: 'GET',
+    http_request_path: '/v5/order/:segment',
+    http_request_phase: 'released',
+  });
+  for (const path of ['/v5/order/SECRET', '/v5/order?signature=SECRET', 'https://api.bybit.com/v5/order'])
+    expect(startupDiagnosticTags({ ...event, fields: { ...event.fields, httpPath: path } })).toEqual({});
+});
+
 it.each(['state', 'spot', 'orders', 'role', 'mode', 'discovery'])('allows the closed failed-read enum %s', (kind) => {
   expect(
     startupDiagnosticTags({

@@ -224,6 +224,11 @@ are reported through `console.error` with venue, event and original cause.
 Reporting emits no error/log event, so failures in those listeners cannot recurse.
 The inherited once/off/context and subscription-snapshot behavior stays intact.
 
+Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
+with the actual SDK venue plus method, redacted path template, phase and closed
+failure kind. Queries, origins and request material are never diagnostic fields;
+this event does not emit another error or change retries/native deadlines.
+
 ## Rust public-feed ownership
 
 Rust accounts use `publicFeed: { mode: 'direct' | 'disabled' }` or

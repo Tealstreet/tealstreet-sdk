@@ -6,7 +6,7 @@ import { classifyInitialCase } from './cpu-ci.mjs';
 import { decideRemeasurement } from './cpu-remeasure.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
-import { performanceFailures, performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './performance-policy.mjs';
 
 const A = 'a'.repeat(40), B = 'b'.repeat(40), TREE = 'c'.repeat(40);
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -53,11 +53,11 @@ function evidence(metadata, second = false, steady) {
     const bytes = JSON.stringify(output); raw.push({ impl, mode, run, bytes, sha256: sha(bytes) });
   };
   for (const impl of ['ts', 'rust']) add(impl, 'correctness', 0);
-  for (let run = 0; run < 9; run++) for (const impl of performanceOrder(run)) add(impl, 'performance', run);
+  for (let run = 0; run < PUBLIC_REPLAY_PAIRS; run++) for (const impl of performanceOrder(run)) add(impl, 'performance', run);
   const samples = Object.fromEntries(['ts', 'rust'].map(impl => [impl, raw.filter(slot => slot.impl === impl && slot.mode === 'performance').map(slot => JSON.parse(slot.bytes).metrics)]));
   const failures = performanceFailures(samples.ts, samples.rust).sort();
   const report = { ...publicCase, schema: 1, tapeSha256: sha('tape'), private: false,
-    runs: 9, correctnessRuns: 1, requiredImprovement: .1, status: failures.length ? 'FAIL' : 'PASS', failures, samples, fixers: [], ciWasm: metadata,
+    runs: PUBLIC_REPLAY_PAIRS, correctnessRuns: 1, requiredImprovement: .1, status: failures.length ? 'FAIL' : 'PASS', failures, samples, fixers: [], ciWasm: metadata,
     artifacts: raw.map(({ impl, mode, run }) => ({ impl, mode, run, path: `out/${impl}-${mode}-${run}` })) };
   return { report, raw, execution: { runId: '10', attempt: 1, jobId: second ? '21' : '20', runnerId: second ? '31' : '30',
     measuredCheckoutSha: B, imageOS: 'ubuntu24', imageVersion: 'pinned', architecture: 'x64', nodeVersion: 'v22',

@@ -1,6 +1,7 @@
 // Workflow orchestration: original reports remain strict; only the final job
 // can certify an authenticated canonical cohort. There is no rerun API here.
 import { spawnSync } from 'node:child_process';
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
@@ -432,7 +433,7 @@ async function secondMeasurement(context, suite, destination) {
     mkdirSync(dirname(reportPath), { recursive: true });
     const item = first.claim.case;
     const child = spawnSync(runtime.nodePath, [resolve(context.root, 'sdk-rs/harness/gate.mjs'),
-      '--venue', item.venue, '--tape', item.tape, '--books', item.books, '--runs', '9',
+      '--venue', item.venue, '--tape', item.tape, '--books', item.books, '--runs', String(PUBLIC_REPLAY_PAIRS),
       '--runtime-capsule', destination, '--report', reportPath], {
       cwd: context.root, env: { ...process.env, ...reset.env, CPU_COLLECTION_STATE: '' }, stdio: 'inherit',
     });
@@ -508,7 +509,7 @@ export function validatePlannedCases(plan) {
       Array.isArray(row.cases) && same(row.cases.map(value => gateCaseKey(value.case)).sort(), publicCases(row.suite).map(gateCaseKey).sort()), 'missing/duplicate/substituted complete public roster');
     insist(new Set(row.cases.map(value => value.key)).size === row.cases.length, 'duplicate case key');
     for (const value of row.cases) insist(['first', 'second'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
-      value.case.private === false && value.case.runs === 9 && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
+      value.case.private === false && value.case.runs === PUBLIC_REPLAY_PAIRS && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
   }
   return plan;
 }

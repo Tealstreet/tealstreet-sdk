@@ -128,6 +128,11 @@ yarn test           # Vitest
   `prepareLegacy` and the Axios function retain the existing parser/simulation
   behavior and provide no engine release guarantee. An epoch change invalidates
   a managed preparation before dispatch; cancellation never closes a shared peer.
+  Readiness also requires native OPEN and the current connected loop generation:
+  a browser can retire a socket while its close callback is still deferred after
+  sleep. Each actual open resets clock/token readiness. Bind/ready reject stale
+  resources with `HTTP_PREPARATION_STALE` before claim, so the engine re-prepares
+  and re-signs within the original deadline; no post-send failure is replayed.
 - Axios `config.timeout` is one deadline for the complete tunnel request, not
   only the post-send response wait. Token retrieval, socket/time sync,
   authentication, simulation, and response handling all consume the same

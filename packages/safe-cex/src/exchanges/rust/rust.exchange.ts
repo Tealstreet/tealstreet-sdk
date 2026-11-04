@@ -2207,6 +2207,8 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveEvent = (event: EngineEvent) => {
+    if (event.code === 'http.request_failed') event = { ...event, fields: { ...event.fields, venue: this.name } };
+
     if (event.code === 'startup.incomplete') {
       this.nativeStartupTags = startupDiagnosticTags(event);
       this.nativeStartupSampleAt = Date.now();
