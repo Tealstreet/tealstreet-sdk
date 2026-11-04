@@ -528,6 +528,9 @@ impl BitgetFutures {
         {
             return;
         }
+        // An owed full census (an Unknown write, a refresh ask) is never answered
+        // by the safety read's normal page alone, which proves no cover.
+        let virtual_only = virtual_only && !self.account.orders_dirty;
         self.account.orders_in_flight = true;
         self.account.orders_dirty = false;
         self.order_page(
