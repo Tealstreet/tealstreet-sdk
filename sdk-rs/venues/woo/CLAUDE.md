@@ -16,3 +16,10 @@ This is checkpoint timing and polling latency, not a book-triggered Rust wipe.
 Check selected HTTP responses and actual virtual-clock time before diagnosing
 these differences; retaining terminal rows or future position state would be
 the wrong runtime fix.
+
+
+# Endpoint migration follow-up
+
+The proposal in `docs/plans/RUST_WOO_ENDPOINT_MIGRATION.md` inventories the active
+native REST/socket contracts and next-cut RED gates. It changes no runtime route;
+legacy availability is not proved by an unauthenticated response.
