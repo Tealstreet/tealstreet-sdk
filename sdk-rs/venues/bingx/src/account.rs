@@ -135,6 +135,7 @@ pub struct Account {
     symbol_settings_sequence: u64,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
+    source_orders_owed: bool,
     positions_in_flight: Option<u64>,
     /// Numbers every positions read, so `readPositions` can name one it may trust.
     positions_read: u32,
@@ -710,7 +711,9 @@ impl Account {
         if self.orders_in_flight.is_some() {
             return;
         }
-        self.start_order_read(cx, credentials, None);
+        let primary = std::mem::take(&mut self.source_orders_owed)
+            .then_some(PrimaryReason::PostUnknownOrderRead);
+        self.start_order_read(cx, credentials, primary);
     }
     /// The snapshot that clears an uncertain-write fence is Primary-signed, so a
     /// read key can never be the read that proves the trading account's orders.
@@ -718,10 +721,15 @@ impl Account {
         if cx.frame_fed() {
             return;
         }
+        if cx.orders_refresh_pending() && self.orders_in_flight.is_some() {
+            self.source_orders_owed = true;
+            return;
+        }
         if cx.reconcile_reask() && self.orders_in_flight.is_some() {
             return;
         }
         self.bump_orders(cx.store);
+        self.source_orders_owed = false;
         self.start_order_read(cx, credentials, Some(PrimaryReason::PostUnknownOrderRead));
     }
     /// A fence needs a new owner even if an older snapshot is still pending.
@@ -1561,6 +1569,9 @@ impl Account {
                     cx.orders_reconciled_except(&fenced, read_epoch);
                 }
             }
+        }
+        if self.source_orders_owed && self.orders_in_flight.is_none() {
+            self.fetch_orders(cx, credentials);
         }
     }
 

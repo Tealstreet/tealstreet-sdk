@@ -196,8 +196,11 @@ fn a_source_ask_joins_an_ordinary_census_and_owes_one_successor() {
     for command in 100..200 {
         h.refresh(command, None);
     }
-    assert_eq!(h.orders_reads().iter().map(|r| r.id).collect::<Vec<_>>(),
-        first.iter().map(|r| r.id).collect::<Vec<_>>(), "retain the ordinary read, no competing batch");
+    assert_eq!(
+        h.orders_reads().iter().map(|r| r.id).collect::<Vec<_>>(),
+        first.iter().map(|r| r.id).collect::<Vec<_>>(),
+        "retain the ordinary read, no competing batch"
+    );
     h.now += 100.;
     let fresh_sent = h.now;
     h.answer_reads(&first);

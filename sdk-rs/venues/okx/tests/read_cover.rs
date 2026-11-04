@@ -420,11 +420,18 @@ fn a_source_ask_joins_an_ordinary_census_and_owes_one_successor() {
     let (mut e, _, mut out) = startup();
     for command in 100..200 {
         let reads = refresh(&mut e, command, None, 5.);
-        assert!(!reads.iter().any(|(a, _)| census_start(a)), "do not replace the ordinary census");
+        assert!(
+            !reads.iter().any(|(a, _)| census_start(a)),
+            "do not replace the ordinary census"
+        );
         out.extend(reads);
     }
     let (out, now, starts, _) = drive(&mut e, out, 5., 10., 2, empty);
-    assert_eq!(starts.len(), 2, "ordinary census plus one coalesced successor");
+    assert_eq!(
+        starts.len(),
+        2,
+        "ordinary census plus one coalesced successor"
+    );
     assert!(starts[0] < 5. && starts[1] > 5., "{starts:?}");
     assert_eq!(account_cover(&mut e, now).1, Some(starts[1]));
     assert!(!out.iter().any(|(a, _)| census_start(a)), "no third census");

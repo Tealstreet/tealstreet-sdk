@@ -17,6 +17,15 @@ retains an ordinary census in flight and sets its existing follow-up flag,
 instead of abandoning that census and starting a competing physical batch.
 Read epochs, cover validation, and malformed/partial-read rules are unchanged.
 
+BingX and OKX also join an ordinary census when this source ask is pending.
+Each retains one owed successor; starting a fresh census consumes that demand.
+BingX keeps the successor Primary-signed, including when its normal poll
+recovers a failed old read. OKX keeps the source debt separate from the
+balance/positions re-read flag and preserves its existing failure retry wait.
+Both production controls failed before these joins: an ask started a competing
+ordinary census. One hundred asks now retain the original census and produce
+one fresh successor, whose send supplies the account cover.
+
 Callers forwarding engine events must retain this control event even when
 the cancel's Unknown error has already been displayed. No caller should
 resubmit the cancel or treat a later absence as proof that this cancel caused
