@@ -51,6 +51,9 @@ pub mod section {
     /// A venue's private state for frame-fed engines (`Venue::export_venue_state`):
     /// a u32 length, then the venue's own bytes, padded.
     pub const VENUE_STATE: u16 = 22;
+    /// Beside ORDERS: rows rebuilt from a venue read are as old as the earliest
+    /// such read's send, on the writer's clock (one f64), not the frame's stamp.
+    pub const ORDERS_READ: u16 = 23;
 }
 
 pub mod status_flag {
@@ -216,6 +219,12 @@ impl<'a> FrameWriter<'a> {
         self.begin(section::VENUE_STATE);
         self.u32(state.len() as u32);
         self.buf.extend_from_slice(state);
+        self.end();
+    }
+
+    pub fn orders_read(&mut self, sent: f64) {
+        self.begin(section::ORDERS_READ);
+        self.f64(sent);
         self.end();
     }
 

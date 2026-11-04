@@ -603,9 +603,6 @@ const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this ven
 /// A repair on a feed that has carried no data this long reconnects it instead.
 #[cfg(feature = "managed-sockets")]
 const REPAIR_SILENCE_MS: f64 = 30_000.0;
-/// Data source: a `RefreshOrders` whose read never landed stops blocking a new one.
-#[cfg(feature = "order-locks")]
-const ORDERS_REFRESH_WAIT_MS: f64 = 30_000.0;
 /// The same topic repaired again within this window reconnects its feed.
 #[cfg(feature = "managed-sockets")]
 const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;
@@ -1730,12 +1727,20 @@ struct IoCore {
     #[cfg(feature = "order-locks")]
     active_commands: std::collections::HashSet<CommandId>,
     #[cfg(feature = "order-locks")]
-    order_read_tokens: crate::IdMap<RequestId, u64>,
+    /// Each order read's order-lock epoch and send time (this engine's clock).
+    order_read_tokens: crate::IdMap<RequestId, (u64, f64)>,
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
-    /// Data source: the order-lock epoch a `RefreshOrders` asked from, and when.
+    /// Data source: the order-lock epoch the latest `RefreshOrders` opened.
     #[cfg(feature = "order-locks")]
-    orders_refresh: Option<(u64, f64)>,
+    orders_refresh: Option<u64>,
+    /// The send time of the read `order_response_token` belongs to.
+    #[cfg(feature = "order-locks")]
+    order_response_sent: f64,
+    /// Data source: how old the order rows reaching the next frame are: the send
+    /// of the last complete read, or earlier if a partial read touched them since.
+    #[cfg(feature = "order-locks")]
+    orders_read_sent: Option<f64>,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -1942,6 +1947,10 @@ impl Default for IoCore {
             order_response_token: None,
             #[cfg(feature = "order-locks")]
             orders_refresh: None,
+            #[cfg(feature = "order-locks")]
+            order_response_sent: f64::NEG_INFINITY,
+            #[cfg(feature = "order-locks")]
+            orders_read_sent: None,
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -2538,7 +2547,7 @@ impl<P> Cx<'_, P> {
             self.io
                 .core
                 .order_read_tokens
-                .insert(id, self.io.core.order_locks.token());
+                .insert(id, (self.io.core.order_locks.token(), self.now));
         }
         self.io.pending.insert(
             id,
@@ -3038,7 +3047,7 @@ impl<P> Cx<'_, P> {
                 .core
                 .order_locks
                 .reconciled(symbol, token.min(epoch));
-            self.orders_refreshed(symbol.is_none(), token.min(epoch));
+            self.orders_read(symbol.is_none(), token.min(epoch));
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = (symbol, epoch);
@@ -3054,7 +3063,7 @@ impl<P> Cx<'_, P> {
                 .core
                 .order_locks
                 .reconciled_except(unproven, token.min(epoch));
-            self.orders_refreshed(unproven.is_empty(), token.min(epoch));
+            self.orders_read(unproven.is_empty(), token.min(epoch));
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = (unproven, epoch);
@@ -3066,25 +3075,31 @@ impl<P> Cx<'_, P> {
         #[cfg(feature = "order-locks")]
         if let Some(token) = self.io.core.order_response_token {
             self.io.core.order_locks.reconciled(symbol, token);
-            self.orders_refreshed(symbol.is_none(), token);
+            self.orders_read(symbol.is_none(), token);
         }
         #[cfg(not(feature = "order-locks"))]
         let _ = symbol;
     }
 
-    /// Data source: a complete orders read sent after a `RefreshOrders` answers it.
-    /// Its rows go out as ORDERS in the next frame, changed or not.
+    /// The rows of an orders read just reached the store, as old as its send.
+    /// A complete read sent at or after a `RefreshOrders` answers it: its rows go
+    /// out as ORDERS in the next frame, changed or not. An older one cannot, and
+    /// asks for another read.
     #[cfg(feature = "order-locks")]
-    fn orders_refreshed(&mut self, complete: bool, token: u64) {
-        if complete
-            && self
-                .io
-                .core
-                .orders_refresh
-                .is_some_and(|(epoch, _)| token >= epoch)
-        {
+    fn orders_read(&mut self, complete: bool, token: u64) {
+        let sent = self.io.core.order_response_sent;
+        self.io.core.orders_read_sent = Some(match self.io.core.orders_read_sent {
+            Some(earlier) if !complete => earlier.min(sent),
+            _ => sent,
+        });
+        let Some(epoch) = self.io.core.orders_refresh.filter(|_| complete) else {
+            return;
+        };
+        if token >= epoch {
             self.io.core.orders_refresh = None;
             self.store.mark_orders_read();
+        } else {
+            self.io.queue_reconcile(None, self.now);
         }
     }
 
@@ -4488,6 +4503,8 @@ impl<V: Venue> Engine<V> {
         // otherwise a grace long enough to absorb the unmeasured skew.
         let cover = applied.orders.then(|| {
             let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
+            // Rows from a venue read are as old as that read, however late it landed.
+            let stamp = applied.orders_read.map_or(stamp, |sent| stamp.min(sent));
             match self.source_clock_offset {
                 Some(offset) => stamp - offset - crate::frame_fed::FENCE_GRACE_MS,
                 None => stamp - crate::frame_fed::UNSYNCED_FENCE_GRACE_MS,
@@ -5365,17 +5382,11 @@ impl<V: Venue> Engine<V> {
                 command,
                 action: VenueAction::RefreshOrders,
             }) => {
+                // Every ask opens a newer epoch: a read already out, sent before
+                // a later lost write, can never answer it.
                 #[cfg(feature = "order-locks")]
-                if self.venue.refreshes_orders()
-                    && cx
-                        .io
-                        .core
-                        .orders_refresh
-                        .is_none_or(|(_, at)| now - at >= ORDERS_REFRESH_WAIT_MS)
-                {
-                    // Reads sent from here on carry a newer epoch than any already out.
-                    let epoch = cx.io.core.order_locks.advance();
-                    cx.io.core.orders_refresh = Some((epoch, now));
+                if self.venue.refreshes_orders() {
+                    cx.io.core.orders_refresh = Some(cx.io.core.order_locks.advance());
                     cx.io.queue_reconcile(None, now);
                 }
                 cx.done(command, "null".into());
@@ -5932,7 +5943,9 @@ impl<V: Venue> Engine<V> {
     fn http_end(&mut self, now: f64, request: RequestId) {
         #[cfg(feature = "order-locks")]
         {
-            self.io.core.order_response_token = self.io.core.order_read_tokens.remove(&request);
+            let read = self.io.core.order_read_tokens.remove(&request);
+            self.io.core.order_response_token = read.map(|(epoch, _)| epoch);
+            self.io.core.order_response_sent = read.map_or(f64::NEG_INFINITY, |(_, sent)| sent);
         }
         let (Some(incoming), Some(pending)) = (
             self.io.core.incoming.remove(&request),
@@ -6898,6 +6911,12 @@ impl<V: Venue> Engine<V> {
         let pending = store.then(|| self.store.take_pending());
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
+            #[cfg(feature = "order-locks")]
+            if let Some(sent) = self.io.core.orders_read_sent.take()
+                && pending.orders()
+            {
+                w.orders_read(sent);
+            }
             if let Some(state) = self.venue.export_venue_state_for(&self.store)
                 && self.venue_state_sent.as_deref() != Some(state.as_slice())
             {

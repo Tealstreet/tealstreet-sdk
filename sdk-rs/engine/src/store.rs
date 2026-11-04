@@ -147,6 +147,13 @@ pub struct Pending {
     ticker_deltas: Vec<(u32, u16)>,
 }
 
+impl Pending {
+    /// This frame carries ORDERS.
+    pub fn orders(&self) -> bool {
+        self.changes.orders
+    }
+}
+
 impl Store {
     /// Every market's quantity convention, written into its MARKETS flags.
     pub fn set_quantity_units(&mut self, units: crate::QuantityUnits) {

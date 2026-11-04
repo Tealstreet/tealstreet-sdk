@@ -828,16 +828,60 @@ fn a_fresh_read_that_finds_the_lost_order_brings_its_row() {
     );
 }
 
+/// codex-hcmq3f's repro: a read the source already had out, released before a
+/// later lost write, answered a newer ask and lifted that write's fence.
 #[test]
-fn a_refresh_in_flight_is_not_asked_again() {
+fn an_older_refresh_read_cannot_lift_a_later_lost_write() {
     let (mut source, mut page) = source_and_fenced_page();
-    advance_both(&mut source, &mut page, 3_500.0);
     refresh_orders(&mut source, 90);
-    source.requests.clear();
+    advance_both(&mut source, &mut page, 100.0);
+    lose_eth_placement(&mut page, 2);
+    advance_both(&mut source, &mut page, 3_500.0);
+    let old: Vec<_> = source
+        .requests
+        .iter()
+        .filter(|request| request.url.contains("/v5/order/realtime"))
+        .map(|request| (request.id, request.url.contains("settleCoin=USDT")))
+        .collect();
     source.command(Command::Venue {
         command: 91,
         action: safe_cex_engine::VenueAction::RefreshOrders,
     });
-    assert!(!source.has_request("/v5/order/realtime"));
-    assert!(matches!(source.result(91), Some(Ok(_))));
+    assert!(
+        !btc_place_goes_out(&mut page, 3),
+        "working control: fence holds before old data"
+    );
+    // Only the read refresh 90 sent, before the ETH write, lands now.
+    assert!(!old.is_empty());
+    source
+        .requests
+        .retain(|request| !old.iter().any(|(id, _)| *id == request.id));
+    for (id, usdt) in old {
+        source.reply(id, 200, if usdt { LOST_ORDER_RESTING } else { NO_ROWS });
+    }
+    forward(&mut source, &mut page);
+    let place_eth = |page: &mut Harness, command| {
+        let mut order = support::order();
+        order.symbol = "ETHUSDT".into();
+        page.requests.clear();
+        page.command(Command::PlaceOrders {
+            command,
+            orders: vec![order],
+        });
+        page.has_request("/v5/order/create")
+    };
+    assert!(
+        !place_eth(&mut page, 4),
+        "the orders read was released before the lost ETH write; it cannot authorize a second placement"
+    );
+    // The old read could not answer ask 91, so the source reads again; that read,
+    // sent well after the ETH write and finding no such order, lifts its fence.
+    assert!(
+        source.has_request("/v5/order/realtime"),
+        "{:?}",
+        source.paths()
+    );
+    answer_all(&mut source, "/v5/order/realtime", NO_ROWS);
+    assert!(forward(&mut source, &mut page));
+    assert!(place_eth(&mut page, 5));
 }
