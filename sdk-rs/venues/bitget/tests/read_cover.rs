@@ -106,3 +106,68 @@ fn the_follow_up_to_a_refused_census_is_rate_bounded() {
         "no sooner than 2 s: {armed:?}"
     );
 }
+
+#[test]
+fn successive_refused_reads_wait_for_real_bound() {
+    let mut h = census_out();
+    for round in 0..3 {
+        let started = h.now;
+        h.private_message(&format!(r#"{{"arg":{{"channel":"orders"}},"data":[{{"orderId":"7","symbol":"BTCUSDT","size":"1","price":"{}","side":"buy","orderType":"limit","status":"live"}}]}}"#,88+round));
+        let timers: Vec<_> = h.timers.iter().map(|(id, _)| *id).collect();
+        h.orders(OPEN_ORDER);
+        assert!(!h.requests.iter().any(|r| r.url.contains("/orders-pending")));
+        let (timer, at) = *h
+            .timers
+            .iter()
+            .find(|(id, _)| !timers.contains(id))
+            .unwrap();
+        assert!(at >= started + 2000.);
+        h.timers.retain(|(id, _)| *id != timer);
+        h.now = at;
+        h.event(safe_cex_engine::Event::TimerFired { timer });
+        assert_eq!(
+            h.requests
+                .iter()
+                .filter(|r| r.url.contains("/orders-pending"))
+                .count(),
+            1
+        );
+        h.event(safe_cex_engine::Event::TimerFired { timer });
+        assert_eq!(
+            h.requests
+                .iter()
+                .filter(|r| r.url.contains("/orders-pending"))
+                .count(),
+            1
+        );
+    }
+}
+#[test]
+fn known_market_unsupported_order_blocks_cover() {
+    let mut h = census_out();
+    h.orders(r#"{"code":"00000","data":{"entrustedList":[{"orderId":"9","symbol":"BTCUSDT","size":"1","price":"1","side":"buy","orderType":"future_type","status":"live"}],"endId":""}}"#);
+    assert!(h.engine.store().order("9").is_none());
+    assert_eq!(account_cover(&mut h).1, None);
+}
+
+#[test]
+fn same_clock_stream_metadata_survives_refused_read() {
+    let mut h = census_out();
+    h.private_message(r#"{"arg":{"channel":"orders"},"data":[{"orderId":"7","symbol":"BTCUSDT","size":"1","price":"88","triggerPrice":"88","side":"sell","orderType":"market","planType":"track_plan","callbackRatio":"0.01","status":"live"}]}"#);
+    let row = h.engine.store().order("7").unwrap().clone();
+    let metadata = |h: &mut Harness| {
+        let f = h.engine.snapshot_frame(h.now).to_vec();
+        safe_cex_engine::wire::sections(&f)
+            .find(|(k, _)| *k == section::VENUE_STATE)
+            .unwrap()
+            .1
+            .to_vec()
+    };
+    let before = metadata(&mut h);
+    h.respond("/orders-pending", 200, EMPTY_PLANS);
+    h.respond("planType=profit_loss", 200, EMPTY_PLANS);
+    h.respond("planType=track_plan",200,r#"{"code":"00000","data":[{"orderId":"7","symbol":"BTCUSDT","size":"1","price":"1","triggerPrice":"1","side":"sell","orderType":"market","planType":"track_plan","callbackRatio":"0.2","status":"live"}]}"#);
+    assert_eq!(h.engine.store().order("7"), Some(&row));
+    assert_eq!(metadata(&mut h), before);
+    assert_eq!(account_cover(&mut h).1, None);
+}

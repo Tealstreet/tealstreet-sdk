@@ -1291,7 +1291,51 @@ impl Blofin {
                         *failed = true;
                     }
                     let source = Self::source(&o);
-                    for order in self.map_orders(cx, &o) {
+                    let mapped = self.map_orders(cx, &o);
+                    let working = !matches!(
+                        o.state.as_ref(),
+                        "filled" | "effective" | "canceled" | "partially_canceled" | "order_failed"
+                    );
+                    let market = (o.inst_type.is_empty()
+                        || o.inst_type.eq_ignore_ascii_case("SWAP"))
+                    .then(|| cx.store.market_by_id(&o.inst_id).map(|m| m.symbol.clone()))
+                    .flatten();
+                    // A working order on this account's market that maps to nothing (an
+                    // unsupported category or type) is still there: its stored copies
+                    // stay, and the census proves nothing for its market.
+                    if mapped.is_empty()
+                        && working
+                        && let Some(symbol) = market
+                    {
+                        let mut ids = Vec::new();
+                        for base in [&o.order_id, &o.tpsl_id] {
+                            if !base.is_empty() {
+                                ids.extend(
+                                    ["take_profit", "stop_loss"]
+                                        .map(|suffix| format!("{base}__{suffix}")),
+                                );
+                            }
+                        }
+                        ids.extend(
+                            [&o.order_id, &o.algo_id]
+                                .into_iter()
+                                .filter(|id| !id.is_empty())
+                                .map(|id| id.to_string()),
+                        );
+                        if ids.is_empty() {
+                            rows.reject(None);
+                        }
+                        for id in ids {
+                            rows.reject(Some(id));
+                        }
+                        self.account.census_unproven.push(symbol);
+                        cx.notice(
+                            Level::Warn,
+                            code::ROW_SKIPPED,
+                            format!("BloFin working order {last_cursor} maps to no supported order; its stored copies stay"),
+                        );
+                    }
+                    for order in mapped {
                         sources.insert(order.id.clone(), source.clone());
                         rows.push(order);
                     }

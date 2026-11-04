@@ -88,3 +88,61 @@ fn an_unmappable_census_row_proves_no_newer_cover() {
     assert!(h.e.store().order("bad").is_none(), "the row was not mapped");
     assert_eq!(account_cover(&mut h).1, before);
 }
+
+fn finish_row(h: &mut Harness, category: &str) {
+    h.reply("orders-pending", &format!(r#"{{"code":"0","data":[{{"instId":"BTC-USDT","orderCategory":"{category}","orderId":"new-working","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","price":"1","state":"live"}}]}}"#));
+    h.reply("orders-pending", EMPTY);
+    h.reply("orders-tpsl-pending", EMPTY);
+    h.reply("orders-algo-pending", EMPTY);
+}
+#[test]
+fn supported_working_row_advances_cover_control() {
+    let (mut h, _) = census_out();
+    finish_row(&mut h, "normal");
+    assert!(h.e.store().order("new-working").is_some());
+    assert_eq!(account_cover(&mut h).1, Some(10_000.));
+}
+#[test]
+fn unsupported_working_row_must_not_advance_cover() {
+    let (mut h, before) = census_out();
+    finish_row(&mut h, "future_category");
+    assert!(h.e.store().order("new-working").is_none());
+    assert_eq!(
+        account_cover(&mut h).1,
+        before,
+        "unmapped live owned order is not proof of absence"
+    );
+}
+fn state(h: &mut Harness) -> Vec<u8> {
+    let frame = h.e.snapshot_frame(h.now).to_vec();
+    safe_cex_engine::wire::sections(&frame)
+        .find(|(k, _)| *k == section::VENUE_STATE)
+        .unwrap()
+        .1
+        .to_vec()
+}
+#[test]
+fn same_clock_stream_source_and_rows_survive_refused_snapshot() {
+    let (mut h, before) = census_out();
+    h.ws(&format!(
+        r#"{{"arg":{{"channel":"orders"}},"data":[{STREAMED}]}}"#
+    ));
+    let row = h.e.store().order("streamed").unwrap().clone();
+    let metadata = state(&mut h);
+    h.reply(
+        "orders-pending",
+        &format!(
+            r#"{{"code":"0","data":[{}]}}"#,
+            STREAMED
+                .replace("cross", "isolated")
+                .replace("net", "long")
+                .replace("59000", "1")
+        ),
+    );
+    h.reply("orders-pending", EMPTY);
+    h.reply("orders-tpsl-pending", EMPTY);
+    h.reply("orders-algo-pending", EMPTY);
+    assert_eq!(h.e.store().order("streamed"), Some(&row));
+    assert_eq!(state(&mut h), metadata);
+    assert_eq!(account_cover(&mut h).1, before);
+}
