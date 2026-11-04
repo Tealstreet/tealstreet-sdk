@@ -325,6 +325,12 @@ export class HOWWebSocket {
     noteTunnelDialOpened(this.dialedUrl);
     if (!this.isDisposed) {
       this.isOpen = true;
+      // A frozen browser can redial a CLOSED socket before its old close event runs.
+      // Never carry clock/auth readiness into a replacement connection.
+      this.isTimeSynced = false;
+      this.isTokenSent = false;
+      this.tokenSentAt = 0;
+      this.authState = HOWWebSocketAuthState.Unknown;
       clearTimeout(this.connectCheckTimeout);
       this.connectCheckTimeout = undefined;
 

@@ -467,6 +467,11 @@ const createAxiosHttpOverWebsocketAdapter = (
       howWebSocket = selectedRegion === 'JA' ? howWebSocketJA : howWebSocketSG;
     }
     lastSocket = howWebSocket;
+    const connected = () =>
+      howWebSocket.isOpen &&
+      howWebSocket.ws !== undefined &&
+      howWebSocket.ws.readyState === howWebSocket.ws.OPEN &&
+      howWebSocket.ws.loopState.phase === 'connected';
     const baseRouteContext: TradeTunnelRouteContext = {
       selectedRegion,
       tunnelHost: selectedRegion === 'JA' ? 'tokyo' : 'singapore',
@@ -500,7 +505,7 @@ const createAxiosHttpOverWebsocketAdapter = (
       const readinessState = (): TradeTunnelReadiness => {
         const loop = howWebSocket.ws?.loopState;
         return {
-          stage: !howWebSocket.isOpen ? 'connect' : !howWebSocket.isTimeSynced ? 'timeSync' : 'authReply',
+          stage: !connected() ? 'connect' : !howWebSocket.isTimeSynced ? 'timeSync' : 'authReply',
           ...(loop
             ? { socketPhase: loop.phase, socketPhaseSeconds: Math.round((Date.now() - loop.since) / 1000) }
             : {}),
@@ -666,7 +671,7 @@ const createAxiosHttpOverWebsocketAdapter = (
           const MAX_RETRIES = 5;
           try {
             // Wait for WebSocket to be ready
-            while (!howWebSocket.isOpen || !howWebSocket.isTimeSynced) {
+            while (!connected() || !howWebSocket.isTimeSynced) {
               await sleepWithinDeadline(25);
             }
             // Use runtime globals that webpack/SWC don't constant-fold.
@@ -699,11 +704,14 @@ const createAxiosHttpOverWebsocketAdapter = (
         }
         // One immediate redial per wait, rather than sitting out a backoff a wake left behind.
         let redialed = false;
-        while (!howWebSocket.isOpen || !howWebSocket.isTimeSynced) {
-          if (howWebSocket.redialIfConnectExpired?.()) redialed = true;
-          if (!redialed) redialed = howWebSocket.redialIfBackingOff?.() ?? false;
-          await sleepWithinDeadline(25);
-        }
+        const waitForConnection = async () => {
+          while (!connected() || !howWebSocket.isTimeSynced) {
+            if (howWebSocket.redialIfConnectExpired?.()) redialed = true;
+            if (!redialed) redialed = howWebSocket.redialIfBackingOff?.() ?? false;
+            await sleepWithinDeadline(25);
+          }
+        };
+        await waitForConnection();
 
         // IP-whitelisted connections are authenticated by TradeTunnel itself,
         // which sends rpc.auth success immediately after the WebSocket opens.
@@ -718,8 +726,9 @@ const createAxiosHttpOverWebsocketAdapter = (
           }
         }
 
-        while (howWebSocket.authState !== HOWWebSocketAuthState.Good) {
+        while (!connected() || !howWebSocket.isTimeSynced || howWebSocket.authState !== HOWWebSocketAuthState.Good) {
           await sleepWithinDeadline(25);
+          await waitForConnection();
           const isBad = howWebSocket.authState === HOWWebSocketAuthState.Bad;
           // isTokenSent alone would gate every later request off resending for the
           // connection's life when the tunnel drops or never answers that rpc.auth.
@@ -770,11 +779,15 @@ const createAxiosHttpOverWebsocketAdapter = (
 
         readying = false;
         const epoch = howWebSocket.epoch;
+        const connection = howWebSocket.ws;
+        const generation = connection!.loopState.since;
         const usable = () =>
           !canceled &&
           !disposed &&
           !config.signal?.aborted &&
-          howWebSocket.isOpen &&
+          connected() &&
+          howWebSocket.ws === connection &&
+          howWebSocket.ws?.loopState.since === generation &&
           howWebSocket.isTimeSynced &&
           howWebSocket.authState === HOWWebSocketAuthState.Good &&
           howWebSocket.epoch === epoch;
