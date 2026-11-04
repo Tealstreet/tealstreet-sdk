@@ -146,6 +146,7 @@ const ROUTE: Record<PublicMethod, 'worker' | 'mirror' | 'unsupported' | 'writer'
   algoOp: 'mirror',
   routeAlgoOp: 'mirror',
   refreshAccountSettings: 'worker',
+  refreshAccountOrders: 'worker',
   ingestSourceFrame: 'mirror',
 };
 

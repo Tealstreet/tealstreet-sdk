@@ -131,6 +131,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // ddi2il standing rule: CI size plus 10 KiB rounded up to the KiB, shared-family siblings equal.
 // #3028 after merging #3039 at 9bf12da7671: PR run 41845929983 measured bitunix 1,838,517,
 // cryptocom 1,716,657, kucoin 1,670,273, kucoinspot 2,253,260, lighter 1,991,579, mexc 1,729,817 B.
+// #3047 Phemex read covers at d8899b7a3e0: PR run 41868980693 measured phemex 2,054,401 and
+// kraken 2,121,746 B; CI size plus 10 KiB rounded up to the KiB, krakenspot equal to kraken.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
   asterdex: 2_124_800,
@@ -149,8 +151,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   grvt: 1_778_688,
   hyperliquid: 2_106_368,
   hyperliquidspot: 2_106_368,
-  kraken: 2_121_728,
-  krakenspot: 2_121_728,
+  kraken: 2_132_992,
+  krakenspot: 2_132_992,
   kucoin: 1_681_408,
   kucoinspot: 2_264_064,
   lighter: 2_001_920,
@@ -159,7 +161,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   okx: 1_947_648,
   orderly: 1_721_344,
   paradex: 2_234_368,
-  phemex: 2_051_072,
+  phemex: 2_065_408,
   polymarket: 1_598_464,
   txflow: 1_838_080,
   weex: 1_936_384,

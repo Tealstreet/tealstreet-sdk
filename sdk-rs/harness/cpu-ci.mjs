@@ -1,6 +1,7 @@
 // Workflow orchestration: original reports remain strict; only the final job
 // can certify an authenticated canonical cohort. There is no rerun API here.
 import { spawnSync } from 'node:child_process';
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
@@ -178,15 +179,30 @@ const workflowIdentity = run => Object.fromEntries(['id', 'run_number', 'run_att
   'path', 'head_sha', 'head_branch', 'event'].map(key => [key, run[key]]));
 
 async function terminalProducer(context, jobName, stepName) {
-  let inventory = await evidenceInventory(context), originalJob, originalRun;
+  let inventory = await evidenceInventory(context), originalJob, originalRun, physical;
   for (;;) {
     const { run, jobs } = inventory, selected = jobs.filter(job => job.name === jobName);
     insist(run.id === context.runId && run.run_attempt === 1 && selected.length === 1,
       'missing unique artifact physical producer in original workflow attempt1');
     const job = selected[0];
     insist(Number.isSafeInteger(job.id) && job.id > 0 && Number.isSafeInteger(job.runner_id) && job.runner_id > 0 &&
-      job.run_id === run.id && job.run_attempt === 1 && job.head_sha === run.head_sha && job.head_branch === run.head_branch &&
-      job.status === 'completed' && job.conclusion === 'success', 'measurement not successful original physical attempt1');
+      job.run_id === run.id && job.run_attempt === 1 && job.head_sha === run.head_sha && job.head_branch === run.head_branch,
+      'measurement not successful original physical attempt1');
+    const { status, conclusion, ...observed } = producerIdentity(job);
+    physical ??= observed;
+    insist(same(observed, physical), 'producer physical identity changed during step metadata refresh');
+    // The job record can trail its own terminal steps; only a settled record is judged.
+    if (status !== 'completed' || conclusion == null) {
+      context.producerStepRefreshes ??= 0;
+      insist(context.producerStepRefreshes < PRODUCER_STEP_REFRESH_LIMIT,
+        `producer job not terminal after ${PRODUCER_STEP_REFRESH_LIMIT} refreshes: run ${run.id}, job ${job.id} ${job.name} ` +
+        `[${status}/${conclusion}]`);
+      context.producerStepRefreshes++;
+      await new Promise(resolve => setTimeout(resolve, PRODUCER_STEP_REFRESH_MS));
+      inventory = await evidenceInventory(context, true);
+      continue;
+    }
+    insist(job.conclusion === 'success', 'measurement not successful original physical attempt1');
     const identity = producerIdentity(job), workflow = workflowIdentity(run);
     originalJob ??= identity; originalRun ??= workflow;
     insist(same(identity, originalJob) && same(workflow, originalRun), 'producer physical identity changed during step metadata refresh');
@@ -417,7 +433,7 @@ async function secondMeasurement(context, suite, destination) {
     mkdirSync(dirname(reportPath), { recursive: true });
     const item = first.claim.case;
     const child = spawnSync(runtime.nodePath, [resolve(context.root, 'sdk-rs/harness/gate.mjs'),
-      '--venue', item.venue, '--tape', item.tape, '--books', item.books, '--runs', '9',
+      '--venue', item.venue, '--tape', item.tape, '--books', item.books, '--runs', String(PUBLIC_REPLAY_PAIRS),
       '--runtime-capsule', destination, '--report', reportPath], {
       cwd: context.root, env: { ...process.env, ...reset.env, CPU_COLLECTION_STATE: '' }, stdio: 'inherit',
     });
@@ -493,7 +509,7 @@ export function validatePlannedCases(plan) {
       Array.isArray(row.cases) && same(row.cases.map(value => gateCaseKey(value.case)).sort(), publicCases(row.suite).map(gateCaseKey).sort()), 'missing/duplicate/substituted complete public roster');
     insist(new Set(row.cases.map(value => value.key)).size === row.cases.length, 'duplicate case key');
     for (const value of row.cases) insist(['first', 'second'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
-      value.case.private === false && value.case.runs === 9 && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
+      value.case.private === false && value.case.runs === PUBLIC_REPLAY_PAIRS && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
   }
   return plan;
 }

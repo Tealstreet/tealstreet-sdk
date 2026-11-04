@@ -440,7 +440,17 @@ fn owned_first_and_filtered_only_failures_are_typed_without_a_partial_marker() {
             }
             fail_read(&mut e, &r, failure);
             let err = owned_terminal(&mut e, 99, false).unwrap_err();
-            assert_eq!(err.kind, Some(safe_cex_engine::ErrorKind::Internal));
+            assert_eq!(
+                err.kind,
+                Some(if failure == 0 {
+                    safe_cex_engine::ErrorKind::RateLimited
+                } else {
+                    safe_cex_engine::ErrorKind::Internal
+                })
+            );
+            if failure == 0 {
+                assert_eq!(err.venue_code.as_deref(), Some("510"));
+            }
         }
     }
 }

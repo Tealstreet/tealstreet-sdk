@@ -22,6 +22,7 @@ const tunnelReply = vi.hoisted(() => ({ data: '{"via":"tunnel"}', headers: {} as
 
 vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
   HOWWebSocket: class {
+    ws = { OPEN: 1, readyState: 1, loopState: { phase: 'connected', since: 0 } };
     epoch = 0;
     get isOpen() {
       return tunnelSocket.open;

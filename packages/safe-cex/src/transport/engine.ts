@@ -1,4 +1,9 @@
 import type { DisposableAxiosAdapter } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
+import type {
+  AccountReconnectDiagnostics,
+  ConnectionCloseDiagnostic,
+  TimerLatenessBucket,
+} from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import type { TunnelOutage } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import type { HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
@@ -10,6 +15,11 @@ import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } fr
 import { AxiosHeaders } from 'axios';
 
 import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
+import {
+  ConnectionDiagnostics,
+  HiddenTimerLateness,
+  maximumTimerLateness,
+} from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import { stripDiagnosticUrlQueries } from '@tealstreet/http-over-websocket/src/diagnosticUrl';
 import {
   onTunnelFailing,
@@ -463,6 +473,8 @@ const httpTransport = (
 ): {
   mode: 'direct' | 'how';
   invalidateCatalogue(): void;
+  connectionDiagnostic(): ConnectionCloseDiagnostic | undefined;
+  hiddenTimerLateness(): TimerLatenessBucket;
   request: Transport['request'];
   prepareHttp: NonNullable<Transport['prepareHttp']>;
   dispose(): void;
@@ -985,6 +997,9 @@ const httpTransport = (
     invalidateCatalogue: () => {
       for (const origin of catalogueOrigins) void sharedHyperliquidCatalogue.invalidateOrigin(origin);
     },
+    connectionDiagnostic: () => (adapter as Partial<DisposableAxiosAdapter> | undefined)?.connectionDiagnostic?.(),
+    hiddenTimerLateness: () =>
+      (adapter as Partial<DisposableAxiosAdapter> | undefined)?.hiddenTimerLateness?.() ?? 'unknown',
     request,
     prepareHttp: (request) => (request.intent === 'public' ? preparePublic(request) : prepare(request, request.intent)),
     dispose: () => {
@@ -996,6 +1011,12 @@ const httpTransport = (
   };
 };
 
+export type EngineTransport = Transport & {
+  reconnectDiagnostics(): AccountReconnectDiagnostics | undefined;
+  startupDiagnostics(): Record<string, string>;
+  invalidateCatalogue(): void;
+};
+
 /** Account options are already normalized by accountToExchangeOptions. */
 export const createEngineTransport = (
   exchange: ExchangeName,
@@ -1005,7 +1026,7 @@ export const createEngineTransport = (
   onProxyAuthorizationFailure?: (message: string) => void,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
-): Transport & { startupDiagnostics(): Record<string, string>; invalidateCatalogue(): void } => {
+): EngineTransport => {
   assertEngineAccountRouting(options, exchange);
   const infoFacts =
     exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidStartupFacts() : undefined;
@@ -1052,6 +1073,29 @@ export const createEngineTransport = (
       for (const candidate of candidates) if (candidate) requireSocketHeaders(candidate);
     }
   }
+  const diagnostics: Partial<Pick<AccountReconnectDiagnostics, 'public' | 'private' | 'business'>> = {};
+  const timerLateness = new HiddenTimerLateness();
+  let cachedDiagnostic: AccountReconnectDiagnostics | undefined;
+  let cachedDiagnosticKey = '';
+  const reconnectDiagnostics = (): AccountReconnectDiagnostics | undefined => {
+    const how = http.connectionDiagnostic();
+    const value = {
+      ...diagnostics,
+      ...(how ? { how } : {}),
+      hiddenTimerLateness: maximumTimerLateness(
+        timerLateness.bucket,
+        http.hiddenTimerLateness(),
+        readHttp?.hiddenTimerLateness() ?? 'unknown',
+      ),
+    };
+    const key = JSON.stringify(value);
+    if (key !== cachedDiagnosticKey) {
+      cachedDiagnosticKey = key;
+      cachedDiagnostic =
+        Object.keys(diagnostics).length || how || value.hiddenTimerLateness !== 'unknown' ? value : undefined;
+    }
+    return cachedDiagnostic;
+  };
   const fallbacks = new Map<string, WsDirectFallback>();
   let proxyAuthorizationFailing = false;
   const proxyAuthorization: ProxyAuthorizationNotice = {
@@ -1139,13 +1183,20 @@ export const createEngineTransport = (
       readHttp?.invalidateCatalogue();
     },
     httpMode: http.mode,
+    reconnectDiagnostics,
     engineOptions: {
       ...transport.engineOptions,
       ...(exchange === 'grvt' ? { grvtSessionProxy: Boolean(routes.private.host) } : {}),
     },
     webSocketHeaders: transport.webSocketHeaders,
     now: () => transport.now(),
-    setTimeout: (fn, ms) => transport.setTimeout(fn, ms),
+    setTimeout: (fn, ms) => {
+      const dueAt = Date.now() + Math.max(0, ms);
+      return transport.setTimeout(() => {
+        timerLateness.observe(dueAt);
+        fn();
+      }, ms);
+    },
     clearTimeout: (handle) => transport.clearTimeout(handle),
     prepareHttp: (request) => {
       const { route, intent, ...packet } = request;
@@ -1239,9 +1290,42 @@ export const createEngineTransport = (
         fallback?.onMessage();
         handlers.onBinary?.(data);
       };
-      if (connection?.kind !== 'relay')
-        return transport.connect(target, { ...handlers, headers, onMessage: receive, onBinary: receiveBinary });
+      const diagnostic = new ConnectionDiagnostics(
+        connection?.kind === 'relay' ? 'relay' : target === url ? 'direct' : 'proxy',
+      );
+      diagnostic.dial(target);
+      let locallyClosed = false;
+      const recordClose = (code?: number) => {
+        diagnostics[channel] = diagnostic.closed(
+          locallyClosed ? 'local' : code === undefined || code === 1006 ? 'unknown' : 'remote',
+        );
+      };
+      if (connection?.kind !== 'relay') {
+        const native = transport.connect(target, {
+          ...handlers,
+          headers,
+          onMessage: receive,
+          onBinary: receiveBinary,
+          onOpen: () => {
+            diagnostic.opened();
+            handlers.onOpen();
+          },
+          onClose: (code) => {
+            recordClose(code);
+            handlers.onClose(code);
+          },
+        });
+        return {
+          send: (text) => native.send(text),
+          close: () => {
+            locallyClosed = true;
+            recordClose();
+            native.close();
+          },
+        };
+      }
       let socket: { send(text: string): void; close(): void } | undefined;
+      let relayDiagnostics: ConnectionDiagnostics | undefined;
       let closed = false;
       let opened = false;
       const pending: string[] = [];
@@ -1258,9 +1342,11 @@ export const createEngineTransport = (
               : new RelayWebSocket(target, [], relayOptions),
           );
           socket = relay;
+          relayDiagnostics = relay.diagnostics;
           relay.addEventListener('open', () => {
             if (!closed) {
               opened = true;
+              diagnostic.opened();
               for (const text of pending) relay.send(text);
               pending.length = 0;
               handlers.onOpen();
@@ -1279,6 +1365,7 @@ export const createEngineTransport = (
                 pending.length = 0;
                 // Browser close() forbids protocol error codes.
                 relay.close();
+                diagnostics[channel] = relay.diagnostics?.lastClose ?? diagnostic.closed('local');
                 handlers.onClose(1007);
               }
             },
@@ -1290,6 +1377,7 @@ export const createEngineTransport = (
           relay.addEventListener('close', (event) => {
             if (!closed) {
               closed = true;
+              diagnostics[channel] = relay.diagnostics?.lastClose ?? diagnostic.closed('unknown');
               handlers.onClose((event as CloseEvent).code);
             }
           });
@@ -1297,6 +1385,7 @@ export const createEngineTransport = (
         .catch(() => {
           if (!closed) {
             closed = true;
+            recordClose(1006);
             handlers.onClose(1006);
           }
         });
@@ -1308,12 +1397,16 @@ export const createEngineTransport = (
             if (pending.length >= 100) {
               closed = true;
               pending.length = 0;
+              locallyClosed = true;
+              diagnostics[channel] = (relayDiagnostics ?? diagnostic).closed('local');
               socket?.close();
               handlers.onClose(1006);
             } else pending.push(text);
           }
         },
         close: () => {
+          locallyClosed = true;
+          diagnostics[channel] = (relayDiagnostics ?? diagnostic).closed('local');
           closed = true;
           pending.length = 0;
           socket?.close();

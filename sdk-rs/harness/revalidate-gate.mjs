@@ -1,3 +1,4 @@
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -16,7 +17,7 @@ export function revalidateRecordedEvidence(evidence, { root = process.cwd() } = 
   const input = resolve(directory, `${name}.input.json`), output = resolve(directory, `${name}.strict.json`);
   writeFileSync(input, JSON.stringify(evidence));
   const child = spawnSync(process.execPath, [resolve(root, 'sdk-rs/harness/gate.mjs'),
-    '--venue', report.venue, '--tape', report.tape, '--books', report.books, '--runs', '9',
+    '--venue', report.venue, '--tape', report.tape, '--books', report.books, '--runs', String(PUBLIC_REPLAY_PAIRS),
     '--recorded-evidence', input, '--report', output], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
   writeFileSync(resolve(directory, `${name}.stdout.log`), child.stdout ?? '');
   writeFileSync(resolve(directory, `${name}.stderr.log`), child.stderr ?? '');

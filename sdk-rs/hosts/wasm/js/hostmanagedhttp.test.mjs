@@ -251,3 +251,71 @@ test('a shared pause refuses before claim and cancellation prevents late admissi
     r.host.dispose();
   }
 });
+
+test('a native deadline cancellation names the exact pending endpoint without signed material', async () => {
+  const r = rig(() => new Promise(() => {}));
+  const failures = [];
+  r.host.handlers.onEvent = (event) => failures.push(event);
+  const request = { ...packet, method: 'GET', url: 'https://api.bybit.com/v5/market/instruments-info?apiKey=SECRET&signature=SECRET#SECRET' };
+  r.host.execute({ ...prepare, packet: request });
+  r.at(1000);
+  r.host.run(JSON.stringify([
+    { op: 'event', level: 'error', code: 'request.failed', message: 'HTTP request timed out', fields: { httpTimeoutRequest: '7' } }, cancel,
+  ]));
+  r.host.execute(cancel);
+  assert.equal(failures.filter((event) => event.code === 'http.request_failed').length, 1);
+  assert.deepEqual(failures[0].fields, { method: 'GET', path: '/v5/market/instruments-info', kind: 'timeout', phase: 'preparing' });
+  assert.doesNotMatch(JSON.stringify(failures), /SECRET|api\.bybit|signature|apiKey/);
+  r.host.dispose();
+});
+
+test('released transport failure templates dynamic path segments and preserves ordinary engine failure', async () => {
+  const r = rig(() => ({ bind: () => ({ ready: () => true, dispatch: () => Promise.reject(new Error('SECRET')) }) }));
+  const failures = [];
+  r.host.handlers.onEvent = (event) => failures.push(event);
+  const actual = { ...packet, url: 'https://venue.test/api/v1/orders/SECRET?sign=SECRET' };
+  r.host.engine.httpPrepared = () => JSON.stringify([{ ...bind, packet: actual }]);
+  r.host.execute(prepare);
+  await tick();
+  assert.equal(failures.length, 1);
+  assert.deepEqual(failures[0].fields, { method: 'POST', path: '/api/v1/orders/:segment', kind: 'network', phase: 'released' });
+  assert.equal(r.events.filter(([name]) => name === 'httpFailed').length, 1);
+  assert.doesNotMatch(JSON.stringify(failures), /SECRET|venue\.test|sign=/);
+  r.host.dispose();
+});
+
+test('ordinary cancellation and disposal emit no request-failure diagnostic', async () => {
+  const r = rig(() => new Promise(() => {}));
+  const failures = [];
+  r.host.handlers.onEvent = (event) => failures.push(event);
+  r.host.execute(prepare); r.at(999); r.host.execute(cancel);
+  r.host.execute(prepare); r.at(5000); r.host.dispose();
+  assert.deepEqual(failures, []);
+});
+
+test('deadline context precedes a generic failure in the native timer action batch', async () => {
+  const r = rig(() => new Promise(() => {}));
+  const events = [];
+  r.host.handlers.onEvent = (event) => events.push(event);
+  r.host.execute(prepare);
+  r.at(1000);
+  r.host.run(JSON.stringify([
+    { op: 'event', level: 'error', code: 'request.failed', message: 'HTTP request timed out', fields: { httpTimeoutRequest: '7' } }, cancel,
+  ]));
+  assert.deepEqual(events.map((event) => event.code), ['http.request_failed', 'request.failed']);
+  r.host.dispose();
+});
+
+test('late provider answers and broken diagnostic observers cannot alter cleanup or failure delivery', async () => {
+  let complete;
+  const r = rig(() => new Promise((resolve) => { complete = resolve; }));
+  r.host.handlers.onEvent = (event) => { if (event.code === 'http.request_failed') throw new Error('observer failed'); };
+  r.host.execute(prepare);
+  r.at(1000); r.host.run(JSON.stringify([{ op: 'event', level: 'debug', code: 'request.failed', fields: { httpTimeoutRequest: '7' } }, cancel]));
+  let cleaned = 0;
+  complete({ cancel: () => cleaned++ }); await tick();
+  assert.equal(cleaned, 1);
+  assert.equal(r.host.managedHttp.resources.size, 0);
+  assert.equal(r.events.some(([name]) => name === 'claim'), false);
+  r.host.dispose();
+});

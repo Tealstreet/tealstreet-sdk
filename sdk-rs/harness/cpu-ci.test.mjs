@@ -1,3 +1,4 @@
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -8,12 +9,12 @@ import { resolve } from 'node:path';
 import { GATE_SUITES, expectedGateCases } from './ci-gate-suites.mjs';
 
 const dispositions = (decision) => [{ key: 'a'.repeat(64), decision,
-  case: { ...expectedGateCases('bitget')[0], tapeSha256: 'b'.repeat(64), private: false, runs: 9, correctnessRuns: 1 } }];
+  case: { ...expectedGateCases('bitget')[0], tapeSha256: 'b'.repeat(64), private: false, runs: PUBLIC_REPLAY_PAIRS, correctnessRuns: 1 } }];
 const plan = () => ({ schema: 1, runId: 1, checkoutSha: 'c'.repeat(40), suites: GATE_SUITES.map((suite, index) =>
   ({ suite, firstArtifactId: index + 2, firstArtifactDigest: 'sha256:' + 'd'.repeat(64),
     cases: publicCases(suite).map((item, ordinal) => ({
       key: (index * 10 + ordinal).toString(16).padStart(64, '0'), decision: 'first',
-      case: { ...item, tapeSha256: 'b'.repeat(64), private: false, runs: 9, correctnessRuns: 1 },
+      case: { ...item, tapeSha256: 'b'.repeat(64), private: false, runs: PUBLIC_REPLAY_PAIRS, correctnessRuns: 1 },
     })),
   })) });
 const job = (extra = {}) => ({ id: 3, run_attempt: 1, status: 'completed', conclusion: 'success', ...extra });
@@ -108,8 +109,8 @@ test('declared public diagnostics keep their strict FAIL and never request a CPU
     wasmBeforeBytes: 0, wasmBytes: 0, wasmRetainedBytes: 0,
     heapRetainedBytes: retained, bufferRetainedBytes: 0, retainedBytes: retained });
   const report = { schema: 1, venue: 'fixture', tapeSha256: 'b'.repeat(64), private: false, status: 'FAIL',
-    requiredImprovement: .1, failures: ['snapshot fixture mismatch'], correctnessRuns: 1, runs: 9,
-    samples: { ts: Array(9).fill(metric(200, 100)), rust: Array(9).fill(metric(100, 50)) } };
+    requiredImprovement: .1, failures: ['snapshot fixture mismatch'], correctnessRuns: 1, runs: PUBLIC_REPLAY_PAIRS,
+    samples: { ts: Array(PUBLIC_REPLAY_PAIRS).fill(metric(200, 100)), rust: Array(PUBLIC_REPLAY_PAIRS).fill(metric(100, 50)) } };
   const manifest = { schema: 1, failures: [{ venue: 'fixture', tapeSha256: report.tapeSha256,
     diagnostics: [{ key: 'snapshot fixture mismatch', divergence: 'existing declared fixture divergence' }] }] };
   assert.equal(classifyInitialCase({ report }, manifest).decision, 'first');
