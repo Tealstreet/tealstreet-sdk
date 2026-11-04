@@ -169,10 +169,10 @@ fn advertises_read_covers(e: &mut Engine<Hyperliquid>) -> bool {
 /// symbol-scoped refresh reads only that symbol's dex, and the account cover
 /// needs every HIP-3 dex (H9), so the ask would never land.
 #[test]
-fn only_spot_advertises_read_covers() {
+fn spot_and_perp_advertise_read_covers() {
     assert!(advertises_read_covers(&mut spot_source()));
     let (mut perp, _) = support::ready_with_dex("disabled", true);
-    assert!(!advertises_read_covers(&mut perp));
+    assert!(advertises_read_covers(&mut perp));
 }
 
 /// The ask reads spot's open orders; its answer publishes an account cover
@@ -223,4 +223,28 @@ fn spot_asks_while_a_read_is_out_get_one_follow_up() {
     assert_eq!(follow_up.len(), 1, "one follow-up read");
     support::reply(&mut e, &follow_up[0], 200, "[]");
     assert!(orders_reads(&mut e).is_empty());
+}
+
+/// §5.3: the account cover needs every dex, so a perp refresh ask that names a
+/// core symbol reads core and every HIP-3 dex, and lands with the account cover.
+#[test]
+fn a_perp_refresh_ask_naming_a_symbol_reads_every_dex_and_covers_the_account() {
+    let (mut e, _, held) = support::ready_holding_dex_orders("no-such-dex");
+    assert!(held.is_empty());
+    let read = |e: &mut Engine<Hyperliquid>, now, command, symbols| {
+        refresh(e, now, command, symbols);
+        let mut dexes = drive(e, now, now);
+        dexes.sort();
+        dexes
+    };
+    let dexes = read(&mut e, 5_000.0, 70, Some(vec!["BTC-PERP".into()]));
+    assert_eq!(dexes, [None, Some("xyz".to_owned())], "core and every dex");
+    assert_eq!(account_cover(&mut e, 5_000.0), Some(5_000.0));
+    let again = read(&mut e, 6_000.0, 71, None);
+    assert_eq!(
+        again,
+        [None, Some("xyz".to_owned())],
+        "the slot is free again"
+    );
+    assert_eq!(account_cover(&mut e, 6_000.0), Some(6_000.0));
 }

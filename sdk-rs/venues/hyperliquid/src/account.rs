@@ -780,22 +780,13 @@ impl Hyperliquid {
     pub(crate) fn reconcile_order_scopes(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        symbols: Option<&[String]>,
+        _symbols: Option<&[String]>,
     ) {
-        let mut dexes = if let Some(symbols) =
-            symbols.filter(|symbols| symbols.iter().all(|s| cx.store.market(s).is_some()))
-        {
-            symbols
-                .iter()
-                .map(|symbol| self.dex_of(cx, symbol).to_owned())
-                .collect::<Vec<_>>()
-        } else {
-            std::iter::once(String::new())
-                .chain(self.dex_names.iter().cloned())
-                .collect()
-        };
-        dexes.sort();
-        dexes.dedup();
+        // Core and every dex, whatever the symbols: the account cover joins
+        // them all (H9), so a symbol's dex alone could never answer a refresh ask.
+        let dexes: Vec<String> = std::iter::once(String::new())
+            .chain(self.dex_names.iter().cloned())
+            .collect();
         for dex in dexes {
             if self.account.inflight.contains(&format!("orders:{dex}")) {
                 if !cx.reconcile_reask() {

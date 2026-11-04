@@ -1097,10 +1097,9 @@ impl Venue for Hyperliquid {
         self.reconcile_order_scopes(cx, symbols);
         self.reconcile_settings(cx);
     }
-    // Spot reads its one scope. Perp's symbol-scoped read skips the other
-    // HIP-3 dexes the account cover joins (H9), so its ask would never land.
+    // Every read reads every scope the account cover joins (H9).
     fn refreshes_orders(&self) -> bool {
-        self.spot
+        true
     }
 
     type Pending = Pending;
@@ -1120,6 +1119,7 @@ impl Venue for Hyperliquid {
                 schedule_cancel: true,
                 fresh_positions: true,
                 symbol_cancel_misses_unseen: true,
+                order_read_covers: true,
                 ..safe_cex_engine::Capabilities::BASE
             }
         }
