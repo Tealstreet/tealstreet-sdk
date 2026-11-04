@@ -1689,6 +1689,14 @@ storage failure waits within the original read deadline rather than sending from
 an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
 Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
+Each Hyperliquid engine issues at most three routine account reads at once, with
+core Mode/State/Orders ahead of ancillary work. Queued intents acquire their
+managed deadline only when issued. Caller-owned reads and uncertain-write
+reconciliation bypass those slots while retaining the existing quota and root
+deadlines; only completion of an issued routine read releases its slot. Shared
+dispatch waiters use FIFO leases so newer cheap reads cannot starve older Orders;
+100 ms renewal and 2 s expiry bound a dead worker's obstruction without charging
+its abandoned work.
 
 The worker's unchanged 120 s timeout preserves closed native startup fields and
 per-account `/info` route, 429, quota-wait, undispatched and in-flight counters.

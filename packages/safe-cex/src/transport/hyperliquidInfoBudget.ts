@@ -6,14 +6,25 @@ const BUCKET_WINDOW_MS = 60_000;
 const MAX_PAUSE_MS = 300_000;
 const STORAGE_TIMEOUT_MS = 1500;
 const STORAGE_COOLDOWN_MS = 30_000;
+const DISPATCH_POLL_MS = 100;
+const DISPATCH_LEASE_MS = 2000;
+const MAX_DISPATCH_WAITERS = 128;
+type DispatchWaiter = { id: string; until: number };
 let indexedDBOpenedInRealm = false;
-type BudgetState = { nextAt: number; pausedUntil: number; generation: number; failures: number };
+type BudgetState = {
+  nextAt: number;
+  pausedUntil: number;
+  generation: number;
+  failures: number;
+  dispatchQueue?: DispatchWaiter[];
+};
 const emptyState = (): BudgetState => ({ nextAt: 0, pausedUntil: 0, generation: 0, failures: 0 });
 const mergeState = (a: BudgetState, b: BudgetState): BudgetState => ({
   nextAt: Math.max(a.nextAt, b.nextAt),
   pausedUntil: Math.max(a.pausedUntil, b.pausedUntil),
   generation: Math.max(a.generation, b.generation),
   failures: Math.max(a.failures, b.failures),
+  dispatchQueue: a.dispatchQueue,
 });
 class StorageTimeoutError extends Error {}
 let warned = false;
@@ -32,6 +43,15 @@ function boundedState(raw: Partial<BudgetState> = {}): BudgetState {
   const timestamp = (value: number | undefined, maximum: number) =>
     typeof value === 'number' && Number.isFinite(value) ? Math.max(now, Math.min(value, now + maximum)) : now;
   return {
+    dispatchQueue: Array.isArray(raw.dispatchQueue)
+      ? raw.dispatchQueue
+          .filter(
+            (row) =>
+              row && typeof row.id === 'string' && row.id.length <= 64 && Number.isFinite(row.until) && row.until > now,
+          )
+          .slice(0, MAX_DISPATCH_WAITERS)
+          .map((row) => ({ id: row.id, until: Math.min(row.until, now + DISPATCH_LEASE_MS) }))
+      : [],
     nextAt: timestamp(raw.nextAt, MAX_PAUSE_MS + BUCKET_WINDOW_MS),
     pausedUntil: timestamp(raw.pausedUntil, MAX_PAUSE_MS),
     generation: Number.isSafeInteger(raw.generation) && raw.generation! >= 0 ? raw.generation! : 0,
@@ -324,6 +344,7 @@ export class HyperliquidInfoBudget {
     wasSent: () => boolean = () => true,
   ): Promise<T> {
     const cost = grant.weight * MS_PER_WEIGHT;
+    const waiterId = crypto.randomUUID();
     let charged = false;
     let dispatched = false;
     const active = () => {
@@ -340,8 +361,20 @@ export class HyperliquidInfoBudget {
           const now = Date.now();
           const at = Math.max(now, state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
           if (at >= deadline || state.generation !== grant.generation) throw new HttpPreparationError('timedOut');
-          if (at > now) return { at };
+          const queue = (state.dispatchQueue ?? []).filter((row) => row.until > now);
+          const existing = queue.find((row) => row.id === waiterId);
+          if (!existing && queue.length >= MAX_DISPATCH_WAITERS)
+            return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
+          // Leases order dispatch attempts across realms without charging queued work.
+          state.dispatchQueue = existing
+            ? queue.map((row) =>
+                row.id === waiterId ? { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS) } : row,
+              )
+            : [...queue, { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS) }];
+          if (state.dispatchQueue[0]?.id !== waiterId || at > now)
+            return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
           state.nextAt = Math.max(now, state.nextAt) + cost;
+          state.dispatchQueue = state.dispatchQueue.filter((row) => row.id !== waiterId);
           return undefined;
         });
         if (!reservation) {
@@ -381,11 +414,13 @@ export class HyperliquidInfoBudget {
         await waitUntil(decision.at, signal);
       }
     } finally {
-      if (charged && !dispatched) {
+      if (!dispatched) {
         await this.backend
           .update(origin, (state) => {
+            state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
             // A 429 replaced the old token generation; refunds cannot weaken that floor.
-            if (state.generation === grant.generation) state.nextAt = Math.max(Date.now(), state.nextAt - cost);
+            if (charged && state.generation === grant.generation)
+              state.nextAt = Math.max(Date.now(), state.nextAt - cost);
           })
           .catch(() => warnHyperliquidInfoBudgetUnavailable());
       }

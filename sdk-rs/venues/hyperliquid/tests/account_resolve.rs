@@ -146,10 +146,11 @@ fn a_failed_role_lookup_retries_and_does_not_show_the_account_flat() {
         200,
         &format!(r#"{{"role":"agent","data":{{"user":"{MASTER}"}}}}"#),
     );
-    assert!(
-        run.take("userFees").is_some(),
-        "the resolved account starts"
-    );
+    let state = run
+        .take("clearinghouseState")
+        .expect("the resolved account starts its core read");
+    let body: serde_json::Value = serde_json::from_str(state.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["user"], MASTER);
 }
 
 #[test]

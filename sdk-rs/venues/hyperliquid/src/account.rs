@@ -16,6 +16,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// How soon `readPositions` tries again after a read a newer stream frame held.
 const UNREADABLE_ORDER: &str = "Hyperliquid returned an open order this account cannot read, so a fresh read cannot clear this. Cancel that order on Hyperliquid to resume";
 const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
+// Four engines expose at most twelve ordinary 20-weight reads: 14.4 s of
+// refill, leaving margin inside an issued read's unchanged 20 s deadline.
+const MAX_BACKGROUND_READS: u8 = 3;
 
 /// What a state read did to the store, for the `readPositions` waiting on it.
 enum StateApplied {
@@ -78,11 +81,18 @@ impl ReadContinuation {
         }
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ReadPriority {
+    Foreground,
+    Core,
+    Background,
+}
 struct QueuedRead {
     body: String,
-    request: ReadContinuation,
+    continuation: ReadContinuation,
     streamed: bool,
     weight: u32,
+    priority: ReadPriority,
 }
 struct SettingBarrier {
     at: f64,
@@ -122,6 +132,7 @@ pub struct Account {
     read_window: f64,
     read_weight: u32,
     reads: VecDeque<QueuedRead>,
+    background_reads: u8,
     pub refresh_timer: Option<TimerId>,
     spot_at: f64,
     spot_forced_at: Option<f64>,
@@ -300,14 +311,31 @@ impl Hyperliquid {
             Request::State { .. } | Request::Spot { .. } => 2,
             _ => 20,
         };
+        let urgent = std::mem::take(&mut self.account.fence_read)
+            || matches!(
+                &request,
+                Request::AmendSource { .. } | Request::AmendRole { .. } | Request::Asset { .. }
+            );
+        let core = match &request {
+            Request::Role | Request::Mode | Request::Spot { .. } => true,
+            Request::State { dex, .. } | Request::Orders { dex, .. } => dex.is_empty(),
+            _ => false,
+        };
         let read = QueuedRead {
             body,
-            request: ReadContinuation::Account(request),
+            continuation: ReadContinuation::Account(request),
             streamed,
             weight,
+            priority: if urgent {
+                ReadPriority::Foreground
+            } else if core {
+                ReadPriority::Core
+            } else {
+                ReadPriority::Background
+            },
         };
-        // A read an uncertain placement waits on goes ahead of routine refreshes.
-        if std::mem::take(&mut self.account.fence_read) {
+        // Foreground reconciliation never waits for a routine snapshot's network round trip.
+        if urgent {
             self.account.reads.push_front(read);
         } else {
             self.account.reads.push_back(read);
@@ -324,9 +352,10 @@ impl Hyperliquid {
         let weight = if streamed { 120 } else { 2 };
         self.account.reads.push_back(QueuedRead {
             body,
-            request: ReadContinuation::History(Box::new(request)),
+            continuation: ReadContinuation::History(Box::new(request)),
             streamed,
             weight,
+            priority: ReadPriority::Foreground,
         });
         self.pump_reads(cx);
     }
@@ -346,7 +375,19 @@ impl Hyperliquid {
             self.account.read_window = cx.now;
             self.account.read_weight = 0;
         }
-        while let Some(read) = self.account.reads.front() {
+        while let Some(index) = self
+            .account
+            .reads
+            .iter()
+            .enumerate()
+            .filter(|(_, read)| {
+                self.account.background_reads < MAX_BACKGROUND_READS
+                    || read.priority == ReadPriority::Foreground
+            })
+            .min_by_key(|(_, read)| read.priority)
+            .map(|(index, _)| index)
+        {
+            let read = &self.account.reads[index];
             // Leave headroom for chart reads and trading in the shared IP budget.
             if self.account.read_weight + read.weight > 1000 {
                 if self.account.read_timer.is_none() {
@@ -356,13 +397,14 @@ impl Hyperliquid {
                 }
                 return;
             }
-            let read = self.account.reads.pop_front().unwrap();
+            let read = self.account.reads.remove(index).unwrap();
             let read = match read {
                 QueuedRead {
                     body,
-                    request: ReadContinuation::History(mut history),
+                    continuation: ReadContinuation::History(mut history),
                     streamed,
                     weight,
+                    ..
                 } => {
                     let leg = match cx.http_leg_context(
                         history.root(),
@@ -407,22 +449,37 @@ impl Hyperliquid {
             };
             let QueuedRead {
                 body,
-                request,
+                continuation,
                 streamed,
                 weight,
+                priority,
             } = read;
             self.account.read_weight += weight;
-            if streamed {
-                self.info(cx, body, ArrayAt::Root, request.pending());
-            } else {
-                self.info_read(cx, body, request.pending(), None);
+            let background = priority != ReadPriority::Foreground;
+            if background {
+                self.account.background_reads += 1;
             }
+            // Only issued reads acquire a managed deadline; queued intents own no grant.
+            self.info_read(
+                cx,
+                body,
+                continuation.pending(),
+                streamed.then_some(ArrayAt::Root),
+                background,
+            );
+        }
+    }
+    pub(crate) fn finish_background_read(&mut self, cx: &mut Cx<'_, Pending>, background: bool) {
+        if background {
+            debug_assert!(self.account.background_reads > 0);
+            self.account.background_reads -= 1;
+            self.pump_reads(cx);
         }
     }
     pub(crate) fn discard_history_owner(&mut self, owner: safe_cex_engine::request_context::Owner) {
         self.account.reads.retain(|read| match read {
             QueuedRead {
-                request: ReadContinuation::History(history),
+                continuation: ReadContinuation::History(history),
                 ..
             } => history.root().owner() != owner,
             _ => true,
@@ -605,10 +662,10 @@ impl Hyperliquid {
         self.account_read(cx, "userAbstraction", None, Request::Mode, false);
     }
     fn private_bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account_read(cx, "userFees", None, Request::Fees, false);
         self.send_mode(cx);
-        self.check_builder(cx);
         self.refresh_account(cx);
+        self.account_read(cx, "userFees", None, Request::Fees, false);
+        self.check_builder(cx);
         if !self.dex_names.is_empty() {
             self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
                 120_000.0,
@@ -722,6 +779,7 @@ impl Hyperliquid {
         let read = self.account.state_reads.entry(dex.into()).or_default();
         *read += 1;
         let read = *read;
+        self.account.fence_read |= self.account.fresh_positions.owed(self.dex_key(dex));
         self.account_read(
             cx,
             "clearinghouseState",
@@ -769,7 +827,13 @@ impl Hyperliquid {
         for dex in dexes {
             if self.account.inflight.contains(&format!("orders:{dex}")) {
                 if !cx.reconcile_reask() {
-                    self.account.orders_refresh_due.insert(dex);
+                    self.account.orders_refresh_due.insert(dex.clone());
+                    if let Some(read) = self.account.reads.iter_mut().find(|read| matches!(&read.continuation,
+                        ReadContinuation::Account(Request::Orders { dex: queued, .. }) if queued == &dex)) {
+                        // Promotion preserves the census epoch captured before the uncertain write.
+                        read.priority = ReadPriority::Foreground;
+                    }
+                    self.pump_reads(cx);
                 }
             } else {
                 self.account.fence_read = true;
@@ -780,7 +844,9 @@ impl Hyperliquid {
     }
     fn refresh_owed_orders(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
         if self.account.orders_refresh_due.remove(dex) {
+            self.account.fence_read = true;
             self.refresh_orders_scope(cx, dex);
+            self.account.fence_read = false;
         }
     }
     fn refresh_orders_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
@@ -1412,6 +1478,15 @@ impl Hyperliquid {
             .collect();
         if self.account.fresh_positions.admit(cx, legs) {
             for dex in dexes {
+                // An undispatched routine intent predates this caller and owns no context.
+                // Replace it with a fresh foreground read instead of waiting for a slot.
+                if let Some(index) = self.account.reads.iter().position(|read| {
+                    read.priority != ReadPriority::Foreground && matches!(&read.continuation,
+                        ReadContinuation::Account(Request::State { dex: queued, .. }) if queued == &dex)
+                }) {
+                    self.account.reads.remove(index);
+                    self.account.inflight.remove(&format!("state:{dex}"));
+                }
                 self.refresh_state(cx, &dex);
             }
         }

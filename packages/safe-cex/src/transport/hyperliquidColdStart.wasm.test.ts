@@ -64,6 +64,7 @@ it.each([0, 8000])(
     const events: EngineEvent[] = [];
     const loadedAt = [0, 0, 0, 0];
     const sends: Array<{ account: number; type: string; dex: string; at: number }> = [];
+    const completed: typeof sends = [];
     for (let account = 0; account < 4; account++) {
       // Separate module state models account worker realms sharing only IndexedDB.
       vi.resetModules();
@@ -117,6 +118,8 @@ it.each([0, 8000])(
             default:
               throw new Error(`Unexpected startup read ${type}`);
           }
+          request.signal?.throwIfAborted();
+          completed.push({ account, type, dex, at: Date.now() - startedAt });
           return { status: 200, headers: '', body: new TextEncoder().encode(JSON.stringify(body)) };
         },
         connect(_url, handlers) {
@@ -168,11 +171,12 @@ it.each([0, 8000])(
       stores.forEach((store, i) => {
         if (!loadedAt[i] && Object.values(store.loaded).every(Boolean)) loadedAt[i] = Date.now() - startedAt;
       });
-      const allScopesRead = stores.every(
-        (_, account) =>
-          new Set(
-            sends.filter((row) => row.account === account && row.type === 'frontendOpenOrders').map((row) => row.dex),
-          ).size === 11,
+      const allScopesRead = stores.every((_, account) =>
+        ['clearinghouseState', 'frontendOpenOrders'].every(
+          (type) =>
+            new Set(completed.filter((row) => row.account === account && row.type === type).map((row) => row.dex))
+              .size === 11,
+        ),
       );
       if (allScopesRead && stores.every((store) => Object.values(store.loaded).every(Boolean))) break;
     }
@@ -189,8 +193,10 @@ it.each([0, 8000])(
       expect(sent.filter((row) => row.type === 'userRole')).toHaveLength(1);
       expect(sent.filter((row) => row.type === 'userAbstraction')).toHaveLength(1);
       for (const type of ['clearinghouseState', 'frontendOpenOrders'])
-        expect(new Set(sent.filter((row) => row.type === type).map((row) => row.dex))).toEqual(new Set(['', ...DEXES]));
+        expect(
+          new Set(completed.filter((row) => row.account === account && row.type === type).map((row) => row.dex)),
+        ).toEqual(new Set(['', ...DEXES]));
     }
-    expect(events.filter((event) => event.level === 'error')).toEqual([]);
+    expect(events.filter((event) => event.code === 'request.failed' || event.level === 'error')).toEqual([]);
   },
 );
