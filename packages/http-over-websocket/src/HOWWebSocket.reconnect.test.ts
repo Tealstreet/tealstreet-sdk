@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createAxiosHttpOverWebsocketAdapter, TradeTunnelTimeoutError } from './axiosHttpOverWebsocketAdapter';
 import { configureHOW } from './config';
+import { HOWWebSocket } from './HOWWebSocket';
 
 type ServerMode = {
   /** IP-whitelisted: rpc.auth success right after open, no token needed. */
@@ -411,4 +412,36 @@ describe('HOWWebSocket reconnect recovery (real socket stack, fake tunnel)', () 
       [],
     );
   });
+});
+
+it('automatic HOW silence recovery waits for the existing reconnect backoff', async () => {
+  vi.useFakeTimers();
+  const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  FakeTunnelSocket.instances = [];
+  FakeTunnelSocket.nextModes = [];
+  FakeTunnelSocket.defaultMode = { silent: true };
+  const how = new HOWWebSocket('wss://tunnel.test/tunnel', FakeTunnelSocket as unknown as typeof WebSocket);
+  try {
+    how.connectAndSubscribe();
+    await advance(25_011);
+    expect(how.ws?.loopState.phase).toBe('retry-scheduled');
+    expect(how.ws?.retryCount).toBe(1);
+    expect(how.diagnostics.lastClose).toMatchObject({
+      initiator: 'local',
+      phase: 'handshake',
+      route: 'HOW',
+      port: '443',
+      lifetime: '15-30s',
+    });
+    expect(how.ws?.retryConnection()).toBe(false);
+    expect(FakeTunnelSocket.instances).toHaveLength(1);
+    await advance(6_000);
+    expect(FakeTunnelSocket.instances).toHaveLength(2);
+  } finally {
+    how.dispose();
+    quiet.mockRestore();
+    log.mockRestore();
+    vi.useRealTimers();
+  }
 });

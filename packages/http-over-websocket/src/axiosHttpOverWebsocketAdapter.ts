@@ -9,6 +9,8 @@ import { bindProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from 
 import { tunnelEgressUrl, tunnelLanePort, tunnelOutage } from './tunnelEndpoints';
 import { isTokyoEgress } from './egressRegion';
 import { diagnosticUrl, isDiagnosticSecretKey, stripDiagnosticUrlQueries } from './diagnosticUrl';
+import type { ConnectionCloseDiagnostic, TimerLatenessBucket } from './connectionDiagnostics';
+
 import { HOWWebSocket } from './HOWWebSocket';
 import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, LatencyEntry } from './types';
 
@@ -409,6 +411,8 @@ export class TradeTunnelPreparationError extends Error {
   }
 }
 export type DisposableAxiosAdapter = AxiosAdapter & {
+  connectionDiagnostic(): ConnectionCloseDiagnostic | undefined;
+  hiddenTimerLateness(): TimerLatenessBucket;
   prepare(config: InternalAxiosRequestConfig): Promise<PreparedTunnelRequest>;
   /** Opaque TS/legacy requests only; never managed engine release proof. */
   prepareLegacy(config: InternalAxiosRequestConfig): Promise<PreparedTunnelRequest>;
@@ -423,6 +427,7 @@ const createAxiosHttpOverWebsocketAdapter = (
     typeof options === 'function' ? { customParser: options } : options || {};
   const { customParser, region, WebSocket: WebSocketCtor } = opts;
   const ownedSockets = new Map<'JA' | 'SG', HOWWebSocket>();
+  let lastSocket: HOWWebSocket | undefined;
   const abort = new AbortController();
   let disposed = false;
   const owner = {};
@@ -461,6 +466,7 @@ const createAxiosHttpOverWebsocketAdapter = (
     } else {
       howWebSocket = selectedRegion === 'JA' ? howWebSocketJA : howWebSocketSG;
     }
+    lastSocket = howWebSocket;
     const baseRouteContext: TradeTunnelRouteContext = {
       selectedRegion,
       tunnelHost: selectedRegion === 'JA' ? 'tokyo' : 'singapore',
@@ -923,6 +929,8 @@ const createAxiosHttpOverWebsocketAdapter = (
   };
   const adapter: AxiosAdapter = (config) => prepare(config, true).then((prepared) => prepared.bind(config).dispatch());
   return Object.assign(adapter, {
+    connectionDiagnostic: () => lastSocket?.diagnostics.lastClose,
+    hiddenTimerLateness: () => lastSocket?.timerLateness.bucket ?? 'unknown',
     prepare: (config: InternalAxiosRequestConfig) => prepare(config),
     prepareLegacy: (config: InternalAxiosRequestConfig) => prepare(config, true),
     dispose: () => {
