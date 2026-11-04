@@ -16,3 +16,18 @@ This is checkpoint timing and polling latency, not a book-triggered Rust wipe.
 Check selected HTTP responses and actual virtual-clock time before diagnosing
 these differences; retaining terminal rows or future position state would be
 the wrong runtime fix.
+
+# Private socket egress and auth diagnostics
+
+Mainnet WOO accounts using the Tealstreet REST proxy or HOW tunnel also send
+their private socket through the fleet's existing `rpc.relay`, with the original
+application-ID suffix. Public, unproxied and staging sockets stay direct. The
+shared TS/native routing table owns the override; native Hosted WOO admission
+remains refused. Roll the production upstream allowlist on both tunnel hosts
+before merging this routing change; no runtime feature flag gates the override.
+
+Auth refusals expose only the numeric WOO code, an optional numeric response
+status, and closed reasons from `https://docs.woox.io/#error-codes`. Free vendor
+`message`/`error`, authentication parameters and unknown fields are discarded.
+The broad `-1002` does not identify an IP refusal, so it adds no whitelist advice.
+An auth-frame status is a vendor status, not a measured HTTP upgrade response.
