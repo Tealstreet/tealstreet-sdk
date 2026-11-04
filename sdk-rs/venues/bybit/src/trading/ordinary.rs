@@ -70,7 +70,7 @@ enum Stage {
     /// A Hyro link-filtered read before admission.
     HyroRead {
         lot: usize,
-        history: bool,
+        axis: crate::hyro::LookupAxis,
         context: Context,
         boundary: (u32, u32),
     },

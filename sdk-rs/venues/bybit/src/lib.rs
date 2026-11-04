@@ -786,7 +786,21 @@ impl BybitLinear {
         if self.config_error.is_some() {
             return self.on_public_response(cx, then, Err("Bybit options are invalid"));
         }
-        let Some(policy) = self.read_policy(rest.signed, policy::read_policy().timeout_ms) else {
+        let timeout_ms = match &then {
+            Then::Hyro(read) => {
+                let remaining = (read.deadline - cx.now).floor() as u32;
+                if remaining == 0 {
+                    return self.on_public_response(
+                        cx,
+                        then,
+                        Err("Hyro reconciliation deadline expired"),
+                    );
+                }
+                remaining.min(policy::read_policy().timeout_ms)
+            }
+            _ => policy::read_policy().timeout_ms,
+        };
+        let Some(policy) = self.read_policy(rest.signed, timeout_ms) else {
             return self.on_public_response(
                 cx,
                 then,

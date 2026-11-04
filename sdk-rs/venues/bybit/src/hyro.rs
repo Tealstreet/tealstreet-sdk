@@ -1,6 +1,6 @@
 //! Hyro's retained placement intents. Each lot keeps its link across lost
 //! acknowledgements and caller retries and is created at most twice (R1(a));
-//! only a fresh complete absence on both order axes permits the second create.
+//! only complete realtime and history status axes permit the second create.
 use crate::account::{map_order, valid_hyro_order};
 use crate::sign::{Body, Query};
 use crate::trading::acknowledgement::{self as ack, Answer};
@@ -17,6 +17,8 @@ use std::collections::HashMap;
 type Boundary = (u32, u32);
 /// Same-link creates one lot may ever send.
 pub(crate) const MAX_SENDS: u8 = 2;
+/// Keep the original two 20 s lookup windows across every history status.
+const LOOKUP_TIMEOUT_MS: f64 = 40_000.0;
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -147,8 +149,48 @@ impl Intent {
 pub struct Lookup {
     key: String,
     link: String,
-    history: bool,
+    axis: LookupAxis,
+    pub(crate) deadline: f64,
     boundary: Boundary,
+}
+
+/// Default history omits these terminal statuses from November 12, 2026.
+#[derive(Clone, Copy)]
+pub(crate) enum LookupAxis {
+    Realtime,
+    History,
+    Cancelled,
+    Rejected,
+    Deactivated,
+}
+
+impl LookupAxis {
+    pub(crate) fn next(self) -> Option<Self> {
+        match self {
+            Self::Realtime => Some(Self::History),
+            Self::History => Some(Self::Cancelled),
+            Self::Cancelled => Some(Self::Rejected),
+            Self::Rejected => Some(Self::Deactivated),
+            Self::Deactivated => None,
+        }
+    }
+
+    pub(crate) fn path(self) -> &'static str {
+        match self {
+            Self::Realtime => "/v5/order/realtime",
+            _ => "/v5/order/history",
+        }
+    }
+
+    pub(crate) fn query(self, link: &str) -> Query {
+        let query = link_query(link);
+        match self {
+            Self::Realtime | Self::History => query,
+            Self::Cancelled => query.str("orderStatus", "Cancelled"),
+            Self::Rejected => query.str("orderStatus", "Rejected"),
+            Self::Deactivated => query.str("orderStatus", "Deactivated"),
+        }
+    }
 }
 
 /// What one link-filtered order read proves.
@@ -473,7 +515,8 @@ impl BybitLinear {
                     reads.push(Lookup {
                         key: key.clone(),
                         link: lot.link.clone(),
-                        history: false,
+                        axis: LookupAxis::Realtime,
+                        deadline: cx.now + LOOKUP_TIMEOUT_MS,
                         boundary,
                     });
                 }
@@ -485,12 +528,7 @@ impl BybitLinear {
     }
 
     fn send_hyro_lookup(&mut self, cx: &mut Cx<'_, Pending>, read: Lookup) {
-        let path = if read.history {
-            "/v5/order/history"
-        } else {
-            "/v5/order/realtime"
-        };
-        let rest = Rest::get(path, link_query(&read.link)).signed();
+        let rest = Rest::get(read.axis.path(), read.axis.query(&read.link)).signed();
         // A reconcile read on its own Background authority.
         self.send_read(cx, rest, Then::Hyro(read));
     }
@@ -628,14 +666,10 @@ impl BybitLinear {
         let found = self.hyro_found(cx, &symbol, &read.link, response.as_ref().map_err(|e| *e));
         self.drain_hyro_late();
         self.apply_hyro_found(cx, &read.key, &read.link, &found, read.boundary);
-        if matches!(found, Found::Absent) && !read.history {
-            self.send_hyro_lookup(
-                cx,
-                Lookup {
-                    history: true,
-                    ..read
-                },
-            );
+        if matches!(found, Found::Absent)
+            && let Some(axis) = read.axis.next()
+        {
+            self.send_hyro_lookup(cx, Lookup { axis, ..read });
         }
     }
 }

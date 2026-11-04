@@ -4207,3 +4207,144 @@ fn an_unknown_inverse_placement_reconciles_on_the_inverse_category_and_releases(
         h.result(3)
     );
 }
+
+// The November 12 default-history change also affects link-filtered lookups.
+fn answer_terminal_link(h: &mut Harness, id: &str, status: &str) {
+    let filter = format!("orderLinkId={id}");
+    for expected in [
+        None,
+        None,
+        Some("Cancelled"),
+        Some("Rejected"),
+        Some("Deactivated"),
+    ] {
+        let read = h.take(&filter);
+        assert!(read.url.starts_with("https://hyro.example/"));
+        match expected {
+            None => assert!(!read.url.contains("orderStatus=")),
+            Some(value) => assert!(read.url.contains(&format!("orderStatus={value}"))),
+        }
+        assert!(!h.has_request("/v5/order/create"));
+        if expected == Some(status) {
+            h.reply(read.id, 200, &lookup_row(id, status));
+            return;
+        }
+        h.reply(read.id, 200, EMPTY);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "empty earlier axis is no proof"
+        );
+    }
+    panic!("terminal status was not queried");
+}
+
+#[test]
+fn hyro_background_explicit_terminal_history_preserves_original_identity() {
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        answer_terminal_link(&mut h, &id, status);
+        assert_eq!(outcome(&h, 1), Some(safe_cex_engine::Outcome::Unknown));
+        assert!(!h.has_request("/v5/order/create"));
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        if status == "Rejected" {
+            assert_ne!(
+                link(&h.take("/v5/order/create")),
+                id,
+                "positive rejection remints"
+            );
+        } else {
+            assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+            assert!(!h.has_request("/v5/order/create"));
+            assert!(h.engine.store().order("recovered").is_none());
+        }
+    }
+}
+
+#[test]
+fn hyro_preflight_explicit_terminal_history_preserves_original_identity() {
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        answer_terminal_link(&mut h, &id, status);
+        if status == "Rejected" {
+            assert_ne!(
+                link(&h.take("/v5/order/create")),
+                id,
+                "positive rejection remints"
+            );
+        } else {
+            assert_eq!(h.result(2), Some(&Ok("[\"recovered\"]".into())));
+            assert!(!h.has_request("/v5/order/create"));
+        }
+    }
+}
+
+#[test]
+fn hyro_terminal_history_failure_never_proves_absence() {
+    for body in [
+        "unavailable",
+        r#"{"retCode":0,"result":{"list":[],"nextPageCursor":"more"}}"#,
+    ] {
+        let mut h = ready(Variant::Hyrotrader);
+        place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+        let create = h.take("/v5/order/create");
+        let id = link(&create);
+        h.event(Event::HttpFailed {
+            request: create.id,
+            error: "lost",
+        });
+        h.respond(&format!("orderLinkId={id}"), 500, "unavailable");
+        place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+        h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+        h.respond(&format!("orderLinkId={id}"), 200, EMPTY);
+        let terminal = h.take("orderStatus=Cancelled");
+        h.reply(terminal.id, 200, body);
+        assert_eq!(outcome(&h, 2), Some(safe_cex_engine::Outcome::Unknown));
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(!h.has_request(&format!("orderLinkId={id}")));
+    }
+}
+
+#[test]
+fn hyro_explicit_terminal_reads_share_the_original_background_deadline() {
+    let mut h = ready(Variant::Hyrotrader);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    let create = h.take("/v5/order/create");
+    let id = link(&create);
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    let started = h.now;
+    let filter = format!("orderLinkId={id}");
+    for _ in 0..4 {
+        let read = h.take(&filter);
+        h.advance(9_000.0);
+        h.reply(read.id, 200, EMPTY);
+    }
+    let last = h.take("orderStatus=Deactivated");
+    h.advance(started + 40_000.0 - h.now);
+    h.reply(last.id, 200, &lookup_row(&id, "Deactivated"));
+    place(&mut h, 2, vec![order("BTCUSDT", 1.0)]);
+    assert!(
+        h.has_request(&filter),
+        "late DATA did not resolve the expired lookup"
+    );
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(h.result(2).is_none());
+}

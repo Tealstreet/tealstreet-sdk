@@ -5,7 +5,7 @@ use super::{
     CALL_ATTEMPTS, CALL_TIMEOUT_MS, Decision, Gate, HyroCall, Leg, LegIntent, Ordinary, Request,
     Run, Stage, call_bound, internal,
 };
-use crate::hyro::{self, Found, Intent, LotState, MAX_SENDS, Phase};
+use crate::hyro::{self, Found, Intent, LookupAxis, LotState, MAX_SENDS, Phase};
 use crate::trading::{Call, Planned, not_sent};
 use crate::{BybitLinear, Pending};
 use safe_cex_engine::engine::Window;
@@ -232,7 +232,7 @@ impl BybitLinear {
                 let _ = cx.fail_preflight(&entry.preflight, error);
                 return;
             }
-            if !self.send_hyro_link_read(cx, id, &mut entry, index, false) {
+            if !self.send_hyro_link_read(cx, id, &mut entry, index, LookupAxis::Realtime) {
                 let error = internal("Bybit order read was refused").outcome(Outcome::NotSent);
                 let _ = cx.fail_preflight(&entry.preflight, error);
                 return;
@@ -286,7 +286,7 @@ impl BybitLinear {
         id: CommandId,
         entry: &mut Ordinary,
         lot: usize,
-        history: bool,
+        axis: LookupAxis,
     ) -> bool {
         let Some(link) = entry
             .hyro
@@ -316,18 +316,14 @@ impl BybitLinear {
         let Ok(context) = context else {
             return false;
         };
-        let path = if history {
-            "/v5/order/history"
-        } else {
-            "/v5/order/realtime"
-        };
-        let query = hyro::link_query(&link).into_string();
+        let path = axis.path();
+        let query = axis.query(&link).into_string();
         if !self.send_ordinary(cx, id, context.clone(), Method::Get, path, query) {
             return false;
         }
         entry.stage = Stage::HyroRead {
             lot,
-            history,
+            axis,
             context,
             boundary: self.hyro_boundary(),
         };
@@ -343,7 +339,7 @@ impl BybitLinear {
     ) {
         let Stage::HyroRead {
             lot,
-            history,
+            axis,
             context,
             boundary,
         } = std::mem::replace(&mut entry.stage, Stage::Idle)
@@ -356,7 +352,7 @@ impl BybitLinear {
         {
             entry.stage = Stage::HyroRead {
                 lot,
-                history,
+                axis,
                 context,
                 boundary,
             };
@@ -395,8 +391,9 @@ impl BybitLinear {
         self.drain_hyro_late();
         self.apply_hyro_found(cx, &key, &link, &found, boundary);
         match found {
-            Found::Absent if !history => {
-                if !self.send_hyro_link_read(cx, id, &mut entry, lot, true) {
+            Found::Absent if axis.next().is_some() => {
+                let next = axis.next().expect("remaining lookup axis");
+                if !self.send_hyro_link_read(cx, id, &mut entry, lot, next) {
                     let error = internal("Bybit order read was refused").outcome(Outcome::NotSent);
                     let _ = cx.fail_preflight(&entry.preflight, error);
                     return;
