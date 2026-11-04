@@ -134,3 +134,126 @@ fn a_read_released_after_a_same_millisecond_stream_order_proves_its_cover() {
         "the read released after the stream row proves its cover: {cover}"
     );
 }
+
+/// codex-hcmq3f (#3005): a rejected native row, named or not, proves no
+/// account cover; the healthy rows still publish.
+fn rejected_row_read_cover(unidentified: bool) {
+    let mut h = started();
+    let mut row =
+        serde_json::from_str::<serde_json::Value>(STREAMED_ORDER).unwrap()["data"][0].clone();
+    row["price"] = serde_json::json!("NaN");
+    if unidentified {
+        row = serde_json::json!({"price":"NaN"});
+    }
+    let body = serde_json::json!({"retCode":0,"retMsg":"OK","result":{"list":[row],"nextPageCursor":"","category":"linear"}}).to_string();
+    answer_all(&mut h, "/v5/order/realtime", &body);
+    answer_all(&mut h, "/v5/position/list", EMPTY_LIST);
+    answer_all(&mut h, "/v5/account/wallet-balance", WALLET);
+    assert!(h.notices.iter().any(|n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == safe_cex_engine::log::code::ROW_SKIPPED)), "actual rejected native row");
+    assert!(h.engine.store().orders().is_empty());
+    assert_eq!(
+        snapshot(&mut h).1,
+        None,
+        "a rejected native order cannot prove account-wide absence"
+    );
+}
+
+#[test]
+fn an_unreadable_known_symbol_cannot_publish_an_account_cover() {
+    rejected_row_read_cover(false);
+}
+
+#[test]
+fn an_unidentified_order_cannot_publish_an_account_cover() {
+    rejected_row_read_cover(true);
+}
+
+/// codex-hcmq3f (#3005): an unsupported native order type proves no account cover.
+#[test]
+fn an_unsupported_order_cannot_publish_an_account_cover() {
+    let mut h = started();
+    let mut row =
+        serde_json::from_str::<serde_json::Value>(STREAMED_ORDER).unwrap()["data"][0].clone();
+    row["orderType"] = serde_json::json!("UnrecognizedNativeType");
+    let body = serde_json::json!({"retCode":0,"retMsg":"OK","result":{"list":[row],"nextPageCursor":"","category":"linear"}}).to_string();
+    answer_all(&mut h, "/v5/order/realtime", &body);
+    answer_all(&mut h, "/v5/position/list", EMPTY_LIST);
+    answer_all(&mut h, "/v5/account/wallet-balance", WALLET);
+    assert!(
+        h.logs.iter().any(|line| line.contains("unsupported type")),
+        "actual unsupported native type: {:?}",
+        h.logs
+    );
+    assert!(h.engine.store().orders().is_empty());
+    assert_eq!(
+        snapshot(&mut h).1,
+        None,
+        "an unmapped native order cannot prove account-wide absence"
+    );
+}
+
+/// codex-hcmq3f (#3005): a stream-created full position stop, kept by the
+/// sequence refusal, keeps its position-bound route: its amend goes to
+/// /v5/position/trading-stop, never /v5/order/amend.
+#[test]
+fn a_refused_read_keeps_the_stream_stops_position_route() {
+    let mut h = started();
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message("/v5/private", r#"{"success":true,"op":"auth"}"#);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Full","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#);
+    answer_account(&mut h);
+    assert!(
+        h.engine.store().order("position-stop").is_some(),
+        "sequence refusal retains the native row"
+    );
+    h.requests.clear();
+    h.command(safe_cex_engine::Command::AmendOrder {
+        command: 901,
+        id: "position-stop".into(),
+        price: Some(87000.),
+        amount: None,
+    });
+    if h.has_request("/v5/position/list?category=linear&symbol=BTCUSDT") {
+        h.respond("/v5/position/list?category=linear&symbol=BTCUSDT", 200, r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"positionIdx":0,"riskId":1,"riskLimitValue":"2000000","symbol":"BTCUSDT","side":"Buy","size":"0.010","avgPrice":"95000","positionValue":"950","tradeMode":0,"positionStatus":"Normal","autoAddMargin":0,"adlRankIndicator":2,"leverage":"10","breakEvenPrice":"95010","positionBalance":"95","markPrice":"96000","liqPrice":"86000.5","bustPrice":"","positionMM":"5","positionMMByMp":"5","positionIM":"95","positionIMByMp":"95","tpslMode":"Full","takeProfit":"0.00","stopLoss":"0.00","trailingStop":"0.00","unrealisedPnl":"10","curRealisedPnl":"-0.5","cumRealisedPnl":"-1","seq":5723621632,"isReduceOnly":false,"mmrSysUpdateTime":"","leverageSysUpdatedTime":"","sessionAvgPrice":"","createdTime":"1676538056258","updatedTime":"1697673600012"},{"positionIdx":0,"symbol":"ETHUSDT","side":"","size":"0","avgPrice":"0","positionValue":"0","leverage":"20","unrealisedPnl":"0","curRealisedPnl":"0","liqPrice":"","positionIM":"0","seq":-1,"positionStatus":"","updatedTime":""}],"nextPageCursor":"","category":"linear"},"retExtInfo":{},"time":1697684980172}"#);
+    }
+    assert!(
+        h.has_request("/v5/position/trading-stop"),
+        "position-bound native routing must stay with the retained row; actual requests {:?}, terminals {:?}",
+        h.paths(),
+        h.done
+    );
+    assert!(!h.has_request("/v5/order/amend"));
+}
+
+/// The control: the same stop streamed after the read landed keeps its route.
+#[test]
+fn a_stream_stop_after_the_read_keeps_its_position_route() {
+    let mut h = started();
+    answer_account(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message("/v5/private", r#"{"success":true,"op":"auth"}"#);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Full","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#);
+    assert!(
+        h.engine.store().order("position-stop").is_some(),
+        "sequence refusal retains the native row"
+    );
+    h.requests.clear();
+    h.command(safe_cex_engine::Command::AmendOrder {
+        command: 901,
+        id: "position-stop".into(),
+        price: Some(87000.),
+        amount: None,
+    });
+    if h.has_request("/v5/position/list?category=linear&symbol=BTCUSDT") {
+        h.respond("/v5/position/list?category=linear&symbol=BTCUSDT", 200, r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"positionIdx":0,"riskId":1,"riskLimitValue":"2000000","symbol":"BTCUSDT","side":"Buy","size":"0.010","avgPrice":"95000","positionValue":"950","tradeMode":0,"positionStatus":"Normal","autoAddMargin":0,"adlRankIndicator":2,"leverage":"10","breakEvenPrice":"95010","positionBalance":"95","markPrice":"96000","liqPrice":"86000.5","bustPrice":"","positionMM":"5","positionMMByMp":"5","positionIM":"95","positionIMByMp":"95","tpslMode":"Full","takeProfit":"0.00","stopLoss":"0.00","trailingStop":"0.00","unrealisedPnl":"10","curRealisedPnl":"-0.5","cumRealisedPnl":"-1","seq":5723621632,"isReduceOnly":false,"mmrSysUpdateTime":"","leverageSysUpdatedTime":"","sessionAvgPrice":"","createdTime":"1676538056258","updatedTime":"1697673600012"},{"positionIdx":0,"symbol":"ETHUSDT","side":"","size":"0","avgPrice":"0","positionValue":"0","leverage":"20","unrealisedPnl":"0","curRealisedPnl":"0","liqPrice":"","positionIM":"0","seq":-1,"positionStatus":"","updatedTime":""}],"nextPageCursor":"","category":"linear"},"retExtInfo":{},"time":1697684980172}"#);
+    }
+    assert!(
+        h.has_request("/v5/position/trading-stop"),
+        "position-bound native routing must stay with the retained row; actual requests {:?}, terminals {:?}",
+        h.paths(),
+        h.done
+    );
+    assert!(!h.has_request("/v5/order/amend"));
+}

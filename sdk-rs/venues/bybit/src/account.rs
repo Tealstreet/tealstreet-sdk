@@ -3159,8 +3159,17 @@ impl BybitLinear {
             join.rejected.holds(parent_order_id(id))
                 && !admitted_parents.contains(parent_order_id(id))
         };
-        self.account.position_bound.retain(kept);
-        self.account.trailing_profit.retain(kept);
+        // Route metadata changes with its rows, after the commit says which
+        // symbols this read may replace (a refused symbol keeps both).
+        let route_symbols: HashMap<String, String> = cx
+            .store
+            .orders()
+            .iter()
+            .map(|o| (o.id.clone(), o.symbol.clone()))
+            .collect();
+        let mut bound_new: Vec<(String, String)> = Vec::new();
+        let mut trailing_new: Vec<(String, String)> = Vec::new();
+        let mut priced: Vec<(String, String)> = Vec::new();
         let mut orders = Vec::new();
         for mut mapped in join.rows {
             if join
@@ -3177,17 +3186,14 @@ impl BybitLinear {
                 && let Some(kind) = priced_tpsl_kind(&mapped.orders[0], cx.store)
             {
                 mapped.orders[0].kind = kind;
-                self.account.unpriced_tpsl.remove(&mapped.orders[0].id);
+                priced.push((mapped.orders[0].id.clone(), mapped.orders[0].symbol.clone()));
             }
+            let identity = || (mapped.orders[0].id.clone(), mapped.orders[0].symbol.clone());
             if mapped.position_bound {
-                self.account
-                    .position_bound
-                    .insert(mapped.orders[0].id.clone());
+                bound_new.push(identity());
             }
             if mapped.trailing_profit {
-                self.account
-                    .trailing_profit
-                    .insert(mapped.orders[0].id.clone());
+                trailing_new.push(identity());
             }
             orders.extend(mapped.orders);
         }
@@ -3249,14 +3255,43 @@ impl BybitLinear {
             .into_iter()
             .map(Category::as_str)
             .collect();
-        cx.commit_orders_read(
+        // Rows the read could not map commit nothing new and prove no cover:
+        // a rejected row's market, or any account-wide when it names none.
+        let mut unproven = join.rejected.unproven().to_vec();
+        if !join.unsupported.is_empty() {
+            unproven.push(String::new());
+        }
+        let committed = cx.commit_orders_read(
             safe_cex_engine::order_read_cover::OrderReadScope::Account {
                 key: self.category.as_str(),
                 account: &account,
             },
             |symbol| self.owns_symbol(symbol),
             merged,
+            &unproven,
         );
+        if let Some(refused) = committed {
+            let refused_id = |id: &String| {
+                route_symbols
+                    .get(id)
+                    .is_some_and(|symbol| refused.contains(symbol))
+            };
+            let replace = |held: &mut HashSet<String>, new: Vec<(String, String)>| {
+                held.retain(|id| refused_id(id) || kept(id));
+                held.extend(
+                    new.into_iter()
+                        .filter(|(_, symbol)| !refused.contains(symbol))
+                        .map(|(id, _)| id),
+                );
+            };
+            replace(&mut self.account.position_bound, bound_new);
+            replace(&mut self.account.trailing_profit, trailing_new);
+            for (id, symbol) in priced {
+                if !refused.contains(&symbol) {
+                    self.account.unpriced_tpsl.remove(&id);
+                }
+            }
+        }
         self.orders_loaded.insert(self.category);
         if self
             .required_categories()
