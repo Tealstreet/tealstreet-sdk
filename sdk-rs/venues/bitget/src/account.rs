@@ -586,21 +586,24 @@ impl BitgetFutures {
     }
 
     pub(crate) fn check_unknown_cancels(&mut self, cx: &mut Cx<'_, Pending>, orders: &[Order]) {
-        let targets: Vec<_> = orders
-            .iter()
-            .filter(|o| {
-                matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
-                    && !is_preset_child(o)
-                    && !cx.store.order(&o.id).is_some_and(|r| {
-                        matches!(r.status, OrderStatus::Canceled | OrderStatus::Closed)
-                    })
-            })
-            .take(CANCEL_CHECK_LIMIT)
-            .map(|o| CancelOrderRef {
+        let mut targets = Vec::new();
+        for o in orders {
+            if !matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                || is_preset_child(o)
+                || cx.store.order(&o.id).is_some_and(|r| {
+                    matches!(r.status, OrderStatus::Canceled | OrderStatus::Closed)
+                })
+            {
+                continue;
+            }
+            targets.push(CancelOrderRef {
                 id: o.id.clone(),
                 symbol: o.symbol.clone(),
-            })
-            .collect();
+            });
+            if targets.len() == CANCEL_CHECK_LIMIT {
+                break;
+            }
+        }
         self.register_cancel_checks(cx, &targets);
         cx.source_cancel_checks(&targets);
     }
@@ -640,30 +643,29 @@ impl BitgetFutures {
             self.cancel_check_unproven(cx, "partial-or-stale-census");
             return vec![];
         }
-        self.account
-            .cancel_checks
-            .iter()
-            .filter(|c| {
-                c.serial <= snapshot.cancel_check_serial
-                    && c.uta == snapshot.uta
-                    && !refused.contains(&c.target.symbol)
-                    && self.order_revision(&c.target.id) <= snapshot.stream_revision
-                    && !snapshot.rows.iter().any(|row| {
-                        (row.id == c.native || row.parent_id.as_ref() == Some(&c.native))
-                            && (row.symbol != c.target.symbol
-                                || !matches!(row.kind, OrderType::StopLoss | OrderType::TakeProfit))
-                    })
-            })
-            .map(|c| {
-                (
-                    c.target.id.clone(),
-                    snapshot.rows.iter().any(|row| {
-                        row.symbol == c.target.symbol
-                            && (row.id == c.native || row.parent_id.as_ref() == Some(&c.native))
-                    }),
-                )
-            })
-            .collect()
+        let mut evidence = Vec::new();
+        for c in &self.account.cancel_checks {
+            if c.serial > snapshot.cancel_check_serial
+                || c.uta != snapshot.uta
+                || refused.contains(&c.target.symbol)
+                || self.order_revision(&c.target.id) > snapshot.stream_revision
+                || snapshot.rows.iter().any(|row| {
+                    (row.id == c.native || row.parent_id.as_ref() == Some(&c.native))
+                        && (row.symbol != c.target.symbol
+                            || !matches!(row.kind, OrderType::StopLoss | OrderType::TakeProfit))
+                })
+            {
+                continue;
+            }
+            evidence.push((
+                c.target.id.clone(),
+                snapshot.rows.iter().any(|row| {
+                    row.symbol == c.target.symbol
+                        && (row.id == c.native || row.parent_id.as_ref() == Some(&c.native))
+                }),
+            ));
+        }
+        evidence
     }
 
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>, virtual_only: bool) {
