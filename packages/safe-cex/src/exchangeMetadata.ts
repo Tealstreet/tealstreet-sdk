@@ -1,5 +1,9 @@
+import type { AnyTimeframe } from './types';
+
 import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
-import { ExchangeName, MarginType, OrderStopTriggerType, PositionMode } from '@tealstreet/safe-cex/src/types';
+import {
+  ExchangeName, MarginType, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode,
+} from '@tealstreet/safe-cex/src/types';
 
 /** Features supported by an exchange - used to skip health checks for unsupported features */
 export type ExchangeFeatures = {
@@ -99,6 +103,8 @@ export type ExchangeMetadata = {
   tvMaxGetBarFetches: number;
   /** Maximum number of candles that can be fetched in a single API call */
   candleApiCountLimit: number;
+  /** Native candle intervals when the venue accepts only a declared subset. */
+  supportedCandleIntervals?: readonly AnyTimeframe[];
   /** Default quote currency for the exchange (e.g., 'USDT', 'USD', 'USDC') */
   defaultQuote: string;
   /** Supported position modes (OneWay, Hedged) */
@@ -208,6 +214,13 @@ export type ExchangeMetadata = {
   unifiedMargin?: boolean;
   /** Whether the exchange supports second-resolution kline/candle data */
   supportsKlineSeconds?: boolean;
+  /** Public order-shape restrictions; the engine still validates native reconciliation. */
+  orderAmendment?: {
+    limitTimeInForce: readonly OrderTimeInForce[];
+    triggerPriceTypes: readonly OrderType[];
+    unfilledOnly: boolean;
+    preserveAttachedLimitProtection: boolean;
+  };
   /** Default trading symbol to display when first loading the exchange */
   defaultSymbol?: string;
   /** Default symbol to use specifically for TradingView chart widget (overrides global BTCUSDT default) */
@@ -1012,6 +1025,12 @@ const CryptocomMetadata: ExchangeMetadata = {
 
 const BingxMetadata: ExchangeMetadata = {
   ...defaultMetaData,
+  orderAmendment: {
+    limitTimeInForce: [OrderTimeInForce.GoodTillCancel, OrderTimeInForce.PostOnly],
+    triggerPriceTypes: [OrderType.StopLoss, OrderType.TakeProfit],
+    unfilledOnly: true,
+    preserveAttachedLimitProtection: true,
+  },
   supportsPublicOnly: true,
   exchangeName: 'bingx' as ExchangeName,
   logo: '/static/exchanges/logos/BINGX/logo.svg',
@@ -1488,8 +1507,14 @@ const WhatMetadata: ExchangeMetadata = {
   },
 };
 
+const hyperliquidCandleIntervals: readonly AnyTimeframe[] = [
+  '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M',
+];
+
 const HyperliquidMetadata: ExchangeMetadata = {
   ...defaultMetaData,
+  supportsKlineSeconds: false,
+  supportedCandleIntervals: hyperliquidCandleIntervals,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquid' as ExchangeName,
   // One connection serves perps + spot; spot is opt-in per account.
@@ -1541,6 +1566,8 @@ const HyperliquidMetadata: ExchangeMetadata = {
 
 const HyperliquidSpotMetadata: ExchangeMetadata = {
   ...defaultMetaData,
+  supportsKlineSeconds: false,
+  supportedCandleIntervals: hyperliquidCandleIntervals,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquidspot' as ExchangeName,
   // Superseded by the `hyperliquid` connection's spot toggle. Kept enabled so
