@@ -26,6 +26,49 @@ enum SigningReadiness {
     },
 }
 
+// Holds the recipe through a failure callback, matching the original local's lifetime.
+struct HttpSigningCompletion {
+    pending: Option<crate::signing_dispatch::Pending>,
+    outbound: Option<Action>,
+    error: Option<crate::signing::SignError>,
+    preparation: Option<Preparation>,
+    stale: bool,
+    #[cfg(feature = "dispatch-nonce")]
+    nonce_stale: bool,
+}
+
+impl HttpSigningCompletion {
+    #[inline(never)]
+    fn new(completion: crate::signing_dispatch::Completion) -> Self {
+        use crate::signing_dispatch::Completion;
+        #[cfg(feature = "dispatch-nonce")]
+        let nonce_stale = matches!(&completion, Completion::NonceStale(_));
+        let (pending, outbound, error, stale) = match completion {
+            Completion::Ready(pending, outbound) => (pending, Some(outbound), None, false),
+            Completion::Stale(pending) | Completion::NonceStale(pending) => {
+                (pending, None, None, true)
+            }
+            Completion::Failed(pending, error) => (pending, None, Some(error), false),
+        };
+        Self {
+            pending: Some(pending),
+            outbound,
+            error,
+            preparation: None,
+            stale,
+            #[cfg(feature = "dispatch-nonce")]
+            nonce_stale,
+        }
+    }
+}
+
+struct SignedHttp {
+    token: Preparation,
+    permit: Permit,
+    packet: HttpRequest,
+    pending: crate::signing_dispatch::Pending,
+}
+
 enum ManagedRecipe {
     Unsigned(&'static [(&'static str, &'static str)]),
     Signed(Box<dyn crate::SignStep>),
@@ -1567,11 +1610,7 @@ impl<V: Venue> Engine<V> {
                         }
                     }
                 }
-                let bind = Action::ManagedHttp(Box::new(HttpAction::Bind {
-                    preparation: token,
-                    permit,
-                    request,
-                }));
+                let bind = crate::engine::IoCore::http_bind(token, permit, request);
                 // Const-folded: an undeclared venue compiles the domain hold out.
                 #[cfg(feature = "release-domains")]
                 let bind = if V::http_release_domain().is_some() {
@@ -1694,160 +1733,83 @@ impl<V: Venue> Engine<V> {
         now: f64,
         completion: crate::signing_dispatch::Completion,
     ) {
-        use crate::signing_dispatch::Completion;
-        #[cfg(feature = "dispatch-nonce")]
-        let nonce_stale = matches!(&completion, Completion::NonceStale(_));
-        let (pending, mut outbound, error, stale) = match completion {
-            Completion::Ready(pending, outbound) => (pending, Some(outbound), None, false),
-            Completion::Stale(pending) | Completion::NonceStale(pending) => {
-                (pending, None, None, true)
+        let mut completion = HttpSigningCompletion::new(completion);
+        let permit = match self.io.core.complete_http_signing(now, &mut completion) {
+            Ok(Some(ready)) => ready,
+            Ok(None) => return,
+            Err((reason, error)) => {
+                let token = completion
+                    .preparation
+                    .expect("a failed completion has a preparation");
+                self.http_preparation_failed(now, token, reason, error);
+                return;
             }
-            Completion::Failed(pending, error) => (pending, None, Some(error), false),
         };
-        #[cfg(feature = "dispatch-nonce")]
-        let mut pending = pending;
-        let Some(request) = pending.request_id() else {
-            return;
+        let token = completion
+            .preparation
+            .expect("a completed signing has a preparation");
+        let Some(Action::Http(packet)) = completion.outbound.take() else {
+            unreachable!("completed signing checked the packet");
         };
-        let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
-            if let Some(action) = outbound.as_mut() {
-                crate::signing_dispatch::wipe(action);
+        let mut ready = SignedHttp {
+            token,
+            permit,
+            packet,
+            pending: completion.pending.take().expect("completed recipe"),
+        };
+        let request = ready.token.attempt().request;
+        let managed = self
+            .io
+            .core
+            .managed_http
+            .get_mut(&request)
+            .expect("completed signing retains its managed request");
+        // Added after signing, so the venue signature never covers it.
+        if let Some(bearer) = managed.bearer.as_mut() {
+            let read = bearer
+                .read(&self.venue, &self.io.core.request_contexts)
+                .and_then(|session| {
+                    session
+                        .map(|session| {
+                            attach_session_headers(
+                                &mut ready.packet.headers,
+                                &ready.packet.signer_headers,
+                                &session,
+                            )
+                        })
+                        .transpose()
+                });
+            match read {
+                Ok(Some(())) => {}
+                Ok(None) => {
+                    // Re-signed on wake, exactly as a Stale reprepare.
+                    crate::signing_dispatch::wipe(&mut Action::Http(ready.packet));
+                    managed.recipe = Some(ready.pending);
+                    self.park_bearer(now, ready.token, request);
+                    return;
+                }
+                Err(reason) => {
+                    crate::signing_dispatch::wipe(&mut Action::Http(ready.packet));
+                    self.http_preparation_failed(now, ready.token, reason, bearer_refused(reason));
+                    return;
+                }
             }
-            return;
-        };
-        let token = managed.lifecycle.preparation();
-        if let Err(reason) = managed.validate_send(&self.io.core.request_contexts, now) {
-            if let Some(action) = outbound.as_mut() {
-                crate::signing_dispatch::wipe(action);
-            }
-            self.http_preparation_failed(
-                now,
-                token,
-                reason,
-                if reason == Error::TimedOut {
-                    crate::signing::SignError::TimedOut.venue_error()
-                } else {
-                    VenueError::new("HTTP signing result is no longer valid")
-                },
-            );
-            return;
         }
-        if let Some(error) = error {
-            let reason = if error == crate::signing::SignError::TimedOut {
-                Error::TimedOut
+        if let Some(bind) = self.io.core.bind_signed_http(now, ready) {
+            #[cfg(feature = "release-domains")]
+            let bind = if V::http_release_domain().is_some() {
+                self.io.core.domain_bind(request, bind)
             } else {
-                Error::State
+                Some(bind)
             };
-            self.http_preparation_failed(now, token, reason, error.venue_error());
-            return;
-        }
-        if stale {
-            #[cfg(feature = "dispatch-nonce")]
-            if nonce_stale {
-                if pending.nonce_repairs >= crate::signing_dispatch::MAX_NONCE_REPREPARES {
-                    self.http_preparation_failed(
-                        now,
-                        token,
-                        Error::State,
-                        VenueError::new("Signing nonce repair budget exhausted")
-                            .kind(ErrorKind::Internal),
-                    );
-                    return;
-                }
-                pending.nonce_repairs += 1;
+            #[cfg(not(feature = "release-domains"))]
+            let bind = Some(bind);
+            if let Some(bind) = bind {
+                self.io.core.actions.push(bind);
             }
-            managed.recipe = Some(pending);
-            self.reprepare_http(now, token);
-            return;
-        }
-        let prepared = pending
-            .managed_freshness()
-            .ok_or(Error::State)
-            .and_then(|(revision, until)| {
-                managed
-                    .lifecycle
-                    .signed(token, pending.receipt, revision, until)
-            })
-            .and_then(|()| managed.lifecycle.permit());
-        match (prepared, outbound) {
-            (Ok(permit), Some(Action::Http(mut packet))) if packet.id == request => {
-                // Added after signing, so the venue signature never covers it.
-                if let Some(bearer) = managed.bearer.as_mut() {
-                    let read = bearer
-                        .read(&self.venue, &self.io.core.request_contexts)
-                        .and_then(|session| {
-                            session
-                                .map(|session| {
-                                    attach_session_headers(
-                                        &mut packet.headers,
-                                        &packet.signer_headers,
-                                        &session,
-                                    )
-                                })
-                                .transpose()
-                        });
-                    match read {
-                        Ok(Some(())) => {}
-                        Ok(None) => {
-                            // Re-signed on wake, exactly as a Stale reprepare.
-                            crate::signing_dispatch::wipe(&mut Action::Http(packet));
-                            managed.recipe = Some(pending);
-                            self.park_bearer(now, token, request);
-                            return;
-                        }
-                        Err(reason) => {
-                            crate::signing_dispatch::wipe(&mut Action::Http(packet));
-                            self.http_preparation_failed(
-                                now,
-                                token,
-                                reason,
-                                bearer_refused(reason),
-                            );
-                            return;
-                        }
-                    }
-                }
-                packet.timeout_ms = Some(
-                    (managed.lifecycle.deadline().min(pending.deadline) - now)
-                        .ceil()
-                        .max(1.) as u32,
-                );
-                managed.recipe = Some(pending);
-                #[cfg(feature = "http-mutation-barriers")]
-                if let Some(member) = &mut managed.group {
-                    member.packet = Some(packet);
-                    member.permit = Some(permit);
-                    self.pump_mutation_group(now, request);
-                    return;
-                }
-                let bind = Action::ManagedHttp(Box::new(HttpAction::Bind {
-                    preparation: token,
-                    permit,
-                    request: packet,
-                }));
-                #[cfg(feature = "release-domains")]
-                let bind = if V::http_release_domain().is_some() {
-                    self.io.core.domain_bind(request, bind)
-                } else {
-                    Some(bind)
-                };
-                #[cfg(not(feature = "release-domains"))]
-                let bind = Some(bind);
-                if let Some(bind) = bind {
-                    self.io.core.actions.push(bind);
-                }
-            }
-            (result, mut outbound) => {
-                if let Some(action) = outbound.as_mut() {
-                    crate::signing_dispatch::wipe(action);
-                }
-                self.http_preparation_failed(
-                    now,
-                    token,
-                    result.err().unwrap_or(Error::Invalid),
-                    VenueError::new("HTTP signing result is no longer valid"),
-                );
-            }
+        } else {
+            #[cfg(feature = "http-mutation-barriers")]
+            self.pump_mutation_group(now, request);
         }
     }
 
@@ -2824,6 +2786,124 @@ impl crate::engine::CoreIo<'_> {
 }
 
 impl crate::engine::IoCore {
+    // Venue hooks stay in the generic driver, after this common state transition.
+    #[inline(never)]
+    fn complete_http_signing(
+        &mut self,
+        now: f64,
+        completion: &mut HttpSigningCompletion,
+    ) -> Result<Option<Permit>, (Error, VenueError)> {
+        #[cfg(feature = "dispatch-nonce")]
+        let pending = completion.pending.as_mut().expect("unconsumed completion");
+        #[cfg(not(feature = "dispatch-nonce"))]
+        let pending = completion.pending.as_ref().expect("unconsumed completion");
+        let Some(request) = pending.request_id() else {
+            return Ok(None);
+        };
+        let Some(managed) = self.managed_http.get_mut(&request) else {
+            if let Some(action) = completion.outbound.as_mut() {
+                crate::signing_dispatch::wipe(action);
+            }
+            return Ok(None);
+        };
+        let token = managed.lifecycle.preparation();
+        completion.preparation = Some(token);
+        if let Err(reason) = managed.validate_send(&self.request_contexts, now) {
+            if let Some(action) = completion.outbound.as_mut() {
+                crate::signing_dispatch::wipe(action);
+            }
+            return Err((
+                reason,
+                if reason == Error::TimedOut {
+                    crate::signing::SignError::TimedOut.venue_error()
+                } else {
+                    VenueError::new("HTTP signing result is no longer valid")
+                },
+            ));
+        }
+        if let Some(error) = completion.error {
+            let reason = if error == crate::signing::SignError::TimedOut {
+                Error::TimedOut
+            } else {
+                Error::State
+            };
+            return Err((reason, error.venue_error()));
+        }
+        if completion.stale {
+            #[cfg(feature = "dispatch-nonce")]
+            if completion.nonce_stale {
+                if pending.nonce_repairs >= crate::signing_dispatch::MAX_NONCE_REPREPARES {
+                    return Err((
+                        Error::State,
+                        VenueError::new("Signing nonce repair budget exhausted")
+                            .kind(ErrorKind::Internal),
+                    ));
+                }
+                pending.nonce_repairs += 1;
+            }
+            managed.recipe = completion.pending.take();
+            self.reprepare_http(now, token)?;
+            return Ok(None);
+        }
+        let prepared = pending
+            .managed_freshness()
+            .ok_or(Error::State)
+            .and_then(|(revision, until)| {
+                managed
+                    .lifecycle
+                    .signed(token, pending.receipt, revision, until)
+            })
+            .and_then(|()| managed.lifecycle.permit());
+        match (prepared, completion.outbound.as_ref()) {
+            (Ok(permit), Some(Action::Http(packet))) if packet.id == request => Ok(Some(permit)),
+            (result, _) => {
+                if let Some(action) = completion.outbound.as_mut() {
+                    crate::signing_dispatch::wipe(action);
+                }
+                Err((
+                    result.err().unwrap_or(Error::Invalid),
+                    VenueError::new("HTTP signing result is no longer valid"),
+                ))
+            }
+        }
+    }
+
+    #[inline(never)]
+    fn bind_signed_http(&mut self, now: f64, ready: SignedHttp) -> Option<Action> {
+        let SignedHttp {
+            token,
+            permit,
+            mut packet,
+            pending,
+        } = ready;
+        let managed = self
+            .managed_http
+            .get_mut(&token.attempt().request)
+            .expect("completed signing retains its managed request");
+        packet.timeout_ms = Some(
+            (managed.lifecycle.deadline().min(pending.deadline) - now)
+                .ceil()
+                .max(1.) as u32,
+        );
+        managed.recipe = Some(pending);
+        #[cfg(feature = "http-mutation-barriers")]
+        if let Some(member) = &mut managed.group {
+            member.packet = Some(packet);
+            member.permit = Some(permit);
+            return None;
+        }
+        Some(Self::http_bind(token, permit, packet))
+    }
+
+    #[inline(never)]
+    fn http_bind(token: Preparation, permit: Permit, packet: HttpRequest) -> Action {
+        Action::ManagedHttp(Box::new(HttpAction::Bind {
+            preparation: token,
+            permit,
+            request: packet,
+        }))
+    }
+
     // Return refusals to the generic caller before it delivers any venue hook.
     #[inline(never)]
     fn reprepare_http(&mut self, now: f64, token: Preparation) -> Result<(), (Error, VenueError)> {
@@ -3157,6 +3237,7 @@ mod tests {
     }
     #[derive(Default)]
     struct Probe {
+        recipe_alive: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
         #[cfg(feature = "session-bearer")]
         session_fixture: Option<Session>,
         #[cfg(feature = "session-bearer")]
@@ -3356,6 +3437,12 @@ mod tests {
             reason: Error,
             error: VenueError,
         ) {
+            if let Some(alive) = &self.recipe_alive {
+                assert!(
+                    alive.load(std::sync::atomic::Ordering::SeqCst),
+                    "the completed recipe survives its failure hook"
+                );
+            }
             self.failures.push((reason, error.outcome));
             self.failure_messages.push(error.message.clone());
             if pending.0.operation() == Operation::Mutation {

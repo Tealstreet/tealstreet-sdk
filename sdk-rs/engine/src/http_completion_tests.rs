@@ -211,3 +211,34 @@ fn signed_completion_parks_and_wakes_with_only_the_current_bearer() {
     assert_eq!(request.timeout_ms, Some(986));
     assert!(matches!(engine.claim_http(15., permit), Ok(Claim::Released(_))));
 }
+
+#[test]
+fn failure_hook_precedes_the_completed_recipes_destructor() {
+    struct TrackedRecipe(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for TrackedRecipe {
+        fn drop(&mut self) { self.0.store(false, std::sync::atomic::Ordering::SeqCst); }
+    }
+    impl crate::SignStep for TrackedRecipe {
+        fn prepare(&mut self, outbound: &mut Action, context: &crate::DispatchContext<'_>) -> Result<crate::signing::SignRequest, crate::signing::SignError> {
+            Recipe.prepare(outbound, context)
+        }
+        fn apply(&mut self, outbound: &mut Action, result: &crate::signing::SignResult) -> Result<(), crate::signing::SignError> {
+            Recipe.apply(outbound, result)
+        }
+        fn freshness_ms(&self) -> f64 { 3000. }
+    }
+    let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (mut engine, _) = start(Probe { recipe_alive: Some(alive.clone()), ..Probe::default() });
+    let mut cx = Cx { now: 0., store: &mut engine.store, io: &mut engine.io };
+    let context = cx.http_context(Scope::Background, Policy {
+        operation: Operation::Read,
+        credential: Some(crate::request_context::Credential { slot: CredentialSlot::Primary, reference: crate::signing::KeyRef("fixture".into()) }),
+        timeout_ms: 1000, pacing: None, retry: RetryPolicy::Never,
+    }).unwrap();
+    cx.request_signed_managed(context.clone(), None, Method::Post, "https://venue.test/read".into(), Some("{}".into()), Box::new(TrackedRecipe(alive.clone())), Pending(context)).unwrap();
+    let token = engine.drain_actions().find_map(|a| match a { Action::ManagedHttp(a) => match *a { HttpAction::Prepare { preparation, .. } => Some(preparation), _ => None }, _ => None }).unwrap();
+    let (attempt, _) = work(&route(&mut engine, token, 10.));
+    engine.handle(11., Event::Signed { attempt, result: Err(crate::signing::SignError::Refused) });
+    assert!(!alive.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(engine.venue().failures.len(), 1);
+}
