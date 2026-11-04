@@ -50,6 +50,8 @@ implementation.
 | H5 | Cover held per flush, not per row: partial read at 1, flush, partial read at 500, and the cover becomes 500 with no complete read | `/tmp/codex-hcmq3f-2990-recheck-boundaries.patch` (`review_partial_cover_survives_an_intermediate_frame`) | engine unit test, same name |
 | H6 | The hosted server's `segment_frame` splits ORDERS from its cover; the ORDERS segment arrives first and lifts on its stamp | `/tmp/codex-hcmq3f-2990-segmentation.rs` | `orders_never_segment_apart_from_their_read_time` (hosts/native) |
 | H7 | Unbounded source reads: 100 same-clock asks start 200 physical order reads | `/tmp/codex-hcmq3f-2990-recheck-boundaries.patch` (`review_repeated_same_clock_refreshes_have_bounded_physical_reads`) | same name |
+| H8 | An older read lands after a fresh one: old read sent at 0 misses the write at 1; fresh read sent at 5 finds the order; the old read lands last and removes the row while cover 5 stays, and the next frame lifts with the order missing | codex-hcmq3f, #3000 design review (28a0b5d) | `an_older_read_landing_after_a_fresh_one_neither_removes_the_found_order_nor_lifts`, run three ways: the delta, `snapshot_frame` and `account_snapshot_frame` after it |
+| H9 | One scope's fresh send stands for the whole account: an old HIP-3 dex read sent at 0 plus a fresh core read sent at 5 yields account cover 5 and clears a HIP-3 fence. The same shape applies to Bybit products with independent read roots. | codex-hcmq3f, #3000 design review (28a0b5d) | Hyperliquid `an_old_dex_read_keeps_the_account_cover_and_its_fence`; Bybit `an_old_product_read_keeps_the_account_cover` |
 
 Controls that must stay green:
 
@@ -92,15 +94,51 @@ sets `account_read`. A partial read sets only its symbols. Stream events don't
 touch either (H5: no flush or stream event can raise a cover).
 
 Send time is the existing `order_read_tokens` epoch pair extended with time
-(done in #2990's head). For a managed logical read it is the earliest released
-leg (`read_mark`), and venues report through the existing `orders_reconciled*`
-calls: `orders_reconciled(None)`, `_since(None, _)` and `_except(&[], _)` are
-complete; `Some(symbol)` and `_except` with unproven symbols are per-symbol,
-covering the symbols proven.
+(done in #2990's head). For one managed logical read, it is the earliest
+released leg (`read_mark`).
 
-A read already in flight when its rows are superseded (an older read landing
-after a newer complete one) must not lower a newer cover, and must not raise
-it. It is ignored for covers (its send is older than the cover it would touch).
+**An account cover is the minimum over every constituent scope (H9).** Many
+complete reads are assembled from independent scopes, each with its own read
+root and send time:
+
+- Hyperliquid: core plus every HIP-3 dex. `account.rs` keeps only an epoch per
+  dex in `clean_dexes`, and the final scope calls
+  `orders_reconciled_since(None, minEpoch)`.
+- Bybit: one read root per product or settle coin.
+- Paged venues: one root per page chain.
+
+The account cover is the **minimum retained proven send time across all of
+them**, not the send time of whichever scope finished last. A final callback's
+own token or timestamp is never account-wide proof.
+
+Each scope therefore reports its own send time when it commits, and the
+account-wide report names the scopes it joins. The engine takes the minimum of
+the retained per-scope sends. A venue that cannot attribute a send time to each
+scope produces per-symbol covers only, for the symbols its scopes proved, and no
+account cover. Today's `orders_reconciled_since(None, epoch)` and
+`_except(&[], epoch)` calls carry an epoch minimum but no per-scope time, so
+step 1 extends them (or adds `orders_scope_read(scope, sent)` beside them), and
+each venue is audited.
+
+**Rows and cover commit together, and an older read never rolls either back
+(H8).** A cover is only as good as the rows beside it. Take an old read sent at
+0 that misses a write at 1, and a fresh read sent at 5 that finds the order. If
+the old read lands last and replaces the rows, the order disappears while
+cover 5 stays, and the next frame lifts the fence with the order missing.
+
+- Every row replacement from a read goes through the store's existing atomic
+  commit (`begin_orders_snapshot` / `commit_orders_snapshot`, whose tokens order
+  by begin). It writes the rows and that read's cover in the same call.
+- The commit is refused for every symbol (or scope) whose current row
+  provenance is newer than the read's send. Its rows are dropped and its cover
+  is not applied.
+- Row provenance per symbol is the send time of the read that last committed
+  it, or the receive time of the stream event that last changed it.
+- A read already in flight when newer rows land therefore can neither lower a
+  cover, nor raise it, nor replace the newer rows.
+- Venues that write rows outside `commit_orders_snapshot` today (direct
+  `set_orders`, `upsert_order` and `remove_orders` from read handlers) move onto
+  it in step 1. The audit lists each one.
 
 ### 4.2 Wire section `ORDERS_READ` (23)
 
@@ -260,9 +298,15 @@ logical-read deadline of 60 s on frame-fed sources would make it sound.
 
 ## 7. Implementation order
 
-1. Engine: per-symbol cover provenance in `Store` (§4.1) and section 23
-   revision 1 written after ORDERS on every output (§4.2). Segmenter parent
-   mapping (H6). Tests H2, H4, H5, H6.
+1. Engine plus a venue audit:
+   - Per-symbol cover provenance in `Store`, with rows and cover committed
+     atomically through `commit_orders_snapshot` and no rollback by an older
+     read (§4.1, H8).
+   - Per-scope send times with a minimum account cover (H9), and every
+     frame-fed venue's read handlers moved onto that path.
+   - Section 23 revision 1 written after ORDERS on every output (§4.2), and the
+     segmenter parent mapping (H6).
+   - Tests H2, H4, H5, H6, H8, H9.
 2. Engine: per-symbol fence marks and the cover-only lift behind the capability
    bit (§4.3, §4.4). Mixed-version tests: an old source keeps the stamp rule; a
    new source's ORDERS without 23 lifts nothing.
