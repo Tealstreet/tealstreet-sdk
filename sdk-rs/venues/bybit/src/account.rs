@@ -3241,25 +3241,29 @@ impl BybitLinear {
                 },
             );
         }
-        let old: Vec<String> = cx
-            .store
-            .orders()
-            .iter()
-            .filter(|order| self.owns_symbol(&order.symbol))
-            .map(|order| order.id.clone())
+        // This category's rows and the cover its read proves, together: a symbol
+        // whose rows changed after the read went out keeps them, and a newer
+        // committed read of this category refuses this one whole.
+        let account: Vec<&str> = self
+            .required_categories()
+            .into_iter()
+            .map(Category::as_str)
             .collect();
-        let old_refs: Vec<&str> = old.iter().map(String::as_str).collect();
-        cx.store.remove_orders(&old_refs);
-        for order in merged.drain(..) {
-            cx.store.upsert_order(order);
-        }
+        cx.commit_orders_read(
+            safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                key: self.category.as_str(),
+                account: &account,
+            },
+            |symbol| self.owns_symbol(symbol),
+            merged,
+        );
         self.orders_loaded.insert(self.category);
         if self
             .required_categories()
             .iter()
             .all(|c| self.orders_loaded.contains(c))
         {
-            cx.store.set_orders(cx.store.orders().to_vec());
+            cx.store.set_orders_loaded();
         }
         // A committed, wholly admitted fresh read clears the engine's
         // uncertain-write fence once no product's order read is still out.
