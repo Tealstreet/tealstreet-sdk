@@ -198,3 +198,255 @@ fn unidentified_row_grants_no_cover() {
     answer_orders(&mut h, r#"[{"broken":true}]"#);
     assert_eq!(account_cover(&mut h).1, None);
 }
+
+/// The CAPABILITIES record's `order_read_covers` bit in a variant's snapshot.
+fn advertises_covers(variant: safe_cex_venue_binance::Variant, portfolio_margin: bool) -> bool {
+    let mut h = Harness::started(Options {
+        variant,
+        portfolio_margin,
+        ..credentials()
+    });
+    let frame = h.engine.snapshot_frame(h.now).to_vec();
+    let (_, payload) = safe_cex_engine::wire::sections(&frame)
+        .find(|(kind, _)| *kind == section::CAPABILITIES)
+        .unwrap();
+    let flags = u32::from_le_bytes(payload[..4].try_into().unwrap());
+    flags & 1 << safe_cex_engine::Capabilities::ORDER_READ_COVERS_BIT != 0
+}
+
+/// Every frame-fed alias (USD-M, PM, COIN-M, spot) advertises read covers;
+/// options, whose orders read commits no cover, does not.
+#[test]
+fn binance_advertises_read_covers() {
+    use safe_cex_venue_binance::Variant;
+    for (variant, pm) in [
+        (Variant::UsdM, false),
+        (Variant::UsdM, true),
+        (Variant::CoinM, false),
+        (Variant::Spot, false),
+    ] {
+        assert!(advertises_covers(variant, pm), "{variant:?} pm {pm}");
+    }
+    assert!(!advertises_covers(Variant::Options, false));
+}
+
+/// A loaded USD-M source, its startup orders read answered and nothing out.
+fn loaded() -> Harness {
+    let mut h = orders_read_out();
+    while h.has_request("/fapi/v1/openOrders") || h.has_request("/fapi/v1/openAlgoOrders") {
+        for path in ["/fapi/v1/openOrders", "/fapi/v1/openAlgoOrders"] {
+            if h.has_request(path) {
+                h.respond(path, 200, "[]");
+            }
+        }
+    }
+    h.requests.clear();
+    h
+}
+
+fn refresh(h: &mut Harness, command: u32, symbols: Option<Vec<String>>) {
+    h.event(Event::Command(safe_cex_engine::Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols },
+    }));
+}
+
+fn orders_reads(h: &Harness) -> Vec<safe_cex_engine::RequestId> {
+    h.requests
+        .iter()
+        .filter(|r| {
+            r.url.contains("/fapi/v1/openOrders") || r.url.contains("/fapi/v1/openAlgoOrders")
+        })
+        .map(|r| r.id)
+        .collect()
+}
+
+/// Answer the reads `ids` with empty lists.
+fn answer_reads(h: &mut Harness, ids: &[safe_cex_engine::RequestId]) {
+    for id in ids {
+        h.requests.retain(|r| r.id != *id);
+        h.reply(*id, 200, "", "[]");
+    }
+}
+
+/// The ask reads both legs; their answers publish an account cover at the
+/// ask's send time, not the landing time.
+#[test]
+fn a_refresh_ask_reads_orders_and_publishes_its_send_time() {
+    for symbols in [None, Some(vec!["BTCUSDT".to_owned()])] {
+        let mut h = loaded();
+        h.advance(5_000.0);
+        let asked = h.now;
+        refresh(&mut h, 60, symbols.clone());
+        let reads = orders_reads(&h);
+        assert_eq!(reads.len(), 2, "{symbols:?}: {:?}", h.paths());
+        h.advance(1_000.0);
+        answer_reads(&mut h, &reads);
+        assert_eq!(account_cover(&mut h).1, Some(asked), "{symbols:?}");
+    }
+}
+
+/// H7/H3: asks while the read is out start nothing; exactly one follow-up
+/// batch starts after it lands, and nothing after that one.
+#[test]
+fn asks_while_a_read_is_out_get_one_follow_up() {
+    let mut h = loaded();
+    h.advance(5_000.0);
+    refresh(&mut h, 60, Some(vec!["BTCUSDT".into()]));
+    let first = orders_reads(&h);
+    assert_eq!(first.len(), 2, "{:?}", h.paths());
+    for command in 61..161 {
+        refresh(&mut h, command, None);
+    }
+    assert_eq!(orders_reads(&h), first, "H7: nothing more while it is out");
+    h.advance(100.0);
+    answer_reads(&mut h, &first);
+    let follow = orders_reads(&h);
+    assert_eq!(follow.len(), 2, "one follow-up batch: {:?}", h.paths());
+    h.advance(100.0);
+    let sent = h.now - 100.0;
+    answer_reads(&mut h, &follow);
+    assert_eq!(account_cover(&mut h).1, Some(sent));
+    h.advance(1_000.0);
+    assert!(orders_reads(&h).is_empty(), "{:?}", h.paths());
+}
+
+/// A loaded portfolio margin, COIN-M or spot source with nothing out, and its
+/// open-orders legs.
+fn loaded_variant(variant: &str) -> (Harness, &'static [&'static str]) {
+    use safe_cex_venue_binance::Variant;
+    let (options, legs): (Options, &[&str]) = match variant {
+        "pm" => (
+            Options {
+                portfolio_margin: true,
+                ..credentials()
+            },
+            &[
+                "/papi/v1/um/openOrders",
+                "/papi/v1/um/conditional/openOrders",
+            ],
+        ),
+        "coinm" => (
+            Options {
+                variant: Variant::CoinM,
+                ..credentials()
+            },
+            &["/dapi/v1/openOrders"],
+        ),
+        _ => (
+            Options {
+                variant: Variant::Spot,
+                ..credentials()
+            },
+            &["/api/v3/openOrders"],
+        ),
+    };
+    let mut h = Harness::started(options);
+    let answers: &[(&str, &str)] = match variant {
+        "pm" => &[
+            ("/fapi/v1/exchangeInfo", support::EXCHANGE_INFO),
+            (
+                "/papi/v1/um/leverageBracket",
+                r#"[{"symbol":"BTCUSDT","brackets":[{"bracket":1,"initialLeverage":125}]}]"#,
+            ),
+            ("/fapi/v1/ticker/24hr", support::DAILY),
+            ("/fapi/v1/ticker/bookTicker", support::BOOK_TICKERS),
+            ("/fapi/v1/premiumIndex", support::PREMIUM),
+            ("/papi/v1/listenKey", r#"{"listenKey":"pmkey"}"#),
+            (
+                "/papi/v1/um/positionSide/dual",
+                r#"{"dualSidePosition":false}"#,
+            ),
+            ("/papi/v1/um/positionRisk", "[]"),
+            ("/papi/v1/balance", "[]"),
+        ],
+        "coinm" => &[
+            (
+                "/dapi/v1/exchangeInfo",
+                r#"{"symbols":[{"symbol":"BTCUSD_PERP","contractStatus":"TRADING","baseAsset":"BTC","quoteAsset":"USD","marginAsset":"BTC","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"1000"}]}]}"#,
+            ),
+            (
+                "/dapi/v2/leverageBracket",
+                r#"[{"symbol":"BTCUSD_PERP","brackets":[{"initialLeverage":125}]}]"#,
+            ),
+            (
+                "/dapi/v1/ticker/24hr",
+                r#"[{"symbol":"BTCUSD_PERP","lastPrice":"10000","priceChangePercent":"1","volume":"100","baseVolume":"1"}]"#,
+            ),
+            (
+                "/dapi/v1/ticker/bookTicker",
+                r#"[{"symbol":"BTCUSD_PERP","bidPrice":"9999","askPrice":"10001"}]"#,
+            ),
+            (
+                "/dapi/v1/premiumIndex",
+                r#"[{"symbol":"BTCUSD_PERP","markPrice":"10000","indexPrice":"10000","lastFundingRate":"0.0001","nextFundingTime":100000}]"#,
+            ),
+            ("/dapi/v1/listenKey", r#"{"listenKey":"coin-key"}"#),
+            (
+                "/dapi/v1/positionSide/dual",
+                r#"{"dualSidePosition":false}"#,
+            ),
+            ("/dapi/v1/positionRisk", "[]"),
+            ("/dapi/v1/account", r#"{"assets":[]}"#),
+        ],
+        _ => &[
+            (
+                "/api/v3/exchangeInfo",
+                r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}]}]}"#,
+            ),
+            (
+                "/api/v3/ticker/24hr",
+                r#"[{"symbol":"BTCUSDT","lastPrice":"10000","bidPrice":"9999","askPrice":"10001","priceChangePercent":"0","volume":"1","quoteVolume":"10000"}]"#,
+            ),
+        ],
+    };
+    for (path, body) in answers {
+        h.respond(path, 200, body);
+    }
+    let sockets: Vec<_> = h.sockets.iter().map(|(socket, _)| *socket).collect();
+    for socket in sockets {
+        h.event(Event::WsOpened { socket });
+    }
+    if variant == "spot" {
+        h.respond("/api/v3/account", 200, r#"{"balances":[]}"#);
+    }
+    while legs.iter().any(|leg| h.has_request(leg)) {
+        for leg in legs {
+            if h.has_request(leg) {
+                h.respond(leg, 200, "[]");
+            }
+        }
+    }
+    h.requests.clear();
+    (h, legs)
+}
+
+/// The ask on each other frame-fed alias reads every orders leg it reads at
+/// startup, and their answers publish an account cover at the send time.
+#[test]
+fn every_alias_answers_a_refresh_ask_with_a_cover() {
+    for variant in ["pm", "coinm", "spot"] {
+        let (mut h, legs) = loaded_variant(variant);
+        h.advance(5_000.0);
+        h.requests.clear();
+        let asked = h.now;
+        refresh(&mut h, 60, Some(vec!["BTCUSDT".into()]));
+        let reads: Vec<_> = h
+            .requests
+            .iter()
+            .filter(|r| legs.iter().any(|leg| r.url.contains(leg)))
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(reads.len(), legs.len(), "{variant}: {:?}", h.paths());
+        refresh(&mut h, 61, None);
+        h.advance(100.0);
+        answer_reads(&mut h, &reads);
+        assert_eq!(account_cover(&mut h).1, Some(asked), "{variant}");
+        let follow = h
+            .requests
+            .iter()
+            .filter(|r| legs.iter().any(|leg| r.url.contains(leg)))
+            .count();
+        assert_eq!(follow, legs.len(), "{variant}: one follow-up batch");
+    }
+}

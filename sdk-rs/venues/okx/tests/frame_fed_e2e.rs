@@ -177,7 +177,8 @@ fn the_page_engine_writes_from_the_sources_frames_and_its_next_frame_settles_the
     // 4. An unknown outcome is never re-sent; the source's next ORDERS frame is
     //    the reconcile once written past the fence grace (a frame written
     //    sooner can predate the venue showing the lost order); after it the
-    //    symbol takes a new write.
+    //    symbol takes a new write. The source advertises read covers, so only
+    //    an orders read's cover lifts the fence (§4.4), not a bare ORDERS write.
     let lost = send(
         &mut page,
         Command::PlaceOrders {
@@ -193,9 +194,22 @@ fn the_page_engine_writes_from_the_sources_frames_and_its_next_frame_settles_the
         requests(&prepared(&mut page, 6.1)).is_empty(),
         "never re-sent, no reconcile read"
     );
-    source
-        .store_mut()
-        .set_orders(vec![resting("701", 39000.), resting("703", 39600.)]);
+    let store = source.store_mut();
+    let read = safe_cex_engine::order_read_cover::OrderReadMark {
+        seq: store.order_read_sequence(),
+        sent: 3_107.0,
+        epoch: 0,
+    };
+    store.commit_orders_read(
+        read,
+        safe_cex_engine::order_read_cover::OrderReadScope::Account {
+            key: "orders",
+            account: &["orders"],
+        },
+        |_| true,
+        vec![resting("701", 39000.), resting("703", 39600.)],
+        &[],
+    );
     let settled = source.take_frame(3_107.0).expect("orders changed").to_vec();
     page.apply_frame(3_107.0, &settled, false).unwrap();
     assert!(
