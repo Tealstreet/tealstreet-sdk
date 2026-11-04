@@ -1472,12 +1472,43 @@ fn portfolio_probe_advances_past_a_missing_portfolio() {
     assert!(r.url.ends_with("/portfolios/portfolio-one"), "{}", r.url);
 }
 
+fn cfm_discovery_probe(s: &mut Session) -> HttpRequest {
+    for suffix in ["/portfolios", "/portfolios/portfolio-one"] {
+        let request = s.next_request();
+        assert!(request.url.ends_with(suffix));
+        s.answer(request);
+    }
+    let request = s.next_request();
+    assert!(request.url.ends_with("/cfm/balance_summary"));
+    request
+}
+
 fn no_cfm_account_still_finishes_private_startup(body: &str) {
     let mut s = Session::new("DEFAULT", false);
     s.breakdown = Some(r#"{"breakdown":{"spot_positions":[{"account_type":"ACCOUNT_TYPE_WALLET","asset":"USDC","total_balance_crypto":2600,"available_to_trade_crypto":2400}],"futures_positions":null,"perp_positions":null}}"#.into());
-    let probe = next_read(&mut s, "/cfm/balance_summary");
+    let probe = cfm_discovery_probe(&mut s);
     s.reply(probe, 200, body);
-    let mut s = s.ready();
+    for _ in 0..250 {
+        let requests = s.collect();
+        if !requests.is_empty() {
+            for request in requests {
+                if request.url.ends_with("/cfm/balance_summary") {
+                    s.reply(request, 200, body);
+                } else {
+                    s.answer(request);
+                }
+            }
+            continue;
+        }
+        let loaded = s.e.store().loaded();
+        if loaded.markets && loaded.tickers && loaded.balance && loaded.orders && loaded.positions {
+            break;
+        }
+        if s.timers.is_empty() {
+            break;
+        }
+        s.fire();
+    }
     let loaded = s.e.store().loaded();
     assert!(loaded.markets && loaded.tickers && loaded.balance && loaded.orders && loaded.positions);
     assert_eq!(serde_json::from_str::<serde_json::Value>(&fetch_account(&mut s).unwrap()).unwrap()["userId"], "portfolio-one");
@@ -1502,7 +1533,7 @@ fn null_cfm_summary_means_no_us_futures_account() {
 fn malformed_cfm_probe_names_the_endpoint_and_field_without_selecting_spot() {
     for body in ["{}", "[]", r#"{"balance_summary":[]}"#, r#"{"balance_summary":{"total_usd_balance":null}}"#] {
         let mut s = Session::new("DEFAULT", false);
-        let probe = next_read(&mut s, "/cfm/balance_summary");
+        let probe = cfm_discovery_probe(&mut s);
         s.reply(probe, 200, body);
         s.collect();
         assert!(!s.e.store().loaded().markets);

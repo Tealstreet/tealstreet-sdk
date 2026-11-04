@@ -94,6 +94,32 @@ describe('retained Coinbase Rust family oracle', () => {
   let mirrored: BaseExchange | undefined;
   afterEach(() => { exchange?.dispose(); exchange = undefined; mirrored?.dispose(); mirrored = undefined; });
 
+  it.each([
+    { shape: 'top-level null', body: null },
+    { shape: 'null summary', body: { balance_summary: null } },
+  ])('coinbase completes private startup without a US futures account: $shape', async ({ body }) => {
+    const tape = transport();
+    const originalRequest = tape.native.request;
+    tape.native.request = async (request) => {
+      if (new URL(request.url).pathname.endsWith('/cfm/balance_summary')) {
+        tape.requests.push(request);
+        return { status: 200, body: new TextEncoder().encode(JSON.stringify(body)) };
+      }
+      return originalRequest(request);
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    const store = new DefaultStore();
+    exchange = await createExchange('coinbase', { key: downloaded, secret: '', tealstreetTunnel: false }, store) as RustEngineExchange;
+    await exchange.start();
+    expect(await exchange.getAccount()).toEqual({ userId: 'selected-spot-portfolio' });
+    expect(store.loaded).toEqual({ markets: true, tickers: true, balance: true, orders: true, positions: true });
+    expect(store.markets.map((market) => market.symbol)).toEqual(['BTC-USD']);
+    expect(store.balance.currencies?.BTC).toMatchObject({ total: 1.5, free: 1 });
+    expect(tape.requests.filter((request) => new URL(request.url).pathname.endsWith('/cfm/balance_summary'))).toHaveLength(1);
+    expect(tape.requests.some((request) => /\/(cfm\/positions|intx)\//.test(new URL(request.url).pathname))).toBe(false);
+  });
+
   it.each(names)('%s normalizes pasted BOM credentials through EngineHost without changing the JWT identity', async (name) => {
     const tape = transport();
     setWasmEngineLoader(loadNodeEngine);
