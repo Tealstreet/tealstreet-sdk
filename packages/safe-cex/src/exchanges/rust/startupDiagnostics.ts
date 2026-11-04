@@ -1,5 +1,13 @@
 import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
 
+export type FailedPrivateReadKind = 'state' | 'spot' | 'orders' | 'role' | 'mode' | 'discovery';
+
+export function failedPrivateReadKind(value: unknown): FailedPrivateReadKind | undefined {
+  return typeof value === 'string' && ['state', 'spot', 'orders', 'role', 'mode', 'discovery'].includes(value)
+    ? (value as FailedPrivateReadKind)
+    : undefined;
+}
+
 const STAGES = new Set([
   'metaAndAssetCtxs',
   'perpDexs',
@@ -18,6 +26,8 @@ export function startupDiagnosticTags(event: EngineEvent): Record<string, string
   const fields = event.fields ?? {};
   const tags: Record<string, string> = {};
   if (typeof fields.stage === 'string' && STAGES.has(fields.stage)) tags.startup_stage = fields.stage;
+  const failedRead = failedPrivateReadKind(fields.lastFailedPrivateReadKind);
+  if (failedRead) tags.startup_last_failed_private_read_kind = failedRead;
   for (const [field, tag] of [
     ['elapsedMs', 'startup_elapsed_ms'],
     ['deadlineMs', 'startup_deadline_ms'],

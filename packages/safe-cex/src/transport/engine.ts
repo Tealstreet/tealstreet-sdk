@@ -23,6 +23,7 @@ import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
+import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
 import {
@@ -456,6 +457,7 @@ const httpTransport = (
   proxyAuthorization?: ProxyAuthorizationNotice,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
+  infoFacts?: HyperliquidStartupFacts,
 ): {
   mode: 'direct' | 'how';
   request: Transport['request'];
@@ -543,9 +545,11 @@ const httpTransport = (
     const deadlineMs = Math.max(1, request.timeoutMs ?? 20_000);
     const remaining = () => Math.max(0, deadlineMs - (Date.now() - started));
     let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
+    let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
     let bound = false;
     let cancelBound: (() => void) | undefined;
     const cleanup = () => {
+      infoRead?.close();
       clearTimeout(timer);
       pending.delete(controller);
       signal.removeEventListener('abort', onAbort);
@@ -637,6 +641,8 @@ const httpTransport = (
           ? (proxyRoute ??
             restRoute(provider, exchange, restOptions, restRouting, request, transport.serverHeaders, intent))
           : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
+      if (infoFacts && request.method === 'POST' && original.pathname === '/info')
+        infoRead = infoFacts.begin(tunnelAdapter ? 'how' : route.proxied ? 'proxy' : 'direct', deadlineMs);
       const target = route.baseURL ?? request.url;
       const prefix = target.endsWith(request.url) ? target.slice(0, -request.url.length) : undefined;
       if (intent !== undefined && prefix === undefined) throw new HttpPreparationError('unsupported');
@@ -725,7 +731,10 @@ const httpTransport = (
       signal.throwIfAborted();
       const budgetGeneration =
         infoBudget && request.method === 'POST' && original.pathname === '/info'
-          ? await untilAborted(infoBudget.wait(original.origin, request.body, started + deadlineMs, signal), signal)
+          ? await untilAborted(
+              infoRead!.wait(() => infoBudget.wait(original.origin, request.body, started + deadlineMs, signal)),
+              signal,
+            )
           : undefined;
       if (intent !== undefined && (!prepared || typeof prepared.bind !== 'function'))
         throw new HttpPreparationError('invalid');
@@ -825,21 +834,23 @@ const httpTransport = (
             admitting = true;
             try {
               const result = await untilAborted(
-                infoBudget!.admitDispatch(
-                  original.origin,
-                  budgetGeneration!,
-                  started + deadlineMs,
-                  signal,
-                  () => {
-                    active();
-                    admitted = true;
-                    try {
-                      return { value: handoff() };
-                    } finally {
-                      admitted = false;
-                    }
-                  },
-                  () => sent,
+                infoRead!.wait(() =>
+                  infoBudget!.admitDispatch(
+                    original.origin,
+                    budgetGeneration!,
+                    started + deadlineMs,
+                    signal,
+                    () => {
+                      active();
+                      admitted = true;
+                      try {
+                        return { value: handoff() };
+                      } finally {
+                        admitted = false;
+                      }
+                    },
+                    () => sent,
+                  ),
                 ),
                 signal,
               );
@@ -862,6 +873,7 @@ const httpTransport = (
                 if (sent) throw new HttpPreparationError('invalid');
               });
               sent = true;
+              infoRead?.sent();
               try {
                 const response = send();
                 return untilAborted(response, signal)
@@ -869,6 +881,7 @@ const httpTransport = (
                     route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
                   )
                   .then(async (value) => {
+                    infoRead?.response(value.status);
                     if (infoBudget && request.method === 'POST' && original.pathname === '/info') {
                       const reportFailure = () => {
                         if (!signal.aborted) warnHyperliquidInfoBudgetUnavailable();
@@ -963,8 +976,10 @@ export const createEngineTransport = (
   onProxyAuthorizationFailure?: (message: string) => void,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
-): Transport => {
+): Transport & { startupDiagnostics(): Record<string, string> } => {
   assertEngineAccountRouting(options, exchange);
+  const infoFacts =
+    exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidStartupFacts() : undefined;
   const provider = getTransport(options);
   const { routing, restRouting } = resolved(exchange, options, provider);
   const routes = {
@@ -1034,13 +1049,36 @@ export const createEngineTransport = (
     proxyAuthorization,
     onTunnelProxyFallback,
     onBybitPublicRateLimit,
+    infoFacts,
   );
   // Explicit public requests bypass account proxy/tunnel policy. URLs stay in
   // the host; venues choose only the typed route name.
-  const directHttp = httpTransport(exchange, options, transport, provider, restRouting, '');
+  const directHttp = httpTransport(
+    exchange,
+    options,
+    transport,
+    provider,
+    restRouting,
+    '',
+    undefined,
+    undefined,
+    undefined,
+    infoFacts,
+  );
   const publicCorsProxy = provider.publicCorsProxy();
   const publicCorsHttp = publicCorsProxy
-    ? httpTransport(exchange, options, transport, provider, restRouting, publicCorsProxy)
+    ? httpTransport(
+        exchange,
+        options,
+        transport,
+        provider,
+        restRouting,
+        publicCorsProxy,
+        undefined,
+        undefined,
+        undefined,
+        infoFacts,
+      )
     : undefined;
   const readOptions = credentials?.hasSecondary
     ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
@@ -1058,11 +1096,13 @@ export const createEngineTransport = (
         proxyAuthorization,
         onTunnelProxyFallback,
         onBybitPublicRateLimit,
+        infoFacts,
       )
     : undefined;
   return {
     // Protocol negotiation must use the same resolved route as connect(),
     // including hosts (such as Workers) which construct the engine themselves.
+    startupDiagnostics: () => infoFacts?.tags() ?? {},
     httpMode: http.mode,
     engineOptions: {
       ...transport.engineOptions,

@@ -861,3 +861,27 @@ it('does not charge a managed claim that waits without dispatching', async () =>
     transport.dispose?.();
   }
 });
+
+it('atomically charges concurrent dispatches across workers while granting preparations freely', async () => {
+  const a = client();
+  const b = client();
+  const deadline = Date.now() + 20_000;
+  const grants = await Promise.all(
+    Array.from({ length: 60 }, (_, index) => (index % 2 ? a : b).wait(ORIGIN, ORDERS, deadline, signal())),
+  );
+  const sends: number[] = [];
+  const requests = Promise.all(
+    grants.map((grant, index) =>
+      (index % 2 ? a : b).admitDispatch(ORIGIN, grant, deadline, signal(), () => {
+        sends.push(Date.now());
+      }),
+    ),
+  );
+  for (let i = 0; i < 30; i++) await flushDatabase();
+  expect(sends).toEqual(Array(50).fill(1_000_000));
+  await vi.advanceTimersByTimeAsync(12_000);
+  await flushDatabase();
+  await requests;
+  expect(sends).toHaveLength(60);
+  expect(sends.filter((at) => at < 1_001_200)).toHaveLength(50);
+});

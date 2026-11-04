@@ -55,6 +55,7 @@ it('does not turn arbitrary stage text or invalid counters into Sentry tags', ()
       message: '',
       fields: {
         stage: 'wallet-or-request-data',
+        lastFailedPrivateReadKind: 'wallet-or-request-data',
         elapsedMs: NaN,
         deadlineMs: -1,
         readTimeoutMs: Infinity,
@@ -70,4 +71,33 @@ it('does not turn arbitrary stage text or invalid counters into Sentry tags', ()
       fields: { stage: 'frontendOpenOrders', http429Count: 3 },
     }),
   ).toEqual({});
+});
+
+it.each(['state', 'spot', 'orders', 'role', 'mode', 'discovery'])('allows the closed failed-read enum %s', (kind) => {
+  expect(
+    startupDiagnosticTags({
+      code: 'startup.incomplete',
+      level: 'warn',
+      message: '',
+      fields: { lastFailedPrivateReadKind: kind },
+    }),
+  ).toEqual({ startup_last_failed_private_read_kind: kind });
+});
+
+it('accepts failure enums before the watchdog, without inferring a kind from error text', () => {
+  const exchange = new RustEngineExchange(
+    'hyperliquid',
+    { key: '', secret: '', publicDataOnly: true },
+    new DefaultStore(),
+  );
+  accounts.push(exchange);
+  exchange.on('error', vi.fn());
+  const emit = (fields: Record<string, unknown>, message = 'role orders mode') =>
+    (exchange as any).receiveEvent({ code: 'request.failed', level: 'error', message, fields });
+  emit({ lastFailedPrivateReadKind: 'spot' });
+  expect(exchange.lastFailedPrivateReadKind).toBe('spot');
+  expect(exchange.startupDiagnostics.startup_last_failed_private_read_kind).toBe('spot');
+  emit({ lastFailedPrivateReadKind: 'wallet-or-request-data' });
+  emit({});
+  expect(exchange.lastFailedPrivateReadKind).toBe('spot');
 });

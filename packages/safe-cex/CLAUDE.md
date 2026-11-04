@@ -1678,3 +1678,17 @@ additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+
+
+Hyperliquid `/info` admission shares a token bucket across account workers through
+IndexedDB. Prepare may wait but reserves no weight; the final atomic admission
+charges only if managed Claim actually dispatches. Cancellation, stale Claim and
+unbound preparation consume no tokens; a request handed to fetch is never refunded.
+Retry-After and generation checks still apply at dispatch. Role/mode startup reads
+stay single-flight until their managed completion or deadline, including quota wait.
+
+The worker's unchanged 120 s timeout preserves closed native startup fields and
+per-account `/info` route, 429, quota-wait, undispatched and in-flight counters.
+`startup_native_sample_age_ms` identifies the age of the last native watchdog
+snapshot; elapsed/deadline tags on the timeout describe the worker's own bound.
+No request bodies, account addresses, headers or URLs enter these facts.

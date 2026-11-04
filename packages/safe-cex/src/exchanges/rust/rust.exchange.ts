@@ -53,11 +53,11 @@ import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../cl
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { ChaseEnd } from './algoControlWatch';
 import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
+import type { FailedPrivateReadKind } from './startupDiagnostics';
 
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
-import { startupDiagnosticTags } from './startupDiagnostics';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
@@ -67,10 +67,10 @@ import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
-import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { bybitPublicRateLimitReport } from '../../transport/bybitPublicRateLimitTelemetry';
-import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
+import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { withRequestsLog } from '../../transport/requestsLog';
+import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
@@ -144,6 +144,7 @@ import {
   serveInProcessPublicData,
 } from './publicFeed';
 import { RustSocketHandle } from './rustSockets';
+import { failedPrivateReadKind, startupDiagnosticTags } from './startupDiagnostics';
 
 /** The public registry and direct construction share the same beta policy. */
 export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set(BETA_VENUES);
@@ -472,6 +473,22 @@ export class RustEngineExchange extends BaseExchange {
   private publicFeedDisabled = false;
   /** Why a start that never finishes has not: a venue answer is not a slow connection. */
   lastReadFailure?: string;
+  lastFailedPrivateReadKind?: FailedPrivateReadKind;
+  private nativeStartupTags: Record<string, string> = {};
+  private nativeStartupSampleAt?: number;
+  private httpStartupDiagnostics?: () => Record<string, string>;
+  get startupDiagnostics(): Record<string, string> {
+    return {
+      ...this.nativeStartupTags,
+      ...(this.nativeStartupSampleAt === undefined
+        ? {}
+        : { startup_native_sample_age_ms: String(Math.max(0, Date.now() - this.nativeStartupSampleAt)) }),
+      ...(this.lastFailedPrivateReadKind
+        ? { startup_last_failed_private_read_kind: this.lastFailedPrivateReadKind }
+        : {}),
+      ...this.httpStartupDiagnostics?.(),
+    };
+  }
 
   /** A native trap is terminal for this instance, including after disposal. */
   get isEngineDead(): boolean {
@@ -1425,25 +1442,25 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = options;
     const publicDataOnly = this.isPublicDataOnly;
-    const transport = withRequestsLog(
-      createEngineTransport(
-        this.name,
-        options,
-        (transportFactory ?? synchronizedEngineTransport)(),
-        this.signerSetup,
-        (message) => this.emitAndLogError(message),
-        (notice) => {
-          // Sentry and the log only: the account keeps working, degraded, so no toast.
-          const { message, sentryData } = tunnelProxyFallbackReport(this.name, notice);
-          this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
-        },
-        (notice) => {
-          const { message, sentryData } = bybitPublicRateLimitReport(this.name, notice);
-          this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
-        },
-      ),
+    const routedTransport = createEngineTransport(
       this.name,
-      (event, message) => this.emitter.emit(event, message),
+      options,
+      (transportFactory ?? synchronizedEngineTransport)(),
+      this.signerSetup,
+      (message) => this.emitAndLogError(message),
+      (notice) => {
+        // Sentry and the log only: the account keeps working, degraded, so no toast.
+        const { message, sentryData } = tunnelProxyFallbackReport(this.name, notice);
+        this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
+      },
+      (notice) => {
+        const { message, sentryData } = bybitPublicRateLimitReport(this.name, notice);
+        this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
+      },
+    );
+    this.httpStartupDiagnostics = routedTransport.startupDiagnostics;
+    const transport = withRequestsLog(routedTransport, this.name, (event, message) =>
+      this.emitter.emit(event, message),
     );
     const engine = constructEngine(
       WasmEngine,
@@ -2132,6 +2149,13 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveEvent = (event: EngineEvent) => {
+    if (event.code === 'startup.incomplete') {
+      this.nativeStartupTags = startupDiagnosticTags(event);
+      this.nativeStartupSampleAt = Date.now();
+    }
+    if (event.code === 'request.failed' || event.code === 'startup.incomplete')
+      this.lastFailedPrivateReadKind =
+        failedPrivateReadKind(event.fields?.lastFailedPrivateReadKind) ?? this.lastFailedPrivateReadKind;
     if (event.code === 'request.failed' || event.code === 'auth.rejected') this.lastReadFailure = event.message;
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
