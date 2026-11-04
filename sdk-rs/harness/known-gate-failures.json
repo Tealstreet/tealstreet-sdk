@@ -9592,7 +9592,7 @@
     },
     {
       "venue": "coinbase",
-      "tapeSha256": "4ffa8093afd580b239c66d419873c4c5031e059220cb7491aef821b5e6995387",
+      "tapeSha256": "8eb7184586b7e39725d479aa854b02be130357f805272137aade02d7b4b7a824",
       "tape": "sdk-rs/harness/tapes/coinbase-cfm-ES256-private.jsonl",
       "diagnostics": [
         {
@@ -10005,7 +10005,7 @@
     },
     {
       "venue": "coinbase",
-      "tapeSha256": "808e36ce5f45b0fd00535c2e52ad4d991b7f2daeca00ef98379a2059b623c65e",
+      "tapeSha256": "d126b5b316d36553d256935e8fd49e030043bc53539c81c0ea4cb0598a5a900d",
       "tape": "sdk-rs/harness/tapes/coinbase-spot-EdDSA-private.jsonl",
       "diagnostics": [
         {
@@ -10338,7 +10338,7 @@
     },
     {
       "venue": "coinbase",
-      "tapeSha256": "9e9f3ed23ebabb8c21c93192e9b7939ae313dd6b190857b9defab93175e6ee24",
+      "tapeSha256": "f25e34b1692e73d208d2f990b5c5b6c3fc80c4c78b6aaf4e8beb2f55d17590bc",
       "tape": "sdk-rs/harness/tapes/coinbase-spot-ES256-private.jsonl",
       "diagnostics": [
         {
@@ -15668,7 +15668,7 @@
     },
     {
       "venue": "coinbase",
-      "tapeSha256": "d4aad90baa9ab9f638258f308b6541f823bb2d75d6c49a1f44ebbc963300f8c6",
+      "tapeSha256": "c90d0f7eccbb046d8687b4577b08414a644aba1fa4b7ea98e99e9ea07b329483",
       "tape": "sdk-rs/harness/tapes/coinbase-intx-ES256-private.jsonl",
       "diagnostics": [
         {
@@ -15984,7 +15984,7 @@
     },
     {
       "venue": "coinbase",
-      "tapeSha256": "e44c11b269e03630cbbbf187e5666006ecb3ee4e67a7b8ad162dbce43abe503b",
+      "tapeSha256": "e77be399ef8d3016e2f8b4feafeb62a0fdb4bec01fb3ae9185af3af6dc426c0e",
       "tape": "sdk-rs/harness/tapes/coinbase-cfm-EdDSA-private.jsonl",
       "diagnostics": [
         {
@@ -16397,7 +16397,7 @@
     },
     {
       "venue": "coinbase",
-      "tapeSha256": "f117e75efcfeca77e155c8c351d6a63747fceaf9fdb4756ad6cab3e959751c0e",
+      "tapeSha256": "c23d90824c886a3e1b12dee9f1db11161c1666f05f79b84ead9b752959e89e23",
       "tape": "sdk-rs/harness/tapes/coinbase-intx-EdDSA-private.jsonl",
       "diagnostics": [
         {
@@ -16713,7 +16713,7 @@
     },
     {
       "venue": "coinbasespot",
-      "tapeSha256": "b24e43baac0344b7908c1a2098c8a340bf3ecaa384723e5b0885931fc139b41b",
+      "tapeSha256": "bb3004bb0e0f0d5ed81bfe4fd2f43fcd49e1f2c8c6f5d8b55d885601e87cdb0b",
       "tape": "sdk-rs/harness/tapes/coinbasespot-spot-ES256-private.jsonl",
       "diagnostics": [
         {
@@ -17051,7 +17051,7 @@
     },
     {
       "venue": "coinbasespot",
-      "tapeSha256": "c334a242dc7fc5528ac9d6893605577c66e5ae34d10f7c8fccbe525b67dbf23a",
+      "tapeSha256": "9fbbaa510aa081c498c9994fa86b37f022b30e7b33ce70167356b4c32a9f73d5",
       "tape": "sdk-rs/harness/tapes/coinbasespot-spot-EdDSA-private.jsonl",
       "diagnostics": [
         {
