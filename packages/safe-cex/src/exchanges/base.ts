@@ -359,6 +359,7 @@ export const WORKER_OPTIONAL_METHODS = [
   // Rust native account reads; a main-thread mirror asks the worker's engine.
   'getAccount',
   'fetchPositions',
+  'readPositions',
   'fetchBalance',
   'fetchPositionMode',
   // Rust-only engine methods a mirror forwards whole.
@@ -377,6 +378,7 @@ export const WORKER_OPTIONAL_METHODS = [
 const WORKER_READ_METHODS: ReadonlySet<string> = new Set([
   'refreshMarkets',
   'fetchPositions',
+  'readPositions',
   'fetchBalance',
   'fetchPositionMode',
   'findOrderByClientOrderId',
