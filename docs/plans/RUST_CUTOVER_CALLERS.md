@@ -10316,3 +10316,31 @@ for the selected mode/network, checked through the declared endpoint setup polic
 now emits an `invalidInput/notSent` error and
 rejects before loading WASM or starting transport. Demo selection and the existing
 production-to-simulator fallback are unchanged; no destination is invented.
+
+### Bybit batch cancel acknowledgements: identity matching and safe diagnostics
+
+`/v5/order/cancel-batch` (including one-order linear/demo batches) matches named
+response rows to the requested native `orderId`, rather than requiring the
+original request order. Each `retExtInfo.list` status remains paired with its
+response row, and the result is restored to request order before classification.
+A single unnamed remaining target is unambiguous; a sole-target empty result
+list follows the existing partial-stop cancel codec. Multiple ambiguous unnamed
+successes, foreign/duplicate IDs, missing/short/invalid statuses and malformed
+rows remain Unknown, keep live Store rows and never replay a cancel. A nonzero
+status still goes through the existing per-item refusal/absence classifier.
+
+The wire requests use native order IDs only. IDs remain opaque and case-sensitive;
+empty `orderLinkId` is harmless, and no client-ID alias or case folding is invented.
+Stock-token symbols use the same linear cancellation path. Cancel-all, single-cancel
+and partial-stop handling retain their own existing proof rules. Bybit's
+[batch cancel documentation](https://bybit-exchange.github.io/docs/v5/order/batch-cancel)
+describes separate identity and per-item status lists; it does not promise request-order echoes.
+An accepted acknowledgement retains the existing request-acceptance semantics,
+not a new guarantee of final asynchronous exchange execution.
+
+An unproven batch now asks the user to check open orders on Bybit before retrying.
+Its bounded diagnostic reports list presence/counts, order-ID/client-ID field
+presence and nonempty counts, target-match count, and success/refusal/invalid
+status counts. It never includes ID values, native messages or raw responses.
+The reported production events had no response body; the covered false-Unknown
+shapes are reproduced, while the specific live shape remains unconfirmed.
