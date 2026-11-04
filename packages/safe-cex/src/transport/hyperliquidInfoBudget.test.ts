@@ -983,3 +983,64 @@ it.each(['cancel', 'pause'] as const)(
     await peer;
   },
 );
+
+it('does not let newer cheap reads overtake an older cross-realm dispatch waiter', async () => {
+  const a = client();
+  await spend(a);
+  const deadline = Date.now() + 20_000;
+  const sent: string[] = [];
+  const older = a.admitDispatch(ORIGIN, { generation: 0, weight: 20 }, deadline, signal(), () => sent.push('orders'));
+  await flushDatabase();
+  vi.resetModules();
+  const realm = await import('./hyperliquidInfoBudget');
+  const b = new realm.HyperliquidInfoBudget(new realm.IndexedInfoBudgetStorage(factory));
+  await vi.advanceTimersByTimeAsync(120);
+  const newer = b.admitDispatch(ORIGIN, { generation: 0, weight: 2 }, deadline, signal(), () => sent.push('state'));
+  await flushDatabase();
+  expect(sent).toEqual([]);
+  for (let step = 0; step < 15; step++) {
+    await vi.advanceTimersByTimeAsync(100);
+    await flushDatabase();
+  }
+  await Promise.all([older, newer]);
+  expect(sent).toEqual(['orders', 'state']);
+});
+
+it.each(['expired', 'cancelled'] as const)('a %s dispatch waiter cannot block a healthy peer', async (cause) => {
+  const backend = new budgetModule.IndexedInfoBudgetStorage(factory);
+  const a = new budgetModule.HyperliquidInfoBudget(backend);
+  await spend(a);
+  const sent: string[] = [];
+  const controller = new AbortController();
+  const deadline = Date.now() + 20_000;
+  let abandoned: Promise<unknown> | undefined;
+  if (cause === 'expired')
+    await backend.update(ORIGIN, (state) => {
+      state.dispatchQueue = [{ id: 'dead-worker', until: Date.now() + 2000 }];
+    });
+  else {
+    abandoned = a
+      .admitDispatch(ORIGIN, { generation: 0, weight: 20 }, deadline, controller.signal, () => sent.push('cancelled'))
+      .catch(() => undefined);
+    await flushDatabase();
+    controller.abort();
+    await abandoned;
+  }
+  const peer = client().admitDispatch(ORIGIN, { generation: 0, weight: 20 }, deadline, signal(), () =>
+    sent.push('peer'),
+  );
+  await flushDatabase();
+  for (let step = 0; step < 21; step++) {
+    await vi.advanceTimersByTimeAsync(100);
+    await flushDatabase();
+  }
+  await peer;
+  expect(sent).toEqual(['peer']);
+});
+
+it('does not require crypto.randomUUID to schedule ordinary reads', async () => {
+  vi.stubGlobal('crypto', {});
+  const sent = vi.fn();
+  await client().admitDispatch(ORIGIN, { generation: 0, weight: 20 }, Date.now() + 20_000, signal(), sent);
+  expect(sent).toHaveBeenCalledOnce();
+});

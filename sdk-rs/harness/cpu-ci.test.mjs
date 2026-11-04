@@ -2,7 +2,7 @@ import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { publicCases, validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle, restorePairedRawOutputs, currentPhysical } from './cpu-ci.mjs';
+import { publicCases, validatePlannedCases, requireSecondState, secondMatrix, requireMeasuredProducer, requireAuthorityRefs, classifyInitialCase, requireCertifiedSuite, authenticatedBundle, restorePairedRawOutputs, currentPhysical, imageRollReceipt, imageRolledRefusal, certifySuites } from './cpu-ci.mjs';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -122,14 +122,89 @@ test('declared public diagnostics keep their strict FAIL and never request a CPU
 
 test('required check wrappers accept only successful complete same-run same-checkout certification', () => {
   const args = { suite: 'bitgetusdc', result: 'success', runId: 1, checkoutSha: 'a'.repeat(40),
-    results: { schema: 1, runId: 1, checkoutSha: 'a'.repeat(40), suites: Object.fromEntries(GATE_SUITES.map(suite => [suite, true])) } };
+    results: { schema: 1, runId: 1, checkoutSha: 'a'.repeat(40), certified: true, reasons: {}, suites: Object.fromEntries(GATE_SUITES.map(suite => [suite, true])) } };
   assert.equal(requireCertifiedSuite(args), true);
   for (const change of [value => { value.result = 'failure'; }, value => { value.result = 'skipped'; },
     value => { value.results = null; }, value => { value.results.runId = 2; }, value => { value.results.checkoutSha = 'b'.repeat(40); },
-    value => { delete value.results.suites.woo; }, value => { value.results.suites.woo = false; },
+    value => { delete value.results.suites.woo; }, value => { value.results.suites.bitgetusdc = false; },
+    value => { value.results.suites.woo = 'yes'; }, value => { value.results.certified = false; },
     value => { value.results.suites.unknown = true; }, value => { value.suite = 'unknown'; }]) {
     const bad = structuredClone(args); change(bad); assert.throws(() => requireCertifiedSuite(bad));
   }
+});
+
+test('a replay gate accepts its own certificate while another suite is uncertified, never the reverse', () => {
+  const suites = Object.fromEntries(GATE_SUITES.map(suite => [suite, suite !== 'txflow']));
+  const reason = 'CPU certification: txflow not certified: runner image rolled 20261026.354.1→20261101.360.1; fresh run required';
+  const results = { schema: 1, runId: 1, checkoutSha: 'a'.repeat(40), certified: false, suites, reasons: { txflow: reason } };
+  const args = { result: 'success', runId: 1, checkoutSha: 'a'.repeat(40), results };
+  assert.equal(requireCertifiedSuite({ ...args, suite: 'bitget' }), true);
+  assert.throws(() => requireCertifiedSuite({ ...args, suite: 'txflow' }), (error) => error.message.includes(reason));
+  // Overall certification stays false while any suite is missing; a claimed overall pass is refused.
+  assert.throws(() => requireCertifiedSuite({ ...args, suite: 'bitget', results: { ...results, certified: true } }));
+  assert.throws(() => requireCertifiedSuite({ ...args, suite: 'bitget', results: { ...results, reasons: {} } }));
+});
+
+test('certifyAll records each suite and keeps overall certification false when one is refused', async () => {
+  const refused = new Error('CPU certification: txflow not certified: runner image rolled a→b; fresh run required');
+  const { results, certificates } = await certifySuites(['bitget', 'txflow', 'woo'], async (suite) => {
+    if (suite === 'txflow') throw refused;
+    return { suite };
+  });
+  assert.deepEqual(results, { certified: false, suites: { bitget: true, txflow: false, woo: true }, reasons: { txflow: refused.message } });
+  assert.deepEqual(Object.keys(certificates), ['bitget', 'woo']);
+  const all = await certifySuites(['bitget', 'woo'], async (suite) => ({ suite }));
+  assert.deepEqual(all.results, { certified: true, suites: { bitget: true, woo: true }, reasons: {} });
+});
+
+const sealed = { ImageOS: 'ubuntu24', ImageVersion: '20261026.354.1', arch: 'x64', nodeVersion: 'v22.1.0', nodeVersions: { node: '22.1.0', v8: 'fixture-v8' } };
+const rolled = { ...sealed, ImageVersion: '20261101.360.1' };
+const receiptArgs = { suite: 'txflow', expected: sealed, environment: rolled, runId: 41898670964, firstJobId: 126830000000 };
+
+test('run 41898670964: a second runner on a rolled image writes a typed unmeasured receipt', () => {
+  assert.equal(imageRollReceipt({ ...receiptArgs, environment: sealed }), null);
+  assert.deepEqual(imageRollReceipt(receiptArgs), { schema: 1, suite: 'txflow', status: 'image-rolled', measured: false,
+    runId: 41898670964, firstJobId: 126830000000, expected: sealed, actual: rolled,
+    differences: [{ field: 'ImageVersion', expected: '20261026.354.1', actual: '20261101.360.1' }] });
+  // Every other environment change stays the existing hard refusal.
+  for (const environment of [{ ...rolled, arch: 'arm64' }, { ...sealed, nodeVersion: 'v22.2.0', nodeVersions: { node: '22.2.0', v8: 'fixture-v8' } },
+    { ...sealed, nodeVersions: { ...sealed.nodeVersions, v8: 'other' } }])
+    assert.throws(() => imageRollReceipt({ ...receiptArgs, environment }), /environment identity mismatch/);
+});
+
+test('the second job checks image identity before downloading the capsule or restoring anything', () => {
+  const source = readFileSync(new URL('./cpu-ci.mjs', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function secondMeasurement('), source.indexOf('\n}\n', source.indexOf('async function secondMeasurement(')));
+  const check = body.indexOf('imageRollReceipt(');
+  assert.ok(check > 0, 'secondMeasurement checks the runner image');
+  for (const later of ["`cpu-runtime-${suite}`", 'artifactEntriesToDirectory(', 'restoreRuntime(', 'spawnSync('])
+    assert.ok(body.indexOf(later) > check, `${later} follows the image check`);
+  assert.match(body.slice(check, body.indexOf("`cpu-runtime-${suite}`")), /return /, 'a rolled image ends the job before any restore');
+});
+
+test('certification turns only an authentic unmeasured image-rolled receipt into a typed refusal', () => {
+  const receipt = imageRollReceipt(receiptArgs);
+  const entries = (value = receipt, extra = {}) => new Map([['cpu-second/image-rolled.json', Buffer.from(JSON.stringify(value))],
+    ...Object.entries(extra).map(([name, value]) => [name, Buffer.from(value)])]);
+  const refuse = (overrides = {}) => imageRolledRefusal({ suite: 'txflow', entries: entries(), expected: sealed, logBytes: Buffer.from('no markers'),
+    runId: 41898670964, firstJobId: 126830000000, ...overrides });
+  assert.equal(refuse(), 'txflow not certified: runner image rolled 20261026.354.1→20261101.360.1; fresh run required');
+  assert.equal(refuse({ entries: new Map() }), null);
+  for (const overrides of [
+    { entries: entries({ ...receipt, measured: true }) },
+    { entries: entries(receipt, { 'cpu-second/cases/x.json': '{}' }) },
+    { entries: entries(receipt, { 'second.json': '{}' }) },
+    { entries: entries(receipt, { 'manifest.json': '{}' }) },
+    { entries: entries({ ...receipt, suite: 'woo' }) },
+    { entries: entries({ ...receipt, status: 'rolled' }) },
+    { entries: entries({ ...receipt, actual: sealed, differences: [] }) },
+    { entries: entries({ ...receipt, actual: { ...rolled, arch: 'arm64' } }) },
+    { entries: entries({ ...receipt, differences: [] }) },
+    { expected: { ...sealed, ImageVersion: 'other' } },
+    { runId: 1 },
+    { firstJobId: 1 },
+    { logBytes: Buffer.from(`\nCPU_CASE_BEGIN ${'a'.repeat(64)} 2026-11-04T19:00:00.000Z`) },
+  ]) assert.throws(() => refuse(overrides), /image-rolled receipt/, JSON.stringify(Object.keys(overrides)));
 });
 
 test('status names incomplete shared certification before reading absent or malformed output', () => {
@@ -145,7 +220,7 @@ test('status names incomplete shared certification before reading absent or malf
 
 test('successful upstream status still requires complete same-run same-checkout certification', () => {
   const checkoutSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const results = { schema: 1, runId: 123, checkoutSha, suites: Object.fromEntries(GATE_SUITES.map(suite => [suite, true])) };
+  const results = { schema: 1, runId: 123, checkoutSha, certified: true, reasons: {}, suites: Object.fromEntries(GATE_SUITES.map(suite => [suite, true])) };
   const status = value => spawnSync(process.execPath, ['sdk-rs/harness/cpu-ci.mjs', '--command', 'status', '--suite', 'bitget'], {
     encoding: 'utf8', env: { ...process.env, CPU_CERT_RESULT: 'success', CPU_CERT_RESULTS: value, GITHUB_RUN_ID: '123' },
   });
@@ -153,7 +228,7 @@ test('successful upstream status still requires complete same-run same-checkout 
   assert.equal(pass.status, 0, pass.stderr);
   assert.match(pass.stdout, /CPU certification accepted for bitget/);
   for (const mutate of [value => { value.runId++; }, value => { value.checkoutSha = 'f'.repeat(40); },
-    value => { delete value.suites.woo; }, value => { value.suites.woo = false; }]) {
+    value => { delete value.suites.woo; }, value => { value.suites.bitget = false; }]) {
     const value = structuredClone(results); mutate(value); const failure = status(JSON.stringify(value));
     assert.equal(failure.status, 1); assert.doesNotMatch(failure.stdout, /accepted/);
   }

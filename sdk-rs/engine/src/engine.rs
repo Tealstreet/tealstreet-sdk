@@ -3122,38 +3122,14 @@ impl<P> Cx<'_, P> {
     /// and `retryAfterMs` when the error has them. It keeps the caller's code:
     /// only a caller passing `auth.rejected` (as [`Self::retried_failure_error`]
     /// does for an auth-kind read refusal) counts an auth failure.
+    #[inline]
     pub fn notice_error(&mut self, level: Level, code: &'static str, error: &VenueError) {
-        let mut fields = Vec::new();
-        if let Some(kind) = error.kind {
-            fields.push(("kind", kind.as_str().into()));
-        }
-        if let Some(venue_code) = &error.venue_code {
-            fields.push(("venueCode", venue_code.as_str().into()));
-        }
-        if let Some(venue_message) = &error.venue_message {
-            fields.push(("venueMessage", venue_message.as_str().into()));
-        }
-        if let Some(retry_after_ms) = error.retry_after_ms {
-            fields.push(("retryAfterMs", retry_after_ms.into()));
-        }
-        self.event(level, code, error.message.clone(), fields);
+        self.core().notice_error(level, code, error)
     }
 
+    #[inline]
     fn retried_failure_level(&mut self, site: &'static str, message: &str) -> Level {
-        let shape: String = message
-            .chars()
-            .map(|c| if c.is_ascii_digit() { '#' } else { c })
-            .collect();
-        let now = self.now;
-        match self.io.core.retried_failures.get(site) {
-            Some((at, last)) if *last == shape && now - at < RETRIED_FAILURE_ERROR_EVERY_MS => {
-                Level::Warn
-            }
-            _ => {
-                self.io.core.retried_failures.insert(site, (now, shape));
-                Level::Error
-            }
-        }
+        self.core().retried_failure_level(site, message)
     }
 
     #[inline]
@@ -3568,6 +3544,43 @@ impl crate::engine::CoreCx<'_> {
                 timeout_ms: 0,
             },
         );
+    }
+
+    // Shared across venue pending types; no diagnostic work needs typed custody.
+    #[inline(never)]
+    fn notice_error(&mut self, level: Level, code: &'static str, error: &VenueError) {
+        let mut fields = Vec::new();
+        if let Some(kind) = error.kind {
+            fields.push(("kind", kind.as_str().into()));
+        }
+        if let Some(venue_code) = &error.venue_code {
+            fields.push(("venueCode", venue_code.as_str().into()));
+        }
+        if let Some(venue_message) = &error.venue_message {
+            fields.push(("venueMessage", venue_message.as_str().into()));
+        }
+        if let Some(retry_after_ms) = error.retry_after_ms {
+            fields.push(("retryAfterMs", retry_after_ms.into()));
+        }
+        self.event(level, code, error.message.clone(), fields);
+    }
+
+    #[inline(never)]
+    fn retried_failure_level(&mut self, site: &'static str, message: &str) -> Level {
+        let shape: String = message
+            .chars()
+            .map(|c| if c.is_ascii_digit() { '#' } else { c })
+            .collect();
+        let now = self.now;
+        match self.io.core.retried_failures.get(site) {
+            Some((at, last)) if *last == shape && now - at < RETRIED_FAILURE_ERROR_EVERY_MS => {
+                Level::Warn
+            }
+            _ => {
+                self.io.core.retried_failures.insert(site, (now, shape));
+                Level::Error
+            }
+        }
     }
 
     /// [`Cx::event`] without fields.
@@ -11308,3 +11321,7 @@ mod read_cover_lift_tests;
 #[cfg(all(test, feature = "order-locks"))]
 #[path = "orders_refresh_tests.rs"]
 mod orders_refresh_tests;
+
+#[cfg(test)]
+#[path = "retried_read_diagnostic_tests.rs"]
+mod retried_read_diagnostic_tests;

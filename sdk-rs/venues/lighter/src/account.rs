@@ -713,8 +713,9 @@ impl Lighter {
         cx.store.set_hedged(false);
         for m in cx.store.markets().to_vec() {
             let mode = self.metadata.get(&m.symbol).map_or(0, |v| v.margin_mode);
+            let leverage = self.default_leverage(&m);
             cx.store.update_setting(&m.symbol, |s| {
-                s.leverage = m.limits.leverage.max;
+                s.leverage = leverage;
                 s.margin_type = Some(if mode == 1 {
                     MarginType::Isolated
                 } else {
@@ -1420,7 +1421,7 @@ impl Lighter {
                     .find(|p| p.symbol == symbol)
                     .map(|p| p.leverage)
             })
-            .unwrap_or(market.limits.leverage.max);
+            .unwrap_or_else(|| self.default_leverage(market));
         let leverage = safe_cex_engine::num::clamp_leverage(
             leverage,
             market.limits.leverage.min,
@@ -2171,7 +2172,7 @@ impl Lighter {
             let (leverage, margin) = provided.unwrap_or_else(|| {
                 let old = cx.store.setting(&m.symbol);
                 (
-                    old.map_or(m.limits.leverage.max, |s| s.leverage),
+                    old.map_or_else(|| self.default_leverage(&m), |s| s.leverage),
                     old.and_then(|s| s.margin_type).unwrap_or(MarginType::Cross),
                 )
             });

@@ -1727,6 +1727,14 @@ storage failure waits within the original read deadline rather than sending from
 an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
 Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
+Each Hyperliquid engine issues at most three routine account reads at once, with
+core Mode/State/Orders ahead of ancillary work. Queued intents acquire their
+managed deadline only when issued. Caller-owned reads and uncertain-write
+reconciliation bypass those slots while retaining the existing quota and root
+deadlines; only completion of an issued routine read releases its slot. Shared
+dispatch waiters use FIFO leases so newer cheap reads cannot starve older Orders;
+100 ms renewal and 2 s expiry bound a dead worker's obstruction without charging
+its abandoned work.
 
 The worker's unchanged 120 s timeout preserves closed native startup fields and
 per-account `/info` route, 429, quota-wait, undispatched and in-flight counters.
@@ -1746,6 +1754,25 @@ reads, candles and writes are never cached. Typed discovery failures invalidate
 that origin's entries and leases. Cache hits make no physical request and consume
 no quota. Invalidation after native parsing uses the closed `discovery` failure
 kind supplied by #3046; HTTP/JSON errors already invalidate at the cache boundary.
+
+The same `SharedCatalogue` coordinator owns anonymous Binance `exchangeInfo`
+GET sharing. Binance and Hyperliquid have separate closed eligibility/validation
+policies; account requests, writes, tokens and candles never participate. Binance
+keys include exact endpoint/query, network and resolved public route. Valid replies
+have a 5 s TTL and an 8 MiB cap; leases last at most 25 s and never exceed their
+owner's original managed deadline. Followers never bypass an active lease or
+cooldown. Failed physical reads publish owner-fenced 1/2/4/8/16/30 s cooldowns,
+honoring Retry-After up to five minutes before followers can elect again.
+Unavailable storage from startup preserves independent native discovery/backoff.
+After a successful coordination transaction, storage loss refuses preparation
+instead of bypassing an unknown lease. Waiter cancellation never deletes a peer's
+lease/cooldown; each engine still parses and publishes its own catalogue.
+Future-dated strict ownership stays blocking. A dispatched timeout publishes a
+cooldown before abort cleanup without delaying the caller; expired ownership
+retains its minimum failure window until that publication can settle. The original
+deadline callback remains authoritative after wall-clock rollback. Queued Binance
+publications check the transport lifetime at the storage write, including after
+a timeout has already completed request cleanup.
 
 Rust account `socketHealth.reconnectDiagnostics` carries bounded last-close
 snapshots for public/private/business channels and the primary HOW adapter,

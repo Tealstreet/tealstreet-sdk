@@ -959,7 +959,7 @@ impl Lighter {
                 let previous_leverage = setting
                     .map(|s| s.leverage)
                     .filter(|n| n.is_finite() && *n > 0.0)
-                    .unwrap_or(market.limits.leverage.max);
+                    .unwrap_or_else(|| self.default_leverage(market));
                 let leverage = leverage.unwrap_or(previous_leverage);
                 if !leverage.is_finite() || leverage <= 0.0 {
                     return Err("Invalid Lighter leverage".into());

@@ -139,8 +139,8 @@ impl Fees {
             .position(|(kind, _)| kind == "userAbstraction")
             .unwrap();
         assert!(
-            fee < mode,
-            "fee read must retain its place before private state reads"
+            mode < fee,
+            "core account reads must precede ancillary fee reads"
         );
     }
 }
