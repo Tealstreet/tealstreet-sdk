@@ -1,3 +1,4 @@
+import { requestFailureFields } from './request-failure.mjs';
 import { bindGroup } from './managed-http-group.mjs';
 
 /** Closed transport preparation errors; arbitrary provider text never crosses the wire. */
@@ -50,8 +51,18 @@ export class ManagedHttp {
     }
   }
 
+  failure(resource, kind) {
+    if (resource.failureReported || this.host.disposed) return;
+    resource.failureReported = true;
+    try {
+      this.host.handlers.onEvent?.({ level: 'debug', code: 'http.request_failed', message: 'HTTP request failed',
+        fields: { ...resource.diagnostic, kind, phase: resource.phase } });
+    } catch { /* Diagnostic consumers cannot change request settlement or cleanup. */ }
+  }
+
   fail(token, resource, code) {
     if (!this.live(token, resource)) return;
+    this.failure(resource, code === 'timedOut' ? 'timeout' : code);
     this.cancel(token);
     const { host } = this;
     host.run(host.invoke(host.engine.httpPreparationFailed, token, code, host.transport.now()));
@@ -82,6 +93,7 @@ export class ManagedHttp {
     if (cause !== undefined && host.commands.get(cause)?.onStage) host.stageCauses.set(`http:${action.packet.request}`, cause);
     try {
       if (typeof action.permit !== 'string') throw new Error('Invalid HTTP permit');
+      resource.diagnostic = requestFailureFields(action.packet);
       resource.bound = resource.prepared.bind({ ...action.packet, headers: Object.fromEntries(action.packet.headers), signal: resource.controller.signal });
       if (!resource.bound || typeof resource.bound.ready !== 'function' || typeof resource.bound.dispatch !== 'function') throw new Error('Invalid bound HTTP resource');
       resource.phase = 'bound';
@@ -95,7 +107,8 @@ export class ManagedHttp {
     const token = action.preparation;
     if (this.resources.has(token) || host.disposed
       || !host.invoke(host.engine.httpPreparationPending, token)) return;
-    const resource = { controller: new AbortController(), phase: 'preparing' };
+    const resource = { controller: new AbortController(), phase: 'preparing',
+      diagnostic: requestFailureFields(action.packet), request: action.packet.request };
     this.resources.set(token, resource);
     if (typeof host.transport.prepareHttp !== 'function') { this.fail(token, resource, 'unsupported'); return; }
     try {
@@ -148,6 +161,7 @@ export class ManagedHttp {
       host.stage(host.stageCauses.get(`http:${request}`), 'sent');
     } catch (error) {
       if (resource.phase === 'released' && this.live(token, resource)) {
+        this.failure(resource, 'network');
         this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
         this.cancel(token);
       } else this.fail(token, resource, preparationReason(error, 'invalid'));
@@ -173,7 +187,10 @@ export class ManagedHttp {
       const value = await response;
       if (this.live(token, resource)) await host.receive(request, value, () => this.live(token, resource));
     } catch {
-      if (this.live(token, resource)) this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
+      if (this.live(token, resource)) {
+        this.failure(resource, 'network');
+        this.post(() => host.run(host.invoke(host.engine.httpFailed, request, 'HTTP transport request failed', host.transport.now())));
+      }
     } finally {
       if (this.live(token, resource)) this.cancel(token);
     }

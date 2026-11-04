@@ -2437,6 +2437,7 @@ impl<V: Venue> Engine<V> {
         if self.expire_plan_before_http_failure(now, request) {
             return true;
         }
+        let first_action = self.io.core.actions.len();
         let managed = &self.io.core.managed_http[&request];
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.core.http_failure_kind, ErrorKind::Timeout);
@@ -2457,6 +2458,17 @@ impl<V: Venue> Engine<V> {
                 Error::TimedOut,
                 VenueError::new("HTTP request timed out"),
             );
+        }
+        // Only notices from this original timeout callback receive its opaque request ID.
+        // The JS host joins it to a redacted template before cancelling the resource.
+        for action in &mut self.io.core.actions[first_action..] {
+            if let Action::Notice(Notice::Event(event)) = action
+                && event.code == log_code::REQUEST_FAILED
+            {
+                event
+                    .fields
+                    .push(("httpTimeoutRequest", request.0.to_string().into()));
+            }
         }
         true
     }
@@ -3160,6 +3172,7 @@ mod tests {
         items: usize,
         failures: Vec<(Error, Option<crate::Outcome>)>,
         failure_messages: Vec<String>,
+        report_read_failure: bool,
         releases: Vec<HttpRelease>,
         receipts: usize,
         finish_in_item: Option<bool>,
@@ -3330,6 +3343,9 @@ mod tests {
         ) {
             self.failures.push((reason, error.outcome));
             self.failure_messages.push(error.message.clone());
+            if self.report_read_failure {
+                cx.notice_error(Level::Error, log_code::REQUEST_FAILED, &error);
+            }
             if pending.0.operation() == Operation::Mutation {
                 cx.fail_context(&pending.0, error).unwrap();
             }
@@ -3506,6 +3522,10 @@ mod tests {
             }
         }
         fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+            if self.report_read_failure {
+                cx.notice(Level::Error, log_code::REQUEST_FAILED, error);
+                return;
+            }
             if pending.0.operation() == Operation::Mutation {
                 cx.fail_context(&pending.0, error).unwrap();
             } else {
@@ -6566,6 +6586,87 @@ mod tests {
             assert!(engine.io.pending.is_empty());
             assert!(engine.io.core.managed_http.is_empty());
         }
+    }
+
+    #[test]
+    fn native_read_timeout_attributes_only_its_original_request_before_and_after_release() {
+        for released in [false, true] {
+            let (mut engine, tokens) = start(Probe {
+                count: 2,
+                report_read_failure: true,
+                ..Probe::default()
+            });
+            let request = tokens[0].attempt().request;
+            if released {
+                let permit = bind(&mut engine, tokens[0], 1.);
+                assert!(matches!(
+                    engine.claim_http(2., permit),
+                    Ok(Claim::Released(_))
+                ));
+            }
+            let timer = engine.io.core.managed_http[&request].timer;
+            engine.drain_actions().for_each(drop);
+            engine.handle(1_000., Event::TimerFired { timer });
+            let events: Vec<_> = engine
+                .drain_actions()
+                .filter_map(|action| match action {
+                    Action::Notice(Notice::Event(event))
+                        if event.code == log_code::REQUEST_FAILED =>
+                    {
+                        Some(event)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(events.len(), 1);
+            assert!(
+                events[0]
+                    .fields
+                    .contains(&("httpTimeoutRequest", request.0.to_string().into()))
+            );
+            assert!(!events[0].fields.contains(&(
+                "httpTimeoutRequest",
+                tokens[1].attempt().request.0.to_string().into()
+            )));
+        }
+    }
+
+    #[test]
+    fn ordinary_network_failure_does_not_acquire_a_native_timeout_identity() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            report_read_failure: true,
+            ..Probe::default()
+        });
+        let permit = bind(&mut engine, tokens[0], 1.);
+        assert!(matches!(
+            engine.claim_http(2., permit),
+            Ok(Claim::Released(_))
+        ));
+        engine.drain_actions().for_each(drop);
+        engine.handle(
+            3.,
+            Event::HttpFailed {
+                request: tokens[0].attempt().request,
+                error: "network disconnected",
+            },
+        );
+        let events: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) if event.code == log_code::REQUEST_FAILED => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 1);
+        assert!(
+            events[0]
+                .fields
+                .iter()
+                .all(|(key, _)| *key != "httpTimeoutRequest")
+        );
     }
 
     #[test]

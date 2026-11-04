@@ -2127,6 +2127,7 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveEvent = (event: EngineEvent) => {
+    if (event.code === 'http.request_failed') event = { ...event, fields: { ...event.fields, venue: this.name } };
     if (event.code === 'request.failed' || event.code === 'auth.rejected') this.lastReadFailure = event.message;
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
