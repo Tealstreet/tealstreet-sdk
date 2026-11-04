@@ -135,6 +135,7 @@ impl Covers {
         scope: OrderReadScope<'_>,
         written: &[String],
         clean: bool,
+        unproven: &[String],
     ) -> bool {
         self.clock += 1;
         let revision = self.clock;
@@ -167,7 +168,11 @@ impl Covers {
                 true
             }
             OrderReadScope::Symbols(symbols) => {
+                let unmapped_row = unproven.iter().any(String::is_empty);
                 for symbol in symbols {
+                    if unmapped_row || unproven.iter().any(|u| u == symbol) {
+                        continue;
+                    }
                     if written.iter().any(|w| w == symbol) || !self.changed_since(symbol, read) {
                         let sent = self
                             .symbol_sent
