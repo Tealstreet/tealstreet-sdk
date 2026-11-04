@@ -118,7 +118,14 @@ fn terminal_order_tombstone_and_ws_open_grace_guard_rest() {
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
     );
     h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
-    assert!(h.engine.store().order("1").is_none());
+    // The read went out before both events, so it may not replace BTCUSDT's rows:
+    // the canceled order stays canceled (never resurrected), the live one stays.
+    assert!(
+        h.engine
+            .store()
+            .order("1")
+            .is_none_or(|order| order.status != safe_cex_engine::model::OrderStatus::Open)
+    );
     assert!(h.engine.store().order("2").is_some());
 }
 
@@ -1027,8 +1034,18 @@ fn a_venue_read_without_the_parent_proves_its_preset_legs_gone() {
     h.private_message(
         &serde_json::json!({"arg":{"channel":"orders"},"data":[ordinary_row("2")]}).to_string(),
     );
-    h.timer_after(500.0);
-    h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
+    // Read covers: a census already out when that event changed BTCUSDT cannot
+    // replace its rows, and another follows it; the first one released after the
+    // event proves the legs gone.
+    for _ in 0..3 {
+        if open_legs(&h) == 0 {
+            break;
+        }
+        if !h.requests.iter().any(|r| r.url.contains("/orders-pending")) {
+            h.timer_after(500.0);
+        }
+        h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
+    }
     assert_eq!(open_legs(&h), 0, "{:?}", h.logs);
     assert!(h.engine.store().order("1").is_none());
 }

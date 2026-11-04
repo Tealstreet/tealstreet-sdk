@@ -293,6 +293,17 @@ export class ReconnectingWebSocket {
     }
   }
 
+  /** A supervisor timeout keeps the current wrapper's retry count and backoff. */
+  public timeoutConnecting(): boolean {
+    if (!this._shouldReconnect || this._loopState.phase !== 'connecting' || this._ws?.readyState === this.OPEN)
+      return false;
+    // Invalidate deferred URL work before a close listener can start another attempt.
+    this._attempt++;
+    this._connectLock = false;
+    this._handleTimeout();
+    return true;
+  }
+
   /**
    * Enqueue specified data to be transmitted to the server over the WebSocket connection
    */
@@ -439,11 +450,12 @@ export class ReconnectingWebSocket {
     this._enterPhase(delay > 0 ? 'retry-scheduled' : 'connecting');
     this._wait(delay)
       .then(() => {
-        if (attempt === this._attempt && this._shouldReconnect) this._enterPhase('connecting');
+        if (attempt !== this._attempt || !this._shouldReconnect) return;
+        this._enterPhase('connecting');
         return this._getNextUrl(this._url);
       })
       .then((url) => {
-        if (attempt !== this._attempt) return;
+        if (attempt !== this._attempt || url === undefined) return;
         // close could be called before creating the ws
         if (this._closeCalled) {
           this._connectLock = false;
@@ -528,16 +540,13 @@ export class ReconnectingWebSocket {
 
   private _disconnect(code = 1000, reason?: string) {
     this._clearTimeouts();
-    if (!this._ws) {
-      return;
-    }
     this._removeListeners();
     try {
-      this._ws.close(code, reason);
-      this._handleClose(new Events.CloseEvent(code, reason, this));
+      this._ws?.close(code, reason);
     } catch (error) {
-      // ignore
+      // A native close refusal must not suppress the wrapper's close notification.
     }
+    this._handleClose(new Events.CloseEvent(code, reason, this));
   }
 
   private _acceptOpen() {

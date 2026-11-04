@@ -1044,6 +1044,7 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     freshPositions: false,
     nukeAccountCancel: false,
     symbolCancelMissesUnseen: false,
+    orderReadCovers: false,
     account: 'afterLoad',
     cancelAll: 'eachPlacedSymbol',
     leverageQuery: 'onMetadata',
@@ -1059,6 +1060,10 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
   assert.equal(capabilities(1 << 15, 0).marketRefresh, true);
   assert.equal(capabilities(1 << 25, 0).scheduleCancel, true);
   assert.equal(capabilities(0, 0).scheduleCancel, false);
+  // Bit 30 is carried like every flag, so a page's record matches the worker's;
+  // only Rust ingest acts on it.
+  assert.equal(capabilities(1 << 30, 0).orderReadCovers, true);
+  assert.equal(capabilities(0, 0).orderReadCovers, false);
   assert.equal(capabilities(1 << 27, 0).freshPositions, true);
   assert.equal(capabilities(0, 0).freshPositions, false);
   assert.equal(capabilities(1 << 28, 0).nukeAccountCancel, true);
