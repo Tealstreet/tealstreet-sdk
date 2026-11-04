@@ -18,6 +18,7 @@ import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 const tunnels = vi.hoisted(() => [] as Array<Array<Record<string, any>>>);
 // false: the tunnel socket cannot open, so a preparation waits in readiness.
 const tunnelSocket = vi.hoisted(() => ({ open: true }));
+const tunnelReply = vi.hoisted(() => ({ data: '{"via":"tunnel"}', headers: {} as Record<string, string> }));
 
 vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
   HOWWebSocket: class {
@@ -46,7 +47,7 @@ vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
     send(message: Record<string, any>) {
       this.sent.push(message);
       queueMicrotask(() => {
-        this.listeners.get(`sub:${message.nonce}`)?.({ status: 200, data_raw: '{"via":"tunnel"}', headers: {} });
+        this.listeners.get(`sub:${message.nonce}`)?.({ status: 200, data_raw: tunnelReply.data, headers: tunnelReply.headers });
         this.listeners.delete(`sub:${message.nonce}`);
       });
     }
@@ -115,6 +116,8 @@ const bybitTunnel = (raw: Transport, notices: TunnelProxyFallbackNotice[] = []) 
 
 beforeEach(() => {
   tunnelSocket.open = true;
+  tunnelReply.data = '{"via":"tunnel"}';
+  tunnelReply.headers = {};
   resetTunnelLane(true);
   for (const sent of tunnels) sent.length = 0;
 });
@@ -124,6 +127,27 @@ afterEach(() => {
 });
 
 describe('REST while the tunnel is unreachable', () => {
+  it('captures 10006 headers after genuine managed HOW bind and dispatch, excluding private intent', async () => {
+    tunnelReply.data = '{"retCode":10006,"retMsg":"Too many visits"}';
+    tunnelReply.headers = { 'x-tealstreet-egress': 'node-a', 'x-bapi-limit-status': '0' };
+    const report = vi.fn();
+    const { raw } = rawTransport();
+    const route = createEngineTransport('bybitinverse', { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true }, raw, undefined, undefined, undefined, report);
+    const packet = { request: 1, method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=inverse&symbol=BTCUSD&interval=1', headers: {}, intent: 'public' as const };
+    try {
+      const bound = (await route.prepareHttp!(packet)).bind(packet);
+      expect(report).not.toHaveBeenCalled();
+      expect(bound.ready()).toBe(true);
+      const response = await bound.dispatch();
+      expect(await body(response)).toBe(tunnelReply.data);
+      expect(report).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ egress: 'node-a', remaining: '0' }));
+      const privatePacket = { ...packet, request: 2, intent: 'primary' as const, headers: { 'X-BAPI-API-KEY': 'private' } };
+      await (await route.prepareHttp!(privatePacket)).bind(privatePacket).dispatch();
+      expect(report).toHaveBeenCalledTimes(1);
+      expect(tunnelSent()).toHaveLength(2);
+    } finally { route.dispose!(); }
+  });
+
   it('stays on the tunnel while the tunnel is reachable', async () => {
     const { raw, dispatched } = rawTransport();
     const notices: TunnelProxyFallbackNotice[] = [];
