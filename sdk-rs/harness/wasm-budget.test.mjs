@@ -149,7 +149,6 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
     ['bybit', 2_177_290, 2_188_288],
     ['cryptocom', 1_704_291, 1_715_200],
     ['hyperliquid', 2_083_308, 2_094_080],
-    ['mexc', 1_717_351, 1_728_512],
     ['orderly', 1_710_152, 1_721_344],
     ['paradex', 2_211_804, 2_222_080],
     ['kraken', 2_111_267, 2_121_728],
@@ -181,4 +180,15 @@ test('shared-address setup CI caps retain the ruled headroom and exact boundary'
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), new RegExp(`exceeds ${cap}`));
   }
+});
+
+test('MEXC refusal and read-clock cap pins the measured size and exact boundary', () => {
+  const measured = 1_734_410;
+  const cap = 1_736_704;
+  assert.equal(cap, Math.ceil(measured / 1024) * 1024 + 2 * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.mexc, cap);
+  for (const size of [1_717_351, 1_728_512, measured, cap]) {
+    assert.equal(wasmBudgetError(size, 'venue', 'mexc'), undefined);
+  }
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'mexc'), /exceeds/);
 });

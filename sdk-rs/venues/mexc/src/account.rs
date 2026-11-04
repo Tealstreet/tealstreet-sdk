@@ -1449,7 +1449,13 @@ impl MexcFutures {
             self.account.poll = Some(cx.set_poll_timer(2000.0));
         }
     }
-    pub fn account_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+    pub fn account_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: impl Into<VenueError>,
+    ) {
+        let error = error.into();
         if let (true, Request::Mode | Request::Snapshot(_)) = (self.account.auth_rejected, &request)
         {
             return;
@@ -1457,7 +1463,7 @@ impl MexcFutures {
         if let Request::Leverage { .. } = &request {
             self.private_fail(cx, error, true);
         } else {
-            cx.retried_failure("mexc.account:1339", error);
+            cx.retried_failure_error("mexc.account:1339", &error);
         }
         if let Request::Snapshot(s) = request {
             self.account.in_flight.remove(&s.scope);
@@ -1582,12 +1588,12 @@ impl MexcFutures {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
         auth_scope(pending)?;
         let e: Envelope<'_> = serde_json::from_str(response.body).ok()?;
-        if e.success != Some(true)
-            && matches!(
-                e.code,
-                401.0 | 402.0 | 406.0 | 602.0 | 701.0 | 702.0 | 703.0 | 704.0
+        if Envelope::refusal(response.body).is_some_and(|error| {
+            matches!(
+                error.kind,
+                Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
             )
-        {
+        }) {
             return Some(Rejected);
         }
         if response.status != 200 || e.success != Some(true) || e.code != 0.0 {
@@ -1610,11 +1616,11 @@ impl MexcFutures {
 /// MEXC's documented key refusals. Only a parsed venue code counts: a bare HTTP
 /// 401/403 may come from a CDN, WAF or proxy and is retried.
 fn auth_rejection(body: &str, read_key: bool) -> Option<VenueError> {
-    let envelope = serde_json::from_str::<Envelope<'_>>(body).ok()?;
-    let (kind, reason) = match envelope.code {
-        401.0 | 602.0 => (ErrorKind::AuthInvalid, "rejected"),
-        402.0 => (ErrorKind::AuthExpired, "expired"),
-        406.0 | 701.0 | 702.0 | 703.0 | 704.0 => (ErrorKind::AuthPermission, "permission denied"),
+    let mut error = Envelope::refusal(body)?;
+    let reason = match error.kind? {
+        ErrorKind::AuthInvalid => "rejected",
+        ErrorKind::AuthExpired => "expired",
+        ErrorKind::AuthPermission => "permission denied",
         _ => return None,
     };
     let which = if read_key {
@@ -1622,14 +1628,11 @@ fn auth_rejection(body: &str, read_key: bool) -> Option<VenueError> {
     } else {
         "API key"
     };
-    let code = envelope.code.to_string();
-    let venue_message = envelope.message.into_owned();
-    let mut error = VenueError::new(format!("MEXC {which} {reason} ({code}): {venue_message}"))
-        .kind(kind)
-        .venue_code(code);
-    if !venue_message.is_empty() {
-        error = error.venue_message(venue_message);
-    }
+    error.message = format!(
+        "MEXC {which} {reason} ({}): {}",
+        error.venue_code.as_deref().unwrap_or_default(),
+        error.venue_message.as_deref().unwrap_or_default()
+    );
     Some(error)
 }
 

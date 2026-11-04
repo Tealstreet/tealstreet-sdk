@@ -139,7 +139,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kucoinspot: 2_234_368,
   lighter: 1_990_656,
   'lighter-robinhood': 1_990_656,
-  mexc: 1_728_512,
+  // Contract refusal fields and read-only clock recovery: local optimized 1,734,410 B + ceil KiB + 2 KiB.
+  mexc: 1_736_704,
   okx: 1_935_360,
   orderly: 1_721_344,
   paradex: 2_222_080,
