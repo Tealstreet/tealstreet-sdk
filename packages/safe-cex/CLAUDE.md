@@ -1725,9 +1725,11 @@ Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
 Each Hyperliquid engine issues at most three routine account reads at once, with
 core Mode/State/Orders ahead of ancillary work. Queued intents acquire their
-managed deadline only when issued. Caller-owned reads and uncertain-write
-reconciliation bypass those slots while retaining the existing quota and root
-deadlines; only completion of an issued routine read releases its slot. Shared
+managed deadline only when issued. Foreground Orders, including refresh asks,
+Unknown reconciliation and owed successors, retain priority but consume the same
+slots; promoting a queued intent preserves its captured census epoch. Caller-owned
+history, positions and settings retain their independent admission and original
+quota/root deadlines. Only completion of a slotted read releases its slot. Shared
 dispatch waiters use FIFO leases so newer cheap reads cannot starve older Orders;
 100 ms renewal and 2 s expiry bound a dead worker's obstruction without charging
 its abandoned work.
