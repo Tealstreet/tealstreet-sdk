@@ -5,7 +5,8 @@ import { setImmediate } from 'node:timers';
 import { IDBDatabase, IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { HyperliquidCatalogue } from './hyperliquidCatalogue';
+import { hyperliquidCataloguePolicy } from './hyperliquidCatalogue';
+import { SharedCatalogue } from './sharedCatalogue';
 
 const ORIGIN = 'https://api.hyperliquid.xyz';
 const request = (body = '{"type":"perpDexs"}', url = ORIGIN + '/info') => ({
@@ -36,8 +37,8 @@ afterEach(() => {
 });
 
 it('shares byte-exact public catalogue replies across independent worker clients', async () => {
-  const a = new HyperliquidCatalogue(factory);
-  const b = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
+  const b = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const leader = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   expect(leader?.cached).toBeUndefined();
   const expected = response();
@@ -47,8 +48,8 @@ it('shares byte-exact public catalogue replies across independent worker clients
 });
 
 it('single-flights a pending catalogue and never puts account reads in the cache', async () => {
-  const a = new HyperliquidCatalogue(factory);
-  const b = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
+  const b = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const leader = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   let resolved = false;
   const waiting = b.prepare(request(), controller().signal, Date.now() + 20_000).then((value) => {
@@ -70,8 +71,8 @@ it('single-flights a pending catalogue and never puts account reads in the cache
 });
 
 it('recovers a dead leader by allowing its own fetch within a bounded wait', async () => {
-  const a = new HyperliquidCatalogue(factory);
-  const b = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
+  const b = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const dead = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   const recovering = b.prepare(request(), controller().signal, Date.now() + 20_000);
   for (let i = 0; i < 31; i++) {
@@ -87,7 +88,7 @@ it('recovers a dead leader by allowing its own fetch within a bounded wait', asy
 });
 
 it('expires a short TTL and keeps mainnet, testnet and dex keys separate', async () => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const leader = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   await leader!.complete(response());
   expect(
@@ -106,8 +107,8 @@ it('expires a short TTL and keeps mainnet, testnet and dex keys separate', async
 it.each(['invalid', 'http', 'abort'])(
   'invalidates the catalogue on %s failure without stranding a follower',
   async (cause) => {
-    const a = new HyperliquidCatalogue(factory);
-    const b = new HyperliquidCatalogue(factory);
+    const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
+    const b = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
     const stop = controller();
     const leader = await a.prepare(request(), stop.signal, Date.now() + 20_000);
     if (cause === 'abort') {
@@ -123,8 +124,8 @@ it.each(['invalid', 'http', 'abort'])(
 );
 
 it('fences every old leader on an origin error without touching another endpoint', async () => {
-  const a = new HyperliquidCatalogue(factory);
-  const b = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
+  const b = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const old = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   const testnet = request(undefined, 'https://api.hyperliquid-testnet.xyz/info');
   await (await b.prepare(testnet, controller().signal, Date.now() + 20_000))!.complete(response());
@@ -148,7 +149,7 @@ it.each(['throw', 'blocked', 'stalled', 'quota'])(
       vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(() => {
         throw new DOMException('full', 'QuotaExceededError');
       });
-    const a = new HyperliquidCatalogue(factory);
+    const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
     const work = a.prepare(request(), controller().signal, Date.now() + 20_000);
     await flush();
     if (failure === 'blocked') openRequest.onblocked();
@@ -160,7 +161,7 @@ it.each(['throw', 'blocked', 'stalled', 'quota'])(
 );
 
 it('keeps a good HTTP answer when cache publication fails', async () => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const read = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(() => {
     throw new DOMException('full', 'QuotaExceededError');
@@ -169,13 +170,13 @@ it('keeps a good HTTP answer when cache publication fails', async () => {
   expect(await read!.complete(answer)).toEqual(answer);
   await vi.advanceTimersByTimeAsync(3001);
   expect(
-    (await new HyperliquidCatalogue(factory).prepare(request(), controller().signal, Date.now() + 20_000))?.cached,
+    (await new SharedCatalogue(hyperliquidCataloguePolicy, factory).prepare(request(), controller().signal, Date.now() + 20_000))?.cached,
   ).toBeUndefined();
 });
 
 it('does not cancel a leader when a follower is aborted', async () => {
-  const a = new HyperliquidCatalogue(factory);
-  const b = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
+  const b = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const leader = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   const stop = controller();
   const result = Promise.allSettled([b.prepare(request(), stop.signal, Date.now() + 20_000)]);
@@ -187,7 +188,7 @@ it('does not cancel a leader when a follower is aborted', async () => {
 });
 
 it('keeps dex scopes separate and rejects credential-bearing or non-public requests', async () => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const body = (dex: string) => JSON.stringify({ type: 'metaAndAssetCtxs', dex });
   await (await a.prepare(request(body('xyz')), controller().signal, Date.now() + 20_000))!.complete(
     response('[{"universe":[]},[]]'),
@@ -205,14 +206,14 @@ it('keeps dex scopes separate and rejects credential-bearing or non-public reque
 });
 
 it('rejects clock-rollback freshness and a wait beyond its original deadline', async () => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   await (await a.prepare(request(), controller().signal, Date.now() + 20_000))!.complete(response());
   await flush();
   vi.setSystemTime(Date.now() - 1000);
   const leader = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   expect(leader?.cached).toBeUndefined();
   const rejected = Promise.allSettled([
-    new HyperliquidCatalogue(factory).prepare(request(), controller().signal, Date.now() + 50),
+    new SharedCatalogue(hyperliquidCataloguePolicy, factory).prepare(request(), controller().signal, Date.now() + 50),
   ]);
   await flush();
   await vi.advanceTimersByTimeAsync(100);
@@ -220,7 +221,7 @@ it('rejects clock-rollback freshness and a wait beyond its original deadline', a
 });
 
 it('copies reused streaming buffers and preserves an oversized response byte for byte', async () => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const read = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   const bytes = new TextEncoder().encode('[null]');
   const body = (async function* () {
@@ -249,7 +250,7 @@ it('copies reused streaming buffers and preserves an oversized response byte for
 });
 
 it('releases a failed or cancelled stream without caching a partial reply', async () => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const first = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   await expect(
     first!.complete({
@@ -277,7 +278,7 @@ it('releases a failed or cancelled stream without caching a partial reply', asyn
 });
 
 it('bounds cache keys and sweeps expired entries before accepting a new catalogue', async () => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const packet = (i: number) => request(JSON.stringify({ type: 'metaAndAssetCtxs', dex: 'dex' + i }));
   for (let i = 0; i < 64; i++)
     await (await a.prepare(packet(i), controller().signal, Date.now() + 20_000))!.complete(
@@ -291,8 +292,8 @@ it('bounds cache keys and sweeps expired entries before accepting a new catalogu
 });
 
 it('shares spot catalogues with the complete token metadata intact', async () => {
-  const a = new HyperliquidCatalogue(factory);
-  const b = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
+  const b = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const packet = request('{"type":"spotMetaAndAssetCtxs"}');
   const expected = response('[{"universe":[],"tokens":[{"name":"USDC","index":0,"szDecimals":8}]},[]]');
   await (await a.prepare(packet, controller().signal, Date.now() + 20_000))!.complete(expected);
@@ -304,20 +305,20 @@ it.each([
   '[{"universe":[{"name":"BTC","szDecimals":5}]},[{"markPx":"not-a-price"}]]',
   '[{"universe":[],"tokens":[{"name":"USDC"}]},[]]',
 ])('passes through malformed rows unchanged without caching them: %s', async (body) => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const packet = request(
     JSON.stringify({ type: body.includes('tokens') ? 'spotMetaAndAssetCtxs' : 'metaAndAssetCtxs' }),
   );
   const leader = await a.prepare(packet, controller().signal, Date.now() + 20_000);
   const original = response(body);
   expect(await leader!.complete(original)).toEqual(original);
-  const next = await new HyperliquidCatalogue(factory).prepare(packet, controller().signal, Date.now() + 20_000);
+  const next = await new SharedCatalogue(hyperliquidCataloguePolicy, factory).prepare(packet, controller().signal, Date.now() + 20_000);
   expect(next?.cached).toBeUndefined();
   next!.cancel();
 });
 
 it('does not hold a good HTTP answer behind stalled cache publication', async () => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   const read = await a.prepare(request(), controller().signal, Date.now() + 20_000);
   const abort = vi.fn();
   vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(
@@ -335,7 +336,7 @@ it('does not hold a good HTTP answer behind stalled cache publication', async ()
 });
 
 it('rechecks freshness after an asynchronous storage observation crosses the TTL', async () => {
-  const a = new HyperliquidCatalogue(factory);
+  const a = new SharedCatalogue(hyperliquidCataloguePolicy, factory);
   await (await a.prepare(request(), controller().signal, Date.now() + 20_000))!.complete(response());
   await flush();
   const get = IDBObjectStore.prototype.get;

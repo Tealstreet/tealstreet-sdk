@@ -9,7 +9,7 @@ import type { HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
 import type { BybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
-import type { CatalogueRead } from './hyperliquidCatalogue';
+import type { CatalogueRead } from './sharedCatalogue';
 import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } from './types';
 
 import { AxiosHeaders } from 'axios';
@@ -31,6 +31,7 @@ import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/
 import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
+import { sharedBinanceCatalogue } from './binanceCatalogue';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
@@ -563,6 +564,17 @@ const httpTransport = (
     let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
     let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
     let catalogueRead: CatalogueRead | undefined;
+    let physicalRequest = false;
+    const settleDeadline = (deadlineFired = false) => {
+      if (
+        physicalRequest &&
+        (deadlineFired || remaining() <= 0) &&
+        !disposed &&
+        !request.signal?.aborted &&
+        !reroute.abandon?.aborted
+      )
+        catalogueRead?.timedOut?.();
+    };
     let bound = false;
     let cancelBound: (() => void) | undefined;
     const cleanup = () => {
@@ -593,12 +605,17 @@ const httpTransport = (
       }
     };
     const onAbort = () => {
+      settleDeadline();
       releaseResources();
       cleanup();
     };
-    const timer = setTimeout(() => controller.abort(new HttpPreparationError('timedOut')), remaining());
+    const timer = setTimeout(() => {
+      settleDeadline(true);
+      controller.abort(new HttpPreparationError('timedOut'));
+    }, remaining());
     signal.addEventListener('abort', onAbort, { once: true });
     const cancel = () => {
+      settleDeadline();
       controller.abort();
       releaseResources();
       cleanup();
@@ -728,10 +745,42 @@ const httpTransport = (
           signal,
         );
         if (catalogueRead) catalogueOrigins.add(original.origin);
+      } else if (['binance', 'binancepm', 'binanceinverse', 'binancespot'].includes(exchange)) {
+        // Only resolved public routing facts enter the anonymous catalogue key.
+        const routeEndpoint = tunnelAdapter
+          ? new URL(tunnelEgressUrl(routing.howEgress))
+          : prefix
+            ? new URL(prefix)
+            : undefined;
+        if (
+          !routeEndpoint ||
+          !(routeEndpoint.username || routeEndpoint.password || routeEndpoint.search || routeEndpoint.hash)
+        ) {
+          catalogueRead = await untilAborted(
+            sharedBinanceCatalogue.prepare(
+              { ...request, intent },
+              signal,
+              started + deadlineMs,
+              {
+                network: options.testnet ? 'testnet' : 'mainnet',
+                route: tunnelAdapter
+                  ? `how:${routing.howEgress}:${routeEndpoint!.href}`
+                  : routeEndpoint
+                    ? `proxy:${routeEndpoint.href}`
+                    : 'direct',
+              },
+              () => !disposed,
+            ),
+            signal,
+          );
+        }
       }
       const cached = catalogueRead?.cached;
       const cacheFresh = () =>
         !cached || (Date.now() >= catalogueRead!.cachedAt! && Date.now() < catalogueRead!.expiresAt!);
+      const leaseFresh = () =>
+        catalogueRead?.leaseExpiresAt === undefined ||
+        (Date.now() >= catalogueRead.leaseStartedAt! && Date.now() < catalogueRead.leaseExpiresAt);
       const how = tunnelAdapter as Partial<DisposableAxiosAdapter> | undefined;
       if (!cached && tunnelAdapter) {
         const prepareTunnel = intent === undefined ? how?.prepareLegacy : how?.prepare;
@@ -903,17 +952,22 @@ const httpTransport = (
           return {
             ...(budgetGeneration === undefined ? {} : { admitDispatch }),
             ready() {
-              return beforeRelease(() => !sent && ready());
+              return beforeRelease(() => {
+                if (!leaseFresh()) throw new HttpPreparationError('stale');
+                return !sent && ready();
+              });
             },
             dispatch() {
               if (budgetGeneration !== undefined && !admitted) return admitDispatch(() => this.dispatch());
               beforeRelease(() => {
                 if (sent) throw new HttpPreparationError('invalid');
+                if (!leaseFresh()) throw new HttpPreparationError('stale');
               });
               sent = true;
               if (!cached) infoRead?.sent();
               try {
                 const response = send();
+                physicalRequest = true;
                 return untilAborted(response, signal)
                   .then((value) =>
                     route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
@@ -930,17 +984,21 @@ const httpTransport = (
                       // Only a 429 must publish its pause before Rust can enqueue its retry.
                       if (value.status === 429) await untilAborted(recorded, signal).catch(reportFailure);
                     }
-                    return catalogueRead && !cached ? catalogueRead.complete(value) : value;
+                    return catalogueRead && !cached ? untilAborted(catalogueRead.complete(value), signal) : value;
                   })
                   .then(wrap)
                   .catch((error) => {
-                    // No answer through the relay, and nobody called it off: the relay is down.
-                    if (tunnelAdapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
-                      proxyAuthorization?.failed(
-                        relayFailed(exchange, error instanceof Error ? error : new Error(String(error))),
-                      );
-                    cancel();
-                    throw error;
+                    const report = (): never => {
+                      // No answer through the relay, and nobody called it off: the relay is down.
+                      if (tunnelAdapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
+                        proxyAuthorization?.failed(
+                          relayFailed(exchange, error instanceof Error ? error : new Error(String(error))),
+                        );
+                      cancel();
+                      throw error;
+                    };
+                    const failed = catalogueRead?.failed?.();
+                    return failed ? untilAborted(failed, signal).then(report, report) : report();
                   });
               } catch (error) {
                 cancel();
