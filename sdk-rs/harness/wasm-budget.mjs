@@ -113,6 +113,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
 // #3023 page rule at 2495abee4f1: cut run 41799876396 measured kraken 2,111,267, kucoinspot 2,224,069,
 // lighter 1,980,286 and woo 2,377,495 B; ddi2il ruling: CI size plus 10 KiB rounded up, siblings equal.
+// #3035 CI run 41810769240: bitrue 1,803,160 B; txflow 1,819,613 B.
+// CI + 10 KiB rounded up; TxFlow retains #3031's cap from pre-refactor CI 1,819,696 B.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_970_176,
   asterdex: 2_109_440,
@@ -121,7 +123,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bingx: 2_013_184,
   bitget: 2_304_000,
   bitgetusdc: 2_304_000,
-  bitrue: 1_798_144,
+  bitrue: 1_813_504,
   bitunix: 1_837_056,
   blofin: 1_950_720,
   breakoutprop: 1_494_016,
@@ -143,7 +145,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   paradex: 2_222_080,
   phemex: 2_034_688,
   polymarket: 1_587_200,
-  txflow: 1_817_600,
+  txflow: 1_830_912,
   weex: 1_921_024,
   woo: 2_387_968,
 });
