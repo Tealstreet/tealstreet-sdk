@@ -421,3 +421,48 @@ fn invalid_catalogue_bounds_do_not_panic_when_a_default_is_present() {
         );
     }
 }
+
+/// deaws2's live lighter-robinhood GET /api/v1/account on a flat account: a
+/// market the account set keeps a zero-size row whose IMF is a PERCENT string
+/// ("5.00" = 20x, "50.00" = 2x), unlike the catalogue's basis points.
+#[test]
+fn live_flat_rows_read_their_percent_fraction_on_rest_and_ws() {
+    let rows = json!([
+        {"market_id":1,"symbol":"ETH","position":"0.00000","initial_margin_fraction":"50.00","margin_mode":0},
+        {"market_id":2,"symbol":"BTC","position":"0.00","initial_margin_fraction":"5.00","margin_mode":0}
+    ]);
+    for websocket in [false, true] {
+        let (mut e, socket) = ready_with_defaults();
+        if websocket {
+            let positions: serde_json::Map<String, Value> = rows
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| (row["market_id"].to_string(), row.clone()))
+                .collect();
+            let text = json!({"channel":"account_all:718895","positions":positions}).to_string();
+            message(&mut e, socket, NOW + 1.0, &text);
+        } else {
+            e.handle(NOW + 1.0, Event::WsOpened { socket });
+            let reads = requests(&mut e);
+            let account = reads.iter().find(|r| r.url.contains("/account?")).unwrap();
+            let mut value: Value = serde_json::from_str(ACCOUNT).unwrap();
+            value["accounts"][0]["positions"] = rows.clone();
+            reply_at(&mut e, NOW + 2.0, account, 200, &value.to_string());
+        }
+        assert_eq!(
+            e.store().setting("ETH").unwrap().leverage,
+            2.0,
+            "'50.00' is 2x, WS={websocket}"
+        );
+        assert_eq!(
+            e.store().setting("BTC").unwrap().leverage,
+            20.0,
+            "'5.00' is 20x, WS={websocket}"
+        );
+        assert!(
+            e.store().positions().is_empty(),
+            "flat rows open no position"
+        );
+    }
+}
