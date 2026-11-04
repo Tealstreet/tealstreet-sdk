@@ -321,6 +321,15 @@ logical-read deadline of 60 s on frame-fed sources would make it sound.
    - Section 23 revision 1 written after ORDERS on every output (§4.2), and the
      segmenter parent mapping (H6).
    - Tests H2, H4, H5, H6, H8, H9, H10.
+   - Implementation notes from codex-hcmq3f's clearance (d9905b4f137):
+     - The revision rule covers read commits too, not only stream mutations.
+       An accepted read commit advances `orders_revision` and records it as the
+       last-mutation sequence of every symbol it wrote, so a still-older read
+       is refused against it.
+     - Per-symbol mutation provenance lives beside the rows, not inside them.
+       It must survive a row's removal and an empty snapshot or read result: a
+       symbol with no row keeps its last-mutation sequence, so a missing row
+       never erases the proof that refuses an older read.
 2. Engine: per-symbol fence marks and the cover-only lift behind the capability
    bit (§4.3, §4.4). Mixed-version tests: an old source keeps the stamp rule; a
    new source's ORDERS without 23 lifts nothing.
