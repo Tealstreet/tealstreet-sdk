@@ -4203,6 +4203,177 @@ fn an_id_no_longer_trailing_amends_as_an_ordinary_full_take_profit() {
     );
 }
 
+#[test]
+fn already_set_margin_mode_updates_account_positions_and_settings() {
+    for isolated in [false, true] {
+        let mut h = ready();
+        h.command(Command::SetMarginType {
+            command: 601,
+            symbol: "BTCUSDT".into(),
+            isolated,
+        });
+        let request = h.take("/v5/account/set-margin-mode");
+        h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+        assert_eq!(h.result(601), Some(&Ok("[]".into())));
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == 601).count(), 1);
+        assert!(h.command_errors.is_empty());
+        let margin = Some(if isolated {
+            MarginType::Isolated
+        } else {
+            MarginType::Cross
+        });
+        assert_eq!(
+            h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+            margin
+        );
+        assert!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .all(|p| p.margin_type == margin)
+        );
+        assert!(!h.has_request("/v5/account/set-margin-mode"), "no resend");
+    }
+}
+
+#[test]
+fn gateway_margin_noop_is_unknown_and_keeps_the_previous_setting() {
+    let mut h = ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetMarginType {
+        command: 602,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 503, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+    assert!(h.result(602).unwrap().is_err());
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn margin_noop_with_native_failure_reasons_cannot_claim_success() {
+    let mut h = ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetMarginType {
+        command: 603,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"not modified","result":{"reasons":[{"reasonCode":"3400000","reasonMsg":"insufficient equity"}]}}"#);
+    assert!(h.result(603).unwrap().is_err());
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn review_3014_margin_code_must_not_satisfy_leverage() {
+    let mut h = ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetLeverage {
+        command: 701,
+        symbol: "BTCUSDT".into(),
+        leverage: 5.,
+        side: None,
+    });
+    let request = h.take("/v5/position/set-leverage");
+    h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+    assert!(
+        matches!(h.result(701), Some(Err(_))),
+        "margin-only code falsely satisfied leverage: {:?}; stored {:?}",
+        h.result(701),
+        h.engine.store().setting("BTCUSDT")
+    );
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    assert!(!h.has_request("/v5/position/set-leverage"), "no resend");
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 701).count(), 1);
+}
+#[test]
+fn review_3014_margin_code_must_not_satisfy_position_mode() {
+    let mut h = ready();
+    let before = h.engine.store().hedged();
+    h.command(Command::SetPositionMode {
+        command: 702,
+        hedged: true,
+        symbol: None,
+    });
+    let request = h.take("/v5/position/switch-mode");
+    h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+    assert!(
+        matches!(h.result(702), Some(Err(_))),
+        "margin-only code falsely satisfied position mode: {:?}; hedged {}",
+        h.result(702),
+        h.engine.store().hedged()
+    );
+    assert_eq!(h.engine.store().hedged(), before);
+    assert!(!h.has_request("/v5/position/switch-mode"), "no resend");
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 702).count(), 1);
+}
+#[test]
+fn review_3014_margin_code_working_control() {
+    let mut h = ready();
+    h.command(Command::SetMarginType {
+        command: 703,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+    assert!(matches!(h.result(703), Some(Ok(_))));
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(MarginType::Isolated)
+    );
+}
+
+#[test]
+fn margin_noop_cannot_satisfy_full_or_partial_protection_writes_or_resend() {
+    for partial in [false, true] {
+        let mut h = ready();
+        let before = h.engine.store().positions().to_vec();
+        if partial {
+            h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Partial","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#);
+            h.command(Command::AmendOrder {
+                command: 704,
+                id: "position-stop".into(),
+                price: Some(87000.),
+                amount: None,
+            });
+            h.respond(
+                "/v5/order/cancel-batch",
+                200,
+                r#"{"retCode":0,"retMsg":"OK","retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+            );
+        } else {
+            let mut stop = limit("BTCUSDT", OrderSide::Sell, 0., 86000.04);
+            stop.kind = OrderType::StopLoss;
+            place(&mut h, 704, vec![stop]);
+        }
+        let request = h.take("/v5/position/trading-stop");
+        h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+        if partial {
+            // #3018: the refused replacement's cancel landed, so the old stop goes back once
+            // (a different write: its own 86000 body, not a resend of the replacement).
+            let restore = h.take("/v5/position/trading-stop");
+            assert!(
+                body(&restore).contains(r#""stopLoss":"86000""#),
+                "{}",
+                body(&restore)
+            );
+            h.reply(
+                restore.id,
+                200,
+                r#"{"retCode":0,"retMsg":"OK","result":{}}"#,
+            );
+        }
+        assert!(matches!(h.result(704), Some(Err(_))));
+        assert_eq!(h.engine.store().positions(), before);
+        assert!(!h.has_request("/v5/position/trading-stop"), "no resend");
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == 704).count(), 1);
+    }
+}
+
 /// Move a symbol's mark and last price, as its ticker stream would.
 fn price_at(h: &mut Harness, symbol: &str, price: f64) {
     h.engine.store_mut().update_ticker(symbol, |ticker| {

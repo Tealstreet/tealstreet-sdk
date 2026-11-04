@@ -21,6 +21,10 @@ const ORDER_KINDS: [&str; 5] = ["", "oco", "conditional", "trigger", "move_order
 const SKIP_LOG_LIMIT: usize = 4_096;
 /// Store-id suffixes one native order row may expand into.
 const ORDER_SUFFIXES: [&str; 4] = ["", "_sl", "_tp", "_tsl"];
+/// The open-order census's read-cover scope: one census reads the whole account.
+const ORDERS_SCOPE: &str = "orders";
+/// A census the stream outran is read again no sooner than this after it began.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.0;
 
 // Match the SDK's decimal arithmetic without reducing native coin precision.
 fn decimal_result(a: f64, b: f64, result: f64) -> f64 {
@@ -154,6 +158,11 @@ pub enum Request {
         cursor: String,
         cursors: HashSet<String>,
         invalid: bool,
+        /// The earliest release among this census's pages so far.
+        read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+        /// A page answered outside a read: the census proves no cover.
+        read_lost: bool,
+        started: f64,
     },
 }
 
@@ -265,6 +274,7 @@ pub struct AccountState {
     pub startup_rejected: bool,
     pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
     fresh_positions_timer: Option<TimerId>,
+    census_follow_up: Option<TimerId>,
 }
 impl AccountState {
     pub(crate) fn order_final(&self, id: &str) -> bool {
@@ -460,29 +470,49 @@ impl Okx {
                 },
             );
         }
-        if include_orders && !self.account.orders_in_flight {
-            self.account.orders_in_flight = true;
-            self.account.orders_generation += 1;
-            self.account.census_unproven.clear();
-            let generation = self.account.orders_generation;
-            self.orders_page(
-                cx,
-                Request::Orders {
-                    context: None,
-                    generation,
-                    version: self.account.revision,
-                    epoch: cx.order_read_epoch(),
-                    kind: 0,
-                    product: 0,
-                    rows: SnapshotBuilder::default(),
-                    margins: HashMap::new(),
-                    page_count: 0,
-                    cursor: String::new(),
-                    cursors: HashSet::new(),
-                    invalid: false,
-                },
-            );
+        if include_orders {
+            self.census(cx);
         }
+    }
+
+    fn census(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.orders_in_flight {
+            return;
+        }
+        self.account.orders_in_flight = true;
+        self.account.orders_generation += 1;
+        self.account.census_unproven.clear();
+        let generation = self.account.orders_generation;
+        self.orders_page(
+            cx,
+            Request::Orders {
+                context: None,
+                generation,
+                version: self.account.revision,
+                epoch: cx.order_read_epoch(),
+                kind: 0,
+                product: 0,
+                rows: SnapshotBuilder::default(),
+                margins: HashMap::new(),
+                page_count: 0,
+                cursor: String::new(),
+                cursors: HashSet::new(),
+                invalid: false,
+                read: None,
+                read_lost: false,
+                started: cx.now,
+            },
+        );
+    }
+
+    /// Owe a census after one the stream outran, `CENSUS_FOLLOW_UP_MS` after
+    /// that one started at the earliest.
+    fn census_follow_up(&mut self, cx: &mut Cx<'_, Pending>, started: f64) {
+        if self.account.census_follow_up.is_some() {
+            return;
+        }
+        let wait = (started + CENSUS_FOLLOW_UP_MS - cx.now).max(0.0);
+        self.account.census_follow_up = Some(cx.set_timer(wait));
     }
 
     /// One physical account-cycle page under its own Background Read with the
@@ -762,7 +792,14 @@ impl Okx {
                         self.unlisted_order(cx, o.inst_id, invalid);
                         return;
                     }
-                    for order in self.orders(cx, &o) {
+                    let orders = self.orders(cx, &o);
+                    // A working row that decodes but maps to no order (an OCO with
+                    // no trigger) keeps its stored legs and proves nothing.
+                    if orders.is_empty() && !terminal_state(o.state) {
+                        self.reject_order(cx, rows, o.inst_id, o.ord_id, o.algo_id);
+                        return;
+                    }
+                    for order in orders {
                         margins.insert(
                             order.id.clone(),
                             (reserve_leverage(o.lever), self.order_margin_currency(&o)),
@@ -1078,7 +1115,14 @@ impl Okx {
                 cursor,
                 mut cursors,
                 invalid: false,
+                mut read,
+                mut read_lost,
+                started,
             } => {
+                match cx.order_read_mark() {
+                    Some(mark) => read = Some(read.map_or(mark, |earliest| earliest.earliest(mark))),
+                    None => read_lost = true,
+                }
                 if page_count >= 100 {
                     if cursor.is_empty() || cursors.len() >= 200 || !cursors.insert(cursor.clone())
                     {
@@ -1105,6 +1149,9 @@ impl Okx {
                             cursor,
                             cursors,
                             invalid: false,
+                            read,
+                            read_lost,
+                            started,
                         },
                     );
                     return;
@@ -1131,6 +1178,9 @@ impl Okx {
                             cursor: String::new(),
                             cursors: HashSet::new(),
                             invalid: false,
+                            read,
+                            read_lost,
+                            started,
                         },
                     );
                     return;
@@ -1168,28 +1218,62 @@ impl Okx {
                         })
                         .cloned(),
                 );
+                // What this census may replace, decided before any per-order state
+                // moves (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+                let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                    key: ORDERS_SCOPE,
+                    account: &[ORDERS_SCOPE],
+                };
+                let refused = read.filter(|_| !read_lost).and_then(|earliest| {
+                    cx.orders_read_refusals_from(earliest, scope, |_| true, &rows)
+                        .map(|refused| (earliest, refused))
+                });
+                let Some((earliest, refused)) = refused else {
+                    // Refused whole, or unprovable: newer rows already stand, and
+                    // another census follows to prove what they cannot (absences).
+                    self.census_follow_up(cx, started);
+                    return;
+                };
+                if !refused.is_empty() {
+                    self.census_follow_up(cx, started);
+                }
+                let admitted = |id: &str| {
+                    rows.iter()
+                        .find(|row| row.id == id)
+                        .is_some_and(|row| !refused.contains(&row.symbol))
+                };
                 for (id, leverage) in margins {
-                    if !self
-                        .account
-                        .order_versions
-                        .get(&id)
-                        .is_some_and(|(v, _, _)| *v > version)
+                    if admitted(&id)
+                        && !self
+                            .account
+                            .order_versions
+                            .get(&id)
+                            .is_some_and(|(v, _, _)| *v > version)
                     {
                         self.account.order_leverage.insert(id, leverage);
                     }
                 }
-                cx.store.set_orders(rows);
                 // A rejected row may be an uncertain placement only if nothing stored proves
                 // it older; that symbol stays fenced, and the rest of the census still counts.
-                if clean {
-                    cx.orders_reconciled_since(None, epoch);
-                } else {
-                    let unproven = std::mem::take(&mut self.account.census_unproven);
-                    cx.orders_reconciled_except(&unproven, epoch);
+                let mut unproven = std::mem::take(&mut self.account.census_unproven);
+                // Any rejected row proves the account nothing.
+                let mut cover_unproven = unproven.clone();
+                if !clean {
+                    cover_unproven.push(String::new());
                 }
+                if cx
+                    .commit_orders_read_from(earliest, scope, |_| true, rows, &cover_unproven)
+                    .is_none()
+                {
+                    self.census_follow_up(cx, started);
+                    return;
+                }
+                cx.store.set_orders_loaded();
+                unproven.extend(refused.iter().cloned());
+                cx.orders_reconciled_except(&unproven, epoch);
                 self.trading
                     .acknowledged
-                    .retain(|_, order| order.version > version);
+                    .retain(|_, order| order.version > version || refused.contains(&order.symbol));
                 self.account.ready = cx.store.loaded().positions && cx.store.loaded().balance;
                 let ids: HashSet<_> = cx.store.orders().iter().map(|o| o.id.as_str()).collect();
                 self.account
@@ -1530,6 +1614,13 @@ impl Okx {
         }
         if self.account.startup.on_timer(timer).is_some() {
             self.account_start(cx);
+            return true;
+        }
+        if self.account.census_follow_up == Some(timer) {
+            self.account.census_follow_up = None;
+            if self.account.configured {
+                self.census(cx);
+            }
             return true;
         }
         if self.account.retry == Some(timer) {

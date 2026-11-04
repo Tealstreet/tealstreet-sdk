@@ -66,6 +66,9 @@ pub struct Capabilities {
     /// A symbol cancel acts on the store's rows, so it can miss an order the store
     /// has not seen yet (one placed seconds ago, its frame still in flight).
     pub symbol_cancel_misses_unseen: bool,
+    /// The data source writes `ORDERS_READ` read covers, and a page lifts its
+    /// uncertain fences on them alone (docs/plans/RUST_FRAME_FED_READ_COVER.md §9).
+    pub order_read_covers: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -199,6 +202,7 @@ impl Capabilities {
         fresh_positions: false,
         nuke_account_cancel: false,
         symbol_cancel_misses_unseen: false,
+        order_read_covers: false,
     };
 
     /// No history axis: fills, orders and income are all unavailable.
@@ -217,6 +221,9 @@ impl Default for Capabilities {
 }
 
 impl Capabilities {
+    /// `order_read_covers`' bit in the CAPABILITIES record's flag word.
+    pub const ORDER_READ_COVERS_BIT: u32 = 30;
+
     /// Two words: boolean flags, then four-bit enum fields (layout in wire.mjs).
     pub fn write(&self, w: &mut FrameWriter<'_>) {
         let flags = [
@@ -250,6 +257,7 @@ impl Capabilities {
             self.fresh_positions,
             self.nuke_account_cancel,
             self.symbol_cancel_misses_unseen,
+            self.order_read_covers,
         ]
         .iter()
         .enumerate()
@@ -324,6 +332,7 @@ mod tests {
             fresh_positions: true,
             nuke_account_cancel: true,
             symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..Capabilities::NO_HISTORY
         };
         let mut w = FrameWriter::new(vec![], 0.0);
@@ -334,7 +343,7 @@ mod tests {
         assert_eq!(payload.len(), 8);
         assert_eq!(
             u32::from_le_bytes(payload[..4].try_into().unwrap()),
-            (0x1ff << 16) | (0x1f << 25)
+            (0x1ff << 16) | (0x3f << 25)
         );
         assert_eq!(
             u32::from_le_bytes(payload[4..].try_into().unwrap()),

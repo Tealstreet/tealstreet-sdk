@@ -104,34 +104,41 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // Master CI run 41783084277: apexomni 1,959,768, asterdex 2,099,176, backpack 1,860,786,
 // binance 2,157,319, bybit 2,163,030, coinbase 1,800,411, hyperliquid/spot 2,069,390 and weex 1,909,946 B.
 // ddi2il ruling: CI size plus 10 KiB, rounded up to the KiB; shared-family siblings carry the same cap.
+// Read-cover batch (#3010/#3016/#3005/#3007 engine plus venue covers) at SDK 3b9f6b0fe2b: cut run 41796230942
+// measured binance 2,172,329, bingx 2,002,885, bitget 2,293,016, bitunix 1,826,666, blofin 1,939,942, bybit 2,177,290, cryptocom 1,704,291, hyperliquid 2,083,308, lighter 1,968,734, mexc 1,717,351, orderly 1,710,152, paradex 2,198,375 B;
+// ddi2il ruling: CI size plus 10 KiB rounded up to the KiB, shared-family siblings set equal.
+// #3020 OKX read covers: cut run 41797896337 at e7e0251a87d measured okx 1,924,239 B;
+// ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
+// Paradex at b716d928440: cut run 41798863064 measured paradex 2,211,804 B;
+// ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_970_176,
   asterdex: 2_109_440,
   backpack: 1_871_872,
-  binance: 2_167_808,
-  bingx: 1_997_824,
-  bitget: 2_275_328,
-  bitgetusdc: 2_276_352,
+  binance: 2_183_168,
+  bingx: 2_013_184,
+  bitget: 2_304_000,
+  bitgetusdc: 2_304_000,
   bitrue: 1_798_144,
-  bitunix: 1_824_768,
-  blofin: 1_934_336,
+  bitunix: 1_837_056,
+  blofin: 1_950_720,
   breakoutprop: 1_494_016,
-  bybit: 2_173_952,
+  bybit: 2_188_288,
   coinbase: 1_811_456,
-  cryptocom: 1_701_888,
+  cryptocom: 1_715_200,
   grvt: 1_767_424,
-  hyperliquid: 2_079_744,
-  hyperliquidspot: 2_079_744,
+  hyperliquid: 2_094_080,
+  hyperliquidspot: 2_094_080,
   kraken: 2_108_416,
   krakenspot: 2_108_416,
   kucoin: 1_640_448,
   kucoinspot: 2_222_080,
-  lighter: 1_965_056,
-  'lighter-robinhood': 1_967_104,
-  mexc: 1_714_176,
-  okx: 1_921_024,
-  orderly: 1_708_032,
-  paradex: 2_196_480,
+  lighter: 1_979_392,
+  'lighter-robinhood': 1_979_392,
+  mexc: 1_728_512,
+  okx: 1_935_360,
+  orderly: 1_721_344,
+  paradex: 2_222_080,
   phemex: 2_034_688,
   polymarket: 1_587_200,
   txflow: 1_817_600,

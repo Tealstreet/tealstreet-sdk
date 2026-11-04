@@ -4,7 +4,7 @@
 //! seals. Options run here too; a Hyro placement founds or joins one planned
 //! execution of its retained intent (`placements`).
 use super::acknowledgement::{self as ack, Answer, Row};
-use super::codes::BYBIT;
+use super::codes::{BYBIT, MARGIN_MODE_ALREADY_SET};
 use super::{
     Call, Job, LocalWrite, Planned, check_client_order_ids, describe, is_virtual, mark_canceled,
     not_sent, trade_command_id, validate_stop_triggers,
@@ -12,7 +12,7 @@ use super::{
 use crate::sign::{self, Query};
 use crate::{BybitLinear, Category, Pending, Rest, Then};
 use safe_cex_engine::classify::{
-    self, BatchItem, Intent, Native, NativeCode, ReadRetry, Released, Verdict, WriteFact,
+    self, BatchItem, CodeTable, Intent, Native, NativeCode, ReadRetry, Released, Verdict, WriteFact,
 };
 use safe_cex_engine::model::{MarginType, OrderStatus};
 use safe_cex_engine::request_context::plan::{CallBound, CallTerms, RetryWindow, Slot, StepBound};
@@ -1260,16 +1260,18 @@ impl BybitLinear {
 
     /// Record the classified failure before anything else. `weaken` marks a
     /// refusal the codec cannot prove; `evidence` IDs are reconciliation-only.
+    #[allow(clippy::too_many_arguments)]
     fn record_failure(
         cx: &mut Cx<'_, Pending>,
         context: &Context,
+        table: &CodeTable,
         native: Option<&Native<'_>>,
         message: String,
         weaken: bool,
         evidence: &[String],
         known_effects: bool,
     ) -> Option<(Verdict, Option<ResendGrant>, VenueError)> {
-        let mut fact = cx.classify_write(context, &BYBIT, native, message).ok()?;
+        let mut fact = cx.classify_write(context, table, native, message).ok()?;
         if weaken {
             fact = fact.unproven();
         }
@@ -1297,7 +1299,16 @@ impl BybitLinear {
         message: &str,
         evidence: &[String],
     ) -> Decision {
-        match Self::record_failure(cx, context, None, message.into(), true, evidence, false) {
+        match Self::record_failure(
+            cx,
+            context,
+            &BYBIT,
+            None,
+            message.into(),
+            true,
+            evidence,
+            false,
+        ) {
             Some((_, _, error)) => Decision::Failed(error),
             None => Decision::Lost,
         }
@@ -1396,7 +1407,12 @@ impl BybitLinear {
             code: NativeCode::Int(code),
             message: &message,
         };
-        let Ok(probe) = cx.classify_write(context, &BYBIT, Some(&native), "") else {
+        let table = if code == 110026 && matches!(planned.call, Call::MarginMode { .. }) {
+            &MARGIN_MODE_ALREADY_SET
+        } else {
+            &BYBIT
+        };
+        let Ok(probe) = cx.classify_write(context, table, Some(&native), "") else {
             return Decision::Lost;
         };
         let rows = ack::carries_rows(result, ext);
@@ -1417,6 +1433,8 @@ impl BybitLinear {
         let weaken = match probe.verdict() {
             Verdict::Satisfied(_) => {
                 matches!(planned.call, Call::CancelAll { .. })
+                    || (matches!(planned.call, Call::MarginMode { .. })
+                        && ack::margin_applied(result) != Ok(true))
                     || (rows && evidence.is_empty())
                     || evidence
                         .iter()
@@ -1427,6 +1445,7 @@ impl BybitLinear {
         let Some((verdict, grant, error)) = Self::record_failure(
             cx,
             context,
+            table,
             Some(&native),
             describe((code, message.clone())),
             weaken,
@@ -1483,6 +1502,7 @@ impl BybitLinear {
         match call {
             Call::Leverage { symbol, leverage } => self.apply_leverage(cx, symbol, *leverage),
             Call::PositionMode { hedged } => self.apply_position_mode(cx, *hedged),
+            Call::MarginMode { isolated } => self.apply_margin_mode(cx, *isolated),
             Call::PartialStop { .. } => self.schedule_partial_stop_refresh(cx),
             // Already gone when we canceled it: a refused replacement never puts it back.
             Call::CancelPartialStop { id, .. } => {
@@ -1505,6 +1525,34 @@ impl BybitLinear {
             }
         });
         cx.hold_setting(SettingKey::Leverage(symbol.to_owned()));
+    }
+
+    fn apply_margin_mode(&mut self, cx: &mut Cx<'_, Pending>, isolated: bool) {
+        let margin = if isolated {
+            MarginType::Isolated
+        } else {
+            MarginType::Cross
+        };
+        self.account.margin_type = Some(margin);
+        for state in &mut self.products {
+            state.account.margin_type = Some(margin);
+        }
+        cx.store.update_positions(|p| p.margin_type = Some(margin));
+        // Account-wide, including already-set replies: publish the requested
+        // value now and hold it over older source SETTINGS frames.
+        let symbols: Vec<String> = cx
+            .store
+            .markets()
+            .iter()
+            .filter(|market| cx.store.setting(&market.symbol).is_some())
+            .map(|market| market.symbol.clone())
+            .collect();
+        for symbol in symbols {
+            cx.store
+                .update_setting(&symbol, |s| s.margin_type = Some(margin));
+            cx.hold_setting(SettingKey::MarginType(symbol));
+        }
+        self.fetch_positions(cx);
     }
 
     fn apply_position_mode(&mut self, cx: &mut Cx<'_, Pending>, hedged: bool) {
@@ -1858,33 +1906,7 @@ impl BybitLinear {
                 if !Self::accepted(cx, context, Vec::new()) {
                     return Decision::Lost;
                 }
-                let margin = if *isolated {
-                    MarginType::Isolated
-                } else {
-                    MarginType::Cross
-                };
-                self.account.margin_type = Some(margin);
-                for state in &mut self.products {
-                    state.account.margin_type = Some(margin);
-                }
-                cx.store.update_positions(|p| p.margin_type = Some(margin));
-                if cx.frame_fed() {
-                    // Account-wide: every symbol the store has settings for, held
-                    // over the source's SETTINGS until it re-reads them.
-                    let symbols: Vec<String> = cx
-                        .store
-                        .markets()
-                        .iter()
-                        .filter(|market| cx.store.setting(&market.symbol).is_some())
-                        .map(|market| market.symbol.clone())
-                        .collect();
-                    for symbol in symbols {
-                        cx.store
-                            .update_setting(&symbol, |s| s.margin_type = Some(margin));
-                        cx.hold_setting(SettingKey::MarginType(symbol));
-                    }
-                }
-                self.fetch_positions(cx);
+                self.apply_margin_mode(cx, *isolated);
                 Decision::Next(Vec::new())
             }
             Call::PositionMode { hedged } => {
