@@ -391,6 +391,222 @@ fn oco_amend_keeps_sibling_stop_and_amends_only_selected_native_leg() {
 }
 
 #[test]
+fn an_idempotent_cancel_51400_completes_without_an_error_and_reconciles() {
+    use safe_cex_engine::model::*;
+    for (kind, ids, code) in [
+        (OrderType::Limit, vec!["1"], "1"),
+        (OrderType::Limit, vec!["1", "2"], "2"),
+        (OrderType::StopLoss, vec!["91_sl"], "0"),
+    ] {
+        let mut e = trading_engine();
+        for id in &ids {
+            e.store_mut().upsert_order(stored(id, kind));
+        }
+        e.handle(
+            5.,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: ids.iter().map(|id| (*id).into()).collect(),
+            }),
+        );
+        let out = prepared(&mut e, 5.);
+        let rows: Vec<_> = ids
+            .iter()
+            .map(|_| r#"{"sCode":"51400","sMsg":"A ordem já foi executada ou cancelada"}"#)
+            .collect();
+        reply(
+            &mut e,
+            http(&out),
+            &format!(r#"{{"code":"{code}","data":[{}]}}"#, rows.join(",")),
+            6.,
+        );
+        let out = prepared(&mut e, 6.);
+        assert!(
+            !out.iter().any(|action| matches!(
+                action,
+                Action::Notice(
+                    Notice::CommandError { command: 2, .. }
+                        | Notice::CommandFailed { command: 2, .. }
+                )
+            )),
+            "{out:?}"
+        );
+        assert_eq!(
+            out.iter()
+                .filter(|action| matches!(action,
+                    Action::Notice(Notice::CommandDone { command: 2, result }) if result == "[]"
+                ))
+                .count(),
+            1
+        );
+        assert!(
+            out.iter().any(|action| matches!(action,
+                Action::Http(r) if r.url.contains("orders-pending")
+            )),
+            "a missing terminal frame still needs reconciliation"
+        );
+        assert!(
+            !out.iter().any(|action| matches!(action,
+                Action::Http(r) if r.method != safe_cex_engine::Method::Get
+            )),
+            "a satisfied cancel is never resent"
+        );
+        for id in &ids {
+            assert_eq!(
+                e.store().order(id).unwrap().status,
+                OrderStatus::Open,
+                "51400 does not invent a Canceled state for a possibly filled order"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_idempotent_cancel_does_not_hide_a_sibling_failure() {
+    use safe_cex_engine::model::*;
+    for (code, failure) in [
+        ("1", "51000"),
+        ("2", "51000"),
+        ("2", "51410"),
+        ("2", "51412"),
+        ("2", "59999"),
+    ] {
+        let mut e = trading_engine();
+        for id in ["1", "2"] {
+            e.store_mut().upsert_order(stored(id, OrderType::Limit));
+        }
+        e.handle(
+            5.,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: vec!["1".into(), "2".into()],
+            }),
+        );
+        let out = prepared(&mut e, 5.);
+        reply(
+            &mut e,
+            http(&out),
+            &format!(
+                r#"{{"code":"{code}","data":[{{"ordId":"1","sCode":"51400","sMsg":"localized"}},{{"ordId":"2","sCode":"{failure}","sMsg":"real failure"}}]}}"#
+            ),
+            6.,
+        );
+        let out = prepared(&mut e, 6.);
+        assert!(
+            !out.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandError { message, .. }) if message.contains("51400")
+            )),
+            "{out:?}"
+        );
+        assert!(
+            out.iter().any(|a| match a {
+                Action::Notice(Notice::CommandError { message, .. }) => message.contains(failure),
+                Action::Notice(Notice::CommandFailed { error, .. }) =>
+                    error.message.contains(failure),
+                _ => false,
+            }),
+            "{out:?}"
+        );
+        assert!(
+            out.iter().any(|a| matches!(a,
+                Action::Http(r) if r.url.contains("orders-pending")
+            )),
+            "the satisfied row still needs reconciliation: {out:?}"
+        );
+    }
+}
+
+#[test]
+fn a_cancel_noop_never_overrides_a_bad_identity_count_or_http_status() {
+    use safe_cex_engine::{Outcome, Response, model::*};
+    for (status, data) in [
+        (200, r#"[{"ordId":"other","sCode":"51400"}]"#),
+        (200, r#"[]"#),
+        (503, r#"[{"ordId":"1","sCode":"51400"}]"#),
+    ] {
+        let mut e = trading_engine();
+        e.store_mut().upsert_order(stored("1", OrderType::Limit));
+        e.handle(
+            5.,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: vec!["1".into()],
+            }),
+        );
+        let out = prepared(&mut e, 5.);
+        let Action::Http(request) = http(&out) else {
+            unreachable!()
+        };
+        let body = format!(r#"{{"code":"1","data":{data}}}"#);
+        e.handle(
+            6.,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body: &body,
+                },
+            },
+        );
+        let out = prepared(&mut e, 6.);
+        let result = terminals(&out, 2);
+        assert_eq!(result.len(), 1, "{out:?}");
+        assert_eq!(
+            result[0].as_ref().unwrap_err().outcome,
+            Some(Outcome::Unknown)
+        );
+        assert!(!out.iter().any(|a| matches!(a,
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get
+        )));
+    }
+}
+
+#[test]
+fn code_51400_is_not_success_for_a_placement_or_amendment() {
+    use safe_cex_engine::model::*;
+    for amend in [false, true] {
+        let mut e = trading_engine();
+        let (out, command) = if amend {
+            e.store_mut().upsert_order(stored("1", OrderType::Limit));
+            e.handle(
+                5.,
+                Event::Command(Command::AmendOrder {
+                    command: 2,
+                    id: "1".into(),
+                    price: Some(37000.),
+                    amount: None,
+                }),
+            );
+            (prepared(&mut e, 5.), 2)
+        } else {
+            (
+                place(
+                    &mut e,
+                    vec![order(
+                        r#"{"symbol":"BTCUSDT","type":"market","side":"buy","amount":2}"#,
+                    )],
+                ),
+                1,
+            )
+        };
+        reply(
+            &mut e,
+            http(&out),
+            r#"{"code":"1","data":[{"ordId":"1","sCode":"51400","sMsg":"localized"}]}"#,
+            6.,
+        );
+        let out = prepared(&mut e, 6.);
+        let result = terminals(&out, command);
+        assert_eq!(result.len(), 1, "{out:?}");
+        assert!(result[0].is_err(), "{out:?}");
+        assert!(!out.iter().any(|a| matches!(a,
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get
+        )));
+    }
+}
+
+#[test]
 fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
     use safe_cex_engine::model::*;
     let mut e = trading_engine();
@@ -408,8 +624,10 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
         Event::Command(Command::CancelOrders { command: 2, ids }),
     );
     let out = prepared(&mut e, 5.0);
-    let mut rows = vec![r#"{"ordId":"1","sCode":"0","sMsg":""}"#; 19];
-    rows.push(r#"{"ordId":"2","sCode":"51400","sMsg":"Order does not exist"}"#);
+    let mut rows: Vec<_> = (0..19)
+        .map(|id| format!(r#"{{"ordId":"{id}","sCode":"0","sMsg":""}}"#))
+        .collect();
+    rows.push(r#"{"ordId":"19","sCode":"51000","sMsg":"Parameter error"}"#.into());
     let mixed = format!(
         r#"{{"code":"2","msg":"Bulk operation partially succeeded","data":[{}]}}"#,
         rows.join(",")
@@ -417,7 +635,7 @@ fn standalone_cancel_logs_item_errors_and_continues_regular_and_algo_batches() {
     reply(&mut e, http(&out), &mixed, 6.0);
     let out = prepared(&mut e, 6.0);
     assert!(out.iter().any(
-        |a| matches!(a, Action::Notice(Notice::CommandError { command:2, message }) if message.contains("51400"))
+        |a| matches!(a, Action::Notice(Notice::CommandError { command:2, message }) if message.contains("51000"))
     ));
     let a = http(&out);
     assert!(matches!(a, Action::Http(r) if r.url.ends_with("/cancel-batch-orders")));
@@ -2348,6 +2566,15 @@ fn a_gone_cancel_row_asks_for_a_read_because_its_frame_may_never_come() {
         6.0,
     );
     let out = prepared(&mut e, 6.0);
+    assert!(
+        !out.iter().any(|a| matches!(
+            a,
+            Action::Notice(
+                Notice::CommandError { command: 2, .. } | Notice::CommandFailed { command: 2, .. }
+            )
+        )),
+        "{out:?}"
+    );
     assert!(
         out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders-pending")))

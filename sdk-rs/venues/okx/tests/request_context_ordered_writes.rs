@@ -353,7 +353,7 @@ fn native_maximum_plain_split_returns_all_ten_thousand_accepted_ids() {
 }
 
 #[test]
-fn native_code_two_all_refused_cancels_report_each_row_continue_then_finish_empty() {
+fn native_code_two_all_absent_cancels_continue_then_finish_empty_without_errors() {
     let mut engine = trading_engine();
     let ids: Vec<_> = (1..=21).map(|i| i.to_string()).collect();
     for id in &ids {
@@ -377,7 +377,7 @@ fn native_code_two_all_refused_cancels_report_each_row_continue_then_finish_empt
     let second = prepared(&mut engine, 6.);
     assert_eq!(second.iter().filter(|a| matches!(a,
         Action::Notice(Notice::CommandError { command: OWNER, message }) if message.contains("51400")
-    )).count(), 20);
+    )).count(), 0);
     reply(
         &mut engine,
         post(&second),
@@ -393,7 +393,7 @@ fn native_code_two_all_refused_cancels_report_each_row_continue_then_finish_empt
                 Action::Notice(Notice::CommandError { command: OWNER, .. })
             ))
             .count(),
-        1
+        0
     );
     assert_eq!(
         output
