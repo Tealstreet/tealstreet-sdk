@@ -719,6 +719,7 @@ fn a_stop_against_the_open_position_goes_through_trading_stop() {
 #[test]
 fn amends_in_place_and_moves_attached_brackets_on_the_parent() {
     let mut h = ready();
+    price_at(&mut h, "ETHUSDT", 1_700.0);
     h.command(Command::AmendOrder {
         command: 12,
         id: ORDER_ID.into(),
@@ -1044,6 +1045,9 @@ fn a_split_preserves_quantity_and_only_the_first_lot_has_brackets() {
 fn partial_stops_cancel_recreate_and_full_stops_keep_the_position_update_path() {
     for mode in ["Partial", "Full"] {
         let mut h = ready();
+        // Partial: 87000 crosses the price and becomes a take profit (owner-decided drag);
+        // Full: the stop stays a stop, below the price.
+        price_at(&mut h, "BTCUSDT", if mode == "Partial" { 80_000.0 } else { 90_000.0 });
         let stop = format!(
             r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"{mode}","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}}]}}"#
         );
@@ -3098,6 +3102,7 @@ fn stale_join_discards_staged_unsupported_diagnostics_without_consuming_memory()
 fn trading_stop_amends_treat_tpsl_not_modified_as_satisfied() {
     for kind in ["full", "trailing"] {
         let mut h = ready();
+        price_at(&mut h, "BTCUSDT", 90_000.0);
         h.message(
             "/v5/private",
             r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Full","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#,
@@ -4119,11 +4124,12 @@ const TRAILING_PROFIT_REFUSAL: &str =
 
 fn assert_amend_refused(h: &mut Harness, command: u32) {
     h.requests.clear();
+    // A size edit: the venue's own refusal decides, not the engine's price checks.
     h.command(Command::AmendOrder {
         command,
         id: TRAILING_PROFIT_ID.into(),
-        price: Some(0.07),
-        amount: None,
+        price: None,
+        amount: Some(0.07),
     });
     assert!(h.requests.is_empty(), "{:?}", h.paths());
     assert_eq!(
@@ -4161,6 +4167,7 @@ fn a_frame_fed_engine_refuses_a_trailing_take_profit_amend_from_the_source_state
 #[test]
 fn an_id_no_longer_trailing_amends_as_an_ordinary_full_take_profit() {
     let mut h = ready();
+    price_at(&mut h, "BTCUSDT", 99_000.0);
     let mut row = trailing_profit_row();
     row["symbol"] = serde_json::json!("BTCUSDT");
     row["triggerPrice"] = serde_json::json!("100000");
@@ -4188,4 +4195,12 @@ fn an_id_no_longer_trailing_amends_as_an_ordinary_full_take_profit() {
         body(&amend),
         r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Full","takeProfit":"101000","tpTriggerBy":"LastPrice"}"#
     );
+}
+
+/// Move a symbol's mark and last price, as its ticker stream would.
+fn price_at(h: &mut Harness, symbol: &str, price: f64) {
+    h.engine.store_mut().update_ticker(symbol, |ticker| {
+        ticker.mark = price;
+        ticker.last = price;
+    });
 }

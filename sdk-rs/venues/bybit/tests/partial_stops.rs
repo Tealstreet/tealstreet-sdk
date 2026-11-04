@@ -162,6 +162,7 @@ fn ready(profile: Profile) -> Harness {
     let mut tickers = h.engine.store().tickers().to_vec();
     for ticker in &mut tickers {
         ticker.mark = 100.0;
+        ticker.last = 100.0;
     }
     h.engine.store_mut().set_tickers(tickers);
     h.requests.clear();
@@ -236,8 +237,8 @@ fn partial_drag_cancels_before_replacing_and_projects_raw_price_without_changing
     for profile in PROFILES {
         for (side, kind, price, field, by) in [
             ("Sell", "StopLoss", 100.049, "takeProfit", "tpTriggerBy"),
-            ("Sell", "TakeProfit", 100.0, "stopLoss", "slTriggerBy"),
-            ("Buy", "StopLoss", 100.0, "takeProfit", "tpTriggerBy"),
+            ("Sell", "TakeProfit", 99.95, "stopLoss", "slTriggerBy"),
+            ("Buy", "StopLoss", 99.95, "takeProfit", "tpTriggerBy"),
             ("Buy", "TakeProfit", 100.049, "stopLoss", "slTriggerBy"),
         ] {
             let mut h = ready(profile);
@@ -286,12 +287,19 @@ fn a_refused_replacement_names_the_lost_stop() {
         false,
         true,
     );
-    amend(&mut h, Some(100.0), None);
+    amend(&mut h, Some(95.0), None);
     let cancel = h.take(profile.cancel_path());
     h.reply(cancel.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
     let replacement = h.take("/v5/position/trading-stop");
     h.reply(
         replacement.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"StopLoss would trigger immediately","result":{}}"#,
+    );
+    // Putting the old stop back is refused too.
+    let restore = h.take("/v5/position/trading-stop");
+    h.reply(
+        restore.id,
         200,
         r#"{"retCode":10001,"retMsg":"StopLoss would trigger immediately","result":{}}"#,
     );
@@ -1148,10 +1156,11 @@ fn free_conditional_virtual_full_trailing_and_limit_paths_do_not_cancel_recreate
             row.parent_id = Some("parent".into());
         }
         h.engine.store_mut().upsert_order(row);
+        // A sell stop below the price, so the trigger check passes and only routing differs.
         h.command(Command::AmendOrder {
             command: 91,
             id: id.into(),
-            price: Some(110.0),
+            price: Some(95.0),
             amount: None,
         });
         assert!(!h.has_request(profile.cancel_path()));
@@ -1162,4 +1171,61 @@ fn free_conditional_virtual_full_trailing_and_limit_paths_do_not_cancel_recreate
             body(&request)
         );
     }
+}
+
+/// ADAUSD: a stop amended to 1880, a price from another symbol, is refused before its cancel.
+#[test]
+fn a_partial_stop_moved_to_another_symbols_price_is_refused_before_its_cancel() {
+    for profile in PROFILES {
+        let mut h = ready(profile);
+        seed(&mut h, profile, "Buy", "StopLoss", "MarkPrice", false, true);
+        amend(&mut h, Some(1880.0), None);
+        assert!(!h.has_request(profile.cancel_path()), "{profile:?}");
+        assert!(!h.has_request("/v5/position/trading-stop"));
+        let error = h.result(91).unwrap().as_ref().unwrap_err();
+        assert!(error.contains("50%"), "{error}");
+    }
+}
+
+/// Each kind is judged against the price that fires it: a buy between last and mark
+/// is neither a stop (above mark) nor a take profit (below last), so nothing is canceled.
+#[test]
+fn a_partial_drag_that_stands_as_neither_kind_is_refused_before_its_cancel() {
+    for profile in PROFILES {
+        let mut h = ready(profile);
+        h.engine
+            .store_mut()
+            .update_ticker(profile.symbol(), |ticker| ticker.last = 98.0);
+        seed(&mut h, profile, "Buy", "StopLoss", "MarkPrice", false, true);
+        amend(&mut h, Some(99.0), None);
+        assert!(!h.has_request(profile.cancel_path()), "{profile:?}");
+        let error = h.result(91).unwrap().as_ref().unwrap_err();
+        assert!(error.contains("would trigger at once"), "{error}");
+    }
+}
+
+#[test]
+fn a_refused_partial_replacement_puts_the_exact_old_stop_back() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(&mut h, profile, "Sell", "StopLoss", "MarkPrice", false, true);
+    amend(&mut h, Some(95.0), None);
+    let replaced = h.take(profile.cancel_path());
+    h.reply(replaced.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+    let replacement = h.take("/v5/position/trading-stop");
+    assert!(body(&replacement).contains(r#""stopLoss":"95""#));
+    h.reply(
+        replacement.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"StopLoss would trigger immediately","result":{}}"#,
+    );
+    let restore = h.take("/v5/position/trading-stop");
+    assert_eq!(
+        body(&restore),
+        r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Partial","stopLoss":"90","slTriggerBy":"MarkPrice","slSize":"7"}"#
+    );
+    h.reply(restore.id, 200, OK);
+    let error = h.result(91).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("put back"), "{error}");
+    assert!(!h.has_request("/v5/position/trading-stop"), "never loops");
 }

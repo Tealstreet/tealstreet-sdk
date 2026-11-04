@@ -592,6 +592,8 @@ fn a_stop_whose_replacement_is_refused_says_the_stop_is_gone() {
     stop.reduce_only = true;
     stop.trigger_type = Some(safe_cex_engine::model::StopTriggerType::MarkPrice);
     h.engine.store_mut().upsert_order(stop);
+    // A buy stop (a short's) sits above the price.
+    h.engine.store_mut().update_ticker("BTCUSDT", |ticker| ticker.mark = 85_000.0);
     h.event(Event::Command(Command::AmendOrder {
         command: 12,
         id: id.into(),
@@ -613,6 +615,9 @@ fn a_stop_whose_replacement_is_refused_says_the_stop_is_gone() {
         "",
         r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
     );
+    // Putting the old stop back is refused too: nothing protects the position now.
+    let restore = h.take("/fapi/v1/algoOrder");
+    h.reply(restore.id, 400, "", r#"{"code":-2021,"msg":"Order would immediately trigger."}"#);
     let (_, error) = h
         .failures
         .iter()
@@ -1921,4 +1926,111 @@ fn a_refusal_ends_the_start_however_it_arrives() {
         h.respond("/fapi/v3/account", status, body);
         assert_eq!(h.startup_failures.len(), 1, "{status} {body}");
     }
+}
+
+/// The PEPE take profit: a protective edit whose new trigger already fires, or
+/// is nowhere near the market, is refused before its old order is canceled.
+fn protective(h: &mut Harness, kind: OrderType, trigger: safe_cex_engine::model::StopTriggerType) -> String {
+    let id = "8389765519993909000";
+    let mut row = h.engine.store().order(id).unwrap().clone();
+    row.kind = kind;
+    row.side = OrderSide::Sell;
+    row.price = if kind == OrderType::TakeProfit { 99_000.0 } else { 91_000.0 };
+    row.amount = 0.0;
+    row.filled = 0.0;
+    row.reduce_only = true;
+    row.close = Some(true);
+    row.trigger_type = Some(trigger);
+    h.engine.store_mut().upsert_order(row);
+    h.engine.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 95_000.0;
+        ticker.last = 95_000.0;
+    });
+    id.into()
+}
+
+fn amend(h: &mut Harness, id: &str, price: f64) {
+    h.event(Event::Command(Command::AmendOrder {
+        command: 12,
+        id: id.into(),
+        price: Some(price),
+        amount: None,
+    }));
+}
+
+fn failure(h: &Harness) -> &safe_cex_engine::error::VenueError {
+    &h.failures.iter().find(|(id, _)| *id == 12).expect("a failure").1
+}
+
+#[test]
+fn a_take_profit_moved_past_the_price_is_refused_before_its_cancel() {
+    use safe_cex_engine::model::StopTriggerType::LastPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::TakeProfit, LastPrice);
+    amend(&mut h, &id, 94_000.0);
+    assert!(!h.has_request("/fapi/v1/algoOrder") && !h.has_request("/fapi/v1/order"));
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(safe_cex_engine::error::Outcome::NotSent));
+    assert!(error.message.contains("take profit"), "{}", error.message);
+}
+
+#[test]
+fn a_stop_moved_far_from_the_mark_is_refused_before_its_cancel() {
+    use safe_cex_engine::model::StopTriggerType::MarkPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::StopLoss, MarkPrice);
+    // The right side of the price, but 58% away: a price meant for another symbol.
+    amend(&mut h, &id, 40_000.0);
+    assert!(!h.has_request("/fapi/v1/algoOrder"));
+    assert_eq!(failure(&h).outcome, Some(safe_cex_engine::error::Outcome::NotSent));
+}
+
+/// On a stale ticker nothing is refused up front; a refused replacement puts the old order back.
+fn refused_after_cancel(restore: Option<&str>) -> Harness {
+    use safe_cex_engine::model::StopTriggerType::LastPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::TakeProfit, LastPrice);
+    advance_with_account_replies(&mut h, 10_000.0);
+    amend(&mut h, &id, 94_000.0);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(cancel.id, 200, "", r#"{"algoId":8389765519993909000,"code":"200","msg":"success"}"#);
+    let replacement = h.take("/fapi/v1/algoOrder");
+    assert_eq!(param(&replacement.url, "triggerPrice").as_deref(), Some("94000"));
+    h.reply(replacement.id, 400, "", r#"{"code":-2021,"msg":"Order would immediately trigger."}"#);
+    let restored = h.take("/fapi/v1/algoOrder");
+    assert_eq!(restored.method, Method::Post);
+    for (name, value) in [
+        ("triggerPrice", "99000"),
+        ("type", "TAKE_PROFIT_MARKET"),
+        ("side", "SELL"),
+        ("workingType", "CONTRACT_PRICE"),
+        ("closePosition", "true"),
+    ] {
+        assert_eq!(param(&restored.url, name).as_deref(), Some(value), "{name}");
+    }
+    match restore {
+        None => h.reply(restored.id, 200, "", r#"{"algoId":2146799,"algoStatus":"NEW"}"#),
+        Some(body) => h.reply(restored.id, 400, "", body),
+    }
+    h
+}
+
+#[test]
+fn a_refused_take_profit_replacement_puts_the_old_one_back() {
+    let h = refused_after_cancel(None);
+    let error = failure(&h);
+    assert_eq!(error.protection, Some(safe_cex_engine::error::Protection::Restored), "{error:?} {:?}", h.failures);
+    assert!(error.message.contains("put back"), "{}", error.message);
+    assert!(error.message.contains("Order would immediately trigger"), "{}", error.message);
+    assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
+}
+
+#[test]
+fn a_take_profit_that_cannot_be_put_back_says_the_position_is_unprotected() {
+    let h = refused_after_cancel(Some(r#"{"code":-2021,"msg":"Order would immediately trigger."}"#));
+    let error = failure(&h);
+    assert_eq!(error.protection, Some(safe_cex_engine::error::Protection::Unprotected));
+    assert!(error.message.contains("has no take profit"), "{}", error.message);
+    assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
 }

@@ -28,6 +28,7 @@ pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
 pub mod paging;
+pub mod protective_amend;
 mod placement_acks;
 mod protocol_clock;
 pub mod public_feed;

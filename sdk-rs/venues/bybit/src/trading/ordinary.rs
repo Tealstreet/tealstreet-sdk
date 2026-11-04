@@ -125,6 +125,8 @@ enum Decision {
     Failed(VenueError),
     Resend(ResendGrant),
     Replace(Vec<(String, Vec<safe_cex_engine::model::OrderIdentityReceipt>)>),
+    /// A Partial stop's replacement was refused: put the old stop back, once.
+    Restore(Call),
     /// The engine refused the fact; the plan cannot continue.
     Lost,
 }
@@ -426,7 +428,7 @@ impl BybitLinear {
                 // Every trading-stop leg is a position TP/SL setting (D1).
                 Call::TradingStop => LegIntent::Setting,
                 Call::Amend if amend_virtual => LegIntent::Setting,
-                Call::PartialStop { .. } => LegIntent::Setting,
+                Call::PartialStop { .. } | Call::RestorePartialStop { .. } => LegIntent::Setting,
                 Call::CancelPartialStop { .. } | Call::ClearAttachedLeg { .. } => {
                     LegIntent::ProtectionCancel
                 }
@@ -442,6 +444,9 @@ impl BybitLinear {
             .iter()
             .map(|leg| match &leg.planned.call {
                 Call::PlaceBatch { fallback } => fallback.iter().map(|_| call_bound(&[])).collect(),
+                Call::PartialStop {
+                    restore: Some(_), ..
+                } => vec![call_bound(&[])],
                 _ => Vec::new(),
             })
             .collect();
@@ -919,6 +924,14 @@ impl BybitLinear {
             return;
         }
         let decision = self.leg_decision(cx, id, &active, response);
+        // Its replacement has answered, so the already-gone mark has served.
+        if let Call::PartialStop {
+            restore: Some((replaced, _)),
+            ..
+        } = &active.leg.planned.call
+        {
+            self.trading.gone_before_cancel.remove(replaced);
+        }
         if let (Some(call), Some(lot)) = (&entry.hyro, active.leg.lot) {
             self.hyro_leg_decided(&call.key, lot, &decision);
         }
@@ -928,6 +941,29 @@ impl BybitLinear {
         let plan = run.plan.clone();
         match decision {
             Decision::Next(ids) => {
+                // The old stop is back: the edit failed, but nothing is unprotected.
+                if let Call::RestorePartialStop {
+                    stop: (symbol, _, kind),
+                    refusal,
+                } = &active.leg.planned.call
+                {
+                    let what = if *kind == safe_cex_engine::model::OrderType::TakeProfit {
+                        "take profit"
+                    } else {
+                        "stop"
+                    };
+                    let presented = VenueError {
+                        kind: Some(safe_cex_engine::error::ErrorKind::Rejected),
+                        outcome: Some(Outcome::Rejected),
+                        protection: Some(safe_cex_engine::error::Protection::Restored),
+                        ..VenueError::new(format!(
+                            "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was put back as a new order: {refusal}"
+                        ))
+                    };
+                    let _ = cx.finish_plan_call(&plan, &active.slot, &active.context);
+                    let _ = cx.fail_plan(&plan, presented);
+                    return;
+                }
                 run.ids.extend(ids);
                 if cx
                     .finish_plan_call(&plan, &active.slot, &active.context)
@@ -951,12 +987,37 @@ impl BybitLinear {
                 let stop_lost = match &active.leg.planned.call {
                     Call::PartialStop {
                         stop: (symbol, side, kind),
+                        ..
                     } => Some(safe_cex_engine::error::stop_gone_text(
                         symbol,
                         *side,
                         *kind,
                         error.outcome == Some(Outcome::Unknown),
                     )),
+                    // The old stop could not be put back either: say so as loudly as before.
+                    Call::RestorePartialStop {
+                        stop: (symbol, side, kind),
+                        refusal,
+                    } => {
+                        let gone = safe_cex_engine::error::stop_gone_text(
+                            symbol,
+                            *side,
+                            *kind,
+                            error.outcome == Some(Outcome::Unknown),
+                        );
+                        let presented = VenueError {
+                            protection: Some(safe_cex_engine::error::Protection::Unprotected),
+                            ..VenueError::new(format!(
+                                "{gone}: {refusal}; putting it back failed too: {}",
+                                error.message
+                            ))
+                        };
+                        if entry.hyro.is_none() {
+                            cx.command_error(id, error.message.clone());
+                        }
+                        let _ = cx.fail_plan(&plan, presented);
+                        return;
+                    }
                     _ => None,
                 };
                 // An execution's journal reports each failure to every observer.
@@ -1030,6 +1091,35 @@ impl BybitLinear {
                         lot: None,
                     });
                 }
+            }
+            Decision::Restore(call) => {
+                if cx
+                    .replace_plan_call(&plan, &active.slot, &active.context)
+                    .is_err()
+                {
+                    let _ = cx.fail_plan(&plan, internal("Bybit stop restore was refused"));
+                    return;
+                }
+                let Call::RestorePartialStop { .. } = &call else {
+                    unreachable!("a restore names its stop")
+                };
+                let body = match &active.leg.planned.call {
+                    Call::PartialStop {
+                        restore: Some((_, body)),
+                        ..
+                    } => body.clone(),
+                    _ => unreachable!("only a Partial stop restores"),
+                };
+                run.queue.push_front(Leg {
+                    planned: Planned {
+                        receipts: Vec::new(),
+                        path: "/v5/position/trading-stop",
+                        body,
+                        call,
+                    },
+                    intent: LegIntent::Setting,
+                    lot: None,
+                });
             }
             Decision::Lost => {
                 let _ = cx.fail_plan(&plan, internal("Bybit write fact was refused"));
@@ -1348,6 +1438,19 @@ impl BybitLinear {
             (Verdict::RefusedResend(_), _) if grant.is_some() => {
                 Decision::Resend(grant.expect("checked above"))
             }
+            // Definitively refused after its cancel landed: the old stop goes back.
+            (
+                Verdict::Refused(_),
+                Call::PartialStop {
+                    stop,
+                    restore: Some((replaced, _)),
+                },
+            ) if !self.trading.gone_before_cancel.remove(replaced) => {
+                Decision::Restore(Call::RestorePartialStop {
+                    stop: stop.clone(),
+                    refusal: error.message.clone(),
+                })
+            }
             (Verdict::Refused(_), Call::PlaceBatch { fallback })
                 if code == 10001 && !fallback.is_empty() =>
             {
@@ -1368,6 +1471,10 @@ impl BybitLinear {
             Call::Leverage { symbol, leverage } => self.apply_leverage(cx, symbol, *leverage),
             Call::PositionMode { hedged } => self.apply_position_mode(cx, *hedged),
             Call::PartialStop { .. } => self.schedule_partial_stop_refresh(cx),
+            // Already gone when we canceled it: a refused replacement never puts it back.
+            Call::CancelPartialStop { id, .. } => {
+                self.trading.gone_before_cancel.insert(id.clone());
+            }
             _ => {}
         }
     }
@@ -1604,6 +1711,8 @@ impl BybitLinear {
                         if matches!(rows[0], Row::Accepted(_)) {
                             self.note_partial_stop_canceled(id);
                             mark_canceled(cx, std::slice::from_ref(id), local);
+                        } else {
+                            self.trading.gone_before_cancel.insert(id.clone());
                         }
                         Decision::Next(Vec::new())
                     }
@@ -1700,12 +1809,15 @@ impl BybitLinear {
                 }
                 Decision::Next(vec![target])
             }
-            Call::TradingStop | Call::PartialStop { .. } => {
+            Call::TradingStop | Call::PartialStop { .. } | Call::RestorePartialStop { .. } => {
                 if !Self::accepted(cx, context, Vec::new()) {
                     return Decision::Lost;
                 }
                 // No order id comes back; the stop's row arrives on the stream.
-                if matches!(planned.call, Call::PartialStop { .. }) {
+                if matches!(
+                    planned.call,
+                    Call::PartialStop { .. } | Call::RestorePartialStop { .. }
+                ) {
                     self.schedule_partial_stop_refresh(cx);
                 }
                 Decision::Next(Vec::new())

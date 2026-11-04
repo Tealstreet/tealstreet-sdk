@@ -3784,6 +3784,11 @@ pub trait Venue {
     fn cancel_needs_stored_order(&self) -> bool {
         false
     }
+    /// An amend of this stop or take profit may turn it into the other kind by
+    /// where its new price lies; the venue then judges which kind stands.
+    fn amend_reclassifies(&self, _order: &crate::model::Order) -> bool {
+        false
+    }
     /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
     /// out must itself cancel any late-landing order once its fresh read proves it.
     fn fence_uncertain_cancel_all(&self) -> bool {
@@ -4408,6 +4413,7 @@ impl<V: Venue> Engine<V> {
             ));
         }
         self.expire_read_roots(now);
+        self.store.set_clock(now);
         let parsed = crate::ingest::parse(frame)?;
         let expired = self.io.core.setting_holds.expire(now);
         let kept = self.io.core.setting_holds.keep(&self.store);
@@ -4493,6 +4499,7 @@ impl<V: Venue> Engine<V> {
     ) -> Result<(), &'static str> {
         self.assert_live();
         self.expire_read_roots(now);
+        self.store.set_clock(now);
         if self.public_feed_policy() != PublicFeedPolicy::Shared {
             return Err("publicFeedUpdate requires shared public feed policy");
         }
@@ -5054,6 +5061,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn handle_event_scoped(&mut self, now: f64, mut event: Event<'_>, _physical_timeout: bool) {
+        self.store.set_clock(now);
         // A new event cannot borrow an in-flight managed command's generation.
         // Sibling legs originate under Cx authority, not a repeated wire command.
         if let Event::Command(command) = &event
@@ -5340,6 +5348,32 @@ impl<V: Venue> Engine<V> {
                     command,
                     "symbol-aware amendment is unsupported by this venue",
                 );
+            }
+            // A stop or take profit edit that cannot stand: refused before its cancel.
+            Event::Command(Command::AmendOrder {
+                command, ref id, price, ..
+            }) if crate::protective_amend::refusal(cx.store, id, price, now, |order| {
+                self.venue.amend_reclassifies(order)
+            })
+            .is_some() =>
+            {
+                let reason = crate::protective_amend::refusal(cx.store, id, price, now, |order| {
+                    self.venue.amend_reclassifies(order)
+                });
+                cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
+            }
+            #[cfg(feature = "command-kucoinspot")]
+            Event::Command(Command::AmendOrderWithSymbol {
+                command, ref id, price, ..
+            }) if crate::protective_amend::refusal(cx.store, id, price, now, |order| {
+                self.venue.amend_reclassifies(order)
+            })
+            .is_some() =>
+            {
+                let reason = crate::protective_amend::refusal(cx.store, id, price, now, |order| {
+                    self.venue.amend_reclassifies(order)
+                });
+                cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
             }
             Event::Command(command) => {
                 #[cfg(feature = "order-locks")]

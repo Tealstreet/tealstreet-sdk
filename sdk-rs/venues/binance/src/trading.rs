@@ -33,6 +33,14 @@ const BROKER_PREFIX: &str = "x-s3vFFRQp";
 const SILENT_CODES: [i64; 4] = [-2011, -2013, -4059, -5022];
 const UNKNOWN_ORDER: i64 = -2011;
 
+fn stop_name(kind: OrderType) -> &'static str {
+    if kind == OrderType::TakeProfit {
+        "take profit"
+    } else {
+        "stop"
+    }
+}
+
 fn is_stop_kind(kind: OrderType) -> bool {
     matches!(
         kind,
@@ -155,6 +163,10 @@ struct Job {
     replacing_stop: Option<(String, OrderSide, OrderType)>,
     /// The same for any other order: a refusal now leaves it gone.
     replacing_order: Option<String>,
+    /// The replaced stop exactly as it stood, to put back if its replacement is refused.
+    restore: Option<(PlaceOrderOpts, Option<&'static str>)>,
+    /// Putting it back is under way; the replacement's refusal.
+    restoring: Option<String>,
 }
 
 impl Job {
@@ -176,6 +188,8 @@ struct Amendment {
     id: String,
     target_total: f64,
     replacement: PlaceOrderOpts,
+    /// The order as it stands, with its own trigger and size.
+    original: PlaceOrderOpts,
     position_side: Option<&'static str>,
 }
 
@@ -609,6 +623,15 @@ impl BinanceFutures {
                 });
                 job.replacing_order =
                     (!is_stop_kind(replacement.kind)).then(|| replacement.symbol.clone());
+                if is_stop_kind(replacement.kind) {
+                    let mut original = amendment.original.clone();
+                    original.amount = if full_close {
+                        0.0
+                    } else {
+                        (original.amount - filled).max(0.0)
+                    };
+                    job.restore = Some((original, amendment.position_side));
+                }
             }
             amendment.replacement.amount = if full_close {
                 0.0
@@ -880,6 +903,7 @@ impl BinanceFutures {
         // never feed them into accepted placement planning or caller bindings.
         let mut evidence_ids = Vec::new();
         let mut known_cancel_effects = false;
+        let mut restore_planned = false;
         let error = match (call, outcome) {
             (Call::PlaceOne { .. }, Ok(body)) if self.is_options() => {
                 if let Some(id) = crate::options::placed_id(body) {
@@ -1097,10 +1121,25 @@ impl BinanceFutures {
                     .filter(|_| ids.is_empty())
                     .and_then(|job| job.gone_text(unproven));
                 known_cancel_effects |= gone.is_some();
-                let told = match gone {
-                    Some(gone) => format!("{gone}: {message}"),
-                    None => message.clone(),
+                let restoring = self
+                    .trading
+                    .jobs
+                    .get(&command)
+                    .and_then(|job| job.restoring.clone());
+                let told = match (&gone, &restoring) {
+                    (Some(gone), Some(refusal)) => {
+                        format!("{gone}: {refusal}; putting it back failed too: {message}")
+                    }
+                    (Some(gone), None) => format!("{gone}: {message}"),
+                    _ => message.clone(),
                 };
+                // A definitive refusal of a stop's replacement puts the old stop back, once.
+                if gone.is_some() && !unproven {
+                    match restoring {
+                        Some(_) => self.fail_unprotected(command, &told),
+                        None => restore_planned = self.plan_restore(cx, command, &gone, &message),
+                    }
+                }
                 let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &told) else {
                     return;
                 };
@@ -1108,6 +1147,7 @@ impl BinanceFutures {
             }
             if let Some(job) = self.trading.jobs.get_mut(&command)
                 && !continue_after_item_refusal
+                && !restore_planned
             {
                 job.stop = true;
             }
@@ -1160,10 +1200,79 @@ impl BinanceFutures {
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
+        if !ids.is_empty()
+            && let Some(refusal) = job.restoring.take()
+        {
+            let what = job
+                .replacing_stop
+                .as_ref()
+                .map_or("order", |(_, _, kind)| stop_name(*kind));
+            let symbol = job
+                .replacing_stop
+                .as_ref()
+                .map_or("", |(symbol, _, _)| symbol.as_str());
+            job.planning_error = Some(VenueError {
+                kind: Some(safe_cex_engine::error::ErrorKind::Rejected),
+                outcome: Some(safe_cex_engine::error::Outcome::Rejected),
+                protection: Some(safe_cex_engine::error::Protection::Restored),
+                ..VenueError::new(format!(
+                    "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was put back as a new order: {refusal}"
+                ))
+            });
+        }
         job.ids.extend(ids);
         job.outstanding = job.outstanding.saturating_sub(1);
         if job.outstanding == 0 {
             self.advance(cx, command);
+        }
+    }
+
+    /// Plan putting a refused replacement's original back; true when it will be sent.
+    fn plan_restore(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        gone: &Option<String>,
+        refusal: &str,
+    ) -> bool {
+        let Some((original, position_side)) = self
+            .trading
+            .jobs
+            .get_mut(&command)
+            .and_then(|job| job.restore.take())
+        else {
+            return false;
+        };
+        self.trading.amended_position_side = position_side;
+        let plan = self.plan_place(cx, std::slice::from_ref(&original));
+        self.trading.amended_position_side = None;
+        let Some(job) = self.trading.jobs.get_mut(&command) else {
+            return false;
+        };
+        match plan {
+            Ok(plan) => {
+                job.steps = plan.steps;
+                job.restoring = Some(refusal.to_owned());
+                true
+            }
+            Err(error) => {
+                let told = format!(
+                    "{}: {refusal}; putting it back failed too: {error}",
+                    gone.as_deref().unwrap_or_default()
+                );
+                self.fail_unprotected(command, &told);
+                false
+            }
+        }
+    }
+
+    /// The replacement and the old stop were both refused: say so as loudly as before.
+    fn fail_unprotected(&mut self, command: CommandId, told: &str) {
+        if let Some(job) = self.trading.jobs.get_mut(&command) {
+            job.planning_error = Some(VenueError {
+                protection: Some(safe_cex_engine::error::Protection::Unprotected),
+                ..VenueError::new(told)
+            });
         }
     }
 
@@ -1872,10 +1981,16 @@ impl BinanceFutures {
             .market(&order.symbol)
             .map_or(1.0, |market| market.precision.amount);
         let target_total = num::adjust(replacement.amount, step);
+        let original = PlaceOrderOpts {
+            amount: order.amount,
+            price: Some(order.price),
+            ..replacement.clone()
+        };
         job.amendment = Some(Amendment {
             id: id.to_owned(),
             target_total,
             replacement,
+            original,
             position_side: self.order_position_side(id),
         });
         Ok(job)

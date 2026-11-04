@@ -1986,6 +1986,8 @@ impl CommandWrites {
     /// Seal exactly once. A caller's fallback text never chooses the outcome;
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.
+    /// A fallback naming what a protective edit left (`protection`) supplies the
+    /// words and that fact; the outcome still comes from the legs.
     pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
         let (error, budget) = self.failure_projection(fallback, None)?;
         self.evidence = budget;
@@ -2009,6 +2011,9 @@ impl CommandWrites {
         if self.sealed {
             return Err(Error::State);
         }
+        let presented = fallback
+            .protection
+            .map(|protection| (fallback.message.clone(), protection));
         let mut projected_budget = self.evidence;
         #[cfg(feature = "serial-plans")]
         let any_released = self.streamed().is_some_and(|stream| stream.settled > 0)
@@ -2166,6 +2171,10 @@ impl CommandWrites {
             .filter(|dropped| *dropped > 0)
         {
             error.message = format!("{} [truncated: {dropped} more refusals]", error.message);
+        }
+        if let Some((message, protection)) = presented {
+            error.message = message;
+            error.protection = Some(protection);
         }
         #[cfg(feature = "http-plans")]
         if let Some(note) = note {

@@ -58,6 +58,10 @@ pub struct Store {
     rejected_empty_catalogue: bool,
     /// Changed-field bits per ticker, in [`TICKER_FIELDS`] order.
     ticker_masks: Vec<u16>,
+    /// Host time each ticker row last changed (`clock` then); -inf before any data.
+    ticker_changed_at: Vec<f64>,
+    /// The engine's current host time, set at each entry, so rows can be dated.
+    clock: f64,
     dirty_tickers: Vec<u32>,
     ticker_deltas_spare: Vec<(u32, u16)>,
     /// Funded base assets awaiting valuation; live data may add their rows after the seed.
@@ -372,8 +376,22 @@ impl Store {
             .collect();
         self.changes.tickers_replaced = true;
         self.ticker_masks = vec![0; self.tickers.len()];
+        self.ticker_changed_at = vec![self.clock; self.tickers.len()];
         self.dirty_tickers.clear();
         self.set_loaded(|loaded| loaded.tickers = true);
+    }
+
+    /// The engine's host time, for dating ticker changes.
+    pub(crate) fn set_clock(&mut self, now: f64) {
+        if now.is_finite() {
+            self.clock = now;
+        }
+    }
+
+    /// When this symbol's ticker last changed, on the engine's host clock.
+    pub fn ticker_changed_at(&self, symbol: &str) -> Option<f64> {
+        self.ticker_index(symbol)
+            .and_then(|index| self.ticker_changed_at.get(index as usize).copied())
     }
 
     pub(crate) fn ticker_revision(&self) -> u64 {
@@ -399,6 +417,7 @@ impl Store {
         let index = self.tickers.len() as u32;
         self.tickers.push(ticker);
         self.ticker_masks.push(0);
+        self.ticker_changed_at.push(f64::NEG_INFINITY);
         self.ticker_by_symbol.insert(symbol.into(), index);
         self.changes.tickers_replaced = true;
         Some(index)
@@ -459,6 +478,7 @@ impl Store {
         if mask == 0 {
             return;
         }
+        self.ticker_changed_at[index as usize] = self.clock;
         self.ticker_revision = self.ticker_revision.wrapping_add(1);
         let slot = &mut self.ticker_masks[index as usize];
         if *slot == 0 {
