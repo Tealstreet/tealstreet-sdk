@@ -122,6 +122,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // admission code is newly linked by KuCoin; Binance already carries this machinery.
 // #3039 CI run 41823036111: breakoutprop 1,495,000 B.
 // Shared signing bookkeeping: standing CI + 10 KiB, rounded up to the KiB.
+// #3042 CI run 41854584968, job 126664323055: phemex 2,034,706 B.
+// ddi2il ruling: CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_970_176,
   asterdex: 2_121_728,
@@ -150,7 +152,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   okx: 1_935_360,
   orderly: 1_721_344,
   paradex: 2_222_080,
-  phemex: 2_034_688,
+  phemex: 2_045_952,
   polymarket: 1_587_200,
   txflow: 1_830_912,
   weex: 1_921_024,

@@ -203,3 +203,13 @@ test('shared signing bookkeeping cap retains CI headroom and exact boundary', ()
   assert.equal(wasmBudgetError(cap, 'venue', 'breakoutprop'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'breakoutprop'), new RegExp(`exceeds ${cap}`));
 });
+
+test('startup request diagnostics cap retains CI headroom and exact boundary', () => {
+  const measured = 2_034_706;
+  const cap = 2_045_952;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.phemex, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'phemex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'phemex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'phemex'), new RegExp(`exceeds ${cap}`));
+});
