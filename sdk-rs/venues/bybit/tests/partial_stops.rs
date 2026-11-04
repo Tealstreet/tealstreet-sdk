@@ -1468,3 +1468,64 @@ fn review_recheck_definitive_restore_refusal_is_unprotected_control() {
         "{error:?}"
     );
 }
+
+// TEALSTREET-NEXT-DK2 (14:46:27Z): a BTCUSDT long's Partial LastPrice stop moved to
+// 79124.9, above last 79110.8 and at or below mark (so it stays a stop). A
+// fresh last refuses it before the cancel; on a stale one Bybit's refusal after the
+// cancel puts the exact old stop back.
+fn dk2_long_partial_last_stop() -> (Harness, Profile) {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "LastPrice",
+        false,
+        true,
+    );
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"partial","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Partial","qty":"7","cumExecQty":"0","price":"0","leavesQty":"7","triggerPrice":"78900","triggerBy":"LastPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#);
+    let socket = h.socket("/v5/public/linear").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"snapshot","data":{"symbol":"BTCUSDT","markPrice":"79130","lastPrice":"79110.8","indexPrice":"79115.0"}}"#);
+    (h, profile)
+}
+
+#[test]
+fn dk2_stop_above_a_fresh_last_is_refused_before_its_cancel() {
+    let (mut h, profile) = dk2_long_partial_last_stop();
+    amend(&mut h, Some(79124.9), None);
+    assert!(!h.has_request(profile.cancel_path()));
+    assert!(!h.has_request("/v5/position/trading-stop"));
+    let error = h.result(91).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("would trigger at once"), "{error}");
+}
+
+#[test]
+fn dk2_venue_refusal_after_the_cancel_puts_the_exact_old_stop_back() {
+    let (mut h, profile) = dk2_long_partial_last_stop();
+    h.now += 10_000.;
+    amend(&mut h, Some(79124.9), None);
+    accept_cancel(&mut h, profile);
+    let replacement = h.take("/v5/position/trading-stop");
+    assert!(
+        body(&replacement).contains(r#""stopLoss":"79124.9""#),
+        "{}",
+        body(&replacement)
+    );
+    h.reply(
+        replacement.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"PartialStopLoss:791249000 set for Buy position should lower than base_price:791108000 LastPrice","result":{}}"#,
+    );
+    let restore = h.take("/v5/position/trading-stop");
+    assert_eq!(
+        body(&restore),
+        r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Partial","stopLoss":"78900","slTriggerBy":"LastPrice","slSize":"7"}"#
+    );
+    h.reply(restore.id, 200, OK);
+    let error = h.result(91).unwrap().as_ref().unwrap_err();
+    assert!(error.contains("put back"), "{error}");
+    assert!(!h.has_request("/v5/position/trading-stop"), "never loops");
+}
