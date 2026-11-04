@@ -485,3 +485,8 @@ channel per diagnostic to avoid double counting/toasting.
 History failures preserve the native closed `causeCode` alongside `kind` and the
 independent `venueCode` through `commandOutcome.ts`. Reporting code may use these
 classifications without forwarding the free-form message or a signed request.
+
+`__workerConfig.connectionVisibility` accepts only `hidden` or `visible` from
+the owning page. It supplies dedicated workers' timer-lateness diagnostics;
+it changes no reconnect, throttle or account policy. A callback delivered after
+the page is visible is not counted as a hidden callback.

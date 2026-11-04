@@ -408,6 +408,14 @@ the engine's own frames fill the UI store. Books, candles and fills still come
 from the source's ops. It signs and sends `FRAME_FED_WRITES` (manual writes,
 settings, nuke, scheduleCancel) itself, including writes the web sends through
 `callMethodInWorker`; a nuke first asks the source for `stopAccountAlgos`. A
+write whose outcome is unknown fences its symbol. From a source advertising
+`orderReadCovers`, a fence lifts only on a read the source sent after the write
+(`ORDERS_READ`, docs/plans/RUST_FRAME_FED_READ_COVER.md). The engine emits
+`orders.held { symbols, liftAfterMs }` (comma-joined, `''` the account) whenever
+a symbol not yet named turns uncertain or a partial lift leaves some standing,
+and the page asks the source for `refreshAccountOrders(symbols)` once
+`liftAfterMs + 500 ms` has passed: one timer, the latest names, the earliest due
+time. The source's engine (`refreshOrders`) bounds the reads. A
 LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
 snapshot}`, after the `forwardFrames` op, and keeps posting fill ops.
 
@@ -1678,3 +1686,10 @@ additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+
+Rust account `socketHealth.reconnectDiagnostics` carries bounded last-close
+snapshots for public/private/business channels and the primary HOW adapter,
+plus maximum hidden timer lateness across engine/HOW callbacks. These are TS
+host observations, not native venue health or server-managed browser evidence.
+Snapshots retain object identity until a bucket changes; the existing health
+sync publishes them without a new polling loop. The wasm binary is unchanged.

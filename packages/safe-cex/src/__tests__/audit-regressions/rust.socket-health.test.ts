@@ -1,4 +1,3 @@
-import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 
@@ -8,6 +7,7 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { RUST_SOCKET_STALE_MS, RustSocketHandle } from '../../exchanges/rust/rustSockets';
 import { DefaultStore } from '../../store/store.base';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
 type Handlers = Parameters<Transport['connect']>[1];
 interface FakeSocket {
@@ -125,6 +125,23 @@ describe('Rust engine socket health (cutover B5)', () => {
     expect(exchange.publicWebsocket?.lastReceived).toBeGreaterThan(0);
     // web createLimitOrder reads this off a venue-specific private socket.
     expect((exchange.privateWebsocket as unknown as RustSocketHandle).isReadonlyFallbackActive()).toBe(false);
+  });
+
+  it('publishes the transport close attribution in the existing account socket health', async () => {
+    const { exchange, store, live, deliver } = await setup();
+    deliver('private');
+    live('private').handlers.onClose(1006);
+    exchange.syncSocketHealthToStore();
+    expect(store.socketHealth?.reconnectDiagnostics?.private).toMatchObject({
+      initiator: 'unknown',
+      phase: 'established',
+      route: 'direct',
+      port: '443',
+      lifetime: '<5s',
+    });
+    const snapshot = store.socketHealth?.reconnectDiagnostics;
+    exchange.syncSocketHealthToStore();
+    expect(store.socketHealth?.reconnectDiagnostics).toBe(snapshot);
   });
 
   it('keeps the page-clock private message timestamp while its reconnect is uninitialized', async () => {

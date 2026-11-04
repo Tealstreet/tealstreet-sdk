@@ -140,6 +140,32 @@ describe('ReconnectingWebSocket loop phase', () => {
     expect(phases).toEqual(['connecting', 'connected', 'retry-scheduled', 'connecting', 'stopped']);
   });
 
+  it('keeps a nonzero retry count across an open-connection supervisor retry and never duplicates it', async () => {
+    const socket = new ReconnectingWebSocket('wss://example.test', undefined, {
+      ...options,
+      WebSocket: ControllableWebSocket,
+    });
+    const onClose = vi.fn();
+    socket.onclose = onClose;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.timeoutConnecting()).toBe(true);
+    await vi.advanceTimersByTimeAsync(1_000);
+    ControllableWebSocket.live[1].fire('open');
+    expect(socket.retryCount).toBe(1);
+    expect(socket.retryConnection()).toBe(true);
+    expect(socket.retryConnection()).toBe(false);
+    expect(socket.retryCount).toBe(2);
+    expect(onClose.mock.calls.at(-1)?.[0].initiator).toBe('local');
+    await vi.advanceTimersByTimeAsync(1_299);
+    expect(ControllableWebSocket.live).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(ControllableWebSocket.live).toHaveLength(3);
+    socket.terminate();
+    expect(socket.retryConnection()).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ControllableWebSocket.live).toHaveLength(3);
+  });
+
   it('a reconnect from stopped resumes the loop', async () => {
     const socket = new ReconnectingWebSocket('wss://example.test/account', undefined, {
       ...options,
