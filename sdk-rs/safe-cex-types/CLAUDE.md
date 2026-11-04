@@ -71,6 +71,16 @@ bindings come from root `yarn types:generate`; `tests/generate.test.cjs` is thei
 freshness check — regenerating is not a substitute for running it. The oracles
 are the reason a field rename here is cheap and a shape change is not.
 
+Exchange metadata has a dedicated `Rust / native metadata` CI check: run
+`node --test safe-cex-types/tests/metadata-freshness.test.cjs` and
+`cargo test --locked -p safe-cex-types --test exchange_metadata` from `sdk-rs`.
+Regenerate its snapshot and typed records with
+`node safe-cex-types/scripts/generate-exchange-metadata.cjs`; readonly arrays
+retain their element enums and nested property records stay typed objects.
+The explicit 48-name roster includes Binance Options and excludes the retired
+SalsaDEX/Tealstreet DEX brokers. Roster changes must update this independent
+fixture and the strict native enum, not replace equality checks with floors.
+
 `position_record` defines the canonical 24-field linear-perpetual journal type.
 Gross realized PnL, fees and signed funding remain separate; closeCount is the
 source's numeric count, not an integer restriction. Optional numbers/venue ID/

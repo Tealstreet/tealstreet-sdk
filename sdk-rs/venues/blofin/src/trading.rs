@@ -2067,7 +2067,16 @@ impl Blofin {
                 .ok()
                 .filter(|reply| !reply.code.is_empty())
                 .map(|reply| native(&reply.code, &reply.msg));
-            let error = http_failure(response.status, response.body);
+            let error = if let Effect::Setting = &request.step.effect {
+                let detail = parsed
+                    .as_ref()
+                    .ok()
+                    .filter(|reply| !reply.code.is_empty())
+                    .map(|reply| (&*reply.code, &*reply.msg));
+                setting_failure(request.step.path, response.status, detail)
+            } else {
+                http_failure(response.status, response.body)
+            };
             record_failed(cx, context, native, &error.message);
             return Err(error);
         }
@@ -2312,13 +2321,14 @@ impl Blofin {
             Effect::Setting => {
                 let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
                 if reply.code != "0" || refused.is_some() {
-                    let message = format!("BloFin setting rejected: {}", reply.msg);
-                    let evidence = match refused {
-                        Some(row) if reply.code == "0" => native(&row.code, &row.msg),
-                        _ => native(&reply.code, &reply.msg),
+                    let (code, message) = match refused {
+                        Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
+                        _ => (&*reply.code, &*reply.msg),
                     };
-                    record_failed(cx, context, Some(evidence), &message);
-                    return Err(VenueError::new(message));
+                    let error =
+                        setting_failure(request.step.path, response.status, Some((code, message)));
+                    record_failed(cx, context, Some(native(code, message)), &error.message);
+                    return Err(error);
                 }
                 let accepted = WriteFact::Accepted { order_ids: vec![] };
                 let _ = cx.http_write_fact(context, accepted, None);
@@ -2397,6 +2407,25 @@ fn tpsl_keeps_leg(response: &Response<'_>, tpsl_id: &str, kept: OrderType) -> bo
 /// BloFin refuses placements in Multi-Position mode with this code.
 const MULTI_POSITION_CODE: &str = "102143";
 const MULTI_POSITION_MESSAGE: &str = "BloFin Multi-Position mode is not supported in Tealstreet yet. Turn off Multi-Position mode on BloFin, then retry from Tealstreet.";
+
+/// The journal retains native code/message; the text identifies the setting and HTTP status.
+fn setting_failure(path: &str, status: u16, detail: Option<(&str, &str)>) -> VenueError {
+    let setting = match path {
+        "/api/v1/account/set-leverage" => "leverage",
+        "/api/v1/account/set-margin-mode" => "margin mode",
+        "/api/v1/account/set-position-mode" => "position mode",
+        _ => unreachable!("only setting writes use setting_failure"),
+    };
+    let message = match detail {
+        Some((code, message)) => format!(
+            "BloFin {setting} setting rejected (HTTP {status}, venue code {code}): {message}"
+        ),
+        None => {
+            format!("BloFin {setting} setting rejected (HTTP {status}): no BloFin error details")
+        }
+    };
+    VenueError::new(message)
+}
 
 /// A non-2xx answer's native text. Its outcome and kind are the journal's,
 /// from the recorded fact (`CODES`).

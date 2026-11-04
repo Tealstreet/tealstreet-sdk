@@ -2063,6 +2063,8 @@ const ParadexMetadata: ExchangeMetadata = {
   forbidCors: false,
   orderPendingUpdateDelay: 1000,
   stopOrderPendingUpdateDelay: 1000,
+  // Local Paradex REST already installs HOW, including unsigned discovery.
+  supportsTunnel: true,
   enforceWsTunnel: true,
   latencyDomain: 'api.prod.paradex.trade',
   features: {

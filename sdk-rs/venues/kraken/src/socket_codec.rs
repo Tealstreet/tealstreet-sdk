@@ -1,5 +1,6 @@
 //! Shared engine lifecycle admission; Kraken retains native protocol evidence.
 use super::*;
+use safe_cex_engine::ErrorKind;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy, Interest,
@@ -197,11 +198,30 @@ impl Kraken {
                 cx.send(epoch.socket(), r#"{"event":"ping"}"#);
             }
             LifecycleEvent::AuthFailure { evidence, .. } => {
-                cx.notice(
-                    Level::Error,
-                    code::AUTH_REJECTED,
-                    format!("Kraken private socket refused: {evidence:?}"),
-                );
+                if let safe_cex_engine::socket_lifecycle::AuthEvidence::Rejected(mut error) =
+                    evidence
+                {
+                    error.message = format!("Kraken private socket refused: {}", error.message);
+                    let code = if matches!(
+                        error.kind,
+                        Some(
+                            ErrorKind::AuthInvalid
+                                | ErrorKind::AuthExpired
+                                | ErrorKind::AuthPermission
+                        )
+                    ) {
+                        code::AUTH_REJECTED
+                    } else {
+                        code::SUBSCRIPTION_REJECTED
+                    };
+                    cx.notice_error(Level::Error, code, &error);
+                } else {
+                    cx.notice(
+                        Level::Error,
+                        code::AUTH_REJECTED,
+                        format!("Kraken private socket refused: {evidence:?}"),
+                    );
+                }
             }
             LifecycleEvent::InterestsRefused { feed, error, .. } => {
                 let private = self.private_feed(feed)?;

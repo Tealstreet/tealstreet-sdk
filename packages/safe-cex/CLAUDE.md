@@ -1119,6 +1119,9 @@ public clients bypass ordinary proxies; WEEX/GRVT/BloFin do not install HOW).
 KuCoin futures and spot install HOW for private clients even if
 `tealstreetTunnel` is false or unset. Paradex payload signing skips its API
 factory's HOW adapter; JWT acquisition uses a direct request in every mode.
+Paradex declares both `supportsTunnel` and `enforceWsTunnel` true because local
+account REST already selects HOW, including unsigned market discovery. This
+describes the existing adapter contract, not a live-connectivity guarantee.
 Account normalization already applies metadata; do not normalize explicit
 headless options again at this boundary. Engine socket effects carry optional
 public/private/business roles; new venues with shared URLs must supply the role.
@@ -1668,3 +1671,10 @@ page routing, replacement replies, the bound and zero write replay.
 Relay-failure notices strip URL queries from upstream error messages before
 reporting reconnect state. Request configs and signed dispatch bytes are retained
 unchanged; the web Sentry hooks provide independent diagnostic redaction.
+
+Unsigned Bybit mainnet market responses with native `retCode: 10006` generate
+one causal transport diagnostic through the exchange log/Sentry channel (no
+additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
+Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
+Old tunnels without node metadata report unknown. This observer changes no
+response, routing or retry behavior; the Rust venue's local kline pause remains.

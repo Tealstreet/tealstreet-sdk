@@ -130,6 +130,7 @@ pub(crate) struct Public {
     retries: Vec<(TimerId, String, u8)>,
     seed_retry: safe_cex_engine::startup::Backoff<bool>,
     failed_market_reads: u32,
+    first_market_failure: Option<String>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     pub(crate) books: HashMap<String, BookState>,
     pub(crate) price_bands: HashMap<String, f64>,
@@ -973,6 +974,7 @@ impl Paradex {
             } => {
                 self.public.seed_retry.succeeded(cx, &true);
                 self.public.failed_market_reads = 0;
+                self.public.first_market_failure = None;
                 self.public.price_bands = bands;
                 self.account.excluded_perps = excluded;
                 cx.store.set_markets(rows);
@@ -1100,12 +1102,27 @@ impl Paradex {
                 let markets = matches!(seed, Request::Markets { .. });
                 cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
                 if markets {
-                    self.public.failed_market_reads += 1;
+                    self.public.failed_market_reads =
+                        self.public.failed_market_reads.saturating_add(1);
+                    if self.public.failed_market_reads == 1 {
+                        self.public.first_market_failure = Some(error.chars().take(256).collect());
+                    }
                     if self.public.failed_market_reads == 2 {
-                        cx.notice(
+                        cx.event(
                             safe_cex_engine::Level::Error,
                             code::REQUEST_FAILED,
-                            "Paradex market list is unavailable; retrying",
+                            format!("Paradex market list is unavailable; retrying: {error}"),
+                            vec![
+                                (
+                                    "firstCause",
+                                    self.public
+                                        .first_market_failure
+                                        .take()
+                                        .unwrap_or_default()
+                                        .into(),
+                                ),
+                                ("cause", error.into()),
+                            ],
                         );
                     }
                 }

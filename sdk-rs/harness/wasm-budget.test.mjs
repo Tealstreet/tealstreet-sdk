@@ -36,10 +36,10 @@ test('shared broker-role setup caps retain CI headroom and reject the next byte'
   }
 });
 
-test('KuCoin custody caps retain the approved CI headroom and exact boundary', () => {
+test('KuCoin 400002 resync caps retain the approved CI headroom and exact boundary', () => {
   for (const [venue, measured, cap] of [
-    ['kucoin', 1_630_161, 1_640_448],
-    ['kucoinspot', 2_224_069, 2_234_368],
+    ['kucoin', 1_657_796, 1_668_096],
+    ['kucoinspot', 2_237_656, 2_248_704],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -52,7 +52,6 @@ test('KuCoin custody caps retain the approved CI headroom and exact boundary', (
 test('master 41783084277 caps retain the ruled headroom and shared-family boundary', () => {
   for (const [venue, measured, cap] of [
     ['apexomni', 1_959_768, 1_970_176],
-    ['asterdex', 2_099_176, 2_109_440],
     ['backpack', 1_860_786, 1_871_872],
     ['coinbase', 1_800_411, 1_811_456],
     ['weex', 1_909_946, 1_921_024],
@@ -72,6 +71,19 @@ test('WOO attribution cap retains the approved CI headroom and exact boundary', 
   assert.equal(wasmBudgetError(2_377_495, 'venue', 'woo'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'woo'), /exceeds/);
+});
+
+test('single-pass aggregate caps retain the approved CI headroom and exact boundary', () => {
+  for (const [venue, measured, cap] of [
+    ['asterdex', 2_110_514, 2_121_728],
+    ['bingx', 2_009_588, 2_020_352],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
 
 test('CI budgets each standalone venue build under its own venue name', () => {
@@ -142,13 +154,13 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
 test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
     ['binance', 2_172_329, 2_183_168],
-    ['bingx', 2_002_885, 2_013_184],
     ['bitget', 2_293_016, 2_304_000],
     ['bitunix', 1_826_666, 1_837_056],
     ['blofin', 1_939_942, 1_950_720],
     ['bybit', 2_177_290, 2_188_288],
     ['cryptocom', 1_704_291, 1_715_200],
     ['hyperliquid', 2_083_308, 2_094_080],
+    ['mexc', 1_717_351, 1_728_512],
     ['orderly', 1_710_152, 1_721_344],
     ['paradex', 2_211_804, 2_222_080],
     ['kraken', 2_111_267, 2_121_728],
@@ -180,6 +192,16 @@ test('shared-address setup CI caps retain the ruled headroom and exact boundary'
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), new RegExp(`exceeds ${cap}`));
   }
+});
+
+test('shared signing bookkeeping cap retains CI headroom and exact boundary', () => {
+  const measured = 1_495_000;
+  const cap = 1_505_280;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.breakoutprop, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'breakoutprop'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'breakoutprop'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'breakoutprop'), new RegExp(`exceeds ${cap}`));
 });
 
 test('MEXC refusal and read-clock cap pins the measured size and exact boundary', () => {
