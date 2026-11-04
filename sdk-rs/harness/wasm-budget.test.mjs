@@ -38,8 +38,6 @@ test('shared broker-role setup caps retain CI headroom and reject the next byte'
 
 test('KuCoin custody caps retain the approved CI headroom and exact boundary', () => {
   for (const [venue, measured, cap] of [
-    ['kucoin', 1_630_161, 1_640_448],
-    ['kucoinspot', 2_224_069, 2_234_368],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -51,11 +49,6 @@ test('KuCoin custody caps retain the approved CI headroom and exact boundary', (
 
 test('master 41783084277 caps retain the ruled headroom and shared-family boundary', () => {
   for (const [venue, measured, cap] of [
-    ['apexomni', 1_959_768, 1_970_176],
-    ['asterdex', 2_099_176, 2_109_440],
-    ['backpack', 1_860_786, 1_871_872],
-    ['coinbase', 1_800_411, 1_811_456],
-    ['weex', 1_909_946, 1_921_024],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -63,15 +56,6 @@ test('master 41783084277 caps retain the ruled headroom and shared-family bounda
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
-});
-
-test('WOO attribution cap retains the approved CI headroom and exact boundary', () => {
-  const cap = 2_387_968;
-  assert.equal(cap, Math.ceil((2_377_495 + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES.woo, cap);
-  assert.equal(wasmBudgetError(2_377_495, 'venue', 'woo'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'woo'), /exceeds/);
 });
 
 test('CI budgets each standalone venue build under its own venue name', () => {
@@ -141,21 +125,13 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
 
 test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['binance', 2_172_329, 2_183_168],
-    ['bingx', 2_002_885, 2_013_184],
-    ['bitget', 2_293_016, 2_304_000],
     ['bitunix', 1_826_666, 1_837_056],
-    ['blofin', 1_939_942, 1_950_720],
-    ['bybit', 2_177_290, 2_188_288],
     ['cryptocom', 1_704_291, 1_715_200],
-    ['hyperliquid', 2_083_308, 2_094_080],
     ['mexc', 1_717_351, 1_728_512],
     ['orderly', 1_710_152, 1_721_344],
-    ['paradex', 2_211_804, 2_222_080],
     ['kraken', 2_111_267, 2_121_728],
     ['krakenspot', 2_111_267, 2_121_728],
     ['lighter', 1_980_286, 1_990_656],
-    ['okx', 1_924_239, 1_935_360],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -166,4 +142,41 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
   assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
   assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
+});
+
+test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
+  for (const [venue, measured, cap] of [
+    ['apexomni', 1_974_257, 1_984_512],
+    ['asterdex', 2_113_727, 2_124_800],
+    ['backpack', 1_876_304, 1_887_232],
+    ['binance', 2_184_476, 2_195_456],
+    ['bingx', 2_015_091, 2_025_472],
+    ['bitget', 2_306_497, 2_317_312],
+    ['bitgetusdc', 2_306_497, 2_317_312],
+    ['bitrue', 1_810_954, 1_821_696],
+    ['blofin', 1_952_470, 1_963_008],
+    ['breakoutprop', 1_501_277, 1_512_448],
+    ['bybit', 2_189_590, 2_200_576],
+    ['coinbase', 1_816_299, 1_826_816],
+    ['grvt', 1_768_339, 1_778_688],
+    ['hyperliquid', 2_095_474, 2_106_368],
+    ['hyperliquidspot', 2_095_474, 2_106_368],
+    ['kucoin', 1_647_848, 1_658_880],
+    ['kucoinspot', 2_235_996, 2_246_656],
+    ['okx', 1_936_660, 1_947_648],
+    ['paradex', 2_223_483, 2_234_368],
+    ['phemex', 2_040_251, 2_051_072],
+    ['polymarket', 1_587_809, 1_598_464],
+    ['txflow', 1_827_125, 1_838_080],
+    ['weex', 1_925_507, 1_936_384],
+    ['woo', 2_388_474, 2_399_232],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
+  assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
 });
