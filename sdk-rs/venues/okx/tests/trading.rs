@@ -924,7 +924,12 @@ fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_canc
             Event::Command(Command::AmendOrder {
                 command: 2,
                 id: id.into(),
-                price: Some(36500.0),
+                // Each on its own side of the 40000 price: a sell stop below, a take profit above.
+                price: Some(if kind == OrderType::StopLoss {
+                    36500.0
+                } else {
+                    41000.0
+                }),
                 amount: None,
             }),
         );

@@ -135,8 +135,13 @@ impl Venue for Paradex {
             order_book_query: true,
             fresh_positions: true,
             symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    // Every orders read commits its cover (`commit_orders_plan`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn on_venue_action(
         &mut self,

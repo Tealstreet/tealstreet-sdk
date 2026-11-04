@@ -164,3 +164,92 @@ fn the_follow_up_to_a_refused_census_is_rate_bounded() {
         1
     );
 }
+
+fn refresh(e: &mut Engine<Lighter>, now: f64, command: u32, symbols: Option<Vec<String>>) {
+    e.handle(
+        now,
+        Event::Command(safe_cex_engine::Command::Venue {
+            command,
+            action: safe_cex_engine::VenueAction::RefreshOrders { symbols },
+        }),
+    );
+}
+
+/// The open-order reads issued at `now`, with any account read answered.
+fn orders_reads(e: &mut Engine<Lighter>, now: f64) -> Vec<HttpRequest> {
+    let mut orders = Vec::new();
+    for r in requests_at(e, now) {
+        if r.url.contains("ActiveOrders") {
+            orders.push(r);
+        } else if r.url.contains("/account?") {
+            reply_at(e, now, &r, 200, ACCOUNT);
+        }
+    }
+    orders
+}
+
+/// Lighter advertises read covers in its own snapshot.
+#[test]
+fn lighter_advertises_read_covers() {
+    for robinhood in [false, true] {
+        let (mut e, _) = ready_with(Options {
+            robinhood,
+            ..options()
+        });
+        let frame = e.snapshot_frame(NOW).to_vec();
+        let (_, payload) = safe_cex_engine::wire::sections(&frame)
+            .find(|(kind, _)| *kind == section::CAPABILITIES)
+            .unwrap();
+        let flags = u32::from_le_bytes(payload[..4].try_into().unwrap());
+        assert_ne!(
+            flags & 1 << safe_cex_engine::Capabilities::ORDER_READ_COVERS_BIT,
+            0,
+            "robinhood {robinhood}"
+        );
+    }
+}
+
+/// The ask reads the account's open orders; its answer publishes an account
+/// cover at the ask's send time, not the landing time.
+#[test]
+fn a_refresh_ask_reads_orders_and_publishes_its_send_time() {
+    for symbols in [None, Some(vec!["ETH".to_owned()])] {
+        let (mut e, _) = ready();
+        let asked = NOW + 5_000.0;
+        refresh(&mut e, asked, 60, symbols.clone());
+        let reads = orders_reads(&mut e, asked);
+        assert_eq!(reads.len(), 1, "{symbols:?}");
+        reply_at(&mut e, asked + 1_000.0, &reads[0], 200, OPEN);
+        assert!(e.store().order("42").is_some());
+        assert_eq!(
+            account_cover(&mut e, asked + 1_000.0).1,
+            Some(asked),
+            "{symbols:?}"
+        );
+    }
+}
+
+/// H7/H3: asks while the read is out start nothing; exactly one follow-up
+/// read starts after it lands, and nothing after that one.
+#[test]
+fn asks_while_a_read_is_out_get_one_follow_up() {
+    let (mut e, _) = ready();
+    let asked = NOW + 5_000.0;
+    refresh(&mut e, asked, 60, Some(vec!["ETH".to_owned()]));
+    let first = orders_reads(&mut e, asked);
+    assert_eq!(first.len(), 1);
+    for command in 61..161 {
+        refresh(&mut e, asked + 10.0, command, Some(vec!["BTC".to_owned()]));
+    }
+    assert!(orders_reads(&mut e, asked + 10.0).is_empty(), "H7");
+    reply_at(&mut e, asked + 1_000.0, &first[0], 200, EMPTY);
+    let follow_up = orders_reads(&mut e, asked + 1_000.0);
+    assert_eq!(follow_up.len(), 1, "one follow-up read");
+    reply_at(&mut e, asked + 2_000.0, &follow_up[0], 200, EMPTY);
+    assert!(orders_reads(&mut e, asked + 2_000.0).is_empty());
+    assert_eq!(
+        account_cover(&mut e, asked + 2_000.0).1,
+        Some(asked + 1_000.0),
+        "the follow-up's send"
+    );
+}

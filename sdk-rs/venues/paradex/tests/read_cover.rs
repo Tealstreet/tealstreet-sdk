@@ -395,3 +395,82 @@ fn retired_old_census_cannot_replace_fresh_commit() {
     assert_eq!(h.e.store().orders(), rows);
     assert_eq!(account_cover(&mut h).1, cover);
 }
+
+fn refresh(h: &mut Harness, command: u32, symbols: Option<Vec<String>>) {
+    h.command(safe_cex_engine::Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols },
+    });
+}
+
+fn orders_reads(h: &Harness) -> Vec<safe_cex_engine::RequestId> {
+    h.pending
+        .iter()
+        .filter(|r| r.method == safe_cex_engine::Method::Get && r.url.contains("/orders"))
+        .map(|r| r.id)
+        .collect()
+}
+
+fn answer_orders(h: &mut Harness, id: safe_cex_engine::RequestId) {
+    let i = h.pending.iter().position(|r| r.id == id).unwrap();
+    let read = h.pending.remove(i);
+    h.respond(read, 200, &format!(r#"{{"results":[{ORDER}]}}"#));
+}
+
+/// Paradex advertises read covers in its own snapshot's CAPABILITIES.
+#[test]
+fn paradex_advertises_read_covers() {
+    let (mut h, _) = loaded();
+    let frame = h.e.snapshot_frame(h.now).to_vec();
+    let (_, payload) = safe_cex_engine::wire::sections(&frame)
+        .find(|(kind, _)| *kind == section::CAPABILITIES)
+        .unwrap();
+    let flags = u32::from_le_bytes(payload[..4].try_into().unwrap());
+    assert_ne!(
+        flags & 1 << safe_cex_engine::Capabilities::ORDER_READ_COVERS_BIT,
+        0
+    );
+}
+
+/// A refresh ask reads the account's orders; its answer publishes the
+/// account cover at the read's send time.
+#[test]
+fn a_refresh_ask_reads_orders_and_publishes_its_send_time() {
+    for symbols in [None, Some(vec!["BTC-USD-PERP".to_owned()])] {
+        let (mut h, _) = loaded();
+        assert!(orders_reads(&h).is_empty(), "{:?}", h.pending);
+        h.now += 5_000.;
+        refresh(&mut h, 50, symbols.clone());
+        let sent = h.now;
+        let reads = orders_reads(&h);
+        assert_eq!(reads.len(), 1, "{symbols:?}: {:?}", h.pending);
+        h.now += 1_500.;
+        answer_orders(&mut h, reads[0]);
+        assert_eq!(account_cover(&mut h).1, Some(sent), "{symbols:?}");
+    }
+}
+
+/// H7/H3: asks while the read is out start nothing; exactly one follow-up
+/// read starts after it lands, and nothing after that.
+#[test]
+fn asks_while_a_read_is_out_get_one_read_after_it() {
+    let (mut h, _) = loaded();
+    h.now += 5_000.;
+    refresh(&mut h, 50, None);
+    let first = orders_reads(&h);
+    assert_eq!(first.len(), 1);
+    for command in 51..150 {
+        h.now += 1.;
+        refresh(&mut h, command, Some(vec!["BTC-USD-PERP".into()]));
+    }
+    assert_eq!(orders_reads(&h), first, "H7: nothing more while it is out");
+    h.now += 10.;
+    answer_orders(&mut h, first[0]);
+    let follow = orders_reads(&h);
+    assert_eq!(follow.len(), 1, "one follow-up: {:?}", h.pending);
+    let sent = h.now;
+    h.now += 10.;
+    answer_orders(&mut h, follow[0]);
+    assert!(orders_reads(&h).is_empty(), "{:?}", h.pending);
+    assert_eq!(account_cover(&mut h).1, Some(sent));
+}

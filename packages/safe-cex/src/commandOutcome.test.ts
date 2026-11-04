@@ -218,6 +218,17 @@ describe('command outcome serialization', () => {
     });
   });
 
+  it('carries what a refused protective edit left the position with, and nothing else', async () => {
+    const { ExchangeError } = await import('@tealstreet/safe-cex-wasm/host');
+    for (const protection of ['restored', 'unprotected'] as const) {
+      const error = new ExchangeError('Your BTCUSDT stop is unchanged', { message: 'x', kind: 'rejected', protection });
+      expect(error.protection).toBe(protection);
+      expect(deserializeCommandError(serializeCommandError(error))).toMatchObject({ protection });
+    }
+    expect(new ExchangeError('x', { message: 'x', protection: 'maybe' as never }).protection).toBeUndefined();
+    expect(serializeCommandError({ message: 'x', protection: 'maybe' })).toEqual({ message: 'x' });
+  });
+
   it('maps each classified kind onto the health categories and leaves unclassified errors to text', () => {
     expect(exchangeErrorCategory({ kind: 'authExpired' })).toBe('auth_expired');
     expect(exchangeErrorCategory({ kind: 'venueUnavailable' })).toBe('exchange_down');

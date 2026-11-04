@@ -125,7 +125,6 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
 
 test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['orderly', 1_710_152, 1_721_344],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -141,23 +140,17 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
 test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
     ['apexomni', 1_974_257, 1_984_512],
-    ['asterdex', 2_113_727, 2_124_800],
     ['backpack', 1_876_304, 1_887_232],
-    ['binance', 2_184_476, 2_195_456],
-    ['bingx', 2_015_091, 2_025_472],
     ['bitget', 2_306_497, 2_317_312],
     ['bitgetusdc', 2_306_497, 2_317_312],
     ['bitrue', 1_810_954, 1_821_696],
     ['blofin', 1_952_470, 1_963_008],
     ['breakoutprop', 1_501_277, 1_512_448],
-    ['bybit', 2_189_590, 2_200_576],
     ['coinbase', 1_816_299, 1_826_816],
-    ['grvt', 1_768_339, 1_778_688],
     ['hyperliquid', 2_095_474, 2_106_368],
     ['hyperliquidspot', 2_095_474, 2_106_368],
     ['okx', 1_936_660, 1_947_648],
     ['paradex', 2_223_483, 2_234_368],
-    ['polymarket', 1_587_809, 1_598_464],
     ['txflow', 1_827_125, 1_838_080],
     ['weex', 1_925_507, 1_936_384],
     ['woo', 2_388_474, 2_399_232],
@@ -172,6 +165,34 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
   assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
 });
 
+test('#3018 after merging 78bc1ae5a39 (run 41870743418 at c9d4de158d5) retains headroom and siblings match', () => {
+  for (const [venue, measured, cap] of [
+    ['bybit', 2_201_340, 2_211_840],
+    ['kraken', 2_125_098, 2_136_064],
+    ['krakenspot', 2_125_098, 2_136_064],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
+
+test('#3018 protective-amend caps (run 41854021043 at 824ff543b6d) retain the ruled headroom', () => {
+  for (const [venue, measured, cap] of [
+    ['grvt', 1_770_412, 1_780_736],
+    ['polymarket', 1_590_031, 1_600_512],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
     ['bitunix', 1_838_517, 1_849_344],
@@ -179,7 +200,6 @@ test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain he
     ['kucoin', 1_670_273, 1_681_408],
     ['kucoinspot', 2_253_260, 2_264_064],
     ['lighter', 1_991_579, 2_001_920],
-    ['mexc', 1_729_817, 1_740_800],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -193,8 +213,6 @@ test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain he
 test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
     ['phemex', 2_054_401, 2_065_408],
-    ['kraken', 2_121_746, 2_132_992],
-    ['krakenspot', 2_121_746, 2_132_992],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -203,4 +221,28 @@ test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
+
+test('#3018 after merging d171fbb0e31 (run 41893192741 at b94d76fa368) retains the ruled headroom', () => {
+  for (const [venue, measured, cap] of [
+    ['asterdex', 2_125_918, 2_137_088],
+    ['bingx', 2_026_253, 2_036_736],
+    ['mexc', 1_743_880, 1_755_136],
+    ['orderly', 1_721_849, 1_732_608],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('master b0d2122742d release cut (run 41901638294) retains the ruled binance headroom', () => {
+  const [measured, cap] = [2_195_793, 2_206_720];
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.binance, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'binance'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'binance'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'binance'), /exceeds/);
 });
