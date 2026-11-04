@@ -1,3 +1,4 @@
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -8,7 +9,7 @@ const hash = (value) => createHash('sha256').update(value).digest('hex');
 const git = (value) => createHash('sha1').update(value).digest('hex');
 const gitBlob = (value) => git(Buffer.concat([Buffer.from(`blob ${value.length}\0`), value]));
 const at = (second) => `2026-10-23T00:00:${String(second).padStart(2, '0')}.000Z`;
-const caseValue = { venue: 'bitget', tape: 'tapes/bitget-public.jsonl', tapeSha256: hash('tape'), books: 'BTCUSDT', private: false, correctnessRuns: 1, runs: 9 };
+const caseValue = { venue: 'bitget', tape: 'tapes/bitget-public.jsonl', tapeSha256: hash('tape'), books: 'BTCUSDT', private: false, correctnessRuns: 1, runs: PUBLIC_REPLAY_PAIRS };
 const clone = (value) => structuredClone(value);
 const policy = Buffer.from('export const rule = "all-objective-normalized-two-run-mean-v1";');
 const row = (path, value) => ({ path, type: 'blob', mode: '100644', sha: gitBlob(Buffer.from(value)) });
