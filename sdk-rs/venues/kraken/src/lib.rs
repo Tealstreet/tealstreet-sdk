@@ -1172,6 +1172,7 @@ impl Venue for Kraken {
     ) {
         match pending {
             Pending::History(request) => self.history_stream_error(cx, *request, response),
+            Pending::Account(request) => self.account_http(cx, request, response),
             pending => self.on_request_failed(
                 cx,
                 pending,

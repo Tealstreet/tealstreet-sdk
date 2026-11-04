@@ -23,11 +23,46 @@ fn refuses_private_feed(msg: &Ws<'_>) -> bool {
     match msg.event.as_ref() {
         "error" | "subscribed_failed" | "unsubscribed_failed" => true,
         "alert" | "info" => {
-            let message = msg.message.to_ascii_lowercase();
+            let message = format!("{} {}", msg.error, msg.message).to_ascii_lowercase();
             message.contains("authenticat") || message.contains("api key")
         }
         _ => false,
     }
+}
+
+fn private_refusal(msg: &Ws<'_>) -> VenueError {
+    let detail = if !msg.error.is_empty() {
+        msg.error.as_ref()
+    } else if !msg.message.is_empty() {
+        msg.message.as_ref()
+    } else {
+        msg.reason.as_ref()
+    };
+    let detail: String = detail.chars().take(128).collect();
+    let lower = detail.to_ascii_lowercase();
+    let kind = if lower.contains("permission") {
+        ErrorKind::AuthPermission
+    } else if lower.contains("authenticat")
+        || lower.contains("api key")
+        || lower == "invalid challenge"
+    {
+        ErrorKind::AuthInvalid
+    } else {
+        ErrorKind::Rejected
+    };
+    let mut error = VenueError::new(if detail.is_empty() {
+        "Kraken private subscription rejected".into()
+    } else {
+        format!("Kraken private subscription rejected: {detail}")
+    })
+    .kind(kind);
+    if !detail.is_empty() {
+        error = error.venue_message(detail);
+    }
+    if !msg.error.is_empty() {
+        error = error.venue_code(msg.error.chars().take(64).collect::<String>());
+    }
+    error
 }
 /// Recent execution deduplication and terminal fences survive reconnects without
 /// retaining every historical identity for the lifetime of the engine.
@@ -285,6 +320,8 @@ struct Ws<'a> {
     feed: Cow<'a, str>,
     #[serde(default, borrow)]
     message: Cow<'a, str>,
+    #[serde(default, borrow)]
+    error: Cow<'a, str>,
     #[serde(default, borrow)]
     reason: Cow<'a, str>,
     #[serde(default)]
@@ -725,9 +762,7 @@ impl Kraken {
             return Control::Pong;
         }
         if refuses_private_feed(&msg) {
-            return Control::Auth(AuthEvidence::Rejected(safe_cex_engine::VenueError::new(
-                "Kraken private subscription rejected",
-            )));
+            return Control::Auth(AuthEvidence::Rejected(private_refusal(&msg)));
         }
         if !authenticated {
             if msg.event == "challenge" && self.account.waiting_challenge && !msg.message.is_empty()
@@ -791,8 +826,8 @@ impl Kraken {
         self.account.waiting_challenge = false;
         true
     }
-    fn account_disconnect(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
-        cx.notice(Level::Error, code::STREAM_UNAVAILABLE, message);
+    fn account_disconnect(&mut self, cx: &mut Cx<'_, Pending>, error: VenueError) {
+        cx.notice_error(Level::Error, code::STREAM_UNAVAILABLE, &error);
         if let Some(socket) = self.account.socket {
             if let Some(feed) = self.account.feed {
                 cx.retire_socket(
@@ -839,7 +874,10 @@ impl Kraken {
             self.account.waiting_challenge = false;
             self.account.challenge = Some(msg.message.to_string());
             let Some(signer) = self.signer.as_ref() else {
-                self.account_disconnect(cx, "Kraken signing credentials unavailable");
+                self.account_disconnect(
+                    cx,
+                    VenueError::new("Kraken signing credentials unavailable"),
+                );
                 return true;
             };
             let signature = signer.challenge(&msg.message);
@@ -852,7 +890,7 @@ impl Kraken {
             return true;
         }
         if refuses_private_feed(&msg) {
-            self.account_disconnect(cx, "Kraken private subscription rejected");
+            self.account_disconnect(cx, private_refusal(&msg));
             return true;
         }
         if msg.event == "subscribed"
@@ -1419,22 +1457,11 @@ impl Kraken {
             }
         }
         if !wire::success(response) || !request.valid {
-            if response.status == 401 || response.body.contains("authenticationError") {
-                cx.startup_read_refused(
-                    &safe_cex_engine::VenueError::new(
-                        "Kraken refused the API key: authenticationError",
-                    )
-                    .kind(safe_cex_engine::ErrorKind::AuthInvalid)
-                    .venue_message("authenticationError"),
-                );
-            }
+            let error = read_error(response);
+            cx.startup_read_refused(&error);
             self.account.read_failures = self.account.read_failures.saturating_add(1);
-            cx.retried_failure(
-                "kraken.account:1266",
-                "Kraken account reconciliation failed",
-            );
+            cx.retried_failure_error("kraken.account:1266", &error);
             if request.scope == Scope::Positions {
-                let error = read_error(response);
                 let read = request.read;
                 self.account.fresh_positions.failed(cx, 0, read, &error);
                 self.read_fresh_positions_again(cx, read);
@@ -1540,18 +1567,21 @@ impl Kraken {
             self.account_refresh(cx);
         }
         self.account.read_failures = self.account.read_failures.saturating_add(1);
-        cx.retried_failure(
-            "kraken.account:1343",
-            "Kraken account reconciliation transport failure",
-        );
+        let mut failure = self
+            .account
+            .read_error
+            .take()
+            .unwrap_or_else(|| VenueError::new(error));
+        let description = if matches!(failure.kind, Some(ErrorKind::Network | ErrorKind::Timeout)) {
+            "Kraken account reconciliation transport failure"
+        } else {
+            "Kraken account reconciliation failed"
+        };
+        failure.message = format!("{description}: {}", failure.message);
+        cx.retried_failure_error("kraken.account:1343", &failure);
         if request.scope == Scope::Positions {
-            let fresh = self
-                .account
-                .read_error
-                .take()
-                .unwrap_or_else(|| VenueError::new(error));
             let read = request.read;
-            self.account.fresh_positions.failed(cx, 0, read, &fresh);
+            self.account.fresh_positions.failed(cx, 0, read, &failure);
             self.read_fresh_positions_again(cx, read);
         }
         self.account_schedule_heal(cx);
@@ -1583,20 +1613,41 @@ impl Kraken {
     }
 }
 
-/// The reply's own error for a positions read that cannot answer.
+/// Only the error code leaves an HTTP refusal; never its account payload.
 fn read_error(response: Response<'_>) -> VenueError {
-    if response.status == 401 || response.body.contains("authenticationError") {
-        return VenueError::new("Kraken refused the API key: authenticationError")
-            .kind(ErrorKind::AuthInvalid)
-            .venue_message("authenticationError");
-    }
-    if wire::success(response) {
-        return VenueError::new("Kraken positions: malformed reply");
-    }
-    VenueError::new(format!(
-        "Kraken positions HTTP {}: {}",
-        response.status, response.body
+    let envelope = serde_json::from_str::<wire::Envelope<'_>>(response.body).ok();
+    let native = envelope.as_ref().map_or("", |value| value.error.as_ref());
+    let kind = match (response.status, native) {
+        (408, _) => ErrorKind::Timeout,
+        (429, _) => ErrorKind::RateLimited,
+        (500..=599, _) => ErrorKind::VenueUnavailable,
+        (401, _) => ErrorKind::AuthInvalid,
+        (403, _) => ErrorKind::AuthPermission,
+        (_, "apiLimitExceeded") => ErrorKind::RateLimited,
+        (_, "authenticationError" | "unauthorized" | "nonceBelowThreshold" | "nonceDuplicate") => {
+            ErrorKind::AuthInvalid
+        }
+        (_, "marketUnavailable" | "Server Error" | "Unavailable") => ErrorKind::VenueUnavailable,
+        (400..=499, _) => ErrorKind::Rejected,
+        (_, "") => ErrorKind::Internal,
+        _ => ErrorKind::Rejected,
+    };
+    let native: String = native.chars().take(128).collect();
+    let detail = if native.is_empty() {
+        String::new()
+    } else {
+        format!(", Kraken code {native}")
+    };
+    let error = VenueError::new(format!(
+        "Kraken account reconciliation failed (HTTP {}{detail})",
+        response.status
     ))
+    .kind(kind);
+    if native.is_empty() {
+        error
+    } else {
+        error.venue_code(native.clone()).venue_message(native)
+    }
 }
 fn balance(accounts: Accounts<'_>) -> (Balance, Vec<CoinBalance>) {
     let mut out = Balance::default();
