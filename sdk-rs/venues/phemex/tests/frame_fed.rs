@@ -524,6 +524,18 @@ fn an_unreadable_venue_state_warns_once_per_outage_and_keeps_the_last_state() {
     assert_eq!(malformed(&mut e, 1005.), 1, "a new outage warns again");
 }
 
+/// The source commits a read of BTCUSDT sent at `sent`: its rows, and their cover.
+fn read_orders(source: &mut Engine<PhemexPerpetuals>, sent: f64, rows: Vec<Order>) {
+    let store = source.store_mut();
+    let read = safe_cex_engine::order_read_cover::OrderReadMark {
+        seq: store.order_read_sequence(),
+        sent,
+        epoch: 0,
+    };
+    let scope = safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&["BTCUSDT"]);
+    store.commit_orders_read(read, scope, |_| true, rows, &[]);
+}
+
 /// A page whose source has loaded empty orders, with `caller-1` lost and a
 /// cancel-all on BTCUSDT covering it.
 fn lost_and_canceled() -> (Engine<PhemexPerpetuals>, Engine<PhemexPerpetuals>) {
@@ -580,8 +592,9 @@ fn a_lost_placement_ends_once_a_source_frame_covers_its_signed_expiry() {
     );
     assert!(requests(&a).is_empty(), "{:?}", requests(&a));
 
-    // One written well past it, without the order: it never landed.
+    // One from a read sent well past it, without the order: it never landed.
     let late = 10_000_000.;
+    read_orders(&mut source, late, vec![]);
     e.apply_frame(late, source.snapshot_frame(late), true)
         .unwrap();
     e.drain_actions().for_each(drop);
@@ -625,7 +638,7 @@ fn a_create_ack_does_not_reopen_an_order_an_orders_frame_showed_closed() {
     let mut filled = landed(0.01);
     filled.id = "real-1".into();
     filled.status = OrderStatus::Closed;
-    source.store_mut().set_orders(vec![filled]);
+    read_orders(&mut source, 1001., vec![filled]);
     e.apply_frame(1001., source.snapshot_frame(1001.), true)
         .unwrap();
     respond(&mut e, &sent[0], &ack(&sent[0], "real-1").to_string());
@@ -633,4 +646,49 @@ fn a_create_ack_does_not_reopen_an_order_an_orders_frame_showed_closed() {
         e.store().order("real-1").map(|o| o.status),
         Some(OrderStatus::Closed)
     );
+}
+
+#[test]
+fn a_foreign_symbol_cover_cannot_release_the_lost_btc_placement() {
+    let (mut e, mut source) = lost_and_canceled();
+    let late = 10_000_000.;
+    let store = source.store_mut();
+    let read = safe_cex_engine::order_read_cover::OrderReadMark {
+        seq: store.order_read_sequence(),
+        sent: late,
+        epoch: 0,
+    };
+    store.commit_orders_read(
+        read,
+        safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&["ETHUSDC"]),
+        |_| true,
+        vec![],
+        &[],
+    );
+    e.apply_frame(late, source.snapshot_frame(late), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 3,
+            orders: vec![order("caller-1")],
+        },
+    );
+    assert!(
+        requests(&a).is_empty(),
+        "ETH's cover cannot forget BTC's lost placement"
+    );
+    read_orders(&mut source, late + 1_000., vec![]);
+    e.apply_frame(late + 1_000., source.snapshot_frame(late + 1_000.), true)
+        .unwrap();
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 4,
+            orders: vec![order("caller-1")],
+        },
+    );
+    assert_eq!(requests(&a).len(), 1, "BTC's own fresh cover retires it");
 }
