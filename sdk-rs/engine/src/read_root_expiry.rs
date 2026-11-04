@@ -140,9 +140,6 @@ impl CoreCx<'_> {
     /// its park is no longer bounded. Runs outside every command loan.
     #[inline(never)]
     fn expire_write_preflights(&mut self, now: f64) {
-        if self.io.core.write_preflight_waits.is_empty() || !now.is_finite() {
-            return;
-        }
         let mut index = 0;
         while index < self.io.core.write_preflight_waits.len() {
             let (at_ms, preflight, timer) = self.io.core.write_preflight_waits[index].clone();
@@ -173,13 +170,15 @@ impl<V: Venue> Engine<V> {
     /// hand back its continuations without a Cx, and seal once.
     pub(super) fn expire_read_roots(&mut self, now: f64) {
         #[cfg(feature = "write-preflight-wait")]
-        Cx {
-            now,
-            store: &mut self.store,
-            io: &mut self.io,
+        if !self.io.core.write_preflight_waits.is_empty() && now.is_finite() {
+            Cx {
+                now,
+                store: &mut self.store,
+                io: &mut self.io,
+            }
+            .core()
+            .expire_write_preflights(now);
         }
-        .core()
-        .expire_write_preflights(now);
         if self.io.core.read_roots.is_empty()
             || !now.is_finite()
             || !self.io.core.read_roots.iter().any(|(at, ..)| now >= *at)
