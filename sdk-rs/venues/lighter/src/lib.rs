@@ -122,6 +122,9 @@ pub struct MarketMeta {
     pub initial_margin_fraction: f64,
     pub maintenance_margin_fraction: f64,
     pub initial_last_price: f64,
+    /// The leverage the venue applies until the account sets one: its default
+    /// fraction, which can sit far below the maximum (robinhood: 2x of 20x).
+    pub default_leverage: Option<f64>,
 }
 const TICKER_TOPICS_PER_SECOND: usize = 2;
 struct Connection {
@@ -211,6 +214,22 @@ fn supported(interval: Interval) -> bool {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1)
 }
 impl Lighter {
+    /// What the venue applies to `market` until the account sets a leverage.
+    pub(crate) fn default_leverage(&self, market: &Market) -> f64 {
+        self.metadata
+            .get(&market.symbol)
+            .and_then(|meta| meta.default_leverage)
+            .and_then(|default| {
+                // Fallible: a malformed catalogue row (min above max) must not panic.
+                safe_cex_engine::num::clamp_leverage(
+                    default,
+                    market.limits.leverage.min,
+                    market.limits.leverage.max,
+                )
+                .ok()
+            })
+            .unwrap_or(market.limits.leverage.max)
+    }
     pub fn new(options: Options) -> Self {
         Self {
             options,
@@ -1288,6 +1307,10 @@ impl Venue for Lighter {
                                 initial_margin_fraction: fraction / 10000.0,
                                 maintenance_margin_fraction: m.maintenance_margin_fraction
                                     / 10000.0,
+                                default_leverage: m
+                                    .default_initial_margin_fraction
+                                    .filter(|default| *default > 0.0)
+                                    .map(|default| 10_000.0 / default),
                             },
                         );
                         rows.push(Market {
