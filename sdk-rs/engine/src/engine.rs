@@ -576,6 +576,11 @@ pub enum VenueAction {
     /// (`None`: the account) until a read sent after this ask lands
     /// (docs/plans/RUST_FRAME_FED_READ_COVER.md §5.2).
     RefreshOrders { symbols: Option<Vec<String>> },
+    /// Register native identities for the next source census; never cancels or seals a write.
+    #[cfg(feature = "command-bitget")]
+    RegisterCancelChecks {
+        orders: Vec<crate::model::CancelOrderRef>,
+    },
     /// Succeeds only once a positions read issued after this command has
     /// committed to the store; `Capabilities::fresh_positions` advertises it.
     ReadPositions,
@@ -3253,6 +3258,31 @@ impl<P> Cx<'_, P> {
         false
     }
 
+    /// Forward bounded cancel targets before the ordinary source refresh ask.
+    /// This grants no read-cover, write or reconciliation authority.
+    #[cfg(feature = "command-bitget")]
+    pub fn source_cancel_checks(&mut self, orders: &[crate::model::CancelOrderRef]) {
+        if !self.frame_fed() || orders.is_empty() || orders.len() > 64 {
+            return;
+        }
+        if orders.iter().any(|o| {
+            o.id.is_empty() || o.id.len() > 128 || o.symbol.is_empty() || o.symbol.len() > 128
+        }) {
+            return;
+        }
+        if let Ok(targets) = serde_json::to_string(orders) {
+            self.io
+                .core
+                .actions
+                .push(Action::Notice(Notice::Event(LogEvent {
+                    level: Level::Info,
+                    code: "orders.cancel_check",
+                    message: "Register native targets before the source orders refresh".into(),
+                    fields: vec![("targets", Value::Str(targets))],
+                })));
+        }
+    }
+
     /// The order-uncertainty epoch now. A read that spans several contexts (a
     /// paged census) records it before its first page and reports through
     /// `orders_reconciled_since`, so it clears only marks its first page saw.
@@ -4126,6 +4156,12 @@ pub trait Venue {
     /// Every complete orders read commits its covers through
     /// `Cx::commit_orders_read*`, so a data source answers `RefreshOrders` by
     /// reading through `reconcile_uncertain` (the page's bounded ask).
+    /// Read-only targets retained by a retired cancel owner, before its source ask.
+    #[cfg(feature = "command-bitget")]
+    fn take_source_cancel_checks(&mut self) -> Vec<crate::model::CancelOrderRef> {
+        vec![]
+    }
+
     fn refreshes_orders(&self) -> bool {
         false
     }
@@ -6365,6 +6401,16 @@ impl<V: Venue> Engine<V> {
                         .cancel_refresh
                         .take()
                         .expect("due cancel refresh");
+                    #[cfg(feature = "command-bitget")]
+                    {
+                        let targets = self.venue.take_source_cancel_checks();
+                        let mut cx = Cx {
+                            now,
+                            store: &mut self.store,
+                            io: &mut self.io,
+                        };
+                        cx.source_cancel_checks(&targets);
+                    }
                     let named = symbols.map(|s| s.join(",")).unwrap_or_default();
                     // A control ask must survive the host's diagnostic log filter.
                     self.io

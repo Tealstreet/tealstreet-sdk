@@ -425,6 +425,11 @@ cancel has no placement fence: for a source-refreshing venue,
 `orders.refresh { symbols }` asks the source once without disturbing that
 placement-hold timer. It preserves the cancel's Unknown error, never replays,
 and never infers a Canceled order from absence.
+Bitget also sends bounded `orders.cancel_check` targets before that same ask.
+The source registers them through read-only `registerCancelChecks`, then runs
+`refreshOrders` even if registration refuses. Only its clean post-registration
+native census can report present/absent before cached-algo retention; it never
+changes the writer's original Unknown command result.
 A LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
 snapshot}`, after the `forwardFrames` op, and keeps posting fill ops.
 

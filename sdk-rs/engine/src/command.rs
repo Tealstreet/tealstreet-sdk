@@ -1,5 +1,9 @@
 //! The shared JSON command boundary for engine hosts.
-#[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
+#[cfg(any(
+    feature = "command-asterdex",
+    feature = "command-kucoinspot",
+    feature = "command-bitget"
+))]
 use crate::model::CancelOrderRef;
 #[cfg(feature = "command-asterdex")]
 use crate::model::StpMode;
@@ -134,6 +138,11 @@ enum CommandIn {
         command: u32,
         symbols: Option<Vec<String>>,
     },
+    #[cfg(feature = "command-bitget")]
+    RegisterCancelChecks {
+        command: u32,
+        orders: Vec<CancelOrderRef>,
+    },
     ReadPositions {
         command: u32,
     },
@@ -241,6 +250,8 @@ enum Op {
     FetchBalanceInfo,
     RefreshSettings,
     RefreshOrders,
+    #[cfg(feature = "command-bitget")]
+    RegisterCancelChecks,
     ReadPositions,
     CancelAccountOrders,
     FetchClosedPositions,
@@ -478,6 +489,13 @@ struct RefreshOrdersIn {
     command: u32,
     #[serde(default)]
     symbols: Option<Vec<String>>,
+}
+
+#[cfg(feature = "command-bitget")]
+#[derive(Deserialize)]
+struct RegisterCancelChecksIn {
+    command: u32,
+    orders: Vec<CancelOrderRef>,
 }
 
 #[derive(Deserialize)]
@@ -797,6 +815,11 @@ fn decode_payload(op: Op, json: &str) -> Result<CommandIn, serde_json::Error> {
             let RefreshOrdersIn { command, symbols } = payload(json)?;
             CommandIn::RefreshOrders { command, symbols }
         }
+        #[cfg(feature = "command-bitget")]
+        Op::RegisterCancelChecks => {
+            let RegisterCancelChecksIn { command, orders } = payload(json)?;
+            CommandIn::RegisterCancelChecks { command, orders }
+        }
         Op::ReadPositions => {
             let ReadPositionsIn { command } = payload(json)?;
             CommandIn::ReadPositions { command }
@@ -1055,6 +1078,11 @@ impl From<CommandIn> for Command {
             CommandIn::RefreshOrders { command, symbols } => Self::Venue {
                 command,
                 action: crate::VenueAction::RefreshOrders { symbols },
+            },
+            #[cfg(feature = "command-bitget")]
+            CommandIn::RegisterCancelChecks { command, orders } => Self::Venue {
+                command,
+                action: crate::VenueAction::RegisterCancelChecks { orders },
             },
             CommandIn::ReadPositions { command } => Self::Venue {
                 command,
@@ -1966,6 +1994,19 @@ mod tests {
             );
             assert!(decode_command(&json).is_err(), "{json}");
         }
+    }
+
+    #[test]
+    fn cancel_check_registration_is_read_only_and_feature_gated() {
+        let decoded = decode_command(
+            r#"{"op":"registerCancelChecks","command":7,"orders":[{"id":"native-1","symbol":"BTCUSDT"}]}"#,
+        );
+        #[cfg(feature = "command-bitget")]
+        assert!(
+            matches!(decoded, Ok(Command::Venue { command: 7, action: crate::VenueAction::RegisterCancelChecks { orders } }) if orders == vec![crate::model::CancelOrderRef { id: "native-1".into(), symbol: "BTCUSDT".into() }])
+        );
+        #[cfg(not(feature = "command-bitget"))]
+        assert!(decoded.is_err());
     }
 
     #[test]

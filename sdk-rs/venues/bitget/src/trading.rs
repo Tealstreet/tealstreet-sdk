@@ -11,7 +11,7 @@ use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     ConditionOwner, ConditionWait, Context, Credential, HttpOwnerRetirement, Operation, Plan,
     Policy, Preflight, PreflightPolicy, PreflightPurpose, ReconciliationData, ResendGrant,
-    RetryPolicy,
+    RetryPolicy, WriteResult,
 };
 use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{
@@ -129,7 +129,7 @@ pub struct Trading {
     metadata_at: HashMap<String, f64>,
     /// A released write whose Plan the engine sealed itself (unproven status):
     /// restore and reconcile at the next callback that holds Cx.
-    retired_write: Option<Planned>,
+    retired_write: Option<(Planned, bool)>,
 }
 
 struct Queued {
@@ -1160,7 +1160,8 @@ impl BitgetFutures {
             .is_some_and(|job| owner.matches_preflight(&job.preflight))
         {
             let job = self.trading.active.take().expect("retired job");
-            self.trading.retired_write = job.live;
+            let plain_cancel = job.is_plain_cancel();
+            self.trading.retired_write = job.live.map(|call| (call, plain_cancel));
             return self
                 .trading
                 .queue
@@ -1168,6 +1169,31 @@ impl BitgetFutures {
                 .map(|queued| queued.preflight.clone());
         }
         None
+    }
+
+    /// Engine-gated HTTP failure can retire the owner without response delivery.
+    /// Export its targets once, before that same event's source refresh ask.
+    pub(crate) fn take_retired_cancel_targets(
+        &mut self,
+    ) -> Vec<safe_cex_engine::model::CancelOrderRef> {
+        let Some((call, plain)) = self.trading.retired_write.as_mut() else {
+            return vec![];
+        };
+        if !std::mem::take(plain) {
+            return vec![];
+        }
+        match &call.effect {
+            Effect::Cancel { orders, .. } => orders
+                .iter()
+                .filter(|o| matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit))
+                .take(64)
+                .map(|o| safe_cex_engine::model::CancelOrderRef {
+                    id: o.id.clone(),
+                    symbol: o.symbol.clone(),
+                })
+                .collect(),
+            _ => vec![],
+        }
     }
 
     /// Native restore and reconcile for a write the engine sealed as Unknown.
@@ -1179,11 +1205,14 @@ impl BitgetFutures {
 
     /// The I/O-free half of the settle: exact Store restoration. Returns whether
     /// the order refresh is still owed.
-    fn restore_retired_write(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
-        let Some(call) = self.trading.retired_write.take() else {
+    pub(crate) fn restore_retired_write(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        let Some((call, plain_cancel)) = self.trading.retired_write.take() else {
             return false;
         };
         restore_canceling(cx, &call);
+        if plain_cancel && let Effect::Cancel { orders, .. } = &call.effect {
+            self.check_unknown_cancels(cx, orders);
+        }
         if matches!(call.effect, Effect::Place { .. }) {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
         }
@@ -2412,7 +2441,7 @@ impl BitgetFutures {
         {
             let message = format!("Bitget 40009: sign signature error (HTTP {status})");
             let native = native_code(parsed.as_ref().ok(), status);
-            let (_, grant) =
+            let (_, grant, _) =
                 self.record_once(cx, &request, native, Answer::Coded, &message, &mut false);
             let plan = job.plan.clone().expect("live Plan");
             if let Some(context) = grant.and_then(|grant| {
@@ -2670,7 +2699,8 @@ impl BitgetFutures {
             }
         }
         if let Some(message) = error {
-            self.record_once(cx, &request, native, answer, &message, &mut recorded);
+            let (_, _, native_unknown) =
+                self.record_once(cx, &request, native, answer, &message, &mut recorded);
             let error = match &parsed {
                 _ if unproven => VenueError::new(message).outcome(Outcome::Unknown),
                 Ok(reply) if explicit_rejection => {
@@ -2714,6 +2744,63 @@ impl BitgetFutures {
                 job.calls.clear();
                 job.calls.push_back(rollback);
                 return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            if (native_unknown || error.outcome == Some(Outcome::Unknown))
+                && job.is_plain_cancel()
+                && let Effect::Cancel { orders, .. } = &request.call.effect
+            {
+                self.check_unknown_cancels(cx, orders);
+                let data = parsed.as_ref().ok().and_then(|r| r.data.as_ref());
+                let endpoint = if request.call.path == paths::CANCEL_PLAN {
+                    "cancel-plan-order"
+                } else if request.call.path == paths::UTA_CANCEL_STRATEGY {
+                    "cancel-strategy-order"
+                } else {
+                    "cancel-order"
+                };
+                cx.event(
+                    safe_cex_engine::Level::Warn,
+                    "bitget.cancel.check",
+                    "An uncertain cancel requests native order confirmation",
+                    vec![
+                        (
+                            "accountMode",
+                            if self.account.uta { "uta" } else { "classic" }.into(),
+                        ),
+                        ("endpoint", endpoint.into()),
+                        ("httpStatus", (status as f64).into()),
+                        (
+                            "nativeCode",
+                            parsed
+                                .as_ref()
+                                .ok()
+                                .and_then(|r| r.code.0)
+                                .unwrap_or(-1.0)
+                                .into(),
+                        ),
+                        (
+                            "dataShape",
+                            if data.is_some() {
+                                "object"
+                            } else {
+                                "none-or-unrecognized"
+                            }
+                            .into(),
+                        ),
+                        (
+                            "successCount",
+                            (data.map_or(0, |d| d.success_list.len()) as f64).into(),
+                        ),
+                        (
+                            "failureCount",
+                            (data.map_or(0, |d| {
+                                d.failure_list.len() + listed_failures(&d.list).len()
+                            }) as f64)
+                                .into(),
+                        ),
+                        ("reconciliation", "requested".into()),
+                    ],
+                );
             }
             self.end(cx, job, current, error);
             self.refresh_orders(cx, false);
@@ -2854,9 +2941,9 @@ impl BitgetFutures {
         answer: Answer,
         message: &str,
         recorded: &mut bool,
-    ) -> (bool, Option<ResendGrant>) {
+    ) -> (bool, Option<ResendGrant>, bool) {
         if *recorded || request.call.read() {
-            return (false, None);
+            return (false, None, false);
         }
         *recorded = true;
         let context = &request.context;
@@ -2878,25 +2965,31 @@ impl BitgetFutures {
                         message: message.as_str(),
                     })
                 }));
-                let _ = cx.http_write_batch(context, &CODES, expected, &items, message, None);
-                return (false, None);
+                let result = cx.http_write_batch(context, &CODES, expected, &items, message, None);
+                let unknown = match result {
+                    Ok(WriteResult::PartialUnknown(_)) | Err(_) => true,
+                    Ok(WriteResult::Failed(error)) => error.outcome == Some(Outcome::Unknown),
+                    Ok(_) => false,
+                };
+                return (false, None, unknown);
             }
             Answer::Unproven => {
                 let _ = cx.http_write_unproven(context, message);
-                return (false, None);
+                return (false, None, true);
             }
             Answer::Coded => match cx.classify_write(context, &CODES, native.as_ref(), message) {
                 Ok(fact) => WriteFact::Failed {
                     fact,
                     known_effects: false,
                 },
-                Err(_) => return (false, None),
+                Err(_) => return (false, None, true),
             },
         };
+        let unknown = matches!(&fact, WriteFact::Failed { fact, .. } if matches!(fact.verdict(), Verdict::Unknown(_)));
         let refusal =
             matches!(&fact, WriteFact::Failed { fact, .. } if fact.verdict().is_refusal());
         let grant = cx.http_write_fact(context, fact, None).ok().flatten();
-        (refusal, grant)
+        (refusal, grant, unknown)
     }
 
     /// Native placement custody: each acknowledged ID keeps its own cancel call
@@ -3195,6 +3288,12 @@ impl BitgetFutures {
         }
         if released && request.call.is_place() {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
+        }
+        if error.outcome == Some(Outcome::Unknown)
+            && job.is_plain_cancel()
+            && let Effect::Cancel { orders, .. } = &request.call.effect
+        {
+            self.check_unknown_cancels(cx, orders);
         }
         let _ = cx.finish_plan_failed_call(&plan, &request.slot, &request.context);
         self.end(cx, job, None, error);
@@ -3658,6 +3757,20 @@ pub(crate) fn trade_reconciliation(
 }
 
 impl Job {
+    fn is_plain_cancel(&self) -> bool {
+        self.replaces_stop.is_none()
+            && self.replaces_order.is_none()
+            && matches!(
+                &self.intent,
+                Command::CancelOrders { .. }
+                    | Command::CancelSymbolOrders { .. }
+                    | Command::Venue {
+                        action: safe_cex_engine::VenueAction::CancelAccountOrders,
+                        ..
+                    }
+            )
+    }
+
     /// The operation the job issues next once a condition wait releases.
     fn next_operation(&self) -> Operation {
         if !self.metadata.is_empty() || self.calls.front().is_some_and(Planned::read) {
