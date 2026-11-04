@@ -1238,7 +1238,8 @@ impl Okx {
         if acks.iter().any(|ack| ack.s_code == "50004") {
             return self.unproven(cx, request, "OKX 50004: write execution status is unknown");
         }
-        // A cancel with an explicit sCode 0 need not name its order; anything else must.
+        // Placement success needs its new native ID. Cancel identities are
+        // matched against the requested rows below, including native refusals.
         if step.expected > 0
             && acks.iter().any(|ack| {
                 matches!(ack.s_code, "" | "0")
@@ -1257,16 +1258,19 @@ impl Okx {
             return self.unproven(cx, request, "OKX write response row count mismatch");
         }
         let requested: Vec<Requested> = serde_json::from_str(&step.body).unwrap_or_default();
-        if job.continue_cancel_errors
-            && acks.iter().enumerate().any(|(index, ack)| {
-                ack.s_code == "51400"
-                    && requested.get(index).is_none_or(|named| {
-                        (!ack.ord_id.is_empty() && ack.ord_id != named.ord_id)
-                            || (!ack.algo_id.is_empty() && ack.algo_id != named.algo_id)
-                    })
-            })
+        if matches!(
+            step.path,
+            "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+        ) && (requested.len() != step.expected
+            || acks.iter().enumerate().any(|(index, ack)| {
+                requested.get(index).is_none_or(|named| {
+                    named.id().is_empty()
+                        || ack.ord_id != named.ord_id
+                        || ack.algo_id != named.algo_id
+                })
+            }))
         {
-            return self.unproven(cx, request, "OKX absent cancel row identity mismatch");
+            return self.unproven(cx, request, "OKX cancel row identity missing or mismatched");
         }
         if step.collect_ids
             && acks.len() == step.expected

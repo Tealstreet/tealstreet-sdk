@@ -367,7 +367,10 @@ fn native_code_two_all_absent_cancels_continue_then_finish_empty_without_errors(
         }),
     );
     let first = prepared(&mut engine, 5.);
-    let rows = [r#"{"sCode":"51400","sMsg":"Order does not exist"}"#; 20].join(",");
+    let rows = (1..=20)
+        .map(|id| format!(r#"{{"ordId":"{id}","sCode":"51400","sMsg":"Order does not exist"}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
     reply(
         &mut engine,
         post(&first),
@@ -381,7 +384,7 @@ fn native_code_two_all_absent_cancels_continue_then_finish_empty_without_errors(
     reply(
         &mut engine,
         post(&second),
-        r#"{"code":"2","data":[{"sCode":"51400","sMsg":"Order does not exist"}]}"#,
+        r#"{"code":"2","data":[{"ordId":"21","sCode":"51400","sMsg":"Order does not exist"}]}"#,
         7.,
     );
     let output = prepared(&mut engine, 7.);
@@ -429,7 +432,10 @@ fn native_code_one_all_refused_cancel_stops_and_restores_optimistic_status() {
         ids.iter()
             .all(|id| engine.store().order(id).unwrap().status == OrderStatus::Canceling)
     );
-    let rows = [r#"{"sCode":"51000","sMsg":"Parameter error"}"#; 20].join(",");
+    let rows = (1..=20)
+        .map(|id| format!(r#"{{"ordId":"{id}","sCode":"51000","sMsg":"Parameter error"}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
     reply(
         &mut engine,
         post(&first),
@@ -682,7 +688,10 @@ fn a_managed_code_one_cancel_fails_the_plan_without_continuing() {
     );
     let (first, managed) = release(&mut engine, 5.);
     assert!(managed, "the cancel batch is a managed Plan call");
-    let rows = [r#"{"sCode":"51000","sMsg":"Parameter error"}"#; 20].join(",");
+    let rows = (1..=20)
+        .map(|id| format!(r#"{{"ordId":"{id}","sCode":"51000","sMsg":"Parameter error"}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
     reply(
         &mut engine,
         post(&first),
@@ -728,7 +737,7 @@ fn a_dependent_replacement_never_runs_after_its_cancel_is_refused() {
     reply(
         &mut engine,
         cancel,
-        r#"{"code":"1","msg":"All operations failed","data":[{"sCode":"51400","sMsg":"Order does not exist"}]}"#,
+        r#"{"code":"1","msg":"All operations failed","data":[{"algoId":"stop","sCode":"51400","sMsg":"Order does not exist"}]}"#,
         6.,
     );
     let (output, replaced) = release(&mut engine, 6.);
@@ -1366,7 +1375,7 @@ fn a_refused_row_still_fails_whatever_its_message() {
 }
 
 #[test]
-fn a_cancel_success_without_an_id_is_a_success() {
+fn a_cancel_success_without_an_id_is_unknown() {
     let mut engine = trading_engine();
     engine.store_mut().upsert_order(Order {
         kind: OrderType::StopLoss,
@@ -1387,10 +1396,13 @@ fn a_cancel_success_without_an_id_is_a_success() {
         6.,
     );
     let output = prepared(&mut engine, 6.);
-    assert!(output.iter().any(|a| matches!(
+    assert!(!output.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone { command: OWNER, .. })
     )));
+    let errors = failed(&output, OWNER);
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].outcome, Some(safe_cex_engine::Outcome::Unknown));
 }
 
 #[test]

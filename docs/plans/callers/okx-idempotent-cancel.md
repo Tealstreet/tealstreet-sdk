@@ -3,8 +3,10 @@
 SDK, NX and server callers receive normal cancel completion for exact OKX
 `51400` on a standalone cancel, including batch and algo-cancel rows. The native
 code confirms the order is filled, canceled or absent; localized text is not
-used. A supplied response ID must match the corresponding requested ID, and
-the response must retain the expected row count and successful HTTP status.
+used. Every cancel row, including a success or refusal, must echo its matching
+requested `ordId` or `algoId` before any batch fact is recorded. Missing, foreign,
+duplicated or swapped echoes leave the batch Unknown. The response must also
+retain the expected row count and successful HTTP status.
 
 The engine records `Satisfied(Cancel)` before completing the call. The existing
 account reconciliation read still runs: neither the ACK nor the completion
