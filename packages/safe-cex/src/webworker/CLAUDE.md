@@ -481,3 +481,7 @@ Rust `engine-event` diagnostics use the existing generation-guarded event bridge
 with `data: [EngineEvent]`. Legacy `error` options and the third `log` argument
 retain the event for callers migrating in place. Consumers must choose one
 channel per diagnostic to avoid double counting/toasting.
+
+History failures preserve the native closed `causeCode` alongside `kind` and the
+independent `venueCode` through `commandOutcome.ts`. Reporting code may use these
+classifications without forwarding the free-form message or a signed request.
