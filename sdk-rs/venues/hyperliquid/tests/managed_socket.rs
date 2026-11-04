@@ -59,23 +59,14 @@ fn public_open() -> (Engine<Hyperliquid>, SocketId) {
     (engine, socket)
 }
 
-fn private_connecting_before_mode() -> (
-    Engine<Hyperliquid>,
-    SocketId,
-    safe_cex_engine::HttpRequest,
-    safe_cex_engine::TimerId,
-) {
+fn private_connecting_before_mode() -> (Engine<Hyperliquid>, SocketId, safe_cex_engine::HttpRequest)
+{
     private_connecting_before_mode_with_meta(support::META)
 }
 
 fn private_connecting_before_mode_with_meta(
     meta: &str,
-) -> (
-    Engine<Hyperliquid>,
-    SocketId,
-    safe_cex_engine::HttpRequest,
-    safe_cex_engine::TimerId,
-) {
+) -> (Engine<Hyperliquid>, SocketId, safe_cex_engine::HttpRequest) {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Options::default()
@@ -83,11 +74,10 @@ fn private_connecting_before_mode_with_meta(
     engine.start(1000.0);
     let mut socket = None;
     let mut mode = None;
-    let mut mode_timer = None;
     for _ in 0..20 {
         let actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
         if actions.is_empty() {
-            return (engine, socket.unwrap(), mode.unwrap(), mode_timer.unwrap());
+            return (engine, socket.unwrap(), mode.unwrap());
         }
         for action in actions {
             match action {
@@ -106,12 +96,6 @@ fn private_connecting_before_mode_with_meta(
                         other => panic!("unexpected pre-mode read {other}"),
                     };
                     support::reply(&mut engine, &request, 200, body);
-                }
-                Action::SetTimer {
-                    timer,
-                    at_ms: 7000.0,
-                } => {
-                    assert!(mode_timer.replace(timer).is_none());
                 }
                 Action::WsConnect {
                     socket: current,
@@ -489,7 +473,7 @@ fn private_reconnect_hands_subscriptions_off_before_account_refresh() {
 
 #[test]
 fn unresolved_mode_does_not_park_the_native_open_refresh() {
-    let (mut engine, socket, _mode, _mode_timer) = private_connecting_before_mode();
+    let (mut engine, socket, _mode) = private_connecting_before_mode();
     engine.handle(2000.0, Event::WsOpened { socket });
     let actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
     assert!(actions.iter().any(|a| matches!(a,
@@ -507,14 +491,9 @@ fn unresolved_mode_does_not_park_the_native_open_refresh() {
 
 #[test]
 fn mode_before_first_open_still_refreshes_spot_without_a_subscription() {
-    let (mut engine, _socket, mode, mode_timer) = private_connecting_before_mode();
+    let (mut engine, _socket, mode) = private_connecting_before_mode();
     support::reply(&mut engine, &mode, 200, "\"portfolioMargin\"");
     let actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
-    assert!(
-        actions
-            .iter()
-            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == mode_timer))
-    );
     assert_eq!(engine.store().balance().total, 0.0);
     assert_eq!(engine.store().balance().used, 0.0);
     assert!(actions.iter().any(|a| matches!(a,
@@ -524,7 +503,7 @@ fn mode_before_first_open_still_refreshes_spot_without_a_subscription() {
 
 #[test]
 fn mode_while_closed_still_refreshes_spot_without_a_subscription() {
-    let (mut engine, socket, mode, mode_timer) = private_connecting_before_mode();
+    let (mut engine, socket, mode) = private_connecting_before_mode();
     engine.handle(2000.0, Event::WsClosed { socket, code: 1006 });
     prepared_now(&mut engine).into_iter().for_each(drop);
     engine.handle(
@@ -539,11 +518,6 @@ fn mode_while_closed_still_refreshes_spot_without_a_subscription() {
         },
     );
     let actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
-    assert!(
-        actions
-            .iter()
-            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == mode_timer))
-    );
     assert_eq!(engine.store().balance().total, 0.0);
     assert_eq!(engine.store().balance().used, 0.0);
     assert!(actions.iter().any(|a| matches!(a,
@@ -552,8 +526,8 @@ fn mode_while_closed_still_refreshes_spot_without_a_subscription() {
 }
 
 #[test]
-fn mode_after_open_clears_its_timer_then_hands_private_topics_off_before_spot_read() {
-    let (mut engine, socket, mode, mode_timer) = private_connecting_before_mode();
+fn mode_after_open_hands_private_topics_off_before_spot_read() {
+    let (mut engine, socket, mode) = private_connecting_before_mode();
     engine.handle(2000.0, Event::WsOpened { socket });
     prepared_now(&mut engine).into_iter().for_each(drop);
     engine.handle(
@@ -568,11 +542,6 @@ fn mode_after_open_clears_its_timer_then_hands_private_topics_off_before_spot_re
         },
     );
     let mut actions: Vec<_> = prepared_now(&mut engine).into_iter().collect();
-    assert!(
-        actions
-            .iter()
-            .any(|a| matches!(a, Action::ClearTimer { timer } if *timer == mode_timer))
-    );
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert_eq!(engine.store().balance().total, 0.0);
     let private: Vec<_> = actions
@@ -614,18 +583,11 @@ fn mode_after_open_clears_its_timer_then_hands_private_topics_off_before_spot_re
     assert_eq!(engine.store().balance().total, 1100.0);
     assert_eq!(engine.store().balance().free, 1050.0);
     prepared_now(&mut engine).into_iter().for_each(drop);
-    engine.handle(7000.0, Event::TimerFired { timer: mode_timer });
-    assert!(
-        !prepared_now(&mut engine)
-            .into_iter()
-            .any(|a| matches!(a, Action::Http(_))),
-        "retired mode timer is inert"
-    );
 }
 
 #[test]
 fn retired_mode_handoff_never_starts_its_spot_read() {
-    let (mut engine, socket, mode, _mode_timer) = private_connecting_before_mode();
+    let (mut engine, socket, mode) = private_connecting_before_mode();
     engine.handle(2000.0, Event::WsOpened { socket });
     prepared_now(&mut engine).into_iter().for_each(drop);
     engine.handle(
@@ -811,7 +773,7 @@ fn refused_mode_handoff_recovers_its_spot_refresh_after_capacity_is_freed() {
         universe.join(","),
         contexts.join(",")
     );
-    let (mut engine, socket, mode, mode_timer) = private_connecting_before_mode_with_meta(&meta);
+    let (mut engine, socket, mode) = private_connecting_before_mode_with_meta(&meta);
     assert_eq!(engine.store().markets().len(), MAX_INTERESTS);
     engine.handle(2000.0, Event::WsOpened { socket });
     prepared_now(&mut engine).into_iter().for_each(drop);
@@ -833,11 +795,6 @@ fn refused_mode_handoff_recovers_its_spot_refresh_after_capacity_is_freed() {
         if event.message.contains("Capacity"))
         ),
         "real interest-count capacity refusal"
-    );
-    assert!(
-        refused
-            .iter()
-            .any(|a| matches!(a,Action::ClearTimer{timer} if *timer==mode_timer))
     );
     assert!(!refused.iter().any(
         |a| matches!(a,Action::Http(request) if support::kind(request)=="spotClearinghouseState")

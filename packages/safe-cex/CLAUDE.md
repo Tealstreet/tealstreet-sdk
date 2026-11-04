@@ -1692,6 +1692,36 @@ Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
 
+
+Hyperliquid `/info` admission shares a token bucket across account workers through
+IndexedDB. Prepare may wait but reserves no weight. Admission durably reserves
+weight before the final shared Retry-After/generation gate and physical handoff.
+Cancellation or Claim without dispatch refunds only that token generation; a
+request handed to fetch is never refunded. Once IDB has worked in a realm,
+storage failure waits within the original read deadline rather than sending from
+an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
+Role/mode startup reads
+stay single-flight until their managed completion or deadline, including quota wait.
+
+The worker's unchanged 120 s timeout preserves closed native startup fields and
+per-account `/info` route, 429, quota-wait, undispatched and in-flight counters.
+`startup_native_sample_age_ms` identifies the age of the last native watchdog
+snapshot; elapsed/deadline tags on the timeout describe the worker's own bound.
+No request bodies, account addresses, headers or URLs enter these facts.
+
+Public Hyperliquid catalogue reads (`perpDexs`, `metaAndAssetCtxs` and
+`spotMetaAndAssetCtxs`) share byte-exact replies across engines through a separate
+IndexedDB cache. Entries expire after 5 s; a 3 s leader lease bounds follower
+waiting and fences late leaders. Cached preparations recheck payload expiry at
+readiness and handoff; asynchronous publication owns a separate byte buffer.
+Cache storage attempts are bounded to 250 ms;
+unavailable storage bypasses the cache while retaining ordinary quota admission.
+Only anonymous public requests with the exact catalogue shape qualify. Account
+reads, candles and writes are never cached. Typed discovery failures invalidate
+that origin's entries and leases. Cache hits make no physical request and consume
+no quota. Invalidation after native parsing uses the closed `discovery` failure
+kind supplied by #3046; HTTP/JSON errors already invalidate at the cache boundary.
+
 Rust account `socketHealth.reconnectDiagnostics` carries bounded last-close
 snapshots for public/private/business channels and the primary HOW adapter,
 plus maximum hidden timer lateness across engine/HOW callbacks. These are TS
