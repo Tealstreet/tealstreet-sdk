@@ -209,3 +209,20 @@ The 25 s silence watchdog that redials starts on open as well as on each pong,
 so a socket that opens and never speaks is replaced. Both stalls ran every
 request out to its deadline for the connection's lifetime
 (`src/HOWWebSocket.reconnect.test.ts`).
+
+
+**CONNECTING also has a wall-clock bound.** RWS has a 4 s `connectionTimeout`,
+armed only after creating its native socket; that one timer can be deferred, and
+`redialIfBackingOff` deliberately handles only `retry-scheduled`. HOW therefore
+checks actual dial age (or phase age before native construction) every 1 s while
+not open, on visible `visibilitychange`, document `resume`, window `pageshow`,
+and on every request-readiness poll. A connect at least 4 s old is retired and
+counted once toward the existing two-failure 8443→443 fallback before replacing
+its stopped wrapper, even if native close throws. A delayed URL callback from
+an old wrapper cannot change the new attempt's bookkeeping. Fresh connects,
+open sockets and scheduled normal backoff are untouched; opening stops the
+watchdog, and disposal removes its timer/listeners. Fully frozen JS cannot run a
+repair; the first runnable check uses wall-clock age rather than assuming a timer
+fired. This reconnects the transport only: no account reload, deadline renewal,
+or replay of HTTP already sent (`HOWWebSocket.connect-timeout.test.ts` and the
+real-stack managed/legacy request-entry controls).

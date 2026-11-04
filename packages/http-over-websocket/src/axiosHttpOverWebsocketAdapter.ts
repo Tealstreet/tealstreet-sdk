@@ -691,6 +691,7 @@ const createAxiosHttpOverWebsocketAdapter = (
         // One immediate redial per wait, rather than sitting out a backoff a wake left behind.
         let redialed = false;
         while (!howWebSocket.isOpen || !howWebSocket.isTimeSynced) {
+          howWebSocket.redialIfConnectExpired?.();
           if (!redialed) redialed = howWebSocket.redialIfBackingOff?.() ?? false;
           await sleepWithinDeadline(25);
         }
