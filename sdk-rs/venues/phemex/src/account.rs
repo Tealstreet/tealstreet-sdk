@@ -409,10 +409,13 @@ impl State {
             .retain(|_, entry| !entry.lost.is_empty() || !entry.cancel.is_empty());
     }
     /// Frame-fed: removes each symbol's lost placements whose signed expiry
-    /// is at or before `cover`, returning the symbol and that expiry.
-    pub(crate) fn take_proven_lost(&mut self, cover: f64) -> Vec<(String, f64)> {
+    /// is at or before its `cover`, returning the symbol and that expiry.
+    pub(crate) fn take_proven_lost(
+        &mut self,
+        cover: impl Fn(&str) -> Option<f64>,
+    ) -> Vec<(String, f64)> {
         let proven: Vec<_> = (self.reconcile.iter())
-            .filter(|(_, entry)| entry.not_before <= cover)
+            .filter(|(symbol, entry)| cover(symbol).is_some_and(|cover| entry.not_before <= cover))
             .map(|(symbol, entry)| (symbol.clone(), entry.not_before))
             .collect();
         for (symbol, _) in &proven {
@@ -2149,7 +2152,7 @@ impl PhemexPerpetuals {
         } else {
             None
         };
-        if receipt.is_none() {
+        if receipt.is_none() && !self.commit_orders_read(cx, &read.symbol, &published, &listed, complete, list_len) {
             for order in published {
                 cx.store.upsert_order(order);
             }
@@ -2207,6 +2210,58 @@ impl PhemexPerpetuals {
             }
         }
         self.orders_reconcile(cx);
+    }
+    /// Commits a read's rows with the cover its send time proves: the symbol's rows,
+    /// less those it shows gone, plus the ones it found. False when the stream changed
+    /// the symbol after the read went out: its rows stand, and the read proves nothing.
+    fn commit_orders_read(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        published: &[Order],
+        listed: &HashSet<String>,
+        complete: bool,
+        list_len: usize,
+    ) -> bool {
+        let entry = self.account.reconcile.get(symbol);
+        let cut = list_len >= RESTING_LIST_MAX_ROWS;
+        let gone = |id: &String| {
+            complete
+                && !listed.contains(id)
+                && entry.is_some_and(|entry| {
+                    entry.unconfirmed.contains(id) || (!cut && entry.resting.contains(id))
+                })
+        };
+        let mut rows: Vec<Order> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|order| order.symbol == symbol && !gone(&order.id))
+            .cloned()
+            .collect();
+        rows.extend_from_slice(published);
+        let unproven = if complete && !cut { vec![] } else { vec![symbol.to_owned()] };
+        cx.commit_orders_read(
+            safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&[symbol]),
+            |_| true,
+            rows,
+            &unproven,
+        )
+        .is_some_and(|refused| refused.is_empty())
+    }
+    /// A refresh ask: each named symbol owes a read, paced as any other. One already
+    /// owed is read after the ask anyway; one out when asked, the engine asks again.
+    pub(crate) fn owe_order_reads(&mut self, cx: &mut Cx<'_, Pending>, symbols: &[String]) {
+        let mut owed = false;
+        for symbol in symbols.iter().filter(|symbol| !symbol.is_empty()) {
+            if !self.account.reconcile.contains_key(symbol) {
+                self.account.reconcile.insert(symbol.clone(), Reconcile::default());
+                owed = true;
+            }
+        }
+        if owed {
+            self.orders_reconcile(cx);
+        }
     }
     pub(crate) fn orders_read_failed(
         &mut self,

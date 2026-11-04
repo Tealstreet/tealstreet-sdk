@@ -1954,8 +1954,8 @@ struct IoCore {
     /// unreadable, and whether that outage has already warned.
     venue_state_unreadable: bool,
     venue_state_warned: bool,
-    /// Frame-fed, during `on_frame_ingested`: see `Cx::source_orders_cover`.
-    pub(crate) source_orders_cover: Option<f64>,
+    /// Frame-fed, during `on_frame_ingested`: see `Cx::source_orders_covers`.
+    pub(crate) source_orders_covers: Option<crate::ingest::ReadCovers>,
     /// Attempts a Session resume selected with no delivery in this event: the
     /// resume is their issue custody until the outer Plan flush. Reserved at
     /// park, so a resume never allocates.
@@ -2215,7 +2215,7 @@ impl Default for IoCore {
             setting_holds: Default::default(),
             venue_state_unreadable: false,
             venue_state_warned: false,
-            source_orders_cover: None,
+            source_orders_covers: None,
             #[cfg(feature = "http-plans")]
             session_resumed: Vec::new(),
             signing: Default::default(),
@@ -2607,10 +2607,12 @@ impl<P> Cx<'_, P> {
     }
 
     /// Frame-fed, in `on_frame_ingested` for a frame carrying ORDERS: the host
-    /// time up to which those orders speak (written, less the fence grace). A
-    /// write sent before it that they do not show never landed.
-    pub fn source_orders_cover(&self) -> Option<f64> {
-        self.io.core.source_orders_cover
+    /// times up to which those orders speak (`ReadCovers::cover`), less the
+    /// fence grace: the frame's stamp for every symbol, or, from a source with
+    /// read covers, its covers alone. A write sent before a symbol's cover that
+    /// its orders do not show never landed.
+    pub fn source_orders_covers(&self) -> Option<&crate::ingest::ReadCovers> {
+        self.io.core.source_orders_covers.as_ref()
     }
 
     /// Frame-fed: keep a settings write this engine confirmed over the data
@@ -4869,18 +4871,28 @@ impl<V: Venue> Engine<V> {
             None => sent - crate::frame_fed::UNSYNCED_FENCE_GRACE_MS,
         };
         let read_covers = self.source_read_covers;
-        let cover = applied.orders.then(|| {
+        let covers = applied.orders.then(|| {
             if read_covers {
-                applied.orders_read.as_ref()?.account.map(host_time)
+                let read = applied.orders_read.as_ref()?;
+                Some(crate::ingest::ReadCovers {
+                    account: read.account.map(host_time),
+                    symbols: (read.symbols.iter())
+                        .map(|(symbol, sent)| (symbol.clone(), host_time(*sent)))
+                        .collect(),
+                })
             } else {
                 let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
-                Some(host_time(stamp))
+                Some(crate::ingest::ReadCovers {
+                    account: Some(host_time(stamp)),
+                    symbols: Vec::new(),
+                })
             }
         });
-        let cover = cover.flatten();
-        cx.io.core.source_orders_cover = cover;
+        let covers = covers.flatten();
+        let cover = covers.as_ref().and_then(|covers| covers.account);
+        cx.io.core.source_orders_covers = covers;
         self.venue.on_frame_ingested(&mut cx);
-        cx.io.core.source_orders_cover = None;
+        cx.io.core.source_orders_covers = None;
         if applied.orders {
             #[cfg(feature = "order-locks")]
             if read_covers {
