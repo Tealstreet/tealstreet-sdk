@@ -742,13 +742,20 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     };
     let reject = present(&o.reject_reason);
     let inverse = is_inverse_symbol(&o.symbol);
-    let extra = (inverse || reject == Some("EC_PostOnlyWillTakeLiquidity")).then(|| OrderExtra {
-        remaining_native: inverse.then_some(remaining),
-        remaining_notional: inverse.then_some(remaining),
-        reject_reason: (reject == Some("EC_PostOnlyWillTakeLiquidity"))
-            .then_some(RejectReason::PostOnly),
-        ..OrderExtra::default()
-    });
+    // A Limit stop executes at its own price once triggered; an edit must keep it.
+    let stop_limit = (is_stop && present(&o.order_type) == Some("Limit"))
+        .then(|| o.price.as_deref().map(float))
+        .flatten()
+        .filter(|price| price.is_finite() && *price > 0.0);
+    let extra = (inverse || reject == Some("EC_PostOnlyWillTakeLiquidity") || stop_limit.is_some())
+        .then(|| OrderExtra {
+            remaining_native: inverse.then_some(remaining),
+            remaining_notional: inverse.then_some(remaining),
+            reject_reason: (reject == Some("EC_PostOnlyWillTakeLiquidity"))
+                .then_some(RejectReason::PostOnly),
+            conditional_order_price: stop_limit,
+            ..OrderExtra::default()
+        });
     let id = o.order_id.to_string();
     let parent = Order {
         id: id.clone(),

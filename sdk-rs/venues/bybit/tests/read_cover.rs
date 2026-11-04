@@ -208,6 +208,11 @@ fn a_refused_read_keeps_the_stream_stops_position_route() {
         "sequence refusal retains the native row"
     );
     h.requests.clear();
+    // The sell stop moves to 87000, below the price, so the trigger check passes.
+    h.engine.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 90_000.;
+        ticker.last = 90_000.;
+    });
     h.command(safe_cex_engine::Command::AmendOrder {
         command: 901,
         id: "position-stop".into(),
@@ -240,6 +245,11 @@ fn a_stream_stop_after_the_read_keeps_its_position_route() {
         "sequence refusal retains the native row"
     );
     h.requests.clear();
+    // The sell stop moves to 87000, below the price, so the trigger check passes.
+    h.engine.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 90_000.;
+        ticker.last = 90_000.;
+    });
     h.command(safe_cex_engine::Command::AmendOrder {
         command: 901,
         id: "position-stop".into(),

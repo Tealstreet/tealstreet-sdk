@@ -964,6 +964,7 @@ impl BinanceFutures {
                 mask |= 2;
             }
         }
+        cx.store.observe_ticker_fields(&event.s, mask);
         self.live_tickers.record(cx.store, &event.s, mask);
     }
 
@@ -992,11 +993,9 @@ impl BinanceFutures {
                             t.funding_rate = funding_rate;
                             t.funding_time = event.funding_time;
                         });
-                        self.live_tickers.record(
-                            cx.store,
-                            &event.s,
-                            (1 << 3) | (1 << 4) | (1 << 7) | (1 << 8),
-                        );
+                        let observed = (1 << 3) | (1 << 4) | (1 << 7) | (1 << 8);
+                        cx.store.observe_ticker_fields(&event.s, observed);
+                        self.live_tickers.record(cx.store, &event.s, observed);
                     }
                 }
             }
