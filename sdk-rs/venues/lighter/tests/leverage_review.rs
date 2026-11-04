@@ -221,3 +221,64 @@ fn invalid_leverage_bounds_reject_setting_write_and_preserve_account_state() {
         assert_eq!(e.store().positions(), before_positions);
     }
 }
+
+/// lighter-robinhood's shape: every market's default fraction (2x) sits far
+/// below its maximum (min 500 = 20x). ETH has an account row at 10x; BTC none.
+const DEFAULTS_META: &str = r#"{"code":200,"order_book_details":[{"market_id":1,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1","min_initial_margin_fraction":500,"default_initial_margin_fraction":666,"maintenance_margin_fraction":250},{"market_id":2,"symbol":"BTC","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"1","min_initial_margin_fraction":500,"default_initial_margin_fraction":5000,"maintenance_margin_fraction":250}]}"#;
+
+fn ready_with_defaults() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
+    let mut options = options();
+    options.testnet = true;
+    ready_with_meta(options, DEFAULTS_META)
+}
+
+/// daxx on preview-next: lighter-robinhood showed 20x for a market the account
+/// never set, where the venue applies its default fraction, 2x.
+#[test]
+fn a_market_with_no_account_row_shows_the_venue_default_leverage() {
+    let (e, _) = ready_with_defaults();
+    let btc = e.store().market("BTC").unwrap();
+    assert_eq!(
+        btc.limits.leverage.max, 20.0,
+        "the maximum is still the minimum fraction's"
+    );
+    assert_eq!(
+        e.store().setting("BTC").unwrap().leverage,
+        2.0,
+        "the venue's default, not its maximum"
+    );
+    assert_eq!(
+        e.store().setting("ETH").unwrap().leverage,
+        10.0,
+        "an account row's fraction wins"
+    );
+}
+
+/// A margin-mode change sends the leverage the account holds; on an
+/// unconfigured market that is the venue default, never the maximum.
+#[test]
+fn a_margin_mode_change_on_an_unconfigured_market_keeps_its_default_leverage() {
+    let (mut e, _) = ready_with_defaults();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW,
+        Event::Command(Command::SetMarginType {
+            command: 9,
+            symbol: "BTC".into(),
+            isolated: true,
+        }),
+    );
+    let write = nonce(&mut e);
+    assert_eq!(
+        wire(&write)["InitialMarginFraction"],
+        5000,
+        "2x, not 500 (20x)"
+    );
+}
+
+/// A market whose metadata names no default keeps the maximum, as before.
+#[test]
+fn a_market_without_a_default_fraction_falls_back_to_its_minimum() {
+    let (e, _) = ready_unattributed();
+    assert_eq!(e.store().setting("BTC").unwrap().leverage, 20.0);
+}
