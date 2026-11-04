@@ -597,6 +597,21 @@ pub fn translate(
             }
             one(command("refreshSettings", out, true))
         }
+        // A frame-fed page engine holds uncertain writes: a bounded fresh orders read.
+        "refreshAccountOrders" if public_only => one(Plan::Reply(Value::Null)),
+        "refreshAccountOrders" => {
+            let mut out = Map::new();
+            if let Some(symbols) = args.first().filter(|symbols| !symbols.is_null()) {
+                let symbols = symbols
+                    .as_array()
+                    .ok_or_else(|| refused("TypeError", "symbols must be an array"))?
+                    .iter()
+                    .map(|symbol| text(symbol, "symbol"))
+                    .collect::<Result<Vec<_>, _>>()?;
+                out.insert("symbols".into(), symbols.into());
+            }
+            one(command("refreshOrders", out, true))
+        }
         // As `RustEngineExchange.updateSymbolMetadata`: the venue's rails or maximum
         // reach the engine store, and the next frame carries them.
         "updateSymbolMetadata" => {
@@ -1375,6 +1390,43 @@ mod tests {
                 true
             )
             .unwrap(),
+            vec![Plan::Reply(Value::Null)]
+        );
+    }
+
+    // A frame-fed page engine holding uncertain writes (`orders.held`): the source
+    // reads its orders, bounded (docs/plans/RUST_FRAME_FED_READ_COVER.md §5).
+    #[test]
+    fn web_refresh_account_orders_asks_the_engine_for_a_bounded_read() {
+        let (wire, _) = web(
+            "refreshAccountOrders",
+            json!([["BTCUSDT", "ETHUSDT"]]),
+            &caps(),
+        );
+        assert_eq!(wire["op"], "refreshOrders");
+        assert_eq!(wire["symbols"], json!(["BTCUSDT", "ETHUSDT"]));
+        assert_eq!(
+            translate("refreshAccountOrders", &[], &caps(), &[], false).unwrap(),
+            vec![command("refreshOrders", Map::new(), true)],
+            "no symbols: the account"
+        );
+        assert_eq!(
+            translate("refreshAccountOrders", &[Value::Null], &caps(), &[], false).unwrap(),
+            vec![command("refreshOrders", Map::new(), true)]
+        );
+        assert!(
+            translate(
+                "refreshAccountOrders",
+                &[json!("BTCUSDT")],
+                &caps(),
+                &[],
+                false
+            )
+            .is_err()
+        );
+        assert!(translate("refreshAccountOrders", &[json!([7])], &caps(), &[], false).is_err());
+        assert_eq!(
+            translate("refreshAccountOrders", &[], &caps(), &[], true).unwrap(),
             vec![Plan::Reply(Value::Null)]
         );
     }

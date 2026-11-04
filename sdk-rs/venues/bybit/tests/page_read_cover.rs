@@ -171,3 +171,81 @@ fn h10_a_refused_source_read_lifts_nothing_with_the_bit() {
         assert_eq!(placeable(&mut page, &mut source, bit, 2), !bit, "bit {bit}");
     }
 }
+
+/// The page's `orders.held` asks since `from`: (symbols, liftAfterMs).
+fn held(page: &Harness, from: usize) -> Vec<(String, f64)> {
+    page.notices[from..]
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event)
+                if event.code == safe_cex_engine::log::code::ORDERS_HELD =>
+            {
+                let field = |name| event.fields.iter().find(|(key, _)| *key == name);
+                match (field("symbols"), field("liftAfterMs")) {
+                    (
+                        Some((_, safe_cex_engine::Value::Str(symbols))),
+                        Some((_, safe_cex_engine::Value::Num(after))),
+                    ) => Some((symbols.clone(), *after)),
+                    _ => panic!("{event:?}"),
+                }
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// H1: the page names its fence in `orders.held`; the host relays it after
+/// `liftAfterMs`, the source reads after the ask, and that read's frame lifts
+/// the fence. A second ask while the read is out starts nothing (H7).
+#[test]
+fn h1_the_pages_ask_brings_the_read_that_lifts_its_fence() {
+    let mut source = source();
+    answer_account(&mut source);
+    let mut page = fenced_page(&mut source, true);
+    let asks = held(&page, 0);
+    assert_eq!(asks, [("BTCUSDT".to_owned(), 3_000.0)], "{asks:?}");
+    source.advance(asks[0].1 + 500.0);
+    page.advance(asks[0].1 + 500.0);
+    answer_account(&mut source);
+    let orders_reads = |source: &Harness| {
+        source
+            .paths()
+            .iter()
+            .filter(|path| path.contains("/v5/order/realtime"))
+            .count()
+    };
+    source.command(Command::Venue {
+        command: 50,
+        action: safe_cex_engine::VenueAction::RefreshOrders {
+            symbols: Some(vec![asks[0].0.clone()]),
+        },
+    });
+    let asked = orders_reads(&source);
+    assert!(asked > 0, "the ask reads: {:?}", source.paths());
+    source.command(Command::Venue {
+        command: 51,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    });
+    assert_eq!(
+        orders_reads(&source),
+        asked,
+        "H7: nothing more while it is out"
+    );
+    answer_account(&mut source);
+    assert!(placeable(&mut page, &mut source, true, 3));
+}
+
+/// Bybit advertises read covers in its own snapshot, without forcing.
+#[test]
+fn bybit_advertises_read_covers() {
+    let mut source = source();
+    let frame = source.engine.snapshot_frame(source.now).to_vec();
+    let (_, payload) = safe_cex_engine::wire::sections(&frame)
+        .find(|(kind, _)| *kind == section::CAPABILITIES)
+        .unwrap();
+    let flags = u32::from_le_bytes(payload[..4].try_into().unwrap());
+    assert_ne!(
+        flags & 1 << safe_cex_engine::Capabilities::ORDER_READ_COVERS_BIT,
+        0
+    );
+}

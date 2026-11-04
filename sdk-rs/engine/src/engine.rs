@@ -572,6 +572,10 @@ pub enum VenueAction {
     /// Data source: re-read the account settings a frame-fed engine changed
     /// (position mode, margin, leverage, venue keys), for `symbol` or the account.
     RefreshSettings { symbol: Option<String> },
+    /// Data source: a frame-fed engine holds uncertain writes on `symbols`
+    /// (`None`: the account) until a read sent after this ask lands
+    /// (docs/plans/RUST_FRAME_FED_READ_COVER.md §5.2).
+    RefreshOrders { symbols: Option<Vec<String>> },
     /// Succeeds only once a positions read issued after this command has
     /// committed to the store; `Capabilities::fresh_positions` advertises it.
     ReadPositions,
@@ -1649,6 +1653,98 @@ where
 
 /// Every Io field that does not name the venue's pending type, so engine
 /// code that only touches these can be shared across venues.
+/// How long a data source's refresh read may stay out before its slot frees.
+#[cfg(feature = "order-locks")]
+pub(crate) const ORDERS_REFRESH_DEADLINE_MS: f64 = 30_000.;
+
+/// A data source's frame-fed page asks for fresh orders (`RefreshOrders`;
+/// docs/plans/RUST_FRAME_FED_READ_COVER.md §5.2): at most one refresh read in
+/// flight, and one pending follow-up for every ask it cannot answer.
+#[cfg(feature = "order-locks")]
+#[derive(Default)]
+struct OrdersRefresh {
+    /// The read out: the epoch its ask opened, its scope, and its deadline.
+    in_flight: Option<(u64, Option<Vec<String>>, f64)>,
+    /// Asks since that read began: the newest epoch and the merged scope.
+    pending: Option<(u64, Option<Vec<String>>)>,
+    /// The asks pending were already re-read once after a lost read.
+    retried: bool,
+}
+
+#[cfg(feature = "order-locks")]
+impl OrdersRefresh {
+    /// `None` reads the account, so it absorbs any symbol list.
+    fn merge(a: Option<Vec<String>>, b: Option<Vec<String>>) -> Option<Vec<String>> {
+        let (mut a, b) = (a?, b?);
+        for symbol in b {
+            if !a.contains(&symbol) {
+                a.push(symbol);
+            }
+        }
+        Some(a)
+    }
+
+    fn ask(&mut self, epoch: u64, scope: Option<Vec<String>>) {
+        let scope = match self.pending.take() {
+            Some((_, pending)) => Self::merge(pending, scope),
+            None => scope,
+        };
+        self.pending = Some((epoch, scope));
+        self.retried = false;
+    }
+
+    /// The scope to read now, when asks wait and no read is out.
+    fn start(&mut self, now: f64) -> Option<Option<Vec<String>>> {
+        if self.in_flight.is_some() {
+            return None;
+        }
+        let (epoch, scope) = self.pending.take()?;
+        self.in_flight = Some((epoch, scope.clone(), now + ORDERS_REFRESH_DEADLINE_MS));
+        Some(scope)
+    }
+
+    /// A read released at `epoch` landed: it answers the asks opened by then.
+    fn landed(&mut self, epoch: u64) {
+        if self
+            .in_flight
+            .as_ref()
+            .is_some_and(|(asked, ..)| *asked <= epoch)
+        {
+            self.in_flight = None;
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|(asked, _)| *asked <= epoch)
+        {
+            self.pending = None;
+        }
+    }
+
+    /// The read out passed its deadline: its asks wait again and are re-read
+    /// once (the scope to read now); after that only a new ask starts one.
+    fn expired(&mut self, now: f64) -> Option<Option<Vec<String>>> {
+        let (epoch, scope, deadline) = self.in_flight.take()?;
+        if deadline > now {
+            self.in_flight = Some((epoch, scope, deadline));
+            return None;
+        }
+        let (newest, scope) = match self.pending.take() {
+            Some((newest, pending)) => (newest, Self::merge(scope, pending)),
+            None => (epoch, scope),
+        };
+        self.pending = Some((newest, scope));
+        if std::mem::replace(&mut self.retried, true) {
+            return None;
+        }
+        self.start(now)
+    }
+
+    fn deadline(&self) -> Option<f64> {
+        self.in_flight.as_ref().map(|(_, _, deadline)| *deadline)
+    }
+}
+
 struct IoCore {
     #[cfg(feature = "address-nonce")]
     address_setup: address_nonce_setup::AddressNonceSetup,
@@ -1731,6 +1827,9 @@ struct IoCore {
     /// authorizes a commit only while `order_response_token` is that epoch.
     #[cfg(feature = "order-locks")]
     order_response_read: Option<(u64, crate::order_read_cover::OrderReadMark)>,
+    /// Data source: a frame-fed page's asks for fresh orders.
+    #[cfg(feature = "order-locks")]
+    orders_refresh: OrdersRefresh,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -1937,6 +2036,8 @@ impl Default for IoCore {
             order_response_token: None,
             #[cfg(feature = "order-locks")]
             order_response_read: None,
+            #[cfg(feature = "order-locks")]
+            orders_refresh: OrdersRefresh::default(),
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -2533,6 +2634,7 @@ impl<P> Cx<'_, P> {
             let read = crate::order_read_cover::OrderReadMark {
                 seq: self.store.order_read_sequence(),
                 sent: self.now,
+                epoch: self.io.core.order_locks.token(),
             };
             self.io
                 .core
@@ -3076,8 +3178,23 @@ impl<P> Cx<'_, P> {
         if self.io.core.order_response_token != Some(epoch) {
             return None;
         }
-        self.store
-            .commit_orders_read(read, scope, in_scope, rows, unproven)
+        let committed = self
+            .store
+            .commit_orders_read(read, scope, in_scope, rows, unproven);
+        self.orders_read_landed(read.epoch);
+        committed
+    }
+
+    /// An orders read released at `epoch` landed, committed or refused: it
+    /// answers every refresh ask opened at or before it, and a later ask gets
+    /// its one follow-up now.
+    #[cfg(feature = "order-locks")]
+    fn orders_read_landed(&mut self, epoch: u64) {
+        let refresh = &mut self.io.core.orders_refresh;
+        refresh.landed(epoch);
+        if let Some(scope) = refresh.start(self.now) {
+            self.io.queue_reconcile(scope, self.now);
+        }
     }
 
     /// The release of the read this response answers, only inside that response.
@@ -3102,8 +3219,11 @@ impl<P> Cx<'_, P> {
         unproven: &[String],
     ) -> Option<Vec<String>> {
         let read = self.order_read_mark()?.earliest(earliest);
-        self.store
-            .commit_orders_read(read, scope, in_scope, rows, unproven)
+        let committed = self
+            .store
+            .commit_orders_read(read, scope, in_scope, rows, unproven);
+        self.orders_read_landed(read.epoch);
+        committed
     }
 
     /// `orders_read_refusals` for rows drawn from several independent reads.
@@ -3786,6 +3906,13 @@ pub trait Venue {
     ) {
     }
 
+    /// Every complete orders read commits its covers through
+    /// `Cx::commit_orders_read*`, so a data source answers `RefreshOrders` by
+    /// reading through `reconcile_uncertain` (the page's bounded ask).
+    fn refreshes_orders(&self) -> bool {
+        false
+    }
+
     /// A repair root ended or a snapshot mint was refused. Runs outside any
     /// command entry, like `reconcile_uncertain`; it grants no new authority.
     #[cfg(feature = "repair-mutations")]
@@ -4194,6 +4321,9 @@ pub struct Engine<V: Venue> {
     /// host time); a source frame lifts it only once written well after.
     #[cfg(feature = "order-locks")]
     fence_marks: Vec<(u64, f64)>,
+    /// Frame-fed: the uncertain symbols `orders.held` last named.
+    #[cfg(feature = "order-locks")]
+    orders_held: Vec<String>,
     /// Frame-fed: the data source's clock minus this host's, in ms, as the
     /// host measured it (`None` until it has).
     source_clock_offset: Option<f64>,
@@ -4293,6 +4423,8 @@ impl<V: Venue> Engine<V> {
             ingest: Default::default(),
             #[cfg(feature = "order-locks")]
             fence_marks: Vec::new(),
+            #[cfg(feature = "order-locks")]
+            orders_held: Vec::new(),
             source_clock_offset: None,
             source_read_covers: false,
             venue_state_sent: None,
@@ -4566,7 +4698,7 @@ impl<V: Venue> Engine<V> {
             #[cfg(feature = "order-locks")]
             if read_covers {
                 if let Some(covers) = &applied.orders_read {
-                    self.lift_on_read_covers(covers, host_time);
+                    self.lift_on_read_covers(covers, host_time, now);
                 }
             } else if let Some(cover) = cover {
                 let lifted = self
@@ -4595,6 +4727,7 @@ impl<V: Venue> Engine<V> {
         &mut self,
         covers: &crate::ingest::ReadCovers,
         host_time: impl Fn(f64) -> f64,
+        now: f64,
     ) {
         let marks = &self.fence_marks;
         let lifts: Vec<(String, u64)> = self
@@ -4608,6 +4741,10 @@ impl<V: Venue> Engine<V> {
                 (host_time(sent) >= marked).then(|| (symbol.to_owned(), epoch))
             })
             .collect();
+        if !lifts.is_empty() {
+            // What still stands is announced afresh, timed for its own marks.
+            self.orders_held.clear();
+        }
         let locks = &mut self.io.core.order_locks;
         for (symbol, epoch) in lifts {
             // The account cover speaks for every symbol fenced up to `epoch`.
@@ -4617,6 +4754,69 @@ impl<V: Venue> Engine<V> {
             Some(oldest) => self.fence_marks.retain(|(token, _)| *token >= oldest),
             None => self.fence_marks.clear(),
         }
+        self.announce_orders_held(now);
+    }
+
+    /// Frame-fed, from a source with read covers: a source sees none of this
+    /// engine's writes, so it is asked to read (`orders.held`) whenever a
+    /// symbol not yet named turns uncertain, timed for when a read could lift
+    /// the oldest standing fence.
+    #[cfg(feature = "order-locks")]
+    fn announce_orders_held(&mut self, now: f64) {
+        if !self.source_read_covers {
+            return;
+        }
+        let standing: Vec<(String, u64)> = self
+            .io
+            .core
+            .order_locks
+            .uncertain_epochs()
+            .map(|(symbol, epoch)| (symbol.to_owned(), epoch))
+            .collect();
+        self.orders_held
+            .retain(|named| standing.iter().any(|(symbol, _)| symbol == named));
+        if standing
+            .iter()
+            .all(|(symbol, _)| self.orders_held.contains(symbol))
+        {
+            return;
+        }
+        let marks = &self.fence_marks;
+        let Some(oldest) = standing
+            .iter()
+            .filter_map(|(_, epoch)| marks.iter().find(|(token, _)| token >= epoch))
+            .map(|(_, at)| *at)
+            .min_by(f64::total_cmp)
+        else {
+            return;
+        };
+        let grace = if self.source_clock_offset.is_some() {
+            crate::frame_fed::FENCE_GRACE_MS
+        } else {
+            crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
+        };
+        let mut symbols: Vec<String> = standing.into_iter().map(|(symbol, _)| symbol).collect();
+        symbols.sort();
+        let named = if symbols.iter().any(String::is_empty) {
+            String::new()
+        } else {
+            symbols.join(",")
+        };
+        self.orders_held = symbols;
+        Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        }
+        .event(
+            Level::Info,
+            crate::log::code::ORDERS_HELD,
+            "Holding an uncertain write until the data source reads its orders",
+            vec![
+                ("symbols", Value::Str(named)),
+                ("liftAfterMs", Value::Num((oldest + grace - now).max(0.))),
+            ],
+        );
     }
 
     /// Account sections (balance, orders, positions) are expected at startup only
@@ -5454,6 +5654,23 @@ impl<V: Venue> Engine<V> {
             }
             Event::Command(Command::Venue {
                 command,
+                action: VenueAction::RefreshOrders { symbols: _symbols },
+            }) => {
+                // Every ask opens a newer epoch, so only a read released after
+                // it answers it; one read in flight at a time (H3, H7).
+                #[cfg(feature = "order-locks")]
+                if !cx.io.core.frame_fed && self.venue.refreshes_orders() {
+                    let epoch = cx.io.core.order_locks.advance();
+                    let refresh = &mut cx.io.core.orders_refresh;
+                    refresh.ask(epoch, _symbols);
+                    if let Some(scope) = refresh.start(now) {
+                        cx.io.queue_reconcile(scope, now);
+                    }
+                }
+                cx.done(command, "null".into());
+            }
+            Event::Command(Command::Venue {
+                command,
                 action: VenueAction::RefreshSettings { symbol },
             }) => {
                 // A data source re-reads what a frame-fed engine just changed.
@@ -5834,10 +6051,15 @@ impl<V: Venue> Engine<V> {
             {
                 self.fence_marks.push((token, now));
             }
+            self.announce_orders_held(now);
             if let Some((timer, _)) = self.reconcile_timer.take() {
                 self.io.core.actions.push(Action::ClearTimer { timer });
             }
             return;
+        }
+        // A refresh read that never landed frees its slot; its asks retry once.
+        if let Some(scope) = self.io.core.orders_refresh.expired(now) {
+            self.io.queue_reconcile(scope, now);
         }
         let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());
         self.io.core.reconcile_due.retain_mut(|(scope, at)| {
@@ -5909,6 +6131,7 @@ impl<V: Venue> Engine<V> {
             .iter()
             .map(|(_, at)| *at)
             .chain(self.io.core.fence_reread.map(|(at, _)| at))
+            .chain(self.io.core.orders_refresh.deadline())
             .min_by(f64::total_cmp);
         if self.reconcile_timer.map(|(_, at)| at) == next {
             return;
@@ -10807,3 +11030,7 @@ mod http_plan_expiry;
 #[cfg(all(test, feature = "order-locks"))]
 #[path = "read_cover_lift_tests.rs"]
 mod read_cover_lift_tests;
+
+#[cfg(all(test, feature = "order-locks"))]
+#[path = "orders_refresh_tests.rs"]
+mod orders_refresh_tests;
