@@ -1,5 +1,6 @@
 //! MEXC USDT/USDC perpetual futures, driven by the sans-I/O engine.
 mod account;
+mod clock;
 mod depth_query;
 mod history;
 mod identity;
@@ -39,7 +40,9 @@ pub enum Pending {
     Private {
         owner: private_read::Owner,
         pending: Box<Pending>,
+        replay: private_read::Replay,
     },
+    Clock(Box<clock::Request>),
     History(history::Request),
     Identity(CommandId),
     Trade(trading::Request),
@@ -683,6 +686,7 @@ impl MexcFutures {
             Pending::Private { .. } => {
                 unreachable!("private ownership is handled before native dispatch")
             }
+            Pending::Clock(request) => self.clock_failed(cx, *request, VenueError::new(error)),
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Depth {
                 symbol, generation, ..
@@ -889,7 +893,7 @@ impl Venue for MexcFutures {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
-        if let Pending::Private { owner, pending } = pending {
+        if let Pending::Private { owner, pending, .. } = pending {
             if owner.current(cx) {
                 self.on_item(cx, pending, item);
             }
@@ -950,11 +954,27 @@ impl Venue for MexcFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        if let Pending::Private { owner, pending } = pending {
+        if let Pending::Clock(request) = pending {
+            self.clock_response(cx, *request, response);
+            return;
+        }
+        let Some(pending) = self.recover_clock(cx, pending, &response) else {
+            return;
+        };
+        if let Pending::Private {
+            owner,
+            pending,
+            replay,
+        } = pending
+        {
             if !owner.current(cx) {
                 self.private_failed(
                     cx,
-                    Pending::Private { owner, pending },
+                    Pending::Private {
+                        owner,
+                        pending,
+                        replay,
+                    },
                     VenueError::new("MEXC read expired"),
                 );
                 return;
@@ -1000,6 +1020,19 @@ impl Venue for MexcFutures {
             self.failure(cx, pending, &error.venue_error().message);
             return;
         }
+        if matches!(
+            &pending,
+            Pending::Identity(_) | Pending::Account(_) | Pending::History(_)
+        ) && let Some(error) = Envelope::refusal(response.body)
+        {
+            if let Pending::Account(request) = &pending
+                && self.account_startup_refusal(cx, request, &response)
+            {
+                return;
+            }
+            self.read_refused(cx, pending, error);
+            return;
+        }
         // Account reads classify their own HTTP failures (a refused key ends startup).
         if response.status != 200 && !matches!(pending, Pending::Account(_)) {
             self.failure(cx, pending, &format!("MEXC HTTP {}", response.status));
@@ -1008,6 +1041,7 @@ impl Venue for MexcFutures {
         let background = pending.public_context().cloned();
         let mut start_account_and_tickers = false;
         (|| match pending {
+            Pending::Clock(_) => unreachable!("clock handled before native dispatch"),
             Pending::Private { .. } => {
                 unreachable!("private ownership is handled before native dispatch")
             }
@@ -1173,11 +1207,27 @@ impl Venue for MexcFutures {
         pending: Pending,
         response: Response<'_>,
     ) {
-        if let Pending::Private { owner, pending } = pending {
+        if let Pending::Clock(request) = pending {
+            self.clock_response(cx, *request, response);
+            return;
+        }
+        let Some(pending) = self.recover_clock(cx, pending, &response) else {
+            return;
+        };
+        if let Pending::Private {
+            owner,
+            pending,
+            replay,
+        } = pending
+        {
             if !owner.current(cx) {
                 self.private_failed(
                     cx,
-                    Pending::Private { owner, pending },
+                    Pending::Private {
+                        owner,
+                        pending,
+                        replay,
+                    },
                     VenueError::new("MEXC read expired"),
                 );
                 return;
@@ -1193,6 +1243,10 @@ impl Venue for MexcFutures {
         {
             return;
         }
+        if let Some(error) = Envelope::refusal(response.body) {
+            self.read_refused(cx, pending, error);
+            return;
+        }
         self.on_request_failed(
             cx,
             pending,
@@ -1203,6 +1257,10 @@ impl Venue for MexcFutures {
         );
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Pending::Clock(request) = pending {
+            self.clock_failed(cx, *request, error);
+            return;
+        }
         if matches!(pending, Pending::Private { .. }) {
             self.private_precommit_failed(
                 cx,
@@ -1236,6 +1294,10 @@ impl Venue for MexcFutures {
         }
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Pending::Clock(request) = pending {
+            self.clock_failed(cx, *request, error);
+            return;
+        }
         if matches!(pending, Pending::Private { .. }) {
             self.private_failed(cx, pending, error);
             return;

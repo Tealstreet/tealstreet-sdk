@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { validateCiWasm, validatePairedCiWasm } from './ci-wasm.mjs';
 import { verifyRuntime } from './cpu-runtime.mjs';
+import { observeCpu } from './cpu-observation.mjs';
 import { resolve } from 'node:path';
 import { createRecordedReplay } from './recorded-replay.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -23,7 +24,7 @@ import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
 import { runAuditedFixer } from './oracle-audit.mjs';
 import { createTsFixes } from './ts-oracle.mjs';
 import { duplicateSymbols, compareCheckpoints, compareSnapshots, valueDifferences, checkpointCoverageErrors, snapshotCoverageErrors } from './snapshot-compare.mjs';
-import { median, performanceFailures, performanceMetricErrors, performanceOrder, replayRunCount, smallWindowRunCount } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, median, performanceFailures, performanceMetricErrors, performanceOrder, replayRunCount } from './performance-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -44,8 +45,8 @@ if (values['correctness-only'] && (values['paired-source'] || values['runtime-ca
   throw new Error('Correctness-only replay cannot supply CPU measurement evidence');
 // Validate before spawning either implementation; a bad artifact has no fallback.
 if (values['paired-source'] !== undefined && (!values['ci-wasm'] || values.venue !== 'bitget' ||
-    values.runs !== '9' || values['runtime-capsule'] || values['recorded-evidence'] || values['no-egress']))
-  throw new Error('Paired source is only a public Bitget nine-pair measurement module contract');
+    values.runs !== String(PUBLIC_REPLAY_PAIRS) || values['runtime-capsule'] || values['recorded-evidence'] || values['no-egress']))
+  throw new Error('Paired source is only a public Bitget fixed-pair measurement module contract');
 const ciWasm = values['ci-wasm'] === undefined ? null : values['paired-source'] === undefined
   ? validateCiWasm({ directory: values['ci-wasm'], venue: values.venue })
   : validatePairedCiWasm({ directory: values['ci-wasm'], venue: values.venue, sourceHead: values['paired-source'] });
@@ -72,8 +73,14 @@ const recorded = values['recorded-evidence'] === undefined ? null : createRecord
   evidence: JSON.parse(readFileSync(values['recorded-evidence'], 'utf8')),
   venue: values.venue, tape: values.tape, books: values.books,
 });
-if (recorded && values.runs !== '9') throw new Error('recorded public verification requires exactly nine original pairs');
+if (recorded && values.runs !== String(PUBLIC_REPLAY_PAIRS)) throw new Error('recorded public verification requires the complete fixed balanced original pairs');
 const artifacts = [];
+const sampleOrder = [];
+const cpuObservation = recorded ? undefined : observeCpu();
+const retainMeasurement = () => {
+  if (!recorded) writeFileSync(`${outDir}/measurement.json`, JSON.stringify({ cpu: cpuObservation, sampleOrder }, null, 2));
+};
+retainMeasurement();
 const fixerReports = [];
 class CommandReplayTimeout extends Error {
   constructor(impl, command, stderrPath) {
@@ -104,11 +111,17 @@ const replay = (impl, run, performanceRun = false) => {
   if (values['no-egress']) args.push('--no-egress');
   if (performanceRun) args.push('--performance');
   // TSX's compiler worker retains shared buffers independently of engine work.
+  const observed = performanceRun ? observeCpu() : undefined;
+  const sampleStarted = performance.now();
   const result = spawnSync(process.execPath, args, {
     encoding: 'utf8',
     timeout: 125000,
     env: { ...process.env, ESBUILD_WORKER_THREADS: '0' },
   });
+  if (performanceRun) {
+    sampleOrder.push({ pair: run, impl, ordinal: sampleOrder.length, before: observed, after: observeCpu(), elapsedMs: performance.now() - sampleStarted });
+    retainMeasurement();
+  }
   if (result.status !== 0) {
     const timeout = /^ReplayTimeout \[Error\]: replay timeout: command ([A-Za-z][A-Za-z0-9]*)$/m.exec(result.stderr ?? '');
     if (result.status === 1 && !performanceRun && timeout && tapeRecords.some((record) => record.type === 'command' && record.op === timeout[1])) {
@@ -153,11 +166,6 @@ for (let run = 0; run < correctnessRuns; run++) {
 if (!isPrivate && !values['correctness-only']) {
   for (let run = 0; run < runs; run++)
     for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
-  // Small windows get more pairs (performance-policy.mjs).
-  const total = smallWindowRunCount(runs, performanceResults.ts.map((output) => output.metrics));
-  for (let run = runs; run < total; run++)
-    for (const impl of performanceOrder(run)) performanceResults[impl].push(replay(impl, run, true));
-  runs = total;
 }
 } catch (error) {
   if (!(error instanceof CommandReplayTimeout)) throw error;
@@ -170,6 +178,7 @@ if (!isPrivate && !values['correctness-only']) {
     private: isPrivate, status: 'FAIL', failures: [error.message], replayFailure: error.failure,
     ...(values['correctness-only'] ? { correctnessOnly: true } : {}),
     coverage: { correctness: 'incomplete', performance: 'not-run' },
+    ...(recorded ? {} : { measurement: { cpu: cpuObservation, sampleOrder } }),
     runs: 0, correctnessRuns, artifacts, fixers: [], samples: { ts: [], rust: [] },
   }, null, 2) + '\n');
   console.log(`FAIL (incomplete replay)\n  ${error.message}`);
@@ -413,6 +422,7 @@ writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   private: isPrivate, books: values.books, runs: isPrivate ? 0 : runs, correctnessRuns, requiredImprovement: 0.10,
   ...(values['correctness-only'] ? { correctnessOnly: true, coverage: { correctness: 'complete', performance: 'not-run' } } : {}),
   status: failures.length ? 'FAIL' : 'PASS', failures, artifacts, fixers: fixerReports,
+  ...(recorded ? {} : { measurement: { cpu: cpuObservation, sampleOrder } }),
   summary: { ts: t, rust: r },
   samples: { ts: measuredResults.ts.map((output) => output.metrics), rust: measuredResults.rust.map((output) => output.metrics) },
 }, null, 2) + '\n');

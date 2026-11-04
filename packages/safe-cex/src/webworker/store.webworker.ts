@@ -1,3 +1,4 @@
+import { setConnectionVisibility } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import { ExchangeName } from '../types';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { virtualClock } from '../utils/virtualClock';
@@ -346,6 +347,9 @@ const start = (ctx: Worker, shared = false) => {
     // and pushes them once, before any 'init', so safe-cex resolves the right hosts from
     // the start. Applied via typed setters — safe-cex never sees flag names.
     if (payload?.op === '__workerConfig') {
+      if (payload.data?.connectionVisibility === 'hidden' || payload.data?.connectionVisibility === 'visible') {
+        setConnectionVisibility(payload.data.connectionVisibility);
+      }
       const cfg = (payload.data ?? {}) as WorkerConfig;
       if ('tickIntervalMultipliers' in cfg) setTickIntervalMultipliers(cfg.tickIntervalMultipliers);
       if ('wsDiagnosticsEnabled' in cfg) setWsDiagnosticsEnabled(cfg.wsDiagnosticsEnabled === true);
@@ -419,7 +423,8 @@ const start = (ctx: Worker, shared = false) => {
         // re-get exchangeWorker after init
         exchangeWorker = getMyExchangeWorker();
 
-        if (exchangeWorker?.exchange && !exchangeWorker.exchange.isDisposed) startTelegramWorker(exchangeWorker, payload);
+        if (exchangeWorker?.exchange && !exchangeWorker.exchange.isDisposed)
+          startTelegramWorker(exchangeWorker, payload);
         break;
       case 'dispose':
         if (shared) {

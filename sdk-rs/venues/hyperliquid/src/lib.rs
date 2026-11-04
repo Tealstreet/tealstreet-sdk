@@ -1207,11 +1207,15 @@ impl Venue for Hyperliquid {
         } else {
             "tickers"
         };
-        vec![
+        let mut fields = vec![
             ("stage", stage.into()),
             ("readTimeoutMs", 20_000.0.into()),
             ("http429Count", f64::from(self.http_429_count).into()),
-        ]
+        ];
+        if let Some(kind) = self.account.last_failed_private_read_kind {
+            fields.push(("lastFailedPrivateReadKind", kind.as_str().into()));
+        }
+        fields
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.credentials = safe_cex_engine::credential_selection::Slots::new(
@@ -1670,6 +1674,12 @@ impl Venue for Hyperliquid {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if matches!(
+            pending,
+            Pending::Meta { .. } | Pending::SpotMeta { .. } | Pending::Dexs { .. }
+        ) {
+            self.private_read_failed(cx, account::PrivateReadKind::Discovery, error);
+        }
         match pending {
             Pending::ManagedInfo(read) => {
                 let _ = cx.finish_http_context(&read.context);

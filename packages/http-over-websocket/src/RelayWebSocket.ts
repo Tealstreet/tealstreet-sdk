@@ -26,6 +26,8 @@
 // ALPN http/1.1 — the tunnel's WAF needs them); in browsers it is the native
 // WebSocket, which ignores those options.
 
+import { ConnectionDiagnostics } from './connectionDiagnostics';
+
 import { bindProxyToken } from './config';
 import { noteTunnelDialFailed, noteTunnelDialOpened, parseRelayUrl, tunnelDialUrl } from './tunnelEndpoints';
 
@@ -79,6 +81,7 @@ export class RelayWebSocket extends EventTarget {
   readonly CLOSING = 2;
   readonly CLOSED = 3;
 
+  readonly diagnostics = new ConnectionDiagnostics('relay');
   readonly url: string;
   readonly tunnelUrl: string;
   readonly upstream: string;
@@ -110,6 +113,7 @@ export class RelayWebSocket extends EventTarget {
     this.url = url;
     this.tunnelUrl = tunnelDialUrl(tunnelUrl);
     this.upstream = upstream;
+    this.diagnostics.dial(this.tunnelUrl);
 
     const Socket = WebSocketCtor ?? NodeWebSocket;
     this.inner = Socket
@@ -148,6 +152,7 @@ export class RelayWebSocket extends EventTarget {
     if (this.readyState === RelayWebSocket.CLOSING || this.readyState === RelayWebSocket.CLOSED) return;
     this.readyState = RelayWebSocket.CLOSING;
     this.closedByCaller = true;
+    this.diagnostics.closed('local');
     this.clearHandshakeTimer();
     try {
       if (code === undefined) this.inner.close();
@@ -161,6 +166,7 @@ export class RelayWebSocket extends EventTarget {
 
   private onInnerOpen = () => {
     this.innerOpened = true;
+    this.diagnostics.opened(true);
     noteTunnelDialOpened(this.tunnelUrl);
     if (this.readyState !== RelayWebSocket.CONNECTING) return;
     this.getProxyToken()
@@ -216,6 +222,7 @@ export class RelayWebSocket extends EventTarget {
       reason?: string;
       wasClean?: boolean;
     };
+    if (!this.diagnostics.lastClose) this.diagnostics.closed(code === 1006 || !wasClean ? 'unknown' : 'remote');
     this.finish(code, reason, wasClean);
   };
 
@@ -229,6 +236,7 @@ export class RelayWebSocket extends EventTarget {
   private becomeOpen() {
     this.clearHandshakeTimer();
     this.readyState = RelayWebSocket.OPEN;
+    this.diagnostics.established();
     const event = new Event('open');
     this.onopen?.(event);
     this.dispatchEvent(event);
@@ -237,6 +245,7 @@ export class RelayWebSocket extends EventTarget {
 
   private fail(message: string) {
     if (this.readyState === RelayWebSocket.CLOSED) return;
+    this.diagnostics.closed('local');
     this.dispatchError(message);
     this.readyState = RelayWebSocket.CLOSING;
     this.clearHandshakeTimer();

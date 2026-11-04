@@ -91,7 +91,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
       'krakenspot', 'bitget', 'bitgetinverse', 'bitgetusdc', 'hyperliquid', 'hyperliquidspot', 'lighter',
       'lighter-robinhood', ...OKX, 'blofin', 'hyrotrader', 'paradex', 'phemex',
     ),
-    orderReadCovers: is('bybit', 'bybitdemo', 'bybitinverse', 'bybitspot'),
+    orderReadCovers: is('bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'phemex'),
     ...overrides,
   };
   return JSON.stringify(record);

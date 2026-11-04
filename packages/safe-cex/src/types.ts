@@ -1,5 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from './commandOutcome';
 import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
@@ -1196,6 +1197,7 @@ export type StoreData = {
      * clock-free, which matters because hosted exchange-server stamps these
      * on the server's clock.
      */
+    reconnectDiagnostics?: AccountReconnectDiagnostics;
     publicCloseCode?: number;
     privateCloseCode?: number;
     publicCloseCountTotal?: number;

@@ -1171,7 +1171,19 @@ export class EngineHost {
     if (this.disposed || !actionsJson) return;
     let unknown;
     let callbackFailure;
-    for (const action of JSON.parse(actionsJson)) {
+    const actions = JSON.parse(actionsJson);
+    // Native timeout IDs bind diagnostics before this batch cancels their original resources.
+    for (const action of actions) {
+      const request = action.op === 'event' ? action.fields?.httpTimeoutRequest : undefined;
+      if (typeof request !== 'string' || !/^[1-9][0-9]{0,19}$/.test(request)) continue;
+      for (const resource of this.managedHttp.resources.values()) {
+        if (!Number.isSafeInteger(resource.request) || String(resource.request) !== request) continue;
+        action.fields = { ...action.fields, httpMethod: resource.diagnostic.method, httpPath: resource.diagnostic.path, httpPhase: resource.phase };
+        this.managedHttp.failure(resource, 'timeout');
+        break;
+      }
+    }
+    for (const action of actions) {
       if (this.disposed) return;
       // Unknown protocol actions remain errors, but cannot discard the batch's
       // subsequent command completions. Ordinary callbacks still propagate.

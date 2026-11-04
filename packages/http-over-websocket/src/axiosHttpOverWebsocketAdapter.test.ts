@@ -17,6 +17,7 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 // mock class has to be in place by then.
 vi.mock('./HOWWebSocket', () => {
   class MockHOWWebSocket {
+    ws = { OPEN: 1, readyState: 1, loopState: { phase: 'connected', since: 0 } };
     isOpen = true;
     isInitialized = true;
     isTimeSynced = true;

@@ -103,9 +103,9 @@ pub enum Retire<'a> {
     /// no longer contains it.
     CompleteRead(&'a SnapshotReceipt),
     /// Frame-fed: the data source's ORDERS frame being ingested speaks for
-    /// every write sent before `since` (`Cx::source_orders_cover`) and does not
-    /// contain it.
-    SourceOrders { since: f64 },
+    /// every write on `symbol` sent before `since` (`Cx::source_orders_covers`)
+    /// and does not contain it.
+    SourceOrders { since: f64, symbol: &'a str },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

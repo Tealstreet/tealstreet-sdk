@@ -7,10 +7,15 @@ use crate::order_read_cover::{OrderReadMark, OrderReadScope};
 use crate::wire::{FrameWriter, section};
 use crate::{Capabilities, Response, SocketId, Store, TimerId};
 
-struct Page;
+struct Page {
+    observed: Vec<Option<crate::ingest::ReadCovers>>,
+}
 
 impl Venue for Page {
     type Pending = ();
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, ()>) {
+        self.observed.push(cx.source_orders_covers().cloned());
+    }
     fn start(&mut self, _: &mut Cx<'_, ()>) {}
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
@@ -33,7 +38,7 @@ const MARKED: f64 = 1_000.;
 const FRESH: f64 = MARKED + crate::frame_fed::FENCE_GRACE_MS;
 
 fn page() -> Engine<Page> {
-    let mut engine = crate::test_support::seeded_engine(Page);
+    let mut engine = crate::test_support::seeded_engine(Page { observed: vec![] });
     engine.set_frame_fed().unwrap();
     engine.set_source_clock_offset(Some(0.));
     engine
@@ -478,4 +483,49 @@ fn measured_and_unsynced_clock_graces_are_applied_to_read_time() {
         .unwrap();
         assert!(!fenced(&e, "BTCUSDT"));
     }
+}
+
+#[test]
+fn source_cover_cutover_keeps_account_and_stamp_host_times() {
+    for (bit, expected) in [(true, 6_750.), (false, 16_750.)] {
+        let mut engine = page();
+        engine.set_source_clock_offset(Some(250.));
+        engine
+            .apply_frame(
+                20_000.,
+                &source(20_000., Some(bit), &[Read::Account(10_000.)]),
+                true,
+            )
+            .unwrap();
+        let observed = engine.venue.observed.last().unwrap().as_ref().unwrap();
+        assert_eq!(observed.account, Some(expected));
+        assert_eq!(observed.cover("BTCUSDT"), Some(expected));
+        assert_eq!(observed.cover("ETHUSDT"), Some(expected));
+        assert!(engine.io.core.source_orders_covers.is_none());
+    }
+}
+#[test]
+fn source_cover_cutover_preserves_symbol_isolation_and_unsynced_grace() {
+    let mut engine = page();
+    engine.set_source_clock_offset(None);
+    engine
+        .apply_frame(
+            50_000.,
+            &source(
+                50_000.,
+                Some(true),
+                &[
+                    Read::Symbol("BTCUSDT", 40_000.),
+                    Read::Symbol("ETHUSDT", 45_000.),
+                ],
+            ),
+            true,
+        )
+        .unwrap();
+    let observed = engine.venue.observed.last().unwrap().as_ref().unwrap();
+    assert_eq!(observed.account, None);
+    assert_eq!(observed.cover("BTCUSDT"), Some(10_000.));
+    assert_eq!(observed.cover("ETHUSDT"), Some(15_000.));
+    assert_eq!(observed.cover("SOLUSDT"), None);
+    assert!(engine.io.core.source_orders_covers.is_none());
 }

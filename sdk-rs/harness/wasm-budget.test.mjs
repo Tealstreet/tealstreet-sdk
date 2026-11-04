@@ -155,7 +155,6 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
     ['hyperliquidspot', 2_095_474, 2_106_368],
     ['okx', 1_936_660, 1_947_648],
     ['paradex', 2_223_483, 2_234_368],
-    ['phemex', 2_040_251, 2_051_072],
     ['txflow', 1_827_125, 1_838_080],
     ['weex', 1_925_507, 1_936_384],
     ['woo', 2_388_474, 2_399_232],
@@ -214,4 +213,17 @@ test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain he
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
+});
+
+test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom and siblings match', () => {
+  for (const [venue, measured, cap] of [
+    ['phemex', 2_054_401, 2_065_408],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
 });

@@ -106,3 +106,17 @@ test('workflow controls reject skipped final checks, unconditional second jobs a
   ];
   for (const change of changes) { const changed = change(source); assert.notEqual(changed, source); assert.throws(() => verifyWorkflow(changed)); }
 });
+
+
+test('A/A diagnostics are explicit dispatch-only and cannot supply certification evidence', () => {
+  const diagnostic = job(source, 'cpu-budget-diagnostic');
+  assert.match(diagnostic, /if: github.event_name == 'workflow_dispatch' && inputs.cpu_budget_diagnostic/);
+  assert.match(diagnostic, /fail-fast: false/);
+  assert.match(diagnostic, /slot: \[1, 2, 3, 4\]/);
+  assert.match(diagnostic, /cpu-budget-diagnostic\.mjs --module/);
+  assert.doesNotMatch(diagnostic, /--command (?:collect|certify|second)|rust:gate:record|gh run rerun|continue-on-error/);
+  assert.match(diagnostic, /name: cpu-budget-diagnostic-\$\{\{ matrix\.slot \}\}/);
+  const scope = job(source, 'scope');
+  assert.match(scope, /if \[ '\$\{\{ github\.event_name \}\}' = workflow_dispatch \] && \[ '\$\{\{ inputs\.cpu_budget_diagnostic \}\}' = true \]/);
+  assert.match(scope, /else\n\s+node sdk-rs\/harness\/ci-scope\.mjs/);
+});

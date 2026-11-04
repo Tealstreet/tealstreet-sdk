@@ -1,3 +1,4 @@
+import { requestFailureFields } from './request-failure.mjs';
 // Group resources are built and checked before the shared synchronous claim.
 export function bindGroup(manager, action, reason) {
   const { host } = manager;
@@ -22,6 +23,7 @@ export function bindGroup(manager, action, reason) {
       const member = members[i];
       const { resource } = entries[i];
       if (member.packet) {
+        resource.diagnostic = requestFailureFields(member.packet);
         resource.bound = resource.prepared.bind({ ...member.packet, headers: Object.fromEntries(member.packet.headers), signal: resource.controller.signal });
         resource.phase = 'bound';
         resource.groupRequest = member.packet.request;

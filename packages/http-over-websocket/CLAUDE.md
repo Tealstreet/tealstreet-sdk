@@ -128,6 +128,11 @@ yarn test           # Vitest
   `prepareLegacy` and the Axios function retain the existing parser/simulation
   behavior and provide no engine release guarantee. An epoch change invalidates
   a managed preparation before dispatch; cancellation never closes a shared peer.
+  Readiness also requires native OPEN and the current connected loop generation:
+  a browser can retire a socket while its close callback is still deferred after
+  sleep. Each actual open resets clock/token readiness. Bind/ready reject stale
+  resources with `HTTP_PREPARATION_STALE` before claim, so the engine re-prepares
+  and re-signs within the original deadline; no post-send failure is replayed.
 - Axios `config.timeout` is one deadline for the complete tunnel request, not
   only the post-send response wait. Token retrieval, socket/time sync,
   authentication, simulation, and response handling all consume the same
@@ -240,3 +245,11 @@ fields, header tuples and secret-bearing object keys are scrubbed before logging
 HTML normalization covers decimal/hex entities and quot/apos/lt/gt/amp. Base64
 and base64url tokens are checked for auth names, with four nesting levels,
 64 candidate tokens and 4096 bytes per token; excess discards the whole token.
+
+Automatic 25 s silence recovery uses RWS `retryConnection()` on the same wrapper,
+preserving its current retry counter and normal delay. Explicit manual/wake
+reconnects retain their reset semantics; the existing 5 s stable-uptime reset is
+unchanged. Close diagnostics retain only route/port, phase, initiator and lifetime
+buckets. An abnormal native close is unknown, not proof of a server close.
+HOW's existing timers record maximum lateness only when delivered while hidden;
+no new polling timer or keepalive protocol is introduced.
