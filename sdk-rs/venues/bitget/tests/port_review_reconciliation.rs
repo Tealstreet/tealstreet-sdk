@@ -252,17 +252,38 @@ fn unmapped_owned_rest_rows_keep_their_own_position_and_protection_while_peers_u
             r#"{"code":"00000","data":{"entrustedList":[]}}"#,
         );
         h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
-        h.respond(
-            "/orders-pending",
-            200,
-            &json!({"code":"00000","data":{"entrustedList":normal_rows}}).to_string(),
-        );
-        h.respond(
-            "planType=profit_loss",
-            200,
-            &json!({"code":"00000","data":{"entrustedList":plan_rows}}).to_string(),
-        );
-        h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
+        // The follow-up waits out its minimum interval; answer every poll that
+        // comes due and every census page until one full census has landed.
+        let normal_body = json!({"code":"00000","data":{"entrustedList":normal_rows}}).to_string();
+        let plan_body = json!({"code":"00000","data":{"entrustedList":plan_rows}}).to_string();
+        let pending = |h: &Harness, path: &str| h.requests.iter().any(|r| r.url.contains(path));
+        let mut landed = false;
+        for _ in 0..32 {
+            for (path, body) in [("/account/accounts", ACCOUNT), ("/all-position", POSITION)] {
+                if pending(&h, path) {
+                    h.respond(path, 200, body);
+                }
+            }
+            if pending(&h, "/orders-pending") {
+                h.respond("/orders-pending", 200, &normal_body);
+            } else if pending(&h, "planType=profit_loss") {
+                h.respond("planType=profit_loss", 200, &plan_body);
+            } else if pending(&h, "planType=track_plan") {
+                h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
+                landed = true;
+                break;
+            } else {
+                let (timer, at) = *h
+                    .timers
+                    .iter()
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .expect("a follow-up census is owed");
+                h.timers.retain(|(t, _)| *t != timer);
+                h.now = h.now.max(at);
+                h.event(safe_cex_engine::Event::TimerFired { timer });
+            }
+        }
+        assert!(landed, "a full follow-up census landed");
         let store = h.engine.store();
         assert!(store.order("valid-new").is_some());
         assert!(store.order("valid-new-sl").is_some());

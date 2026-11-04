@@ -44,6 +44,9 @@ fn log_skip(
 /// The identity fields of a position or order row that failed to decode.
 /// The one read-cover scope of BloFin's account-wide pending-order census.
 const ORDERS_SCOPE: &str = "orders";
+/// The least wait before the census owed after one the stream outran, so a
+/// busy symbol cannot drive back-to-back census reads.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.0;
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1875,9 +1878,13 @@ impl Blofin {
                         {
                             let mut unproven = std::mem::take(&mut self.account.census_unproven);
                             // A refused symbol's fence waits for a read released after it.
+                            let outran = !refused_symbols.is_empty();
                             unproven.extend(refused_symbols);
                             self.account.reconcile_owed = !unproven.is_empty();
                             cx.orders_reconciled_except(&unproven, read_epoch);
+                            if outran && self.account.retry.is_none() {
+                                self.account.retry = Some((cx.set_timer(CENSUS_FOLLOW_UP_MS), 1));
+                            }
                         } else if reconcile {
                             self.account.reconcile_owed = true;
                         }

@@ -79,6 +79,9 @@ pub struct OrderSnapshot {
 
 /// The one read-cover scope of Bitget's account-wide open-order census.
 const ORDERS_SCOPE: &str = "orders";
+/// The least time between a census the stream outran and its follow-up, so
+/// a busy symbol cannot drive back-to-back census reads.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.0;
 
 /// Symbol and side of a position row; a `None` side covers both legs.
 type PositionKey = (String, Option<PositionSide>);
@@ -171,6 +174,8 @@ pub struct Account {
     rest_paused_until: f64,
     last_payload: f64,
     write_check: Option<(TimerId, f64)>,
+    /// A census the stream outran owes another, no sooner than this timer.
+    census_follow_up: Option<TimerId>,
     degraded: bool,
     /// When positions, balance and orders were last read over REST while live;
     /// `None` after each (re)login, so the first live poll covers the gap.
@@ -931,14 +936,16 @@ impl BitgetFutures {
                     let Some((earliest, refused)) = refused else {
                         // Refused whole, or unprovable: newer rows already stand, and
                         // another read follows to prove what they cannot (absences).
-                        self.account.orders_dirty = true;
-                        self.refresh_orders(cx, false);
+                        self.census_follow_up(cx, snapshot.started);
+                        if self.account.orders_dirty {
+                            self.refresh_orders(cx, false);
+                        }
                         return;
                     };
                     // Rows the stream changed after this census went out stay as
                     // they are; another read follows for what only a read proves.
                     if !refused.is_empty() {
-                        self.account.orders_dirty = true;
+                        self.census_follow_up(cx, snapshot.started);
                     }
                     let admitted = |id: &str| {
                         rows.iter()
@@ -2464,7 +2471,22 @@ impl BitgetFutures {
         }
     }
 
+    /// Owe a census after one the stream outran, `CENSUS_FOLLOW_UP_MS` after
+    /// that one started at the earliest.
+    fn census_follow_up(&mut self, cx: &mut Cx<'_, Pending>, started: f64) {
+        if self.account.census_follow_up.is_some() {
+            return;
+        }
+        let wait = (started + CENSUS_FOLLOW_UP_MS - cx.now).max(0.0);
+        self.account.census_follow_up = Some(cx.set_timer(wait));
+    }
+
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.census_follow_up == Some(timer) {
+            self.account.census_follow_up = None;
+            self.account.orders_dirty = true;
+            self.refresh_orders(cx, false);
+        }
         if self.account.fresh_positions_timer == Some(timer) {
             self.account.fresh_positions_timer = None;
             self.retry_fresh_positions(cx);

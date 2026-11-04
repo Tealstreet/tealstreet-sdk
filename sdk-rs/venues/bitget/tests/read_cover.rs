@@ -80,3 +80,29 @@ fn an_unmappable_census_row_proves_no_cover() {
     );
     assert_eq!(account_cover(&mut h).1, None);
 }
+
+/// The follow-up a refused census owes waits at least 2 s from that census's
+/// start, so a busy symbol cannot drive back-to-back census reads.
+#[test]
+fn the_follow_up_to_a_refused_census_is_rate_bounded() {
+    let mut h = census_out();
+    let started = h.now;
+    h.private_message(r#"{"arg":{"channel":"orders"},"data":[{"orderId":"7","symbol":"BTCUSDT","size":"1","price":"88","side":"buy","orderType":"limit","status":"live"}]}"#);
+    let before: Vec<_> = h.timers.iter().map(|(timer, _)| *timer).collect();
+    h.orders(OPEN_ORDER);
+    assert!(
+        !h.requests.iter().any(|r| r.url.contains("/orders-pending")),
+        "no census straight after the refused one"
+    );
+    let armed: Vec<f64> = h
+        .timers
+        .iter()
+        .filter(|(timer, _)| !before.contains(timer))
+        .map(|(_, at)| *at)
+        .collect();
+    assert_eq!(armed.len(), 1, "one follow-up: {armed:?}");
+    assert!(
+        armed[0] >= started + 2_000.0 - 0.01,
+        "no sooner than 2 s: {armed:?}"
+    );
+}
