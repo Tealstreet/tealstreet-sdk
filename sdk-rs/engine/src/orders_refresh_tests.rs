@@ -12,6 +12,12 @@ struct Source {
     refreshes: bool,
     /// Sends its own orders read at start, as a venue's startup census does.
     startup_read: bool,
+    /// The account scope keys (one read each); empty: one key, "all".
+    keys: Vec<&'static str>,
+    /// Symbols the stream changes after each read goes out, so it refuses them.
+    refuse: Vec<&'static str>,
+    /// The key of each read out.
+    out: Vec<&'static str>,
     /// The scope of each read the engine asked for.
     reads: Vec<Option<Vec<String>>>,
 }
@@ -27,11 +33,25 @@ impl Venue for Source {
     fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
     fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
     fn on_response(&mut self, cx: &mut Cx<'_, ()>, _: (), _: Response<'_>) {
-        let scope = OrderReadScope::Account {
-            key: "all",
-            account: &["all"],
+        let keys = if self.keys.is_empty() {
+            vec!["all"]
+        } else {
+            self.keys.clone()
         };
-        cx.commit_orders_read(scope, |_| true, vec![], &[]);
+        let key = if self.out.is_empty() {
+            keys[0]
+        } else {
+            self.out.remove(0)
+        };
+        for symbol in &self.refuse {
+            cx.store.upsert_order(row(symbol));
+        }
+        let scope = OrderReadScope::Account {
+            key,
+            account: &keys,
+        };
+        let rows = cx.store.orders().to_vec();
+        cx.commit_orders_read(scope, |_| true, rows, &[]);
     }
     fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
     fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
@@ -41,7 +61,15 @@ impl Venue for Source {
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, ()>, symbols: Option<&[String]>) {
         self.reads.push(symbols.map(<[String]>::to_vec));
-        self.read(cx);
+        let keys = if self.keys.is_empty() {
+            vec!["all"]
+        } else {
+            self.keys.clone()
+        };
+        for key in keys {
+            self.out.push(key);
+            self.read(cx);
+        }
     }
     fn book(&self, _: &str) -> Option<&Book> {
         None
@@ -73,6 +101,31 @@ impl Source {
             None,
             (),
         );
+    }
+}
+
+/// A resting order on `symbol`, as the stream would insert it.
+fn row(symbol: &str) -> crate::model::Order {
+    crate::model::Order {
+        id: format!("{symbol}-streamed"),
+        parent_id: None,
+        status: crate::model::OrderStatus::Open,
+        symbol: symbol.into(),
+        kind: crate::model::OrderType::Limit,
+        side: crate::model::OrderSide::Buy,
+        price: 1.,
+        amount: 1.,
+        filled: 0.,
+        remaining: 1.,
+        reduce_only: false,
+        close: None,
+        client_order_id: None,
+        time_in_force: None,
+        last_update: 0.,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
     }
 }
 
@@ -227,12 +280,63 @@ fn a_read_released_before_the_ask_cannot_answer_it() {
         2,
         "the startup read did not answer ask 7, so its read is still the one out"
     );
+    // The startup read committed after the ask's read went out, so the scope
+    // refuses that read whole: it answers nothing, and one follow-up for both
+    // asks waits its 2 s from that read's send.
     h.answer(4., asked);
+    assert_eq!(h.requests.len(), 2, "no follow-up straight away");
+    h.advance(1. + crate::frame_fed::REFRESH_FOLLOW_UP_MS);
+    assert_eq!(h.requests.len(), 3, "one follow-up, at its time");
+    let follow_up = h.requests[2];
+    h.answer(3_100., follow_up);
+    assert_eq!(h.requests.len(), 3, "it answers both asks");
+}
+
+/// An account read lands only once every scope key has: one key alone frees
+/// no slot, so a new ask starts nothing until the others land (H7).
+#[test]
+fn an_account_read_frees_its_slot_only_when_every_key_lands() {
+    let mut h = Harness::with(Source {
+        refreshes: true,
+        keys: vec!["linear", "inverse"],
+        ..Source::default()
+    });
+    h.ask(1., 7, None);
+    assert_eq!(h.requests.len(), 2, "one read per key");
+    let (linear, inverse) = (h.requests[0], h.requests[1]);
+    h.answer(2., linear);
+    h.ask(3., 8, None);
+    assert_eq!(h.requests.len(), 2, "inverse is still out");
+    h.answer(4., inverse);
+    assert_eq!(h.requests.len(), 4, "now ask 8's follow-up");
+}
+
+/// A read that refuses an asked symbol keeps demand for it, read again no
+/// sooner than 2 s after it went out; one it answered asks nothing more.
+#[test]
+fn a_refused_symbol_is_asked_again_after_its_wait() {
+    let mut h = Harness::with(Source {
+        refreshes: true,
+        refuse: vec!["BTCUSDT"],
+        ..Source::default()
+    });
+    h.ask(1., 7, Some(&["BTCUSDT", "ETHUSDT"]));
+    let first = h.requests[0];
+    h.answer(2., first);
+    assert_eq!(h.requests.len(), 1, "the follow-up waits");
+    h.advance(1. + crate::frame_fed::REFRESH_FOLLOW_UP_MS - 1.);
+    assert_eq!(h.requests.len(), 1);
+    h.advance(1. + crate::frame_fed::REFRESH_FOLLOW_UP_MS);
     assert_eq!(
-        h.requests.len(),
-        3,
-        "ask 8 came after that read: one follow-up"
+        h.reads()[1],
+        Some(vec!["BTCUSDT".to_owned()]),
+        "only what was refused"
     );
+    h.engine.venue.refuse.clear();
+    let second = h.requests[1];
+    h.answer(3_100., second);
+    h.advance(10_000.);
+    assert_eq!(h.requests.len(), 2, "answered: nothing more");
 }
 
 /// A read that never lands frees its slot at its deadline and is retried

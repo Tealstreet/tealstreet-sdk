@@ -1663,12 +1663,32 @@ pub(crate) const ORDERS_REFRESH_DEADLINE_MS: f64 = 30_000.;
 #[cfg(feature = "order-locks")]
 #[derive(Default)]
 struct OrdersRefresh {
-    /// The read out: the epoch its ask opened, its scope, and its deadline.
-    in_flight: Option<(u64, Option<Vec<String>>, f64)>,
-    /// Asks since that read began: the newest epoch and the merged scope.
-    pending: Option<(u64, Option<Vec<String>>)>,
+    in_flight: Option<RefreshRead>,
+    /// Asks since that read began: the newest epoch, the merged scope, and
+    /// the earliest it may be read (a refused read's follow-up waits).
+    pending: Option<(u64, Option<Vec<String>>, f64)>,
     /// The asks pending were already re-read once after a lost read.
     retried: bool,
+    /// That re-read was lost too: only a new ask starts another.
+    stalled: bool,
+}
+
+/// The refresh read out, and what its landed parts have proved so far.
+#[cfg(feature = "order-locks")]
+struct RefreshRead {
+    /// The epoch its ask opened, its scope, and its deadline.
+    epoch: u64,
+    scope: Option<Vec<String>>,
+    deadline: f64,
+    /// The account scope keys committed (Bybit's categories): an account
+    /// read lands only once every key has.
+    keys: Vec<String>,
+    /// Symbols a commit refused (the stream changed them after the release);
+    /// `refused_all` when a whole scope was refused.
+    refused: Vec<String>,
+    refused_all: bool,
+    /// The earliest send among the landed parts.
+    sent: f64,
 }
 
 #[cfg(feature = "order-locks")]
@@ -1684,64 +1704,129 @@ impl OrdersRefresh {
         Some(a)
     }
 
-    fn ask(&mut self, epoch: u64, scope: Option<Vec<String>>) {
-        let scope = match self.pending.take() {
-            Some((_, pending)) => Self::merge(pending, scope),
-            None => scope,
-        };
-        self.pending = Some((epoch, scope));
-        self.retried = false;
+    /// Demand a read at or after `epoch` for `scope`, no sooner than `not_before`.
+    fn demand(&mut self, epoch: u64, scope: Option<Vec<String>>, not_before: f64) {
+        self.pending = Some(match self.pending.take() {
+            Some((_, pending, waits)) => {
+                (epoch, Self::merge(pending, scope), waits.max(not_before))
+            }
+            None => (epoch, scope, not_before),
+        });
     }
 
-    /// The scope to read now, when asks wait and no read is out.
+    /// A page's own ask reads now: only an automatic follow-up waits.
+    fn ask(&mut self, epoch: u64, scope: Option<Vec<String>>) {
+        self.demand(epoch, scope, f64::NEG_INFINITY);
+        if let Some((.., at)) = &mut self.pending {
+            *at = f64::NEG_INFINITY;
+        }
+        self.retried = false;
+        self.stalled = false;
+    }
+
+    /// The scope to read now, when asks wait, none is due later, and no read is out.
     fn start(&mut self, now: f64) -> Option<Option<Vec<String>>> {
-        if self.in_flight.is_some() {
+        if self.stalled
+            || self.in_flight.is_some()
+            || self.pending.as_ref().is_some_and(|(.., at)| *at > now)
+        {
             return None;
         }
-        let (epoch, scope) = self.pending.take()?;
-        self.in_flight = Some((epoch, scope.clone(), now + ORDERS_REFRESH_DEADLINE_MS));
+        let (epoch, scope, _) = self.pending.take()?;
+        self.in_flight = Some(RefreshRead {
+            epoch,
+            scope: scope.clone(),
+            deadline: now + ORDERS_REFRESH_DEADLINE_MS,
+            keys: Vec::new(),
+            refused: Vec::new(),
+            refused_all: false,
+            sent: f64::INFINITY,
+        });
         Some(scope)
     }
 
-    /// A read released at `epoch` landed: it answers the asks opened by then.
-    fn landed(&mut self, epoch: u64) {
-        if self
-            .in_flight
-            .as_ref()
-            .is_some_and(|(asked, ..)| *asked <= epoch)
-        {
-            self.in_flight = None;
+    /// One commit of a read released at `epoch` (and `sent`) landed. Once the
+    /// read out has landed whole, it answers every ask opened by its release
+    /// but for the symbols it refused: the scope still owed, and when.
+    fn landed(
+        &mut self,
+        epoch: u64,
+        sent: f64,
+        account: Option<(&str, &[&str])>,
+        refused: Option<&[String]>,
+    ) -> Option<(Option<Vec<String>>, f64)> {
+        let read = self.in_flight.as_mut().filter(|read| read.epoch <= epoch)?;
+        match refused {
+            None => read.refused_all = true,
+            Some(refused) => {
+                for symbol in refused {
+                    if !read.refused.contains(symbol) {
+                        read.refused.push(symbol.clone());
+                    }
+                }
+            }
         }
+        read.sent = read.sent.min(sent);
+        if let Some((key, keys)) = account {
+            if !read.keys.iter().any(|landed| landed == key) {
+                read.keys.push(key.to_owned());
+            }
+            if !keys
+                .iter()
+                .all(|key| read.keys.iter().any(|landed| landed == key))
+            {
+                return None;
+            }
+        }
+        let read = self.in_flight.take().expect("checked above");
+        let mut scope = read.scope;
         if self
             .pending
             .as_ref()
-            .is_some_and(|(asked, _)| *asked <= epoch)
+            .is_some_and(|(asked, ..)| *asked <= epoch)
         {
-            self.pending = None;
+            let (_, pending, _) = self.pending.take().expect("checked above");
+            scope = Self::merge(scope, pending);
         }
-    }
-
-    /// The read out passed its deadline: its asks wait again and are re-read
-    /// once (the scope to read now); after that only a new ask starts one.
-    fn expired(&mut self, now: f64) -> Option<Option<Vec<String>>> {
-        let (epoch, scope, deadline) = self.in_flight.take()?;
-        if deadline > now {
-            self.in_flight = Some((epoch, scope, deadline));
-            return None;
-        }
-        let (newest, scope) = match self.pending.take() {
-            Some((newest, pending)) => (newest, Self::merge(scope, pending)),
-            None => (epoch, scope),
+        let owed = if read.refused_all {
+            scope
+        } else {
+            let refused = read.refused.into_iter();
+            let owed: Vec<String> = match &scope {
+                None => refused.collect(),
+                Some(asked) => refused.filter(|symbol| asked.contains(symbol)).collect(),
+            };
+            if owed.is_empty() {
+                return None;
+            }
+            Some(owed)
         };
-        self.pending = Some((newest, scope));
-        if std::mem::replace(&mut self.retried, true) {
-            return None;
-        }
-        self.start(now)
+        Some((owed, read.sent + crate::frame_fed::REFRESH_FOLLOW_UP_MS))
     }
 
+    /// A read out past its deadline frees its slot: its asks wait again, to
+    /// be re-read once; after that only a new ask starts another.
+    fn expire(&mut self, now: f64) {
+        if self
+            .in_flight
+            .as_ref()
+            .is_none_or(|read| read.deadline > now)
+        {
+            return;
+        }
+        let read = self.in_flight.take().expect("checked above");
+        self.demand(read.epoch, read.scope, f64::NEG_INFINITY);
+        self.stalled = std::mem::replace(&mut self.retried, true);
+    }
+
+    /// When the reconcile timer must wake: the read out's deadline, or a
+    /// follow-up waiting for its time.
     fn deadline(&self) -> Option<f64> {
-        self.in_flight.as_ref().map(|(_, _, deadline)| *deadline)
+        match (&self.in_flight, &self.pending) {
+            (Some(read), _) => Some(read.deadline),
+            (None, Some((.., at))) if at.is_finite() && !self.stalled => Some(*at),
+            _ => None,
+        }
     }
 }
 
@@ -3177,18 +3262,36 @@ impl<P> Cx<'_, P> {
         let committed = self
             .store
             .commit_orders_read(read, scope, in_scope, rows, unproven);
-        self.orders_read_landed(read.epoch);
+        self.orders_read_landed(read, scope, committed.as_deref());
         committed
     }
 
-    /// An orders read released at `epoch` landed, committed or refused: it
-    /// answers every refresh ask opened at or before it, and a later ask gets
-    /// its one follow-up now.
+    /// An orders read commit landed, committed or refused (`None`: the whole
+    /// scope). A refresh read answers the asks opened by its release once it
+    /// has landed whole, but not for the symbols it refused: those are asked
+    /// again under a newer epoch, after `REFRESH_FOLLOW_UP_MS`.
     #[cfg(feature = "order-locks")]
-    fn orders_read_landed(&mut self, epoch: u64) {
-        let refresh = &mut self.io.core.orders_refresh;
-        refresh.landed(epoch);
-        if let Some(scope) = refresh.start(self.now) {
+    fn orders_read_landed(
+        &mut self,
+        read: crate::order_read_cover::OrderReadMark,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        refused: Option<&[String]>,
+    ) {
+        let account = match scope {
+            crate::order_read_cover::OrderReadScope::Account { key, account } => {
+                Some((key, account))
+            }
+            crate::order_read_cover::OrderReadScope::Symbols(_) => None,
+        };
+        let core = &mut self.io.core;
+        if let Some((owed, not_before)) = core
+            .orders_refresh
+            .landed(read.epoch, read.sent, account, refused)
+        {
+            let epoch = core.order_locks.advance();
+            core.orders_refresh.demand(epoch, owed, not_before);
+        }
+        if let Some(scope) = self.io.core.orders_refresh.start(self.now) {
             self.io.queue_reconcile(scope, self.now);
         }
     }
@@ -3218,7 +3321,7 @@ impl<P> Cx<'_, P> {
         let committed = self
             .store
             .commit_orders_read(read, scope, in_scope, rows, unproven);
-        self.orders_read_landed(read.epoch);
+        self.orders_read_landed(read, scope, committed.as_deref());
         committed
     }
 
@@ -6079,7 +6182,10 @@ impl<V: Venue> Engine<V> {
             return;
         }
         // A refresh read that never landed frees its slot; its asks retry once.
-        if let Some(scope) = self.io.core.orders_refresh.expired(now) {
+        // A refused read's follow-up starts once its time comes.
+        let refresh = &mut self.io.core.orders_refresh;
+        refresh.expire(now);
+        if let Some(scope) = refresh.start(now) {
             self.io.queue_reconcile(scope, now);
         }
         let (mut any, mut all, mut symbols) = (false, false, Vec::<String>::new());

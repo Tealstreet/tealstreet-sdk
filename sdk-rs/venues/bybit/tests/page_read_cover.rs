@@ -249,3 +249,239 @@ fn bybit_advertises_read_covers() {
         0
     );
 }
+
+#[test]
+fn one_hundred_asks_start_only_one_follow_up() {
+    let mut source = source();
+    answer_account(&mut source);
+    source.advance(3500.);
+    let ask = |command| Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::RefreshOrders {
+            symbols: Some(vec!["BTCUSDT".into()]),
+        },
+    };
+    source.command(ask(90));
+    let first: Vec<_> = source
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert!(!first.is_empty());
+    for command in 91..190 {
+        source.command(ask(command));
+    }
+    let after: Vec<_> = source
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(after, first, "H7: old exact physical reads stay out");
+    for id in first {
+        source.requests.retain(|r| r.id != id);
+        source.reply(id, 200, EMPTY_LIST);
+    }
+    let follow: Vec<_> = source
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(follow.len(), after.len(), "one follow-up batch");
+    answer_account(&mut source);
+    assert!(!source.has_request("/v5/order/realtime"));
+}
+
+#[test]
+fn a_refused_refresh_keeps_bounded_retry_demand() {
+    let mut source = source();
+    answer_account(&mut source);
+    let socket = source.socket("/v5/private").unwrap();
+    source.event(Event::WsOpened { socket });
+    source.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth"}"#,
+    );
+    source.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe"}"#,
+    );
+    answer_account(&mut source);
+    let mut page = fenced_page(&mut source, true);
+    source.advance(3500.);
+    page.advance(3500.);
+    source.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::RefreshOrders {
+            symbols: Some(vec!["BTCUSDT".into()]),
+        },
+    });
+    assert!(source.has_request("/v5/order/realtime"));
+    source.message("/v5/private", STREAMED_ORDER);
+    answer_account(&mut source);
+    assert!(
+        !placeable(&mut page, &mut source, true, 2),
+        "refused census does not lift"
+    );
+    for _ in 0..31 {
+        source.advance(1000.);
+        page.advance(1000.);
+        source.message("/v5/private", r#"{"op":"pong"}"#);
+    }
+    assert!(
+        source.has_request("/v5/order/realtime"),
+        "a refused refresh cannot erase all retry demand and leave the page fenced"
+    );
+    answer_account(&mut source);
+    assert!(
+        placeable(&mut page, &mut source, true, 3),
+        "fresh retry lifts"
+    );
+}
+
+#[test]
+fn a_read_before_a_later_lost_eth_write_cannot_lift_eth() {
+    let mut source = source();
+    answer_account(&mut source);
+    source.command(Command::FetchLeverage {
+        command: 88,
+        symbol: "ETHUSDT".into(),
+    });
+    source.respond(
+        "/v5/position/list",
+        200,
+        &FLAT_BTC.replace("BTCUSDT", "ETHUSDT"),
+    );
+    let mut page = fenced_page(&mut source, true);
+    source.advance(3500.);
+    page.advance(3500.);
+    source.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    });
+    let old: Vec<_> = source
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert!(!old.is_empty());
+    source.advance(100.);
+    page.advance(100.);
+    let mut order = support::order();
+    order.symbol = "ETHUSDT".into();
+    order.price = Some(3000.);
+    order.amount = 0.01;
+    page.command(Command::PlaceOrders {
+        command: 2,
+        orders: vec![order.clone()],
+    });
+    if page.has_request("/v5/position/list") {
+        page.respond(
+            "/v5/position/list",
+            200,
+            &FLAT_BTC.replace("BTCUSDT", "ETHUSDT"),
+        );
+    }
+    let sent = page.take("/v5/order/create");
+    page.event(Event::HttpFailed {
+        request: sent.id,
+        error: "lost ETH",
+    });
+    assert!(page.unknown.contains(&2));
+    source.advance(3500.);
+    page.advance(3500.);
+    source.command(Command::Venue {
+        command: 91,
+        action: safe_cex_engine::VenueAction::RefreshOrders {
+            symbols: Some(vec!["ETHUSDT".into()]),
+        },
+    });
+    for id in old {
+        source.requests.retain(|r| r.id != id);
+        source.reply(id, 200, EMPTY_LIST);
+    }
+    let frame = snapshot(&mut source, true);
+    page.engine.apply_frame(page.now, &frame, true).unwrap();
+    page.collect();
+    page.command(Command::PlaceOrders {
+        command: 3,
+        orders: vec![order.clone()],
+    });
+    assert!(
+        !page.has_request("/v5/order/create"),
+        "H3: old ask cannot clear later ETH"
+    );
+    assert!(
+        source.has_request("/v5/order/realtime"),
+        "new epoch follow-up"
+    );
+    answer_account(&mut source);
+    let frame = snapshot(&mut source, true);
+    page.engine.apply_frame(page.now, &frame, true).unwrap();
+    page.collect();
+    page.command(Command::PlaceOrders {
+        command: 4,
+        orders: vec![order],
+    });
+    if page.has_request("/v5/position/list") {
+        page.respond(
+            "/v5/position/list",
+            200,
+            &FLAT_BTC.replace("BTCUSDT", "ETHUSDT"),
+        );
+    }
+    assert!(
+        page.has_request("/v5/order/create"),
+        "working positive after real newer read"
+    );
+}
+
+#[test]
+fn a_new_ask_after_a_refused_read_does_recover() {
+    let mut source = source();
+    answer_account(&mut source);
+    let socket = source.socket("/v5/private").unwrap();
+    source.event(Event::WsOpened { socket });
+    source.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth"}"#,
+    );
+    source.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe"}"#,
+    );
+    answer_account(&mut source);
+    let mut page = fenced_page(&mut source, true);
+    source.advance(3500.);
+    page.advance(3500.);
+    source.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::RefreshOrders {
+            symbols: Some(vec!["BTCUSDT".into()]),
+        },
+    });
+    assert!(source.has_request("/v5/order/realtime"));
+    source.message("/v5/private", STREAMED_ORDER);
+    answer_account(&mut source);
+    assert!(
+        !placeable(&mut page, &mut source, true, 2),
+        "refused census does not lift"
+    );
+    source.advance(1000.);
+    page.advance(1000.);
+    source.command(Command::Venue {
+        command: 91,
+        action: safe_cex_engine::VenueAction::RefreshOrders {
+            symbols: Some(vec!["BTCUSDT".into()]),
+        },
+    });
+    assert!(source.has_request("/v5/order/realtime"));
+    answer_account(&mut source);
+    assert!(
+        placeable(&mut page, &mut source, true, 3),
+        "fresh retry lifts"
+    );
+}
