@@ -106,6 +106,9 @@ enum CancelledRow {
     Algo(String),
 }
 
+/// The one read-cover scope of Binance's account-wide open-orders read.
+const ORDERS_SCOPE: &str = "orders";
+
 struct OrdersJoin {
     generation: u32,
     token: safe_cex_engine::OrderSnapshotToken,
@@ -1684,73 +1687,97 @@ impl BinanceFutures {
                 return;
             }
         }
-        let unproven = join.skipped.unproven().to_vec();
-        if !cx
-            .store
-            .commit_orders_snapshot([join.token], |current_rows| {
-                self.account.orders_stale = false;
-                let mut orders = join.regular.unwrap_or_default();
-                orders.extend(join.algo.unwrap_or_default());
-                // A clean snapshot re-arms every skip log; otherwise only the ids it mapped.
-                if join.skipped.rejected() == 0 {
-                    self.account.order_skip_logged.clear();
-                } else {
-                    for order in &orders {
-                        self.account.order_skip_logged.remove(&order.id);
-                    }
-                }
-                for (symbol, client, native, filled) in join.native_orders {
-                    if self.is_spot() {
-                        // Only the first accepted REST observation establishes history.
-                        // Live events create a zero floor; ACKs never touch delivery.
-                        self.account
-                            .spot_delivery
-                            .entry((symbol.clone(), native))
-                            .or_insert(SpotDelivery {
-                                bootstrap_floor: filled,
-                                delivered_cumulative: filled,
-                            });
-                    }
-                    let entry = self
-                        .account
-                        .native_executed
-                        .entry((symbol.clone(), native))
-                        .or_default();
-                    entry.0 = entry.0.max(filled);
-                    if self.is_spot() || self.options.portfolio_margin {
-                        self.bind_regular_native(&symbol, &client, native);
-                    }
-                }
-                for (symbol, client, native) in join.native_strategies {
-                    self.bind_strategy_native(&symbol, &client, native);
-                }
-                for current in current_rows {
-                    let terminal = self.account.order_terminal(current);
-                    // A rejected row on another symbol is a different order reusing the id.
-                    let same_order = join
-                        .rejected_symbols
-                        .get(&current.id)
-                        .is_none_or(|symbols| {
-                            symbols
-                                .iter()
-                                .any(|symbol| symbol.is_empty() || *symbol == current.symbol)
-                        });
-                    if current.status == OrderStatus::Open
-                        && !terminal
-                        && !join.skipped.allows_absence(&current.id)
-                        && same_order
-                        && !orders.iter().any(|o| o.id == current.id)
-                    {
-                        orders.push(current.clone());
-                    }
-                }
-                orders
-            })
+        // The read's rows, plus every row it cannot prove gone.
+        let mut orders = join.regular.unwrap_or_default();
+        orders.extend(join.algo.unwrap_or_default());
+        for current in cx.store.orders() {
+            let terminal = self.account.order_terminal(current);
+            // A rejected row on another symbol is a different order reusing the id.
+            let same_order = join
+                .rejected_symbols
+                .get(&current.id)
+                .is_none_or(|symbols| {
+                    symbols
+                        .iter()
+                        .any(|symbol| symbol.is_empty() || *symbol == current.symbol)
+                });
+            if current.status == OrderStatus::Open
+                && !terminal
+                && !join.skipped.allows_absence(&current.id)
+                && same_order
+                && !orders.iter().any(|o| o.id == current.id)
+            {
+                orders.push(current.clone());
+            }
+        }
+        // Rows and venue-side order state change together, only for the symbols
+        // this read may replace: a symbol the stream changed after its release
+        // keeps both (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+        let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+            key: ORDERS_SCOPE,
+            account: &[ORDERS_SCOPE],
+        };
+        // Refused whole: a newer read of these rows has already committed.
+        let Some(refused) = cx.orders_read_refusals(scope, |_| true, &orders) else {
+            return;
+        };
+        let admitted = |symbol: &str| !refused.iter().any(|held| held == symbol);
+        self.account.orders_stale = false;
+        // A clean snapshot re-arms every skip log; otherwise only the ids it mapped.
+        if join.skipped.rejected() == 0 {
+            self.account.order_skip_logged.clear();
+        } else {
+            for order in &orders {
+                self.account.order_skip_logged.remove(&order.id);
+            }
+        }
+        for (symbol, client, native, filled) in join.native_orders {
+            if !admitted(&symbol) {
+                continue;
+            }
+            if self.is_spot() {
+                // Only the first accepted REST observation establishes history.
+                // Live events create a zero floor; ACKs never touch delivery.
+                self.account
+                    .spot_delivery
+                    .entry((symbol.clone(), native))
+                    .or_insert(SpotDelivery {
+                        bootstrap_floor: filled,
+                        delivered_cumulative: filled,
+                    });
+            }
+            let entry = self
+                .account
+                .native_executed
+                .entry((symbol.clone(), native))
+                .or_default();
+            entry.0 = entry.0.max(filled);
+            if self.is_spot() || self.options.portfolio_margin {
+                self.bind_regular_native(&symbol, &client, native);
+            }
+        }
+        for (symbol, client, native) in join.native_strategies {
+            if admitted(&symbol) {
+                self.bind_strategy_native(&symbol, &client, native);
+            }
+        }
+        let mut unproven = join.skipped.unproven().to_vec();
+        // Any row the read could not map proves the account nothing.
+        let mut cover_unproven = unproven.clone();
+        if join.skipped.rejected() > 0 {
+            cover_unproven.push(String::new());
+        }
+        if cx
+            .commit_orders_read(scope, |_| true, orders, &cover_unproven)
+            .is_none()
         {
             self.account.orders_stale = true;
             self.schedule_orders_refresh(cx);
         } else {
-            // Published: resolves an uncertain placement, except on a rejected row's market.
+            cx.store.set_orders_loaded();
+            // Published: resolves an uncertain placement, except on a rejected
+            // row's market or one this read could not replace.
+            unproven.extend(refused);
             cx.orders_reconciled_except(&unproven, join.epoch);
         }
         self.account

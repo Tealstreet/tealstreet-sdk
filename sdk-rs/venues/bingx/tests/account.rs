@@ -630,16 +630,17 @@ fn an_uncrossed_orders_snapshot_still_publishes() {
 }
 
 #[test]
-fn sibling_store_publication_does_not_invalidate_an_orders_read() {
+fn a_full_store_replacement_after_a_reads_release_refuses_that_read() {
+    // Read covers (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1): rows replaced
+    // after a read went out are newer than it, so it may not overwrite them.
+    // This replaces the earlier rule that a sibling publication left the read
+    // valid; BingX's own only full replacement is a keyless startup, with no read.
     let mut h = Harness::ready();
     h.poll_late(26000.0);
     let read = h.take(ORDERS);
     h.engine.store_mut().set_orders(Vec::new());
     h.reply(read.id, 200, OPEN);
-    assert_eq!(
-        h.engine.store().order(ORDER_ID).unwrap().status,
-        OrderStatus::Open
-    );
+    assert!(h.engine.store().order(ORDER_ID).is_none());
 }
 
 #[test]
@@ -3724,4 +3725,73 @@ fn a_malformed_success_names_its_read() {
     let text = format!("{:?}", (&h.logs, &h.errors));
     assert!(text.contains("malformed BingX response envelope"), "{text}");
     assert!(text.contains("position mode"), "{text}");
+}
+
+/// The account read cover in the source's snapshot, if any.
+fn account_cover(h: &mut Harness) -> Option<f64> {
+    let frame = h.engine.snapshot_frame(h.now).to_vec();
+    wire::sections(&frame)
+        .find(|(kind, _)| *kind == wire::section::ORDERS_READ)
+        .map(|(_, payload)| f64::from_le_bytes(payload[8..16].try_into().unwrap()))
+        .filter(|cover| !cover.is_nan())
+}
+
+/// Read covers (docs/plans/RUST_FRAME_FED_READ_COVER.md step 1d): a complete
+/// open-orders read sends its send time directly after ORDERS.
+#[test]
+fn a_complete_open_orders_read_sends_its_cover_beside_orders() {
+    let mut h = Harness::ready();
+    let startup = account_cover(&mut h).unwrap();
+    h.poll_late(26000.0);
+    let read = h.take(ORDERS);
+    let polled = h.now;
+    h.now += 3000.0;
+    h.reply(read.id, 200, OPEN);
+    let frame = h.engine.snapshot_frame(h.now).to_vec();
+    let kinds: Vec<u16> = wire::sections(&frame).map(|(kind, _)| kind).collect();
+    let orders = kinds
+        .iter()
+        .position(|kind| *kind == wire::section::ORDERS)
+        .unwrap();
+    assert_eq!(kinds[orders + 1], wire::section::ORDERS_READ, "{kinds:?}");
+    let cover = account_cover(&mut h).unwrap();
+    assert!(
+        cover > startup && cover <= polled,
+        "its send ({cover}), not its landing ({})",
+        h.now
+    );
+}
+
+/// H10: the user stream reports a new order after the read's release; the read
+/// lacks it, keeps the row, and proves no newer cover.
+#[test]
+fn a_stream_order_after_the_reads_release_leaves_its_cover_where_it_was() {
+    let mut h = Harness::ready();
+    let before = account_cover(&mut h);
+    h.poll_late(26000.0);
+    let read = h.take(ORDERS);
+    h.message(r#"{"e":"ORDER_TRADE_UPDATE","E":1001,"o":{"i":4242,"s":"BTC-USDT","o":"LIMIT","S":"SELL","X":"NEW","q":"0.1","z":"0","p":"61000"}}"#);
+    h.reply(read.id, 200, OPEN);
+    assert!(
+        h.engine.store().order("4242").is_some(),
+        "the stream row stays"
+    );
+    assert_eq!(account_cover(&mut h), before);
+}
+
+/// An open order of a type BingX cannot map exactly (it is kept as a
+/// conditional and reported) proves no newer cover; the healthy row publishes.
+#[test]
+fn an_open_order_of_an_unknown_type_proves_no_newer_cover() {
+    let mut h = Harness::ready();
+    let before = account_cover(&mut h);
+    h.poll_late(26000.0);
+    let read = h.take(ORDERS);
+    h.reply(
+        read.id,
+        200,
+        &OPEN.replace(r#"{"code":0,"data":{"orders":["#, r#"{"code":0,"data":{"orders":[{"orderId":77,"symbol":"BTC-USDT","type":"NOT_A_TYPE","side":"BUY","status":"NEW","origQty":"0.1","executedQty":"0","price":"1"},"#),
+    );
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    assert_eq!(account_cover(&mut h), before);
 }

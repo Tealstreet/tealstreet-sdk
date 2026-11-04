@@ -3080,6 +3080,23 @@ impl<P> Cx<'_, P> {
             .commit_orders_read(read, scope, in_scope, rows, unproven)
     }
 
+    /// What `commit_orders_read` with these rows would refuse, without changing
+    /// anything (`None`: the whole read, or no read response to commit). A venue
+    /// updates its own per-order state only for the symbols this admits.
+    #[cfg(feature = "order-locks")]
+    pub fn orders_read_refusals(
+        &self,
+        scope: crate::order_read_cover::OrderReadScope<'_>,
+        in_scope: impl Fn(&str) -> bool,
+        rows: &[crate::model::Order],
+    ) -> Option<Vec<String>> {
+        let (epoch, read) = self.io.core.order_response_read?;
+        if self.io.core.order_response_token != Some(epoch) {
+            return None;
+        }
+        self.store.orders_read_refusals(read, scope, in_scope, rows)
+    }
+
     /// Call only after accepting a complete, fresh authoritative order read.
     /// A read started before an uncertain placement cannot clear its fence.
     pub fn orders_reconciled(&mut self, symbol: Option<&str>) {
