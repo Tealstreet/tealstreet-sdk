@@ -16,14 +16,24 @@ import { DefaultStore } from '../store/store.base';
 const DEXES = ['xyz', 'flx', 'vntl', 'hyna', 'km', 'abcd', 'cash', 'para', 'mkts', 'io'];
 const hosts: EngineHost[] = [];
 const transports: Transport[] = [];
-afterEach(() => {
+afterEach(async () => {
   hosts.splice(0).forEach((host) => host.dispose());
   transports.splice(0).forEach((transport) => transport.dispose?.());
+  await flushDatabase();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+let pendingDatabaseTasks = 0;
 const flushDatabase = async () => {
-  for (let i = 0; i < 12; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+  // Settle fake IDB's real tasks before advancing virtual deadlines; a fixed
+  // number of turns imposes artificial storage latency on a large read wave.
+  let quietTurns = 0;
+  for (let i = 0; i < 10_000; i++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    quietTurns = pendingDatabaseTasks === 0 ? quietTurns + 1 : 0;
+    if (quietTurns === 2) return;
+  }
+  throw new Error('IndexedDB task queue did not settle');
 };
 const state = (account = 0) => ({
   assetPositions: [],
@@ -37,6 +47,17 @@ it.each([0, 8000])(
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     vi.setSystemTime(1_000_000);
     vi.stubGlobal('indexedDB', new IDBFactory());
+    pendingDatabaseTasks = 0;
+    vi.stubGlobal('setImmediate', (callback: (...args: unknown[]) => void, ...args: unknown[]) => {
+      pendingDatabaseTasks += 1;
+      return setImmediate(() => {
+        try {
+          callback(...args);
+        } finally {
+          pendingDatabaseTasks -= 1;
+        }
+      });
+    });
     const { WasmEngine } = await loadNodeEngine();
     const startedAt = Date.now();
     const stores: DefaultStore[] = [];
@@ -167,9 +188,8 @@ it.each([0, 8000])(
       const sent = sends.filter((row) => row.account === account);
       expect(sent.filter((row) => row.type === 'userRole')).toHaveLength(1);
       expect(sent.filter((row) => row.type === 'userAbstraction')).toHaveLength(1);
-      expect(new Set(sent.filter((row) => row.type === 'frontendOpenOrders').map((row) => row.dex))).toEqual(
-        new Set(['', ...DEXES]),
-      );
+      for (const type of ['clearinghouseState', 'frontendOpenOrders'])
+        expect(new Set(sent.filter((row) => row.type === type).map((row) => row.dex))).toEqual(new Set(['', ...DEXES]));
     }
     expect(events.filter((event) => event.level === 'error')).toEqual([]);
   },
