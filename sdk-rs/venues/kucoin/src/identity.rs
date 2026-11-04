@@ -71,27 +71,38 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
         affiliate_id: data.referrer_user_id.filter(Id::truthy).and_then(Id::value),
     })
 }
-fn finish(cx: &mut Cx<'_, Pending>, command: CommandId, result: Result<Identity, VenueError>) {
+fn finish(
+    cx: &mut Cx<'_, Pending>,
+    root: &safe_cex_engine::request_context::Context,
+    command: CommandId,
+    result: Result<Identity, VenueError>,
+) {
     let result = result.and_then(|identity| {
         serde_json::to_string(&identity).map_err(|error| VenueError::new(error.to_string()))
     });
     match result {
-        Ok(data) => cx.done(command, data),
+        Ok(data) => {
+            let _ = cx.done_context(root, data);
+        }
         Err(error) => {
             cx.command_error(command, &error.message);
-            cx.fail(command, error);
+            let _ = cx.fail_context(root, error);
         }
     }
 }
 impl Kucoin {
-    pub(crate) fn fetch_identity(&self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+    pub(crate) fn fetch_identity(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        let Ok(root) = cx.admit_caller_read_root(None, None) else {
+            return;
+        };
         if let Some(error) = self.options.read_error() {
-            finish(cx, command, Err(error.into()));
+            finish(cx, &root, command, Err(error.into()));
             return;
         }
         if self.options.public_data_only || self.credentials.is_none() {
             finish(
                 cx,
+                &root,
                 command,
                 Err("KuCoin account identity requires credentials".into()),
             );
@@ -102,23 +113,25 @@ impl Kucoin {
             Method::Get,
             "/api/v1/user-info",
             None,
-            Pending::Identity(command),
+            Pending::Identity { command, root },
         );
     }
     pub(crate) fn identity_response(
         &self,
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
+        root: safe_cex_engine::request_context::Context,
         response: Response<'_>,
     ) {
-        finish(cx, command, parse(response).map_err(Into::into));
+        finish(cx, &root, command, parse(response).map_err(Into::into));
     }
     pub(crate) fn identity_failed(
         &self,
         cx: &mut Cx<'_, Pending>,
         command: CommandId,
+        root: safe_cex_engine::request_context::Context,
         error: impl Into<VenueError>,
     ) {
-        finish(cx, command, Err(error.into()));
+        finish(cx, &root, command, Err(error.into()));
     }
 }

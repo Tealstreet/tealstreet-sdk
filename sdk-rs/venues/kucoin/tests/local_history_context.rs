@@ -161,7 +161,7 @@ fn query(e: &mut Engine<Probe>, now: f64, q: Query) -> Vec<Action> {
             query: q,
         }),
     );
-    e.drain_actions().collect()
+    support::actions(e)
 }
 fn failure(a: &[Action]) -> &VenueError {
     assert_eq!(
@@ -462,7 +462,12 @@ fn valid_signed_history_and_funding_keep_native_requests_and_empty_results() {
                 },
             },
         );
-        empty(&e.drain_actions().collect::<Vec<_>>());
+        empty(
+            &support::actions(&mut e)
+                .into_iter()
+                .filter(|a| !matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+                .collect::<Vec<_>>(),
+        );
     }
 }
 #[test]
