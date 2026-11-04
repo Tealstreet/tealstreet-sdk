@@ -184,6 +184,9 @@ struct OrdersPlan {
     versions: Vec<(String, OrderVersion)>,
     fences: Vec<(String, FenceChange)>,
     terminals: Vec<String>,
+    /// Each census row's own symbol, terminal and unpublished rows included:
+    /// its state is gated on that symbol's admission.
+    symbols: HashMap<String, String>,
 }
 
 struct Queued {
@@ -1845,6 +1848,7 @@ impl Account {
             if self.terminals.contains(&row.id) {
                 continue;
             }
+            plan.symbols.insert(row.id.clone(), order.symbol.clone());
             let (evidence, fence) = if self.stale_order(&row.id, version) {
                 (OrderEvidence::Ignore, None)
             } else {
@@ -1906,12 +1910,14 @@ impl Account {
             key: ORDERS_SCOPE,
             account: &[ORDERS_SCOPE],
         };
+        let symbols = &plan.symbols;
         let symbol_of = |id: &str| {
-            plan.rows
-                .iter()
-                .chain(current)
-                .find(|order| order.id == id)
-                .map(|order| order.symbol.clone())
+            symbols.get(id).cloned().or_else(|| {
+                current
+                    .iter()
+                    .find(|order| order.id == id)
+                    .map(|order| order.symbol.clone())
+            })
         };
         let held = |id: &str| symbol_of(id).is_none_or(|symbol| refused.contains(&symbol));
         // A refused symbol keeps the signing evidence its kept rows already had.
