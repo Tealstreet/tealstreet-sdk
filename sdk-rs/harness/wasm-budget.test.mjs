@@ -38,7 +38,7 @@ test('shared broker-role setup caps retain CI headroom and reject the next byte'
 
 test('KuCoin custody caps retain the approved CI headroom and exact boundary', () => {
   for (const [venue, measured, cap] of [
-    ['kucoin', 1_630_161, 1_640_448],
+    ['kucoin', 1_641_512, 1_652_736],
     ['kucoinspot', 2_224_069, 2_234_368],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
@@ -176,6 +176,19 @@ test('shared-address setup CI caps retain the ruled headroom and exact boundary'
     // TxFlow retains the higher pre-refactor cap approved for #3031.
     assert.ok(cap >= Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(cap % 1024, 0);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), new RegExp(`exceeds ${cap}`));
+  }
+});
+
+test('shared signing bookkeeping caps retain CI headroom and exact boundaries', () => {
+  for (const [venue, measured, cap] of [
+    ['breakoutprop', 1_495_000, 1_505_280],
+    ['kucoin', 1_641_512, 1_652_736],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
