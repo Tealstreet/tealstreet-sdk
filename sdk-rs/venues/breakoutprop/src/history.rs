@@ -7,6 +7,7 @@ pub(crate) fn query(cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) 
     match query {
         Query::Fills { .. } | Query::OrderHistory { .. } | Query::Income { .. } => {
             completion.incomplete(
+                safe_cex_engine::history::IncompleteReason::NoNativeRead,
                 "history is INCOMPLETE: BreakoutProp adapter has no native history read",
             );
             HistoryRows::<()>::new(completion, |rows| {

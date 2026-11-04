@@ -1892,9 +1892,10 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
         .expect("owned semantic order-history warning");
     assert_eq!(event.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(35.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(35.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     let done = h
         .notices
         .iter()
@@ -2649,9 +2650,10 @@ fn owned_history_markers(h: &Harness, command: u32) -> Vec<usize> {
             {
                 assert_eq!(event.level, safe_cex_engine::Level::Warn);
                 assert_eq!(
-                    event.fields,
+                    event.fields[..1],
                     [("command", safe_cex_engine::Value::Num(f64::from(command)))]
                 );
+                assert_eq!(event.fields[1].0, "reason");
                 Some(index)
             }
             _ => None,

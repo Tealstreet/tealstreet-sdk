@@ -321,7 +321,7 @@ fn invalid_order_side_fails_and_a_repeated_full_page_is_not_silently_truncated()
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(a,
         Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
-            && matches!(event.fields.as_slice(), [("command", safe_cex_engine::Value::Num(1.0))]))));
+            && matches!(event.fields.as_slice(), [("command", safe_cex_engine::Value::Num(1.0)), ("reason", safe_cex_engine::Value::Str(_))]))));
     assert!(actions.iter().any(|a| matches!(a,
         Action::Notice(Notice::CommandDone { command: 1, result }) if result == "[]")));
     assert!(
@@ -540,7 +540,7 @@ mod owned_history {
         assert_eq!(notices.len(), 1, "exactly one owned marker: {actions:?}");
         assert_eq!(notices[0].level, Level::Warn);
         assert!(
-            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id))] if *id == f64::from(command))
+            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id)), ("reason", Value::Str(_))] if *id == f64::from(command))
         );
         let marker = actions.iter().position(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == code::HISTORY_INCOMPLETE)).unwrap();
         let done = actions.iter().position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: id, .. }) if *id == command)).unwrap();

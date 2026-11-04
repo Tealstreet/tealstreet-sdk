@@ -809,6 +809,7 @@ impl AsterDex {
                 match ReadCompletion::from_context(cx, id, root.clone()) {
                     Ok(mut completion) => {
                         completion.incomplete(
+                            safe_cex_engine::history::IncompleteReason::PageFull,
                             "history is INCOMPLETE: Aster orders read one page and it was full",
                         );
                         let _ = completion.finish(cx, Ok(data));

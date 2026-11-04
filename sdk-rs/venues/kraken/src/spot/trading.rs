@@ -489,6 +489,7 @@ impl KrakenSpot {
                     }
                     Query::Fills { .. } | Query::OrderHistory { .. } | Query::Income { .. } => {
                         completion.incomplete(
+                            safe_cex_engine::history::IncompleteReason::NoNativeRead,
                             "history is INCOMPLETE: Kraken Spot adapter has no native history read",
                         );
                         HistoryRows::<()>::new(completion, |rows| {

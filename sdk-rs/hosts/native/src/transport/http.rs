@@ -705,6 +705,48 @@ mod tests {
         }
     }
 
+    /// The fleet's route (`PROXY_PRIVATE_URL`) is unauthorized: it admits by network and
+    /// forwards every header, so the venue would receive our token.
+    #[tokio::test]
+    async fn a_fleet_route_sends_no_token_of_ours_and_keeps_the_venues_own_authorization() {
+        let fleet = |tokens: ProxyTokenProvider| {
+            NetworkTransport::with_routing(
+                RoutingPlan {
+                    http: HttpRoute {
+                        authorize: false,
+                        ..HttpRoute::default()
+                    },
+                    ..RoutingPlan::default()
+                },
+                tokens,
+            )
+        };
+        for venue_authorization in [None, Some("Bearer venue-jwt")] {
+            let (url, server) = answer_once("200 OK", "{}").await;
+            let transport = fleet(Arc::new(|| Box::pin(async { Ok("edge-token".to_owned()) })));
+            let mut packet = request(&url);
+            if let Some(value) = venue_authorization {
+                packet.headers.push(("Authorization", value.into()));
+            }
+            let prepared = transport
+                .prepare_http(packet.clone(), RoutingIntent::Primary)
+                .await
+                .unwrap();
+            let (events, mut inbox) = mpsc::unbounded_channel();
+            let _task = prepared.bind(packet).unwrap().dispatch(events);
+            while !matches!(inbox.recv().await.unwrap(), HostEvent::HttpEnd(_)) {}
+            let head = server.await.unwrap().to_lowercase();
+            assert!(!head.contains("edge-token"), "{head}");
+            match venue_authorization {
+                Some(_) => assert!(
+                    head.contains("authorization: bearer venue-jwt\r\n"),
+                    "{head}"
+                ),
+                None => assert!(!head.contains("authorization:"), "{head}"),
+            }
+        }
+    }
+
     #[tokio::test]
     async fn a_venues_own_401_through_the_proxy_reaches_the_engine_unchanged() {
         let venue = r#"{"retCode":10003,"retMsg":"API key is invalid."}"#;

@@ -33,6 +33,7 @@ on:
       - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
       - '.github/actions/install-binaryen/**'
+      - '.github/actions/fetch-rust-history/**'
   # Unfiltered so "Rust / required coverage" always reports for branch protection;
   # the scope job applies the push path list and skips coverage outside it.
   pull_request:
@@ -68,7 +69,7 @@ jobs:
   scope:
     name: Rust / scope
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       relevant: ${{ steps.scope.outputs.relevant }}
     defaults:
@@ -77,7 +78,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -93,7 +97,7 @@ jobs:
     if: needs.scope.outputs.relevant == 'true'
     name: Rust / affected coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.select.outputs.full }}
       checkoutSha: ${{ steps.select.outputs.checkoutSha }}
@@ -111,7 +115,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -133,7 +140,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -151,13 +161,14 @@ jobs:
     needs: selection
     name: Rust / banned patterns
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
-          # The shrink-only request provenance ratchet verifies immutable base
-          # and parent manifests, never a caller-supplied enlarged inventory.
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - name: Reject JavaScript emulation and deleted-port dependencies
         run: ./scripts/check-bans.sh
 
@@ -895,7 +906,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1205,7 +1219,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1261,7 +1278,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1305,7 +1325,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1338,7 +1361,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22

@@ -65,9 +65,10 @@ fn owned_incomplete(actions: &[Action], command: u32) {
         {
             assert_eq!(event.level, safe_cex_engine::Level::Warn);
             assert_eq!(
-                event.fields,
-                vec![("command", safe_cex_engine::Value::Num(f64::from(command)))]
+                event.fields[..1],
+                [("command", safe_cex_engine::Value::Num(f64::from(command)))]
             );
+            assert_eq!(event.fields[1].0, "reason");
             if let Some(completion) = completion {
                 assert!(index < completion, "coverage must precede its completion");
             }
@@ -145,9 +146,10 @@ fn owned_income_partial(actions: &[Action], count: usize) {
         .collect();
     assert_eq!(markers.len(), 1, "one final command-owned coverage marker");
     assert_eq!(
-        markers[0].1.fields,
-        vec![("command", safe_cex_engine::Value::Num(7.0))]
+        markers[0].1.fields[..1],
+        [("command", safe_cex_engine::Value::Num(7.0))]
     );
+    assert_eq!(markers[0].1.fields[1].0, "reason");
     assert_eq!(markers[0].1.level, safe_cex_engine::Level::Warn);
     let done = actions
         .iter()
@@ -949,10 +951,14 @@ fn later_income_failure_emits_native_owned_fixture_before_partial_success_at_err
             _ => None,
         })
         .unwrap();
-    let [("command", safe_cex_engine::Value::Num(command))] = event.fields.as_slice() else {
+    let [
+        ("command", safe_cex_engine::Value::Num(command)),
+        ("reason", safe_cex_engine::Value::Str(reason)),
+    ] = event.fields.as_slice()
+    else {
         panic!("actual native ownership must be exact")
     };
-    let actual = serde_json::json!({"op":"event","level":event.level.as_str(),"code":event.code,"message":event.message,"fields":{"command":command}});
+    let actual = serde_json::json!({"op":"event","level":event.level.as_str(),"code":event.code,"message":event.message,"fields":{"command":command,"reason":reason}});
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/incomplete-query-event.json")).unwrap();
     assert_eq!(
@@ -1504,10 +1510,14 @@ fn empty_fill_identity_semantic_marker_survives_error_only_logging_before_succes
             _ => None,
         })
         .unwrap();
-    let [("command", safe_cex_engine::Value::Num(command))] = event.fields.as_slice() else {
+    let [
+        ("command", safe_cex_engine::Value::Num(command)),
+        ("reason", safe_cex_engine::Value::Str(reason)),
+    ] = event.fields.as_slice()
+    else {
         panic!("exact native query owner")
     };
-    let actual = serde_json::json!({"op":"event","level":event.level.as_str(),"code":event.code,"message":event.message,"fields":{"command":command}});
+    let actual = serde_json::json!({"op":"event","level":event.level.as_str(),"code":event.code,"message":event.message,"fields":{"command":command,"reason":reason}});
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "fixtures/empty-fill-incomplete-query-event.json"
     ))

@@ -590,9 +590,10 @@ fn bounded_history_page_cap_owns_warning_before_retained_rows_at_error_only_leve
         .expect("semantic bounded-history cap marker");
     assert_eq!(event.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(37.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(37.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     let done = h
         .actions
         .iter()
@@ -735,9 +736,10 @@ fn assert_owned_marker(h: &Harness, id: u32) {
     );
     assert_eq!(markers[0].1.level, Level::Warn);
     assert_eq!(
-        markers[0].1.fields,
-        vec![("command", Value::Num(f64::from(id)))]
+        markers[0].1.fields[..1],
+        [("command", Value::Num(f64::from(id)))]
     );
+    assert_eq!(markers[0].1.fields[1].0, "reason");
     let done = h
         .actions
         .iter()
