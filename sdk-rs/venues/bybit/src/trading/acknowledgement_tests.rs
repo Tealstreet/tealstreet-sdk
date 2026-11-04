@@ -404,14 +404,13 @@ fn cancel_shape_diagnostic_never_contains_response_values() {
     let diagnostic = cancel_diagnostic(result, ext, &["private-native-needle", "other"]);
     assert_eq!(
         diagnostic,
-        "targets=2; result.list=array/1; retExtInfo.list=array/1; orderId fields/nonempty/matched=1/1/1; orderLinkId fields/nonempty=1/1; statuses success/failed/invalid=0/1/0"
+        "targets=2; result.list=array/1; retExtInfo.list=array/1; orderId fields/nonempty/matched=1/1/1; orderLinkId fields/nonempty=1/1; statuses success/failed/invalid=0/1/0; failure codes=10005; duplicated targets=0"
     );
     for value in [
         "private-ret-message",
         "private-native-needle",
         "private-client-needle",
         "private-status-needle",
-        "10005",
     ] {
         assert!(!diagnostic.contains(value));
     }
@@ -438,4 +437,102 @@ fn cancelled_rows_match_a_sole_unnamed_reordered_status_by_elimination() {
             Ok(vec![Row::Accepted("b".into()), expected])
         );
     }
+}
+
+fn over_count(results: &str, statuses: &str, targets: &[&str]) -> Result<Vec<Row>, Malformed> {
+    let body = format!(
+        r#"{{"retCode":0,"result":{{"list":{results}}},"retExtInfo":{{"list":{statuses}}}}}"#
+    );
+    let (result, ext) = success(&body);
+    cancelled_rows(result, ext, targets)
+}
+
+#[test]
+fn an_over_count_whose_duplicate_echo_is_order_not_found_confirms_every_target() {
+    assert_eq!(
+        over_count(
+            r#"[{"orderId":"a"},{"orderId":"b"},{"orderId":"c"},{"orderId":"b"},{"orderId":"d"}]"#,
+            r#"[{"code":0},{"code":0},{"code":0},{"code":110001,"msg":"order not exists"},{"code":0}]"#,
+            &["a", "b", "c", "d"],
+        ),
+        Ok(Vec::from(
+            ["a", "b", "c", "d"].map(|id| Row::Accepted(id.into()))
+        ))
+    );
+}
+
+#[test]
+fn an_over_count_keeps_a_target_with_only_a_failed_row_refused_beside_its_twin() {
+    assert_eq!(
+        over_count(
+            r#"[{"orderId":"a"},{"orderId":"b"},{"orderId":"a"}]"#,
+            r#"[{"code":0},{"code":110001,"msg":"order not exists"},{"code":0}]"#,
+            &["a", "b"],
+        ),
+        Ok(vec![
+            Row::Accepted("a".into()),
+            Row::Refused {
+                code: 110001,
+                message: "order not exists".into()
+            }
+        ])
+    );
+}
+
+#[test]
+fn an_over_count_stays_malformed_unless_complete_named_and_order_not_found() {
+    let targets = &["a", "b"];
+    for (results, statuses) in [
+        // A foreign fifth ID.
+        (
+            r#"[{"orderId":"a"},{"orderId":"b"},{"orderId":"foreign"}]"#,
+            r#"[{"code":0},{"code":0},{"code":110001}]"#,
+        ),
+        // An unnamed extra row.
+        (
+            r#"[{"orderId":"a"},{"orderId":"b"},{}]"#,
+            r#"[{"code":0},{"code":0},{"code":110001}]"#,
+        ),
+        // Unequal list lengths.
+        (
+            r#"[{"orderId":"a"},{"orderId":"b"},{"orderId":"b"}]"#,
+            r#"[{"code":0},{"code":0}]"#,
+        ),
+        (
+            r#"[{"orderId":"a"},{"orderId":"b"}]"#,
+            r#"[{"code":0},{"code":0},{"code":110001}]"#,
+        ),
+        // A target missing from the echoes.
+        (
+            r#"[{"orderId":"a"},{"orderId":"a"},{"orderId":"a"}]"#,
+            r#"[{"code":0},{"code":110001},{"code":110001}]"#,
+        ),
+        // A twin whose failure is not order-not-found.
+        (
+            r#"[{"orderId":"a"},{"orderId":"b"},{"orderId":"b"}]"#,
+            r#"[{"code":0},{"code":0},{"code":110020,"msg":"permission denied"}]"#,
+        ),
+        // A twin with no success row.
+        (
+            r#"[{"orderId":"a"},{"orderId":"b"},{"orderId":"b"}]"#,
+            r#"[{"code":0},{"code":110001},{"code":110001}]"#,
+        ),
+    ] {
+        assert_eq!(
+            over_count(results, statuses, targets),
+            Err(Malformed),
+            "{results} {statuses}"
+        );
+    }
+}
+
+#[test]
+fn cancel_diagnostic_names_failure_codes_and_duplicated_targets() {
+    let body = r#"{"retCode":0,"result":{"list":[{"orderId":"a"},{"orderId":"b"},{"orderId":"b"}]},
+        "retExtInfo":{"list":[{"code":0},{"code":110020,"msg":"permission denied"},{"code":110001}]}}"#;
+    let (result, ext) = success(body);
+    assert_eq!(
+        cancel_diagnostic(result, ext, &["a", "b"]),
+        "targets=2; result.list=array/3; retExtInfo.list=array/3; orderId fields/nonempty/matched=3/3/3; orderLinkId fields/nonempty=0/0; statuses success/failed/invalid=1/2/0; failure codes=110020,110001; duplicated targets=1"
+    );
 }
