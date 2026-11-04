@@ -25,9 +25,9 @@ const write = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2
 
 /** Select from authenticated run/PR/commit APIs, never an input baseline flag.
  * The Git tree is recomputed before measuring, not accepted from the PR. */
-export async function selectBitgetPair({ reader, runId, root, gitRead = (...args) => git(root, ...args), sleep }) {
+export async function selectCpuComparison({ reader, runId, root, jobName, gitRead = (...args) => git(root, ...args), sleep }) {
   const { run, selected: candidates } = await relistPhysicalJob(async () =>
-    ({ run: await reader.getRun(runId), jobs: await reader.listJobs(runId) }), 'Rust / Bitget counterbalanced steady CPU', { sleep });
+    ({ run: await reader.getRun(runId), jobs: await reader.listJobs(runId) }), jobName, { sleep });
   insist(candidates.length === 1 && candidates[0].runner_id > 0,
     `missing/duplicate paired physical producer; candidates ${physicalCandidateRows(candidates)}`);
   const checkoutSha = gitRead('rev-parse', 'HEAD'), checkoutTree = gitRead('rev-parse', 'HEAD^{tree}');
@@ -58,7 +58,9 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
     insist(checkout.sha === checkoutSha && checkout.tree?.sha === checkoutTree &&
       apiParents?.length === 2 && localParents.length === 2 && isDeepStrictEqual(apiParents, localParents) &&
       apiParents.every(parent => /^[a-f0-9]{40}$/.test(parent)) && apiParents[1] === run.head_sha,
-    'checkout API/local tree and exact two-parent PR composition must agree');
+    'checkout API/local tree and exact two-parent PR composition must agree: ' +
+      JSON.stringify({ checkoutSha, checkoutTree, apiSha: checkout.sha, apiTree: checkout.tree?.sha,
+        localParents, apiParents, expectedHead: run.head_sha }));
     const baseline = apiParents[0], landingRef = await reader.getRustLanding();
     insist(landingRef.ref === 'refs/heads/master' &&
       landingRef.url === 'https://api.github.com/repos/Tealstreet/tealstreet-sdk/git/refs/heads/master' &&
@@ -88,8 +90,14 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
     mergeTree = gitRead('merge-tree', '--write-tree', baseline, pull.head.sha);
     insist(/^[a-f0-9]{40}$/.test(mergeTree), 'composition is not a clean automatic tree');
   }
-  const measurementFiles = Object.fromEntries(BITGET_MEASUREMENT_FILES.map(path => [path, gitRead('rev-parse', `${checkoutSha}:${path}`)]));
-  return bitgetPairedAuthority({ run, pull, landing, job: candidates[0], checkoutSha, checkoutTree, mergeTree, measurementFiles });
+  return { run, pull, landing, job: candidates[0], checkoutSha, checkoutTree, mergeTree };
+}
+
+export async function selectBitgetPair(options) {
+  const selection = await selectCpuComparison({ ...options, jobName: 'Rust / Bitget counterbalanced steady CPU' });
+  const gitRead = options.gitRead ?? ((...args) => git(options.root, ...args));
+  const measurementFiles = Object.fromEntries(BITGET_MEASUREMENT_FILES.map(path => [path, gitRead('rev-parse', `${selection.checkoutSha}:${path}`)]));
+  return bitgetPairedAuthority({ ...selection, measurementFiles });
 }
 
 export async function collectBitgetPair({ reader, runId, root, destination, env = process.env }) {
