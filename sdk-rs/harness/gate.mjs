@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { validateCiWasm, validatePairedCiWasm } from './ci-wasm.mjs';
 import { verifyRuntime } from './cpu-runtime.mjs';
+import { observeCpu } from './cpu-observation.mjs';
 import { resolve } from 'node:path';
 import { createRecordedReplay } from './recorded-replay.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -74,6 +75,8 @@ const recorded = values['recorded-evidence'] === undefined ? null : createRecord
 });
 if (recorded && values.runs !== '9') throw new Error('recorded public verification requires exactly nine original pairs');
 const artifacts = [];
+const sampleOrder = [];
+const cpuObservation = recorded ? undefined : observeCpu();
 const fixerReports = [];
 class CommandReplayTimeout extends Error {
   constructor(impl, command, stderrPath) {
@@ -104,11 +107,14 @@ const replay = (impl, run, performanceRun = false) => {
   if (values['no-egress']) args.push('--no-egress');
   if (performanceRun) args.push('--performance');
   // TSX's compiler worker retains shared buffers independently of engine work.
+  const observed = performanceRun ? observeCpu() : undefined;
+  const sampleStarted = performance.now();
   const result = spawnSync(process.execPath, args, {
     encoding: 'utf8',
     timeout: 125000,
     env: { ...process.env, ESBUILD_WORKER_THREADS: '0' },
   });
+  if (performanceRun) sampleOrder.push({ pair: run, impl, ordinal: sampleOrder.length, before: observed, after: observeCpu(), elapsedMs: performance.now() - sampleStarted });
   if (result.status !== 0) {
     const timeout = /^ReplayTimeout \[Error\]: replay timeout: command ([A-Za-z][A-Za-z0-9]*)$/m.exec(result.stderr ?? '');
     if (result.status === 1 && !performanceRun && timeout && tapeRecords.some((record) => record.type === 'command' && record.op === timeout[1])) {
@@ -413,6 +419,7 @@ writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   private: isPrivate, books: values.books, runs: isPrivate ? 0 : runs, correctnessRuns, requiredImprovement: 0.10,
   ...(values['correctness-only'] ? { correctnessOnly: true, coverage: { correctness: 'complete', performance: 'not-run' } } : {}),
   status: failures.length ? 'FAIL' : 'PASS', failures, artifacts, fixers: fixerReports,
+  ...(recorded ? {} : { measurement: { cpu: cpuObservation, sampleOrder } }),
   summary: { ts: t, rust: r },
   samples: { ts: measuredResults.ts.map((output) => output.metrics), rust: measuredResults.rust.map((output) => output.metrics) },
 }, null, 2) + '\n');

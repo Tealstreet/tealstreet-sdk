@@ -12,6 +12,14 @@ on:
         type: choice
         options: [family, combined]
         default: family
+      cpu_budget_diagnostic:
+        description: Run only the fixed non-certifying TxFlow A/A budget experiment
+        type: boolean
+        default: false
+      cpu_budget_profile:
+        description: Add separate GC and optimization traces after the A/A experiment
+        type: boolean
+        default: false
       mutation_barrier_size:
         description: Compare standalone Bybit barrier capability off/on on this exact checkout
         type: boolean
@@ -90,7 +98,52 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node sdk-rs/harness/ci-scope.mjs
+        run: |
+          if [ '${{ github.event_name }}' = workflow_dispatch ] && [ '${{ inputs.cpu_budget_diagnostic }}' = true ]; then
+            echo 'relevant=false' >> "$GITHUB_OUTPUT"
+          else
+            node sdk-rs/harness/ci-scope.mjs
+          fi
+
+  cpu-budget-diagnostic:
+    name: Rust / diagnostic A-A budget (${{ matrix.slot }})
+    if: github.event_name == 'workflow_dispatch' && inputs.cpu_budget_diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+      - uses: ./.github/actions/prepare-yarn
+      - run: corepack yarn install --frozen-lockfile --ignore-scripts
+      - name: Download the immutable original TxFlow module
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh run download 41853782572 --repo Tealstreet/tealstreet-sdk
+          --name ci-wasm-txflow --dir '${{ runner.temp }}/txflow-module'
+      - name: Fixed diagnostic experiment (never CPU certification evidence)
+        run: |
+          module=$(find '${{ runner.temp }}/txflow-module' -name safe_cex_wasm.js -print -quit)
+          test -n "$module"
+          args=()
+          if [ '${{ inputs.cpu_budget_profile }}' = true ]; then args+=(--profile); fi
+          node sdk-rs/harness/cpu-budget-diagnostic.mjs --module "$module" --out '${{ runner.temp }}/cpu-budget' "${args[@]}"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cpu-budget-diagnostic-${{ matrix.slot }}
+          path: ${{ runner.temp }}/cpu-budget/
+          if-no-files-found: error
+          retention-days: 14
 
   selection:
     needs: scope
