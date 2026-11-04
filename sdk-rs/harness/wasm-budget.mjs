@@ -115,6 +115,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // lighter 1,980,286 and woo 2,377,495 B; ddi2il ruling: CI size plus 10 KiB rounded up, siblings equal.
 // #3035 CI run 41810769240: bitrue 1,803,160 B; txflow 1,819,613 B.
 // CI + 10 KiB rounded up; TxFlow retains #3031's cap from pre-refactor CI 1,819,696 B.
+// #3019 KuCoin 400002 resync: CI run 41794279458 measured kucoin 1,657,796 and kucoinspot 2,237,656 B.
+// ddi2il ruling: CI size plus 10 KiB, rounded up to the KiB. Shared engine queue, issuance and
+// admission code is newly linked by KuCoin; Binance already carries this machinery.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_970_176,
   asterdex: 2_109_440,
@@ -135,8 +138,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   hyperliquidspot: 2_094_080,
   kraken: 2_121_728,
   krakenspot: 2_121_728,
-  kucoin: 1_640_448,
-  kucoinspot: 2_234_368,
+  kucoin: 1_668_096,
+  kucoinspot: 2_248_704,
   lighter: 1_990_656,
   'lighter-robinhood': 1_990_656,
   mexc: 1_728_512,

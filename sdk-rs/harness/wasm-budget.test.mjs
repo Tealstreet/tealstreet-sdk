@@ -36,10 +36,10 @@ test('shared broker-role setup caps retain CI headroom and reject the next byte'
   }
 });
 
-test('KuCoin custody caps retain the approved CI headroom and exact boundary', () => {
+test('KuCoin 400002 resync caps retain the approved CI headroom and exact boundary', () => {
   for (const [venue, measured, cap] of [
-    ['kucoin', 1_630_161, 1_640_448],
-    ['kucoinspot', 2_224_069, 2_234_368],
+    ['kucoin', 1_657_796, 1_668_096],
+    ['kucoinspot', 2_237_656, 2_248_704],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
