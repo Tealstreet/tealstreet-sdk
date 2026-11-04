@@ -1490,10 +1490,6 @@ pub enum ExchangeName {
     Kodiakfi,
     #[serde(rename = "mode")]
     Mode,
-    #[serde(rename = "salsadex")]
-    Salsadex,
-    #[serde(rename = "tealstreet-dex")]
-    TealstreetDex,
     #[serde(rename = "txflow")]
     Txflow,
     #[serde(rename = "what")]
@@ -5066,10 +5062,6 @@ mod strict_codecs {
         Kodiakfi,
         #[serde(rename = "mode")]
         Mode,
-        #[serde(rename = "salsadex")]
-        Salsadex,
-        #[serde(rename = "tealstreet-dex")]
-        TealstreetDex,
         #[serde(rename = "txflow")]
         Txflow,
         #[serde(rename = "what")]
@@ -7389,16 +7381,6 @@ mod strict_codecs {
                         .unwrap()
                         .to_owned(),
                     serde_json::to_value(ExchangeName::Mode)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(ExchangeName::Salsadex)
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_owned(),
-                    serde_json::to_value(ExchangeName::TealstreetDex)
                         .unwrap()
                         .as_str()
                         .unwrap()

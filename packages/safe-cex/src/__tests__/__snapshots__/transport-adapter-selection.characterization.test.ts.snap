@@ -2111,40 +2111,6 @@ exports[`transport adapter selection per exchange > polymarket 1`] = `
 }
 `;
 
-exports[`transport adapter selection per exchange > salsadex 1`] = `
-{
-  "private direct": {},
-  "private proxy+tunnel-JA": {},
-  "private proxy+tunnel-SG": {},
-  "private proxy-JA": {},
-  "private proxy-SG": {},
-  "private tunnel-only": {},
-  "public direct": {},
-  "public proxy+tunnel-JA": {},
-  "public proxy+tunnel-SG": {},
-  "public proxy-JA": {},
-  "public proxy-SG": {},
-  "public tunnel-only": {},
-}
-`;
-
-exports[`transport adapter selection per exchange > tealstreet-dex 1`] = `
-{
-  "private direct": {},
-  "private proxy+tunnel-JA": {},
-  "private proxy+tunnel-SG": {},
-  "private proxy-JA": {},
-  "private proxy-SG": {},
-  "private tunnel-only": {},
-  "public direct": {},
-  "public proxy+tunnel-JA": {},
-  "public proxy+tunnel-SG": {},
-  "public proxy-JA": {},
-  "public proxy-SG": {},
-  "public tunnel-only": {},
-}
-`;
-
 exports[`transport adapter selection per exchange > txflow 1`] = `
 {
   "private direct": {},

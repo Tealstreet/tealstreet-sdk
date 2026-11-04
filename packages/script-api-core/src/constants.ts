@@ -64,8 +64,6 @@ const EXCHANGE_NAMES = [
   'polymarket',
   'kodiakfi',
   'mode',
-  'salsadex',
-  'tealstreet-dex',
   'txflow',
   'what',
   'weex',

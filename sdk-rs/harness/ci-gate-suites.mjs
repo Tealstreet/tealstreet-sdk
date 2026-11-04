@@ -66,7 +66,7 @@ const suiteCases = (suite) => {
       publicCase('okxeu', xperpBooks, 'okxeu-xperp'), publicCase('okxeu', xperpBooks));
     cases.push(...['okx', 'okxeu', 'okxdemo', 'okxeudemo'].map((venue) => privateCase(venue)));
   } else if (suite === 'orderly') {
-    for (const venue of ['orderly', 'tealstreet-dex', 'kodiakfi', 'woofi', 'mode', 'salsadex', 'what']) {
+    for (const venue of ['orderly', 'kodiakfi', 'woofi', 'mode', 'what']) {
       cases.push(privateCase(venue), privateCase(venue, `${venue}-testnet`));
     }
   } else if (suite === 'coinbase') {

@@ -1275,8 +1275,8 @@ raw primary/secondary clients on `this._primaryXhr` / `this._secondaryXhr`. The 
 that wires it MUST equal the set the UI offers it for — i.e. everything **not** in
 `exchangesWithoutSecondaryKey` (`src/utils/exchangeSupportsSecondaryKey.ts`). That
 exclusion list is the wallet / single-keypair venues (hyperliquid, paradex,
-grvt, apexomni, lighter, polymarket, and the orderly ed25519 family
-incl. `tealstreet-dex`) **plus** the session-login venue `breakoutprop` (DXtrade
+grvt, apexomni, lighter, polymarket, and the orderly ed25519 family) **plus** the
+session-login venue `breakoutprop` (DXtrade
 session token) — there a shared per-session token is injected on every request so a
 second client can't authenticate as a distinct key. A read-only "second API key" is
 not a coherent concept for any of these.
@@ -1603,7 +1603,7 @@ the error.
 
 ## Orderly Rust engine
 
-Tealstreet DEX, KodiakFi, WOOFi, Mode, SalsaDEX and What use one Rust venue
+KodiakFi, WOOFi, Mode, and What use one Rust venue
 with broker options. Production registries must not import the frozen replay
 reference in `src/__tests__/reference/orderly`. ED25519 signatures cover exact
 request bytes. The shared engine transport supports direct requests, proxies

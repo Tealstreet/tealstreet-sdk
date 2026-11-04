@@ -28,8 +28,6 @@ pub(crate) fn infinity(venue: &str) -> bool {
             | "woofi"
             | "kodiakfi"
             | "mode"
-            | "salsadex"
-            | "tealstreet-dex"
             | "what"
             | "hyperliquid"
             | "hyperliquidspot"
@@ -149,8 +147,9 @@ mod tests {
             );
             count += 1;
         }
-        assert!(
-            count >= 50,
+        // Two retired broker metadata entries were deleted; every remaining entry is checked.
+        assert_eq!(
+            count, 48,
             "metadata extraction must not silently skip source"
         );
     }

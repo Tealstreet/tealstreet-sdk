@@ -72,8 +72,6 @@ const legacyWhitelist: Record<string, LegacyWhitelist> = {
   coinbasespot: singapore,
   kodiakfi: singapore,
   mode: singapore,
-  salsadex: singapore,
-  'tealstreet-dex': singapore,
   what: singapore,
   hyperliquid: singapore,
   hyperliquidspot: singapore,

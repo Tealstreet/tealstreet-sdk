@@ -12,7 +12,7 @@ import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
-  'salsadex', 'tealstreet-dex', 'polymarket', 'breakoutprop', 'txflow', 'weex',
+  'polymarket', 'breakoutprop', 'txflow', 'weex',
   'bitrue',
 ];
 
@@ -23,6 +23,17 @@ test('the beta set is exactly the 44 IN venues in 23 families', () => {
     'cryptocom', 'grvt', 'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'orderly',
     'paradex', 'phemex', 'woo',
   ]);
+});
+
+test('retired brokers are rejected while all live Orderly names keep their family', () => {
+  for (const venue of ['salsadex', 'tealstreet-dex']) {
+    assert.throws(() => venueFamily(venue), /unsupported Rust venue/);
+    assert.throws(() => betaVenueFamily(venue), /unsupported Rust venue/);
+  }
+  for (const venue of ['orderly', 'woofi', 'kodiakfi', 'mode', 'what']) {
+    assert.equal(venueFamily(venue), 'orderly');
+    assert.equal(betaVenueFamily(venue), 'orderly');
+  }
 });
 
 test('every beta venue keeps the family the full registry gives it', () => {

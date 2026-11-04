@@ -91,7 +91,6 @@ const HONORING: Array<[string, ExchangeCtor]> = [
   ['kucoin', KucoinExchange],
   ['kucoinspot', KucoinSpotExchange],
   ['okx', OKXExchange],
-  ['salsadex', OrderlyExchange],
   ['paradex', ParadexExchange],
   ['phemex', PhemexExchange],
   ['weex', WeexExchange],

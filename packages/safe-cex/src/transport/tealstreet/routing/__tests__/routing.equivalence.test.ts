@@ -59,8 +59,6 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   paradex: 'https://api.prod.paradex.trade/v1',
   phemex: 'https://api.phemex.com',
   polymarket: 'https://clob.polymarket.com',
-  salsadex: 'https://api-evm.orderly.org',
-  'tealstreet-dex': 'https://api-evm.orderly.org',
   txflow: 'https://rpc.txflow.com',
   weex: 'https://api-contract.weex.com',
   what: 'https://api-evm.orderly.org',

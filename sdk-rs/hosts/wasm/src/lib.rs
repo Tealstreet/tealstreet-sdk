@@ -2137,14 +2137,7 @@ mod tests {
         use safe_cex_engine::{
             AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage, QuantityUnits,
         };
-        const ORDERLY: [&str; 6] = [
-            "tealstreet-dex",
-            "kodiakfi",
-            "mode",
-            "salsadex",
-            "what",
-            "woofi",
-        ];
+        const ORDERLY: [&str; 4] = ["kodiakfi", "mode", "what", "woofi"];
         const OKX: [&str; 4] = ["okx", "okxeu", "okxdemo", "okxeudemo"];
         let venues = [
             "coinbase",

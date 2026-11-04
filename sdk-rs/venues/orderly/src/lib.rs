@@ -1,4 +1,4 @@
-//! Orderly perpetuals, shared by its six broker frontends.
+//! Orderly perpetuals, shared by its four broker frontends.
 mod account;
 mod funding;
 mod history;
@@ -22,10 +22,9 @@ use wire::*;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Broker {
     #[default]
-    Tealstreet,
+    Orderly,
     KodiakFi,
     Mode,
-    SalsaDex,
     What,
     WooFi,
 }
@@ -34,9 +33,8 @@ impl Broker {
         match self {
             Self::KodiakFi => "TEALKODIAK",
             Self::Mode => "TEALMODE",
-            Self::SalsaDex => "TEALSALSA",
             Self::What => "TEALWHAT",
-            Self::Tealstreet | Self::WooFi => "TEALSTREET",
+            Self::Orderly | Self::WooFi => "TEALSTREET",
         }
     }
 }

@@ -19,8 +19,8 @@ describe('exchangeSupportsSecondaryKey', () => {
     expect(exchangeSupportsSecondaryKey('what')).toBe(false);
   });
 
-  it('is false for tealstreet-dex (Orderly ed25519 family)', () => {
-    expect(exchangeSupportsSecondaryKey('tealstreet-dex')).toBe(false);
+  it('is false for woofi (Orderly ed25519 family)', () => {
+    expect(exchangeSupportsSecondaryKey('woofi')).toBe(false);
   });
 
   it('is false for session-login venues where a distinct read key cannot authenticate', () => {

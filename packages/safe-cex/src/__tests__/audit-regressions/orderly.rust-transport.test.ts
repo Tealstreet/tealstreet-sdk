@@ -230,7 +230,7 @@ describe('Orderly Rust transport boundary', () => {
     }
   });
 
-  it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+  it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
     '%s refuses unsupported order history filters before dispatching a command',
     async (name) => {
       const exchange = new RustEngineExchange(name, options(undefined, { publicDataOnly: true }), new DefaultStore());
@@ -267,7 +267,7 @@ describe('Orderly Rust transport boundary', () => {
 
   it('keeps direct request bytes and streams through the generic host', async () => {
     const { base } = createBase();
-    const transport = createEngineTransport('tealstreet-dex', options(), base);
+    const transport = createEngineTransport('woofi', options(), base);
     const result = await transport.request(signed());
     expect(base.request).toHaveBeenCalledExactlyOnceWith({ ...signed(), signal: expect.any(AbortSignal) });
     const chunks: number[] = [];
@@ -276,7 +276,7 @@ describe('Orderly Rust transport boundary', () => {
     transport.dispose?.();
   });
 
-  it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+  it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
     '%s uses shared direct/proxy routes and keeps escaped queries and signed body lexemes exact', async (name) => {
       const { base } = createBase();
       base.request.mockResolvedValue({ status: 200, headers: '', body: new Uint8Array() } as never);
@@ -453,7 +453,7 @@ describe('Orderly Rust transport boundary', () => {
     capable.dispose?.();
   });
 
-  it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+  it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
     '%s native routing plan uses the same serializable HOW policy', (name) => {
       const plan = resolveEngineRoutingPlan(name, options(tealstreetTransport, { tealstreetTunnel: true }), origin);
       // Was fsjnpy143pbz.asia (AWS) until AWS_EXIT.md step 3e.

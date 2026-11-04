@@ -159,7 +159,7 @@ describe('Rust cancel-all placement scopes', () => {
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'cancelSymbolOrders', symbol: '' });
   });
 
-  it.each(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'] as const)(
+  it.each(['kodiakfi', 'mode', 'what', 'woofi'] as const)(
     '%s cancels every product through its native global endpoint even with an empty store', async (name) => {
       const { exchange, command, store } = setup(name);
       await exchange.cancelAllOrders();

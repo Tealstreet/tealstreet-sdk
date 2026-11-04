@@ -20,7 +20,7 @@ const remoteSigner: RemoteSigner = {
   onAvailabilityChange: () => () => {},
 };
 
-const orderlyNames: ExchangeName[] = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'];
+const orderlyNames: ExchangeName[] = ['kodiakfi', 'mode', 'what', 'woofi'];
 // Generated per run so no credential-shaped literal is committed.
 const orderlyCredentials = () => ({
   key: `ed25519:${bs58.encode(Uint8Array.from({ length: 32 }, (_, index) => index + 1))}`,

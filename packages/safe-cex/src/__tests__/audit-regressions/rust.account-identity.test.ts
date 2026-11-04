@@ -61,7 +61,7 @@ const commandAliases: ExchangeName[] = [
   'woo',
 ];
 const coinbaseAliases = ['coinbase', 'coinbasespot'] as const;
-const orderlyAliases = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'] as const;
+const orderlyAliases = ['kodiakfi', 'mode', 'what', 'woofi'] as const;
 const unsupportedAliases: ExchangeName[] = [
   'binanceoptions',
   'binancespot',
@@ -202,11 +202,12 @@ function fixture(name: ExchangeName, options: Partial<ExchangeOptions> = {}) {
   };
 }
 
-it('retains all historical identity cases and covers the beta alias subset', () => {
+it('retains remaining historical identity cases and covers the beta alias subset', () => {
   const inventory = [...commandAliases, ...coinbaseAliases, ...orderlyAliases, ...unsupportedAliases];
-  expect(new Set(inventory).size).toBe(50);
+  // Two retired brokers leave the remaining identity and beta coverage intact.
+  expect(new Set(inventory).size).toBe(48);
   expect(inventory.filter((name) => RUST_VENUES.has(name)).sort()).toEqual([...RUST_VENUES].sort());
-  expect(commandAliases.length + coinbaseAliases.length + orderlyAliases.length).toBe(33);
+  expect(commandAliases.length + coinbaseAliases.length + orderlyAliases.length).toBe(31);
 });
 
 it.each(commandAliases)(

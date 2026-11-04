@@ -1073,7 +1073,7 @@ const BitrueMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   // Removed from supported exchanges (hidden from add-account everywhere). Code
   // is kept in place; flip these back to re-enable. Same soft-disable pattern as
-  // dydx/arkham/salsadex — gated by isExchangeAvailableInCurrentEnv.
+  // dydx/arkham — gated by isExchangeAvailableInCurrentEnv.
   enabled: false,
   enabledInDev: false,
   enableInPreview: false,
@@ -1450,48 +1450,6 @@ const MODEMetadata: ExchangeMetadata = {
   },
 };
 
-const SalsaDEXMetadata: ExchangeMetadata = {
-  ...defaultMetaData,
-  exchangeName: 'salsadex' as ExchangeName,
-  logo: '/static/exchanges/logos/SALSADEX/logo.webp',
-  lightLogo: '/static/exchanges/logos/SALSADEX/logo-big.webp',
-  darkLogo: '/static/exchanges/logos/SALSADEX/logo-big.webp',
-  refLink: 'https://teal.link/salsadex',
-  refImage: '/static/exchanges/reflinks/salsadex/ref.png',
-  requiresPassphrase: false,
-  requiresApplicationId: true,
-  // Removed from supported exchanges (hidden from add-account everywhere). Code
-  // is kept in place; flip these back to re-enable. Same soft-disable pattern as
-  // dydx/arkham — gated by isExchangeAvailableInCurrentEnv.
-  enabled: false,
-  enabledInDev: false,
-  enableInPreview: false,
-  supportsTestnet: false,
-  leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
-  orderbookTickDelay: 60,
-  prettyName: 'SalsaDEX',
-  defaultQuote: 'USDC',
-  marginTypes: [MarginType.Cross, MarginType.Isolated],
-  orderPendingUpdateDelay: 3_000,
-  supportsTrailingStopLoss: false,
-  supportsTunnel: true,
-  tickInterval: 2_000,
-  supportsChaser: true,
-  supportsPositionMargin: false,
-  forbidCors: true,
-  supportsFetchSymbolMaxLeverage: true,
-  hideMarginTypeSelector: false,
-  hidePositionModeSelector: true,
-  latencyDomain: 'api-evm.orderly.org',
-  features: {
-    kline: true,
-    orderbook: true,
-    orders: true,
-    positions: true,
-    balance: true,
-  },
-};
-
 const WhatMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   exchangeName: 'what' as ExchangeName,
@@ -1520,47 +1478,6 @@ const WhatMetadata: ExchangeMetadata = {
   supportsFetchSymbolMaxLeverage: true,
   hideMarginTypeSelector: false,
   hidePositionModeSelector: true,
-  latencyDomain: 'api-evm.orderly.org',
-  features: {
-    kline: true,
-    orderbook: true,
-    orders: true,
-    positions: true,
-    balance: true,
-  },
-};
-
-const TealstreetDEXMetadata: ExchangeMetadata = {
-  ...defaultMetaData,
-  exchangeName: 'tealstreet-dex' as ExchangeName,
-  // No longer offered for new connections. Hidden rather than disabled: the
-  // availability flags also gate whether a *saved* account may register at
-  // startup, so `enabled: false` would stop any existing TSDEX account from
-  // loading — including the owner's ability to open it and export or delete it.
-  hiddenFromNewAccountPicker: true,
-  logo: '/static/exchanges/logos/TSDEX/logo.svg',
-  lightLogo: '/static/exchanges/logos/TSDEX/light.png',
-  darkLogo: '/static/exchanges/logos/TSDEX/dark.png',
-  refLink: 'https://teal.link/tsdex',
-  refImage: '/static/exchanges/reflinks/tsdex/ref.png',
-  requiresPassphrase: false,
-  requiresApplicationId: true,
-  enabled: true,
-  enabledInDev: true,
-  supportsTestnet: false,
-  leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
-  orderbookTickDelay: 60,
-  prettyName: 'TSDEX',
-  defaultQuote: 'USDC',
-  marginTypes: [MarginType.Cross, MarginType.Isolated],
-  orderPendingUpdateDelay: 3_000,
-  supportsTrailingStopLoss: false,
-  supportsTunnel: true,
-  tickInterval: 2_000,
-  supportsChaser: true,
-  supportsPositionMargin: false,
-  forbidCors: true,
-  supportsFetchSymbolMaxLeverage: true,
   latencyDomain: 'api-evm.orderly.org',
   features: {
     kline: true,
@@ -2363,8 +2280,6 @@ export const exchangeMetadata: {
   coinbasespot: CoinbaseSpotMetadata,
   kodiakfi: KodiakFIMetadata,
   mode: MODEMetadata,
-  salsadex: SalsaDEXMetadata,
-  'tealstreet-dex': TealstreetDEXMetadata,
   what: WhatMetadata,
   hyperliquid: HyperliquidMetadata,
   hyperliquidspot: HyperliquidSpotMetadata,
