@@ -111,6 +111,19 @@ export const tunnelLastOpenedAt = (): number | undefined => lastOpenedAt;
 /** The current outage when this realm's tunnel is unreachable on every port, else undefined. */
 export const tunnelOutage = (): TunnelOutage | undefined => outage;
 
+// Visibly failing comes one handshake before unreachable: the lane is on 443 and a
+// handshake failed there too. Unsigned public reads take the HTTP proxy from here.
+const failingListeners = new Set<() => void>();
+
+/** This realm's tunnel has failed on 443 since it last opened (always true during an outage). */
+export const tunnelFailing = (): boolean => failuresOn443 > 0;
+
+/** Called each time the tunnel starts failing. Returns the unsubscribe. */
+export const onTunnelFailing = (listener: () => void): (() => void) => {
+  failingListeners.add(listener);
+  return () => failingListeners.delete(listener);
+};
+
 /** A socket dialed from `tunnelDialUrl` opened its handshake. */
 export const noteTunnelDialOpened = (dialedUrl: string): void => {
   if (!dialedPort(dialedUrl)) return;
@@ -139,6 +152,7 @@ export const noteTunnelDialFailed = (dialedUrl: string): void => {
   }
   if (lanePort !== '443') return;
   failuresOn443 += 1;
+  if (failuresOn443 === 1) for (const listener of [...failingListeners]) listener();
   if (failuresOn443 < UNREACHABLE_AFTER_443_FAILURES || outage) return;
   episode += 1;
   outage = {
