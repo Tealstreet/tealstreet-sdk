@@ -744,6 +744,8 @@ impl Venue for BitgetFutures {
             fresh_positions: true,
             nuke_account_cancel: true,
             symbol_cancel_misses_unseen: true,
+            // Every census commits its covers and answers a refresh ask.
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -800,6 +802,9 @@ impl Venue for BitgetFutures {
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_orders(cx);
+    }
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn capture_http_reconciliation(
         &self,

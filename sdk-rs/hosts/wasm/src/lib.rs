@@ -2516,7 +2516,16 @@ mod tests {
                     venue,
                 ) || any(&OKX, venue),
                 order_read_covers: any(
-                    &["bybit", "bybitdemo", "bybitinverse", "bybitspot", "phemex"],
+                    &[
+                        "bitget",
+                        "bitgetinverse",
+                        "bitgetusdc",
+                        "bybit",
+                        "bybitdemo",
+                        "bybitinverse",
+                        "bybitspot",
+                        "phemex",
+                    ],
                     venue,
                 ),
             };
