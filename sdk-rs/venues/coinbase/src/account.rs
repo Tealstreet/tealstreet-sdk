@@ -1741,9 +1741,12 @@ impl Coinbase {
                     }
                 }
                 Request::DetectCfm { portfolio } => {
-                    let _: wire::CfmBalance =
-                        serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                    self.select_portfolio(cx, portfolio, ProductKind::Cfm)
+                    let kind = if wire::cfm_balance(response.body)?.is_some() {
+                        ProductKind::Cfm
+                    } else {
+                        ProductKind::Spot
+                    };
+                    self.select_portfolio(cx, portfolio, kind)
                 }
                 Request::Balance => {
                     self.account.inflight[0] = false;
@@ -1756,12 +1759,13 @@ impl Coinbase {
                             committed_upnl(cx.store),
                         )
                     } else {
-                        let r: wire::CfmBalance =
-                            serde_json::from_str(response.body).map_err(|e| e.to_string())?;
+                        let r = wire::cfm_balance(response.body)?.ok_or(
+                            "Coinbase unknown balance: path `/api/v3/brokerage/cfm/balance_summary`, field `balance_summary`",
+                        )?;
                         (
-                            r.balance_summary.total_usd_balance.value.0,
-                            r.balance_summary.available_margin.value.0,
-                            r.balance_summary.unrealized_pnl.map_or(0.0, |n| n.value.0),
+                            r.total_usd_balance.value.0,
+                            r.available_margin.value.0,
+                            r.unrealized_pnl.map_or(0.0, |n| n.value.0),
                         )
                     };
                     if total < 0.0 || free < 0.0 || !upnl.is_finite() || !(total - free).is_finite()

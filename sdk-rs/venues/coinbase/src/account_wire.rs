@@ -31,8 +31,25 @@ pub struct IntxSummary {
 }
 #[derive(Deserialize)]
 pub struct CfmBalance {
-    pub balance_summary: CfmSummary,
+    #[serde(deserialize_with = "present_cfm_summary")]
+    pub balance_summary: Option<CfmSummary>,
 }
+
+// Only explicit null means no CFM account; a missing field remains malformed.
+fn present_cfm_summary<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<CfmSummary>, D::Error> {
+    Option::deserialize(d)
+}
+
+pub fn cfm_balance(text: &str) -> Result<Option<CfmSummary>, String> {
+    serde_json::from_str::<Option<CfmBalance>>(text)
+        .map(|balance| balance.and_then(|balance| balance.balance_summary))
+        .map_err(|_| {
+            "Coinbase invalid response: path `/api/v3/brokerage/cfm/balance_summary`, field `balance_summary`".into()
+        })
+}
+
 #[derive(Deserialize)]
 pub struct CfmSummary {
     pub total_usd_balance: Money,
