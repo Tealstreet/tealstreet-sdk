@@ -343,83 +343,12 @@ mod enabled {
         }
     }
 
-    impl<V: Venue> Engine<V> {
-        pub fn set_address_setup_host_support(
-            &mut self,
-            support: SetupHostSupport,
-        ) -> Result<(), VenueError> {
-            if self.started {
-                return Err(SignError::InvalidRequest.venue_error());
-            }
-            self.invalidate_address_setup()?;
-            self.io.core.address_setup.support = support;
-            Ok(())
-        }
-        pub fn initialize_address_nonce(
-            &mut self,
-            now: f64,
-        ) -> Result<AddressSetupProgress, VenueError> {
-            if self.started
-                || !now.is_finite()
-                || now < 0.
-                || !(now + BOUND_MS).is_finite()
-                || now + BOUND_MS <= now
-            {
-                return Err(SignError::InvalidRequest.venue_error());
-            }
-            if !self.io.core.address_setup.initialized {
-                let domain = self.venue.address_nonce_domain();
-                if domain.is_some_and(|domain| {
-                    *domain != crate::nonce::HYPERLIQUID_AGENT
-                        && *domain != crate::nonce::ASTERDEX_V3
-                }) {
-                    return Err(SignError::InvalidRequest.venue_error());
-                }
-                let issued = issuer()?;
-                let setup = &mut self.io.core.address_setup;
-                setup.declare(&self.venue).map_err(SignError::venue_error)?;
-                setup.initialized = true;
-                setup.generation = 1;
-                setup.issuer = Some(issued);
-                setup.domain = domain;
-                self.launch_address_setup(now);
-            }
-            self.poll_address_setup(now, &mut TaskContext::from_waker(std::task::Waker::noop()));
-            Ok(self.io.core.address_setup.progress())
-        }
-        pub fn reinitialize_address_nonce(
-            &mut self,
-            now: f64,
-        ) -> Result<AddressSetupProgress, VenueError> {
-            if self.started
-                || !now.is_finite()
-                || now < 0.
-                || !(now + BOUND_MS).is_finite()
-                || now + BOUND_MS <= now
-            {
-                return Err(SignError::InvalidRequest.venue_error());
-            }
-            if !self.io.core.address_setup.initialized {
-                return self.initialize_address_nonce(now);
-            }
-            let core = &mut self.io.core;
-            if !core.address_setup.replacement {
-                if core.address_setup.generation >= MAX_GENERATION {
-                    return Err(SignError::Unavailable.venue_error());
-                }
-                core.address_setup.generation += 1;
-                core.address_setup.replacement = true;
-                core.address_setup
-                    .invalidate(&mut core.actions, &mut core.identities);
-            }
-            self.poll_address_setup(now, &mut TaskContext::from_waker(std::task::Waker::noop()));
-            Ok(self.io.core.address_setup.progress())
-        }
-        pub fn address_nonce_setup_ready(&self) -> bool {
-            self.io.core.address_setup.initialized && self.io.core.address_setup.tasks.is_empty()
-        }
+    // Setup execution uses only core state. Keep these bodies shared across
+    // venue engines instead of inlining them into each Engine<V> instance.
+    impl IoCore {
+        #[inline(never)]
         fn launch_address_setup(&mut self, now: f64) {
-            let core = &mut self.io.core;
+            let core = &mut *self;
             for slot in [CredentialSlot::Primary, CredentialSlot::Secondary] {
                 if !core.address_setup.slots.contains(slot) {
                     continue;
@@ -504,11 +433,12 @@ mod enabled {
                 }
             }
         }
-        pub fn poll_address_setup(&mut self, now: f64, cx: &mut TaskContext<'_>) {
+        #[inline(never)]
+        fn poll_address_setup(&mut self, now: f64, cx: &mut TaskContext<'_>) {
             if !now.is_finite() || now < 0. {
                 return;
             }
-            let core = &mut self.io.core;
+            let core = &mut *self;
             let setup = &mut core.address_setup;
             for task in &mut setup.tasks {
                 if now >= task.deadline && !task.retiring {
@@ -585,6 +515,86 @@ mod enabled {
                 setup.replacement = false;
                 self.launch_address_setup(now);
             }
+        }
+    }
+
+    impl<V: Venue> Engine<V> {
+        pub fn set_address_setup_host_support(
+            &mut self,
+            support: SetupHostSupport,
+        ) -> Result<(), VenueError> {
+            if self.started {
+                return Err(SignError::InvalidRequest.venue_error());
+            }
+            self.invalidate_address_setup()?;
+            self.io.core.address_setup.support = support;
+            Ok(())
+        }
+        pub fn initialize_address_nonce(
+            &mut self,
+            now: f64,
+        ) -> Result<AddressSetupProgress, VenueError> {
+            if self.started
+                || !now.is_finite()
+                || now < 0.
+                || !(now + BOUND_MS).is_finite()
+                || now + BOUND_MS <= now
+            {
+                return Err(SignError::InvalidRequest.venue_error());
+            }
+            if !self.io.core.address_setup.initialized {
+                let domain = self.venue.address_nonce_domain();
+                if domain.is_some_and(|domain| {
+                    *domain != crate::nonce::HYPERLIQUID_AGENT
+                        && *domain != crate::nonce::ASTERDEX_V3
+                }) {
+                    return Err(SignError::InvalidRequest.venue_error());
+                }
+                let issued = issuer()?;
+                let setup = &mut self.io.core.address_setup;
+                setup.declare(&self.venue).map_err(SignError::venue_error)?;
+                setup.initialized = true;
+                setup.generation = 1;
+                setup.issuer = Some(issued);
+                setup.domain = domain;
+                self.io.core.launch_address_setup(now);
+            }
+            self.poll_address_setup(now, &mut TaskContext::from_waker(std::task::Waker::noop()));
+            Ok(self.io.core.address_setup.progress())
+        }
+        pub fn reinitialize_address_nonce(
+            &mut self,
+            now: f64,
+        ) -> Result<AddressSetupProgress, VenueError> {
+            if self.started
+                || !now.is_finite()
+                || now < 0.
+                || !(now + BOUND_MS).is_finite()
+                || now + BOUND_MS <= now
+            {
+                return Err(SignError::InvalidRequest.venue_error());
+            }
+            if !self.io.core.address_setup.initialized {
+                return self.initialize_address_nonce(now);
+            }
+            let core = &mut self.io.core;
+            if !core.address_setup.replacement {
+                if core.address_setup.generation >= MAX_GENERATION {
+                    return Err(SignError::Unavailable.venue_error());
+                }
+                core.address_setup.generation += 1;
+                core.address_setup.replacement = true;
+                core.address_setup
+                    .invalidate(&mut core.actions, &mut core.identities);
+            }
+            self.poll_address_setup(now, &mut TaskContext::from_waker(std::task::Waker::noop()));
+            Ok(self.io.core.address_setup.progress())
+        }
+        pub fn address_nonce_setup_ready(&self) -> bool {
+            self.io.core.address_setup.initialized && self.io.core.address_setup.tasks.is_empty()
+        }
+        pub fn poll_address_setup(&mut self, now: f64, cx: &mut TaskContext<'_>) {
+            self.io.core.poll_address_setup(now, cx);
         }
         pub(in crate::engine) fn address_setup_timer(&mut self, now: f64, timer: TimerId) -> bool {
             let core = &mut self.io.core;
