@@ -2059,6 +2059,15 @@ impl PhemexPerpetuals {
             self.orders_read_failed(cx, read, "malformed open-order envelope");
             return;
         };
+        // Before this response's own writes: whether the stream changed the
+        // symbol after the read went out, so its census is older than the rows.
+        let outran = cx
+            .orders_read_refusals(
+                safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&[&read.symbol]),
+                |_| true,
+                &[],
+            )
+            .is_some_and(|refused| !refused.is_empty());
         let data = envelope
             .data
             .map(RawValue::get)
@@ -2189,7 +2198,7 @@ impl PhemexPerpetuals {
             if list_len < RESTING_LIST_MAX_ROWS {
                 gone.extend(resting);
             }
-            for id in gone.iter().filter(|id| !listed.contains(*id)) {
+            for id in gone.iter().filter(|id| !outran && !listed.contains(*id)) {
                 let version = self.account.order_versions.get(id).copied().unwrap_or(0);
                 self.account.remember_terminal(id.clone(), version);
                 cx.store.remove_orders(&[id.as_str()]);
