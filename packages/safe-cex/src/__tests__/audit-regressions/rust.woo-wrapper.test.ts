@@ -55,9 +55,8 @@ describe('Rust WOO execution history boundary', () => {
     for (const name of ['woo', 'woofi', 'kodiakfi', 'mode', 'what'] as const) {
       expect(isRustVenue(name), name).toBe(true);
     }
-    for (const name of ['salsadex', 'tealstreet-dex'] as const) {
-      expect(isRustVenue(name), name).toBe(false);
-    }
+    // Retired-name rejection moved to the untyped loader boundary in
+    // sdk-rs/hosts/wasm/js/beta-venues.test.mjs.
     const { exchange, command } = setup();
     const opts = { symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 1,
       maxSlippagePct: 0.25, clientOrderId: '9007199254740991' };

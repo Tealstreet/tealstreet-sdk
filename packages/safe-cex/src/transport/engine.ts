@@ -66,7 +66,7 @@ export interface EngineRoutingPlan {
 
 type Request = Parameters<Transport['request']>[0];
 type CredentialIntent = 'public' | 'primary' | 'secondary';
-const orderlyExchanges = new Set<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+const orderlyExchanges = new Set<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi']);
 const coinbaseExchanges = new Set<ExchangeName>(['coinbase', 'coinbasespot']);
 
 const httpHeaderAliases = (exchange: ExchangeName, proxied: boolean, how: boolean): Record<string, string> =>

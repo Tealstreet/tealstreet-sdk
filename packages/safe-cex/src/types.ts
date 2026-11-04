@@ -51,8 +51,6 @@ export type ExchangeName =
   | 'polymarket'
   | 'kodiakfi'
   | 'mode'
-  | 'salsadex'
-  | 'tealstreet-dex'
   | 'txflow'
   | 'what'
   | 'weex'

@@ -48,8 +48,6 @@ export function toBinance(symbol: string, from: ExchangeName): string {
     case 'woofi':
     case 'kodiakfi':
     case 'mode':
-    case 'salsadex':
-    case 'tealstreet-dex':
     case 'what':
     case 'weex':
       return symbol;
@@ -253,8 +251,6 @@ export function fromBinance(symbol: string, to: ExchangeName): string {
     case 'woofi':
     case 'kodiakfi':
     case 'mode':
-    case 'salsadex':
-    case 'tealstreet-dex':
     case 'what':
     case 'weex':
       return symbol;

@@ -337,7 +337,6 @@ fn any_timeframe_preserves_distinct_minute_and_month_branches() {
 fn hyphenated_and_keyword_shaped_variants_keep_their_wire_literals() {
     for (variant, literal) in [
         (ExchangeName::LighterRobinhood, "lighter-robinhood"),
-        (ExchangeName::TealstreetDex, "tealstreet-dex"),
     ] {
         assert_eq!(serde_json::to_value(&variant).unwrap(), json!(literal));
         assert_eq!(

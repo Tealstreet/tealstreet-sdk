@@ -34,7 +34,7 @@ family_args() {
     hyperliquidspot) family=hyperliquid ;;
     krakenspot) family=kraken ;;
     coinbasespot) family=coinbase ;;
-    tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) family=orderly ;;
+    kodiakfi|mode|what|woofi) family=orderly ;;
     *) echo "Unsupported venue: $1 (expected $venues)" >&2; exit 2 ;;
   esac
   # Every family links the Rust algos (chaser, TWAP, exec) for the LOCAL worker.

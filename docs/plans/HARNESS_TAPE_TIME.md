@@ -447,7 +447,7 @@ The original generator fails both causal regressions; wire-identity checks pass.
 ## Orderly broker family phase
 
 Enable private tape time in the shared Orderly harness factory for orderly,
-tealstreet-dex, kodiakfi, woofi, mode, salsadex and what on mainnet/testnet.
+kodiakfi, woofi, mode, and what on mainnet/testnet.
 Preserve existing epoch1765805280000 and all fourteen fixture byte streams,
 broker/network identities, independent Ed25519/freshness checks, request/socket
 correlation, heartbeat roles, the 1000ms polling floor and staged reads.

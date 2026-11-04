@@ -26,7 +26,7 @@ const weexTape = () => {
 };
 const ids = (response) => JSON.parse(response.body).map((row) => row.orderId ?? row.algoId);
 
-test('all 51 covered venue configurations use deterministic private replay clocks', () => {
+test('all 49 covered venue configurations use deterministic private replay clocks', () => {
   const covered = [
     'apexomni', 'asterdex', 'backpack', 'binance', 'binanceinverse',
     'binanceoptions', 'binancepm', 'binancespot', 'bingx', 'bitget', 'bitgetinverse',
@@ -36,7 +36,7 @@ test('all 51 covered venue configurations use deterministic private replay clock
     'hyrotrader', 'kodiakfi', 'kraken', 'krakenspot', 'kucoin',
     'kucoinspot', 'lighter', 'lighter-robinhood', 'mexc', 'mode',
     'okx', 'okxdemo', 'okxeu', 'okxeudemo', 'orderly',
-    'paradex', 'phemex', 'polymarket', 'salsadex', 'tealstreet-dex',
+    'paradex', 'phemex', 'polymarket',
     'txflow', 'weex', 'what', 'woo', 'woofi',
   ];
   assert.deepEqual(Object.keys(VENUES).sort(), covered);

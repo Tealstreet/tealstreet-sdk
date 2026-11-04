@@ -171,10 +171,8 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     mint: () => `x-s3vFFRQp${uuid()}`.slice(0, 32),
   }),
   binancespot: patternClientOrderIdRule('Binance Spot', /^[A-Za-z0-9_-]{1,36}$/, { mint: () => `x-s3vFFRQp${uuid()}` }),
-  'tealstreet-dex': orderlyClientOrderIdRule,
   kodiakfi: orderlyClientOrderIdRule,
   mode: orderlyClientOrderIdRule,
-  salsadex: orderlyClientOrderIdRule,
   what: orderlyClientOrderIdRule,
   woofi: orderlyClientOrderIdRule,
   woo: {

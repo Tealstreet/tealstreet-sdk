@@ -3,7 +3,7 @@ import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/host';
 import { QUANTITY_UNITS } from '@tealstreet/safe-cex-wasm/wire';
 import type { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 
-const ORDERLY = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'];
+const ORDERLY = ['kodiakfi', 'mode', 'what', 'woofi'];
 const OKX = ['okx', 'okxeu', 'okxdemo', 'okxeudemo'];
 
 /**

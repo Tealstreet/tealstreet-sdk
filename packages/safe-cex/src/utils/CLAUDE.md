@@ -35,7 +35,7 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | backpack                              | `{B}_{Q}_PERP`     | `BTC_USDC_PERP`  | USDC          | Underscore-sep, spot: `{B}_{Q}`                          |
 | cryptocom                             | `{B}{Q}-PERP`      | `BTCUSD-PERP`    | USD           | Concat base+quote then `-PERP`                           |
 | lighter                               | `{B}`              | `APT`            | USDT          | Just base, some have `{B}/USDC`                          |
-| orderly variants                      | `{B}{Q}`           | `BTCUSDC`        | USDC          | woofi, kodiakfi, mode, salsadex, what, tealstreet-dex    |
+| orderly variants                      | `{B}{Q}`           | `BTCUSDC`        | USDC          | woofi, kodiakfi, mode, what, |
 | polymarket                            | `{slug}-{outcome}` | `slug-Yes`       | USDC          | Non-standard, not convertible                            |
 
 ### Key Gotchas

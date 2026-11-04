@@ -73,7 +73,7 @@ it('Polymarket private accounts need a wallet private key', () =>
   startRejects('polymarket', { key: 'not-a-key' }, 'Polymarket requires a local 32-byte wallet private key'));
 
 it('Orderly private accounts need an application id', () =>
-  startRejects('tealstreet-dex', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
+  startRejects('woofi', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
 // Unadopted native families still refuse payload callbacks before I/O.
 it('unadopted private venues refuse a payload signer before any I/O', () =>

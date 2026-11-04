@@ -62,8 +62,6 @@ const ALL_EXCHANGES: ExchangeName[] = [
   'polymarket',
   'kodiakfi',
   'mode',
-  'salsadex',
-  'tealstreet-dex',
   'txflow',
   'what',
   'weex',

@@ -14,7 +14,7 @@ existing command and returns its result without interpreting REST data.
 | apexomni, kucoinspot | Existing `getAccount` command aliases; retain their constructor overrides |
 | asterdex, backpack, binance, binancepm, bingx, bitget, bitgetinverse, bitgetusdc, bybit, bybitinverse, bybitspot, bybitdemo, cryptocom, grvt, kucoin, lighter, lighter-robinhood, mexc, paradex, phemex, polymarket, weex, woo | Initialize the host, then issue native `fetchAccount` |
 | coinbase, coinbasespot | Preserve the existing ready native portfolio ID through `host.accountId()` |
-| tealstreet-dex, kodiakfi, mode, salsadex, what, woofi | Preserve the ready configured Orderly application ID and affiliate ID |
+| kodiakfi, mode, what, woofi | Preserve the ready configured Orderly application ID and affiliate ID |
 | binancespot, binanceinverse, bitrue, blofin, breakoutprop, hyrotrader, hyperliquid, hyperliquidspot, kraken, krakenspot, okx, okxeu, okxdemo, okxeudemo, txflow | Explicit unsupported identity rejection before host initialization |
 
 This accounts for all 48 registered Rust aliases: 33 supported and 15

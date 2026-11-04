@@ -246,10 +246,8 @@ fn orderly_private_accounts_need_an_application_id_and_base58_ed25519_keys() {
     let valid = "11111111111111111111111111111111";
     for venue in [
         "orderly",
-        "tealstreet-dex",
         "kodiakfi",
         "mode",
-        "salsadex",
         "what",
         "woofi",
     ] {

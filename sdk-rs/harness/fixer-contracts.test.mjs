@@ -258,7 +258,7 @@ test('scalar null command acknowledgments require their own narrow permission', 
 });
 
 test('registered aliases use the same deeply frozen contract', () => {
-  for (const alias of ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])
+  for (const alias of ['kodiakfi', 'mode', 'what', 'woofi'])
     assert.equal(FIXER_CONTRACTS[alias], FIXER_CONTRACTS.orderly);
   assert.equal(FIXER_CONTRACTS.coinbase, FIXER_CONTRACTS.coinbasespot);
   assert.equal(FIXER_CONTRACTS.lighter, FIXER_CONTRACTS['lighter-robinhood']);

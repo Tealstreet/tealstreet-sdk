@@ -37,8 +37,6 @@ pub(super) const ORDER_METADATA: &[(&str, bool, bool)] = &[
     ("coinbasespot", false, true),
     ("kodiakfi", true, false),
     ("mode", true, false),
-    ("salsadex", true, false),
-    ("tealstreet-dex", true, false),
     ("what", true, false),
     ("hyperliquid", true, true),
     ("hyperliquidspot", true, false),

@@ -842,7 +842,7 @@ PASS; exact-head CI must pass before merge.
 
 The exact-head watcher detects922b5fdc89 (PR1307) landing before1eac CI can
 finish. Four full Orderly broker/network private gates pass (Orderly and
-Tealstreet DEX, both networks); stop the old chain before merging new harness
+both networks); stop the old chain before merging new harness
 code. Integrate Bybit inverse/spot/demo/Hyro variants without changing Bitunix
 base sizing or net PNL. Review host/SDK, harness and engine/Bitrue compatibility
 in independent scopes. Preserve our exact signed-component net memory policy,

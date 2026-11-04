@@ -28,8 +28,6 @@ pub(crate) fn infinity(venue: &str) -> bool {
             | "woofi"
             | "kodiakfi"
             | "mode"
-            | "salsadex"
-            | "tealstreet-dex"
             | "what"
             | "hyperliquid"
             | "hyperliquidspot"

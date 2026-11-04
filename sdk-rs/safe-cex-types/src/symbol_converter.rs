@@ -42,8 +42,6 @@ fn name(exchange: &ExchangeName) -> &'static str {
         ExchangeName::Polymarket => "polymarket",
         ExchangeName::Kodiakfi => "kodiakfi",
         ExchangeName::Mode => "mode",
-        ExchangeName::Salsadex => "salsadex",
-        ExchangeName::TealstreetDex => "tealstreet-dex",
         ExchangeName::Txflow => "txflow",
         ExchangeName::What => "what",
         ExchangeName::Weex => "weex",

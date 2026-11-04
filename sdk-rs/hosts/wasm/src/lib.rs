@@ -2137,11 +2137,9 @@ mod tests {
         use safe_cex_engine::{
             AccountLookup, CancelAll, Capabilities, LeverageQuery, MaxLeverage, QuantityUnits,
         };
-        const ORDERLY: [&str; 6] = [
-            "tealstreet-dex",
+        const ORDERLY: [&str; 4] = [
             "kodiakfi",
             "mode",
-            "salsadex",
             "what",
             "woofi",
         ];

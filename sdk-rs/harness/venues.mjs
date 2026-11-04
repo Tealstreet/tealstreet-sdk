@@ -200,18 +200,14 @@ export const ORDERLY_REPLAY = {
   publicApplicationId: 'OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY',
 };
 export const ORDERLY_BROKERS = {
-  'tealstreet-dex': 'TEALSTREET',
   kodiakfi: 'TEALKODIAK',
   mode: 'TEALMODE',
-  salsadex: 'TEALSALSA',
   what: 'TEALWHAT',
   woofi: 'TEALSTREET',
 };
 const orderlyClasses = {
-  'tealstreet-dex': 'TealstreetDEXExchange',
   kodiakfi: 'KodiakFIExchange',
   mode: 'MODEExchange',
-  salsadex: 'SalsaDEXExchange',
   what: 'WhatExchange',
   woofi: 'WoofiExchange',
 };
@@ -265,7 +261,7 @@ const orderlyAuth = (message) => {
   );
 };
 const orderly = (alias) => {
-  const name = alias === 'orderly' ? 'tealstreet-dex' : alias;
+  const name = alias === 'orderly' ? 'woofi' : alias;
   return {
     family: 'orderly',
     virtualPrivateClock: true,

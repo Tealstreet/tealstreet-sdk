@@ -59,7 +59,7 @@ type BinanceInstrumentInput = {
   contractSize?: number;
 };
 
-const orderlyAliases = new Set(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi']);
+const orderlyAliases = new Set(['kodiakfi', 'mode', 'what', 'woofi']);
 const txflowPublicCorsProxy = 'https://txflow-cutover-cors.invalid';
 
 /** Test input only: no network, no SDK store writes and no fabricated empty replies. */

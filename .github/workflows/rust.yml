@@ -741,7 +741,7 @@ jobs:
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
         run: |
-          for venue in orderly tealstreet-dex kodiakfi woofi mode salsadex what; do
+          for venue in orderly kodiakfi woofi mode what; do
             for network in mainnet testnet; do
               extra=()
               suffix=''
@@ -1107,7 +1107,7 @@ jobs:
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
         run: |
-          for venue in orderly tealstreet-dex kodiakfi woofi mode salsadex what; do
+          for venue in orderly kodiakfi woofi mode what; do
             for network in mainnet testnet; do
               extra=()
               suffix=''

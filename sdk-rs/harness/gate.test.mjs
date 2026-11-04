@@ -494,7 +494,7 @@ test('gate CLI reports command timeouts as incomplete failures and keeps runner 
 
 test('gate CLI retains the strict Orderly command count oracle', () => {
   for (const defect of ['orderly-extra-result', 'orderly-missing-result']) {
-    const result = gate('tealstreet-dex', true, defect);
+    const result = gate('woofi', true, defect);
     assert.equal(result.status, 1, result.stdout);
     assert.match(result.stderr, /missing TS command result/);
   }

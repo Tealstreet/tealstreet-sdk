@@ -42,8 +42,6 @@ const families = Object.freeze({
   orderly: 'orderly',
   kodiakfi: 'orderly',
   mode: 'orderly',
-  salsadex: 'orderly',
-  'tealstreet-dex': 'orderly',
   what: 'orderly',
   woofi: 'orderly',
   paradex: 'paradex',

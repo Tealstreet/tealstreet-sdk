@@ -696,26 +696,6 @@
       "supportsTunnel": false,
       "privateProxyRegions": []
     },
-    "salsadex": {
-      "routing": {
-        "restPool": "asia",
-        "howEgress": "sg"
-      },
-      "requiresCors": false,
-      "enforceWsTunnel": false,
-      "supportsTunnel": true,
-      "privateProxyRegions": []
-    },
-    "tealstreet-dex": {
-      "routing": {
-        "restPool": "asia",
-        "howEgress": "sg"
-      },
-      "requiresCors": false,
-      "enforceWsTunnel": false,
-      "supportsTunnel": true,
-      "privateProxyRegions": []
-    },
     "txflow": {
       "routing": {
         "restPool": "asia",

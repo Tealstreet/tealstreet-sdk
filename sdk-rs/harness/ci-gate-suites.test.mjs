@@ -8,9 +8,10 @@ import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 const copy = (suite) => structuredClone(expectedGateCases(suite));
 
 test('suite registry preserves every primary, alias, profile and network replay', () => {
-  const exceptional = { binance: 11, bybit: 10, okx: 8, orderly: 15, coinbase: 9, asterdex: 3, lighter: 3, 'lighter-robinhood': 3, bitget: 3, hyperliquid: 3 };
+  const exceptional = { binance: 11, bybit: 10, okx: 8, orderly: 11, coinbase: 9, asterdex: 3, lighter: 3, 'lighter-robinhood': 3, bitget: 3, hyperliquid: 3 };
   assert.equal(GATE_SUITES.length, 32);
-  assert.equal(GATE_SUITES.reduce((total, suite) => total + expectedGateCases(suite).length, 0), 112);
+  // Two retired brokers remove only their mainnet/testnet replay cases.
+  assert.equal(GATE_SUITES.reduce((total, suite) => total + expectedGateCases(suite).length, 0), 108);
   for (const suite of GATE_SUITES) {
     const cases = expectedGateCases(suite);
     assert.equal(cases.length, exceptional[suite] ?? 2, suite);
@@ -33,7 +34,7 @@ test('family profiles pin their exact tape paths and private books', () => {
     ['okxeu', 'sdk-rs/harness/fixtures/okxeu-public.jsonl.gz'],
   ]);
   const orderly = expectedGateCases('orderly');
-  for (const venue of ['orderly', 'tealstreet-dex', 'kodiakfi', 'woofi', 'mode', 'salsadex', 'what']) {
+  for (const venue of ['orderly', 'kodiakfi', 'woofi', 'mode', 'what']) {
     assert(orderly.some((item) => item.venue === venue && item.tape === `sdk-rs/harness/tapes/${venue}-testnet-private.jsonl` && item.books === ''), venue);
     assert(orderly.some((item) => item.venue === venue && item.tape === `sdk-rs/harness/tapes/${venue}-private.jsonl` && item.books === ''), venue);
   }

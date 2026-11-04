@@ -500,7 +500,7 @@ pub fn supported(venue: &str) -> bool {
         #[cfg(feature = "asterdex")]
         "asterdex" => true,
         #[cfg(feature = "orderly")]
-        "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => true,
+        "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => true,
         #[cfg(feature = "lighter")]
         "lighter" | "lighter-robinhood" => true,
         #[cfg(feature = "bitrue")]
@@ -1705,7 +1705,7 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "orderly")]
-        "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+        "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => {
             orderly_rules(&options)?;
             let (provider, identities) = orderly_signer(&options)?;
             let mut engine = Engine::new(
@@ -1713,10 +1713,9 @@ pub fn build_with_signer<T: Visit>(
                     broker: match venue {
                         "kodiakfi" => OrderlyBroker::KodiakFi,
                         "mode" => OrderlyBroker::Mode,
-                        "salsadex" => OrderlyBroker::SalsaDex,
                         "what" => OrderlyBroker::What,
                         "woofi" => OrderlyBroker::WooFi,
-                        _ => OrderlyBroker::Tealstreet,
+                        _ => OrderlyBroker::Orderly,
                     },
                     public_data_only: options.public_data_only,
                     testnet: options.testnet,

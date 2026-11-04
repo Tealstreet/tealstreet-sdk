@@ -14,11 +14,9 @@ const { values } = parseArgs({ options: {
 } });
 const tags = {
   orderly: 'TEALSTREET',
-  'tealstreet-dex': 'TEALSTREET',
   kodiakfi: 'TEALKODIAK',
   woofi: 'TEALSTREET',
   mode: 'TEALMODE',
-  salsadex: 'TEALSALSA',
   what: 'TEALWHAT',
 };
 if (!Object.hasOwn(tags, values.venue)) throw new Error('Expected an Orderly broker venue');

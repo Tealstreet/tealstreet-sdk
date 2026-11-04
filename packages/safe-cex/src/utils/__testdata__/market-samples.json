@@ -2477,40 +2477,6 @@
       "binance": "ETHUSDC"
     }
   ],
-  "salsadex": [
-    {
-      "symbol": "BTCUSDC",
-      "base": "BTC",
-      "quote": "USDC",
-      "id": "BTC/USDC:USDC",
-      "_source": "code-verified",
-      "binance": "BTCUSDC"
-    },
-    {
-      "symbol": "ETHUSDC",
-      "base": "ETH",
-      "quote": "USDC",
-      "id": "ETH/USDC:USDC",
-      "binance": "ETHUSDC"
-    }
-  ],
-  "tealstreet-dex": [
-    {
-      "symbol": "BTCUSDC",
-      "base": "BTC",
-      "quote": "USDC",
-      "id": "BTC/USDC:USDC",
-      "_source": "code-verified",
-      "binance": "BTCUSDC"
-    },
-    {
-      "symbol": "ETHUSDC",
-      "base": "ETH",
-      "quote": "USDC",
-      "id": "ETH/USDC:USDC",
-      "binance": "ETHUSDC"
-    }
-  ],
   "txflow": [
     {
       "symbol": "BTC-USDC",

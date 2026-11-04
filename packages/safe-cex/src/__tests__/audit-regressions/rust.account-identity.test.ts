@@ -61,7 +61,7 @@ const commandAliases: ExchangeName[] = [
   'woo',
 ];
 const coinbaseAliases = ['coinbase', 'coinbasespot'] as const;
-const orderlyAliases = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'] as const;
+const orderlyAliases = ['kodiakfi', 'mode', 'what', 'woofi'] as const;
 const unsupportedAliases: ExchangeName[] = [
   'binanceoptions',
   'binancespot',
