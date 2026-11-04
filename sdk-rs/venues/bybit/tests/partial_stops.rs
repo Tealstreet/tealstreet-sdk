@@ -1529,3 +1529,128 @@ fn dk2_venue_refusal_after_the_cancel_puts_the_exact_old_stop_back() {
     assert!(error.contains("put back"), "{error}");
     assert!(!h.has_request("/v5/position/trading-stop"), "never loops");
 }
+
+// codex-mxb4mq #3018 DK2 review probes.
+#[test]
+fn review_dk2_concurrent_same_stop_amend_does_not_restore_over_the_newer_edit() {
+    let (mut h, profile) = dk2_long_partial_last_stop();
+    h.now += 10000.;
+    amend(&mut h, Some(79124.9), None);
+    let first_cancel = h.take(profile.cancel_path());
+    h.command(Command::AmendOrder {
+        command: 92,
+        id: "partial".into(),
+        price: Some(78000.),
+        amount: None,
+    });
+    if !h.has_request(profile.cancel_path()) {
+        assert!(matches!(h.result(92), Some(Err(_))));
+        return;
+    }
+    let second_cancel = h.take(profile.cancel_path());
+    let cancel_ok = r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#;
+    h.reply(first_cancel.id, 200, cancel_ok);
+    let older_replacement = h.take("/v5/position/trading-stop");
+    h.reply(second_cancel.id, 200, cancel_ok);
+    let newer_replacement = h.take("/v5/position/trading-stop");
+    assert!(body(&newer_replacement).contains(r#""stopLoss":"78000""#));
+    h.reply(newer_replacement.id, 200, OK);
+    assert!(matches!(h.result(92), Some(Ok(_))), "newer edit completed");
+    h.reply(older_replacement.id, 200, r#"{"retCode":10001,"retMsg":"PartialStopLoss should lower than base_price LastPrice","result":{}}"#);
+    assert!(
+        !h.has_request("/v5/position/trading-stop"),
+        "older failed edit must not now create an extra 78900 stop alongside the successful newer 78000 stop; actual {:?}",
+        h.requests.iter().map(body).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn review_dk2_duplicate_refusal_and_restore_ack_never_place_twice() {
+    let (mut h, profile) = dk2_long_partial_last_stop();
+    h.now += 10000.;
+    amend(&mut h, Some(79124.9), None);
+    accept_cancel(&mut h, profile);
+    let replacement = h.take("/v5/position/trading-stop");
+    let refused = r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#;
+    h.reply(replacement.id, 200, refused);
+    let restore = h.take("/v5/position/trading-stop");
+    h.reply(replacement.id, 200, refused);
+    assert!(
+        !h.has_request("/v5/position/trading-stop"),
+        "duplicate replacement response must not issue a second restore"
+    );
+    h.reply(restore.id, 200, OK);
+    h.reply(restore.id, 200, OK);
+    assert!(!h.has_request("/v5/position/trading-stop"));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 91).count(), 1);
+}
+
+#[test]
+fn review_dk2_fresh_last_boundary_and_stale_last_working_pair() {
+    for (age, refused) in [(5000., true), (5001., false)] {
+        let (mut h, profile) = dk2_long_partial_last_stop();
+        h.now += age;
+        amend(&mut h, Some(79124.9), None);
+        assert_eq!(!h.has_request(profile.cancel_path()), refused, "age {age}");
+        if refused {
+            assert!(
+                h.result(91)
+                    .unwrap()
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("would trigger at once")
+            );
+        }
+    }
+}
+
+#[test]
+fn review_dk2_definitively_refused_restore_is_serialized_as_unprotected_and_does_not_loop() {
+    let error = review_recheck_restore_failure(10001);
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert!(
+        error.message.contains("long position has no stop")
+            && error.message.contains("putting it back failed too"),
+        "{error:?}"
+    );
+    let wire = serde_json::to_string(&error).unwrap();
+    assert!(wire.contains(r#""protection":"unprotected""#), "{wire}");
+    assert!(!wire.contains("presents"));
+}
+
+/// While an edit of a Partial stop is in flight, a cancel of that stop (or of every
+/// order on its symbol) waits its turn as refused, so a later put-back cannot undo it.
+#[test]
+fn a_cancel_of_a_stop_whose_edit_is_in_flight_is_refused_before_it_is_sent() {
+    for cancel in [
+        Command::CancelOrders {
+            command: 92,
+            ids: vec!["partial".into()],
+        },
+        Command::CancelSymbolOrders {
+            command: 92,
+            symbol: "BTCUSDT".into(),
+        },
+    ] {
+        let (mut h, profile) = dk2_long_partial_last_stop();
+        h.now += 10_000.;
+        amend(&mut h, Some(79124.9), None);
+        let first_cancel = h.take(profile.cancel_path());
+        h.command(cancel);
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.url.contains("/v5/order/cancel")),
+            "{:?}",
+            h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+        );
+        assert!(matches!(h.result(92), Some(Err(_))));
+        h.reply(first_cancel.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+        let replacement = h.take("/v5/position/trading-stop");
+        h.reply(replacement.id, 200, OK);
+        assert!(matches!(h.result(91), Some(Ok(_))));
+    }
+}

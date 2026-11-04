@@ -3912,6 +3912,11 @@ pub trait Venue {
     fn guard_order_mutations(&self) -> bool {
         false
     }
+    /// `guard_order_mutations` for one command, for a venue that serializes only
+    /// the mutations whose own steps (such as a cancel-then-replace) must not overlap.
+    fn guards_order_mutation(&self, _store: &Store, _command: &Command) -> bool {
+        false
+    }
     /// Data source: the venue-private state a frame-fed engine's writes need and
     /// the store does not hold (the VENUE_STATE frame section), in the venue's
     /// own compact encoding. `None` when the venue needs none.
@@ -5617,7 +5622,10 @@ impl<V: Venue> Engine<V> {
             }
             Event::Command(command) => {
                 #[cfg(feature = "order-locks")]
-                if self.venue.guard_order_mutations() {
+                let guarded = self.venue.guard_order_mutations()
+                    || self.venue.guards_order_mutation(cx.store, &command);
+                #[cfg(feature = "order-locks")]
+                if guarded {
                     let id = match &command {
                         Command::PlaceOrders { command, .. }
                         | Command::AmendOrder { command, .. }
@@ -5683,7 +5691,7 @@ impl<V: Venue> Engine<V> {
                 // venue declares), and a placement or amend is marked so its own
                 // Unknown outcome fences its symbols.
                 #[cfg(feature = "order-locks")]
-                if !(self.venue.guard_order_mutations()
+                if !(guarded
                     && (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements()))
                     && let Err(id) = cx.io.core.order_locks.admit_unscoped(
