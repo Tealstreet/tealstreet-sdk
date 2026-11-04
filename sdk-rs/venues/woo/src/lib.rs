@@ -831,6 +831,79 @@ impl Venue for Woo {
             }
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if let Pending::Account(request) = pending {
+            self.account_http_failed(cx, request, &response);
+            self.account_read_again(cx);
+        } else {
+            self.on_request_failed(
+                cx,
+                pending,
+                "WOO response did not contain the expected list",
+            );
+        }
+    }
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        headers: &str,
+        _error: &str,
+    ) {
+        if let Pending::Account(request) = pending {
+            self.account_http_failed(
+                cx,
+                request,
+                &Response {
+                    status,
+                    headers,
+                    body: "",
+                },
+            );
+            self.account_read_again(cx);
+        } else {
+            self.on_http_failed(
+                cx,
+                pending,
+                safe_cex_engine::VenueError::new("WOO response body is malformed")
+                    .kind(safe_cex_engine::ErrorKind::Internal),
+            );
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Pending::Account(request) = pending {
+            let kind = error.kind.unwrap_or(safe_cex_engine::ErrorKind::Network);
+            let message = match kind {
+                safe_cex_engine::ErrorKind::Timeout => {
+                    "WOO account request timed out (no HTTP response)"
+                }
+                safe_cex_engine::ErrorKind::Internal => "WOO account response invalid",
+                safe_cex_engine::ErrorKind::Network => {
+                    "WOO account network request failed (no HTTP response)"
+                }
+                _ => "WOO account request failed (no HTTP response)",
+            };
+            self.account_failed(
+                cx,
+                request,
+                safe_cex_engine::VenueError::new(message).kind(kind),
+            );
+            self.account_read_again(cx);
+        } else {
+            self.on_request_failed(cx, pending, &error.message);
+        }
+    }
     fn on_http_preparation_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,

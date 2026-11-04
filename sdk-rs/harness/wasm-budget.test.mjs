@@ -54,6 +54,15 @@ test('KuCoin custody caps retain the approved CI headroom and exact boundary', (
   }
 });
 
+test('WOO attribution cap retains the approved CI headroom and exact boundary', () => {
+  const cap = 2_376_704;
+  assert.equal(cap, Math.ceil((2_365_883 + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.woo, cap);
+  assert.equal(wasmBudgetError(2_365_883, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'woo'), /exceeds/);
+});
+
 test('CI budgets each standalone venue build under its own venue name', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
   const step = workflow.indexOf('name: Check family isolation, every alias and the shipped size');
