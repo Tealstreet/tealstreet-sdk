@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   bybitPublicRateLimitNotice as notice,
+  observeBybitPublicRateLimit as observe,
   bybitPublicRateLimitReport as report,
 } from './bybitPublicRateLimitTelemetry';
 
@@ -63,5 +64,112 @@ describe('Bybit public rate-limit telemetry', () => {
         'retry-after': '9'.repeat(21),
       }),
     ).toEqual({ egress: 'unknown', target: 'unknown' });
+  });
+});
+
+describe('Bybit host response observation', () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+  const headers = 'x-tealstreet-egress: proxy-01\r\nx-bapi-limit-status: 0\r\nretry-after: 10';
+
+  it('observes buffered bodies and isolates throwing telemetry consumers', () => {
+    const response = { status: 200, headers, body: encode(limited) };
+    let calls = 0;
+    expect(
+      observe(request, response, () => {
+        calls++;
+        throw new Error('sink unavailable');
+      }),
+    ).toBe(response);
+    expect(calls).toBe(1);
+    expect(
+      observe({ ...request, headers: { 'X-BAPI-SIGN': 'secret' } }, response, () => {
+        calls++;
+      }),
+    ).toBe(response);
+    expect(calls).toBe(1);
+  });
+
+  it('preserves lazy chunk delivery and observes only complete bounded bodies, including split UTF-8', async () => {
+    const bytes = encode('{"retCode":10006,"retMsg":"é"}');
+    const split = bytes.indexOf(0xc3) + 1;
+    const chunks = [bytes.subarray(0, split), bytes.subarray(split)];
+    const notices: unknown[] = [];
+    let pulls = 0;
+    const response = observe(
+      request,
+      {
+        status: 200,
+        headers,
+        body: (async function* () {
+          for (const chunk of chunks) {
+            pulls++;
+            yield chunk;
+          }
+        })(),
+      },
+      (value) => notices.push(value),
+    );
+    expect(pulls).toBe(0);
+    const received = [];
+    for await (const chunk of response.body as AsyncIterable<Uint8Array>) received.push(chunk);
+    expect(received[0]).toBe(chunks[0]);
+    expect(received[1]).toBe(chunks[1]);
+    expect(notices).toEqual([{ egress: 'proxy-01', target: 'unknown', remaining: '0', retryAfter: '10' }]);
+  });
+
+  it.each(['oversized', 'malformed', 'successful', 'failed', 'cancelled'] as const)(
+    'does not report a %s stream',
+    async (kind) => {
+      const calls: unknown[] = [];
+      const failure = new Error('body transport failed');
+      let closed = false;
+      const response = observe(
+        request,
+        {
+          status: 200,
+          headers,
+          body: (async function* () {
+            try {
+              yield encode(kind === 'malformed' ? '{"retCode":' : kind === 'successful' ? '{"retCode":0}' : limited);
+              if (kind === 'oversized') yield encode(' '.repeat(1024 * 1024));
+              if (kind === 'failed') throw failure;
+            } finally {
+              closed = true;
+            }
+          })(),
+        },
+        (value) => calls.push(value),
+      );
+      const consume = async () => {
+        for await (const _chunk of response.body as AsyncIterable<Uint8Array>) {
+          if (kind === 'cancelled') break;
+        }
+      };
+      if (kind === 'failed') await expect(consume()).rejects.toBe(failure);
+      else await consume();
+      expect(closed).toBe(true);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it('rejects ambiguous and unsafe host header values', () => {
+    const notices: unknown[] = [];
+    observe(
+      request,
+      {
+        status: 200,
+        body: encode(limited),
+        headers: [
+          'x-tealstreet-egress: secret?signature=x',
+          'x-tealstreet-egress-target: ' + 'x'.repeat(65),
+          'x-bapi-limit: 120',
+          'X-Bapi-Limit: 121',
+          'x-bapi-limit-status: secret',
+          'retry-after: ' + '9'.repeat(21),
+        ].join('\n'),
+      },
+      (value) => notices.push(value),
+    );
+    expect(notices).toEqual([{ egress: 'unknown', target: 'unknown' }]);
   });
 });

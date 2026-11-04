@@ -1,3 +1,4 @@
+import type { HttpPacket, HttpResponse } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName } from '../types';
 
 export interface BybitPublicRateLimitNotice {
@@ -38,13 +39,19 @@ const headerNames = new Set([
   'sec-fetch-dest',
 ]);
 
-/** Inspect only unsigned public responses; never copy a body, URL or arbitrary header into telemetry. */
-export const bybitPublicRateLimitNotice = (
-  request: { method: string; url: string; headers: Record<string, string>; body?: unknown },
-  body: string,
-  headers: unknown,
-): BybitPublicRateLimitNotice | undefined => {
-  if (request.method !== 'GET' || request.body || body.length > 1024 * 1024 || request.url.length > 4096) return;
+type PublicRequest = Pick<HttpPacket, 'method' | 'url' | 'headers'> & { body?: unknown };
+const maxBodyBytes = 1024 * 1024;
+const responseHeaderNames = new Set([
+  'x-tealstreet-egress',
+  'x-tealstreet-egress-target',
+  'x-bapi-limit',
+  'x-bapi-limit-status',
+  'x-bapi-limit-reset-timestamp',
+  'retry-after',
+]);
+
+const isPublicRequest = (request: PublicRequest): boolean => {
+  if (request.method !== 'GET' || request.body || request.url.length > 4096) return false;
   try {
     const url = new URL(request.url);
     if (
@@ -56,13 +63,27 @@ export const bybitPublicRateLimitNotice = (
       url.hash ||
       !publicPaths.has(url.pathname)
     )
-      return;
-    if (Object.keys(request.headers).some((name) => !headerNames.has(name.toLowerCase()))) return;
+      return false;
+    if (Object.keys(request.headers).some((name) => !headerNames.has(name.toLowerCase()))) return false;
     const seen = new Set<string>();
     for (const name of url.searchParams.keys()) {
-      if (!queryNames.has(name) || seen.has(name)) return;
+      if (!queryNames.has(name) || seen.has(name)) return false;
       seen.add(name);
     }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Inspect only unsigned public responses; never copy a body, URL or arbitrary header into telemetry. */
+export const bybitPublicRateLimitNotice = (
+  request: PublicRequest,
+  body: string,
+  headers: unknown,
+): BybitPublicRateLimitNotice | undefined => {
+  if (!isPublicRequest(request) || body.length > maxBodyBytes) return;
+  try {
     if (JSON.parse(body)?.retCode !== 10006) return;
     const normalized: Record<string, string> = Object.fromEntries(
       Object.entries(headers && typeof headers === 'object' ? headers : {})
@@ -82,6 +103,52 @@ export const bybitPublicRateLimitNotice = (
   } catch {
     return;
   }
+};
+
+/** Observe the host's response without consuming ahead, changing chunks, or delaying dispatch. */
+export const observeBybitPublicRateLimit = (
+  request: PublicRequest,
+  response: HttpResponse,
+  report: ((notice: BybitPublicRateLimitNotice) => void) | undefined,
+): HttpResponse => {
+  if (!report || !isPublicRequest(request)) return response;
+  const reportBody = (body: string) => {
+    try {
+      const headers: Record<string, string> = {};
+      const lines = (response.headers?.length ?? 0) <= 64 * 1024 ? (response.headers ?? '') : '';
+      for (const line of lines.split('\n')) {
+        const colon = line.indexOf(':');
+        if (colon < 0) continue;
+        const name = line.slice(0, colon).trim().toLowerCase();
+        if (!responseHeaderNames.has(name)) continue;
+        // Duplicate headers are ambiguous; an empty value is rejected by the notice validator.
+        headers[name] = name in headers ? '' : line.slice(colon + 1).trim();
+      }
+      const notice = bybitPublicRateLimitNotice(request, body, headers);
+      if (notice) report(notice);
+    } catch {
+      /* Telemetry cannot fail a request or its stream. */
+    }
+  };
+  if (response.body instanceof Uint8Array) {
+    if (response.body.byteLength <= maxBodyBytes) reportBody(new TextDecoder().decode(response.body));
+    return response;
+  }
+  const source = response.body;
+  return {
+    ...response,
+    body: (async function* () {
+      const decoder = new TextDecoder();
+      let bytes = 0;
+      let body = '';
+      for await (const chunk of source) {
+        bytes += chunk.byteLength;
+        body = bytes <= maxBodyBytes ? body + decoder.decode(chunk, { stream: true }) : '';
+        yield chunk;
+      }
+      if (bytes <= maxBodyBytes) reportBody(body + decoder.decode());
+    })(),
+  };
 };
 
 export const bybitPublicRateLimitReport = (exchange: ExchangeName, notice: BybitPublicRateLimitNotice) => {
