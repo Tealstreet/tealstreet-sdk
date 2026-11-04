@@ -542,6 +542,11 @@ impl Store {
         self.read_covers.account()
     }
 
+    /// Every required order read has answered: orders are loaded, rows as they are.
+    pub fn set_orders_loaded(&mut self) {
+        self.set_loaded(|loaded| loaded.orders = true);
+    }
+
     /// The row sequence a read released now records (`OrderReadMark::seq`).
     pub fn order_read_sequence(&self) -> u64 {
         self.read_covers.sequence()
