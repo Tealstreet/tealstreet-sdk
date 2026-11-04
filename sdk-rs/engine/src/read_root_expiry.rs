@@ -69,6 +69,70 @@ impl crate::engine::CoreIo<'_> {
     }
 }
 
+// Concrete metadata is shared across venue engines; move-only continuations
+// remain typed and are reserved separately before any owner is marked.
+struct ReadRootCleanup {
+    owner: Owner,
+    requests: Vec<RequestId>,
+}
+
+impl IoCore {
+    #[inline(never)]
+    fn prepare_read_root_sweep(&self, now: f64) -> Vec<ReadRootCleanup> {
+        let mut cleanup = Vec::new();
+        assert!(
+            cleanup.try_reserve_exact(self.read_roots.len()).is_ok(),
+            "read root expiry storage"
+        );
+        for &(_, id, generation, _) in self.read_roots.iter().filter(|(at, ..)| now >= *at) {
+            let owner = Owner::Command { id, generation };
+            let owned =
+                |managed: &http_lifecycle::Managed| managed.delivery().context.owner() == owner;
+            let count = self
+                .managed_http
+                .values()
+                .filter(|managed| owned(managed))
+                .count();
+            let mut requests = Vec::new();
+            assert!(
+                requests.try_reserve_exact(count).is_ok(),
+                "read root expiry storage"
+            );
+            requests.extend(
+                self.managed_http
+                    .iter()
+                    .filter(|(_, managed)| owned(managed))
+                    .map(|(request, _)| *request),
+            );
+            cleanup.push(ReadRootCleanup { owner, requests });
+        }
+        cleanup
+    }
+
+    #[inline(never)]
+    fn mark_read_root_sweep(&mut self, cleanup: &[ReadRootCleanup]) {
+        // Per request: timer clear and cancel. Per owner: its timer clear,
+        // terminal notice and any classified error notice.
+        let actions = cleanup.iter().fold(0_usize, |actions, root| {
+            actions.saturating_add(root.requests.len().saturating_mul(2).saturating_add(3))
+        });
+        assert!(
+            self.actions.try_reserve(actions).is_ok(),
+            "read root expiry storage"
+        );
+        #[cfg(test)]
+        {
+            self.read_root_sweep_capacity = Some(self.actions.capacity());
+        }
+        for root in cleanup {
+            let Owner::Command { id, generation } = root.owner else {
+                unreachable!()
+            };
+            self.request_contexts.expire_read_root(id, generation);
+        }
+    }
+}
+
 impl<V: Venue> Engine<V> {
     /// A parked write Preflight past its caller's cap fails exactly as an
     /// expired entry does, through the owner-aware Preflight seal; one that left
@@ -121,59 +185,24 @@ impl<V: Venue> Engine<V> {
         self.io.core.read_roots_expiring = true;
         let scope = SweepScope { engine: self };
         let io = &mut scope.engine.io;
-        let mut due = Vec::new();
-        let mut cleanup = Vec::new();
-        let reserved = due.try_reserve_exact(io.core.read_roots.len()).is_ok()
-            && cleanup.try_reserve_exact(io.core.read_roots.len()).is_ok();
-        assert!(reserved, "read root expiry storage");
-        for &(at, id, generation, _) in &io.core.read_roots {
-            if now >= at {
-                due.push((id, generation));
-            }
-        }
-        // Prepare: every owner's requests and continuation storage, and the
-        // whole sweep's actions in aggregate, before any mark.
-        let mut actions = 0_usize;
-        for &(id, generation) in &due {
-            let owner = Owner::Command { id, generation };
-            let owned =
-                |managed: &http_lifecycle::Managed| managed.delivery().context.owner() == owner;
-            let count = io
-                .core
-                .managed_http
-                .values()
-                .filter(|managed| owned(managed))
-                .count();
-            let mut requests = Vec::new();
-            let mut pending = Vec::new();
-            let reserved = requests.try_reserve_exact(count).is_ok()
-                && pending.try_reserve_exact(count).is_ok();
-            assert!(reserved, "read root expiry storage");
-            // Per request: timer clear and cancel. Per owner: its timer clear,
-            // terminal notice and any classified error notice.
-            actions = actions.saturating_add(count.saturating_mul(2).saturating_add(3));
-            requests.extend(
-                io.core
-                    .managed_http
-                    .iter()
-                    .filter(|(_, managed)| owned(managed))
-                    .map(|(request, _)| *request),
-            );
-            cleanup.push((owner, requests, pending));
-        }
+        let mut pending = Vec::new();
         assert!(
-            io.core.actions.try_reserve(actions).is_ok(),
+            pending.try_reserve_exact(io.core.read_roots.len()).is_ok(),
             "read root expiry storage"
         );
-        #[cfg(test)]
-        {
-            io.core.read_root_sweep_capacity = Some(io.core.actions.capacity());
+        let cleanup = io.core.prepare_read_root_sweep(now);
+        // Typed continuations stay here; reserve every owner's capacity before
+        // the shared mark-all phase can retire any authority.
+        for root in &cleanup {
+            let mut values = Vec::new();
+            assert!(
+                values.try_reserve_exact(root.requests.len()).is_ok(),
+                "read root expiry storage"
+            );
+            pending.push(values);
         }
-        // Mark every due root first: no cleanup can publish for another.
-        for &(id, generation) in &due {
-            io.core.request_contexts.expire_read_root(id, generation);
-        }
-        for (owner, requests, mut pending) in cleanup {
+        io.core.mark_read_root_sweep(&cleanup);
+        for (ReadRootCleanup { owner, requests }, mut pending) in cleanup.into_iter().zip(pending) {
             let Owner::Command { id, generation } = owner else {
                 unreachable!()
             };
