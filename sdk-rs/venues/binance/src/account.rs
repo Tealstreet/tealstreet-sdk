@@ -1250,16 +1250,6 @@ impl BinanceFutures {
                         rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
-                    limit_stops.push((
-                        o.symbol.to_string(),
-                        id.clone(),
-                        executes_at_limit(&o.kind, spot),
-                    ));
-                    position_sides.push((
-                        o.symbol.to_string(),
-                        id.clone(),
-                        o.position_side.as_deref().map(str::to_owned),
-                    ));
                     if client_keyed
                         && (!matches!(o.side.as_ref(), "BUY" | "SELL")
                             || [&o.price, &o.orig_qty, &o.executed_qty]
@@ -1278,6 +1268,16 @@ impl BinanceFutures {
                     let amount = num::parse(&o.orig_qty);
                     let filled = num::parse(&o.executed_qty);
                     native_orders.push((o.symbol.to_string(), id.clone(), o.order_id, filled));
+                    limit_stops.push((
+                        o.symbol.to_string(),
+                        id.clone(),
+                        executes_at_limit(&o.kind, spot),
+                    ));
+                    position_sides.push((
+                        o.symbol.to_string(),
+                        id.clone(),
+                        o.position_side.as_deref().map(str::to_owned),
+                    ));
                     orders.push(Order {
                         id,
                         parent_id: None,
@@ -1348,16 +1348,6 @@ impl BinanceFutures {
                         rejected.push((id.to_owned(), o.symbol.to_string(), message));
                         return;
                     };
-                    limit_stops.push((
-                        o.symbol.to_string(),
-                        id.to_owned(),
-                        executes_at_limit(&o.strategy_type, false),
-                    ));
-                    position_sides.push((
-                        o.symbol.to_string(),
-                        id.to_owned(),
-                        o.position_side.as_deref().map(str::to_owned),
-                    ));
                     if !matches!(o.side.as_ref(), "BUY" | "SELL")
                         || [&o.price, &o.orig_qty, &o.stop_price]
                             .iter()
@@ -1377,6 +1367,16 @@ impl BinanceFutures {
                             native,
                         ));
                     }
+                    limit_stops.push((
+                        o.symbol.to_string(),
+                        id.to_owned(),
+                        executes_at_limit(&o.strategy_type, false),
+                    ));
+                    position_sides.push((
+                        o.symbol.to_string(),
+                        id.to_owned(),
+                        o.position_side.as_deref().map(str::to_owned),
+                    ));
                     orders.push(Order {
                         id: o.new_client_strategy_id.into_owned(),
                         parent_id: None,
@@ -1433,6 +1433,7 @@ impl BinanceFutures {
                         rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
+                    let amount = opt(&o.quantity);
                     position_sides.push((
                         o.symbol.to_string(),
                         o.algo_id.to_string(),
@@ -1443,7 +1444,6 @@ impl BinanceFutures {
                         o.algo_id.to_string(),
                         executes_at_limit(&o.order_type, false),
                     ));
-                    let amount = opt(&o.quantity);
                     orders.push(Order {
                         id: o.algo_id.to_string(),
                         parent_id: None,
