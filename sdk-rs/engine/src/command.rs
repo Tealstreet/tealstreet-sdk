@@ -493,6 +493,7 @@ struct RefreshOrdersIn {
 
 #[cfg(feature = "command-bitget")]
 #[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::RegisterCancelChecks with 2 elements")]
 struct RegisterCancelChecksIn {
     command: u32,
     orders: Vec<CancelOrderRef>,
