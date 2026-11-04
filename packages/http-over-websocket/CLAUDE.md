@@ -133,6 +133,13 @@ yarn test           # Vitest
 - Socket opening, time sync and authorization share a readiness cap of 30 s,
   bounded by the original request deadline. Exceeding that cap raises
   `TradeTunnelReadinessError`, a timeout subclass; readiness never resets the deadline.
+  It carries `readiness` (`stage`: connect / timeSync / authReply, the reconnect
+  loop's phase and seconds in it, lane port, tunnel outage), also spelled out in
+  its message. A deadline spent waiting on the proxy token, mid-fetch or between
+  polls, is `ProxyTokenUnavailableError` instead. A request waiting on a socket
+  whose loop is `retry-scheduled` redials it at once, once per wait and at most
+  every 5 s per socket (`redialIfBackingOff`), instead of sitting out a backoff
+  a wake or network drop left behind.
 - A `Bad` authentication state is connection-scoped. Concurrent Axios requests
   share one refresh/token-send attempt per `HOWWebSocket` through the adapter's
   weak single-flight map, so one bad-token episode emits one `rpc.auth` frame.
