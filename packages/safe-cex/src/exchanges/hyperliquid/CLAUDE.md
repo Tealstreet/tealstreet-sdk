@@ -37,6 +37,18 @@ when another scope already loaded orders. A successful scope clears its own retr
 429 responses retain the header-proven Retry-After delay. An unusable metadata
 join preserves orders and retries instead of silently ending the read.
 
+The SDK transport admits all `/info` reads through one weighted budget per API
+origin, including metadata, candles and history. Atomic IndexedDB transactions
+share admission and 429 pauses across account workers/tabs; runtimes without
+IndexedDB share a budget within their JS realm. Only pacing timestamps and retry
+counters are stored, never account or request data. Admission and pauses spend
+the existing HTTP deadline and abort signal before managed send claim.
+
+The nonterminal `startup.incomplete` notice exposes a closed stage name, elapsed
+startup time, the original 60-second warning threshold, the 20-second read timeout
+and this engine's observed `/info` 429 count. The SDK forwards only these stage
+and numeric facts as Sentry tags; wallet identities and request data are excluded.
+
 ## Rust margin settings and standalone spot orders
 
 HIP-3 assets get no `activeAssetData` subscription (channel limit), so the Rust

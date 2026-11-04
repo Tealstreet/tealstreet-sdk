@@ -15,6 +15,7 @@ import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/b
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { directTransport } from './direct';
 import { getTransport } from './registry';
+import { HyperliquidInfoBudget } from './hyperliquidInfoBudget';
 import {
   isTealstreetProxyAuthFailureBody,
   proxyAuthorizationHeader,
@@ -463,6 +464,8 @@ const httpTransport = (
       })
     : undefined;
   let disposed = false;
+  const infoBudget = exchange === 'hyperliquid' || exchange === 'hyperliquidspot'
+    ? new HyperliquidInfoBudget() : undefined;
   const pending = new Set<AbortController>();
   // While this realm's tunnel is unreachable, REST goes through the HTTP proxy, which
   // egresses from the same fleet. Decided per request at prepare: a prepared request keeps its path.
@@ -703,6 +706,9 @@ const httpTransport = (
         );
       }
       signal.throwIfAborted();
+      if (infoBudget && request.method === 'POST' && original.pathname === '/info') {
+        await untilAborted(infoBudget.wait(original.origin, request.body, started + deadlineMs, signal), signal);
+      }
       if (intent !== undefined && (!prepared || typeof prepared.bind !== 'function'))
         throw new HttpPreparationError('invalid');
       const validateBound = <T extends { ready(): boolean; dispatch(): unknown; cancel?(): void }>(
@@ -797,6 +803,11 @@ const httpTransport = (
                   .then((value) =>
                     route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
                   )
+                  .then(async (value) => {
+                    if (infoBudget && request.method === 'POST' && original.pathname === '/info')
+                      await untilAborted(infoBudget.response(original.origin, value.status, value.headers ?? ''), signal);
+                    return value;
+                  })
                   .then(wrap)
                   .catch((error) => {
                     // No answer through the relay, and nobody called it off: the relay is down.

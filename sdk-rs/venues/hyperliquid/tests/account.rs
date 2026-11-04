@@ -1217,3 +1217,77 @@ fn failed_hip3_orders_retry_after_peer_scope_loaded_and_honor_retry_after() {
     reply(&mut e, &retried, 200, "[]");
     assert!(e.store().loaded().orders);
 }
+
+#[test]
+fn public_startup_diagnostics_never_report_private_order_reads() {
+    use safe_cex_engine::Venue;
+    use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+    let venue = Hyperliquid::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    let (ready, _) = ready("disabled");
+    let mut store = safe_cex_engine::Store::default();
+    store.set_markets(ready.store().markets().to_vec());
+    assert!(!store.loaded().orders);
+    assert!(
+        venue
+            .startup_diagnostics(&store)
+            .contains(&("stage", "tickers".into()))
+    );
+}
+
+#[test]
+fn startup_watchdog_exposes_stage_original_deadline_and_rate_limit_count() {
+    let (mut e, socket) = ready("disabled");
+    e.set_account_startup(true);
+    let (_socket, _) = reconnect(&mut e, socket, 2000.0);
+    for action in prepared_now(&mut e) {
+        if let Action::Http(request) = action {
+            if kind(&request) == "frontendOpenOrders" {
+                reply(&mut e, &request, 429, "Too many requests");
+            } else if kind(&request) == "clearinghouseState" {
+                reply(&mut e, &request, 200, STATE);
+            }
+        }
+    }
+    e.store_mut().reset_account();
+    e.store_mut().set_balance(Default::default());
+    e.store_mut().set_positions(vec![]);
+    prepared_now(&mut e);
+    e.handle(61_000.0, Event::PollScaleChanged { scale: 1.0 });
+    let notice = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "startup.incomplete" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("the startup watchdog must report the unloaded orders section");
+    assert!(
+        notice
+            .fields
+            .contains(&("stage", "frontendOpenOrders".into()))
+    );
+    assert!(notice.fields.contains(&("elapsedMs", 60_000.0.into())));
+    assert!(notice.fields.contains(&("deadlineMs", 60_000.0.into())));
+    assert!(notice.fields.contains(&("readTimeoutMs", 20_000.0.into())));
+    assert!(notice.fields.contains(&("http429Count", 1.0.into())));
+    e.handle(361_000.0, Event::PollScaleChanged { scale: 1.0 });
+    let repeated = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "startup.incomplete" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("a repeated notice must retain the original startup deadline");
+    assert!(repeated.fields.contains(&("elapsedMs", 360_000.0.into())));
+    assert!(repeated.fields.contains(&("deadlineMs", 60_000.0.into())));
+}

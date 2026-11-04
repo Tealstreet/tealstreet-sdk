@@ -57,6 +57,7 @@ import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
+import { startupDiagnosticTags } from './startupDiagnostics';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
@@ -2119,6 +2120,7 @@ export class RustEngineExchange extends BaseExchange {
         {
           engineEvent: event,
           classified: engineEventClassified(event),
+          sentryTags: startupDiagnosticTags(event),
         },
       );
     else if (event.level !== 'debug')

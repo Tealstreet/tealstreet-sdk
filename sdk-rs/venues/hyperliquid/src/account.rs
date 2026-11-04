@@ -450,6 +450,20 @@ impl Hyperliquid {
             }),
         }
     }
+    pub(crate) fn startup_private_stage(&self) -> &'static str {
+        if self.spot {
+            "spotClearinghouseState"
+        } else if !self.account.mode_resolved {
+            "userAbstraction"
+        } else if self.account.core_loaded
+            && self.account.mode != Mode::Standard
+            && self.account.spot.is_none()
+        {
+            "spotClearinghouseState"
+        } else {
+            "clearinghouseState"
+        }
+    }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started {
             return;
