@@ -99,12 +99,14 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // ddi2il approved each CI size plus 10 KiB, rounded up to the KiB, after shared-provider attribution.
 // #2981 WOO account-read attribution: CI measured 2,365,883 B; ddi2il approved
 // CI size plus 10 KiB, rounded up to the KiB.
+// Batch #2989/#2994/#2995 on master 05275f74aec: CI run 41774217377 measured bingx 1,987,316,
+// hyperliquid 2,066,112 and phemex 2,023,431 B; ddi2il ruling, CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_957_888,
   asterdex: 2_097_152,
   backpack: 1_860_608,
   binance: 2_152_448,
-  bingx: 1_980_416,
+  bingx: 1_997_824,
   bitget: 2_275_328,
   bitgetusdc: 2_276_352,
   bitrue: 1_798_144,
@@ -115,7 +117,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   coinbase: 1_800_192,
   cryptocom: 1_701_888,
   grvt: 1_767_424,
-  hyperliquid: 2_064_384,
+  hyperliquid: 2_076_672,
   hyperliquidspot: 2_065_408,
   kraken: 2_108_416,
   krakenspot: 2_108_416,
@@ -127,7 +129,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   okx: 1_921_024,
   orderly: 1_708_032,
   paradex: 2_196_480,
-  phemex: 2_023_424,
+  phemex: 2_034_688,
   polymarket: 1_587_200,
   txflow: 1_817_600,
   weex: 1_908_736,
