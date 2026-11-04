@@ -97,6 +97,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // OKX 1,910,027 and Kraken 2,097,992 B; ddi2il approved CI + 10 KiB rounded up, including the Kraken sibling.
 // #2961 KuCoin provider custody: CI 41611993463 measured 1,630,161 / 2,211,621 B.
 // ddi2il approved each CI size plus 10 KiB, rounded up to the KiB, after shared-provider attribution.
+// #2981 WOO account-read attribution: CI measured 2,365,883 B; ddi2il approved
+// CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_957_888,
   asterdex: 2_097_152,
@@ -129,7 +131,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   polymarket: 1_587_200,
   txflow: 1_817_600,
   weex: 1_908_736,
-  woo: 2_364_416,
+  woo: 2_376_704,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
