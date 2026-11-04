@@ -70,7 +70,8 @@ impl JsNumberOutput for safe_cex_types::DataProvenance {
 
 impl JsNumberOutput for safe_cex_types::ExchangeName {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binanceinverse, Binancespot, Binancepm, Bingx, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Breakoutprop, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Txflow, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
+        // #3034 restores Binance Options to the strict metadata roster; output eligibility must match.
+        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binanceinverse, Binancespot, Binancepm, Binanceoptions, Bingx, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Breakoutprop, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Txflow, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
     }
 }
 
