@@ -38,5 +38,7 @@ and adds one Rust-only response for the exact end-minus-one-second request.
 Candle payloads and command stages stay unchanged. Existing per-implementation
 request-plan checks cover both shapes; no oracle or comparison policy changes.
 The new SHA carries the same diagnostic sets and exact cash-root acceptances.
+The shared MCP/React Native consumer fixture explicitly selects the Rust tape
+implementation. Tagged records still refuse consumers that omit a selection.
 Coinbase's candle limit and granularity contract:
 https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/products/get-product-candles
