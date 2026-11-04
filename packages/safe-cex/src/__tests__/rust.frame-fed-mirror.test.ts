@@ -1,11 +1,17 @@
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
+import type { Exchange } from '../exchanges/base';
 import type { WasmEngineModule } from '../exchanges/rust/rust.exchange';
+import type { ExchangeName } from '../types';
+import type { AppSettingsWorkerType } from '../webworker/AppSettingsWorkerType';
+import type { ExchangeMetadataWorkerType } from '../webworker/ExchangeMetadataWorkerType';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderStatus, OrderType, PositionSide } from '../types';
+import { CallMethodHandler } from '../webworker/handlers/CallMethodHandler';
 import { consumerFrame } from './cutover/consumerFrame';
 import { engineCapabilities } from './fixtures/engineCapabilities';
 
@@ -22,7 +28,7 @@ type Fake = {
 
 let lastModule: WasmEngineModule | undefined;
 
-const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
+const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as ExchangeName } = {}): Fake => {
   const fake: Fake = { commands: [], applied: [], started: 0, constructed: 0, offsets: [] };
   const idle = () => '[]';
   const frame = () =>
@@ -34,7 +40,7 @@ const fakeEngine = ({ supported = true, frameFed = true } = {}): Fake => {
       }),
     );
   const engine = {
-    capabilities: () => engineCapabilities('bybit'),
+    capabilities: () => engineCapabilities(venue),
     construction: () => JSON.stringify({ frameFed, canSign: true, publicDataOnly: false }),
     start: () => {
       fake.started += 1;
@@ -437,6 +443,101 @@ describe('frame-fed main-thread mirror', () => {
     await expect(exchange.nukeOrders()).resolves.toEqual({ stoppedChasers: ['c-1'], stoppedTwaps: [] });
     expect(mirror.calls[0]).toBe('stopAccountAlgos');
     expect(mirror.calls).not.toContain('nukeOrders');
+  });
+
+  describe('bybitdemo nuke flatness through the real worker RPC handler', () => {
+    let handler: CallMethodHandler;
+    afterEach(() => handler?.dispose());
+
+    const proofWorker = async (readPositions?: ReturnType<typeof vi.fn>) => {
+      const fake = fakeEngine({ venue: 'bybitdemo' });
+      const mirror = new RustEngineExchange(
+        'bybitdemo',
+        { key: 'fixture', secret: 'fixture', workerMirror: true, publicDataOnly: false },
+        new DefaultStore(),
+      );
+      exchange = mirror;
+      const calls: string[] = [];
+      const worker = {
+        name: 'bybitdemo',
+        stopAccountAlgos: vi.fn().mockResolvedValue({ stoppedChasers: [], stoppedTwaps: [] }),
+        fetchPositions: vi.fn().mockResolvedValue([]),
+        readPositions,
+      };
+      handler = new CallMethodHandler(
+        'fixture',
+        'bybitdemo',
+        worker as unknown as Exchange,
+        { postMessage: ({ op, data }: { op: string; data: unknown }) => mirror.emitter.emit(op, data) } as unknown as Worker,
+        {} as AppSettingsWorkerType,
+        {} as ExchangeMetadataWorkerType,
+      );
+      mirror.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+        calls.push(event.method);
+        void handler.handleCallMethod(event.requestId, event.method as never, event.args);
+      });
+      await expect(mirror.frameFedReady).resolves.toBe(true);
+      return { mirror, fake, calls };
+    };
+
+    it('confirms flat only from the worker proof, even when the mirrored store is empty', async () => {
+      const read = vi.fn().mockResolvedValue({ skipped: [], open: [] });
+      const { mirror, fake, calls } = await proofWorker(read);
+      await expect(mirror.nukePositions()).resolves.toEqual({ stoppedChasers: [], stoppedTwaps: [] });
+      expect(read).toHaveBeenCalledExactlyOnceWith();
+      expect(calls[0]).toBe('stopAccountAlgos');
+      expect(calls).toContain('readPositions');
+      expect(fake.commands.map(({ op }) => op)).not.toContain('readPositions');
+      expect(fake.commands.map(({ op }) => op)).not.toContain('placeOrders');
+    });
+
+    it('cannot call an empty mirrored store flat when the worker proof remains open', async () => {
+      const read = vi.fn().mockResolvedValue({
+        skipped: [],
+        open: [{ symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 2 }],
+      });
+      const { mirror } = await proofWorker(read);
+      await expect(mirror.nukePositions()).rejects.toThrow(
+        'Nuke did not leave the account flat: BTCUSDT long 2 still open',
+      );
+      expect(read).toHaveBeenCalledTimes(3);
+    });
+
+    it('names an unavailable proof RPC and retains its typed cause', async () => {
+      const { mirror } = await proofWorker();
+      await expect(mirror.nukePositions()).rejects.toMatchObject({
+        message: 'Nuke could not confirm the account is flat: bybitdemo does not support readPositions',
+        cause: { kind: 'unsupported', outcome: 'notSent' },
+      });
+    });
+
+    it('keeps the real typed read failure as its cause and sends no further close', async () => {
+      const read = vi.fn().mockRejectedValue(
+        new ExchangeError('Bybit positions request timed out', {
+          message: 'Bybit positions request timed out',
+          kind: 'timeout',
+          venueCode: 'READ_TIMEOUT',
+          outcome: 'notSent',
+        }),
+      );
+      const { mirror, fake } = await proofWorker(read);
+      await expect(mirror.nukePositions()).rejects.toMatchObject({
+        message: 'Nuke could not confirm the account is flat: Bybit positions request timed out',
+        cause: { kind: 'timeout', venueCode: 'READ_TIMEOUT', outcome: 'notSent' },
+      });
+      expect(read).toHaveBeenCalledOnce();
+      expect(fake.commands.map(({ op }) => op)).not.toContain('placeOrders');
+    });
+
+    it.each([
+      [{ skipped: ['BTCUSDT'], open: [] }, 'BTCUSDT on no listed market'],
+      [[], 'unexpected positions read result'],
+    ])('refuses incomplete or malformed worker proof %j', async (proof, reason) => {
+      const read = vi.fn().mockResolvedValue(proof);
+      const { mirror } = await proofWorker(read);
+      await expect(mirror.nukePositions()).rejects.toThrow(`Nuke could not confirm the account is flat: ${reason}`);
+      expect(read).toHaveBeenCalledOnce();
+    });
   });
 
   it('stays a plain mirror where the family has no frame-fed engine', async () => {
