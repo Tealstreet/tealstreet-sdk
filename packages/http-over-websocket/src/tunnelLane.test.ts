@@ -8,12 +8,14 @@ import {
   buildRelayUrl,
   noteTunnelDialFailed,
   noteTunnelDialOpened,
+  onTunnelFailing,
   onTunnelLaneFallback,
   parseRelayUrl,
   resetTunnelLane,
   TOKYO_HOW_EGRESS,
   tunnelDialUrl,
   tunnelEgressUrl,
+  tunnelFailing,
   tunnelLanePort,
   tunnelOutage,
 } from './tunnelEndpoints';
@@ -241,5 +243,36 @@ describe('tunnel reachability', () => {
     resetTunnelLane(false);
     for (let attempt = 0; attempt < 4; attempt += 1) noteTunnelDialFailed(TOKYO_HOW_EGRESS);
     expect(tunnelOutage()).toBeUndefined();
+  });
+});
+
+describe('tunnel visibly failing', () => {
+  it('fails at the first failed 443 handshake after the lane fell back, notifying once, until one opens', () => {
+    const notified = vi.fn();
+    const stop = onTunnelFailing(notified);
+    const lane = tunnelDialUrl(TOKYO_HOW_EGRESS);
+    noteTunnelDialFailed(lane);
+    noteTunnelDialFailed(lane);
+    expect(tunnelFailing()).toBe(false);
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(tunnelFailing()).toBe(true);
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(notified).toHaveBeenCalledTimes(1);
+    noteTunnelDialOpened(TOKYO_HOW_EGRESS);
+    expect(tunnelFailing()).toBe(false);
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(notified).toHaveBeenCalledTimes(2);
+    stop();
+    noteTunnelDialOpened(TOKYO_HOW_EGRESS);
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(notified).toHaveBeenCalledTimes(2);
+  });
+
+  it('never fails outside a browser realm, or while the lane is still on 8443', () => {
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(tunnelFailing()).toBe(false);
+    resetTunnelLane(false);
+    for (let attempt = 0; attempt < 4; attempt += 1) noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    expect(tunnelFailing()).toBe(false);
   });
 });
