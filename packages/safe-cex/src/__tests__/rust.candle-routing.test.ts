@@ -14,7 +14,7 @@ const exchanges: RustEngineExchange[] = [];
 const opts = { symbol: 'BTCUSDT', interval: '15m' as const, from: 1_700_000_000_000, to: 1_700_000_900_000 };
 const candles = [{ timestamp: 1_700_000_000, open: 1, high: 2, low: 1, close: 2, volume: 1 }];
 
-const fixture = (frameFed: boolean, privateAccount = true) => {
+const fixture = (privateAccount = true) => {
   const constructions: Array<Record<string, unknown>> = [];
   const commands: Array<{ op: string }> = [];
   const freed = vi.fn();
@@ -56,7 +56,7 @@ const fixture = (frameFed: boolean, privateAccount = true) => {
         },
       } satisfies WasmEngineLike;
     },
-    { frameFedSupported: () => frameFed },
+    { frameFedSupported: () => false },
   );
   setWasmEngineLoader(async () => ({ WasmEngine: Constructor as unknown as WasmEngineModule['WasmEngine'] }));
   const exchange = new RustEngineExchange(
@@ -74,7 +74,7 @@ const fixture = (frameFed: boolean, privateAccount = true) => {
   exchanges.push(exchange);
   const bridge = vi.fn();
   exchange.on('callMethod', bridge);
-  return { exchange, constructions, commands, freed, bridge, frame };
+  return { exchange, constructions, commands, freed, bridge };
 };
 
 afterEach(() => {
@@ -92,24 +92,11 @@ it('opts only Bitrue, Lighter and LighterRobinhood into worker candle history', 
   ).toEqual(['bitrue', 'lighter', 'lighter-robinhood']);
 });
 
-it('runs Bybit candles on its kept page engine, with no worker bridge or private reconciliation dependency', async () => {
-  vi.useFakeTimers();
-  const { exchange, commands, bridge, frame } = fixture(true);
-  await exchange.frameFedReady;
-  exchange.ingestSourceFrame(frame().buffer as ArrayBuffer, true);
-  exchange.off('callMethod', bridge);
-  const result = exchange.fetchOHLCV(opts);
-  await vi.advanceTimersByTimeAsync(0);
-  expect(commands.filter(({ op }) => op === 'fetchCandles')).toHaveLength(1);
-  await expect(result).resolves.toEqual(candles);
-  expect(bridge).not.toHaveBeenCalled();
-});
-
 it.each([true, false])(
   'uses a public page source when no frame-fed engine exists (private=%s)',
   async (privateAccount) => {
     vi.useFakeTimers();
-    const { exchange, constructions, commands, bridge, freed } = fixture(false, privateAccount);
+    const { exchange, constructions, commands, bridge, freed } = fixture(privateAccount);
     await exchange.frameFedReady;
     const first = exchange.fetchOHLCV(opts);
     void first.catch(() => {});

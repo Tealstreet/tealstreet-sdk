@@ -1648,9 +1648,10 @@ interval set, which excludes seconds and 6h; neither may reach a candle subscrip
 ### Candle history across account-worker replacement
 
 `fetchOHLCVInWorker` is authoritative for Rust mirrors as well as CandleCache.
-Only Bitrue, Lighter and LighterRobinhood opt in. Other mirrors query their
-frame-fed page engine; mirrors without one lazily own a credential-free public
-source using the same endpoint/routing options, disposed with the mirror.
+Only Bitrue, Lighter and LighterRobinhood opt in. Other mirrors lazily own a
+credential-free public source using the same endpoint/routing options, disposed
+with the mirror. Frame-fed account engines execute only writes; candle reads
+never run on them. The real-WASM candle-routing test pins this boundary.
 Candle reads do not wait for private reconciliation or lift an order fence.
 
 A detached bridge fails pending reads with `WORKER_STOPPED`. Reads name the

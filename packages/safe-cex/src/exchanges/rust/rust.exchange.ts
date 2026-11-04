@@ -1715,7 +1715,7 @@ export class RustEngineExchange extends BaseExchange {
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
         if (method === 'fetchOHLCV' && this.routesToWorker && !getExchangeMetadata(this.name).fetchOHLCVInWorker)
-          return this.fetchPageCandles(args[0] as OHLCVOptions, local);
+          return this.fetchPageCandles(args[0] as OHLCVOptions);
         if (!this.routesToWorker || (this.frameFed && FRAME_FED_WRITES.has(method))) return local(...args);
         const viaWorker = () =>
           this.callWorker(method, ...args).then(
@@ -3035,11 +3035,9 @@ export class RustEngineExchange extends BaseExchange {
 
   private candleSource?: RustEngineExchange;
 
-  private fetchPageCandles = async (opts: OHLCVOptions, local: (...args: unknown[]) => Promise<unknown>) => {
-    await this.frameFedReady;
+  private fetchPageCandles = async (opts: OHLCVOptions) => {
     if (this.isDisposed) throw new Error('Exchange disposed before candle read');
-    if (!this.isWorkerMirror || this.frameFed) return local(opts);
-    // Mirrors without a page engine own a credential-free public source, never a worker RPC.
+    // Frame-fed engines execute only writes; candles always own a credential-free public source.
     this.candleSource ??= new RustEngineExchange(
       this.name,
       {
