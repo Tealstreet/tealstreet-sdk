@@ -274,6 +274,53 @@ fn place(id: Option<&str>) -> safe_cex_engine::model::PlaceOrderOpts {
 }
 
 #[test]
+fn a_spot_placement_timestamp_refusal_is_not_replayed() {
+    let mut h = H::new(true);
+    h.command(Command::PlaceOrders {
+        command: 901,
+        orders: vec![place(Some("clock-control"))],
+    });
+    let request = h.http("/hf/orders");
+    h.respond(
+        &request,
+        400,
+        r#"{"code":"400002","msg":"Invalid KC-API-TIMESTAMP"}"#,
+    );
+    assert!(h.done(901).is_err());
+    assert!(!h.requests.iter().any(|r| r.url.contains("/timestamp")));
+    assert!(!h.actions.iter().any(|a| matches!(a,Action::Http(r) if r.url.contains("/timestamp") || r.url.contains("/hf/orders"))));
+}
+
+#[test]
+fn a_spot_wallet_snapshot_recovers_with_public_time_once() {
+    let mut h = H::new(true);
+    h.timer(POLL_MS);
+    let first = h.http("/accounts?type=trade");
+    h.actions.clear();
+    let before = h.e.store().balance().total;
+    let skew = r#"{"code":"400002","msg":"Invalid KC-API-TIMESTAMP"}"#;
+    h.respond(&first, 400, skew);
+    assert_eq!(h.e.store().balance().total, before);
+    let clock = h.http("/api/v1/timestamp");
+    assert_eq!(clock.url, "https://api.kucoin.com/api/v1/timestamp");
+    assert!(!clock.headers.iter().any(|(k, _)| k.starts_with("KC-")));
+    h.respond(&clock, 200, r#"{"code":"200000","data":1700000050000}"#);
+    let replay = h.http("/accounts?type=trade");
+    assert_eq!(replay.url, first.url);
+    assert_eq!(
+        replay
+            .headers
+            .iter()
+            .find(|(k, _)| *k == "KC-API-TIMESTAMP")
+            .unwrap()
+            .1,
+        "1700000050000"
+    );
+    h.respond(&replay,200,r#"{"code":"200000","data":[{"currency":"USDT","available":"7","holds":"0","balance":"7"}]}"#);
+    assert_eq!(h.e.store().balance().total, 7.);
+}
+
+#[test]
 fn refused_provider_never_releases_a_spot_write_or_strands_the_next_job() {
     let markets = H::new(true).e.store().markets().to_vec();
     let mut e = support::credentials::engine(
@@ -1447,18 +1494,12 @@ fn secondary_reads_preserve_primary_mutations_and_unsigned_public_gets() {
             }
             let route = if secondary && request.url.contains("/bullet-private") {
                 Some(safe_cex_engine::RequestRoute::Primary)
-            } else if secondary
-                && request.method == Method::Get
-                && !request.url.contains("/api/v2/symbols")
-                && !request.url.contains("/market/allTickers")
-            {
-                Some(safe_cex_engine::RequestRoute::Secondary)
             } else {
                 None
             };
             assert_eq!(
                 request.route, route,
-                "shared Selection binds private egress only"
+                "managed reads carry Context intent; legacy session auth pins primary"
             );
         }
         h.command(Command::FetchAccount { command: 1 });
@@ -1704,8 +1745,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = support::actions(engine)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,

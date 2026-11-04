@@ -107,9 +107,8 @@ impl<V: Venue> Venue for Probe<V> {
             match symbols.first().map(String::as_str) {
                 Some("saturate") => {
                     assert!(self.held.is_empty());
-                    for _ in 0..256 {
-                        self.held
-                            .push(cx.http_context(Scope::Background, policy()).unwrap());
+                    while let Ok(context) = cx.http_context(Scope::Background, policy()) {
+                        self.held.push(context);
                     }
                 }
                 Some("hold-next") => self.hold_next = true,
@@ -276,6 +275,12 @@ fn failure(a: &[Action]) -> &VenueError {
     }
 }
 fn done(a: &[Action]) -> Value {
+    let substantive: Vec<_> = a
+        .iter()
+        .filter(|a| !matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .cloned()
+        .collect();
+    let a = substantive.as_slice();
     assert_eq!(a.len(), 1, "one local result without opaque work: {a:?}");
     match &a[0] {
         Action::Notice(Notice::CommandDone {
@@ -370,8 +375,16 @@ fn check(a: &[Action], expected: &Expected) {
 }
 /// The first of the leverage read's steps, signed, with nothing settled yet.
 fn futures_margin_read(a: &[Action]) {
-    assert_eq!(a.len(), 1, "one signed read and no terminal: {a:?}");
-    let Action::Http(r) = &a[0] else {
+    let substantive: Vec<_> = a
+        .iter()
+        .filter(|a| !matches!(a, Action::SetTimer { .. } | Action::ClearTimer { .. }))
+        .collect();
+    assert_eq!(
+        substantive.len(),
+        1,
+        "one signed read and no terminal: {a:?}"
+    );
+    let Action::Http(r) = substantive[0] else {
         panic!("expected the margin mode read: {a:?}");
     };
     assert_eq!(r.method, Method::Get);
@@ -713,20 +726,20 @@ fn private_fill_and_identity_fallthrough_keep_native_wire_and_completion() {
         assert!(control(&mut e, Some("saturate")).is_empty());
         assert_eq!(
             e.venue().held.len(),
-            256,
-            "native pending HTTP owns no Read root"
+            254,
+            "the command root and its physical read retain two contexts"
         );
         assert_eq!(
             done(&reply(&mut e, id, body)),
             expected,
-            "numeric native completion remains unfenced"
+            "the managed read completes under its original root"
         );
         assert!(control(&mut e, None).is_empty());
         assert!(e.venue().held.is_empty());
     }
 }
 #[test]
-fn cache_misses_and_sentinel_ids_keep_native_pager_without_new_owner() {
+fn cache_misses_and_sentinel_ids_keep_native_pager_under_original_root() {
     for (symbol, id) in [
         (SYMBOL, ""),
         (SYMBOL, "0"),
@@ -754,8 +767,8 @@ fn cache_misses_and_sentinel_ids_keep_native_pager_without_new_owner() {
         assert!(control(&mut e, Some("saturate")).is_empty());
         assert_eq!(
             e.venue().held.len(),
-            256,
-            "native pending pager owns no Read root"
+            254,
+            "the command root and its physical page retain two contexts"
         );
         assert_eq!(
             done(&reply(
