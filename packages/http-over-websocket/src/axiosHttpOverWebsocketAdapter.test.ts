@@ -1068,4 +1068,33 @@ it('attaches caller config (with custom keys + headers) to the resolved tunnel r
     }
   });
 
+  it.each([
+    ['HTML encoded key', 'GET /private?&#83;ignature=probe-auth-value'],
+    ['standalone base64', btoa('Signature=probe-auth-value&symbol=BTC')],
+    ['HTML JSON', 'error {&quot;passphrase&quot;&#58;&quot;probe-auth-value&quot;}'],
+    ['wrapped base64', '/private?query=' + btoa('Signature=probe-auth-value&symbol=BTC')],
+  ])('new real relay probe %s', async (_, upstream) => {
+    vi.useFakeTimers();
+    vi.stubEnv('DEBUG', '1');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const adapter = createAxiosHttpOverWebsocketAdapter();
+    const url = 'https://venue.example/private?Signature=wire-auth-value&symbol=BTC';
+    const config: any = { url, method: 'GET', headers: {}, timeout: 100 };
+    try {
+      mockWs.replyTo = (sent) => mockWs.emitter.emit('sub:' + sent.nonce, { error: upstream });
+      const pending = Promise.resolve(adapter(config)).catch((e) => e);
+      await vi.advanceTimersByTimeAsync(10);
+      const error = await pending;
+      expect(error).toBeInstanceOf(Error);
+      expect(mockWs.sentMessages[0]?.arg.url).toBe(url);
+      expect(config.url).toBe(url);
+      const rendered = error.message + ' ' + JSON.stringify(log.mock.calls);
+      expect(rendered).not.toContain('probe-auth-value');
+      expect(rendered).not.toContain(btoa('Signature=probe-auth-value&symbol=BTC'));
+    } finally {
+      adapter.dispose();
+      vi.useRealTimers();
+    }
+  });
+
 });

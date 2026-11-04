@@ -56,3 +56,53 @@ it('fails closed across encoding layers, Unicode keys and encoded delimiters in 
     }
   }
 });
+
+describe('independent new mixed-encoding probes', () => {
+  const secret = 'probe-auth-value';
+  const raw = `https://venue.example/private?Signature=${secret}&symbol=BTC`;
+  const cases: [string, string, string][] = [
+    ['mixed percent JSON HTML', encodeURIComponent(JSON.stringify({ url: raw.replace('&', '&amp;') })), secret],
+    [
+      'JSON escaped unicode',
+      JSON.stringify({ error: String.raw`https:\/\/venue.example\/private?\u0053ignature=probe-auth-value` }),
+      secret,
+    ],
+    ['HTML decimal key', `/private?&#83;ignature=${secret}`, secret],
+    ['HTML hex key', `/private?&#x53;ignature=${secret}`, secret],
+    ['HTML colon and quotes', `error {&quot;passphrase&quot;&#58;&quot;${secret}&quot;}`, secret],
+    ['standalone base64 query', btoa(`Signature=${secret}&symbol=BTC`), btoa(`Signature=${secret}&symbol=BTC`)],
+    [
+      'wrapped base64 query',
+      '/private?query=' + btoa(`Signature=${secret}&symbol=BTC`),
+      btoa(`Signature=${secret}&symbol=BTC`),
+    ],
+    ['title-case', `/private?Signature=${secret}`, secret],
+    ['header spelling', `/private?X-MBX-APIKEY=${secret}`, secret],
+    ['JSON header spelling', JSON.stringify({ 'X-MBX-APIKEY': secret, status: 503 }), secret],
+  ];
+  test.each(cases)('scrubs %s', (_, text, leaked) => {
+    expect(stripDiagnosticUrlQueries(text)).not.toContain(leaked);
+  });
+});
+
+it('bounds base64 inspection and preserves harmless printable and binary tokens', () => {
+  expect(stripDiagnosticUrlQueries('token=&quot;probe-auth-value&quot;')).not.toContain('probe-auth-value');
+  expect(stripDiagnosticUrlQueries('/private?token=prefix&#32;probe-auth-value')).not.toContain('probe-auth-value');
+  const benign = btoa('symbol=BTC&limit=10');
+  const binary = btoa('\0'.repeat(16));
+  expect(stripDiagnosticUrlQueries(benign)).toBe(benign);
+  expect(stripDiagnosticUrlQueries(binary)).toBe(binary);
+  const base64url = btoa('Signature=probe-auth-value&x=' + String.fromCharCode(255, 255))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  expect(stripDiagnosticUrlQueries(base64url)).not.toContain(base64url);
+  expect(stripDiagnosticUrlQueries('/private?query=' + base64url)).not.toContain(base64url);
+  let nested = btoa('Signature=probe-auth-value&symbol=BTC');
+  for (let depth = 0; depth < 6; depth++) {
+    expect(stripDiagnosticUrlQueries(nested)).not.toContain(nested);
+    nested = btoa(nested);
+  }
+  const oversized = 'A'.repeat(4097);
+  expect(stripDiagnosticUrlQueries(oversized)).not.toContain(oversized);
+});

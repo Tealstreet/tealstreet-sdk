@@ -217,3 +217,6 @@ remain intact for interceptors and dispatch.
 Diagnostic strings normalize percent/JSON escapes through at most four layers;
 newly exposed secrets or deeper encoding discard the whole string. Nested auth
 fields, header tuples and secret-bearing object keys are scrubbed before logging.
+HTML normalization covers decimal/hex entities and quot/apos/lt/gt/amp. Base64
+and base64url tokens are checked for auth names, with four nesting levels,
+64 candidate tokens and 4096 bytes per token; excess discards the whole token.

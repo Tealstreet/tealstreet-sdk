@@ -24,7 +24,12 @@ const MAX_DECODE_DEPTH = 4;
 
 const decodeDiagnosticLayer = (text: string): string =>
   text
-    .replace(/&(?:amp|#0*38|#x0*26);/gi, '&')
+    .replace(/&#([0-9]+);?|&#x([0-9a-f]+);?|&(quot|apos|lt|gt|amp);/gi, (_, decimal, hex, named) => {
+      if (named)
+        return ({ quot: '"', apos: "'", lt: '<', gt: '>', amp: '&' } as Record<string, string>)[named.toLowerCase()];
+      const point = parseInt(decimal ?? hex, decimal ? 10 : 16);
+      return point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : '\uFFFD';
+    })
     .replace(
       /\\(?:u([0-9a-f]{4})|x([0-9a-f]{2})|(["'\\/]))/gi,
       (_, unicode, hex, escaped) => escaped ?? String.fromCharCode(parseInt(unicode ?? hex, 16)),
@@ -92,9 +97,14 @@ const redactParameterValues = (message: string): string =>
   );
 
 /** Newly exposed encoded secrets lose the entire string, avoiding ambiguous decoded value boundaries. */
-export const redactDiagnosticSecrets = (message: string): string => {
+const redactDiagnosticParameters = (message: string): string => {
   let current = message;
   for (let depth = 0; depth < MAX_DECODE_DEPTH; depth++) {
+    // Entity ampersands can be part of a value rather than true query delimiters.
+    if (/&(?:#|quot;|apos;|lt;|gt;|amp;)/i.test(current)) {
+      const decodedEntities = decodeDiagnosticLayer(current);
+      if (redactParameterValues(decodedEntities) !== decodedEntities) return REDACTED;
+    }
     const safe = redactParameterValues(current);
     const decoded = decodeDiagnosticLayer(safe);
     if (decoded === safe) return safe;
@@ -103,3 +113,44 @@ export const redactDiagnosticSecrets = (message: string): string => {
   }
   return decodeDiagnosticLayer(current) === current ? redactParameterValues(current) : REDACTED;
 };
+
+const MAX_BASE64_TOKEN_LENGTH = 4096;
+const MAX_BASE64_TOKENS = 64;
+
+const redactBase64Tokens = (message: string, depth = 0, budget = { remaining: MAX_BASE64_TOKENS }): string =>
+  message.replace(/[A-Za-z0-9+/_-]{16,}={0,2}/g, (token) => {
+    if (
+      typeof atob !== 'function' ||
+      token.length > MAX_BASE64_TOKEN_LENGTH ||
+      budget.remaining-- <= 0 ||
+      depth >= MAX_DECODE_DEPTH
+    )
+      return REDACTED;
+    let decoded: string;
+    try {
+      decoded = atob(token.replace(/-/g, '+').replace(/_/g, '/'));
+    } catch {
+      return token;
+    }
+    // UTF-8 where valid; otherwise atob's Latin-1 text can still name auth parameters.
+    try {
+      decoded = new TextDecoder('utf-8', { fatal: true }).decode(
+        Uint8Array.from(decoded, (char) => char.charCodeAt(0)),
+      );
+    } catch {
+      /* Keep Latin-1. */
+    }
+    if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/.test(decoded)) return token;
+    for (let layer = 0; layer < MAX_DECODE_DEPTH; layer++) {
+      if ([...decoded.matchAll(/[A-Za-z0-9_.%+-]+/g)].some(([key]) => isDiagnosticSecretKey(key, true)))
+        return REDACTED;
+      const next = decodeDiagnosticLayer(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    }
+    if (decodeDiagnosticLayer(decoded) !== decoded) return REDACTED;
+    return redactBase64Tokens(decoded, depth + 1, budget) !== decoded ? REDACTED : token;
+  });
+
+export const redactDiagnosticSecrets = (message: string): string =>
+  redactBase64Tokens(redactDiagnosticParameters(message));
