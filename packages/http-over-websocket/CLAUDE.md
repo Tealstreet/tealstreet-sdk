@@ -69,6 +69,11 @@ behavior changes, update or delete that snapshot in the same PR.
   `/api/exchange_proxy` (same proxy fleet, so the same IPs), skipping hosts the
   fleet does not forward (`proxyFleetAllowlist.ts`); requests already prepared
   keep the tunnel. Each activation reports `Tunnel unreachable; …` to Sentry.
+  One handshake earlier, at the first failed 443 handshake (`tunnelFailing` /
+  `onTunnelFailing`), unsigned public-intent reads move to the HTTP proxy:
+  new ones at once, and one still waiting in tunnel readiness abandons that
+  preparation (nothing has been sent) and re-prepares on the proxy within its
+  original deadline. Signed requests wait for the outage, as before.
 - `ReconnectingWebSocket` handles connection resilience
 - Token-based authentication with expiry checking
 - Latency tracking for tunnel (client↔proxy) and exchange (proxy↔exchange)
