@@ -193,3 +193,13 @@ test('shared-address setup CI caps retain the ruled headroom and exact boundary'
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), new RegExp(`exceeds ${cap}`));
   }
 });
+
+test('shared signing bookkeeping cap retains CI headroom and exact boundary', () => {
+  const measured = 1_495_000;
+  const cap = 1_505_280;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.breakoutprop, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'breakoutprop'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'breakoutprop'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'breakoutprop'), new RegExp(`exceeds ${cap}`));
+});

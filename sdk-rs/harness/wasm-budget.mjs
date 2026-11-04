@@ -120,6 +120,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #3019 KuCoin 400002 resync: CI run 41794279458 measured kucoin 1,657,796 and kucoinspot 2,237,656 B.
 // ddi2il ruling: CI size plus 10 KiB, rounded up to the KiB. Shared engine queue, issuance and
 // admission code is newly linked by KuCoin; Binance already carries this machinery.
+// #3039 CI run 41823036111: breakoutprop 1,495,000 B.
+// Shared signing bookkeeping: standing CI + 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_970_176,
   asterdex: 2_121_728,
@@ -131,7 +133,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_813_504,
   bitunix: 1_837_056,
   blofin: 1_950_720,
-  breakoutprop: 1_494_016,
+  breakoutprop: 1_505_280,
   bybit: 2_188_288,
   coinbase: 1_811_456,
   cryptocom: 1_715_200,
