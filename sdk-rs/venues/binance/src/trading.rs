@@ -40,6 +40,7 @@ fn is_stop_kind(kind: OrderType) -> bool {
     )
 }
 
+const MARGIN_TYPE_ALREADY_SET: i64 = -4046;
 const POSITION_MODE_ALREADY_SET: i64 = -4059;
 const POST_ONLY_REJECTED: i64 = -5022;
 
@@ -1053,7 +1054,8 @@ impl BinanceFutures {
                 cx.hold_setting(SettingKey::Leverage(symbol));
                 None
             }
-            (Call::MarginType { symbol, isolated }, Ok(_)) => {
+            (Call::MarginType { symbol, isolated }, Ok(_))
+            | (Call::MarginType { symbol, isolated }, Err((MARGIN_TYPE_ALREADY_SET, _))) => {
                 let margin = if isolated {
                     safe_cex_engine::model::MarginType::Isolated
                 } else {
