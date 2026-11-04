@@ -1687,8 +1687,10 @@ struct RefreshRead {
     /// `refused_all` when a whole scope was refused.
     refused: Vec<String>,
     refused_all: bool,
-    /// The earliest send among the landed parts.
+    /// The earliest send and order-lock epoch among the landed parts: a
+    /// complete read is only as new as its oldest part (H3).
     sent: f64,
+    released: u64,
 }
 
 #[cfg(feature = "order-locks")]
@@ -1741,6 +1743,7 @@ impl OrdersRefresh {
             refused: Vec::new(),
             refused_all: false,
             sent: f64::INFINITY,
+            released: u64::MAX,
         });
         Some(scope)
     }
@@ -1767,6 +1770,7 @@ impl OrdersRefresh {
             }
         }
         read.sent = read.sent.min(sent);
+        read.released = read.released.min(epoch);
         if let Some((key, keys)) = account {
             if !read.keys.iter().any(|landed| landed == key) {
                 read.keys.push(key.to_owned());
@@ -1783,7 +1787,7 @@ impl OrdersRefresh {
         if self
             .pending
             .as_ref()
-            .is_some_and(|(asked, ..)| *asked <= epoch)
+            .is_some_and(|(asked, ..)| *asked <= read.released)
         {
             let (_, pending, _) = self.pending.take().expect("checked above");
             scope = Self::merge(scope, pending);

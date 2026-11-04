@@ -365,3 +365,113 @@ fn a_source_that_cannot_refresh_answers_and_reads_nothing() {
     assert!(h.requests.is_empty());
     assert_eq!(h.done, [7]);
 }
+
+fn release_one(
+    engine: &mut Engine<Source>,
+    preparation: crate::request_context::Preparation,
+    now: f64,
+) -> RequestId {
+    use crate::request_context::{Claim, HttpAction, Prepared};
+    let request = preparation.attempt().request;
+    assert!(engine.http_preparation_pending(preparation));
+    engine.http_prepared(
+        now,
+        preparation,
+        Prepared {
+            id: request.0,
+            expires_at: None,
+        },
+    );
+    let binds: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Bind {
+                    preparation: p,
+                    permit,
+                    request: r,
+                } => {
+                    assert_eq!(p, preparation);
+                    assert_eq!(r.id, request);
+                    Some(permit)
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(binds.len(), 1);
+    assert!(matches!(
+        engine.claim_http(now, binds[0]),
+        Ok(Claim::Released(_))
+    ));
+    engine.drain_actions().for_each(drop);
+    request
+}
+fn mixed_category_release_epochs(all_after_ask: bool) {
+    use crate::request_context::HttpAction;
+    let mut engine = crate::test_support::seeded_engine(Source {
+        refreshes: true,
+        keys: vec!["linear", "inverse"],
+        ..Source::default()
+    });
+    engine.start(0.);
+    engine.drain_actions().for_each(drop);
+    let ask = |command| {
+        Event::Command(Command::Venue {
+            command,
+            action: VenueAction::RefreshOrders { symbols: None },
+        })
+    };
+    engine.handle(1000., ask(90));
+    engine.prepare_dispatch(1000.);
+    let preparations: Vec<_> = engine
+        .drain_actions()
+        .filter_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(preparations.len(), 2);
+    if all_after_ask {
+        engine.handle(1500., ask(91));
+        engine.drain_actions().for_each(drop);
+    }
+    let first = release_one(&mut engine, preparations[0], 1600.);
+    if !all_after_ask {
+        engine.handle(2000., ask(91));
+        engine.drain_actions().for_each(drop);
+    }
+    let second = release_one(&mut engine, preparations[1], 3000.);
+    assert_eq!(engine.venue.reads.len(), 1, "only first batch is out");
+    for request in [first, second] {
+        engine.handle(
+            4000.,
+            Event::HttpResponse {
+                request,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "[]",
+                },
+            },
+        );
+        crate::test_support::prepared_actions(&mut engine, 4000.);
+    }
+    assert_eq!(
+        engine.venue.reads.len(),
+        if all_after_ask { 1 } else { 2 },
+        "H3: completion of later-claimed inverse cannot answer the ask on behalf of linear released before that ask"
+    );
+}
+#[test]
+fn the_last_category_epoch_cannot_answer_for_an_older_category() {
+    mixed_category_release_epochs(false);
+}
+#[test]
+fn every_category_claimed_after_the_ask_can_answer_it() {
+    mixed_category_release_epochs(true);
+}
