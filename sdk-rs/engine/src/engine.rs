@@ -4080,8 +4080,12 @@ fn watch_startup<P>(
     } else {
         Level::Error
     };
-    fields.push(("elapsedMs", (cx.now - started_at).max(0.0).into()));
-    fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
+    let elapsed = cx.now - started_at;
+    // Invalid transport clocks cannot introduce nonfinite diagnostic fields.
+    if cx.now.is_finite() && elapsed.is_finite() {
+        fields.push(("elapsedMs", elapsed.max(0.0).into()));
+        fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
+    }
     cx.event(
         level,
         log_code::STARTUP_INCOMPLETE,

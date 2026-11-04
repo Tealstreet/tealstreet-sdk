@@ -2,6 +2,7 @@ import { HttpPreparationError } from '@tealstreet/safe-cex-wasm/host';
 
 // Leave 200 of the documented 1,200 weight/minute for exchange actions and other clients.
 const MS_PER_WEIGHT = 60;
+const BUCKET_WINDOW_MS = 60_000;
 const MAX_PAUSE_MS = 300_000;
 const STORAGE_TIMEOUT_MS = 1500;
 const STORAGE_COOLDOWN_MS = 30_000;
@@ -29,11 +30,11 @@ export function warnHyperliquidInfoBudgetUnavailable(): void {
 
 function boundedState(raw: Partial<BudgetState> = {}): BudgetState {
   const now = Date.now();
-  const timestamp = (value: number | undefined) =>
-    typeof value === 'number' && Number.isFinite(value) ? Math.max(now, Math.min(value, now + MAX_PAUSE_MS)) : now;
+  const timestamp = (value: number | undefined, maximum: number) =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.max(now, Math.min(value, now + maximum)) : now;
   return {
-    nextAt: timestamp(raw.nextAt),
-    pausedUntil: timestamp(raw.pausedUntil),
+    nextAt: timestamp(raw.nextAt, MAX_PAUSE_MS + BUCKET_WINDOW_MS),
+    pausedUntil: timestamp(raw.pausedUntil, MAX_PAUSE_MS),
     generation: Number.isSafeInteger(raw.generation) && raw.generation! >= 0 ? raw.generation! : 0,
     failures:
       typeof raw.failures === 'number' && Number.isFinite(raw.failures) ? Math.max(0, Math.min(5, raw.failures)) : 0,
@@ -298,9 +299,11 @@ export class HyperliquidInfoBudget {
       signal.throwIfAborted();
       const grant = await this.backend.update(origin, (state, msPerWeight) => {
         signal.throwIfAborted();
-        const at = Math.max(Date.now(), state.nextAt, state.pausedUntil);
+        const cost = weight * msPerWeight;
+        // Virtual finish time allows one minute's tokens to burst, then refills by weight.
+        const at = Math.max(Date.now(), state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
         if (at >= deadline) throw new HttpPreparationError('timedOut');
-        state.nextAt = at + weight * msPerWeight;
+        state.nextAt = Math.max(Date.now(), state.nextAt) + cost;
         return { at, generation: state.generation };
       });
       await waitUntil(grant.at, signal);
@@ -333,7 +336,8 @@ export class HyperliquidInfoBudget {
       const fallback = Math.min(60_000, 5000 * 2 ** (state.failures - 1));
       const pause = Number.isFinite(delay) && delay > 0 ? Math.min(delay, MAX_PAUSE_MS) : fallback;
       state.pausedUntil = Math.max(state.pausedUntil, Date.now() + pause);
-      state.nextAt = state.pausedUntil;
+      // A rate limit empties the bucket; queued reads refill only after the pause.
+      state.nextAt = state.pausedUntil + BUCKET_WINDOW_MS;
       state.generation += 1;
     });
   }

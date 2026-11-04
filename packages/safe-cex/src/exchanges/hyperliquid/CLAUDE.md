@@ -37,9 +37,12 @@ when another scope already loaded orders. A successful scope clears its own retr
 429 responses retain the header-proven Retry-After delay. An unusable metadata
 join preserves orders and retries instead of silently ending the read.
 
-The SDK transport admits all `/info` reads through one weighted budget per API
-origin, including metadata, candles and history. Atomic IndexedDB transactions
-share admission and 429 pauses across account workers/tabs; runtimes without
+The SDK transport admits all `/info` reads through one weighted token bucket per
+API origin, including metadata, candles and history. Its initial 1,000-weight
+capacity permits cold discovery immediately, then refills at 1,000 weight/minute.
+A 429 empties the bucket and pauses refill until Retry-After ends.
+Atomic IndexedDB transactions share admission and 429 pauses across account
+workers/tabs; runtimes without
 IndexedDB share a budget within their JS realm. Storage operations have a 1.5-second
 timeout and retry once on timeout before degrading. Hard errors or repeated
 timeouts use a shared local budget, retaining known pacing state. Local admission
@@ -59,6 +62,7 @@ The nonterminal `startup.incomplete` notice exposes a closed stage name, elapsed
 startup time, the original 60-second warning threshold, the 20-second read timeout
 and this engine's observed `/info` 429 count. The SDK forwards only these stage
 and numeric facts as Sentry tags; wallet identities and request data are excluded.
+Nonfinite transport clocks omit timing fields rather than publishing invalid numbers.
 
 ## Rust margin settings and standalone spot orders
 

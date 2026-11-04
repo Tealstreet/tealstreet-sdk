@@ -1,3 +1,5 @@
+import type { HyperliquidInfoBudget } from './hyperliquidInfoBudget';
+
 import { setImmediate } from 'node:timers';
 
 import { IDBDatabase, IDBFactory } from 'fake-indexeddb';
@@ -15,6 +17,18 @@ const flushDatabase = async () => {
 let factory: IDBFactory;
 let budgetModule: typeof import('./hyperliquidInfoBudget');
 const client = () => new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(factory));
+const spend = async (budget: HyperliquidInfoBudget, weight = 1000) => {
+  while (weight > 0) {
+    const cost = weight >= 20 ? 20 : 2;
+    await budget.wait(
+      ORIGIN,
+      cost === 20 ? ORDERS : JSON.stringify({ type: 'clearinghouseState' }),
+      Date.now() + 20_000,
+      signal(),
+    );
+    weight -= cost;
+  }
+};
 
 beforeEach(async () => {
   vi.resetModules();
@@ -41,7 +55,7 @@ describe('unavailable shared storage', () => {
         },
       } as unknown as IDBFactory;
       const a = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
-      await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+      await spend(a, opened ? 250 : 1000);
       let admitted = false;
       const next = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
         admitted = true;
@@ -118,23 +132,26 @@ describe('unavailable shared storage', () => {
       throw new DOMException('storage disabled', 'InvalidStateError');
     });
     await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    const controller = new AbortController();
+    let pending: Promise<PromiseSettledResult<void>[]> | undefined;
     if (mode === 'pause') {
       await a.response(ORIGIN, 429, 'Retry-After: 60');
       await vi.advanceTimersByTimeAsync(30_000);
     } else {
       const candles = JSON.stringify({ type: 'candleSnapshot' });
-      const first = a.wait(ORIGIN, candles, Date.now() + 60_000, signal());
-      const second = a.wait(ORIGIN, candles, Date.now() + 60_000, signal());
-      await vi.advanceTimersByTimeAsync(4800);
-      await first;
-      await vi.advanceTimersByTimeAsync(24_960);
-      await second;
-      await vi.advanceTimersByTimeAsync(240);
+      await spend(a, 230);
+      pending = Promise.allSettled([
+        a.wait(ORIGIN, candles, Date.now() + 60_000, controller.signal),
+        a.wait(ORIGIN, candles, Date.now() + 60_000, controller.signal),
+      ]);
+      await vi.advanceTimersByTimeAsync(30_000);
     }
     await a.response(ORIGIN, 200, '');
     await expect(b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
+    controller.abort();
+    await pending;
   });
 
   it('bounds aggregate admission while one worker times out twice and recovers during a burst', async () => {
@@ -188,8 +205,9 @@ describe('unavailable shared storage', () => {
     await flushDatabase();
     await bursting;
     expect(stalls).toBe(0);
-    expect(sends.length * 20).toBeLessThanOrEqual(1300);
-    expect(sends.length * 20).toBeGreaterThanOrEqual(900);
+    // Initial capacity plus one minute of refill, allowing a quarter-rate split.
+    expect(sends.length * 20).toBeLessThanOrEqual(2600);
+    expect(sends.length * 20).toBeGreaterThanOrEqual(1500);
   });
 
   it('keeps a known 429 pause when an established database transaction fails', async () => {
@@ -203,7 +221,7 @@ describe('unavailable shared storage', () => {
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
     const next = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(14_800);
     await next;
     expect(warn).toHaveBeenCalledOnce();
   });
@@ -278,15 +296,37 @@ describe('unavailable shared storage', () => {
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
     await vi.advanceTimersByTimeAsync(300_000);
-    await client().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    const waiting = client().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1200);
+    await waiting;
   });
 });
 
 describe('cross-worker Hyperliquid info admission', () => {
+  it('refills to one full bucket after idle without accumulating extra capacity', async () => {
+    const a = client();
+    await spend(a);
+    await vi.advanceTimersByTimeAsync(120_000);
+    await spend(a);
+    let admitted = false;
+    const next = client()
+      .wait(ORIGIN, ORDERS, Date.now() + 20_000, signal())
+      .then(() => {
+        admitted = true;
+      });
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1199);
+    expect(admitted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await next;
+    expect(admitted).toBe(true);
+  });
+
   it('shares admission within a realm when IndexedDB is unavailable', async () => {
     vi.stubGlobal('indexedDB', undefined);
     const { HyperliquidInfoBudget: Budget } = await import('./hyperliquidInfoBudget');
-    await new Budget().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await spend(new Budget());
     let admitted = false;
     const next = new Budget().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
       admitted = true;
@@ -301,7 +341,7 @@ describe('cross-worker Hyperliquid info admission', () => {
   it('shares weighted admission across independent worker database connections', async () => {
     const a = client();
     const b = client();
-    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await spend(a);
     let admitted = false;
     const next = b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
       admitted = true;
@@ -316,7 +356,7 @@ describe('cross-worker Hyperliquid info admission', () => {
 
   it('does not fuse mainnet and testnet budgets', async () => {
     const a = client();
-    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await spend(a);
     await a.wait('https://api.hyperliquid-testnet.xyz', ORDERS, Date.now() + 20_000, signal());
   });
 
@@ -324,7 +364,7 @@ describe('cross-worker Hyperliquid info admission', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const a = client();
     const b = client();
-    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await spend(a);
     await expect(b.wait(ORIGIN, ORDERS, Date.now() + 1000, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
@@ -337,7 +377,7 @@ describe('cross-worker Hyperliquid info admission', () => {
 
   it('cancels an aborted queued read and never admits it later', async () => {
     const a = client();
-    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await spend(a);
     const controller = new AbortController();
     const waiting = client().wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal);
     const rejection = expect(waiting).rejects.toThrow('disposed');
@@ -351,7 +391,7 @@ describe('cross-worker Hyperliquid info admission', () => {
     const a = client();
     const b = client();
     const sends: number[] = [];
-    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await spend(a);
     const old = b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => sends.push(Date.now()));
     await flushDatabase();
     await a.response(ORIGIN, 429, 'Retry-After: 10\r\n');
@@ -364,10 +404,13 @@ describe('cross-worker Hyperliquid info admission', () => {
     expect(sends).toEqual([]);
     await vi.advanceTimersByTimeAsync(8800);
     await flushDatabase();
-    expect(sends).toEqual([1_010_000]);
+    expect(sends).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1200);
+    await flushDatabase();
+    expect(sends).toEqual([1_011_200]);
     await vi.advanceTimersByTimeAsync(1200);
     await Promise.all([old, fresh]);
-    expect(sends).toEqual([1_010_000, 1_011_200]);
+    expect(sends).toEqual([1_011_200, 1_012_400]);
   });
 
   it('honors a ban longer than the read deadline by refusing rather than dispatching late', async () => {
@@ -418,6 +461,44 @@ describe('cross-worker Hyperliquid info admission', () => {
 });
 
 describe('managed transport admission', () => {
+  it.each(['legacy', 'managed'] as const)(
+    'dispatches a cold discovery burst without spacing through %s HTTP',
+    async (mode) => {
+      vi.stubGlobal('indexedDB', factory);
+      const { createEngineTransport } = await import('./engine');
+      const sends: number[] = [];
+      const send = async () => {
+        sends.push(Date.now());
+        return { status: 200, headers: '', body: new Uint8Array() };
+      };
+      const transport = createEngineTransport(
+        'hyperliquid',
+        { key: '', secret: '', publicDataOnly: true },
+        {
+          ...nativeTransport(),
+          request: send,
+          prepareHttp: () => ({ bind: () => ({ ready: () => true, dispatch: send }) }),
+        },
+      );
+      try {
+        for (let request = 1; request <= 12; request++) {
+          const packet = {
+            request,
+            method: 'POST' as const,
+            url: ORIGIN + '/info',
+            headers: {},
+            body: JSON.stringify({ type: request === 2 ? 'perpDexs' : 'metaAndAssetCtxs' }),
+          };
+          if (mode === 'legacy') await transport.request(packet);
+          else await (await transport.prepareHttp!({ ...packet, intent: 'public' })).bind(packet).dispatch();
+        }
+        expect(sends).toEqual(Array(12).fill(1_000_000));
+      } finally {
+        transport.dispose?.();
+      }
+    },
+  );
+
   it('does not spend the storage warning on an aborted 429 response', async () => {
     vi.stubGlobal('indexedDB', factory);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -488,13 +569,13 @@ describe('managed transport admission', () => {
   );
 
   it.each([
-    ['legacy', 'frontendOpenOrders', 1200],
-    ['managed', 'frontendOpenOrders', 1200],
-    ['managed', 'metaAndAssetCtxs', 1200],
-    ['managed', 'candleSnapshot', 6240],
+    ['legacy', 'frontendOpenOrders', 20],
+    ['managed', 'frontendOpenOrders', 20],
+    ['managed', 'metaAndAssetCtxs', 20],
+    ['managed', 'candleSnapshot', 104],
   ] as const)(
     'applies the shared budget to two actual %s transports for %s before dispatch',
-    async (mode, type, delay) => {
+    async (mode, type, weight) => {
       vi.stubGlobal('indexedDB', factory);
       const { createEngineTransport } = await import('./engine');
       const sends: number[] = [];
@@ -530,13 +611,15 @@ describe('managed transport admission', () => {
         return prepared.bind(request).dispatch();
       };
       try {
-        await execute(a, packet);
-        const next = execute(b, { ...packet, request: 2 });
+        const initial = Math.floor(1000 / weight);
+        const delay = ((initial + 1) * weight - 1000) * 60;
+        for (let request = 1; request <= initial; request++) await execute(a, { ...packet, request });
+        const next = execute(b, { ...packet, request: initial + 1 });
         await flushDatabase();
-        expect(sends).toEqual([1_000_000]);
+        expect(sends).toEqual(Array(initial).fill(1_000_000));
         await vi.advanceTimersByTimeAsync(delay);
         await next;
-        expect(sends).toEqual([1_000_000, 1_000_000 + delay]);
+        expect(sends).toEqual([...Array(initial).fill(1_000_000), 1_000_000 + delay]);
       } finally {
         a.dispose?.();
         b.dispose?.();
