@@ -30,6 +30,7 @@ const tunnelState = (host: string) =>
 vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
   HOWWebSocket: class {
     epoch = 0;
+    ws = { OPEN: 1, readyState: 1, loopState: { phase: 'connected', since: 0 } };
     isOpen = true;
     isInitialized = true;
     isTimeSynced = true;
