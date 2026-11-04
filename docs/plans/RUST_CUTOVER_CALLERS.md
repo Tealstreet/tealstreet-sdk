@@ -10386,3 +10386,23 @@ setting-success authority.
 References: [Binance USD-M error codes](https://developers.binance.com/docs/derivatives/usds-margined-futures/error-code),
 [Binance COIN-M error codes](https://developers.binance.com/docs/derivatives/coin-margined-futures/error-code),
 [Bybit V5 error codes](https://bybit-exchange.github.io/docs/v5/error).
+
+
+### Bybit historical-order terminal statuses (November 12, 2026)
+
+Historical orders read default history plus explicit Cancelled, Rejected and
+Deactivated axes for each enabled product category. Every axis retains the
+requested windows and independent cursor/page guards on the same caller Read
+root and signer. A dedicated engine Claim pacing group allows at most four
+physical order-history requests per second across all categories, cursors,
+statuses and concurrent commands; account reads do not share that clock.
+Limits apply to each axis before the combined
+result is sorted, deduplicated by symbol/order ID and truncated. A terminal-axis
+failure is typed with no collected rows, or explicitly incomplete with accepted
+rows retained; it cannot become an apparently complete default-only result.
+
+The [Bybit announcement](https://t.me/Bybit_API_Announcements/464) removes these
+statuses from default history. Explicit status calls retain the documented
+[24-hour availability](https://bybit-exchange.github.io/docs/v5/order/order-list);
+this change does not restore already expired terminal orders or claim longer
+retention. Hyro placement recovery is handled independently.
