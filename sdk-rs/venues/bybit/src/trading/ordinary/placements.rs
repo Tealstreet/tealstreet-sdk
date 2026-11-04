@@ -47,6 +47,13 @@ impl BybitLinear {
         }
         self.wake_hyro_waiters(cx);
         let (policy, read_credential, write_credential) = self.ordinary_preflight();
+        let lookup_deadline = match cx.command_wait() {
+            Some(safe_cex_engine::CommandWait::Remaining(ms)) => cx.now + f64::from(ms),
+            _ => {
+                let _ = cx.reject_expired_command(Operation::Mutation);
+                return;
+            }
+        };
         let Ok(preflight) = cx.begin_preflight(policy) else {
             return;
         };
@@ -118,6 +125,7 @@ impl BybitLinear {
                 hyro: Some(HyroCall {
                     key: key.clone(),
                     proven,
+                    lookup_deadline,
                     execution: None,
                     observers: Vec::new(),
                 }),
@@ -214,6 +222,10 @@ impl BybitLinear {
             let _ = cx.fail_preflight(&entry.preflight, lost_intent());
             return;
         };
+        if call.lookup_deadline - cx.now < 1.0 {
+            let _ = cx.fail_preflight(&entry.preflight, lookup_expired());
+            return;
+        }
         let Some(intent) = self.trading.hyro.intents.get(&call.key) else {
             let _ = cx.fail_preflight(&entry.preflight, lost_intent());
             return;
@@ -244,6 +256,10 @@ impl BybitLinear {
         for (index, lot) in intent.lots.iter().enumerate() {
             match &lot.state {
                 LotState::Accepted(_) => {}
+                LotState::Absent if !lot.absence_covered(cx.now) => {
+                    let _ = cx.fail_preflight(&entry.preflight, expired_history(&lot.link));
+                    return;
+                }
                 LotState::Absent if lot.stop.is_some() || lot.sends < MAX_SENDS => {
                     legs.push_back(hyro_leg(lot, index));
                 }
@@ -297,18 +313,21 @@ impl BybitLinear {
         else {
             return false;
         };
+        let timeout_ms = entry.hyro.as_ref().map_or(0, |call| {
+            ((call.lookup_deadline - cx.now).floor() as u32).min(CALL_TIMEOUT_MS)
+        });
         let context = cx.preflight_read_context(
             &entry.preflight,
             Policy {
                 operation: Operation::Read,
                 credential: entry.read_credential.clone(),
-                timeout_ms: CALL_TIMEOUT_MS,
+                timeout_ms,
                 pacing: None,
                 retry: RetryPolicy::DefinitiveRefusal,
             },
             CallTerms {
                 wait_ms: 0,
-                timeout_ms: CALL_TIMEOUT_MS,
+                timeout_ms,
                 attempts: CALL_ATTEMPTS,
                 retry_window: RetryWindow::FreshAttempt,
             },
@@ -402,6 +421,17 @@ impl BybitLinear {
                 return;
             }
             Found::Absent => {
+                let covered = self
+                    .trading
+                    .hyro
+                    .intents
+                    .get(&key)
+                    .and_then(|intent| intent.lots.get(lot))
+                    .is_some_and(|lot| lot.absence_covered(cx.now));
+                if !covered {
+                    let _ = cx.fail_preflight(&entry.preflight, expired_history(&link));
+                    return;
+                }
                 if let Some(call) = &mut entry.hyro {
                     call.proven[lot] = true;
                 }
@@ -509,6 +539,7 @@ impl BybitLinear {
         };
         let first = lot.sends == 0;
         lot.sends = lot.sends.saturating_add(1);
+        lot.first_possible_send_at.get_or_insert(cx.now);
         lot.state = LotState::Unknown;
         lot.reconcile = true;
         lot.doubted |= lot.pending;
@@ -536,6 +567,9 @@ impl BybitLinear {
                 .and_then(|intent| intent.lots.get_mut(lot))
         }) {
             lot.sends = lot.sends.saturating_sub(1);
+            if lot.sends == 0 {
+                lot.first_possible_send_at = None;
+            }
             lot.state = LotState::Absent;
             lot.answered();
         }
@@ -767,4 +801,17 @@ fn hyro_leg(lot: &hyro::Lot, index: usize) -> Leg {
         intent,
         lot: Some(index),
     }
+}
+
+fn expired_history(link: &str) -> safe_cex_engine::VenueError {
+    hyro::unknown(
+        link,
+        "the earliest possible send is outside Bybit's 24-hour terminal history coverage; check order and fill history with your broker before retrying",
+    )
+}
+
+fn lookup_expired() -> VenueError {
+    VenueError::new("HyroTrader order reconciliation exceeded the caller deadline; reconcile the original order before retrying")
+        .kind(safe_cex_engine::ErrorKind::Timeout)
+        .outcome(Outcome::Unknown)
 }

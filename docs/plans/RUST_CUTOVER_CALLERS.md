@@ -10393,8 +10393,14 @@ References: [Binance USD-M error codes](https://developers.binance.com/docs/deri
 HyroTrader's Background reconciliation and caller Preflight lookup both read
 realtime, default history, then explicit Cancelled, Rejected and Deactivated
 history only while earlier axes are empty. A failed or unfinished axis never
-proves absence. The Background walk shares the original two 20 s windows;
-caller reads remain on the original Preflight deadline and managed rate policy.
+proves absence. Empty status results also prove nothing once the earliest
+possible send is 24 hours old, including a walk crossing that boundary; a later
+send never renews coverage. Expired coverage gives explicit Unknown guidance
+to check broker order/fill history. Positive terminal evidence may still resolve.
+The Background walk shares the original two 20 s windows;
+caller reads capture the genuine command_wait receipt at entry and cap every
+Read and final Plan admission to that lookup deadline. Expiry seals typed
+Timeout/Unknown. Shared execution/observer deadlines after admission stay native.
 Cancelled and Deactivated recover the original order ID without another create.
 A proven Rejected row retains the existing new-identity remint contract.
 

@@ -19,6 +19,7 @@ type Boundary = (u32, u32);
 pub(crate) const MAX_SENDS: u8 = 2;
 /// Keep the original two 20 s lookup windows across every history status.
 const LOOKUP_TIMEOUT_MS: f64 = 40_000.0;
+const TERMINAL_RETENTION_MS: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -72,6 +73,8 @@ pub(crate) struct Lot {
     base: Option<Body>,
     pub(crate) stop: Option<String>,
     pub(crate) sends: u8,
+    /// Conservative first possible release; another send never renews coverage.
+    pub(crate) first_possible_send_at: Option<f64>,
     pub(crate) state: LotState,
     /// Sent and not yet resolved: reconcile it once its call seals.
     pub(crate) reconcile: bool,
@@ -100,6 +103,13 @@ impl Lot {
     /// A create or stop that may have reached the venue without a resolution.
     pub(crate) fn maybe_sent(&self) -> bool {
         self.sends > 0 && matches!(self.state, LotState::Absent | LotState::Unknown)
+    }
+
+    pub(crate) fn absence_covered(&self, now: f64) -> bool {
+        self.sends == 0
+            || self
+                .first_possible_send_at
+                .is_some_and(|sent| now >= sent && now - sent < TERMINAL_RETENTION_MS)
     }
 
     pub(crate) fn receipt(&self) -> Option<OrderIdentityReceipt> {
@@ -242,6 +252,7 @@ pub(crate) fn remint(cx: &Cx<'_, Pending>, lot: &mut Lot) -> Result<(), String> 
     }
     lot.link = safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))?;
     lot.sends = 0;
+    lot.first_possible_send_at = None;
     lot.state = LotState::Absent;
     lot.reconcile = false;
     lot.observed = false;
@@ -372,6 +383,7 @@ impl BybitLinear {
                     base,
                     stop,
                     sends: 0,
+                    first_possible_send_at: None,
                     state: LotState::Absent,
                     reconcile: false,
                     pending: false,

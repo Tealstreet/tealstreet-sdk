@@ -54,6 +54,8 @@ struct HyroCall {
     key: String,
     /// Lots this call's own reads proved absent on both axes.
     proven: Vec<bool>,
+    /// The genuine caller receipt bounds lookup work, not the shared execution.
+    lookup_deadline: f64,
     execution: Option<safe_cex_engine::engine::ExecutionHandle>,
     /// Every observer root of the execution: the founder's, then joiners'.
     observers: Vec<Context>,
