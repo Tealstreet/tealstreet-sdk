@@ -109,6 +109,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB, shared-family siblings set equal.
 // #3020 OKX read covers: cut run 41797896337 at e7e0251a87d measured okx 1,924,239 B;
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
+// Paradex at b716d928440: cut run 41798863064 measured paradex 2,211,804 B;
+// ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_970_176,
   asterdex: 2_109_440,
@@ -136,7 +138,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   mexc: 1_728_512,
   okx: 1_935_360,
   orderly: 1_721_344,
-  paradex: 2_208_768,
+  paradex: 2_222_080,
   phemex: 2_034_688,
   polymarket: 1_587_200,
   txflow: 1_817_600,
