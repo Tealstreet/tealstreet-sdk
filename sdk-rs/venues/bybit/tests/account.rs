@@ -818,6 +818,41 @@ fn cancels_in_batches_and_treats_an_order_already_gone_as_canceled() {
 }
 
 #[test]
+fn a_batch_cancel_that_also_cancelled_an_unnamed_order_confirms_its_target_and_reads_orders() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    h.command(Command::CancelOrders {
+        command: 16,
+        ids: vec![
+            ORDER_ID.into(),
+            "5cf98598-39a7-459e-97bf-76ca765ee020".into(),
+        ],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    assert!(!h.has_request("/v5/order/realtime"));
+    // Prod e14185004edf: Bybit also echoed a success for an order it cancelled with ours.
+    h.reply(
+        cancel.id,
+        200,
+        &format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{{"category":"linear","symbol":"ETHUSDT","orderId":"{ORDER_ID}","orderLinkId":""}},{{"category":"linear","symbol":"ETHUSDT","orderId":"attached-child","orderLinkId":""}},{{"category":"linear","symbol":"BTCUSDT","orderId":"5cf98598-39a7-459e-97bf-76ca765ee020","orderLinkId":""}}]}},"retExtInfo":{{"list":[{{"code":0,"msg":"OK"}},{{"code":0,"msg":"OK"}},{{"code":0,"msg":"OK"}}]}},"time":1}}"#
+        ),
+    );
+    assert_eq!(
+        h.engine.store().order(ORDER_ID).unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(h.result(16), Some(&Ok("[]".to_owned())));
+    assert!(
+        h.has_request("/v5/order/realtime"),
+        "the unnamed cancellation is learned from a fresh order read"
+    );
+}
+
+#[test]
 fn cancel_all_for_a_symbol() {
     let mut h = ready();
     h.command(Command::CancelSymbolOrders {
