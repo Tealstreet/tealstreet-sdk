@@ -377,19 +377,13 @@ impl Hyperliquid {
                     implied_volatility: None,
                 };
                 if opts.kind == OrderType::TakeProfit
-                    && let Some(t) = cx.store.ticker(&opts.symbol)
+                    && let Some(reference) = cx
+                        .store
+                        .ticker(&opts.symbol)
+                        .and_then(tp_projection_reference)
                 {
-                    let prices = [t.mark, t.last, t.index];
-                    let prices = prices
-                        .into_iter()
-                        .filter(|v| v.is_finite() && *v > 0.0)
-                        .collect::<Vec<_>>();
-                    if let Some(reference) = prices.first()
-                        && prices
-                            .iter()
-                            .all(|p| (p - reference).abs() / reference <= 0.25)
                     {
-                        let above = opts.price.unwrap_or(0.0) > *reference;
+                        let above = opts.price.unwrap_or(0.0) > reference;
                         if (opts.side == OrderSide::Sell && !above)
                             || (opts.side == OrderSide::Buy && above)
                         {
@@ -1529,6 +1523,21 @@ fn only_terminal_cancel(error: &str) -> bool {
                 .is_some_and(|s| s.bytes().all(|b| b.is_ascii_digit()))
     })
 }
+
+/// The price a take profit amended through is judged against, when mark, last and
+/// index agree within 25%; otherwise the TP-to-SL projection does not run.
+pub(crate) fn tp_projection_reference(t: &safe_cex_engine::model::Ticker) -> Option<f64> {
+    let prices = [t.mark, t.last, t.index]
+        .into_iter()
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .collect::<Vec<_>>();
+    let reference = *prices.first()?;
+    prices
+        .iter()
+        .all(|p| (p - reference).abs() / reference <= 0.25)
+        .then_some(reference)
+}
+
 fn mint_cloid(cx: &Cx<'_, Pending>) -> Result<String, String> {
     let mut bytes = [0u8; 16];
     cx.fill_entropy(&mut bytes)?;

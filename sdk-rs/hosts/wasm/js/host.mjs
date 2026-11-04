@@ -218,6 +218,7 @@ function interruptedCommand(error, command, interrupted) {
 const ERROR_KINDS = new Set(['rejected', 'invalidInput', 'insufficientBalance', 'authInvalid', 'authExpired',
   'authPermission', 'rateLimited', 'network', 'timeout', 'venueUnavailable', 'unsupported', 'internal']);
 const ERROR_OUTCOMES = new Set(['notSent', 'rejected', 'unknown']);
+const ERROR_PROTECTIONS = new Set(['restored', 'unprotected']);
 const text = (value) => (typeof value === 'string' && value ? value : undefined);
 const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : undefined);
 
@@ -250,6 +251,7 @@ export class ExchangeError extends Error {
     const venueMessage = text(detail.venueMessage);
     if (venueMessage) this.venueMessage = venueMessage;
     if (Number.isFinite(detail.retryAfterMs) && detail.retryAfterMs >= 0) this.retryAfterMs = detail.retryAfterMs;
+    if (ERROR_PROTECTIONS.has(detail.protection)) this.protection = detail.protection;
     const ids = detail.partial?.orderIds;
     if (Array.isArray(ids) && ids.length && ids.every((id) => typeof id === 'string')) {
       this.partialOrderIds = [...ids];

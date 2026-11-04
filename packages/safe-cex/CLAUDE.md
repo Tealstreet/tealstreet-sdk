@@ -676,6 +676,27 @@ SDK.
   accepts the old ID there, because a rejection silently falls back to
   cancel+replace.
 
+## Protective edits never drop the protection
+
+Most venues amend a stop or take profit by cancel-then-place, so a replacement
+the venue refuses would leave the position unprotected. Before the cancel, the
+engine (`sdk-rs/engine/src/protective_amend.rs`) refuses `notSent` an amend
+whose new trigger already fires against the order's own reference (mark or last
+per its trigger type, both when unknown) or sits over 10x from the symbol's
+price (a price meant for another symbol), but only against a reference observed
+in the last 5 s: each of mark, last and index carries its own observation time
+(`Store::reference_seen_at`), set when it changes or when a venue reports it
+unchanged (`observe_ticker_fields`; a delta omission is not an observation).
+Attached and virtual legs (edited in place on the parent) are exempt. A venue
+that judges the trigger itself (`Venue::judges_protective_amend`: Bybit's
+Partial drag, Hyperliquid's TP-to-SL only when mark, last and index agree within
+25%, BingX's native kind) keeps only the 10x guard. When Binance or Bybit
+definitively refuse a replacement after its cancel landed, the old order is
+placed again exactly (a Bybit Limit stop keeps its limit price), once; the error
+then carries `protection: 'restored' | 'unprotected'` (`ExchangeError.protection`,
+kept by `serializeCommandError`). An unknown outcome is never restored, and a
+stop the cancel found already gone (filled or triggered) is never put back.
+
 ## Automatic retries are for reads only
 
 **Never let `axios-retry` resend a write.** A connection reset after the venue
@@ -1691,6 +1712,36 @@ additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+
+
+Hyperliquid `/info` admission shares a token bucket across account workers through
+IndexedDB. Prepare may wait but reserves no weight. Admission durably reserves
+weight before the final shared Retry-After/generation gate and physical handoff.
+Cancellation or Claim without dispatch refunds only that token generation; a
+request handed to fetch is never refunded. Once IDB has worked in a realm,
+storage failure waits within the original read deadline rather than sending from
+an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
+Role/mode startup reads
+stay single-flight until their managed completion or deadline, including quota wait.
+
+The worker's unchanged 120 s timeout preserves closed native startup fields and
+per-account `/info` route, 429, quota-wait, undispatched and in-flight counters.
+`startup_native_sample_age_ms` identifies the age of the last native watchdog
+snapshot; elapsed/deadline tags on the timeout describe the worker's own bound.
+No request bodies, account addresses, headers or URLs enter these facts.
+
+Public Hyperliquid catalogue reads (`perpDexs`, `metaAndAssetCtxs` and
+`spotMetaAndAssetCtxs`) share byte-exact replies across engines through a separate
+IndexedDB cache. Entries expire after 5 s; a 3 s leader lease bounds follower
+waiting and fences late leaders. Cached preparations recheck payload expiry at
+readiness and handoff; asynchronous publication owns a separate byte buffer.
+Cache storage attempts are bounded to 250 ms;
+unavailable storage bypasses the cache while retaining ordinary quota admission.
+Only anonymous public requests with the exact catalogue shape qualify. Account
+reads, candles and writes are never cached. Typed discovery failures invalidate
+that origin's entries and leases. Cache hits make no physical request and consume
+no quota. Invalidation after native parsing uses the closed `discovery` failure
+kind supplied by #3046; HTTP/JSON errors already invalidate at the cache boundary.
 
 Rust account `socketHealth.reconnectDiagnostics` carries bounded last-close
 snapshots for public/private/business channels and the primary HOW adapter,

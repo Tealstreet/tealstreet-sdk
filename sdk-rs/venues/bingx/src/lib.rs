@@ -728,6 +728,14 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    /// Its native trigger kind decides, and it refuses a trigger that fires before canceling.
+    fn judges_protective_amend(
+        &self,
+        _store: &safe_cex_engine::store::Store,
+        _order: &safe_cex_engine::model::Order,
+    ) -> bool {
+        true
+    }
     fn managed_sockets() -> bool {
         true
     }
