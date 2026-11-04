@@ -38,8 +38,6 @@ test('shared broker-role setup caps retain CI headroom and reject the next byte'
 
 test('KuCoin 400002 resync caps retain the approved CI headroom and exact boundary', () => {
   for (const [venue, measured, cap] of [
-    ['kucoin', 1_657_796, 1_668_096],
-    ['kucoinspot', 2_237_656, 2_248_704],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -51,32 +49,6 @@ test('KuCoin 400002 resync caps retain the approved CI headroom and exact bounda
 
 test('master 41783084277 caps retain the ruled headroom and shared-family boundary', () => {
   for (const [venue, measured, cap] of [
-    ['apexomni', 1_959_768, 1_970_176],
-    ['backpack', 1_860_786, 1_871_872],
-    ['coinbase', 1_800_411, 1_811_456],
-    ['weex', 1_909_946, 1_921_024],
-  ]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
-    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
-    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
-  }
-});
-
-test('WOO attribution cap retains the approved CI headroom and exact boundary', () => {
-  const cap = 2_387_968;
-  assert.equal(cap, Math.ceil((2_377_495 + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES.woo, cap);
-  assert.equal(wasmBudgetError(2_377_495, 'venue', 'woo'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'woo'), /exceeds/);
-});
-
-test('single-pass aggregate caps retain the approved CI headroom and exact boundary', () => {
-  for (const [venue, measured, cap] of [
-    ['asterdex', 2_110_514, 2_121_728],
-    ['bingx', 2_009_588, 2_020_352],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -153,20 +125,9 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
 
 test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['binance', 2_172_329, 2_183_168],
-    ['bitget', 2_293_016, 2_304_000],
-    ['bitunix', 1_826_666, 1_837_056],
-    ['blofin', 1_939_942, 1_950_720],
-    ['bybit', 2_177_290, 2_188_288],
-    ['cryptocom', 1_704_291, 1_715_200],
-    ['hyperliquid', 2_083_308, 2_094_080],
-    ['mexc', 1_717_351, 1_728_512],
     ['orderly', 1_710_152, 1_721_344],
-    ['paradex', 2_211_804, 2_222_080],
     ['kraken', 2_111_267, 2_121_728],
     ['krakenspot', 2_111_267, 2_121_728],
-    ['lighter', 1_980_286, 1_990_656],
-    ['okx', 1_924_239, 1_935_360],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -179,37 +140,55 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });
 
-test('shared-address setup CI caps retain the ruled headroom and exact boundary', () => {
+test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['bitrue', 1_803_160, 1_813_504],
-    ['txflow', 1_819_613, 1_830_912],
+    ['apexomni', 1_974_257, 1_984_512],
+    ['asterdex', 2_113_727, 2_124_800],
+    ['backpack', 1_876_304, 1_887_232],
+    ['binance', 2_184_476, 2_195_456],
+    ['bingx', 2_015_091, 2_025_472],
+    ['bitget', 2_306_497, 2_317_312],
+    ['bitgetusdc', 2_306_497, 2_317_312],
+    ['bitrue', 1_810_954, 1_821_696],
+    ['blofin', 1_952_470, 1_963_008],
+    ['breakoutprop', 1_501_277, 1_512_448],
+    ['bybit', 2_189_590, 2_200_576],
+    ['coinbase', 1_816_299, 1_826_816],
+    ['grvt', 1_768_339, 1_778_688],
+    ['hyperliquid', 2_095_474, 2_106_368],
+    ['hyperliquidspot', 2_095_474, 2_106_368],
+    ['okx', 1_936_660, 1_947_648],
+    ['paradex', 2_223_483, 2_234_368],
+    ['phemex', 2_040_251, 2_051_072],
+    ['polymarket', 1_587_809, 1_598_464],
+    ['txflow', 1_827_125, 1_838_080],
+    ['weex', 1_925_507, 1_936_384],
+    ['woo', 2_388_474, 2_399_232],
   ]) {
-    // TxFlow retains the higher pre-refactor cap approved for #3031.
-    assert.ok(cap >= Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(cap % 1024, 0);
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', venue), new RegExp(`exceeds ${cap}`));
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+  assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
+  assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
 });
 
-test('shared signing bookkeeping cap retains CI headroom and exact boundary', () => {
-  const measured = 1_495_000;
-  const cap = 1_505_280;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES.breakoutprop, cap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'breakoutprop'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'breakoutprop'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'breakoutprop'), new RegExp(`exceeds ${cap}`));
-});
-
-test('startup request diagnostics cap retains CI headroom and exact boundary', () => {
-  const measured = 2_034_706;
-  const cap = 2_045_952;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES.phemex, cap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'phemex'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'phemex'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'phemex'), new RegExp(`exceeds ${cap}`));
+test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain headroom and siblings match', () => {
+  for (const [venue, measured, cap] of [
+    ['bitunix', 1_838_517, 1_849_344],
+    ['cryptocom', 1_716_657, 1_727_488],
+    ['kucoin', 1_670_273, 1_681_408],
+    ['kucoinspot', 2_253_260, 2_264_064],
+    ['lighter', 1_991_579, 2_001_920],
+    ['mexc', 1_729_817, 1_740_800],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });

@@ -240,3 +240,11 @@ fields, header tuples and secret-bearing object keys are scrubbed before logging
 HTML normalization covers decimal/hex entities and quot/apos/lt/gt/amp. Base64
 and base64url tokens are checked for auth names, with four nesting levels,
 64 candidate tokens and 4096 bytes per token; excess discards the whole token.
+
+Automatic 25 s silence recovery uses RWS `retryConnection()` on the same wrapper,
+preserving its current retry counter and normal delay. Explicit manual/wake
+reconnects retain their reset semantics; the existing 5 s stable-uptime reset is
+unchanged. Close diagnostics retain only route/port, phase, initiator and lifetime
+buckets. An abnormal native close is unknown, not proof of a server close.
+HOW's existing timers record maximum lateness only when delivered while hidden;
+no new polling timer or keepalive protocol is introduced.

@@ -2207,3 +2207,58 @@ describe('managed engine HTTP preparation', () => {
     routed.dispose!();
   });
 });
+
+it('retains bounded per-account close attribution at the actual native socket boundary', () => {
+  vi.useFakeTimers({ now: new Date('2026-11-05T00:00:00Z') });
+  const raw = makeRaw();
+  const routed = createEngineTransport('bybit', options({ tealstreetProxy: false, tealstreetTunnel: false }), raw);
+  routed.connect('wss://stream.bybit.com/v5/private?secret=must-not-escape', {
+    channel: 'private',
+    onOpen() {},
+    onMessage() {},
+    onClose() {},
+  });
+  const callbacks = raw.connect.mock.calls[0][1];
+  callbacks.onOpen();
+  vi.setSystemTime(Date.now() + 33_000);
+  callbacks.onClose(1006);
+  const diagnostic = (routed as Transport & { reconnectDiagnostics?: () => unknown }).reconnectDiagnostics?.();
+  expect(diagnostic).toMatchObject({
+    private: {
+      initiator: 'unknown',
+      phase: 'established',
+      route: 'direct',
+      port: '443',
+      lifetime: '30-120s',
+    },
+  });
+  expect(routed.reconnectDiagnostics()).toBe(diagnostic);
+  expect(JSON.stringify(diagnostic)).not.toMatch(/secret|stream\.bybit|wss:/);
+  routed.dispose?.();
+});
+
+it('marks engine-initiated pre-open closes local and measures delayed hidden engine timers', () => {
+  vi.useFakeTimers({ now: 1_000 });
+  vi.stubGlobal('document', { visibilityState: 'hidden' });
+  const raw = makeRaw();
+  const routed = createEngineTransport('bybit', options({ tealstreetProxy: false, tealstreetTunnel: false }), raw);
+  const socket = routed.connect('wss://stream.bybit.com/v5/private', {
+    channel: 'private',
+    onOpen() {},
+    onMessage() {},
+    onClose() {},
+  });
+  socket.close();
+  expect(routed.reconnectDiagnostics()?.private).toMatchObject({
+    initiator: 'local',
+    phase: 'pre-open',
+    lifetime: 'unknown',
+  });
+  const callback = vi.fn();
+  routed.setTimeout(callback, 1_000);
+  vi.setSystemTime(8_000);
+  raw.setTimeout.mock.calls[0][0]();
+  expect(callback).toHaveBeenCalledOnce();
+  expect(routed.reconnectDiagnostics()?.hiddenTimerLateness).toBe('5-20s');
+  routed.dispose?.();
+});

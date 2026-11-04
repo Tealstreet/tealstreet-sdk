@@ -76,6 +76,7 @@ fn source(stamp: f64, bit: Option<bool>, reads: &[Read]) -> Vec<u8> {
         let read = OrderReadMark {
             seq: store.order_read_sequence(),
             sent,
+            epoch: 0,
         };
         store.commit_orders_read(read, scope, |_| true, vec![], &[]);
     }
@@ -196,4 +197,285 @@ fn a_snapshot_without_capabilities_keeps_the_bit() {
     let account = source(FRESH + 60_000., None, &[Read::Account(0.)]);
     engine.apply_frame(FRESH + 60_000., &account, true).unwrap();
     assert!(fenced(&engine, "BTCUSDT"));
+}
+
+/// The `orders.held` asks emitted since the last call: (symbols, liftAfterMs).
+fn held(engine: &mut Engine<Page>) -> Vec<(String, f64)> {
+    crate::test_support::prepared_actions(engine, 0.)
+        .into_iter()
+        .filter_map(|action| match action {
+            crate::Action::Notice(crate::Notice::Event(event))
+                if event.code == crate::log::code::ORDERS_HELD =>
+            {
+                let field = |name| event.fields.iter().find(|(key, _)| *key == name);
+                let Some((_, crate::log::Value::Str(symbols))) = field("symbols") else {
+                    panic!("symbols: {event:?}");
+                };
+                let Some((_, crate::log::Value::Num(after))) = field("liftAfterMs") else {
+                    panic!("liftAfterMs: {event:?}");
+                };
+                Some((symbols.clone(), *after))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_fence_asks_once_for_its_symbols_timed_for_its_grace() {
+    let mut engine = fenced_page(true);
+    assert_eq!(
+        held(&mut engine),
+        [("BTCUSDT".to_owned(), crate::frame_fed::FENCE_GRACE_MS)]
+    );
+    engine.reconcile_uncertain(MARKED + 10.);
+    assert!(
+        held(&mut engine).is_empty(),
+        "asked once per standing fence"
+    );
+}
+
+#[test]
+fn a_source_without_the_bit_is_never_asked() {
+    let mut engine = fenced_page(false);
+    assert!(held(&mut engine).is_empty());
+}
+
+/// A symbol fenced while an ask is out is named in a new ask with the others;
+/// the timing stays the oldest mark's.
+#[test]
+fn a_newly_fenced_symbol_is_asked_for_beside_the_standing_ones() {
+    let mut engine = fenced_page(true);
+    held(&mut engine);
+    engine.io.core.order_locks.fence(Some(&["ETHUSDT".into()]));
+    engine.reconcile_uncertain(MARKED + 1_000.);
+    assert_eq!(
+        held(&mut engine),
+        [(
+            "BTCUSDT,ETHUSDT".to_owned(),
+            crate::frame_fed::FENCE_GRACE_MS - 1_000.
+        )]
+    );
+}
+
+/// After a partial lift the fences still standing are asked for afresh; after
+/// a full lift nothing is.
+#[test]
+fn a_partial_lift_re_asks_for_what_still_stands() {
+    let mut engine = fenced_page(true);
+    engine.io.core.order_locks.fence(Some(&["ETHUSDT".into()]));
+    engine.reconcile_uncertain(MARKED + 500.);
+    held(&mut engine);
+    let btc = source(FRESH, None, &[Read::Symbol("BTCUSDT", FRESH)]);
+    engine.apply_frame(FRESH, &btc, false).unwrap();
+    assert_eq!(
+        held(&mut engine),
+        [(
+            "ETHUSDT".to_owned(),
+            MARKED + 500. + crate::frame_fed::FENCE_GRACE_MS - FRESH
+        )]
+    );
+    let account = source(FRESH + 500., None, &[Read::Account(FRESH + 500.)]);
+    engine.apply_frame(FRESH + 500., &account, false).unwrap();
+    assert!(!fenced(&engine, "ETHUSDT"));
+    assert!(held(&mut engine).is_empty());
+}
+
+#[test]
+fn an_all_symbols_fence_asks_for_the_account() {
+    let mut engine = page();
+    engine
+        .apply_frame(0., &source(0., Some(true), &[]), true)
+        .unwrap();
+    fence(&mut engine, None);
+    assert_eq!(
+        held(&mut engine),
+        [(String::new(), crate::frame_fed::FENCE_GRACE_MS)]
+    );
+}
+
+fn strip_sections(frame: &[u8], drop: &[u16]) -> Vec<u8> {
+    let mut out = frame[..16].to_vec();
+    let mut at = 16;
+    let mut count = 0u16;
+    while at < frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let len = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        let end = at + 8 + len;
+        if !drop.contains(&kind) {
+            out.extend_from_slice(&frame[at..end]);
+            count += 1;
+        }
+        at = end;
+    }
+    out[6..8].copy_from_slice(&count.to_le_bytes());
+    out
+}
+fn fence_at(engine: &mut Engine<Page>, symbols: Option<&[&str]>, now: f64) {
+    let symbols: Option<Vec<String>> = symbols.map(|s| s.iter().map(|s| s.to_string()).collect());
+    engine.io.core.order_locks.fence(symbols.as_deref());
+    engine.reconcile_uncertain(now);
+}
+#[test]
+fn valid_rollback_snapshot_clears_old_bit_and_restores_legacy_rule() {
+    let mut e = fenced_page(true);
+    let account = source(FRESH + 1000., None, &[Read::Account(0.)]);
+    e.apply_frame(FRESH + 1000., &account, true).unwrap();
+    assert!(fenced(&e, "BTCUSDT"));
+    let old_source = source(FRESH + 2000., Some(false), &[]);
+    e.apply_frame(FRESH + 2000., &old_source, true).unwrap();
+    assert!(!e.source_read_covers);
+    assert!(
+        !fenced(&e, "BTCUSDT"),
+        "old source returns to accepted legacy stamp rule"
+    );
+    fence_at(&mut e, Some(&["BTCUSDT"]), FRESH + 3000.);
+    let later = source(FRESH + 3000. + crate::frame_fed::FENCE_GRACE_MS, None, &[]);
+    e.apply_frame(
+        FRESH + 3000. + crate::frame_fed::FENCE_GRACE_MS,
+        &later,
+        false,
+    )
+    .unwrap();
+    assert!(!fenced(&e, "BTCUSDT"));
+}
+#[test]
+fn upgrade_snapshot_uses_cover_rule_before_its_fresh_stamp() {
+    let mut e = fenced_page(false);
+    let frame = source(FRESH + 10000., Some(true), &[Read::Account(0.)]);
+    e.apply_frame(FRESH + 10000., &frame, true).unwrap();
+    assert!(fenced(&e, "BTCUSDT"));
+}
+#[test]
+fn cold_legacy_source_without_any_capabilities_keeps_stamp_rule() {
+    let mut e = page();
+    fence_at(&mut e, Some(&["BTCUSDT"]), MARKED);
+    let frame = source(FRESH + 1., None, &[]);
+    e.apply_frame(FRESH + 1., &frame, true).unwrap();
+    assert!(!fenced(&e, "BTCUSDT"));
+}
+#[test]
+fn orders_really_without_23_do_not_lift_cover_source() {
+    let mut e = fenced_page(true);
+    let frame = strip_sections(
+        &source(FRESH + 10000., None, &[Read::Account(FRESH)]),
+        &[section::ORDERS_READ],
+    );
+    assert!(!crate::wire::sections(&frame).any(|(kind, _)| kind == section::ORDERS_READ));
+    e.apply_frame(FRESH + 10000., &frame, false).unwrap();
+    assert!(fenced(&e, "BTCUSDT"));
+}
+#[test]
+fn detached_23_is_not_cached_to_lift_later_orders() {
+    let mut e = fenced_page(true);
+    let frame = source(FRESH + 10000., None, &[Read::Account(FRESH)]);
+    let cover_only = strip_sections(&frame, &[section::ORDERS]);
+    e.apply_frame(FRESH + 10000., &cover_only, false).unwrap();
+    assert!(fenced(&e, "BTCUSDT"));
+    let orders_only = strip_sections(&frame, &[section::ORDERS_READ]);
+    e.apply_frame(FRESH + 10001., &orders_only, false).unwrap();
+    assert!(fenced(&e, "BTCUSDT"));
+    e.apply_frame(FRESH + 10002., &frame, false).unwrap();
+    assert!(!fenced(&e, "BTCUSDT"));
+}
+#[test]
+fn malformed_cover_payloads_are_absent_and_hold_fence() {
+    for mode in 0..4 {
+        let mut e = fenced_page(true);
+        let mut frame = source(FRESH + 10000., None, &[Read::Account(FRESH)]);
+        let mut at = 16;
+        while at < frame.len() {
+            let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+            let len = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+            if kind == section::ORDERS_READ {
+                match mode {
+                    0 => frame[at + 2..at + 4].copy_from_slice(&2u16.to_le_bytes()),
+                    1 => frame[at + 16..at + 24].copy_from_slice(&f64::INFINITY.to_le_bytes()),
+                    2 => frame[at + 8..at + 12].copy_from_slice(&u32::MAX.to_le_bytes()),
+                    _ => frame[at + 16..at + 24].copy_from_slice(&f64::NEG_INFINITY.to_le_bytes()),
+                }
+                break;
+            }
+            at += 8 + len;
+        }
+        e.apply_frame(FRESH + 10000., &frame, false).unwrap();
+        assert!(fenced(&e, "BTCUSDT"), "mode{mode}");
+    }
+}
+#[test]
+fn partial_lift_and_second_lost_write_keep_each_seals_time() {
+    let mut e = fenced_page(true);
+    fence_at(&mut e, Some(&["ETHUSDT"]), MARKED + 500.);
+    let frame = source(FRESH + 1000., None, &[Read::Symbol("BTCUSDT", FRESH)]);
+    e.apply_frame(FRESH + 1000., &frame, false).unwrap();
+    assert!(!fenced(&e, "BTCUSDT"));
+    assert!(fenced(&e, "ETHUSDT"));
+    let second = FRESH + 1001.;
+    fence_at(&mut e, Some(&["BTCUSDT"]), second);
+    let restamped = source(second + 60000., None, &[Read::Symbol("BTCUSDT", FRESH)]);
+    e.apply_frame(second + 60000., &restamped, false).unwrap();
+    assert!(fenced(&e, "BTCUSDT"));
+    assert!(fenced(&e, "ETHUSDT"));
+    let fresh = source(
+        second + 60001.,
+        None,
+        &[Read::Symbol(
+            "BTCUSDT",
+            second + crate::frame_fed::FENCE_GRACE_MS,
+        )],
+    );
+    e.apply_frame(second + 60001., &fresh, false).unwrap();
+    assert!(!fenced(&e, "BTCUSDT"));
+    assert!(fenced(&e, "ETHUSDT"));
+}
+#[test]
+fn account_cover_lifts_old_all_fence_but_keeps_newer_specific_seal() {
+    let mut e = page();
+    e.apply_frame(0., &source(0., Some(true), &[]), true)
+        .unwrap();
+    fence_at(&mut e, None, MARKED);
+    fence_at(&mut e, Some(&["ETHUSDT"]), MARKED + 1000.);
+    e.apply_frame(
+        FRESH + 10000.,
+        &source(FRESH + 10000., None, &[Read::Account(FRESH)]),
+        false,
+    )
+    .unwrap();
+    assert!(!fenced(&e, "BTCUSDT"));
+    assert!(fenced(&e, "ETHUSDT"));
+    e.apply_frame(
+        FRESH + 10001.,
+        &source(FRESH + 10001., None, &[Read::Account(FRESH + 1000.)]),
+        false,
+    )
+    .unwrap();
+    assert!(!fenced(&e, "ETHUSDT"));
+}
+#[test]
+fn measured_and_unsynced_clock_graces_are_applied_to_read_time() {
+    for offset in [None, Some(1500.), Some(-1500.)] {
+        let mut e = fenced_page(true);
+        e.set_source_clock_offset(offset);
+        let threshold = MARKED
+            + offset.unwrap_or(0.)
+            + if offset.is_some() {
+                crate::frame_fed::FENCE_GRACE_MS
+            } else {
+                crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
+            };
+        e.apply_frame(
+            threshold + 10000.,
+            &source(threshold + 10000., None, &[Read::Account(threshold - 1.)]),
+            false,
+        )
+        .unwrap();
+        assert!(fenced(&e, "BTCUSDT"));
+        e.apply_frame(
+            threshold + 10001.,
+            &source(threshold + 10001., None, &[Read::Account(threshold)]),
+            false,
+        )
+        .unwrap();
+        assert!(!fenced(&e, "BTCUSDT"));
+    }
 }

@@ -2,7 +2,7 @@
 //! non-retried writes, each call bounded on its own.
 use crate::{Okx, Pending, sign, wire};
 use safe_cex_engine::classify::{
-    BatchItem, CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact,
+    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict, WriteFact,
 };
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
@@ -35,6 +35,13 @@ const SERIAL: SerialCall = SerialCall {
 pub(crate) const CODES: CodeTable = CodeTable {
     // Rows match first to last, so the exact codes below win over the 51xxx range.
     rows: &[
+        // docs-v5: filled, canceled or absent. This proves Cancel only, not
+        // which terminal state a later order frame or census will publish.
+        Row {
+            key: Key::Int(51400),
+            verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+            only: Some(Intent::Cancel),
+        },
         // Timed out or down, in the trading range: "does not mean that the request
         // was successful or failed".
         unknown(51149, ErrorKind::Timeout),
@@ -1231,7 +1238,8 @@ impl Okx {
         if acks.iter().any(|ack| ack.s_code == "50004") {
             return self.unproven(cx, request, "OKX 50004: write execution status is unknown");
         }
-        // A cancel with an explicit sCode 0 need not name its order; anything else must.
+        // Placement success needs its new native ID. Cancel identities are
+        // matched against the requested rows below, including native refusals.
         if step.expected > 0
             && acks.iter().any(|ack| {
                 matches!(ack.s_code, "" | "0")
@@ -1249,6 +1257,21 @@ impl Okx {
         if step.expected > 0 && acks.len() != step.expected {
             return self.unproven(cx, request, "OKX write response row count mismatch");
         }
+        let requested: Vec<Requested> = serde_json::from_str(&step.body).unwrap_or_default();
+        if matches!(
+            step.path,
+            "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+        ) && (requested.len() != step.expected
+            || acks.iter().enumerate().any(|(index, ack)| {
+                requested.get(index).is_none_or(|named| {
+                    named.id().is_empty()
+                        || ack.ord_id != named.ord_id
+                        || ack.algo_id != named.algo_id
+                })
+            }))
+        {
+            return self.unproven(cx, request, "OKX cancel row identity missing or mismatched");
+        }
         if step.collect_ids
             && acks.len() == step.expected
             && acks.iter().all(|ack| {
@@ -1263,14 +1286,16 @@ impl Okx {
         {
             cx.placement_resolved(request.command);
         }
-        let failed = acks
-            .iter()
-            .filter(|a| !a.s_code.is_empty() && a.s_code != "0");
+        let failed = acks.iter().filter(|a| {
+            !matches!(a.s_code, "" | "0") && !(job.continue_cancel_errors && a.s_code == "51400")
+        });
         let first_code = failed.clone().next().map(|a| a.s_code);
         // Only 51xxx proves a refused leg, and an accepted leg means something happened.
         let definitive = failed.clone().all(|a| a.s_code.starts_with("51"))
             && !acks.iter().any(|a| {
-                matches!(a.s_code, "" | "0") && (!a.ord_id.is_empty() || !a.algo_id.is_empty())
+                (job.continue_cancel_errors && a.s_code == "51400")
+                    || (matches!(a.s_code, "" | "0")
+                        && (!a.ord_id.is_empty() || !a.algo_id.is_empty()))
             });
         let errors: Vec<_> = failed
             .map(|a| format!("{} (code {})", a.s_msg, a.s_code))
@@ -1283,7 +1308,6 @@ impl Okx {
         // Record the call's fact before any continuation or terminal.
         let recorded = if expected > 0 {
             // A cancel row may answer with no id: the request named it.
-            let requested: Vec<Requested> = serde_json::from_str(&step.body).unwrap_or_default();
             let items: Vec<_> = acks
                 .iter()
                 .enumerate()
@@ -1340,10 +1364,12 @@ impl Okx {
             .iter()
             .filter(|a| !matches!(a.s_code, "" | "0"))
             .all(|a| matches!(a.s_code, "51400" | "51401" | "51402"));
+        let read_after =
+            continue_cancel_errors && acks.iter().any(|a| !matches!(a.s_code, "" | "0"));
         if envelope.code != "0"
             && !(continue_cancel_errors
                 && (envelope.code == "2" || (envelope.code == "1" && only_gone_rows))
-                && !errors.is_empty())
+                && acks.iter().any(|a| !matches!(a.s_code, "" | "0")))
         {
             let error = if errors.is_empty() {
                 let error = format!("OKX {}: {}", envelope.code, envelope.msg);
@@ -1351,9 +1377,12 @@ impl Okx {
             } else {
                 refused(rejection(errors.join("; "), first_code, response.status))
             };
-            return self.end(cx, request.command, Some(&request), error, false);
+            self.end(cx, request.command, Some(&request), error, false);
+            if continue_cancel_errors && acks.iter().any(|a| a.s_code == "51400") {
+                self.account_refresh(cx);
+            }
+            return;
         }
-        let failed_rows = !errors.is_empty();
         if !errors.is_empty() {
             if !continue_cancel_errors {
                 let error = refused(rejection(errors.join("; "), first_code, response.status));
@@ -1364,7 +1393,6 @@ impl Okx {
             }
         }
         // A gone order's own frame may never come: only a read clears its row.
-        let read_after = continue_cancel_errors && failed_rows;
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
             return;
         };
@@ -1740,9 +1768,12 @@ mod code_table_tests {
     fn the_okx_table_satisfies_the_engine_invariants() {
         safe_cex_engine::classify::assert_table(&CODES);
         for row in CODES.rows {
-            // Every row is unscoped, so rejection()'s Place lookup reads the
-            // same row any write intent would.
-            assert_eq!(row.only, None, "{row:?}");
+            if matches!(row.verdict, Verdict::Satisfied(_)) {
+                assert_eq!(row.key, Key::Int(51400), "{row:?}");
+                assert_eq!(row.only, Some(Intent::Cancel), "{row:?}");
+            } else {
+                assert_eq!(row.only, None, "{row:?}");
+            }
             // 50113 (signature) is the one documented re-sign.
             if matches!(row.verdict, Verdict::RefusedResend(_)) {
                 assert_eq!(row.key, Key::Int(50113), "{row:?}");
