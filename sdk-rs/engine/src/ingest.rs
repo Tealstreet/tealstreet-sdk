@@ -900,6 +900,7 @@ pub(crate) mod tests {
             },
             |_| true,
             vec![order],
+            &[],
         );
         assert_eq!(sections_of(&source, section::ORDERS_READ).len(), 1);
         let (store, applied) = round_trip(&source);

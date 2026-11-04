@@ -3455,6 +3455,7 @@ mod tests {
                         },
                         |_| true,
                         Vec::new(),
+                        &[],
                     );
                 }
                 cx.finish_http_context(&pending.0).unwrap();
@@ -3502,6 +3503,7 @@ mod tests {
                         },
                         |_| true,
                         Vec::new(),
+                        &[],
                     )
                     .is_some(),
                 );

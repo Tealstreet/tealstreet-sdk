@@ -556,6 +556,9 @@ impl Store {
     /// A symbol whose rows changed after the read was released keeps them, and
     /// the read proves nothing for it; an account scope committed after the
     /// read refuses all of it. `in_scope` selects an account scope's symbols.
+    /// `unproven` names symbols whose rows the read could not map (rejected or
+    /// unsupported rows); its rows still commit, but it proves no cover for
+    /// them, and an empty symbol (a row naming no market) proves none at all.
     /// Returns the refused symbols, or `None` when the whole read was refused.
     pub fn commit_orders_read(
         &mut self,
@@ -563,6 +566,7 @@ impl Store {
         scope: OrderReadScope<'_>,
         in_scope: impl Fn(&str) -> bool,
         rows: Vec<Order>,
+        unproven: &[String],
     ) -> Option<Vec<String>> {
         let selects = |symbol: &str| match scope {
             OrderReadScope::Account { .. } => in_scope(symbol),
@@ -606,9 +610,13 @@ impl Store {
             .into_iter()
             .filter(|symbol| !refused.contains(symbol))
             .collect();
-        let complete = self
-            .read_covers
-            .committed(read, scope, &written, refused.is_empty());
+        let complete = self.read_covers.committed(
+            read,
+            scope,
+            &written,
+            refused.is_empty() && unproven.is_empty(),
+            unproven,
+        );
         if next != self.orders {
             self.orders_revision = self.orders_revision.saturating_add(1);
             self.orders = next;
@@ -1766,12 +1774,12 @@ mod tests {
             let fresh = release(&store, 5.);
             let found = vec![row("lost", "BTC")];
             assert_eq!(
-                store.commit_orders_read(fresh, ACCOUNT, |_| true, found),
+                store.commit_orders_read(fresh, ACCOUNT, |_| true, found, &[]),
                 Some(vec![])
             );
             assert_eq!(store.read_covers.account(), Some(5.));
             assert_eq!(
-                store.commit_orders_read(old, ACCOUNT, |_| true, vec![]),
+                store.commit_orders_read(old, ACCOUNT, |_| true, vec![], &[]),
                 None
             );
             assert_eq!(ids(&store), ["lost"]);
@@ -1791,7 +1799,7 @@ mod tests {
             let read = release(&store, 5_000.);
             store.upsert_order(row("streamed", "BTC"));
             assert_eq!(
-                store.commit_orders_read(read, ACCOUNT, |_| true, vec![]),
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![], &[]),
                 Some(vec!["BTC".to_owned()])
             );
             assert_eq!(ids(&store), ["streamed"], "the stream row stays");
@@ -1803,7 +1811,7 @@ mod tests {
             // The same read, released after that row: it speaks for it.
             let after = release(&store, 5_000.);
             assert_eq!(
-                store.commit_orders_read(after, ACCOUNT, |_| true, vec![]),
+                store.commit_orders_read(after, ACCOUNT, |_| true, vec![], &[]),
                 Some(vec![])
             );
             assert!(store.orders().is_empty());
@@ -1820,14 +1828,14 @@ mod tests {
             store.upsert_order(row("gone", "BTC"));
             store.remove_orders(&["gone"]);
             assert_eq!(
-                store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("gone", "BTC")]),
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("gone", "BTC")], &[]),
                 Some(vec!["BTC".to_owned()])
             );
             assert!(store.orders().is_empty(), "the removed row is not re-added");
             let read = release(&store, 2.);
             store.set_orders(Vec::new());
             assert_eq!(
-                store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("stale", "ETH")]),
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("stale", "ETH")], &[]),
                 None
             );
             assert!(store.orders().is_empty());
@@ -1849,13 +1857,13 @@ mod tests {
             let old_dex = release(&store, 0.);
             let fresh_core = release(&store, 5.);
             let is_dex = |symbol: &str| symbol.starts_with("xyz:");
-            store.commit_orders_read(fresh_core, core, |s| !is_dex(s), vec![]);
+            store.commit_orders_read(fresh_core, core, |s| !is_dex(s), vec![], &[]);
             assert_eq!(
                 store.read_covers.account(),
                 None,
                 "one scope is not the account"
             );
-            store.commit_orders_read(old_dex, dex, is_dex, vec![]);
+            store.commit_orders_read(old_dex, dex, is_dex, vec![], &[]);
             assert_eq!(
                 store.read_covers.account(),
                 Some(0.),
@@ -1871,11 +1879,11 @@ mod tests {
             let mut store = Store::default();
             let eth = OrderReadScope::Symbols(&["ETH"]);
             let early = release(&store, 1.);
-            store.commit_orders_read(early, eth, |_| false, vec![]);
+            store.commit_orders_read(early, eth, |_| false, vec![], &[]);
             store.take_pending();
             let late_sent_early = release(&store, 2.);
             let next = release(&store, 500.);
-            store.commit_orders_read(next, eth, |_| false, vec![]);
+            store.commit_orders_read(next, eth, |_| false, vec![], &[]);
             assert_eq!(store.read_covers.account(), None);
             assert_eq!(store.read_covers.cover("ETH"), Some(500.));
             assert_eq!(store.read_covers.cover("BTC"), None);
@@ -1884,7 +1892,8 @@ mod tests {
                     late_sent_early,
                     eth,
                     |_| false,
-                    vec![row("stale", "ETH")]
+                    vec![row("stale", "ETH")],
+                    &[]
                 ),
                 Some(vec!["ETH".to_owned()])
             );
@@ -1898,7 +1907,7 @@ mod tests {
         fn an_account_reset_clears_every_cover() {
             let mut store = Store::default();
             let read = release(&store, 3.);
-            store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("a", "BTC")]);
+            store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("a", "BTC")], &[]);
             assert_eq!(store.read_covers.account(), Some(3.));
             store.reset_account();
             assert_eq!(store.read_covers.account(), None);
@@ -1906,7 +1915,7 @@ mod tests {
             assert!(!sections(&mut store).contains(&section::ORDERS_READ));
             // A read released before the reset cannot restore it.
             assert_eq!(
-                store.commit_orders_read(read, ACCOUNT, |_| true, vec![]),
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![], &[]),
                 None
             );
         }
@@ -1920,10 +1929,36 @@ mod tests {
             store.upsert_order(row("brief", "BTC"));
             store.remove_orders(&["brief"]);
             assert_eq!(
-                store.commit_orders_read(read, ACCOUNT, |_| true, vec![]),
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![], &[]),
                 Some(vec!["BTC".to_owned()])
             );
             assert_eq!(store.read_covers.account(), None, "not a clean read");
+        }
+
+        // codex-hcmq3f (#3005): rows a read could not map commit as they are,
+        // but prove nothing: an unmapped row with no market blocks the account
+        // cover, and a known symbol's blocks only that symbol's.
+        #[test]
+        fn unproven_rows_commit_but_prove_no_cover() {
+            let mut store = Store::default();
+            let read = release(&store, 1_000.);
+            assert_eq!(
+                store.commit_orders_read(
+                    read,
+                    ACCOUNT,
+                    |_| true,
+                    vec![row("ok", "ETH")],
+                    &[String::new()]
+                ),
+                Some(vec![])
+            );
+            assert_eq!(ids(&store), ["ok"], "healthy rows still publish");
+            assert_eq!(store.read_covers.account(), None);
+            let symbols = OrderReadScope::Symbols(&["BTC", "ETH"]);
+            let read = release(&store, 2_000.);
+            store.commit_orders_read(read, symbols, |_| false, vec![], &["BTC".to_owned()]);
+            assert_eq!(store.read_covers.cover("BTC"), None);
+            assert_eq!(store.read_covers.cover("ETH"), Some(2_000.));
         }
 
         // Until a read proves a cover, no output changes.

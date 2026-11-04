@@ -3068,6 +3068,7 @@ impl<P> Cx<'_, P> {
         scope: crate::order_read_cover::OrderReadScope<'_>,
         in_scope: impl Fn(&str) -> bool,
         rows: Vec<crate::model::Order>,
+        unproven: &[String],
     ) -> Option<Vec<String>> {
         // Only inside the response event that answered this read: a boundary
         // that takes the token, or any later event, leaves no authority.
@@ -3075,7 +3076,8 @@ impl<P> Cx<'_, P> {
         if self.io.core.order_response_token != Some(epoch) {
             return None;
         }
-        self.store.commit_orders_read(read, scope, in_scope, rows)
+        self.store
+            .commit_orders_read(read, scope, in_scope, rows, unproven)
     }
 
     /// Call only after accepting a complete, fresh authoritative order read.
