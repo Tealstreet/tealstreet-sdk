@@ -155,6 +155,10 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const LIGHTER_TIER_SYNC_MS = 15_000;
+/** Past a hold's `liftAfterMs`, so the source's read goes out after the write it must cover. */
+const SOURCE_ORDERS_SLACK_MS = 500;
+/** The engine's unsynced grace, for an `orders.held` event that names none. */
+const UNSYNCED_FENCE_GRACE_MS = 30_000;
 /** TS replaces `balance.info` on each REST balance tick; the engine caches the same payload. */
 const BALANCE_INFO_SYNC_MS = 2_000;
 // ApeX and KuCoin Spot retain their existing getAccount command aliases below.
@@ -1155,6 +1159,49 @@ export class RustEngineExchange extends BaseExchange {
     });
   };
 
+  private sourceOrdersAsk: { symbols: string[] | undefined; due: number } | undefined;
+  private sourceOrdersTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * A frame-fed engine holds an uncertain write until its data source sends orders from a read
+   * sent after it. The source never saw that write, so the page asks once `liftAfterMs` has
+   * passed. Each event names every standing symbol (`''` is the account), timed for the oldest:
+   * the latest names replace the ask, and the earliest due time stands.
+   */
+  private askSourceForOrders = (fields: Record<string, unknown> | undefined) => {
+    const liftAfterMs = fields?.liftAfterMs;
+    const lift =
+      typeof liftAfterMs === 'number' && Number.isFinite(liftAfterMs) && liftAfterMs >= 0
+        ? liftAfterMs
+        : UNSYNCED_FENCE_GRACE_MS;
+    const named = typeof fields?.symbols === 'string' ? fields.symbols.split(',') : [''];
+    const symbols = named.includes('') ? undefined : named;
+    const due = Math.min(this.sourceOrdersAsk?.due ?? Infinity, Date.now() + lift + SOURCE_ORDERS_SLACK_MS);
+    this.sourceOrdersAsk = { symbols, due };
+    clearTimeout(this.sourceOrdersTimer);
+    this.sourceOrdersTimer = setTimeout(this.sendSourceOrdersAsk, Math.max(0, due - Date.now()));
+  };
+
+  private sendSourceOrdersAsk = () => {
+    const ask = this.sourceOrdersAsk;
+    this.sourceOrdersAsk = undefined;
+    this.sourceOrdersTimer = undefined;
+    if (!ask || this.isDisposed || this.engineFailure) return;
+    void this.refreshAccountOrders(ask.symbols).catch((error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
+    });
+  };
+
+  /** Data source: send orders, for these symbols or the account, from a read sent after this call. */
+  refreshAccountOrders = async (symbols?: string[]): Promise<void> => {
+    if (this.routesToWorker) {
+      await this.callWorker('refreshAccountOrders', ...(symbols !== undefined ? [symbols] : []));
+      return;
+    }
+    await this.command({ op: 'refreshOrders', ...(symbols !== undefined ? { symbols } : {}) }, { report: false });
+  };
+
   /** Data source: re-read the settings a frame-fed engine changed, for one symbol or the account. */
   refreshAccountSettings = async (symbol?: string): Promise<void> => {
     if (this.routesToWorker) {
@@ -2135,6 +2182,7 @@ export class RustEngineExchange extends BaseExchange {
     if (event.code === 'request.failed' || event.code === 'auth.rejected') this.lastReadFailure = event.message;
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
+    if (event.code === 'orders.held' && this.frameFed) this.askSourceForOrders(event.fields);
     this.emitter.emit('engine-event', event);
     if (event.level === 'error')
       this.emitAndLogError(
@@ -3389,6 +3437,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    clearTimeout(this.sourceOrdersTimer);
+    this.sourceOrdersTimer = undefined;
+    this.sourceOrdersAsk = undefined;
     this.candleSource?.dispose();
     this.candleSource = undefined;
     this.algoControlWatch?.dispose();

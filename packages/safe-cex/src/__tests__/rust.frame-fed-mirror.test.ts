@@ -23,6 +23,8 @@ type Fake = {
   started: number;
   constructed: number;
   refuseNext?: boolean;
+  /** The next placement leaves an uncertain write, held as its engine names it. */
+  holdOrders?: { symbols: string; liftAfterMs: number };
   offsets: Array<number | undefined>;
 };
 
@@ -63,6 +65,10 @@ const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as Exch
       const done = { op: 'done', command: command.command, result: JSON.stringify(result) };
       // A confirmed settings write holds it over the source, as a frame-fed venue does.
       const held = { op: 'event', level: 'info', code: 'settings.held', message: 'held', fields: { symbol: 'BTCUSDT' } };
+      if (command.op === 'placeOrders' && fake.holdOrders) {
+        const orders = { op: 'event', level: 'info', code: 'orders.held', message: 'held', fields: fake.holdOrders };
+        return JSON.stringify([orders, done]);
+      }
       return JSON.stringify(command.op === 'setPositionMode' ? [held, done] : [done]);
     },
     applyFrame: (bytes: Uint8Array, snapshot: boolean) => {
@@ -98,8 +104,10 @@ const mirrorWith = (fake: Fake, failure?: Record<string, unknown>) => {
     new DefaultStore(),
   );
   const calls: string[] = [];
-  exchange.on('callMethod', (event: { requestId: string; method: string }) => {
+  const orderAsks: unknown[][] = [];
+  exchange.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
     calls.push(event.method);
+    if (event.method === 'refreshAccountOrders') orderAsks.push(event.args);
     if (failure) {
       exchange.emitter.emit('callMethod:done', { requestId: event.requestId, success: false, result: failure });
       return;
@@ -112,7 +120,7 @@ const mirrorWith = (fake: Fake, failure?: Record<string, unknown>) => {
           : null;
     exchange.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result });
   });
-  return { exchange, calls };
+  return { exchange, calls, orderAsks };
 };
 
 describe('frame-fed main-thread mirror', () => {
@@ -376,6 +384,81 @@ describe('frame-fed main-thread mirror', () => {
     expect(fake.commands.map((command) => command.op)).toContain('setPositionMode');
     expect(mirror.calls).toContain('refreshAccountSettings');
     expect(mirror.calls).not.toContain('changePositionMode');
+  });
+
+  describe('while its engine holds an uncertain write', () => {
+    const held = async (holdOrders: Fake['holdOrders']) => {
+      vi.useFakeTimers();
+      const fake = fakeEngine();
+      const mirror = mirrorWith(fake);
+      exchange = mirror.exchange;
+      await exchange.frameFedReady;
+      fake.holdOrders = holdOrders;
+      return { fake, mirror };
+    };
+    afterEach(() => vi.useRealTimers());
+
+    // Bravulasco: a lost page placement fenced its symbol, and the source, which never saw it,
+    // never sent the orders that lift a fence. Only a read sent after the write can lift it.
+    it('asks its data source for the held symbols once the hold can lift, and only once', async () => {
+      const { mirror } = await held({ symbols: 'BTCUSDT', liftAfterMs: 3_000 });
+      const needsSnapshot = vi.fn();
+      mirror.exchange.on('frameFed:needsSnapshot', needsSnapshot);
+      await mirror.exchange.placeOrder(order);
+      await mirror.exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(3_400);
+      expect(mirror.orderAsks).toEqual([]);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(mirror.orderAsks).toEqual([[['BTCUSDT']]]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mirror.orderAsks).toHaveLength(1);
+      expect(needsSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('asks account-wide when the engine holds the account', async () => {
+      const { mirror } = await held({ symbols: '', liftAfterMs: 0 });
+      await mirror.exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mirror.orderAsks).toEqual([[]]);
+    });
+
+    it('adds a newly held symbol to the waiting ask without delaying the oldest', async () => {
+      const { fake, mirror } = await held({ symbols: 'BTCUSDT', liftAfterMs: 3_000 });
+      await mirror.exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(1_000);
+      fake.holdOrders = { symbols: 'BTCUSDT,ETHUSDT', liftAfterMs: 3_000 };
+      await mirror.exchange.placeOrder({ ...order, symbol: 'ETHUSDT' });
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(mirror.orderAsks).toEqual([[['BTCUSDT', 'ETHUSDT']]]);
+    });
+
+    // A read can lift some symbols and not others; the engine names what still stands.
+    it('asks again for what the engine still holds after a partial lift', async () => {
+      const { fake, mirror } = await held({ symbols: 'BTCUSDT,ETHUSDT', liftAfterMs: 0 });
+      await mirror.exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(500);
+      fake.holdOrders = { symbols: 'ETHUSDT', liftAfterMs: 1_000 };
+      await mirror.exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(mirror.orderAsks).toEqual([[['BTCUSDT', 'ETHUSDT']], [['ETHUSDT']]]);
+    });
+
+    it('waits the unsynced grace for a hold that names no time', async () => {
+      const { mirror } = await held({ symbols: 'BTCUSDT' } as Fake['holdOrders']);
+      await mirror.exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(mirror.orderAsks).toEqual([]);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mirror.orderAsks).toEqual([[['BTCUSDT']]]);
+    });
+
+    it('asks nothing after disposal', async () => {
+      const { mirror } = await held({ symbols: 'BTCUSDT', liftAfterMs: 3_000 });
+      await mirror.exchange.placeOrder(order);
+      mirror.exchange.dispose();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mirror.calls).not.toContain('refreshAccountOrders');
+    });
   });
 
   it('drops source deltas until a snapshot, then ingests in order', async () => {

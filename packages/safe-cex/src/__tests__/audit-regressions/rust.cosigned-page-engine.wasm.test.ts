@@ -37,7 +37,7 @@ afterEach(() => {
   setRustEngineTransport();
 });
 
-const pageEngine = () => {
+const pageEngine = ({ losePlacement = false } = {}) => {
   const sent: { method: string; url: string }[] = [];
   const sockets: string[] = [];
   const transport: Transport = {
@@ -45,6 +45,8 @@ const pageEngine = () => {
     prepareHttp: prepareRecordedHttp,
     request: async (request) => {
       sent.push({ method: request.method, url: request.url });
+      // The placement reached the venue, but its response never came back.
+      if (losePlacement && new URL(request.url).pathname === '/v5/order/create-batch') throw new Error('socket hang up');
       const row = recorded.get(request.url);
       const body =
         row?.body ??
@@ -74,11 +76,13 @@ const pageEngine = () => {
   live.push(exchange);
   // The hosted bridge: what the controller wires to the exchange-server facade.
   const calls: string[] = [];
-  exchange.on('callMethod', (event: { requestId: string; method: string }) => {
+  const asks: { method: string; args: unknown[] }[] = [];
+  exchange.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
     calls.push(event.method);
+    asks.push({ method: event.method, args: event.args });
     exchange.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: null });
   });
-  return { exchange, sent, sockets, calls };
+  return { exchange, sent, sockets, calls, asks };
 };
 
 // The server: a real keyed Bybit engine started from the recorded private tape.
@@ -94,12 +98,14 @@ const privateTape = () => {
   return new Map(rows.filter((row) => row.type === 'http' && row.method === 'GET').map((row) => [row.url!, row]));
 };
 
+const serverReads: string[] = [];
 const serverEngine = async () => {
   const tape = privateTape();
   const transport: Transport = {
     now: () => Date.now(),
     prepareHttp: prepareRecordedHttp,
     request: async (request) => {
+      serverReads.push(`${request.method} ${new URL(request.url).pathname}`);
       const row = tape.get(request.url) ?? recorded.get(request.url);
       if (!row) throw new Error(`server read not on the tape: ${request.method} ${request.url}`);
       return { status: row.status ?? 200, headers: row.headers ?? '', body: new TextEncoder().encode(row.body ?? '') };
@@ -169,3 +175,29 @@ it('the COSIGNED page engine holds server state, writes in one request, and surv
   expect(exchange.store.positions.map((p) => p.symbol).sort()).toEqual(serverPositions);
   expect(sockets).toEqual([]);
 });
+
+// Bravulasco: a page placement whose response was lost fences BTCUSDT, and the server, which
+// never saw it, never sends the orders that lift a fence. The page engine names the held
+// symbol; the page asks the server; the server's engine reads that symbol's orders afresh.
+it('a lost page placement asks the server for a fresh read of the held symbol', async () => {
+  const server = await serverEngine();
+  const { exchange, asks } = pageEngine({ losePlacement: true });
+  await expect(exchange.frameFedReady).resolves.toBe(true);
+  exchange.ingestSourceFrame(server.snapshotFrame()!, true);
+  await settled();
+
+  await expect(
+    exchange.placeOrder({ symbol: BTC, type: OrderType.Limit, side: OrderSide.Buy, amount: 0.01, price: 95_000 }),
+  ).rejects.toMatchObject({ outcome: 'unknown' });
+  await settled();
+  expect(asks.filter((ask) => ask.method === 'refreshAccountOrders')).toEqual([]);
+  // The source clock is measured from its frames, so the engine's 3 s grace applies, plus 500 ms.
+  await new Promise((resolve) => setTimeout(resolve, 3_500));
+  const orderAsks = asks.filter((ask) => ask.method === 'refreshAccountOrders');
+  expect(orderAsks).toEqual([{ method: 'refreshAccountOrders', args: [[BTC]] }]);
+
+  serverReads.splice(0);
+  await server.refreshAccountOrders(...(orderAsks[0].args as [string[]]));
+  await settled();
+  expect(serverReads).toContain('GET /v5/order/realtime');
+}, 20_000);
