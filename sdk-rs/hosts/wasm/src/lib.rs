@@ -2527,6 +2527,7 @@ mod tests {
                         "bybitdemo",
                         "bybitinverse",
                         "bybitspot",
+                        "hyperliquid",
                         "hyperliquidspot",
                         "lighter",
                         "lighter-robinhood",

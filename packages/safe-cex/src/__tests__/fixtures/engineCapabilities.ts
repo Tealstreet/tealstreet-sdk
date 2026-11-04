@@ -102,6 +102,7 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
       'bybitdemo',
       'bybitinverse',
       'bybitspot',
+      'hyperliquid',
       'hyperliquidspot',
       'lighter',
       'lighter-robinhood',
