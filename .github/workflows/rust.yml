@@ -194,6 +194,11 @@ jobs:
           - check: engine-feature-modes
             timeout: 90
             command: python3 scripts/test-http-plan-feature-modes.py
+          - check: metadata
+            command: |
+              node --test safe-cex-types/tests/metadata-freshness.test.cjs
+              cargo clippy --locked -p safe-cex-types --test exchange_metadata -- -D warnings
+              cargo test --locked -p safe-cex-types --test exchange_metadata
           # The restored master candle-cache crates (mono candle-server image) build
           # alone, with master's serde_json features, never unified into the port.
           - check: candle-cache
@@ -231,9 +236,18 @@ jobs:
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
       - uses: actions/setup-node@v4
-        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers'
+        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers' || matrix.check == 'metadata'
         with:
           node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        if: matrix.check == 'metadata'
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        if: matrix.check == 'metadata'
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - name: Run ${{ matrix.check }}
         run: ${{ matrix.command }}
 

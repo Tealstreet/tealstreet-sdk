@@ -119,6 +119,24 @@ afterEach(() => {
 });
 
 describe('engine HTTP routing at the raw transport boundary', () => {
+  it('reports bounded Bybit 10006 metadata at the actual tunnel response without changing it', async () => {
+    const body = '{"retCode":10006,"retMsg":"Too many visits","secret":"never-report"}';
+    mocks.adapter.mockImplementation(async (config: InternalAxiosRequestConfig) => ({
+      status: 200, statusText: 'OK', config, data: body,
+      headers: { 'X-Tealstreet-Egress': 'proxy-tokyo-2', 'X-Bapi-Limit': '120', 'X-Bapi-Limit-Status': '0', 'X-Bapi-Limit-Reset-Timestamp': '1800000000000', 'Authorization': 'never-report' },
+    }));
+    const report = vi.fn();
+    const routed = createEngineTransport('bybit', options({ tealstreetTunnel: true }), makeRaw(), undefined, undefined, undefined, report);
+    try {
+      const reply = await routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1', headers: {} });
+      expect(new TextDecoder().decode(reply.body as Uint8Array)).toBe(body);
+      expect(report).toHaveBeenCalledExactlyOnceWith({ egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
+      expect(mocks.adapter).toHaveBeenCalledTimes(1);
+      report.mockImplementation(() => { throw new Error('listener'); });
+      await expect(routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?symbol=ETHUSDT&interval=1', headers: {} })).resolves.toMatchObject({ status: 200 });
+    } finally { routed.dispose!(); }
+  });
+
   it('scrubs queries from relay failure notices even when the upstream error is unsanitized', async () => {
     const url = 'https://api.bybit.com/v5/order/create?timestamp=123&sign=fixture-signature';
     const error = new TradeTunnelTimeoutError(`connection lost (URL: ${url})`, {
