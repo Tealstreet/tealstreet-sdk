@@ -53,7 +53,10 @@ pub fn ready_identity(
         approval,
         vault,
         safe_cex_engine::PublicFeedPolicy::Direct,
-        HIP3_META,
+        Hip3 {
+            meta: HIP3_META,
+            hold_orders: None,
+        },
     );
     (engine, socket)
 }
@@ -61,7 +64,19 @@ pub fn ready_with_policy(
     mode: &str,
     policy: safe_cex_engine::PublicFeedPolicy,
 ) -> (Engine<Hyperliquid>, SocketId, Vec<String>) {
-    ready_identity_policy(mode, true, None, "30", None, policy, HIP3_META)
+    let (engine, socket, subscriptions) = ready_identity_policy(
+        mode,
+        true,
+        None,
+        "30",
+        None,
+        policy,
+        Hip3 {
+            meta: HIP3_META,
+            hold_orders: None,
+        },
+    );
+    (engine, socket, subscriptions.0)
 }
 pub fn ready_with_hip3_meta(hip_meta: &str) -> (Engine<Hyperliquid>, SocketId) {
     let (engine, socket, _) = ready_identity_policy(
@@ -71,10 +86,35 @@ pub fn ready_with_hip3_meta(hip_meta: &str) -> (Engine<Hyperliquid>, SocketId) {
         "30",
         None,
         safe_cex_engine::PublicFeedPolicy::Direct,
-        hip_meta,
+        Hip3 {
+            meta: hip_meta,
+            hold_orders: None,
+        },
     );
     (engine, socket)
 }
+/// A HIP-3 account at startup, with `dex`'s open-orders read left unanswered.
+pub fn ready_holding_dex_orders(dex: &str) -> (Engine<Hyperliquid>, SocketId, Vec<HttpRequest>) {
+    let (engine, socket, (_, held)) = ready_identity_policy(
+        "disabled",
+        true,
+        None,
+        "30",
+        None,
+        safe_cex_engine::PublicFeedPolicy::Direct,
+        Hip3 {
+            meta: HIP3_META,
+            hold_orders: Some(dex),
+        },
+    );
+    (engine, socket, held)
+}
+/// The HIP-3 dex's metadata, and a dex whose open-orders read is held back.
+struct Hip3<'a> {
+    meta: &'a str,
+    hold_orders: Option<&'a str>,
+}
+
 fn ready_identity_policy(
     mode: &str,
     hip: bool,
@@ -82,8 +122,16 @@ fn ready_identity_policy(
     approval: &str,
     vault: Option<String>,
     policy: safe_cex_engine::PublicFeedPolicy,
-    hip_meta: &str,
-) -> (Engine<Hyperliquid>, SocketId, Vec<String>) {
+    hip3: Hip3<'_>,
+) -> (
+    Engine<Hyperliquid>,
+    SocketId,
+    (Vec<String>, Vec<HttpRequest>),
+) {
+    let Hip3 {
+        meta: hip_meta,
+        hold_orders,
+    } = hip3;
     let secret = test_agent_secret(TEST_SECRET);
     let (signer, identities) = agent(&secret);
     let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
@@ -102,6 +150,7 @@ fn ready_identity_policy(
     e.start(1000.0);
     let mut socket = None;
     let mut subscriptions = Vec::new();
+    let mut held = Vec::new();
     for _ in 0..20 {
         let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
         if actions.is_empty() {
@@ -114,6 +163,13 @@ fn ready_identity_policy(
                         .unwrap()["dex"]
                         .as_str()
                         .map(str::to_owned);
+                    if kind(&r) == "frontendOpenOrders"
+                        && dex.is_some()
+                        && dex.as_deref() == hold_orders
+                    {
+                        held.push(r);
+                        continue;
+                    }
                     let body=match kind(&r).as_str(){"metaAndAssetCtxs" if dex.is_some()=>hip_meta.into(),"metaAndAssetCtxs"=>META.to_owned(),"perpDexs"=>if hip{r#"[null,{"name":"xyz"}]"#.into()}else{"[null]".into()},"userAbstraction"=>format!("\"{mode}\""),"maxBuilderFee"=>approval.into(),"userFees"=>r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#.into(),"clearinghouseState" if dex.is_some()=>r#"{"assetPositions":[],"time":1000}"#.into(),"clearinghouseState"=>STATE.into(),"frontendOpenOrders"=>"[]".into(),"spotClearinghouseState"=>r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"#.into(),other=>panic!("unexpected read {other}")};
                     reply(&mut e, &r, 200, &body);
                 }
@@ -129,7 +185,7 @@ fn ready_identity_policy(
             }
         }
     }
-    (e, socket.unwrap(), subscriptions)
+    (e, socket.unwrap(), (subscriptions, held))
 }
 pub fn message(e: &mut Engine<Hyperliquid>, s: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket: s, text });
