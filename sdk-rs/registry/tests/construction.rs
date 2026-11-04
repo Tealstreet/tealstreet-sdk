@@ -244,13 +244,7 @@ fn orderly_private_accounts_need_an_application_id_and_base58_ed25519_keys() {
     // 31 zero bytes: valid base58, one byte short of an Ed25519 key.
     let key = "1111111111111111111111111111111";
     let valid = "11111111111111111111111111111111";
-    for venue in [
-        "orderly",
-        "kodiakfi",
-        "mode",
-        "what",
-        "woofi",
-    ] {
+    for venue in ["orderly", "kodiakfi", "mode", "what", "woofi"] {
         for application in [
             r#""#,
             r#","applicationId":"""#,

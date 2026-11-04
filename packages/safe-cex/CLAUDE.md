@@ -1266,8 +1266,8 @@ raw primary/secondary clients on `this._primaryXhr` / `this._secondaryXhr`. The 
 that wires it MUST equal the set the UI offers it for — i.e. everything **not** in
 `exchangesWithoutSecondaryKey` (`src/utils/exchangeSupportsSecondaryKey.ts`). That
 exclusion list is the wallet / single-keypair venues (hyperliquid, paradex,
-grvt, apexomni, lighter, polymarket, and the orderly ed25519 family
-incl. ) **plus** the session-login venue `breakoutprop` (DXtrade
+grvt, apexomni, lighter, polymarket, and the orderly ed25519 family) **plus** the
+session-login venue `breakoutprop` (DXtrade
 session token) — there a shared per-session token is injected on every request so a
 second client can't authenticate as a distinct key. A read-only "second API key" is
 not a coherent concept for any of these.

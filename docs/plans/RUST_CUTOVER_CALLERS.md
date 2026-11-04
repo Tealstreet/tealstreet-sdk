@@ -33,8 +33,8 @@ adopting this host version. tealstreet-next remains read-only in this lane.
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **48**.
-The two registries currently default **9 names** to `RustEngineExchange`:
+The SDK exposes **47 registered exchange names**. `RUST_VENUES` includes **46**.
+The two registries currently default **7 names** to `RustEngineExchange`:
 `coinbase`, `coinbasespot`, and Orderly's `kodiakfi`, `mode`,
 `what`, `woofi`, plus testnet-only `txflow`. They default the other **40 names** to TypeScript,
 including **39 names with an available Rust adapter**. Registration in
@@ -2071,8 +2071,6 @@ These are all direct base/concrete-class/registry callers in test source at the 
 | `packages/safe-cex/src/__tests__/reference/coinbase/coinbasespot.exchange.ts` | `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/kodiakfi/kodiakfi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/mode/mode.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges//.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges//.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/what/what.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/woofi/woofi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/orderly.ws-private.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
@@ -2400,8 +2398,6 @@ Coinbase reference, and socket type imports depend on that same class.
 | `packages/safe-cex/src/__tests__/reference/coinbase/coinbasespot.exchange.ts` | `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts`, `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.types.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/kodiakfi/kodiakfi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/mode/mode.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges//.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges//.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/what/what.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/woofi/woofi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/orderly.api.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.encryption.ts`, `packages/safe-cex/src/__tests__/reference/orderly/orderly.types.ts` |

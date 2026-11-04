@@ -71,8 +71,6 @@ does not assign every mismatch to Rust. Exact paths and raw reports carry the de
 | `paradex` | 1 PASS | 1 FAIL | Client IDs and optimistic/open/terminal order lifecycle through cancel/amend/reconciliation. TS retains canceled caller/batch rows that native reconciliation removes. |
 | `phemex` | 1 FAIL | 1 FAIL | Raw rounded percentages; settings readiness, order cumulative fills/remaining/IDs and duplicate executions. |
 | `polymarket` | 1 PASS | 1 FAIL | Interim available PnL and open-order lifecycle/retention. |
-| | not separately gated | 2 FAIL | Orderly-family bracket/root terminal lifecycle, leverage/settings and duplicate executions (mainnet/testnet fixtures). |
-| | not separately gated | 2 FAIL | Orderly-family bracket/root terminal lifecycle, leverage/settings and duplicate executions (mainnet/testnet fixtures). |
 | `txflow` | 1 PASS | 1 FAIL | Per-side leverage and margin settings differ at intermediate command boundaries. |
 | `weex` | 1 PASS | 1 FAIL | Order lifecycle and TS execution IDs/fees/timestamps absent from the native live-fill frame. |
 | `what` | not separately gated | 2 FAIL | Orderly-family bracket/root terminal lifecycle, leverage/settings and duplicate executions (mainnet/testnet fixtures). |

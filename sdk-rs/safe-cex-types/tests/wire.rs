@@ -335,15 +335,13 @@ fn any_timeframe_preserves_distinct_minute_and_month_branches() {
 
 #[test]
 fn hyphenated_and_keyword_shaped_variants_keep_their_wire_literals() {
-    for (variant, literal) in [
-        (ExchangeName::LighterRobinhood, "lighter-robinhood"),
-    ] {
-        assert_eq!(serde_json::to_value(&variant).unwrap(), json!(literal));
-        assert_eq!(
-            serde_json::from_value::<ExchangeName>(json!(literal)).unwrap(),
-            variant
-        );
-    }
+    let variant = ExchangeName::LighterRobinhood;
+    let literal = "lighter-robinhood";
+    assert_eq!(serde_json::to_value(&variant).unwrap(), json!(literal));
+    assert_eq!(
+        serde_json::from_value::<ExchangeName>(json!(literal)).unwrap(),
+        variant
+    );
     let mode = ExchangeOptionsExtraLighterBuilderFeeMode::Static;
     assert_eq!(serde_json::to_value(&mode).unwrap(), json!("static"));
     assert_eq!(

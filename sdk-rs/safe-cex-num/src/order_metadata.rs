@@ -12,6 +12,7 @@ pub(super) const ORDER_METADATA: &[(&str, bool, bool)] = &[
     ("binanceinverse", true, false),
     ("binancepm", true, false),
     ("binancespot", false, false),
+    ("binanceoptions", false, false),
     ("bitget", true, true),
     ("bitgetinverse", true, true),
     ("bitgetusdc", true, true),

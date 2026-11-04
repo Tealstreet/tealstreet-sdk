@@ -7,7 +7,8 @@ Full auto; no master, stash, rebase or force-push. PR targets `feat/rust-rewrite
 ## Scope and design
 
 One `safe-cex-venue-orderly` crate under `sdk-rs/venues/orderly` with a typed
-broker option. Registered aliases: kodiakfi, mode, what, woofi. All share the existing EVM REST/WS hosts and Tealstreet broker
+broker option. Registered aliases: kodiakfi, mode, what, woofi. All share the
+existing EVM REST/WS hosts and Tealstreet broker
 UUID; regular order tags respectively TEALKODIAK, TEALMODE, TEALWHAT,
 TEALSTREET. Testnet selects its own hosts and broker UUID.
 No TS method transcription or generic JSON values. Borrowed typed payloads,

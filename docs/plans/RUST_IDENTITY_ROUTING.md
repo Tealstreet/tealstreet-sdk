@@ -17,8 +17,8 @@ existing command and returns its result without interpreting REST data.
 | kodiakfi, mode, what, woofi | Preserve the ready configured Orderly application ID and affiliate ID |
 | binancespot, binanceinverse, bitrue, blofin, breakoutprop, hyrotrader, hyperliquid, hyperliquidspot, kraken, krakenspot, okx, okxeu, okxdemo, okxeudemo, txflow | Explicit unsupported identity rejection before host initialization |
 
-This accounts for all 48 registered Rust aliases: 33 supported and 15
-unsupported. The inventory follows current TS `getAccount` overrides and their
+The identity regression pins the remaining supported and unsupported cases
+and their beta subset. The inventory follows current TS `getAccount` overrides and their
 product subclasses, plus the preserved Coinbase/Orderly adapters. In particular,
 Binance Spot and COIN-M use independent Base subclasses, Bitrue and Breakout have
 no TS identity override, and Hyro explicitly rejects identity. Kraken Spot's
