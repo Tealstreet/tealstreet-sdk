@@ -144,6 +144,9 @@ pub mod code {
     /// account) wait for the data source's orders read; ask for one
     /// (`refreshAccountOrders`) once `liftAfterMs` has passed.
     pub const ORDERS_HELD: &str = "orders.held";
+    /// Frame-fed: ask `refreshAccountOrders` once for an Unknown cancel;
+    /// `symbols` is comma-separated, empty for the account. This is no fence.
+    pub const ORDERS_REFRESH: &str = "orders.refresh";
     /// Frame-fed: the data source never agreed with a held setting; its value now applies.
     pub const SETTINGS_HOLD_EXPIRED: &str = "settings.hold_expired";
 

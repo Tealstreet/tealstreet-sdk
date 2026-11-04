@@ -37,7 +37,7 @@ afterEach(() => {
   setRustEngineTransport();
 });
 
-const pageEngine = ({ losePlacement = false } = {}) => {
+const pageEngine = ({ losePlacement = false, loseCancel = false } = {}) => {
   const sent: { method: string; url: string }[] = [];
   const sockets: string[] = [];
   const transport: Transport = {
@@ -47,6 +47,7 @@ const pageEngine = ({ losePlacement = false } = {}) => {
       sent.push({ method: request.method, url: request.url });
       // The placement reached the venue, but its response never came back.
       if (losePlacement && new URL(request.url).pathname === '/v5/order/create-batch') throw new Error('socket hang up');
+      if (loseCancel && new URL(request.url).pathname === '/v5/order/cancel-batch') throw new Error('cancel response lost');
       const row = recorded.get(request.url);
       const body =
         row?.body ??
@@ -124,6 +125,31 @@ const serverEngine = async () => {
 };
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 600));
+
+it('an unknown plain page cancel asks the real Bybit source once and never replays', async () => {
+  const server = await serverEngine();
+  const { exchange, asks, sent } = pageEngine({ loseCancel: true });
+  await expect(exchange.frameFedReady).resolves.toBe(true);
+  exchange.ingestSourceFrame(server.snapshotFrame()!, true);
+  await settled();
+  sent.splice(0);
+  const target = exchange.store.orders[0];
+  expect(target).toBeDefined();
+  await expect(exchange.cancelOrders([target!])).rejects.toMatchObject({ outcome: 'unknown' });
+  await settled();
+  const orderAsks = asks.filter((ask) => ask.method === 'refreshAccountOrders');
+  expect(orderAsks).toEqual([{ method: 'refreshAccountOrders', args: [] }]);
+  expect(sent.map((r) => `${r.method} ${new URL(r.url).pathname}`)).toEqual(['POST /v5/order/cancel-batch']);
+  serverReads.splice(0);
+  await server.refreshAccountOrders();
+  await settled();
+  expect(serverReads.some((path) => path === 'GET /v5/order/realtime')).toBe(true);
+  expect(serverReads.every((path) => path.startsWith('GET '))).toBe(true);
+  exchange.ingestSourceFrame(server.snapshotFrame()!, true);
+  await settled();
+  expect(asks.filter((ask) => ask.method === 'refreshAccountOrders')).toHaveLength(1);
+  expect(sent).toHaveLength(1);
+});
 
 it('the COSIGNED page engine holds server state, writes in one request, and survives a snapshot reset', async () => {
   const server = await serverEngine();

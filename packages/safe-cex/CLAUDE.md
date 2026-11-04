@@ -420,8 +420,12 @@ write whose outcome is unknown fences its symbol. From a source advertising
 a symbol not yet named turns uncertain or a partial lift leaves some standing,
 and the page asks the source for `refreshAccountOrders(symbols)` once
 `liftAfterMs + 500 ms` has passed: one timer, the latest names, the earliest due
-time. The source's engine (`refreshOrders`) bounds the reads. A
-LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
+time. The source's engine (`refreshOrders`) bounds the reads. A plain Unknown
+cancel has no placement fence: for a source-refreshing venue,
+`orders.refresh { symbols }` asks the source once without disturbing that
+placement-hold timer. It preserves the cancel's Unknown error, never replays,
+and never infers a Canceled order from absence.
+A LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
 snapshot}`, after the `forwardFrames` op, and keeps posting fill ops.
 
 The web builds a second `RustEngineExchange` on the main thread; the worker's

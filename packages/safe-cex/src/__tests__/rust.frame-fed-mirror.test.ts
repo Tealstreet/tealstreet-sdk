@@ -521,6 +521,25 @@ describe('frame-fed main-thread mirror', () => {
     });
   });
 
+  it('relays an unknown-cancel refresh immediately without replacing a placement hold', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fakeEngine();
+      const mirror = mirrorWith(fake);
+      exchange = mirror.exchange;
+      await exchange.frameFedReady;
+      (exchange as any).receiveEvent({ level: 'info', code: 'orders.held', message: 'held', fields: { symbols: 'ETHUSDT', liftAfterMs: 3_000 } });
+      (exchange as any).receiveEvent({ level: 'info', code: 'orders.refresh', message: 'unknown cancel', fields: { symbols: 'BTCUSDT' } });
+      await Promise.resolve(); await Promise.resolve();
+      expect(mirror.orderAsks).toEqual([[['BTCUSDT']]]);
+      await vi.advanceTimersByTimeAsync(3_500);
+      expect(mirror.orderAsks).toEqual([[['BTCUSDT']], [['ETHUSDT']]]);
+      expect(fake.commands).toEqual([]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mirror.orderAsks).toHaveLength(2);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('drops source deltas until a snapshot, then ingests in order', async () => {
     const fake = fakeEngine();
     exchange = mirrorWith(fake).exchange;
