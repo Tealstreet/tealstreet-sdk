@@ -260,6 +260,9 @@ fn non_direct_account_socket_stays_supervised() {
         let socket = h.socket();
         assert_eq!(h.connects.last().unwrap().1, Some(SocketChannel::Private));
         h.open();
+        for dex in ["", "xyz"] {
+            h.message(socket, &format!(r#"{{"channel":"clearinghouseState","data":{{"dex":"{dex}","clearinghouseState":{{"assetPositions":[]}}}}}}"#));
+        }
         let opened = h.now;
         h.advance(opened + 44_999.0);
         assert_eq!(h.pings(socket), 2);
