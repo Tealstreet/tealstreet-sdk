@@ -32,7 +32,7 @@ import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } 
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { sharedBinanceCatalogue } from './binanceCatalogue';
-import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
+import { observeBybitPublicRateLimit } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
@@ -888,16 +888,6 @@ const httpTransport = (
                 : withProxyTokenProvider(proxyTokenProvider, () => tunnelAdapter(finalConfig));
               return untilAborted(response, signal).then((value) => {
                 if (typeof value.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
-                if (onBybitPublicRateLimit && (intent === undefined || intent === 'public')) {
-                  const notice = bybitPublicRateLimitNotice(packet, value.data, value.headers);
-                  if (notice) {
-                    try {
-                      onBybitPublicRateLimit(notice);
-                    } catch {
-                      /* Telemetry cannot fail the request. */
-                    }
-                  }
-                }
                 return {
                   status: value.status,
                   headers: responseHeaders(value.headers),
@@ -986,7 +976,7 @@ const httpTransport = (
                     }
                     return catalogueRead && !cached ? untilAborted(catalogueRead.complete(value), signal) : value;
                   })
-                  .then(wrap)
+                  .then((value) => wrap(observeBybitPublicRateLimit(packet, value, onBybitPublicRateLimit)))
                   .catch((error) => {
                     const report = (): never => {
                       // No answer through the relay, and nobody called it off: the relay is down.
@@ -1193,7 +1183,7 @@ export const createEngineTransport = (
     '',
     undefined,
     undefined,
-    undefined,
+    onBybitPublicRateLimit,
     infoFacts,
   );
   const publicCorsProxy = provider.publicCorsProxy();
@@ -1207,7 +1197,7 @@ export const createEngineTransport = (
         publicCorsProxy,
         undefined,
         undefined,
-        undefined,
+        onBybitPublicRateLimit,
         infoFacts,
       )
     : undefined;

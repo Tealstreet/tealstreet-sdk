@@ -67,7 +67,7 @@ vi.mock('../accessToken', () => ({
 const PROXY = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/';
 const proxied = { status: 200, headers: '', body: new TextEncoder().encode('{"via":"proxy"}') };
 
-const rawTransport = () => {
+const rawTransport = (reply = proxied) => {
   const dispatched: Array<{ url: string; headers: Record<string, string>; body?: unknown }> = [];
   const raw: Transport = {
     now: () => 0,
@@ -76,14 +76,14 @@ const rawTransport = () => {
     connect: vi.fn(() => ({ send: vi.fn(), close: vi.fn() })),
     request: vi.fn(async (request) => {
       dispatched.push(request);
-      return proxied;
+      return reply;
     }),
     prepareHttp: vi.fn((prepare) => ({
       bind: (network: any) => ({
         ready: () => true,
         dispatch: async () => {
           dispatched.push({ ...network, url: network.url ?? prepare.url });
-          return proxied;
+          return reply;
         },
         cancel: () => undefined,
       }),
@@ -128,6 +128,38 @@ afterEach(() => {
 });
 
 describe('REST while the tunnel is unreachable', () => {
+  it('reports public 10006 on the HTTP proxy fallback without reissuing the read', async () => {
+    const text = '{"retCode":10006,"retMsg":"Too many visits"}';
+    const { raw, dispatched } = rawTransport({
+      status: 200,
+      headers: 'x-tealstreet-egress: proxy-02\nx-bapi-limit-status: 0',
+      body: new TextEncoder().encode(text),
+    });
+    const report = vi.fn();
+    const route = createEngineTransport(
+      'bybit',
+      { key: 'fixture-key', secret: 'fixture-secret', transport: tealstreetTransport, tealstreetTunnel: true },
+      raw, undefined, undefined, undefined, report,
+    );
+    tunnelGoesDown();
+    const packet = {
+      request: 1,
+      method: 'GET',
+      url: 'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1',
+      headers: {},
+      intent: 'public' as const,
+    };
+    try {
+      const reply = await (await route.prepareHttp!(packet)).bind(packet).dispatch();
+      expect(await body(reply)).toBe(text);
+      expect(report).toHaveBeenCalledExactlyOnceWith({ egress: 'proxy-02', target: 'unknown', remaining: '0' });
+      expect(dispatched.map((request) => request.url)).toEqual([`${PROXY}${packet.url}`]);
+      expect(tunnelSent()).toHaveLength(0);
+    } finally {
+      route.dispose!();
+    }
+  });
+
   it('captures 10006 headers after genuine managed HOW bind and dispatch, excluding private intent', async () => {
     tunnelReply.data = '{"retCode":10006,"retMsg":"Too many visits"}';
     tunnelReply.headers = { 'x-tealstreet-egress': 'node-a', 'x-bapi-limit-status': '0' };

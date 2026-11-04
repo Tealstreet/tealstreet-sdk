@@ -1712,6 +1712,9 @@ additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+Observation runs at the shared host-transport response boundary for managed and
+legacy requests on tunnel, proxy, direct and public-CORS routes. Streamed bodies
+are observed lazily with a 1 MiB bound; incomplete or failed streams are not reported.
 
 
 Hyperliquid `/info` admission shares a token bucket across account workers through
