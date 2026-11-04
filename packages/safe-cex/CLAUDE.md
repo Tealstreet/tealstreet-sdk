@@ -1678,3 +1678,10 @@ additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+
+Rust account `socketHealth.reconnectDiagnostics` carries bounded last-close
+snapshots for public/private/business channels and the primary HOW adapter,
+plus maximum hidden timer lateness across engine/HOW callbacks. These are TS
+host observations, not native venue health or server-managed browser evidence.
+Snapshots retain object identity until a bucket changes; the existing health
+sync publishes them without a new polling loop. The wasm binary is unchanged.
