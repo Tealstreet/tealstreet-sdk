@@ -19,19 +19,42 @@ const OCO_WITHOUT_TRIGGERS: &str = r#"{"instId":"BTC-USDT-SWAP","algoId":"9","or
 /// A started account at 4 ms: the startup census went out at 3 ms and the
 /// stream subscribed while it ran, so a second census follows it.
 fn startup() -> (Engine<Okx>, safe_cex_engine::SocketId, Vec<(Action, f64)>) {
+    startup_on(false, false)
+}
+
+/// `startup` on the demo (`testnet`) or EEA alias.
+fn startup_on(
+    testnet: bool,
+    eea: bool,
+) -> (Engine<Okx>, safe_cex_engine::SocketId, Vec<(Action, f64)>) {
     let mut e = crate::support::engine(Options {
         key: Some("test-key".into()),
         secret: Some("test-secret".into()),
         passphrase: Some("test-passphrase".into()),
+        testnet,
+        eea,
         ..Options::default()
     });
     e.start(0.0);
-    let a = take_http(&mut prepared(&mut e, 0.0));
-    reply(&mut e, &a, &envelope(MARKET), 1.0);
-    let mut initial = prepared(&mut e, 1.0);
-    let a = take_http(&mut initial);
-    reply(&mut e, &a, &envelope(TICKER), 2.0);
-    initial.extend(prepared(&mut e, 2.0));
+    let mut initial = prepared(&mut e, 0.0);
+    // Instruments answer at 1 ms (EEA also lists futures), tickers at 2 ms.
+    for (path, now) in [("/instruments?", 1.0), ("/market/tickers", 2.0)] {
+        while let Some(at) = initial.iter().position(|a| url(a).contains(path)) {
+            let a = initial.remove(at);
+            let body = if url(&a).contains("instType=FUTURES") {
+                envelope(&MARKET.replace("BTC-USDT-SWAP", "BTC-USDT-261225").replace(
+                    "\"instType\":\"SWAP\"",
+                    "\"instType\":\"FUTURES\",\"ruleType\":\"xperp\",\"uly\":\"BTC-USDT\"",
+                ))
+            } else if path == "/market/tickers" {
+                envelope(TICKER)
+            } else {
+                envelope(MARKET)
+            };
+            reply(&mut e, &a, &body, now);
+            initial.extend(prepared(&mut e, now));
+        }
+    }
     let business = initial
         .iter()
         .find_map(|a| match a {
@@ -288,4 +311,106 @@ fn the_follow_up_to_a_refused_census_is_rate_bounded() {
     assert_eq!(reads.iter().filter(|a| census_start(a)).count(), 1);
     e.handle(at, Event::TimerFired { timer });
     assert!(!prepared(&mut e, at).iter().any(census_start), "fires once");
+}
+
+/// A page's `RefreshOrders` ask at `now`; the reads it starts, sent at `now`.
+fn refresh(
+    e: &mut Engine<Okx>,
+    command: u32,
+    symbols: Option<Vec<String>>,
+    now: f64,
+) -> Vec<(Action, f64)> {
+    e.handle(
+        now,
+        Event::Command(safe_cex_engine::Command::Venue {
+            command,
+            action: safe_cex_engine::VenueAction::RefreshOrders { symbols },
+        }),
+    );
+    prepared(e, now)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .map(|a| (a, now))
+        .collect()
+}
+
+/// OKX advertises read covers in its own snapshot's CAPABILITIES.
+#[test]
+fn okx_advertises_read_covers() {
+    let (mut e, _, _) = startup();
+    let frame = e.snapshot_frame(4.0).to_vec();
+    let (_, payload) = safe_cex_engine::wire::sections(&frame)
+        .find(|(kind, _)| *kind == section::CAPABILITIES)
+        .unwrap();
+    let flags = u32::from_le_bytes(payload[..4].try_into().unwrap());
+    assert_ne!(
+        flags & 1 << safe_cex_engine::Capabilities::ORDER_READ_COVERS_BIT,
+        0
+    );
+}
+
+/// A refresh ask on a loaded source starts a census (regular and algo pages);
+/// its answer publishes the account cover at the census's first send.
+#[test]
+fn a_refresh_ask_reads_the_census_and_publishes_its_send_time() {
+    for (testnet, eea, symbols) in [
+        (false, false, None),
+        (false, false, Some(vec!["BTC-USDT-SWAP".to_owned()])),
+        (true, false, None),
+        (false, true, None),
+    ] {
+        // An EEA census reads swaps then futures: two final algo pages.
+        let pages = if eea { 2 } else { 1 };
+        let (mut e, _, out) = startup_on(testnet, eea);
+        let (out, now, _, _) = drive(&mut e, out, 4.0, 1.0, 2 * pages, empty);
+        assert!(!out.iter().any(|(a, _)| census_start(a)), "{out:?}");
+        let now = now + 5_000.0;
+        let reads = refresh(&mut e, 50, symbols.clone(), now);
+        assert_eq!(
+            reads.iter().filter(|(a, _)| census_start(a)).count(),
+            1,
+            "{symbols:?}"
+        );
+        let (_, end, starts, _) = drive(&mut e, reads, now, 100.0, pages, empty);
+        assert_eq!(starts, [now], "{symbols:?}");
+        assert!(end > now + 400.0, "the census spans its pages");
+        assert_eq!(account_cover(&mut e, end).1, Some(now), "{symbols:?}");
+    }
+}
+
+/// H7/H3: asks while the census is out start nothing; exactly one follow-up
+/// census starts after it lands, and nothing after that.
+#[test]
+fn asks_while_a_census_is_out_get_one_census_after_it() {
+    let (mut e, _, out) = startup();
+    let (_, now, _, _) = drive(&mut e, out, 4.0, 1.0, 2, empty);
+    let mut now = now + 5_000.0;
+    let mut reads = refresh(&mut e, 50, None, now);
+    assert_eq!(reads.iter().filter(|(a, _)| census_start(a)).count(), 1);
+    // The first page answers, so the census is mid-flight on an algo page.
+    let at = reads.iter().position(|(a, _)| census_start(a)).unwrap();
+    let first = reads.remove(at);
+    now += 1.0;
+    reply(&mut e, &first.0, &envelope(""), now);
+    reads.extend(
+        prepared(&mut e, now)
+            .into_iter()
+            .filter(|a| matches!(a, Action::Http(_)))
+            .map(|a| (a, now)),
+    );
+    for command in 51..150 {
+        now += 1.0;
+        let more = refresh(&mut e, command, Some(vec!["BTC-USDT-SWAP".into()]), now);
+        assert!(
+            more.is_empty(),
+            "H7: nothing more while it is out: {more:?}"
+        );
+    }
+    let (out, now, starts, _) = drive(&mut e, reads, now, 1.0, 1, empty);
+    assert_eq!(starts.len(), 1, "one follow-up census: {starts:?}");
+    let follow_up = starts[0];
+    let (out, now, starts, _) = drive(&mut e, out, now, 1.0, 1, empty);
+    assert_eq!(starts, [follow_up], "nothing after the follow-up");
+    assert!(!out.iter().any(|(a, _)| census_start(a)), "{out:?}");
+    assert_eq!(account_cover(&mut e, now).1, Some(follow_up));
 }

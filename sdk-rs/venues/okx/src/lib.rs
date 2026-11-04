@@ -982,8 +982,13 @@ impl Venue for Okx {
             closed_positions: true,
             fresh_positions: true,
             symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    // Every census commits its cover (`commit_orders_read_from`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account_prices(cx);

@@ -728,6 +728,14 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    /// Its native trigger kind decides, and it refuses a trigger that fires before canceling.
+    fn judges_protective_amend(
+        &self,
+        _store: &safe_cex_engine::store::Store,
+        _order: &safe_cex_engine::model::Order,
+    ) -> bool {
+        true
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -744,6 +752,7 @@ impl Venue for Bingx {
             account: safe_cex_engine::AccountLookup::Query,
             leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
             fresh_positions: true,
+            order_read_covers: self.refreshes_orders(),
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -1298,6 +1307,10 @@ impl Venue for Bingx {
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
     ) {
         self.trading.retired(owner);
+    }
+    // Every open-orders read commits its cover (`Account::on_response`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
         if let Some(credentials) = &self.credentials {

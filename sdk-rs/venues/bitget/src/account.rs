@@ -157,10 +157,6 @@ pub struct Account {
     balance_version: u64,
     inverse_assets: Vec<InverseAsset>,
     inverse_unpriced_warned: bool,
-    full_positions_at: Option<f64>,
-    /// After partial traffic, a prior clean snapshot only fences older reads.
-    full_positions_fence_only: bool,
-    full_position_ids: HashSet<String>,
     ws_positions: HashMap<String, WsPosition>,
     terminal: HashMap<String, f64>,
     opened: HashMap<String, f64>,
@@ -1538,9 +1534,6 @@ impl BitgetFutures {
         started: f64,
     ) -> (Vec<Position>, bool) {
         let held = std::cell::Cell::new(false);
-        let full_fresh = self.account.full_positions_at.is_some_and(|at| {
-            at >= started || (!self.account.full_positions_fence_only && started - at <= 5_000.0)
-        });
         let mut rows: Vec<_> = rows
             .into_iter()
             .filter_map(|mut p| {
@@ -1582,10 +1575,6 @@ impl BitgetFutures {
                             .get(&old.id)
                             .is_some_and(|mark| mark.rejected_at.is_some_and(|at| at >= started))
                 }) {
-                    held.set(true);
-                    return None;
-                }
-                if full_fresh && !self.account.full_position_ids.contains(&p.id) {
                     held.set(true);
                     return None;
                 }
@@ -1979,17 +1968,14 @@ impl BitgetFutures {
                     return;
                 }
                 let mut rejected = skipped.clone();
-                // Preserve the prior all-unmappable scope hold. With valid peers,
-                // rejected identity coverage alone determines safe omission.
+                // Retain the all-unmappable hold and identity-scoped REST guards
+                // while continuing to admit valid peers.
                 if positions.is_empty() && skipped.rejected() != 0 {
                     skipped.reject(None);
                 }
-                let conflicts = self.coherent_position_modes(
-                    cx,
-                    &mut positions,
-                    &mut skipped,
-                    message.action == "snapshot",
-                );
+                // Neither snapshot nor update proves the identities it omits.
+                let conflicts =
+                    self.coherent_position_modes(cx, &mut positions, &mut skipped, false);
                 for symbol in conflicts {
                     rejected.reject(Some((symbol, None)));
                 }
@@ -2027,34 +2013,6 @@ impl BitgetFutures {
                             });
                     }
                 }
-                if message.action == "snapshot" {
-                    // Validly omitted identities still fence an older read's resurrection.
-                    for old in cx.store.positions() {
-                        if !positions.iter().any(|p| p.id == old.id)
-                            && !held.iter().any(|p| p.id == old.id)
-                        {
-                            self.account.ws_positions.insert(
-                                old.id.clone(),
-                                WsPosition {
-                                    at: Some(cx.now),
-                                    update: None,
-                                    rejected_at: None,
-                                },
-                            );
-                        }
-                    }
-                    if skipped.rejected() == 0 {
-                        self.account.full_positions_at = Some(cx.now);
-                        self.account.full_positions_fence_only = false;
-                        self.account.full_position_ids = positions
-                            .iter()
-                            .filter(|p| p.contracts > 0.0)
-                            .map(|p| p.id.clone())
-                            .collect();
-                    } else {
-                        self.account.full_positions_fence_only = true;
-                    }
-                }
                 for p in &positions {
                     self.account.ws_positions.insert(
                         p.id.clone(),
@@ -2065,15 +2023,8 @@ impl BitgetFutures {
                         },
                     );
                 }
-                positions.extend(held);
-                if message.action == "snapshot" && useful {
-                    cx.store.set_positions(
-                        positions
-                            .into_iter()
-                            .filter(|p| p.contracts > 0.0)
-                            .collect(),
-                    );
-                } else if useful {
+                // Only REST establishes readiness; an explicit zero closes its own ID.
+                if useful {
                     for p in positions {
                         cx.store.upsert_position(p);
                     }

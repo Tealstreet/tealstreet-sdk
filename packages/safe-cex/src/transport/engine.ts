@@ -9,6 +9,7 @@ import type { HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
 import type { BybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
+import type { CatalogueRead } from './hyperliquidCatalogue';
 import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } from './types';
 
 import { AxiosHeaders } from 'axios';
@@ -32,7 +33,9 @@ import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/b
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
+import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
+import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
 import {
@@ -466,8 +469,10 @@ const httpTransport = (
   proxyAuthorization?: ProxyAuthorizationNotice,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
+  infoFacts?: HyperliquidStartupFacts,
 ): {
   mode: 'direct' | 'how';
+  invalidateCatalogue(): void;
   connectionDiagnostic(): ConnectionCloseDiagnostic | undefined;
   hiddenTimerLateness(): TimerLatenessBucket;
   request: Transport['request'];
@@ -487,6 +492,7 @@ const httpTransport = (
   let disposed = false;
   const infoBudget =
     exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidInfoBudget() : undefined;
+  const catalogueOrigins = new Set<string>();
   const pending = new Set<AbortController>();
   // While this realm's tunnel is unreachable, REST goes through the HTTP proxy, which
   // egresses from the same fleet. Decided per request at prepare: a prepared request keeps its path.
@@ -555,9 +561,13 @@ const httpTransport = (
     const deadlineMs = Math.max(1, request.timeoutMs ?? 20_000);
     const remaining = () => Math.max(0, deadlineMs - (Date.now() - started));
     let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
+    let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
+    let catalogueRead: CatalogueRead | undefined;
     let bound = false;
     let cancelBound: (() => void) | undefined;
     const cleanup = () => {
+      catalogueRead?.cancel();
+      infoRead?.close();
       clearTimeout(timer);
       pending.delete(controller);
       signal.removeEventListener('abort', onAbort);
@@ -649,6 +659,8 @@ const httpTransport = (
           ? (proxyRoute ??
             restRoute(provider, exchange, restOptions, restRouting, request, transport.serverHeaders, intent))
           : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
+      if (infoFacts && request.method === 'POST' && original.pathname === '/info')
+        infoRead = infoFacts.begin(tunnelAdapter ? 'how' : route.proxied ? 'proxy' : 'direct', deadlineMs);
       const target = route.baseURL ?? request.url;
       const prefix = target.endsWith(request.url) ? target.slice(0, -request.url.length) : undefined;
       if (intent !== undefined && prefix === undefined) throw new HttpPreparationError('unsupported');
@@ -710,15 +722,25 @@ const httpTransport = (
         );
         return untilAborted(promise, signal);
       };
+      if (infoBudget) {
+        catalogueRead = await untilAborted(
+          sharedHyperliquidCatalogue.prepare({ ...request, intent }, signal, started + deadlineMs),
+          signal,
+        );
+        if (catalogueRead) catalogueOrigins.add(original.origin);
+      }
+      const cached = catalogueRead?.cached;
+      const cacheFresh = () =>
+        !cached || (Date.now() >= catalogueRead!.cachedAt! && Date.now() < catalogueRead!.expiresAt!);
       const how = tunnelAdapter as Partial<DisposableAxiosAdapter> | undefined;
-      if (tunnelAdapter) {
+      if (!cached && tunnelAdapter) {
         const prepareTunnel = intent === undefined ? how?.prepareLegacy : how?.prepare;
         if (prepareTunnel)
           prepared = await waitForPrepared(
             withProxyTokenProvider(proxyTokenProvider, () => prepareTunnel.call(tunnelAdapter, config)),
           );
         else if (intent !== undefined) throw new HttpPreparationError('unsupported');
-      } else if (intent !== undefined) {
+      } else if (!cached && intent !== undefined) {
         if (!transport.prepareHttp) throw new HttpPreparationError('unsupported');
         prepared = await waitForPrepared(
           Promise.resolve(
@@ -736,10 +758,13 @@ const httpTransport = (
       }
       signal.throwIfAborted();
       const budgetGeneration =
-        infoBudget && request.method === 'POST' && original.pathname === '/info'
-          ? await untilAborted(infoBudget.wait(original.origin, request.body, started + deadlineMs, signal), signal)
+        !cached && infoBudget && request.method === 'POST' && original.pathname === '/info'
+          ? await untilAborted(
+              infoRead!.wait(() => infoBudget.wait(original.origin, request.body, started + deadlineMs, signal)),
+              signal,
+            )
           : undefined;
-      if (intent !== undefined && (!prepared || typeof prepared.bind !== 'function'))
+      if (!cached && intent !== undefined && (!prepared || typeof prepared.bind !== 'function'))
         throw new HttpPreparationError('invalid');
       const validateBound = <T extends { ready(): boolean; dispatch(): unknown; cancel?(): void }>(
         inner: T | undefined,
@@ -764,7 +789,11 @@ const httpTransport = (
             packet.method !== request.method ||
             new URL(packet.url).origin !== original.origin ||
             packet.route !== request.route ||
-            packet.signal !== request.signal
+            packet.signal !== request.signal ||
+            (catalogueRead &&
+              (packet.url !== signed!.url ||
+                packet.body !== signed!.body ||
+                JSON.stringify(Object.entries(packet.headers)) !== JSON.stringify(signed!.headers)))
           ) {
             cancel();
             throw new HttpPreparationError('invalid');
@@ -794,7 +823,13 @@ const httpTransport = (
           if (intent === undefined) delete network.timeoutMs;
           let send: () => Promise<HttpResponse>;
           let ready: () => boolean;
-          if (tunnelAdapter) {
+          if (cached) {
+            ready = cacheFresh;
+            send = () => {
+              if (!cacheFresh()) throw new HttpPreparationError('timedOut');
+              return Promise.resolve(cached);
+            };
+          } else if (tunnelAdapter) {
             const tunnel = prepared as Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
             const inner = beforeRelease(() => validateBound(tunnel?.bind(finalConfig)));
             ready = inner ? () => inner.ready() : () => true;
@@ -837,15 +872,24 @@ const httpTransport = (
             admitting = true;
             try {
               const result = await untilAborted(
-                infoBudget!.admitDispatch(original.origin, budgetGeneration!, started + deadlineMs, signal, () => {
-                  active();
-                  admitted = true;
-                  try {
-                    return { value: handoff() };
-                  } finally {
-                    admitted = false;
-                  }
-                }),
+                infoRead!.wait(() =>
+                  infoBudget!.admitDispatch(
+                    original.origin,
+                    budgetGeneration!,
+                    started + deadlineMs,
+                    signal,
+                    () => {
+                      active();
+                      admitted = true;
+                      try {
+                        return { value: handoff() };
+                      } finally {
+                        admitted = false;
+                      }
+                    },
+                    () => sent,
+                  ),
+                ),
                 signal,
               );
               return await result.value;
@@ -867,6 +911,7 @@ const httpTransport = (
                 if (sent) throw new HttpPreparationError('invalid');
               });
               sent = true;
+              if (!cached) infoRead?.sent();
               try {
                 const response = send();
                 return untilAborted(response, signal)
@@ -874,7 +919,8 @@ const httpTransport = (
                     route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
                   )
                   .then(async (value) => {
-                    if (infoBudget && request.method === 'POST' && original.pathname === '/info') {
+                    if (!cached) infoRead?.response(value.status);
+                    if (!cached && infoBudget && request.method === 'POST' && original.pathname === '/info') {
                       const reportFailure = () => {
                         if (!signal.aborted) warnHyperliquidInfoBudgetUnavailable();
                       };
@@ -884,7 +930,7 @@ const httpTransport = (
                       // Only a 429 must publish its pause before Rust can enqueue its retry.
                       if (value.status === 429) await untilAborted(recorded, signal).catch(reportFailure);
                     }
-                    return value;
+                    return catalogueRead && !cached ? catalogueRead.complete(value) : value;
                   })
                   .then(wrap)
                   .catch((error) => {
@@ -948,6 +994,9 @@ const httpTransport = (
   const request: Transport['request'] = async (request) => (await prepare(request)).bind(request).dispatch();
   return {
     mode: adapter ? 'how' : 'direct',
+    invalidateCatalogue: () => {
+      for (const origin of catalogueOrigins) void sharedHyperliquidCatalogue.invalidateOrigin(origin);
+    },
     connectionDiagnostic: () => (adapter as Partial<DisposableAxiosAdapter> | undefined)?.connectionDiagnostic?.(),
     hiddenTimerLateness: () =>
       (adapter as Partial<DisposableAxiosAdapter> | undefined)?.hiddenTimerLateness?.() ?? 'unknown',
@@ -962,7 +1011,11 @@ const httpTransport = (
   };
 };
 
-export type EngineTransport = Transport & { reconnectDiagnostics(): AccountReconnectDiagnostics | undefined };
+export type EngineTransport = Transport & {
+  reconnectDiagnostics(): AccountReconnectDiagnostics | undefined;
+  startupDiagnostics(): Record<string, string>;
+  invalidateCatalogue(): void;
+};
 
 /** Account options are already normalized by accountToExchangeOptions. */
 export const createEngineTransport = (
@@ -975,6 +1028,8 @@ export const createEngineTransport = (
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
 ): EngineTransport => {
   assertEngineAccountRouting(options, exchange);
+  const infoFacts =
+    exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidStartupFacts() : undefined;
   const provider = getTransport(options);
   const { routing, restRouting } = resolved(exchange, options, provider);
   const routes = {
@@ -1067,13 +1122,36 @@ export const createEngineTransport = (
     proxyAuthorization,
     onTunnelProxyFallback,
     onBybitPublicRateLimit,
+    infoFacts,
   );
   // Explicit public requests bypass account proxy/tunnel policy. URLs stay in
   // the host; venues choose only the typed route name.
-  const directHttp = httpTransport(exchange, options, transport, provider, restRouting, '');
+  const directHttp = httpTransport(
+    exchange,
+    options,
+    transport,
+    provider,
+    restRouting,
+    '',
+    undefined,
+    undefined,
+    undefined,
+    infoFacts,
+  );
   const publicCorsProxy = provider.publicCorsProxy();
   const publicCorsHttp = publicCorsProxy
-    ? httpTransport(exchange, options, transport, provider, restRouting, publicCorsProxy)
+    ? httpTransport(
+        exchange,
+        options,
+        transport,
+        provider,
+        restRouting,
+        publicCorsProxy,
+        undefined,
+        undefined,
+        undefined,
+        infoFacts,
+      )
     : undefined;
   const readOptions = credentials?.hasSecondary
     ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
@@ -1091,11 +1169,19 @@ export const createEngineTransport = (
         proxyAuthorization,
         onTunnelProxyFallback,
         onBybitPublicRateLimit,
+        infoFacts,
       )
     : undefined;
   return {
     // Protocol negotiation must use the same resolved route as connect(),
     // including hosts (such as Workers) which construct the engine themselves.
+    startupDiagnostics: () => infoFacts?.tags() ?? {},
+    invalidateCatalogue: () => {
+      http.invalidateCatalogue();
+      directHttp.invalidateCatalogue();
+      publicCorsHttp?.invalidateCatalogue();
+      readHttp?.invalidateCatalogue();
+    },
     httpMode: http.mode,
     reconnectDiagnostics,
     engineOptions: {

@@ -2517,17 +2517,27 @@ mod tests {
                 ) || any(&OKX, venue),
                 order_read_covers: any(
                     &[
+                        "binance",
+                        "binancepm",
+                        "binanceinverse",
+                        "binancespot",
+                        "bingx",
                         "bitget",
                         "bitgetinverse",
                         "bitgetusdc",
+                        "blofin",
                         "bybit",
                         "bybitdemo",
                         "bybitinverse",
                         "bybitspot",
+                        "hyperliquidspot",
+                        "lighter",
+                        "lighter-robinhood",
+                        "paradex",
                         "phemex",
                     ],
                     venue,
-                ),
+                ) || any(&OKX, venue),
             };
             let Ok(engine) = super::WasmEngine::new(venue, &engine_options(venue, ""), None) else {
                 panic!("{venue} engine constructs");
