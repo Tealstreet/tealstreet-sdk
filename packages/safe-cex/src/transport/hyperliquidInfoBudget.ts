@@ -289,11 +289,18 @@ function waitUntil(at: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** Admission precedes managed HTTP claim; a queued read never acquires send evidence. */
+export type InfoBudgetGrant = { generation: number; weight: number };
+
+/** Admission precedes managed HTTP claim; only a physical handoff consumes tokens. */
 export class HyperliquidInfoBudget {
   constructor(private readonly backend: InfoBudgetStorage = storage()) {}
 
-  async wait(origin: string, body: string | undefined, deadline: number, signal: AbortSignal): Promise<number> {
+  async wait(
+    origin: string,
+    body: string | undefined,
+    deadline: number,
+    signal: AbortSignal,
+  ): Promise<InfoBudgetGrant> {
     const weight = hyperliquidInfoWeight(body);
     for (;;) {
       signal.throwIfAborted();
@@ -303,46 +310,59 @@ export class HyperliquidInfoBudget {
         // Virtual finish time allows one minute's tokens to burst, then refills by weight.
         const at = Math.max(Date.now(), state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
         if (at >= deadline) throw new HttpPreparationError('timedOut');
-        state.nextAt = Math.max(Date.now(), state.nextAt) + cost;
         return { at, generation: state.generation };
       });
       await waitUntil(grant.at, signal);
       signal.throwIfAborted();
       const current = await this.backend.update(origin, (state) => state.generation === grant.generation);
       if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
-      if (current) return grant.generation;
+      if (current) return { generation: grant.generation, weight };
     }
   }
 
-  admitDispatch<T>(
+  async admitDispatch<T>(
     origin: string,
-    generation: number,
+    grant: InfoBudgetGrant,
     deadline: number,
     signal: AbortSignal,
     send: () => T,
+    wasSent: () => boolean = () => true,
   ): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      let handedOff = false;
-      void this.backend
-        .update(origin, (state) => {
-          // Storage recovery may repeat the callback; a transport handoff is single-use.
-          if (handedOff) return;
-          signal.throwIfAborted();
-          if (Date.now() >= deadline || state.pausedUntil > Date.now() || state.generation !== generation)
-            throw new HttpPreparationError('timedOut');
-          handedOff = true;
-          try {
-            resolve(send());
-          } catch (error) {
-            reject(error);
-          }
-        })
-        .catch((error) => {
-          if (!handedOff) reject(error);
-          // A transaction failure after handoff cannot invalidate or repeat the send.
-          else warnHyperliquidInfoBudgetUnavailable();
-        });
-    });
+    let handedOff = false;
+    for (;;) {
+      const decision = await new Promise<{ at: number } | { value: T }>((resolve, reject) => {
+        void this.backend
+          .update(origin, (state, msPerWeight) => {
+            // Storage recovery may repeat the callback; a transport handoff is single-use.
+            if (handedOff) return;
+            signal.throwIfAborted();
+            const now = Date.now();
+            const cost = grant.weight * msPerWeight;
+            const at = Math.max(now, state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
+            if (at >= deadline || state.generation !== grant.generation) throw new HttpPreparationError('timedOut');
+            if (at > now) return { at };
+            handedOff = true;
+            try {
+              resolve({ value: send() });
+            } catch (error) {
+              reject(error);
+            } finally {
+              // Claim may wait or refuse without calling dispatch. Never charge that path.
+              if (wasSent()) state.nextAt = Math.max(now, state.nextAt) + cost;
+            }
+          })
+          .then((waiting) => {
+            if (!handedOff && waiting) resolve(waiting);
+          })
+          .catch((error) => {
+            if (!handedOff) reject(error);
+            // A transaction failure after handoff cannot invalidate or repeat the send.
+            else warnHyperliquidInfoBudgetUnavailable();
+          });
+      });
+      if ('value' in decision) return decision.value;
+      await waitUntil(decision.at, signal);
+    }
   }
 
   async response(origin: string, status: number, headers: string): Promise<void> {

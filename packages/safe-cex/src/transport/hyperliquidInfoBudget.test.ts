@@ -17,10 +17,21 @@ const flushDatabase = async () => {
 let factory: IDBFactory;
 let budgetModule: typeof import('./hyperliquidInfoBudget');
 const client = () => new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(factory));
+const admit = async (
+  budget: HyperliquidInfoBudget,
+  origin: string,
+  body: string | undefined,
+  deadline: number,
+  signal: AbortSignal,
+) => {
+  const grant = await budget.wait(origin, body, deadline, signal);
+  return budget.admitDispatch(origin, grant, deadline, signal, () => 0);
+};
 const spend = async (budget: HyperliquidInfoBudget, weight = 1000) => {
   while (weight > 0) {
     const cost = weight >= 20 ? 20 : 2;
-    await budget.wait(
+    await admit(
+      budget,
       ORIGIN,
       cost === 20 ? ORDERS : JSON.stringify({ type: 'clearinghouseState' }),
       Date.now() + 20_000,
@@ -57,7 +68,7 @@ describe('unavailable shared storage', () => {
       const a = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
       await spend(a, opened ? 250 : 1000);
       let admitted = false;
-      const next = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+      const next = admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
         admitted = true;
       });
       const delay = opened ? 4800 : 1200;
@@ -79,7 +90,7 @@ describe('unavailable shared storage', () => {
     const a = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
     const reads = Promise.allSettled(
       Array.from({ length: 16 }, () =>
-        a.wait(ORIGIN, JSON.stringify({ type: 'metaAndAssetCtxs' }), Date.now() + 20_000, signal()),
+        admit(a, ORIGIN, JSON.stringify({ type: 'metaAndAssetCtxs' }), Date.now() + 20_000, signal()),
       ),
     );
     await vi.advanceTimersByTimeAsync(20_000);
@@ -99,7 +110,7 @@ describe('unavailable shared storage', () => {
       },
     });
     const a = new budgetModule.HyperliquidInfoBudget();
-    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     expect(opened).not.toHaveBeenCalled();
     allowed = true;
     await vi.advanceTimersByTimeAsync(30_000);
@@ -115,7 +126,7 @@ describe('unavailable shared storage', () => {
     const a = client();
     await a.response(ORIGIN, 200, '');
     vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(stalledTransaction);
-    const waiting = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    const waiting = admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     await flushDatabase();
     await vi.advanceTimersByTimeAsync(1500);
     await flushDatabase();
@@ -123,15 +134,15 @@ describe('unavailable shared storage', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it.each(['pause', 'reservation'])('rejoins after cooldown and max-merges a local %s', async (mode) => {
+  it.each(['pause', 'dispatch'])('rejoins after cooldown and max-merges a local %s', async (mode) => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const a = client();
     const b = client();
-    await b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await admit(b, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
       throw new DOMException('storage disabled', 'InvalidStateError');
     });
-    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     const controller = new AbortController();
     let pending: Promise<PromiseSettledResult<number>[]> | undefined;
     if (mode === 'pause') {
@@ -141,15 +152,27 @@ describe('unavailable shared storage', () => {
       const candles = JSON.stringify({ type: 'candleSnapshot' });
       await spend(a, 230);
       pending = Promise.allSettled([
-        a.wait(ORIGIN, candles, Date.now() + 60_000, controller.signal),
-        a.wait(ORIGIN, candles, Date.now() + 60_000, controller.signal),
+        admit(a, ORIGIN, candles, Date.now() + 60_000, controller.signal),
+        admit(a, ORIGIN, candles, Date.now() + 60_000, controller.signal),
       ]);
       await vi.advanceTimersByTimeAsync(30_000);
     }
     await a.response(ORIGIN, 200, '');
-    await expect(b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
-      code: 'HTTP_PREPARATION_TIMED_OUT',
-    });
+    if (mode === 'pause') {
+      await expect(admit(b, ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+        code: 'HTTP_PREPARATION_TIMED_OUT',
+      });
+    } else {
+      await spend(b, 80);
+      let sent = false;
+      const next = admit(b, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+        sent = true;
+      });
+      await flushDatabase();
+      expect(sent).toBe(false);
+      await vi.advanceTimersByTimeAsync(1200);
+      await next;
+    }
     controller.abort();
     await pending;
   });
@@ -177,7 +200,7 @@ describe('unavailable shared storage', () => {
     });
     const a = new Budget(new Storage(unstableFactory));
     const b = new Budget(new Storage(factory));
-    const first = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    const first = admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     await flushDatabase();
     await vi.advanceTimersByTimeAsync(1500);
     await flushDatabase();
@@ -189,7 +212,7 @@ describe('unavailable shared storage', () => {
     const burst = async (budget: InstanceType<typeof Budget>) => {
       while (Date.now() < end) {
         try {
-          await budget.wait(ORIGIN, ORDERS, end, signal());
+          await admit(budget, ORIGIN, ORDERS, end, signal());
           if (Date.now() < end) sends.push(Date.now());
         } catch (error) {
           expect(error).toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
@@ -217,10 +240,10 @@ describe('unavailable shared storage', () => {
     vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
       throw new DOMException('storage disabled', 'InvalidStateError');
     });
-    await expect(a.wait(ORIGIN, ORDERS, Date.now() + 9999, signal())).rejects.toMatchObject({
+    await expect(admit(a, ORIGIN, ORDERS, Date.now() + 9999, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
-    const next = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    const next = admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     await vi.advanceTimersByTimeAsync(14_800);
     await next;
     expect(warn).toHaveBeenCalledOnce();
@@ -261,7 +284,7 @@ describe('unavailable shared storage', () => {
     });
     vi.stubGlobal('indexedDB', { open });
     const { HyperliquidInfoBudget: Budget } = await import('./hyperliquidInfoBudget');
-    const first = new Budget().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    const first = admit(new Budget(), ORIGIN, ORDERS, Date.now() + 20_000, signal());
     await flushDatabase();
     if (failure === 'error') openRequest.onerror();
     if (failure === 'blocked') openRequest.onblocked();
@@ -275,7 +298,7 @@ describe('unavailable shared storage', () => {
     await vi.advanceTimersByTimeAsync(3000);
     await flushDatabase();
     await first;
-    const next = new Budget().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    const next = admit(new Budget(), ORIGIN, ORDERS, Date.now() + 20_000, signal());
     await vi.advanceTimersByTimeAsync(4800);
     await next;
     expect(open).toHaveBeenCalledTimes(failure === 'stalled' || failure === 'transactionStalled' ? 2 : 1);
@@ -292,11 +315,11 @@ describe('unavailable shared storage', () => {
     const a = client();
     await a.response(ORIGIN, 429, 'Retry-After: 3600');
     vi.setSystemTime(1000);
-    await expect(client().wait(ORIGIN, ORDERS, Date.now() + 300_000, signal())).rejects.toMatchObject({
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 300_000, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
     await vi.advanceTimersByTimeAsync(300_000);
-    const waiting = client().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    const waiting = admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal());
     await flushDatabase();
     await vi.advanceTimersByTimeAsync(1200);
     await waiting;
@@ -310,11 +333,9 @@ describe('cross-worker Hyperliquid info admission', () => {
     await vi.advanceTimersByTimeAsync(120_000);
     await spend(a);
     let admitted = false;
-    const next = client()
-      .wait(ORIGIN, ORDERS, Date.now() + 20_000, signal())
-      .then(() => {
-        admitted = true;
-      });
+    const next = admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+      admitted = true;
+    });
     await flushDatabase();
     await vi.advanceTimersByTimeAsync(1199);
     expect(admitted).toBe(false);
@@ -328,7 +349,7 @@ describe('cross-worker Hyperliquid info admission', () => {
     const { HyperliquidInfoBudget: Budget } = await import('./hyperliquidInfoBudget');
     await spend(new Budget());
     let admitted = false;
-    const next = new Budget().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+    const next = admit(new Budget(), ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
       admitted = true;
     });
     await vi.advanceTimersByTimeAsync(1199);
@@ -343,7 +364,7 @@ describe('cross-worker Hyperliquid info admission', () => {
     const b = client();
     await spend(a);
     let admitted = false;
-    const next = b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+    const next = admit(b, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
       admitted = true;
     });
     await flushDatabase();
@@ -357,7 +378,7 @@ describe('cross-worker Hyperliquid info admission', () => {
   it('does not fuse mainnet and testnet budgets', async () => {
     const a = client();
     await spend(a);
-    await a.wait('https://api.hyperliquid-testnet.xyz', ORDERS, Date.now() + 20_000, signal());
+    await admit(a, 'https://api.hyperliquid-testnet.xyz', ORDERS, Date.now() + 20_000, signal());
   });
 
   it('refuses a reservation beyond its deadline without sending or extending the queue', async () => {
@@ -365,10 +386,10 @@ describe('cross-worker Hyperliquid info admission', () => {
     const a = client();
     const b = client();
     await spend(a);
-    await expect(b.wait(ORIGIN, ORDERS, Date.now() + 1000, signal())).rejects.toMatchObject({
+    await expect(admit(b, ORIGIN, ORDERS, Date.now() + 1000, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
-    const next = b.wait(ORIGIN, ORDERS, Date.now() + 2000, signal());
+    const next = admit(b, ORIGIN, ORDERS, Date.now() + 2000, signal());
     await flushDatabase();
     await vi.advanceTimersByTimeAsync(1200);
     await next;
@@ -379,7 +400,7 @@ describe('cross-worker Hyperliquid info admission', () => {
     const a = client();
     await spend(a);
     const controller = new AbortController();
-    const waiting = client().wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal);
+    const waiting = admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, controller.signal);
     const rejection = expect(waiting).rejects.toThrow('disposed');
     await flushDatabase();
     controller.abort(new Error('disposed'));
@@ -392,12 +413,10 @@ describe('cross-worker Hyperliquid info admission', () => {
     const b = client();
     const sends: number[] = [];
     await spend(a);
-    const old = b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => sends.push(Date.now()));
+    const old = admit(b, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => sends.push(Date.now()));
     await flushDatabase();
     await a.response(ORIGIN, 429, 'Retry-After: 10\r\n');
-    const fresh = client()
-      .wait(ORIGIN, ORDERS, Date.now() + 20_000, signal())
-      .then(() => sends.push(Date.now()));
+    const fresh = admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => sends.push(Date.now()));
     await flushDatabase();
     await vi.advanceTimersByTimeAsync(1200);
     await flushDatabase();
@@ -416,7 +435,7 @@ describe('cross-worker Hyperliquid info admission', () => {
   it('honors a ban longer than the read deadline by refusing rather than dispatching late', async () => {
     const a = client();
     await a.response(ORIGIN, 429, 'retry-after: 30');
-    await expect(client().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
   });
@@ -424,9 +443,9 @@ describe('cross-worker Hyperliquid info admission', () => {
   it('accepts HTTP-date Retry-After and ignores a successful response header', async () => {
     const a = client();
     await a.response(ORIGIN, 200, 'Retry-After: 60');
-    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
     await a.response(ORIGIN, 429, 'Retry-After: ' + new Date(Date.now() + 30_000).toUTCString());
-    await expect(client().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
   });
@@ -434,16 +453,16 @@ describe('cross-worker Hyperliquid info admission', () => {
   it('backs off repeated headerless 429s and caps overflowing header values', async () => {
     const a = client();
     await a.response(ORIGIN, 429, '');
-    await expect(client().wait(ORIGIN, ORDERS, Date.now() + 4999, signal())).rejects.toMatchObject({
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 4999, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
     await vi.advanceTimersByTimeAsync(5000);
     await client().response(ORIGIN, 429, '');
-    await expect(client().wait(ORIGIN, ORDERS, Date.now() + 9999, signal())).rejects.toMatchObject({
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 9999, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
     await a.response(ORIGIN, 429, 'Retry-After: 1e308');
-    await expect(client().wait(ORIGIN, ORDERS, Date.now() + 299_999, signal())).rejects.toMatchObject({
+    await expect(admit(client(), ORIGIN, ORDERS, Date.now() + 299_999, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
   });
@@ -664,7 +683,7 @@ describe('independent review boundaries', () => {
     const realm = await import('./hyperliquidInfoBudget');
     const b = new realm.HyperliquidInfoBudget(new realm.IndexedInfoBudgetStorage(factory));
     let admitted = false;
-    const waiting = b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => (admitted = true));
+    const waiting = admit(b, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => (admitted = true));
     await flushDatabase();
     expect(admitted).toBe(false);
     await vi.advanceTimersByTimeAsync(1199);
@@ -764,4 +783,81 @@ it('does not repeat a physical send when its final admission transaction fails a
   await flushDatabase();
   expect(send).toHaveBeenCalledOnce();
   expect(warn).toHaveBeenCalledOnce();
+});
+
+it.each(['memory', 'indexed'] as const)(
+  'does not charge abandoned preparation or queued grants with %s storage',
+  async (mode) => {
+    if (mode === 'memory') vi.stubGlobal('indexedDB', undefined);
+    const a = mode === 'memory' ? new budgetModule.HyperliquidInfoBudget() : client();
+    const b = mode === 'memory' ? new budgetModule.HyperliquidInfoBudget() : client();
+    await spend(a, 960);
+    const controllers = Array.from({ length: 4 }, () => new AbortController());
+    const pending = Promise.allSettled(
+      controllers.map((controller) => a.wait(ORIGIN, '{"type":"userRole"}', Date.now() + 20_000, controller.signal)),
+    );
+    await flushDatabase();
+    controllers.forEach((controller) => controller.abort());
+    await pending;
+    let sent = false;
+    const peer = admit(b, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+      sent = true;
+    });
+    await flushDatabase();
+    expect(sent).toBe(true);
+    await peer;
+    await b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
+  },
+);
+
+it('never refunds a request handed to fetch when the caller aborts', async () => {
+  const a = client();
+  const controller = new AbortController();
+  const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal);
+  const send = vi.fn();
+  await a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, controller.signal, send);
+  controller.abort();
+  await spend(a, 980);
+  let sent = false;
+  const peer = admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+    sent = true;
+  });
+  await flushDatabase();
+  expect(sent).toBe(false);
+  await vi.advanceTimersByTimeAsync(1200);
+  await peer;
+  expect(send).toHaveBeenCalledOnce();
+});
+
+it('does not charge a managed claim that waits without dispatching', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  const { createEngineTransport } = await import('./engine');
+  const send = vi.fn(async () => ({ status: 200, headers: '', body: new Uint8Array() }));
+  const transport = createEngineTransport(
+    'hyperliquid',
+    { key: '', secret: '', publicDataOnly: true },
+    {
+      ...nativeTransport(),
+      request: send,
+      prepareHttp: () => ({ bind: () => ({ ready: () => true, dispatch: send }) }),
+    },
+  );
+  const packet = { request: 1, method: 'POST' as const, url: ORIGIN + '/info', headers: {}, body: ORDERS };
+  try {
+    const bound = (await transport.prepareHttp!({ ...packet, intent: 'public' })).bind(packet);
+    await bound.admitDispatch!(() => undefined);
+    expect(send).not.toHaveBeenCalled();
+    await spend(client());
+    let done = false;
+    const next = admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => {
+      done = true;
+    });
+    await flushDatabase();
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1200);
+    await next;
+  } finally {
+    transport.dispose?.();
+  }
 });

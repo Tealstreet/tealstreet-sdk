@@ -8,8 +8,8 @@ import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } fr
 
 import { AxiosHeaders } from 'axios';
 
-import { stripDiagnosticUrlQueries } from '@tealstreet/http-over-websocket/src/diagnosticUrl';
 import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
+import { stripDiagnosticUrlQueries } from '@tealstreet/http-over-websocket/src/diagnosticUrl';
 import {
   onTunnelFailing,
   tunnelEgressUrl,
@@ -825,15 +825,22 @@ const httpTransport = (
             admitting = true;
             try {
               const result = await untilAborted(
-                infoBudget!.admitDispatch(original.origin, budgetGeneration!, started + deadlineMs, signal, () => {
-                  active();
-                  admitted = true;
-                  try {
-                    return { value: handoff() };
-                  } finally {
-                    admitted = false;
-                  }
-                }),
+                infoBudget!.admitDispatch(
+                  original.origin,
+                  budgetGeneration!,
+                  started + deadlineMs,
+                  signal,
+                  () => {
+                    active();
+                    admitted = true;
+                    try {
+                      return { value: handoff() };
+                    } finally {
+                      admitted = false;
+                    }
+                  },
+                  () => sent,
+                ),
                 signal,
               );
               return await result.value;
