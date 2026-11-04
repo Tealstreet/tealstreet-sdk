@@ -573,12 +573,15 @@ impl Store {
             OrderReadScope::Symbols(listed) => listed,
             OrderReadScope::Account { .. } => &[],
         };
+        // A symbol changed after the release is a candidate even with no row
+        // left: provenance outlives removal.
         for symbol in self
             .orders
             .iter()
             .chain(rows.iter())
             .map(|order| order.symbol.as_str())
             .chain(listed.iter().copied())
+            .chain(self.read_covers.changed_after(read))
         {
             if selects(symbol) && !candidates.iter().any(|known| known == symbol) {
                 candidates.push(symbol.to_owned());
@@ -631,7 +634,7 @@ impl Store {
     pub fn reset_account(&mut self) {
         self.orders.clear();
         self.orders_revision = self.orders_revision.saturating_add(1);
-        self.read_covers.mutated_all();
+        self.read_covers.reset();
         self.positions.clear();
         self.balance = Balance::default();
         self.coin_balances = None;
@@ -1887,6 +1890,40 @@ mod tests {
             );
             assert!(store.orders().is_empty());
             assert_eq!(store.read_covers.cover("ETH"), Some(500.));
+        }
+
+        // codex-hcmq3f (#3004): rows wiped by an account reset take their cover
+        // with them, and nothing goes out claiming it.
+        #[test]
+        fn an_account_reset_clears_every_cover() {
+            let mut store = Store::default();
+            let read = release(&store, 3.);
+            store.commit_orders_read(read, ACCOUNT, |_| true, vec![row("a", "BTC")]);
+            assert_eq!(store.read_covers.account(), Some(3.));
+            store.reset_account();
+            assert_eq!(store.read_covers.account(), None);
+            assert_eq!(store.read_covers.cover("BTC"), None);
+            assert!(!sections(&mut store).contains(&section::ORDERS_READ));
+            // A read released before the reset cannot restore it.
+            assert_eq!(
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![]),
+                None
+            );
+        }
+
+        // codex-hcmq3f (#3004): a row added and removed after the release
+        // leaves no row to name it, yet the empty read is still refused for it.
+        #[test]
+        fn an_empty_read_is_refused_for_a_symbol_added_and_removed_after_its_release() {
+            let mut store = Store::default();
+            let read = release(&store, 1.);
+            store.upsert_order(row("brief", "BTC"));
+            store.remove_orders(&["brief"]);
+            assert_eq!(
+                store.commit_orders_read(read, ACCOUNT, |_| true, vec![]),
+                Some(vec!["BTC".to_owned()])
+            );
+            assert_eq!(store.read_covers.account(), None, "not a clean read");
         }
 
         // Until a read proves a cover, no output changes.

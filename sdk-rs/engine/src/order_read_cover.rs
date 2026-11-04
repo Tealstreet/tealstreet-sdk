@@ -58,6 +58,23 @@ impl Covers {
         self.full = self.clock;
     }
 
+    /// Every row is gone and nothing proves anything: covers start over, while
+    /// the sequence and provenance keep refusing reads released before this.
+    pub(crate) fn reset(&mut self) {
+        self.mutated_all();
+        self.scopes.clear();
+        self.account = None;
+        self.symbol_sent.clear();
+    }
+
+    /// Symbols whose rows changed after `read` was released, rows or not.
+    pub(crate) fn changed_after(&self, read: OrderReadMark) -> impl Iterator<Item = &str> {
+        self.symbols
+            .iter()
+            .filter(move |(_, seq)| **seq > read.seq)
+            .map(|(symbol, _)| &**symbol)
+    }
+
     pub(crate) fn mutated(&mut self, symbol: &str) {
         self.clock += 1;
         self.stamp(symbol, self.clock);

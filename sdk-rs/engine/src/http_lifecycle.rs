@@ -3161,6 +3161,9 @@ mod tests {
         // A delivered read commits its (empty) rows as the whole account.
         #[cfg(feature = "order-locks")]
         commit_reads: bool,
+        // A FetchLeverage command tries to commit a read; whether it could.
+        #[cfg(feature = "order-locks")]
+        command_commits: Vec<bool>,
     }
     const GROUP: Pacing = Pacing {
         group: 1,
@@ -3490,6 +3493,18 @@ mod tests {
                 self.command_calls.push(*command);
             }
             if let Command::FetchLeverage { command, .. } = command {
+                #[cfg(feature = "order-locks")]
+                self.command_commits.push(
+                    cx.commit_orders_read(
+                        crate::order_read_cover::OrderReadScope::Account {
+                            key: "all",
+                            account: &["all"],
+                        },
+                        |_| true,
+                        Vec::new(),
+                    )
+                    .is_some(),
+                );
                 cx.done(command, "null".into());
             }
         }
@@ -7183,6 +7198,44 @@ mod tests {
         release(&mut engine, tokens[1], 500.);
         response(&mut engine, tokens[1], 501.);
         assert_eq!(engine.store.account_read_cover(), Some(1.));
+    }
+
+    /// codex-hcmq3f (#3004): a read response that committed nothing leaves no
+    /// authority behind; a later command cannot commit with its mark.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_read_mark_authorizes_a_commit_only_inside_its_own_response() {
+        let (mut engine, tokens) = start(Probe {
+            count: 1,
+            ..Probe::default()
+        });
+        release(&mut engine, tokens[0], 1.);
+        response(&mut engine, tokens[0], 2.);
+        engine.handle(
+            3.,
+            Event::Command(Command::FetchLeverage {
+                command: 4,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        assert_eq!(engine.venue.command_commits, [false]);
+        assert_eq!(engine.store.account_read_cover(), None);
+    }
+
+    /// codex-hcmq3f (#3004): a command before any read has no mark to borrow.
+    #[cfg(feature = "order-locks")]
+    #[test]
+    fn a_command_before_any_read_cannot_commit_one() {
+        let (mut engine, _) = start(Probe::default());
+        engine.handle(
+            1.,
+            Event::Command(Command::FetchLeverage {
+                command: 78,
+                symbol: "BTC".into(),
+            }),
+        );
+        assert_eq!(engine.venue.command_commits, [false]);
+        assert_eq!(engine.store.account_read_cover(), None);
     }
 
     /// One logical order read spans several physical attempts (pages, coins);

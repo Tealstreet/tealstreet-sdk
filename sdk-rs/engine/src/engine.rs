@@ -1727,9 +1727,10 @@ struct IoCore {
     order_read_tokens: crate::IdMap<RequestId, (u64, crate::order_read_cover::OrderReadMark)>,
     #[cfg(feature = "order-locks")]
     order_response_token: Option<u64>,
-    /// The release of the read `order_response_token` belongs to.
+    /// The release of the read this response answers, with its epoch: it
+    /// authorizes a commit only while `order_response_token` is that epoch.
     #[cfg(feature = "order-locks")]
-    order_response_read: Option<crate::order_read_cover::OrderReadMark>,
+    order_response_read: Option<(u64, crate::order_read_cover::OrderReadMark)>,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -3068,7 +3069,12 @@ impl<P> Cx<'_, P> {
         in_scope: impl Fn(&str) -> bool,
         rows: Vec<crate::model::Order>,
     ) -> Option<Vec<String>> {
-        let read = self.io.core.order_response_read?;
+        // Only inside the response event that answered this read: a boundary
+        // that takes the token, or any later event, leaves no authority.
+        let (epoch, read) = self.io.core.order_response_read?;
+        if self.io.core.order_response_token != Some(epoch) {
+            return None;
+        }
         self.store.commit_orders_read(read, scope, in_scope, rows)
     }
 
@@ -5608,6 +5614,7 @@ impl<V: Venue> Engine<V> {
         #[cfg(feature = "order-locks")]
         {
             self.io.core.order_response_token = None;
+            self.io.core.order_response_read = None;
         }
         self.io.core.auth_failure_counted = false;
     }
@@ -5861,7 +5868,7 @@ impl<V: Venue> Engine<V> {
         {
             let read = self.io.core.order_read_tokens.remove(&request);
             self.io.core.order_response_token = read.map(|(epoch, _)| epoch);
-            self.io.core.order_response_read = read.map(|(_, read)| read);
+            self.io.core.order_response_read = read;
         }
         let (Some(incoming), Some(pending)) = (
             self.io.core.incoming.remove(&request),
