@@ -111,6 +111,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
 // Paradex at b716d928440: cut run 41798863064 measured paradex 2,211,804 B;
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
+// #3023 page rule at 2495abee4f1: cut run 41799876396 measured kraken 2,111,267, kucoinspot 2,224,069,
+// lighter 1,980,286 and woo 2,377,495 B; ddi2il ruling: CI size plus 10 KiB rounded up, siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_970_176,
   asterdex: 2_109_440,
@@ -129,12 +131,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   grvt: 1_767_424,
   hyperliquid: 2_094_080,
   hyperliquidspot: 2_094_080,
-  kraken: 2_108_416,
-  krakenspot: 2_108_416,
+  kraken: 2_121_728,
+  krakenspot: 2_121_728,
   kucoin: 1_640_448,
-  kucoinspot: 2_222_080,
-  lighter: 1_979_392,
-  'lighter-robinhood': 1_979_392,
+  kucoinspot: 2_234_368,
+  lighter: 1_990_656,
+  'lighter-robinhood': 1_990_656,
   mexc: 1_728_512,
   okx: 1_935_360,
   orderly: 1_721_344,
@@ -143,7 +145,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   polymarket: 1_587_200,
   txflow: 1_817_600,
   weex: 1_921_024,
-  woo: 2_376_704,
+  woo: 2_387_968,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
