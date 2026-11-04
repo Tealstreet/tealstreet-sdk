@@ -175,6 +175,7 @@ pub struct Hyperliquid {
     dex_names: Vec<String>,
     advanced_scopes: HashSet<String>,
     core_discovery_incomplete: bool,
+    http_429_count: u32,
     /// Lowercase coins of catalogue rows excluded by design: never published,
     /// and owned exposure on them is hidden rather than freezing the account.
     excluded: HashSet<String>,
@@ -212,6 +213,7 @@ impl Hyperliquid {
             dex_names: Vec::new(),
             advanced_scopes: HashSet::new(),
             core_discovery_incomplete: true,
+            http_429_count: 0,
             excluded: HashSet::new(),
             startup: Default::default(),
             info_completing: false,
@@ -1163,6 +1165,34 @@ impl Venue for Hyperliquid {
     ) {
         self.trade_plan_ready(cx, owner);
     }
+    fn startup_diagnostics(
+        &self,
+        store: &safe_cex_engine::Store,
+    ) -> Vec<(&'static str, safe_cex_engine::log::Value)> {
+        let loaded = store.loaded();
+        let stage = if !loaded.markets {
+            if self.spot {
+                "spotMetaAndAssetCtxs"
+            } else {
+                "metaAndAssetCtxs"
+            }
+        } else if self.options.public_data_only {
+            "tickers"
+        } else if self.user().is_none() {
+            "userRole"
+        } else if !loaded.orders {
+            "frontendOpenOrders"
+        } else if !loaded.balance || !loaded.positions {
+            self.startup_private_stage()
+        } else {
+            "tickers"
+        };
+        vec![
+            ("stage", stage.into()),
+            ("readTimeoutMs", 20_000.0.into()),
+            ("http429Count", f64::from(self.http_429_count).into()),
+        ]
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.credentials = safe_cex_engine::credential_selection::Slots::new(
             cx.address_nonce_identities().primary.clone(),
@@ -1313,8 +1343,12 @@ impl Venue for Hyperliquid {
         if !(200..300).contains(&response.status) && !matches!(pending, Pending::Trade(_)) {
             let message = format!("Hyperliquid HTTP {}: {}", response.status, response.body);
             if response.status == 429 {
+                self.http_429_count = self.http_429_count.saturating_add(1);
                 let error = safe_cex_engine::VenueError::new(message.clone())
-                    .kind(safe_cex_engine::ErrorKind::RateLimited);
+                    .kind(safe_cex_engine::ErrorKind::RateLimited)
+                    .retry_after_ms(
+                        safe_cex_engine::classify::retry_after_ms(&response).unwrap_or(5000.0),
+                    );
                 self.account.read_error = Some(error);
             }
             self.on_request_failed(cx, pending, &message);

@@ -4023,6 +4023,10 @@ pub trait Venue {
     ) {
         self.on_request_failed(cx, pending, &error.message);
     }
+    /// Optional public stage facts for the nonterminal startup watchdog.
+    fn startup_diagnostics(&self, _store: &Store) -> Vec<(&'static str, Value)> {
+        Vec::new()
+    }
     fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
@@ -4049,7 +4053,12 @@ const STARTUP_WATCH_MS: f64 = 60_000.0;
 const EMPTY_CATALOGUE_WARNING: &str = "Venue returned an empty market catalogue; it was not applied and the previous catalogue is kept";
 const STARTUP_REPEAT_MS: f64 = 300_000.0;
 
-fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
+fn watch_startup<P>(
+    cx: &mut Cx<'_, P>,
+    account: bool,
+    started_at: f64,
+    mut fields: Vec<(&'static str, Value)>,
+) -> bool {
     let loaded = cx.store.loaded();
     let tickers = cx.io.core.public_feed_policy != PublicFeedPolicy::Disabled;
     let missing: Vec<&str> = [
@@ -4071,13 +4080,20 @@ fn watch_startup<P>(cx: &mut Cx<'_, P>, account: bool) -> bool {
     } else {
         Level::Error
     };
-    cx.notice(
+    let elapsed = cx.now - started_at;
+    // Invalid transport clocks cannot introduce nonfinite diagnostic fields.
+    if cx.now.is_finite() && elapsed.is_finite() {
+        fields.push(("elapsedMs", elapsed.max(0.0).into()));
+        fields.push(("deadlineMs", STARTUP_WATCH_MS.into()));
+    }
+    cx.event(
         level,
         log_code::STARTUP_INCOMPLETE,
         format!(
             "Startup incomplete: still waiting for {}",
             missing.join(", ")
         ),
+        fields,
     );
     true
 }
@@ -4090,6 +4106,7 @@ pub struct Engine<V: Venue> {
     started: bool,
     /// Checked on handled events, so it adds no timer of its own.
     startup_watch_at: Option<f64>,
+    startup_started_at: f64,
     /// Engine-owned wake-up for commands held by `placement_acks`, and its time.
     ack_timer: Option<(TimerId, f64)>,
     #[cfg(feature = "order-locks")]
@@ -4192,6 +4209,7 @@ impl<V: Venue> Engine<V> {
             },
             started: false,
             startup_watch_at: None,
+            startup_started_at: 0.0,
             ack_timer: None,
             #[cfg(feature = "order-locks")]
             reconcile_timer: None,
@@ -4706,6 +4724,7 @@ impl<V: Venue> Engine<V> {
         self.process_socket_work(now);
         self.flush_http_owner_retirements();
         self.flush_http_plans(now);
+        self.startup_started_at = now;
         self.startup_watch_at = Some(now + STARTUP_WATCH_MS);
         self.restore_shared_tickers(false, now);
         self.flush_http_owner_retirements();
@@ -5144,8 +5163,14 @@ impl<V: Venue> Engine<V> {
         if let Some(at) = self.startup_watch_at
             && now >= at
         {
-            self.startup_watch_at =
-                watch_startup(&mut cx, self.account_startup).then_some(now + STARTUP_REPEAT_MS);
+            let fields = self.venue.startup_diagnostics(cx.store);
+            self.startup_watch_at = watch_startup(
+                &mut cx,
+                self.account_startup,
+                self.startup_started_at,
+                fields,
+            )
+            .then_some(now + STARTUP_REPEAT_MS);
         }
         #[cfg(feature = "managed-sockets")]
         if V::managed_sockets() && self.io.managed_socket_active() {

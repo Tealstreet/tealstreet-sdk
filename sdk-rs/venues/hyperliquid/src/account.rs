@@ -146,7 +146,7 @@ pub struct Account {
     asset_retry_timer: Option<TimerId>,
     /// The next queued read is a fence reconcile.
     fence_read: bool,
-    orders_retry_timer: Option<TimerId>,
+    orders_retry: safe_cex_engine::startup::Backoff<String>,
     pub(crate) builder_read_at: f64,
     state_time: HashMap<String, f64>,
     position_time: HashMap<String, f64>,
@@ -448,6 +448,20 @@ impl Hyperliquid {
             } else {
                 MarginType::Cross
             }),
+        }
+    }
+    pub(crate) fn startup_private_stage(&self) -> &'static str {
+        if self.spot {
+            "spotClearinghouseState"
+        } else if !self.account.mode_resolved {
+            "userAbstraction"
+        } else if self.account.core_loaded
+            && self.account.mode != Mode::Standard
+            && self.account.spot.is_none()
+        {
+            "spotClearinghouseState"
+        } else {
+            "clearinghouseState"
         }
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1092,9 +1106,13 @@ impl Hyperliquid {
             } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
                 if !valid {
+                    self.account
+                        .orders_retry
+                        .failed_after(cx, dex.clone(), 5000.0);
                     self.refresh_owed_orders(cx, &dex);
                     return;
                 }
+                self.account.orders_retry.succeeded(cx, &dex);
                 if self.account.orders_revision.get(&dex).copied().unwrap_or(0) != revision {
                     self.schedule_orders(cx);
                     self.refresh_owed_orders(cx, &dex);
@@ -1301,9 +1319,14 @@ impl Hyperliquid {
             Request::Orders { dex, .. } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
                 self.refresh_owed_orders(cx, &dex);
-                if !cx.store.loaded().orders && self.account.orders_retry_timer.is_none() {
-                    self.account.orders_retry_timer = Some(cx.set_timer(5000.0));
-                }
+                let pause = self
+                    .account
+                    .read_error
+                    .as_ref()
+                    .and_then(|error| error.retry_after_ms)
+                    .unwrap_or(5000.0)
+                    .max(5000.0);
+                self.account.orders_retry.failed_after(cx, dex, pause);
             }
             Request::Spot { .. } => self.account.spot_inflight = false,
             Request::Asset { symbol, .. } => {
@@ -1402,9 +1425,8 @@ impl Hyperliquid {
                 }
             }
         }
-        if self.account.orders_retry_timer == Some(timer) {
-            self.account.orders_retry_timer = None;
-            self.refresh_orders(cx);
+        if let Some(dex) = self.account.orders_retry.on_timer(timer) {
+            self.refresh_orders_scope(cx, &dex);
         }
         if self.account.asset_retry_timer == Some(timer) {
             self.account.asset_retry_timer = None;
