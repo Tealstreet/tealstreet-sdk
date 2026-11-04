@@ -48,6 +48,7 @@ const expected = [
   'hyperliquid',
   'hyperliquidspot',
   'lighter',
+  'lighter-robinhood',
   'paradex',
   'bitunix',
   'phemex',
@@ -79,15 +80,16 @@ describe('Rust-only beta construction', () => {
   it('has exactly the declared IN names', () => {
     expect([...BETA_VENUES]).toEqual(expected);
     expect(getRegisteredExchangeNames()).toEqual(expected);
-    expect(new Set(BETA_VENUES).size).toBe(42);
-    expect(out).toEqual(expect.arrayContaining(['bitrue', 'lighter-robinhood', 'polymarket']));
+    // Robinhood now uses the same beta runtime as Lighter.
+    expect(new Set(BETA_VENUES).size).toBe(43);
+    expect(out).toEqual(expect.arrayContaining(['bitrue', 'polymarket']));
   });
   it('constructs Rust for every IN name without an engine opt-in', async () => {
     for (const name of BETA_VENUES) {
       expect(await exchangeRegistry[name]()).toBe(state.Rust);
       expect(await createExchange(name, { key: '', secret: '', publicDataOnly: true })).toBeInstanceOf(state.Rust);
     }
-    expect(state.calls).toHaveLength(42);
+    expect(state.calls).toHaveLength(43);
     expect(state.calls.every(({ options }) => (options as { engine: string }).engine === 'rust')).toBe(true);
   });
   it('refuses OUT web/native loaders before loading a runtime', async () => {
@@ -145,6 +147,23 @@ describe('Rust-only beta construction', () => {
     expect(state.calls).toEqual([]);
     expect(JSON.stringify(messages)).toContain('polymarket is unsupported in this build');
     worker.dispose();
+  });
+  it('admits Robinhood saved-account construction before key validation', async () => {
+    const account: ExchangeAccountConfig = {
+      exchange: 'lighter-robinhood',
+      name: 'robinhood',
+      apiKey: '1',
+      apiSecret: `0x${'22'.repeat(40)}`,
+    };
+    await expect(createExchangeFromAccount(account)).resolves.toBeInstanceOf(state.Rust);
+    expect(state.calls[0]?.name).toBe('lighter-robinhood');
+  });
+  it('admits Robinhood Hosted through the existing Lighter remote-signing policy', async () => {
+    const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
+    const options = { key: '1', secret: '', apiKeyIndex: '2', remoteSigner };
+    expect(deriveRemoteSigningPolicy('lighter-robinhood')?.enabled).toBe(true);
+    expect(() => assertBetaAccount('lighter-robinhood', options)).not.toThrow();
+    await expect(createExchange('lighter-robinhood', options)).resolves.toBeInstanceOf(state.Rust);
   });
   it('refuses unsupported delegated modes without fallback', async () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
