@@ -36,6 +36,19 @@ basis. Unsupported external opening, ambiguous exposure, limit-execution or
 index-triggered trailing configurations remain visible and cancelable; edits
 fail before canceling them.
 
+Classic TP/SL cancellation uses `/api/v2/mix/order/cancel-plan-order` with
+`orderIdList: [{ orderId }]`, just like trailing stops. Whole-position TP/SL
+retain `pos_profit`/`pos_loss`; sized orders retain `profit_plan`/`loss_plan`.
+A top-level `orderId` does not address an individual Classic plan cancellation.
+A matching native ID or a client-only acknowledgement matching the known order's
+client ID proves cancellation; conflicting native IDs do not fall back to client
+IDs. Empty or unrelated success lists leave it visible and fail the command.
+Retained placement routes keep the same bounded ID list and client identity
+before private updates arrive. Documented `moving_plan` rows remain visible as
+trailing orders and retain that type for cancellation; `track_plan` and `track`
+retain their existing mapping. UTA
+continues using `/api/v3/trade/cancel-strategy-order` with a single `orderId`.
+
 Documented native regressions and private tapes cover these engine paths; the TS
 implementation below remains the replay reference for its supported overlap.
 See `docs/plans/RUST_BITGET_PARITY.md` for verification and explicit TS fixes.
