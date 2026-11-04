@@ -1,7 +1,7 @@
 mod support;
 
 use safe_cex_engine::test_support::prepared_now;
-use safe_cex_engine::{Action, Engine, Event, Response, SocketId, TimerId};
+use safe_cex_engine::{Action, Engine, Event, Notice, Response, SocketId, TimerId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 
 const MIDS: &str = r#"{"channel":"allMids","data":{"mids":{"BTC":"123"}}}"#;
@@ -14,9 +14,11 @@ struct Harness {
     timers: Vec<(TimerId, f64)>,
     connects: Vec<SocketId>,
     closed: Vec<SocketId>,
+    closed_at: Vec<(SocketId, f64)>,
     sent: Vec<(SocketId, String)>,
     hip: bool,
     mode: &'static str,
+    bootstrap_warnings: usize,
 }
 
 impl Harness {
@@ -40,9 +42,11 @@ impl Harness {
             timers: Vec::new(),
             connects: Vec::new(),
             closed: Vec::new(),
+            closed_at: Vec::new(),
             sent: Vec::new(),
             hip,
             mode,
+            bootstrap_warnings: 0,
         };
         h.engine.start(h.now);
         h.collect();
@@ -111,8 +115,16 @@ impl Harness {
                     Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                     Action::ClearTimer { timer } => self.timers.retain(|(id, _)| *id != timer),
                     Action::WsConnect { socket, .. } => self.connects.push(socket),
-                    Action::WsClose { socket } => self.closed.push(socket),
+                    Action::WsClose { socket } => {
+                        self.closed.push(socket);
+                        self.closed_at.push((socket, self.now));
+                    }
                     Action::WsSend { socket, text } => self.sent.push((socket, text)),
+                    Action::Notice(Notice::Event(event))
+                        if event.code == safe_cex_engine::log::code::STREAM_UNAVAILABLE =>
+                    {
+                        self.bootstrap_warnings += 1;
+                    }
                     _ => {}
                 }
             }
@@ -127,6 +139,20 @@ impl Harness {
 
     fn message(&mut self, socket: SocketId, text: &str) {
         self.event(Event::WsMessage { socket, text });
+    }
+
+    fn next_connection(&mut self) -> SocketId {
+        let before = self.connects.len();
+        while self.connects.len() == before {
+            let at = self
+                .timers
+                .iter()
+                .map(|(_, at)| *at)
+                .min_by(f64::total_cmp)
+                .expect("native reconnect must have a timer");
+            self.advance(at);
+        }
+        self.socket()
     }
 
     fn advance(&mut self, until: f64) {
@@ -212,7 +238,7 @@ fn hidden_tab_wake_expires_before_a_late_snapshot_can_publish() {
     h.now = 937_152.;
     // The browser can deliver a message before its delayed timer callback.
     h.message(old, STATE);
-    assert_eq!(h.closed, [old]);
+    assert_eq!(h.closed, [old], "close times: {:?}", h.closed_at);
     assert_eq!(h.engine.store().positions(), before);
     h.advance(938_153.);
     let replacement = h.socket();
@@ -248,27 +274,98 @@ fn duplicate_open_and_invalid_or_foreign_snapshots_never_renew_the_deadline() {
 }
 
 #[test]
-fn every_subscribed_account_snapshot_is_required_but_event_only_topics_are_not() {
+fn core_snapshot_is_required_and_optional_hip3_and_spot_scopes_are_best_effort() {
     let mut h = Harness::account(false, true, "unifiedAccount");
     let socket = h.socket();
     h.advance(1001.);
-    h.message(socket, STATE);
+    h.message(socket, r#"{"channel":"clearinghouseState","data":{"dex":"xyz","clearinghouseState":{"assetPositions":[]}}}"#);
     h.message(socket, r#"{"channel":"spotState","data":{"balances":[]}}"#);
     h.advance(31_000.);
     assert_eq!(
         h.closed,
         [socket],
-        "core and spot cannot mask a missing HIP-3 snapshot"
+        "HIP-3 and spot cannot mask a missing core snapshot"
     );
 
     let mut h = Harness::account(false, true, "unifiedAccount");
     let socket = h.socket();
     h.advance(1001.);
     h.message(socket, STATE);
-    h.message(socket, r#"{"channel":"clearinghouseState","data":{"dex":"xyz","clearinghouseState":{"assetPositions":[]}}}"#);
-    h.message(socket, r#"{"channel":"spotState","data":{"balances":[]}}"#);
     h.advance(121_000.);
-    assert!(h.closed.is_empty());
+    assert!(
+        h.closed.is_empty(),
+        "absent optional snapshots must not cause churn"
+    );
+}
+
+#[test]
+fn consecutive_bootstrap_misses_back_off_despite_healthy_public_traffic_and_warn_once() {
+    let mut h = Harness::private();
+    for (miss, deadline_ms) in [30_000., 60_000., 120_000., 240_000., 300_000., 300_000.]
+        .into_iter()
+        .enumerate()
+    {
+        let socket = h.socket();
+        let opened = h.now;
+        h.advance(opened + deadline_ms - 1.);
+        assert_eq!(
+            h.closed.len(),
+            miss,
+            "bootstrap miss {miss} keeps its growing deadline"
+        );
+        h.advance(opened + deadline_ms);
+        assert_eq!(h.closed.len(), miss + 1);
+        assert_eq!(h.closed.last(), Some(&socket));
+        assert_eq!(
+            h.bootstrap_warnings, 1,
+            "one warning per incomplete-bootstrap episode"
+        );
+        let replacement = h.next_connection();
+        assert_ne!(replacement, socket);
+        h.event(Event::WsOpened {
+            socket: replacement,
+        });
+    }
+
+    let gaps: Vec<_> = h
+        .closed_at
+        .windows(2)
+        .map(|pair| pair[1].1 - pair[0].1)
+        .collect();
+    assert!(
+        gaps[0] < gaps[1] && gaps[1] < gaps[2],
+        "bootstrap-miss reconnect gaps grow: {gaps:?}"
+    );
+
+    h.message(h.socket(), STATE);
+    h.event(Event::WsClosed {
+        socket: h.socket(),
+        code: 1006,
+    });
+    let closed_before = h.closed.len();
+    let replacement = h.next_connection();
+    h.event(Event::WsOpened {
+        socket: replacement,
+    });
+    let opened = h.now;
+    h.advance(opened + 29_999.);
+    assert_eq!(
+        h.closed.len(),
+        closed_before,
+        "close times: {:?}",
+        h.closed_at
+    );
+    h.advance(opened + 30_000.);
+    assert_eq!(h.closed.len(), closed_before + 1);
+    assert_eq!(
+        h.closed.last(),
+        Some(&replacement),
+        "a completed watch resets the miss streak"
+    );
+    assert_eq!(
+        h.bootstrap_warnings, 2,
+        "a new failure episode reports once again"
+    );
 }
 
 #[test]

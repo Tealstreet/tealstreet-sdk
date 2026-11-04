@@ -6,19 +6,19 @@ use safe_cex_engine::socket_lifecycle::{
 };
 
 const PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 30_000.;
+const MAX_PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 300_000.;
 
 #[derive(Default)]
 pub(super) struct PrivateBootstrap {
     epoch: Option<Epoch>,
     timer: Option<TimerId>,
     deadline: Option<f64>,
-    perps: HashSet<String>,
-    spot: bool,
+    pending: bool,
 }
 
 impl PrivateBootstrap {
     fn pending(&self) -> bool {
-        self.spot || !self.perps.is_empty()
+        self.pending
     }
 }
 
@@ -106,22 +106,19 @@ impl Hyperliquid {
             return;
         }
         self.clear_private_snapshot_watch(cx);
-        let mut perps = HashSet::new();
-        if !self.spot {
-            perps.insert(String::new());
-            perps.extend(self.dex_names.iter().cloned());
-        }
         self.connection.private_bootstrap = PrivateBootstrap {
             epoch: Some(epoch),
             timer: None,
             deadline: None,
-            perps,
-            spot: self.spot || self.tracks_spot_holdings(),
+            pending: true,
         };
     }
 
     /// The initial-state deadline starts when the private subscriptions are released.
     pub(super) fn watch_private_snapshots(&mut self, cx: &mut Cx<'_, Pending>, epoch: Epoch) {
+        let timeout = (PRIVATE_SNAPSHOT_TIMEOUT_MS
+            * f64::from(1u32 << self.connection.private_bootstrap_misses.min(4)))
+        .min(MAX_PRIVATE_SNAPSHOT_TIMEOUT_MS);
         let watch = &mut self.connection.private_bootstrap;
         if watch.epoch != Some(epoch)
             || cx.socket_epoch(epoch.feed()) != Some(epoch)
@@ -130,8 +127,8 @@ impl Hyperliquid {
         {
             return;
         }
-        watch.deadline = Some(cx.now + PRIVATE_SNAPSHOT_TIMEOUT_MS);
-        watch.timer = Some(cx.set_timer(PRIVATE_SNAPSHOT_TIMEOUT_MS));
+        watch.deadline = Some(cx.now + timeout);
+        watch.timer = Some(cx.set_timer(timeout));
     }
 
     fn clear_private_snapshot_watch(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -151,11 +148,18 @@ impl Hyperliquid {
         if let Some(epoch) = epoch
             && cx.socket_epoch(epoch.feed()) == Some(epoch)
         {
-            cx.notice(
-                safe_cex_engine::Level::Warn,
-                code::STREAM_UNAVAILABLE,
-                "Hyperliquid initial private snapshots did not arrive; reconnecting the account stream",
-            );
+            if self.connection.private_bootstrap_misses == 0 {
+                cx.notice(
+                    safe_cex_engine::Level::Warn,
+                    code::STREAM_UNAVAILABLE,
+                    "Hyperliquid initial private snapshots did not arrive; reconnecting the account stream",
+                );
+            }
+            self.connection.private_bootstrap_misses = self
+                .connection
+                .private_bootstrap_misses
+                .saturating_add(1)
+                .min(4);
             cx.retire_socket(
                 epoch.feed(),
                 RetireReason::Timeout(safe_cex_engine::socket::Timeout::Silent),
@@ -192,39 +196,41 @@ impl Hyperliquid {
         cx: &mut Cx<'_, Pending>,
         text: &str,
     ) -> bool {
+        if !self.connection.private_bootstrap.pending() {
+            return true;
+        }
         if !cx.now.is_finite() || self.expire_private_snapshots(cx) {
             return false;
         }
         self.rearm_private_snapshot_watch(cx);
-        if !self.connection.private_bootstrap.pending() {
-            return true;
-        }
         let Ok(frame) = serde_json::from_str::<Envelope>(text) else {
             return true;
         };
         let watch = &mut self.connection.private_bootstrap;
         match frame.channel.as_ref() {
-            "clearinghouseState" => {
+            "clearinghouseState" if !self.spot => {
                 if let Ok(env) = serde_json::from_str::<ClearingEnvelope>(frame.data.get())
-                    && env.clearinghouse_state.is_some()
+                    && env.dex.is_empty()
+                    && (env.clearinghouse_state.is_some()
+                        || serde_json::from_str::<Clearinghouse>(frame.data.get()).is_ok())
                 {
-                    watch.perps.remove(env.dex.as_ref());
-                } else if serde_json::from_str::<Clearinghouse>(frame.data.get()).is_ok() {
-                    watch.perps.remove("");
+                    watch.pending = false;
                 }
             }
             "spotState" | "spotClearinghouseState"
-                if serde_json::from_str::<SpotEnvelope>(frame.data.get()).is_ok()
-                    || serde_json::from_str::<SpotState>(frame.data.get()).is_ok() =>
+                if self.spot
+                    && (serde_json::from_str::<SpotEnvelope>(frame.data.get()).is_ok()
+                        || serde_json::from_str::<SpotState>(frame.data.get()).is_ok()) =>
             {
-                watch.spot = false;
+                watch.pending = false;
             }
             _ => {}
         }
-        if !watch.pending()
-            && let Some(timer) = watch.timer.take()
-        {
-            cx.clear_timer(timer);
+        if !watch.pending() {
+            self.connection.private_bootstrap_misses = 0;
+            if let Some(timer) = watch.timer.take() {
+                cx.clear_timer(timer);
+            }
         }
         true
     }

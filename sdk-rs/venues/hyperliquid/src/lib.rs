@@ -134,6 +134,8 @@ struct Connection {
     // Native topic eligibility, updated only by accepted shared lifecycle events.
     open: bool,
     private_bootstrap: socket_codec::PrivateBootstrap,
+    // Transport liveness and epoch retirement cannot forgive a missing private bootstrap.
+    private_bootstrap_misses: u8,
 }
 #[derive(Default)]
 struct Ladder {
