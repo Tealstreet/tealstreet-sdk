@@ -6402,6 +6402,54 @@ mod tests {
     }
 
     #[test]
+    fn reprepare_keeps_exact_packet_and_cancels_before_issuing_its_replacement() {
+        for signed in [false, true] {
+            let (mut engine, tokens) = start(Probe {
+                count: 1,
+                signed,
+                ..Probe::default()
+            });
+            let old = tokens[0];
+            if signed {
+                let (attempt, input) = work(&route(&mut engine, old, 1.));
+                bound(&self::signed(&mut engine, 2., attempt, input));
+            } else {
+                bind(&mut engine, old, 1.);
+            }
+            let signing = engine.io.core.managed_http[&old.attempt().request].signing_attempt;
+            engine.http_preparation_failed(100., old, Error::Stale, VenueError::new("expired"));
+            let actions = engine.drain_actions().collect::<Vec<_>>();
+            assert_eq!(actions.len(), 2);
+            assert!(matches!(&actions[0], Action::ManagedHttp(action)
+                if matches!(action.as_ref(), HttpAction::Cancel { preparation, signing: previous }
+                    if *preparation == old && *previous == signing)));
+            let Action::ManagedHttp(action) = &actions[1] else {
+                panic!("replacement preparation follows cancellation");
+            };
+            let HttpAction::Prepare {
+                preparation,
+                request,
+                ..
+            } = action.as_ref()
+            else {
+                panic!("replacement remains unsigned until readiness");
+            };
+            assert_ne!(*preparation, old);
+            assert_eq!(preparation.attempt().request, old.attempt().request);
+            assert_eq!(request.id, old.attempt().request);
+            assert_eq!(request.method, Method::Post);
+            assert_eq!(request.url, "https://venue.test/read");
+            assert_eq!(request.body.as_deref(), Some("{}"));
+            assert!(request.headers.is_empty());
+            assert!(request.signer_headers.is_empty());
+            assert_eq!(request.timeout_ms, Some(900));
+            assert!(!engine.http_preparation_pending(old));
+            assert!(engine.http_preparation_pending(*preparation));
+            assert!(engine.venue.failures.is_empty());
+        }
+    }
+
+    #[test]
     fn stale_route_reprepares_without_extending_deadline_and_old_cleanup_cannot_win() {
         let (mut engine, tokens) = start(Probe {
             count: 1,
