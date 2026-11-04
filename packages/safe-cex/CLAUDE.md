@@ -1408,7 +1408,8 @@ Is requiresCors true?
   browser SharedWorker and the CLI answer `''` while their token warms; the
   provider's `authorize` polls for up to `PROXY_TOKEN_WAIT_MS` (15 s), then
   throws `ProxyTokenUnavailableError` ("Tealstreet proxy authorization
-  missing"). The edge's plain-text 401 (`Authorization header is missing` /
+  missing"), naming the last `/api/proxykey` failure when there is one
+  (`lastProxyKeyFailure`: HTTP status, timeout, network error or no token). The edge's plain-text 401 (`Authorization header is missing` /
   `Invalid JWT`) reaches a Rust engine as a transport failure, after a token
   refresh, never as a 401: venues classify a 401 as a refused key
   (`auth.rejected`). The engine transport reports either failure once per

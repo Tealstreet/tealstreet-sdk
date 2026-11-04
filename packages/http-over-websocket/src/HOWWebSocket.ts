@@ -37,6 +37,8 @@ const extractDomainFromUrl = (url: string): string | null => {
   }
 };
 
+const WAITING_REDIAL_INTERVAL_MS = 5_000;
+
 export class HOWWebSocket {
   ws?: ReconnectingWebSocket;
 
@@ -68,6 +70,7 @@ export class HOWWebSocket {
   retries = 0;
   /** Invalidates readiness across connection or authentication transitions. */
   epoch = 0;
+  private lastWaitingRedialAt = 0;
 
   private _activeEventHandlers = new Set<string>();
 
@@ -208,6 +211,18 @@ export class HOWWebSocket {
   sendPrepared = (message: string, url: string) => {
     this.validateAndSend(message, { type: 'rpc.http' }, false, true);
     this.trackDomainFromUrl(url);
+  };
+
+  /**
+   * Redials now when the reconnect loop is waiting out a backoff (after a wake or a
+   * network drop) while a request needs the socket; at most once per 5 s per socket.
+   */
+  redialIfBackingOff = (): boolean => {
+    if (this.isDisposed || this.ws?.loopState.phase !== 'retry-scheduled') return false;
+    if (Date.now() - this.lastWaitingRedialAt < WAITING_REDIAL_INTERVAL_MS) return false;
+    this.lastWaitingRedialAt = Date.now();
+    this.ws.reconnect();
+    return true;
   };
 
   connectAndSubscribe = () => {
