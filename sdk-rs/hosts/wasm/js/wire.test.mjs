@@ -1150,3 +1150,23 @@ test('revision two rejects invalid identity refs, truncated columns and unsuppor
     assert.throws(() => numericFrame([{ kind, revision, length: 0, write() {} }]), /unsupported section/);
   }
 });
+
+// Read covers (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.2): a decoder that
+// predates ORDERS_READ (23) reads the orders beside it and ignores it.
+test('an ORDERS_READ section beside ORDERS is ignored by this decoder', () => {
+  const buffer = new ArrayBuffer(16 + 8 + 8 + 8 + 16);
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 2, true);
+  view.setUint16(16, SECTION.ORDERS, true);
+  view.setUint16(18, 1, true);
+  view.setUint32(20, 8, true);
+  view.setUint16(32, 23, true);
+  view.setUint16(34, 1, true);
+  view.setUint32(36, 16, true);
+  view.setFloat64(48, 1_000, true);
+  const frame = new Frame(buffer);
+  assert.equal(frame.orders().count, 0);
+  assert.equal(frame.accountRead(), false);
+});

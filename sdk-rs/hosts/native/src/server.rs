@@ -1588,6 +1588,8 @@ fn section_parent(kind: u16) -> Option<u16> {
         | section::INSTRUMENT_CLASSIFICATIONS
         | section::DERIVATIVE_PRODUCTS => Some(section::MARKETS),
         section::POSITION_GREEKS | section::PREDICTION_HOLDINGS => Some(section::POSITIONS),
+        // A segment of ORDERS never arrives without how fresh its rows are.
+        section::ORDERS_READ => Some(section::ORDERS),
         _ => None,
     }
 }
@@ -2708,6 +2710,34 @@ mod tests {
         assert!(segment_frame(&frame, 1_000).is_none());
         let orphan = kinded_frame(&[(TICKERS, 400), (POSITION_GREEKS, 400), (BOOK, 400)]);
         assert!(segment_frame(&orphan, 900).is_none());
+    }
+
+    /// H6 (codex-hcmq3f): a segment carrying ORDERS without ORDERS_READ would
+    /// reach a page before the cover that says how fresh its rows are.
+    #[test]
+    fn orders_never_segment_apart_from_their_read_cover() {
+        use safe_cex_engine::wire::section::*;
+        let frame = kinded_frame(&[(TICKERS, 400), (ORDERS, 400), (ORDERS_READ, 8), (BOOK, 400)]);
+        // Every limit that splits the frame, including those whose boundary
+        // would fall between ORDERS and its cover.
+        let mut split = 0;
+        for max in (400..frame.len()).step_by(8) {
+            let Some(segments) = segment_frame(&frame, max) else {
+                continue;
+            };
+            split += usize::from(segments.len() > 1);
+            for segment in &segments {
+                let kinds: Vec<u16> = safe_cex_engine::wire::sections(segment)
+                    .map(|(kind, _)| kind)
+                    .collect();
+                assert_eq!(
+                    kinds.contains(&ORDERS),
+                    kinds.contains(&ORDERS_READ),
+                    "ORDERS travels with its cover at {max}: {kinds:?}"
+                );
+            }
+        }
+        assert!(split > 0);
     }
 
     fn peer(
