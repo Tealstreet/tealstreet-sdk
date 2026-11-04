@@ -133,11 +133,12 @@ impl IoCore {
     }
 }
 
-impl<V: Venue> Engine<V> {
+#[cfg(feature = "write-preflight-wait")]
+impl CoreCx<'_> {
     /// A parked write Preflight past its caller's cap fails exactly as an
     /// expired entry does, through the owner-aware Preflight seal; one that left
     /// its park is no longer bounded. Runs outside every command loan.
-    #[cfg(feature = "write-preflight-wait")]
+    #[inline(never)]
     fn expire_write_preflights(&mut self, now: f64) {
         if self.io.core.write_preflight_waits.is_empty() || !now.is_finite() {
             return;
@@ -153,12 +154,7 @@ impl<V: Venue> Engine<V> {
             // Seal first: the cap leaves the index only once the owner has its
             // terminal, so a refused seal can never strand a parked caller.
             if waiting {
-                let sealed = Cx {
-                    now,
-                    store: &mut self.store,
-                    io: &mut self.io,
-                }
-                .fail_preflight(&preflight, Error::TimedOut.venue_error());
+                let sealed = self.fail_preflight(&preflight, Error::TimedOut.venue_error());
                 if sealed.is_err() {
                     debug_assert!(false, "a due write Preflight cap must seal: {sealed:?}");
                     index += 1;
@@ -169,13 +165,21 @@ impl<V: Venue> Engine<V> {
             self.io.core.actions.push(Action::ClearTimer { timer });
         }
     }
+}
 
+impl<V: Venue> Engine<V> {
     /// Retire every tracked root due at `now` before anything can stamp, run a
     /// codec or lend authority: prepare all, mark all, then per owner discard,
     /// hand back its continuations without a Cx, and seal once.
     pub(super) fn expire_read_roots(&mut self, now: f64) {
         #[cfg(feature = "write-preflight-wait")]
-        self.expire_write_preflights(now);
+        Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        }
+        .core()
+        .expire_write_preflights(now);
         if self.io.core.read_roots.is_empty()
             || !now.is_finite()
             || !self.io.core.read_roots.iter().any(|(at, ..)| now >= *at)
@@ -202,11 +206,12 @@ impl<V: Venue> Engine<V> {
             pending.push(values);
         }
         io.core.mark_read_root_sweep(&cleanup);
-        for (ReadRootCleanup { owner, requests }, mut pending) in cleanup.into_iter().zip(pending) {
+        for (root, mut pending) in cleanup.iter().zip(pending) {
+            let owner = root.owner;
             let Owner::Command { id, generation } = owner else {
                 unreachable!()
             };
-            for request in requests {
+            for &request in &root.requests {
                 if let Some(held) = scope.engine.io.discard_managed(request) {
                     pending.push(held.value);
                 }

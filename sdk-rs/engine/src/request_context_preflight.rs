@@ -374,13 +374,25 @@ impl<P> Cx<'_, P> {
     /// Failure before any plan was admitted proves this command sent no write;
     /// an inherited maybe-sent fact still projects Unknown.
     /// Expiry cannot turn this handle into success, retry or send authority.
+    #[inline]
     pub fn fail_preflight(
         &mut self,
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        self.core().fail_preflight(preflight, error.into())
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    #[inline(never)]
+    pub(in crate::engine) fn fail_preflight(
+        &mut self,
+        preflight: &Preflight,
+        error: VenueError,
+    ) -> Result<(), Error> {
         #[cfg(feature = "condition-waits")]
-        let seal = self.seal_condition_preflight(preflight, error.into())?;
+        let seal = self.seal_condition_preflight(preflight, error)?;
         #[cfg(not(feature = "condition-waits"))]
         self.validate_preflight_failure_custody(preflight)?;
         #[cfg(not(feature = "condition-waits"))]
@@ -388,16 +400,14 @@ impl<P> Cx<'_, P> {
             preflight,
             self.now,
             self.io.core.http_delivery.as_ref(),
-            Some(error.into()),
+            Some(error),
         )?;
         let Owner::Command { id, .. } = preflight.owner() else {
             return Err(Error::Invalid);
         };
         self.finish_sealed_command(id, None, seal)
     }
-}
 
-impl crate::engine::CoreCx<'_> {
     /// Record that an earlier attempt of this intent may have reached the venue.
     /// Monotonic: every later failure of this command projects at least Unknown.
     /// It grants no send, resend, renewal, import or success authority; the
