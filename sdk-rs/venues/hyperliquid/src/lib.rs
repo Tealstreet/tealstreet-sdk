@@ -1307,7 +1307,10 @@ impl Venue for Hyperliquid {
             let message = format!("Hyperliquid HTTP {}: {}", response.status, response.body);
             if response.status == 429 {
                 let error = safe_cex_engine::VenueError::new(message.clone())
-                    .kind(safe_cex_engine::ErrorKind::RateLimited);
+                    .kind(safe_cex_engine::ErrorKind::RateLimited)
+                    .retry_after_ms(
+                        safe_cex_engine::classify::retry_after_ms(&response).unwrap_or(5000.0),
+                    );
                 self.account.read_error = Some(error);
             }
             self.on_request_failed(cx, pending, &message);

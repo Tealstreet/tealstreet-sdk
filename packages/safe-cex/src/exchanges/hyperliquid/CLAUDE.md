@@ -30,6 +30,13 @@ are ignored. Shared ticker input updates native state without replacing local
 market metadata or account settings. Shared quote changes invoke native account
 revaluation so UPNL and available margin follow provider prices.
 
+## Rust startup reads
+
+Open-order snapshot failures retry per DEX scope with jittered backoff, including
+when another scope already loaded orders. A successful scope clears its own retry;
+429 responses retain the header-proven Retry-After delay. An unusable metadata
+join preserves orders and retries instead of silently ending the read.
+
 ## Rust margin settings and standalone spot orders
 
 HIP-3 assets get no `activeAssetData` subscription (channel limit), so the Rust

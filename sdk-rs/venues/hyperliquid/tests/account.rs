@@ -1149,3 +1149,71 @@ fn a_state_frame_that_omits_a_coin_closes_its_position() {
         .collect();
     assert_eq!(symbols, ["ETH-PERP"]);
 }
+
+#[test]
+fn failed_hip3_orders_retry_after_peer_scope_loaded_and_honor_retry_after() {
+    let (mut e, socket) = ready_with_dex("disabled", true);
+    assert!(e.store().loaded().orders);
+    let (_socket, _) = reconnect(&mut e, socket, 2000.0);
+    let requests = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut failed = false;
+    for request in requests {
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        if kind(&request) == "frontendOpenOrders" && body["dex"] == "xyz" {
+            failed = true;
+            e.handle(
+                3000.0,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: safe_cex_engine::Response {
+                        status: 429,
+                        headers: "Retry-After: 12\r\n",
+                        body: "Too many requests",
+                    },
+                },
+            );
+        } else if kind(&request) == "frontendOpenOrders" {
+            reply(&mut e, &request, 200, "[]");
+        } else if kind(&request) == "clearinghouseState" {
+            reply(&mut e, &request, 200, STATE);
+        }
+    }
+    assert!(failed, "the failed read must belong to the HIP-3 scope");
+    let actions = prepared_now(&mut e);
+    let timer = actions
+        .into_iter()
+        .find_map(|action| {
+            if let Action::SetTimer { timer, at_ms } = action {
+                (at_ms == 15_000.0).then_some(timer)
+            } else {
+                None
+            }
+        })
+        .expect("an already-loaded peer scope cannot suppress the 12-second retry");
+    e.handle(15_000.0, Event::TimerFired { timer });
+    let retried = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|action| {
+            if let Action::Http(request) = action {
+                Some(request)
+            } else {
+                None
+            }
+        })
+        .find(|request| kind(request) == "frontendOpenOrders")
+        .expect("the failed orders scope must be retried");
+    let body: serde_json::Value = serde_json::from_str(retried.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["dex"], "xyz");
+    reply(&mut e, &retried, 200, "[]");
+    assert!(e.store().loaded().orders);
+}
