@@ -87,7 +87,10 @@ impl PhemexPerpetuals {
             for grant in &mut self.trading.repair.grants {
                 if grant.symbol == symbol {
                     grant.subjects.retain(|subject| {
-                        let proof = Retire::SourceOrders { since, symbol: &symbol };
+                        let proof = Retire::SourceOrders {
+                            since,
+                            symbol: &symbol,
+                        };
                         cx.retire_repair_subject(&grant.entitlement, &subject.key, proof)
                             .is_err()
                     });

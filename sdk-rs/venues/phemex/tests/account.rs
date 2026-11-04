@@ -2175,7 +2175,10 @@ fn a_refresh_ask_reads_the_named_symbol_and_publishes_its_send_time() {
     assert_eq!(reads.len(), 1, "one read of the named symbol");
     assert!(reads[0].url.contains("symbol=BTCUSDT"), "{}", reads[0].url);
     response(&mut e, NOW + 1_500., reads[0].id, 200, NOT_FOUND);
-    assert_eq!(read_covers(&mut e, NOW + 1_500.).cover("BTCUSDT"), Some(NOW + 1_000.));
+    assert_eq!(
+        read_covers(&mut e, NOW + 1_500.).cover("BTCUSDT"),
+        Some(NOW + 1_000.)
+    );
 }
 
 /// H3 and H7: an ask while a read is out starts nothing, and that older read
@@ -2186,7 +2189,10 @@ fn an_ask_while_a_read_is_out_gets_one_read_after_it() {
     let first = refresh_orders(&mut e, NOW + 1_000., 90);
     assert_eq!(first.len(), 1);
     for command in 91..120 {
-        assert!(refresh_orders(&mut e, NOW + 1_100., command).is_empty(), "H7");
+        assert!(
+            refresh_orders(&mut e, NOW + 1_100., command).is_empty(),
+            "H7"
+        );
     }
     response(&mut e, NOW + 1_500., first[0].id, 200, NOT_FOUND);
     let after: Vec<_> = e.drain_actions().collect();
@@ -2196,9 +2202,16 @@ fn an_ask_while_a_read_is_out_gets_one_read_after_it() {
         .collect();
     assert_eq!(follow.len(), 1, "one follow-up read");
     response(&mut e, NOW + 2_000., follow[0].id, 200, NOT_FOUND);
-    assert_eq!(read_covers(&mut e, NOW + 2_000.).cover("BTCUSDT"), Some(NOW + 1_500.));
+    assert_eq!(
+        read_covers(&mut e, NOW + 2_000.).cover("BTCUSDT"),
+        Some(NOW + 1_500.)
+    );
     let idle: Vec<_> = e.drain_actions().collect();
-    assert!(!requests(&idle).iter().any(|r| r.url.contains("/g-orders/activeList")));
+    assert!(
+        !requests(&idle)
+            .iter()
+            .any(|r| r.url.contains("/g-orders/activeList"))
+    );
 }
 
 /// H10: a stream row after the read's release keeps its row; the read proves nothing.
@@ -2206,10 +2219,19 @@ fn an_ask_while_a_read_is_out_gets_one_read_after_it() {
 fn a_stream_row_after_the_release_keeps_it_and_proves_no_cover() {
     let (mut e, s) = read_cover_source();
     let reads = refresh_orders(&mut e, NOW + 1_000., 90);
-    push_orders(&mut e, s, "incremental", 2, &order("New", 1_700_000_000_100_000_000));
+    push_orders(
+        &mut e,
+        s,
+        "incremental",
+        2,
+        &order("New", 1_700_000_000_100_000_000),
+    );
     assert!(e.store().order("one").is_some());
     response(&mut e, NOW + 1_500., reads[0].id, 200, NOT_FOUND);
-    assert!(e.store().order("one").is_some(), "the read lacks a row the stream sent after it");
+    assert!(
+        e.store().order("one").is_some(),
+        "the read lacks a row the stream sent after it"
+    );
     assert_eq!(read_covers(&mut e, NOW + 1_500.).cover("BTCUSDT"), None);
 }
 
@@ -2221,5 +2243,8 @@ fn phemex_advertises_read_covers() {
         .find(|(kind, _)| *kind == safe_cex_engine::wire::section::CAPABILITIES)
         .unwrap();
     let flags = u32::from_le_bytes(payload[..4].try_into().unwrap());
-    assert_ne!(flags & 1 << safe_cex_engine::Capabilities::ORDER_READ_COVERS_BIT, 0);
+    assert_ne!(
+        flags & 1 << safe_cex_engine::Capabilities::ORDER_READ_COVERS_BIT,
+        0
+    );
 }

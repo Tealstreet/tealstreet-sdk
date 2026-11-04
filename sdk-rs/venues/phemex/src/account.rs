@@ -2152,7 +2152,9 @@ impl PhemexPerpetuals {
         } else {
             None
         };
-        if receipt.is_none() && !self.commit_orders_read(cx, &read.symbol, &published, &listed, complete, list_len) {
+        if receipt.is_none()
+            && !self.commit_orders_read(cx, &read.symbol, &published, &listed, complete, list_len)
+        {
             for order in published {
                 cx.store.upsert_order(order);
             }
@@ -2240,7 +2242,11 @@ impl PhemexPerpetuals {
             .cloned()
             .collect();
         rows.extend_from_slice(published);
-        let unproven = if complete && !cut { vec![] } else { vec![symbol.to_owned()] };
+        let unproven = if complete && !cut {
+            vec![]
+        } else {
+            vec![symbol.to_owned()]
+        };
         cx.commit_orders_read(
             safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&[symbol]),
             |_| true,
@@ -2255,7 +2261,9 @@ impl PhemexPerpetuals {
         let mut owed = false;
         for symbol in symbols.iter().filter(|symbol| !symbol.is_empty()) {
             if !self.account.reconcile.contains_key(symbol) {
-                self.account.reconcile.insert(symbol.clone(), Reconcile::default());
+                self.account
+                    .reconcile
+                    .insert(symbol.clone(), Reconcile::default());
                 owed = true;
             }
         }
