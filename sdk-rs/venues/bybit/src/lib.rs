@@ -2714,6 +2714,10 @@ impl Venue for BybitLinear {
         self.reconcile_ordinary(cx);
     }
 
+    fn refreshes_orders(&self) -> bool {
+        !self.variant.is_hyro()
+    }
+
     // reconcile_uncertain reads every product's orders at once; the engine
     // re-asks until a clean fresh read clears the fence. HyroTrader keeps its
     // own same-intent retry, which recovers identity through link reads.
@@ -2791,6 +2795,9 @@ impl Venue for BybitLinear {
             fresh_positions: !self.variant.is_spot(),
             // HyroTrader cancels the store's rows; its proxy has no by-symbol cancel here.
             symbol_cancel_misses_unseen: self.variant.is_hyro(),
+            // Every orders read commits its covers and answers a refresh ask;
+            // HyroTrader's own snapshot path does neither yet.
+            order_read_covers: !self.variant.is_hyro(),
             // Hyro's snapshot replaces every setting, so a flat read would not last.
             leverage_query: if self.variant.is_spot() || self.variant.is_hyro() {
                 safe_cex_engine::LeverageQuery::Settings

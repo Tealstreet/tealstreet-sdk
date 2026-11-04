@@ -626,6 +626,13 @@ impl OrderLocks {
         self.epoch
     }
 
+    /// Start a new epoch with nothing sealed: reads released from now on are
+    /// newer than any already out.
+    pub fn advance(&mut self) -> u64 {
+        self.epoch = self.epoch.saturating_add(1);
+        self.epoch
+    }
+
     /// Each uncertain symbol (`""`: every symbol) with the epoch that sealed it.
     pub fn uncertain_epochs(&self) -> impl Iterator<Item = (&str, u64)> {
         self.uncertain

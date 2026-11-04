@@ -1819,6 +1819,7 @@ mod tests {
             OrderReadMark {
                 seq: store.order_read_sequence(),
                 sent,
+                epoch: 0,
             }
         }
 

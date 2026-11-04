@@ -8,12 +8,14 @@
 //! its fences.
 use std::collections::HashMap;
 
-/// A read's release: the row sequence then, and its send time on this
-/// engine's clock.
+/// A read's release: the row sequence then, its send time on this engine's
+/// clock, and the order-lock epoch (a refresh ask is answered only by a read
+/// released at or after the epoch it opened).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OrderReadMark {
     pub seq: u64,
     pub sent: f64,
+    pub epoch: u64,
 }
 
 impl OrderReadMark {
@@ -22,6 +24,7 @@ impl OrderReadMark {
         Self {
             seq: self.seq.min(other.seq),
             sent: self.sent.min(other.sent),
+            epoch: self.epoch.min(other.epoch),
         }
     }
 }

@@ -939,6 +939,7 @@ pub(crate) mod tests {
         let read = OrderReadMark {
             seq: source.order_read_sequence(),
             sent: 7.,
+            epoch: 0,
         };
         let order = crate::model::Order {
             id: "a".into(),

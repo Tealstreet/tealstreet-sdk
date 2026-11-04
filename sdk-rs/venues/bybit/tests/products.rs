@@ -1420,3 +1420,47 @@ fn greeks_never_re_read_on_text_alone() {
     assert!(!h.has_request("/v5/asset/coin-greeks"));
     assert_eq!(h.done.iter().filter(|(id, _)| *id == 96).count(), 1);
 }
+
+#[test]
+fn one_category_cannot_release_an_account_refresh_slot() {
+    let mut h = ready(true);
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    h.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    });
+    let linear: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime") && r.url.contains("category=linear"))
+        .map(|r| r.id)
+        .collect();
+    assert!(!linear.is_empty());
+    for id in linear {
+        h.requests.retain(|r| r.id != id);
+        h.reply(id, 200, EMPTY);
+    }
+    let outstanding: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert!(!outstanding.is_empty(), "inverse and option are still out");
+    h.command(Command::Venue {
+        command: 91,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    });
+    let after: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(
+        after, outstanding,
+        "H7: completing linear alone must not permit another complete refresh batch while inverse and option remain out"
+    );
+}
