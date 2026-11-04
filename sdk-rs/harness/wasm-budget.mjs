@@ -101,6 +101,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // CI size plus 10 KiB, rounded up to the KiB.
 // Batch #2989/#2994/#2995 on master 05275f74aec: CI run 41774217377 measured bingx 1,987,316,
 // hyperliquid 2,066,112 and phemex 2,023,431 B; ddi2il ruling, CI size plus 10 KiB, rounded up to the KiB.
+// #3019 KuCoin 400002 resync: CI run 41794279458 measured kucoin 1,657,796 and kucoinspot 2,237,656 B.
+// ddi2il ruling: CI size plus 10 KiB, rounded up to the KiB. Shared engine queue, issuance and
+// admission code is newly linked by KuCoin; Binance already carries this machinery.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_957_888,
   asterdex: 2_097_152,
@@ -121,8 +124,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   hyperliquidspot: 2_065_408,
   kraken: 2_108_416,
   krakenspot: 2_108_416,
-  kucoin: 1_640_448,
-  kucoinspot: 2_222_080,
+  kucoin: 1_668_096,
+  kucoinspot: 2_248_704,
   lighter: 1_965_056,
   'lighter-robinhood': 1_967_104,
   mexc: 1_714_176,
