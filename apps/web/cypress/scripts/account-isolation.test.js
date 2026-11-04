@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { existsSync, readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 const test = require('node:test');
 const { runInNewContext } = require('node:vm');
@@ -15,7 +15,14 @@ function accountFor(account, config = {}) {
   });
   return getter();
 }
-const workflow = readFileSync(resolve(__dirname, '../../../../.github/workflows/e2e.yml'), 'utf8');
+// The SDK repo keeps the workflow at its root; the monorepo mirror keeps it under mirrors/tealstreet-sdk.
+const repoRoot = resolve(__dirname, '../../../..');
+const workflowPath = [
+  resolve(repoRoot, '.github/workflows/e2e.yml'),
+  resolve(repoRoot, 'mirrors/tealstreet-sdk/.github/workflows/e2e.yml'),
+].find((path) => existsSync(path));
+assert.ok(workflowPath, 'locate the e2e workflow in the SDK repo or its monorepo mirror');
+const workflow = readFileSync(workflowPath, 'utf8');
 function checkWorkflow(text) {
   assert.match(text, /^concurrency:\n  group: e2e-shared-test-accounts\n  cancel-in-progress: false\n/m,
     'all branches and targets share credentials; never cancel a running trading suite');

@@ -7,6 +7,7 @@ import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } fr
 
 import { AxiosHeaders } from 'axios';
 
+import { stripDiagnosticUrlQueries } from '@tealstreet/http-over-websocket/src/diagnosticUrl';
 import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 import {
   onTunnelFailing,
@@ -441,7 +442,7 @@ export interface TunnelProxyFallbackNotice {
 }
 
 const relayFailed = (exchange: ExchangeName, error: Error) =>
-  `[${exchange}] The connection to the Tealstreet relay failed (${error.message}); this account's requests through it fail and keep retrying until it reconnects`;
+  `[${exchange}] The connection to the Tealstreet relay failed (${stripDiagnosticUrlQueries(error.message)}); this account's requests through it fail and keep retrying until it reconnects`;
 
 const httpTransport = (
   exchange: ExchangeName,

@@ -7,6 +7,7 @@ import { Blob as NodeBlob } from 'node:buffer';
 import { createHash, createHmac } from 'node:crypto';
 import { deflateSync, gzipSync } from 'node:zlib';
 
+import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
 import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineObject } from '@tealstreet/safe-cex-wasm/workers';
 
@@ -118,6 +119,26 @@ afterEach(() => {
 });
 
 describe('engine HTTP routing at the raw transport boundary', () => {
+  it('scrubs queries from relay failure notices even when the upstream error is unsanitized', async () => {
+    const url = 'https://api.bybit.com/v5/order/create?timestamp=123&sign=fixture-signature';
+    const error = new TradeTunnelTimeoutError(`connection lost (URL: ${url})`, {
+      config: {}, method: 'POST', url,
+      route: { selectedRegion: 'JA', tunnelHost: 'tokyo' },
+    });
+    error.message = `connection lost (URL: ${url})`;
+    mocks.adapter.mockRejectedValueOnce(error);
+    const reports: string[] = [];
+    const routed = createEngineTransport('bybit', options({ tealstreetTunnel: true }), makeRaw(), undefined, (message) => reports.push(message));
+    try {
+      await expect(routed.request(request(url))).rejects.toBe(error);
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toContain('https://api.bybit.com/v5/order/create');
+      expect(reports[0]).not.toContain('?');
+      expect(reports[0]).not.toContain('fixture-signature');
+      expect(mocks.adapter.mock.lastCall![0].url).toBe(url);
+    } finally { routed.dispose!(); }
+  });
+
   it.each(['coinbase', 'coinbasespot'] as const)('preserves %s venue JWT separately from REST proxy authorization', async (exchange) => {
     const raw = makeRaw();
     const opts = options({ tealstreetProxy: true, tealstreetTunnel: false });

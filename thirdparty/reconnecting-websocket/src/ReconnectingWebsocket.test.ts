@@ -151,3 +151,70 @@ describe('ReconnectingWebSocket loop phase', () => {
     expect(socket.loopState.phase).not.toBe('stopped');
   });
 });
+
+describe('ReconnectingWebSocket audited connect timeout', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    FakeWebSocket.made = [];
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('retains retry count and normal delay when a supervisor times out the attempt', async () => {
+    const socket = new ReconnectingWebSocket('wss://example.test', undefined, options);
+    const closed = vi.fn();
+    socket.onclose = closed;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.timeoutConnecting()).toBe(true);
+    expect(socket.timeoutConnecting()).toBe(false);
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(socket.retryCount).toBe(1);
+    expect(socket.loopState.phase).toBe('retry-scheduled');
+    await vi.advanceTimersByTimeAsync(999);
+    expect(FakeWebSocket.made).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.made).toHaveLength(2);
+    expect(socket.timeoutConnecting()).toBe(true);
+    expect(socket.retryCount).toBe(2);
+    await vi.advanceTimersByTimeAsync(1_299);
+    expect(FakeWebSocket.made).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(FakeWebSocket.made).toHaveLength(3);
+    socket.terminate();
+  });
+
+  it('retires a pending URL provider and ignores its late result', async () => {
+    let settle: (url: string) => void = () => {};
+    const provider = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            settle = resolve;
+          }),
+      )
+      .mockReturnValue('wss://example.test/current');
+    const socket = new ReconnectingWebSocket(provider, undefined, options);
+    const closed = vi.fn();
+    socket.onclose = closed;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.timeoutConnecting()).toBe(true);
+    expect(closed).toHaveBeenCalledTimes(1);
+    settle('wss://example.test/retired');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(FakeWebSocket.made.map((made) => made.url)).toEqual(['wss://example.test/current']);
+    socket.terminate();
+  });
+
+  it('does not time out an open or stopped wrapper', async () => {
+    const socket = new ReconnectingWebSocket('wss://example.test', undefined, options);
+    await vi.advanceTimersByTimeAsync(0);
+    FakeWebSocket.made[0].readyState = 1;
+    expect(socket.timeoutConnecting()).toBe(false);
+    socket.terminate();
+    expect(socket.timeoutConnecting()).toBe(false);
+  });
+});
