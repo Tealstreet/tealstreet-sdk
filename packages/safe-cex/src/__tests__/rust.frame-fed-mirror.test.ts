@@ -452,6 +452,63 @@ describe('frame-fed main-thread mirror', () => {
       expect(mirror.orderAsks).toEqual([[['BTCUSDT']]]);
     });
 
+    it('rapid repeated holds coalesce per account while latest scope and earliest due stand', async () => {
+      const { mirror } = await held({ symbols: 'BTCUSDT', liftAfterMs: 3_000 });
+      const other = mirrorWith(fakeEngine());
+      await other.exchange.frameFedReady;
+      try {
+        for (let i = 0; i < 2_000; i++) {
+          (mirror.exchange as any).receiveEvent({ level: 'info', code: 'orders.held', message: 'held', fields: { symbols: i === 1_999 ? 'ETHUSDT' : 'BTCUSDT', liftAfterMs: 3_000 + i } });
+          (other.exchange as any).receiveEvent({ level: 'info', code: 'orders.held', message: 'held', fields: { symbols: '', liftAfterMs: 0 } });
+        }
+        await vi.advanceTimersByTimeAsync(500);
+        expect(other.orderAsks).toEqual([[]]);
+        expect(mirror.orderAsks).toEqual([]);
+        await vi.advanceTimersByTimeAsync(3_000);
+        expect(mirror.orderAsks).toEqual([[['ETHUSDT']]]);
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(other.orderAsks).toHaveLength(1);
+        expect(mirror.orderAsks).toHaveLength(1);
+      } finally { other.exchange.dispose(); }
+    });
+
+    it('dispose between the due timer and worker bridge continuation starts no retired call or timer', async () => {
+      const { mirror } = await held({ symbols: 'BTCUSDT', liftAfterMs: 0 });
+      await mirror.exchange.placeOrder(order);
+      const call = vi.spyOn(mirror.exchange, 'callMethodInWorker');
+      vi.advanceTimersByTime(500); // Fire the real due timer, hold its async bridge continuation.
+      mirror.exchange.dispose();
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      expect.soft(call).not.toHaveBeenCalled();
+      expect.soft(vi.getTimerCount()).toBe(0);
+    });
+
+    it('partial lifts keep coalescing even while an earlier ask is unanswered', async () => {
+      const { mirror } = await held({ symbols: 'BTCUSDT,ETHUSDT', liftAfterMs: 0 });
+      mirror.exchange.off('callMethod');
+      const asks: any[] = [];
+      mirror.exchange.on('callMethod', (event) => { asks.push(event); });
+      await mirror.exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(asks.map((ask) => ask.args)).toEqual([[['BTCUSDT', 'ETHUSDT']]]);
+      for (let i = 0; i < 2_000; i++)
+        (mirror.exchange as any).receiveEvent({ level: 'info', code: 'orders.held', message: 'held', fields: { symbols: 'ETHUSDT', liftAfterMs: 0 } });
+      await vi.advanceTimersByTimeAsync(500);
+      expect(asks.map((ask) => ask.args)).toEqual([[['BTCUSDT', 'ETHUSDT']], [['ETHUSDT']]]);
+      for (const ask of asks) mirror.exchange.emitter.emit('callMethod:done', { requestId: ask.requestId, success: true, result: null });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(asks).toHaveLength(2);
+    });
+
+    it('normal due timer starts exactly one call before disposal', async () => {
+      const { mirror } = await held({ symbols: 'BTCUSDT', liftAfterMs: 0 });
+      await mirror.exchange.placeOrder(order);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mirror.orderAsks).toEqual([[['BTCUSDT']]]);
+      mirror.exchange.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it('asks nothing after disposal', async () => {
       const { mirror } = await held({ symbols: 'BTCUSDT', liftAfterMs: 3_000 });
       await mirror.exchange.placeOrder(order);

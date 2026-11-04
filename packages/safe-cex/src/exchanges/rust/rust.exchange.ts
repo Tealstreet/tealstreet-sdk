@@ -1188,6 +1188,7 @@ export class RustEngineExchange extends BaseExchange {
     this.sourceOrdersTimer = undefined;
     if (!ask || this.isDisposed || this.engineFailure) return;
     void this.refreshAccountOrders(ask.symbols).catch((error: unknown) => {
+      if (this.isDisposed) return;
       const reason = error instanceof Error ? error.message : String(error);
       this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
     });
@@ -1196,7 +1197,13 @@ export class RustEngineExchange extends BaseExchange {
   /** Data source: send orders, for these symbols or the account, from a read sent after this call. */
   refreshAccountOrders = async (symbols?: string[]): Promise<void> => {
     if (this.routesToWorker) {
-      await this.callWorker('refreshAccountOrders', ...(symbols !== undefined ? [symbols] : []));
+      // Disposal while the bridge attaches retires the ask: nothing may start after cleanup.
+      await this.untilWorkerBridge();
+      if (this.isDisposed) return;
+      await (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(
+        'refreshAccountOrders',
+        ...(symbols !== undefined ? [symbols] : []),
+      );
       return;
     }
     await this.command({ op: 'refreshOrders', ...(symbols !== undefined ? { symbols } : {}) }, { report: false });
