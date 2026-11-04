@@ -88,6 +88,10 @@ describe('independent new mixed-encoding probes', () => {
 it('bounds base64 inspection and preserves harmless printable and binary tokens', () => {
   expect(stripDiagnosticUrlQueries('token=&quot;probe-auth-value&quot;')).not.toContain('probe-auth-value');
   expect(stripDiagnosticUrlQueries('/private?token=prefix&#32;probe-auth-value')).not.toContain('probe-auth-value');
+  const padded = btoa('key=secret');
+  expect(padded).toHaveLength(16);
+  expect(stripDiagnosticUrlQueries(padded)).not.toContain(padded);
+  expect(stripDiagnosticUrlQueries(btoa('symbol=BTC'))).toBe(btoa('symbol=BTC'));
   const benign = btoa('symbol=BTC&limit=10');
   const binary = btoa('\0'.repeat(16));
   expect(stripDiagnosticUrlQueries(benign)).toBe(benign);

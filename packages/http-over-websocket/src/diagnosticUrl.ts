@@ -118,7 +118,8 @@ const MAX_BASE64_TOKEN_LENGTH = 4096;
 const MAX_BASE64_TOKENS = 64;
 
 const redactBase64Tokens = (message: string, depth = 0, budget = { remaining: MAX_BASE64_TOKENS }): string =>
-  message.replace(/[A-Za-z0-9+/_-]{16,}={0,2}/g, (token) => {
+  message.replace(/[A-Za-z0-9+/_-]{14,}={0,2}/g, (token) => {
+    if (token.length < 16) return token;
     if (
       typeof atob !== 'function' ||
       token.length > MAX_BASE64_TOKEN_LENGTH ||
