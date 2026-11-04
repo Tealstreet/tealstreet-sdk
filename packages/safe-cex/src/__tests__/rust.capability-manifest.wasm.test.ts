@@ -50,6 +50,7 @@ const CREDENTIAL_SHAPES: Partial<Record<ExchangeName, Partial<ExchangeOptions>>>
   kraken: { secret: Buffer.alloc(64, 0x22).toString('base64') },
   krakenspot: { secret: Buffer.alloc(64, 0x22).toString('base64') },
   lighter: { secret: `0x${'22'.repeat(40)}` },
+  'lighter-robinhood': { secret: `0x${'22'.repeat(40)}` },
   coinbase: { key: COINBASE_KEY, secret: Buffer.alloc(32, 0x22).toString('base64') },
   coinbasespot: { key: COINBASE_KEY, secret: Buffer.alloc(32, 0x22).toString('base64') },
   backpack: { secret: Buffer.alloc(32, 0x22).toString('base64') },

@@ -10316,3 +10316,20 @@ for the selected mode/network, checked through the declared endpoint setup polic
 now emits an `invalidInput/notSent` error and
 rejects before loading WASM or starting transport. Demo selection and the existing
 production-to-simulator fallback are unchanged; no destination is invented.
+
+### Phemex history symbol input
+
+Fills, order history and recent public trades resolve a unique listed market's
+symbol, normalized market ID or native symbol (ASCII case-insensitive aliases)
+before dispatch. Settlement products are never inferred: an inverse or delisted
+contract cannot silently become a USDT/USDC perpetual. Missing, unknown or
+ambiguous symbols fail locally with `invalidInput` and `venueCode: unknown-symbol`,
+with no HTTP or retry timer. The message asks the caller to select a listed
+USDT/USDC perpetual market. Client-order lookup retains its non-definitive
+not-found result for an unknown market. Private credential precedence and the
+original Read receipt bounds are unchanged.
+
+Phemex's income ledger has no symbol column, so it cannot prove an account-wide
+traded-symbol census. Callers must leave such fills/orders coverage incomplete;
+empty-symbol income rows are not evidence of an account with no trades. NX's
+companion stops non-retryable windows until the account/market inputs change.

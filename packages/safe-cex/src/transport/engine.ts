@@ -8,7 +8,12 @@ import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } fr
 import { AxiosHeaders } from 'axios';
 
 import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
-import { tunnelEgressUrl, tunnelOutage } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import {
+  onTunnelFailing,
+  tunnelEgressUrl,
+  tunnelFailing,
+  tunnelOutage,
+} from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/host';
 import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
@@ -16,6 +21,7 @@ import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { directTransport } from './direct';
 import { getTransport } from './registry';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
+import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
 import {
   isTealstreetProxyAuthFailureBody,
   proxyAuthorizationHeader,
@@ -23,7 +29,6 @@ import {
   TEALSTREET_WS_HEADERS,
   tealstreetTransport,
 } from './tealstreet/tealstreetTransport';
-import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
 import { isWsRelayEnabled } from './tealstreet/wsRelay';
 
 export interface EngineHttpRoute {
@@ -472,9 +477,13 @@ const httpTransport = (
   const proxyOptions = { ...options, tealstreetTunnel: false, tealstreetProxy: true };
   let proxyRouting: ResolvedRouting | undefined;
   const reportedOutages = new Set<string>();
-  const tunnelProxyRoute = (request: Request, intent?: CredentialIntent): RestTransport | undefined => {
+  const tunnelProxyRoute = (
+    request: Request,
+    intent?: CredentialIntent,
+    failing = false,
+  ): RestTransport | undefined => {
     const outage = tunnelOutage();
-    if (!adapter || !outage) return undefined;
+    if (!adapter || (!outage && !failing)) return undefined;
     proxyRouting ??= resolved(exchange, proxyOptions, provider).restRouting;
     const route = restRoute(provider, exchange, proxyOptions, proxyRouting, request, transport.serverHeaders, intent);
     const skipped =
@@ -483,8 +492,8 @@ const httpTransport = (
         : route.proxied && !proxyFleetForwards(request.url)
           ? 'proxy_not_allowlisted'
           : undefined;
-    const reportKey = `${outage.episode}:${skipped ?? 'proxy'}`;
-    if (!reportedOutages.has(reportKey)) {
+    const reportKey = outage && `${outage.episode}:${skipped ?? 'proxy'}`;
+    if (outage && reportKey && !reportedOutages.has(reportKey)) {
       reportedOutages.add(reportKey);
       onTunnelProxyFallback?.({ outage, ...(skipped ? { skipped } : {}) });
     }
@@ -510,19 +519,23 @@ const httpTransport = (
     proxyAuthorization?.failed(message);
     throw new Error(message);
   };
-  const prepare = async (request: Request, intent?: CredentialIntent): Promise<PreparedHttp> => {
+  /** `rerouted` re-prepares an abandoned tunnel preparation on the proxy, within its original deadline. */
+  type Reroute = { abandon?: AbortSignal; rerouted?: { startedAt: number } };
+  const prepare = async (request: Request, intent?: CredentialIntent, reroute: Reroute = {}): Promise<PreparedHttp> => {
     if (disposed) throw new Error('Engine transport disposed');
     let proxyRoute: RestTransport | undefined;
     try {
-      proxyRoute = tunnelProxyRoute(request, intent);
+      proxyRoute = tunnelProxyRoute(request, intent, reroute.rerouted !== undefined);
     } catch {
       proxyRoute = undefined;
     }
     const tunnelAdapter = proxyRoute ? undefined : adapter;
     const controller = new AbortController();
     pending.add(controller);
-    const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
-    const started = Date.now();
+    const signal = AbortSignal.any(
+      [request.signal, controller.signal, reroute.abandon].filter((s): s is AbortSignal => s !== undefined),
+    );
+    const started = reroute.rerouted?.startedAt ?? Date.now();
     const deadlineMs = Math.max(1, request.timeoutMs ?? 20_000);
     const remaining = () => Math.max(0, deadlineMs - (Date.now() - started));
     let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
@@ -557,7 +570,7 @@ const httpTransport = (
       releaseResources();
       cleanup();
     };
-    const timer = setTimeout(() => controller.abort(new HttpPreparationError('timedOut')), deadlineMs);
+    const timer = setTimeout(() => controller.abort(new HttpPreparationError('timedOut')), remaining());
     signal.addEventListener('abort', onAbort, { once: true });
     const cancel = () => {
       controller.abort();
@@ -847,17 +860,40 @@ const httpTransport = (
         );
       }
       // The relay never prepared it, and nobody called it off: the relay is down.
-      if (tunnelAdapter && !prepared && !disposed && !request.signal?.aborted)
+      if (tunnelAdapter && !prepared && !disposed && !request.signal?.aborted && !reroute.abandon?.aborted)
         proxyAuthorization?.failed(relayFailed(exchange, error instanceof Error ? error : new Error(String(error))));
       if (intent !== undefined && error instanceof TradeTunnelTimeoutError) throw new HttpPreparationError('timedOut');
       throw error;
     }
   };
+  // An unsigned public read has nothing an egress IP vouches for, so once the tunnel is
+  // visibly failing it takes the HTTP proxy: at once, or by abandoning a tunnel
+  // preparation still in readiness. Nothing has been sent before a preparation resolves.
+  // Not async: off the tunnel path the preparation resolves exactly as an
+  // unwrapped prepare, so the engine's dispatch order stays its own.
+  const preparePublic = (request: Request): Promise<PreparedHttp> => {
+    if (!adapter || publicPrefix !== undefined) return prepare(request, 'public');
+    const startedAt = Date.now();
+    if (tunnelFailing()) return prepare(request, 'public', { rerouted: { startedAt } });
+    const abandon = new AbortController();
+    const stop = onTunnelFailing(() => abandon.abort());
+    return prepare(request, 'public', { abandon: abandon.signal }).then(
+      (prepared) => {
+        stop();
+        return prepared;
+      },
+      (error) => {
+        stop();
+        if (!abandon.signal.aborted || disposed || request.signal?.aborted) throw error;
+        return prepare(request, 'public', { rerouted: { startedAt } });
+      },
+    );
+  };
   const request: Transport['request'] = async (request) => (await prepare(request)).bind(request).dispatch();
   return {
     mode: adapter ? 'how' : 'direct',
     request,
-    prepareHttp: (request) => prepare(request, request.intent),
+    prepareHttp: (request) => (request.intent === 'public' ? preparePublic(request) : prepare(request, request.intent)),
     dispose: () => {
       disposed = true;
       for (const controller of pending) controller.abort(new Error('Engine transport disposed'));

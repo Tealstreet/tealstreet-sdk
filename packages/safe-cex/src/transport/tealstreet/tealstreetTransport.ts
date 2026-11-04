@@ -3,7 +3,12 @@ import type { ExchangeName, ExchangeOptions } from '../../types';
 import type { ResolvedRouting, TransportProvider } from '../types';
 
 import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import { bindProxyTokenLookup, getProxyToken, ProxyTokenUnavailableError } from '../../accessToken';
+import {
+  bindProxyTokenLookup,
+  getProxyToken,
+  lastProxyKeyFailure,
+  ProxyTokenUnavailableError,
+} from '../../accessToken';
 import { resolveLighterDeploymentProfile } from '../../exchanges/lighter/lighter.types';
 import {
   axiosHttpOverWebsocketAdapter,
@@ -48,8 +53,10 @@ export const isTealstreetProxyAuthFailureBody = (body: unknown): boolean => {
 export const PROXY_TOKEN_WAIT_MS = 15_000;
 const PROXY_TOKEN_POLL_MS = 500;
 
-const proxyAuthorizationMissingMessage = (exchange: ExchangeName): string =>
-  `[${exchange}] Tealstreet proxy authorization missing: no proxy token within ${PROXY_TOKEN_WAIT_MS / 1000}s, so the private request was not sent`;
+const proxyAuthorizationMissingMessage = (exchange: ExchangeName): string => {
+  const failure = lastProxyKeyFailure();
+  return `[${exchange}] Tealstreet proxy authorization missing: no proxy token within ${PROXY_TOKEN_WAIT_MS / 1000}s${failure ? ` (${failure})` : ''}, so the private request was not sent`;
+};
 
 /** A non-empty proxy token, or `ProxyTokenUnavailableError` once the wait is over. */
 const awaitProxyToken = async (exchange: ExchangeName, signal?: AbortSignal): Promise<string> => {

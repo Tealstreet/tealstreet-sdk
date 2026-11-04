@@ -16,11 +16,15 @@ import { createEngineTransport } from './engine';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 
 const tunnels = vi.hoisted(() => [] as Array<Array<Record<string, any>>>);
+// false: the tunnel socket cannot open, so a preparation waits in readiness.
+const tunnelSocket = vi.hoisted(() => ({ open: true }));
 
 vi.mock('@tealstreet/http-over-websocket/src/HOWWebSocket', () => ({
   HOWWebSocket: class {
     epoch = 0;
-    isOpen = true;
+    get isOpen() {
+      return tunnelSocket.open;
+    }
     isInitialized = true;
     isTimeSynced = true;
     isTokenSent = true;
@@ -110,6 +114,7 @@ const bybitTunnel = (raw: Transport, notices: TunnelProxyFallbackNotice[] = []) 
   );
 
 beforeEach(() => {
+  tunnelSocket.open = true;
   resetTunnelLane(true);
   for (const sent of tunnels) sent.length = 0;
 });
@@ -219,5 +224,83 @@ describe('REST while the tunnel is unreachable', () => {
     await route.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/time', headers: {} });
     expect(dispatched).toHaveLength(0);
     route.dispose!();
+  });
+});
+
+describe('a public read waiting on a tunnel that is failing', () => {
+  const lane = () => tunnelDialUrl(TOKYO_HOW_EGRESS);
+  const instruments = (request: number, intent: 'public' | 'primary' = 'public') => ({
+    request,
+    method: 'GET',
+    url: 'https://api.bybit.com/v5/market/instruments-info?category=linear',
+    headers: {},
+    intent,
+    timeoutMs: 60_000,
+  });
+  const settled = <T>(promise: Promise<T>) => {
+    const state = { done: false };
+    void promise.then(
+      () => (state.done = true),
+      () => (state.done = true),
+    );
+    return state;
+  };
+
+  it('moves to the HTTP proxy at the first failed 443 handshake, having sent nothing on the tunnel', async () => {
+    vi.useFakeTimers();
+    try {
+      tunnelSocket.open = false;
+      const { raw, dispatched } = rawTransport();
+      const route = bybitTunnel(raw);
+      const original = instruments(11);
+      const preparing = Promise.resolve(route.prepareHttp!(original));
+      const state = settled(preparing);
+      noteTunnelDialFailed(lane());
+      noteTunnelDialFailed(lane());
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(state.done, 'the lane falling back to 443 is not a failing tunnel yet').toBe(false);
+      noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+      await vi.advanceTimersByTimeAsync(100);
+      const prepared = await preparing;
+      await prepared.bind(original).dispatch();
+      expect(tunnelSent()).toHaveLength(0);
+      expect(dispatched.map((request) => request.url)).toEqual([`${PROXY}${original.url}`]);
+      // The reroute keeps the read's own deadline rather than starting a new one.
+      expect(vi.mocked(raw.prepareHttp!).mock.calls[0][0].timeoutMs).toBeLessThanOrEqual(55_000);
+      route.dispose!();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('takes the HTTP proxy at once when the tunnel is already failing', async () => {
+    const { raw, dispatched } = rawTransport();
+    const route = bybitTunnel(raw);
+    noteTunnelDialFailed(lane());
+    noteTunnelDialFailed(lane());
+    noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+    const original = instruments(12);
+    await (await route.prepareHttp!(original)).bind(original).dispatch();
+    expect(dispatched.map((request) => request.url)).toEqual([`${PROXY}${original.url}`]);
+    route.dispose!();
+  });
+
+  it('leaves a signed read waiting on the tunnel', async () => {
+    vi.useFakeTimers();
+    try {
+      tunnelSocket.open = false;
+      const { raw } = rawTransport();
+      const route = bybitTunnel(raw);
+      const state = settled(Promise.resolve(route.prepareHttp!(instruments(13, 'primary'))));
+      noteTunnelDialFailed(lane());
+      noteTunnelDialFailed(lane());
+      noteTunnelDialFailed(TOKYO_HOW_EGRESS);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(state.done).toBe(false);
+      expect(raw.prepareHttp).not.toHaveBeenCalled();
+      route.dispose!();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

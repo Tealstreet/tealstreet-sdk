@@ -133,6 +133,9 @@ struct Connection {
     feed: Option<FeedId>,
     // Native topic eligibility, updated only by accepted shared lifecycle events.
     open: bool,
+    private_bootstrap: socket_codec::PrivateBootstrap,
+    // Transport liveness and epoch retirement cannot forgive a missing private bootstrap.
+    private_bootstrap_misses: u8,
 }
 #[derive(Default)]
 struct Ladder {
@@ -1277,10 +1280,11 @@ impl Venue for Hyperliquid {
     fn on_socket_interests_released(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        _epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
         pending: Pending,
     ) -> Result<(), SocketError> {
         if let Pending::SocketRefresh { mode_ready } = pending {
+            self.watch_private_snapshots(cx, epoch);
             self.finish_socket_refresh(cx, mode_ready);
         }
         Ok(())
@@ -1311,6 +1315,9 @@ impl Venue for Hyperliquid {
             .and_then(|feed| cx.socket_epoch(feed))
             .is_none_or(|epoch| epoch.socket() != socket)
         {
+            return;
+        }
+        if !self.observe_private_snapshot(cx, text) {
             return;
         }
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
@@ -1708,6 +1715,7 @@ impl Venue for Hyperliquid {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.private_snapshot_timer(cx, timer);
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
         if let Some((dex, offset)) = self.startup.on_timer(timer) {

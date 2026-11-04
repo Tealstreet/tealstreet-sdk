@@ -1,6 +1,8 @@
 //! Private account state and its independently recovered listen key.
 #[path = "metadata.rs"]
 mod metadata;
+#[path = "open_order.rs"]
+mod open_order;
 use crate::Pending;
 use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
@@ -84,6 +86,7 @@ pub enum Request {
         skipped: Vec<String>,
         /// Markets of the skipped rows, which stay fenced.
         unproven: Vec<String>,
+        issues: Vec<open_order::Issue>,
     },
 }
 
@@ -756,6 +759,7 @@ impl Account {
                 metas: Vec::new(),
                 skipped: Vec::new(),
                 unproven: Vec::new(),
+                issues: Vec::new(),
             },
             true,
             primary,
@@ -1174,17 +1178,35 @@ impl Account {
                 metas,
                 skipped,
                 unproven,
+                issues,
                 ..
             } => {
-                let Some(order) = serde_json::from_str::<NativeOrder<'_>>(item)
-                    .ok()
-                    .and_then(|native| Some((map_order(&native, cx)?, native)))
-                else {
-                    skipped.push(order_identity(item));
-                    unproven.push(order_row_symbol(cx.store, item));
-                    return;
+                let open_order::Parsed {
+                    order,
+                    metadata: meta,
+                    fields,
+                } = match open_order::parse(item, cx) {
+                    Ok(parsed) => parsed,
+                    Err(fields) => {
+                        let id = order_identity(item);
+                        issues.push(open_order::Issue {
+                            id: id.clone(),
+                            fields,
+                            displayed: false,
+                        });
+                        skipped.push(id);
+                        unproven.push(order_row_symbol(cx.store, item));
+                        return;
+                    }
                 };
-                let (order, native) = order;
+                if !fields.is_empty() {
+                    unproven.push(order_row_symbol(cx.store, item));
+                    issues.push(open_order::Issue {
+                        id: order.id.clone(),
+                        fields,
+                        displayed: true,
+                    });
+                }
                 if self.terminal_orders.contains_key(&order.id) {
                     return;
                 }
@@ -1212,8 +1234,8 @@ impl Account {
                     }
                     return;
                 }
-                if native.complete_metadata() {
-                    metas.push(observation(order.clone(), &native));
+                if let Some(meta) = meta {
+                    metas.push(meta);
                 }
                 rows.push(order);
             }
@@ -1459,6 +1481,7 @@ impl Account {
                 metas,
                 skipped,
                 unproven,
+                issues,
             } => {
                 if self.orders_in_flight == Some(owner) {
                     self.orders_in_flight = None;
@@ -1506,9 +1529,7 @@ impl Account {
                     rows
                 });
                 if committed {
-                    log_snapshot_skips(cx, &mut self.skip_logged, "open order", &skipped, |id| {
-                        kept_ids.iter().any(|kept| id.is_empty() || kept == id)
-                    });
+                    open_order::log_issues(cx, &mut self.skip_logged, &issues, &kept_ids);
                     if complete {
                         self.orders_witness = cx.store.begin_orders_snapshot();
                     }
@@ -2234,6 +2255,7 @@ mod sign_failure_owners {
                     metas: vec![],
                     skipped: vec![],
                     unproven: vec![],
+                    issues: vec![],
                 },
                 3 => Request::ListenKey { epoch: 4 },
                 _ => Request::Keepalive { epoch: 4 },

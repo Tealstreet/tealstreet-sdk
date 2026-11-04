@@ -77,6 +77,7 @@ describe('CallMethodHandler', () => {
           fetchPositions: vi.fn().mockResolvedValue([{ symbol: 'BTCUSDT' }]),
           fetchBalance: vi.fn().mockResolvedValue({ total: 1 }),
           fetchPositionMode: vi.fn().mockResolvedValue(true),
+          readPositions: vi.fn().mockResolvedValue({ skipped: [], open: [] }),
         };
         Object.assign(mockExchange, reads);
         for (const [method, call] of Object.entries(reads)) {
@@ -313,8 +314,33 @@ describe('CallMethodHandler', () => {
         await vi.waitFor(() => {
           expect(mockPostMessage).toHaveBeenCalledWith({
             op: 'callMethod:done',
-            data: { requestId: 'req-8', success: false },
+            data: {
+              requestId: 'req-8',
+              success: false,
+              result: expect.objectContaining({
+                message: 'bybit does not support unknownMethod',
+                kind: 'unsupported',
+                outcome: 'notSent',
+              }),
+            },
           });
+        });
+      });
+
+      it('returns a typed cause when an optional method is not implemented', async () => {
+        await handler.handleCallMethod('missing', 'readPositions', []);
+        expect(mockPostMessage).toHaveBeenCalledOnce();
+        expect(mockPostMessage).toHaveBeenCalledWith({
+          op: 'callMethod:done',
+          data: {
+            requestId: 'missing',
+            success: false,
+            result: expect.objectContaining({
+              message: 'bybit does not support readPositions',
+              kind: 'unsupported',
+              outcome: 'notSent',
+            }),
+          },
         });
       });
 

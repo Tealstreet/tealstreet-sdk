@@ -69,6 +69,11 @@ behavior changes, update or delete that snapshot in the same PR.
   `/api/exchange_proxy` (same proxy fleet, so the same IPs), skipping hosts the
   fleet does not forward (`proxyFleetAllowlist.ts`); requests already prepared
   keep the tunnel. Each activation reports `Tunnel unreachable; …` to Sentry.
+  One handshake earlier, at the first failed 443 handshake (`tunnelFailing` /
+  `onTunnelFailing`), unsigned public-intent reads move to the HTTP proxy:
+  new ones at once, and one still waiting in tunnel readiness abandons that
+  preparation (nothing has been sent) and re-prepares on the proxy within its
+  original deadline. Signed requests wait for the outage, as before.
 - `ReconnectingWebSocket` handles connection resilience
 - Token-based authentication with expiry checking
 - Latency tracking for tunnel (client↔proxy) and exchange (proxy↔exchange)
@@ -133,6 +138,13 @@ yarn test           # Vitest
 - Socket opening, time sync and authorization share a readiness cap of 30 s,
   bounded by the original request deadline. Exceeding that cap raises
   `TradeTunnelReadinessError`, a timeout subclass; readiness never resets the deadline.
+  It carries `readiness` (`stage`: connect / timeSync / authReply, the reconnect
+  loop's phase and seconds in it, lane port, tunnel outage), also spelled out in
+  its message. A deadline spent waiting on the proxy token, mid-fetch or between
+  polls, is `ProxyTokenUnavailableError` instead. A request waiting on a socket
+  whose loop is `retry-scheduled` redials it at once, once per wait and at most
+  every 5 s per socket (`redialIfBackingOff`), instead of sitting out a backoff
+  a wake or network drop left behind.
 - A `Bad` authentication state is connection-scoped. Concurrent Axios requests
   share one refresh/token-send attempt per `HOWWebSocket` through the adapter's
   weak single-flight map, so one bad-token episode emits one `rpc.auth` frame.

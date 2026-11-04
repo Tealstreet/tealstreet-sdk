@@ -4023,3 +4023,53 @@ fn a_spot_read_shows_rows_that_carry_no_category_of_their_own() {
     );
     assert!(h.engine.store().order("s1").is_some());
 }
+
+/// An Unknown placement on Bybit Inverse fences its symbol until the engine's
+/// reconcile reads the INVERSE category's orders and the clean read releases it
+/// (one user hit the fence on bybitinverse; the fence must not outlive the read).
+#[test]
+fn an_unknown_inverse_placement_reconciles_on_the_inverse_category_and_releases() {
+    let mut h = ready(Variant::Inverse);
+    place(&mut h, 1, vec![order("BTCUSD", 10.0)]);
+    resolve_mode(&mut h, "BTCUSD");
+    let write = h.take("/v5/order/create-batch");
+    assert!(body(&write).contains("\"category\":\"inverse\""));
+    h.event(Event::HttpFailed {
+        request: write.id,
+        error: "connection reset",
+    });
+    // The reconcile read is the inverse product's own.
+    let reads: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .cloned()
+        .collect();
+    assert!(!reads.is_empty(), "the seal's reconcile read");
+    assert!(
+        reads.iter().all(|r| r.url.contains("category=inverse")),
+        "{:?}",
+        reads.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    // Fenced until it answers.
+    place(&mut h, 2, vec![order("BTCUSD", 10.0)]);
+    assert!(
+        h.result(2)
+            .is_some_and(|r| r.as_ref().is_err_and(|e| e.contains("uncertain"))),
+        "{:?}",
+        h.result(2)
+    );
+    assert!(!h.has_request("/v5/order/create-batch"));
+    for read in reads {
+        h.reply(read.id, 200, EMPTY);
+    }
+    place(&mut h, 3, vec![order("BTCUSD", 10.0)]);
+    while h.has_request("/v5/position/list") {
+        resolve_mode(&mut h, "BTCUSD");
+    }
+    assert!(
+        h.has_request("/v5/order/create-batch"),
+        "the clean inverse read releases the fence: {:?}",
+        h.result(3)
+    );
+}
