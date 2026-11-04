@@ -849,20 +849,25 @@ const httpTransport = (
   // An unsigned public read has nothing an egress IP vouches for, so once the tunnel is
   // visibly failing it takes the HTTP proxy: at once, or by abandoning a tunnel
   // preparation still in readiness. Nothing has been sent before a preparation resolves.
-  const preparePublic = async (request: Request): Promise<PreparedHttp> => {
+  // Not async: off the tunnel path the preparation resolves exactly as an
+  // unwrapped prepare, so the engine's dispatch order stays its own.
+  const preparePublic = (request: Request): Promise<PreparedHttp> => {
     if (!adapter || publicPrefix !== undefined) return prepare(request, 'public');
     const startedAt = Date.now();
     if (tunnelFailing()) return prepare(request, 'public', { rerouted: { startedAt } });
     const abandon = new AbortController();
     const stop = onTunnelFailing(() => abandon.abort());
-    try {
-      return await prepare(request, 'public', { abandon: abandon.signal });
-    } catch (error) {
-      if (!abandon.signal.aborted || disposed || request.signal?.aborted) throw error;
-      return prepare(request, 'public', { rerouted: { startedAt } });
-    } finally {
-      stop();
-    }
+    return prepare(request, 'public', { abandon: abandon.signal }).then(
+      (prepared) => {
+        stop();
+        return prepared;
+      },
+      (error) => {
+        stop();
+        if (!abandon.signal.aborted || disposed || request.signal?.aborted) throw error;
+        return prepare(request, 'public', { rerouted: { startedAt } });
+      },
+    );
   };
   const request: Transport['request'] = async (request) => (await prepare(request)).bind(request).dispatch();
   return {
