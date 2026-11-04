@@ -15,6 +15,11 @@ family and remote-signing policy; its preview/production visibility flags are un
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
 
+`exchangeMetadata.orderAmendment` declares public order-shape restrictions for UI
+eligibility through `getOrderAmendmentError`. BingX permits unfilled GTC/PostOnly
+limit price or size edits, preserves attached protection on size edits only, and
+permits SL/TP price edits. Native reconciliation and wire-kind checks still run.
+
 Core exchange integration library. See also exchange-specific `CLAUDE.md` files in `src/exchanges/*/`.
 
 > **CLAUDE.md is a living spec.** When you change non-obvious
@@ -1634,3 +1639,8 @@ MEXC trusted compatibility setup preserves its existing persisted account IDs:
 explicit Primary stableId before provider trimming. JS/native setup reject a
 conflicting supplied mapping. Generic LocalSigner never derives stable IDs;
 MEXC venue execution reads only installed metadata, never hashes credentials.
+
+
+Chart consumers must honor `exchangeMetadata.supportsKlineSeconds` and optional
+`supportedCandleIntervals`. Hyperliquid and HyperliquidSpot share their native
+interval set, which excludes seconds and 6h; neither may reach a candle subscription.
