@@ -1128,7 +1128,46 @@ impl Hyperliquid {
                         merged.push(order);
                     }
                 }
-                cx.store.set_orders(merged);
+                // This dex's rows and the cover its read proves, together. The
+                // account is every dex, and no account cover is proved before
+                // discovery has named them all.
+                let market_dex: HashMap<String, String> = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .map(|market| {
+                        (
+                            market.symbol.clone(),
+                            self.dex_of(cx, &market.symbol).to_owned(),
+                        )
+                    })
+                    .collect();
+                let in_dex =
+                    |symbol: &str| market_dex.get(symbol).map_or("", String::as_str) == dex;
+                let mut account: Vec<&str> = std::iter::once("")
+                    .chain(self.dex_names.iter().map(String::as_str))
+                    .collect();
+                if !self.discovery_settled() {
+                    account.push(DEXES_UNSETTLED);
+                }
+                let unproven = if coverage.rejected() == 0 {
+                    Vec::new()
+                } else {
+                    vec![String::new()]
+                };
+                cx.commit_orders_read(
+                    safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                        key: &dex,
+                        account: &account,
+                    },
+                    in_dex,
+                    merged
+                        .into_iter()
+                        .filter(|order| in_dex(&order.symbol))
+                        .collect(),
+                    &unproven,
+                );
+                cx.store.set_orders_loaded();
                 if coverage.rejected() == 0 {
                     let symbols: Vec<_> = cx
                         .store
@@ -2784,6 +2823,10 @@ fn failed_protective_status(status: &str) -> bool {
 }
 
 /// The oldest epoch once every dex has a clean census: an all-symbol fence needs them all.
+/// A read-cover scope no read commits: the account waits while dexes are
+/// still being discovered.
+const DEXES_UNSETTLED: &str = "\u{0}dexes-unsettled";
+
 fn every_dex_clean(names: &[String], clean: &HashMap<String, u64>) -> Option<u64> {
     let main = clean.get("")?;
     names.iter().try_fold(*main, |oldest, name| {
