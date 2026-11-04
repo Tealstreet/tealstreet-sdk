@@ -144,6 +144,11 @@ pub(crate) const BYBIT: CodeTable = CodeTable {
         ),
         // Not-modified answers: the requested setting already holds.
         only(
+            Key::Int(110026),
+            Verdict::Satisfied(SatisfiedIntent::Setting),
+            Intent::Setting,
+        ),
+        only(
             Key::Int(110043),
             Verdict::Satisfied(SatisfiedIntent::Setting),
             Intent::Setting,

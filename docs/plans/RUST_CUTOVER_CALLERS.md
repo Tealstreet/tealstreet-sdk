@@ -10361,3 +10361,25 @@ presence and nonempty counts, target-match count, and success/refusal/invalid
 status counts. It never includes ID values, native messages or raw responses.
 The reported production events had no response body; the covered false-Unknown
 shapes are reproduced, while the specific live shape remains unconfirmed.
+
+
+### Binance and Bybit already-set margin acknowledgements
+
+Binance USD-M and COIN-M `SetMarginType` treat documented `-4046` as an
+already-applied setting, updating the requested stored margin type and completing
+once without an error or resend. The existing `-4059` position-mode success stays
+operation-specific. Ordinary leverage acknowledgements and the local already-at-
+requested-leverage shortcut remain successful. Binance `-4028` stays rejected:
+its documented meanings include invalid leverage as well as an already-existing
+value, so the numeric code alone does not prove the requested leverage.
+
+Bybit `110026` joins the existing `110043` leverage and `110025` position-mode
+already-set setting facts. Margin-mode no-ops use the same effects as normal
+success, including immediate account-wide settings/position updates and source
+frame holds. A contradictory `reasons` result remains unproven. HTTP gateway
+failures keep precedence over these codes, and non-setting writes cannot acquire
+setting-success authority.
+
+References: [Binance USD-M error codes](https://developers.binance.com/docs/derivatives/usds-margined-futures/error-code),
+[Binance COIN-M error codes](https://developers.binance.com/docs/derivatives/coin-margined-futures/error-code),
+[Bybit V5 error codes](https://bybit-exchange.github.io/docs/v5/error).

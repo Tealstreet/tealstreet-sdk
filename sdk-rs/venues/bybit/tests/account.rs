@@ -4189,3 +4189,67 @@ fn an_id_no_longer_trailing_amends_as_an_ordinary_full_take_profit() {
         r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Full","takeProfit":"101000","tpTriggerBy":"LastPrice"}"#
     );
 }
+
+#[test]
+fn already_set_margin_mode_updates_account_positions_and_settings() {
+    for isolated in [false, true] {
+        let mut h = ready();
+        h.command(Command::SetMarginType {
+            command: 601,
+            symbol: "BTCUSDT".into(),
+            isolated,
+        });
+        let request = h.take("/v5/account/set-margin-mode");
+        h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+        assert_eq!(h.result(601), Some(&Ok("[]".into())));
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == 601).count(), 1);
+        assert!(h.command_errors.is_empty());
+        let margin = Some(if isolated {
+            MarginType::Isolated
+        } else {
+            MarginType::Cross
+        });
+        assert_eq!(
+            h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+            margin
+        );
+        assert!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .all(|p| p.margin_type == margin)
+        );
+        assert!(!h.has_request("/v5/account/set-margin-mode"), "no resend");
+    }
+}
+
+#[test]
+fn gateway_margin_noop_is_unknown_and_keeps_the_previous_setting() {
+    let mut h = ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetMarginType {
+        command: 602,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 503, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+    assert!(h.result(602).unwrap().is_err());
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn margin_noop_with_native_failure_reasons_cannot_claim_success() {
+    let mut h = ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetMarginType {
+        command: 603,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"not modified","result":{"reasons":[{"reasonCode":"3400000","reasonMsg":"insufficient equity"}]}}"#);
+    assert!(h.result(603).unwrap().is_err());
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}

@@ -575,3 +575,37 @@ fn a_confirmed_margin_switch_outlasts_a_stale_source_and_reads_nothing() {
     h.collect();
     assert_eq!(margin(&h), Some(Cross));
 }
+
+#[test]
+fn an_already_set_margin_mode_outlasts_an_older_source_frame() {
+    use safe_cex_engine::model::MarginType::{Cross, Isolated};
+    let mut h = loaded_with_settings();
+    h.command(Command::SetMarginType {
+        command: 1,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":110026,"retMsg":"not modified","result":{}}"#,
+    );
+    assert!(matches!(h.result(1), Some(Ok(_))));
+    assert!(
+        h.requests.is_empty(),
+        "a mirror must not issue private reads"
+    );
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(Isolated)
+    );
+    h.engine
+        .apply_frame(h.now, &settings_frame(10.0, Cross), false)
+        .unwrap();
+    h.collect();
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(Isolated)
+    );
+}

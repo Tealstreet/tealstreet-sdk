@@ -1314,6 +1314,8 @@ impl BybitLinear {
         let weaken = match probe.verdict() {
             Verdict::Satisfied(_) => {
                 matches!(planned.call, Call::CancelAll { .. })
+                    || (matches!(planned.call, Call::MarginMode { .. })
+                        && ack::margin_applied(result) != Ok(true))
                     || (rows && evidence.is_empty())
                     || evidence
                         .iter()
@@ -1367,6 +1369,7 @@ impl BybitLinear {
         match call {
             Call::Leverage { symbol, leverage } => self.apply_leverage(cx, symbol, *leverage),
             Call::PositionMode { hedged } => self.apply_position_mode(cx, *hedged),
+            Call::MarginMode { isolated } => self.apply_margin_mode(cx, *isolated),
             Call::PartialStop { .. } => self.schedule_partial_stop_refresh(cx),
             _ => {}
         }
@@ -1385,6 +1388,34 @@ impl BybitLinear {
             }
         });
         cx.hold_setting(SettingKey::Leverage(symbol.to_owned()));
+    }
+
+    fn apply_margin_mode(&mut self, cx: &mut Cx<'_, Pending>, isolated: bool) {
+        let margin = if isolated {
+            MarginType::Isolated
+        } else {
+            MarginType::Cross
+        };
+        self.account.margin_type = Some(margin);
+        for state in &mut self.products {
+            state.account.margin_type = Some(margin);
+        }
+        cx.store.update_positions(|p| p.margin_type = Some(margin));
+        // Account-wide, including already-set replies: publish the requested
+        // value now and hold it over older source SETTINGS frames.
+        let symbols: Vec<String> = cx
+            .store
+            .markets()
+            .iter()
+            .filter(|market| cx.store.setting(&market.symbol).is_some())
+            .map(|market| market.symbol.clone())
+            .collect();
+        for symbol in symbols {
+            cx.store
+                .update_setting(&symbol, |s| s.margin_type = Some(margin));
+            cx.hold_setting(SettingKey::MarginType(symbol));
+        }
+        self.fetch_positions(cx);
     }
 
     fn apply_position_mode(&mut self, cx: &mut Cx<'_, Pending>, hedged: bool) {
@@ -1733,33 +1764,7 @@ impl BybitLinear {
                 if !Self::accepted(cx, context, Vec::new()) {
                     return Decision::Lost;
                 }
-                let margin = if *isolated {
-                    MarginType::Isolated
-                } else {
-                    MarginType::Cross
-                };
-                self.account.margin_type = Some(margin);
-                for state in &mut self.products {
-                    state.account.margin_type = Some(margin);
-                }
-                cx.store.update_positions(|p| p.margin_type = Some(margin));
-                if cx.frame_fed() {
-                    // Account-wide: every symbol the store has settings for, held
-                    // over the source's SETTINGS until it re-reads them.
-                    let symbols: Vec<String> = cx
-                        .store
-                        .markets()
-                        .iter()
-                        .filter(|market| cx.store.setting(&market.symbol).is_some())
-                        .map(|market| market.symbol.clone())
-                        .collect();
-                    for symbol in symbols {
-                        cx.store
-                            .update_setting(&symbol, |s| s.margin_type = Some(margin));
-                        cx.hold_setting(SettingKey::MarginType(symbol));
-                    }
-                }
-                self.fetch_positions(cx);
+                self.apply_margin_mode(cx, *isolated);
                 Decision::Next(Vec::new())
             }
             Call::PositionMode { hedged } => {
