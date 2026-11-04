@@ -244,7 +244,7 @@ it('copies reused streaming buffers and preserves an oversized response byte for
   });
   const chunks: Uint8Array[] = [];
   for await (const chunk of oversized.body as AsyncIterable<Uint8Array>) chunks.push(chunk);
-  expect(Buffer.concat(chunks)).toEqual(Buffer.from(large));
+  expect(Buffer.concat(chunks).equals(Buffer.from(large))).toBe(true);
   expect((await a.prepare(request(), controller().signal, Date.now() + 20_000))?.cached).toBeUndefined();
 });
 
