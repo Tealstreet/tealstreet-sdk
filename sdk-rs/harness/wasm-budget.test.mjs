@@ -183,9 +183,9 @@ test('shared-address setup CI caps retain the ruled headroom and exact boundary'
 });
 
 test('MEXC refusal and read-clock cap pins the measured size and exact boundary', () => {
-  const measured = 1_734_410;
-  const cap = 1_736_704;
-  assert.equal(cap, Math.ceil(measured / 1024) * 1024 + 2 * 1024);
+  const measured = 1_728_678; // CI run 41822718921, isolated MEXC web and node.
+  const cap = 1_739_776;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   assert.equal(WASM_VENUE_OVERRIDES.mexc, cap);
   for (const size of [1_717_351, 1_728_512, measured, cap]) {
     assert.equal(wasmBudgetError(size, 'venue', 'mexc'), undefined);
