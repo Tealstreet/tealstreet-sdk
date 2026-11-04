@@ -1,6 +1,6 @@
 import { setImmediate } from 'node:timers';
 
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBDatabase, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
@@ -22,8 +22,99 @@ beforeEach(() => {
   vi.setSystemTime(1_000_000);
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe('unavailable shared storage', () => {
+  it('keeps a known 429 pause when an established database transaction fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const a = client();
+    await a.response(ORIGIN, 429, 'Retry-After: 10');
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
+      throw new DOMException('storage disabled', 'InvalidStateError');
+    });
+    await expect(a.wait(ORIGIN, ORDERS, Date.now() + 9999, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+    const next = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await vi.advanceTimersByTimeAsync(10_000);
+    await next;
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    'throw',
+    'error',
+    'blocked',
+    'stalled',
+    'transactionThrow',
+    'transactionError',
+    'quota',
+    'transactionStalled',
+  ])('falls back once to a shared local budget on %s without poisoning later reads', async (failure) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const openRequest: any = {};
+    const readRequest: any = {};
+    const transaction: any = {
+      objectStore: () => ({
+        get: () => readRequest,
+        put: () => {
+          throw new DOMException('private details', 'QuotaExceededError');
+        },
+      }),
+      abort: vi.fn(),
+    };
+    const database = {
+      transaction: () => {
+        if (failure === 'transactionThrow') throw new DOMException('private details', 'InvalidStateError');
+        return transaction;
+      },
+      close: vi.fn(),
+    };
+    const open = vi.fn(() => {
+      if (failure === 'throw') throw new DOMException('private details', 'SecurityError');
+      return openRequest;
+    });
+    vi.stubGlobal('indexedDB', { open });
+    const { HyperliquidInfoBudget: Budget } = await import('./hyperliquidInfoBudget');
+    const first = new Budget().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await flushDatabase();
+    if (failure === 'error') openRequest.onerror();
+    if (failure === 'blocked') openRequest.onblocked();
+    if (failure.startsWith('transaction') || failure === 'quota') {
+      openRequest.result = database;
+      openRequest.onsuccess();
+      await flushDatabase();
+      if (failure === 'transactionError') transaction.onerror();
+      if (failure === 'quota') readRequest.onsuccess();
+    }
+    await vi.advanceTimersByTimeAsync(1500);
+    await first;
+    const next = new Budget().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await vi.advanceTimersByTimeAsync(1200);
+    await next;
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('private details');
+    if (failure === 'stalled' || failure === 'blocked') {
+      openRequest.result = database;
+      openRequest.onsuccess();
+      expect(database.close).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('bounds a persisted pause and reservation after a clock step backwards', async () => {
+    const a = client();
+    await a.response(ORIGIN, 429, 'Retry-After: 3600');
+    vi.setSystemTime(1000);
+    await expect(client().wait(ORIGIN, ORDERS, Date.now() + 300_000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+    await vi.advanceTimersByTimeAsync(300_000);
+    await client().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+  });
 });
 
 describe('cross-worker Hyperliquid info admission', () => {
@@ -65,6 +156,7 @@ describe('cross-worker Hyperliquid info admission', () => {
   });
 
   it('refuses a reservation beyond its deadline without sending or extending the queue', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const a = client();
     const b = client();
     await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
@@ -75,6 +167,7 @@ describe('cross-worker Hyperliquid info admission', () => {
     await flushDatabase();
     await vi.advanceTimersByTimeAsync(1200);
     await next;
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('cancels an aborted queued read and never admits it later', async () => {
@@ -142,7 +235,7 @@ describe('cross-worker Hyperliquid info admission', () => {
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
     await a.response(ORIGIN, 429, 'Retry-After: 1e308');
-    await expect(client().wait(ORIGIN, ORDERS, Date.now() + 3_599_999, signal())).rejects.toMatchObject({
+    await expect(client().wait(ORIGIN, ORDERS, Date.now() + 299_999, signal())).rejects.toMatchObject({
       code: 'HTTP_PREPARATION_TIMED_OUT',
     });
   });
@@ -160,6 +253,43 @@ describe('cross-worker Hyperliquid info admission', () => {
 });
 
 describe('managed transport admission', () => {
+  it.each(['rejected', 'thrown', 'stalled'])(
+    'keeps a successful HTTP answer when response bookkeeping is %s',
+    async (failure) => {
+      vi.stubGlobal('indexedDB', factory);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const budget = await import('./hyperliquidInfoBudget');
+      vi.spyOn(budget.HyperliquidInfoBudget.prototype, 'response').mockImplementation(() => {
+        if (failure === 'thrown') throw new Error('private details');
+        return failure === 'rejected' ? Promise.reject(new Error('private details')) : new Promise(() => undefined);
+      });
+      const { createEngineTransport } = await import('./engine');
+      const transport = createEngineTransport(
+        'hyperliquid',
+        { key: '', secret: '', publicDataOnly: true },
+        { ...nativeTransport(), request: async () => ({ status: 200, headers: '', body: new Uint8Array([42]) }) },
+      );
+      try {
+        for (const request of [1, 2]) {
+          const response = transport.request({
+            request,
+            method: 'POST',
+            url: ORIGIN + '/info',
+            headers: {},
+            body: ORDERS,
+          });
+          await flushDatabase();
+          await vi.advanceTimersByTimeAsync(1200);
+          expect(await response).toMatchObject({ status: 200, body: new Uint8Array([42]) });
+        }
+        expect(warn).toHaveBeenCalledTimes(failure === 'stalled' ? 0 : 1);
+        expect(warn.mock.calls.flat().join(' ')).not.toContain('private details');
+      } finally {
+        transport.dispose?.();
+      }
+    },
+  );
+
   it.each([
     ['legacy', 'frontendOpenOrders', 1200],
     ['managed', 'frontendOpenOrders', 1200],

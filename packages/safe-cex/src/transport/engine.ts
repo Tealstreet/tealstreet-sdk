@@ -15,7 +15,7 @@ import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/b
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { directTransport } from './direct';
 import { getTransport } from './registry';
-import { HyperliquidInfoBudget } from './hyperliquidInfoBudget';
+import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
 import {
   isTealstreetProxyAuthFailureBody,
   proxyAuthorizationHeader,
@@ -804,8 +804,14 @@ const httpTransport = (
                     route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
                   )
                   .then(async (value) => {
-                    if (infoBudget && request.method === 'POST' && original.pathname === '/info')
-                      await untilAborted(infoBudget.response(original.origin, value.status, value.headers ?? ''), signal);
+                    if (infoBudget && request.method === 'POST' && original.pathname === '/info') {
+                      const recorded = Promise.resolve()
+                        .then(() => infoBudget.response(original.origin, value.status, value.headers ?? ''))
+                        .catch(warnHyperliquidInfoBudgetUnavailable);
+                      // Only a 429 must publish its pause before Rust can enqueue its retry.
+                      if (value.status === 429)
+                        await untilAborted(recorded, signal).catch(warnHyperliquidInfoBudgetUnavailable);
+                    }
                     return value;
                   })
                   .then(wrap)
