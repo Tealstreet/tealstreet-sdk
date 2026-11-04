@@ -2309,6 +2309,7 @@ impl<V: Venue> Engine<V> {
                     let read = crate::order_read_cover::OrderReadMark {
                         seq: self.store.order_read_sequence(),
                         sent: now,
+                        epoch: self.io.core.order_locks.token(),
                     };
                     let token = self.io.core.request_contexts.read_mark(
                         owner,

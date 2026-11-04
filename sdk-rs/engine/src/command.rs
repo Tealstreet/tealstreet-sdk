@@ -130,6 +130,10 @@ enum CommandIn {
         command: u32,
         symbol: Option<String>,
     },
+    RefreshOrders {
+        command: u32,
+        symbols: Option<Vec<String>>,
+    },
     ReadPositions {
         command: u32,
     },
@@ -236,6 +240,7 @@ enum Op {
     SetAccountTier,
     FetchBalanceInfo,
     RefreshSettings,
+    RefreshOrders,
     ReadPositions,
     CancelAccountOrders,
     FetchClosedPositions,
@@ -465,6 +470,14 @@ struct RefreshSettingsIn {
     command: u32,
     #[serde(default)]
     symbol: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::RefreshOrders with 2 elements")]
+struct RefreshOrdersIn {
+    command: u32,
+    #[serde(default)]
+    symbols: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -780,6 +793,10 @@ fn decode_payload(op: Op, json: &str) -> Result<CommandIn, serde_json::Error> {
             let RefreshSettingsIn { command, symbol } = payload(json)?;
             CommandIn::RefreshSettings { command, symbol }
         }
+        Op::RefreshOrders => {
+            let RefreshOrdersIn { command, symbols } = payload(json)?;
+            CommandIn::RefreshOrders { command, symbols }
+        }
         Op::ReadPositions => {
             let ReadPositionsIn { command } = payload(json)?;
             CommandIn::ReadPositions { command }
@@ -1034,6 +1051,10 @@ impl From<CommandIn> for Command {
             CommandIn::RefreshSettings { command, symbol } => Self::Venue {
                 command,
                 action: crate::VenueAction::RefreshSettings { symbol },
+            },
+            CommandIn::RefreshOrders { command, symbols } => Self::Venue {
+                command,
+                action: crate::VenueAction::RefreshOrders { symbols },
             },
             CommandIn::ReadPositions { command } => Self::Venue {
                 command,
