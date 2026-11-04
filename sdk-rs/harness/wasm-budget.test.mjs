@@ -168,15 +168,17 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });
 
-test('#3031 CI Bitrue and TxFlow measurements retain the approved 10 KiB headroom', () => {
+test('shared-address setup CI caps retain the ruled headroom and exact boundary', () => {
   for (const [venue, measured, cap] of [
     ['bitrue', 1_803_160, 1_813_504],
-    ['txflow', 1_819_696, 1_830_912],
+    ['txflow', 1_819_613, 1_830_912],
   ]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    // TxFlow retains the higher pre-refactor cap approved for #3031.
+    assert.ok(cap >= Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(cap % 1024, 0);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), new RegExp(`exceeds ${cap}`));
   }
 });

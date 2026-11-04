@@ -5,6 +5,8 @@
 // `NEXT_PUBLIC_TRADETUNNEL_STAGING=1` swaps the path to the staging tunnel
 // deployment on the same hostnames.
 
+import { diagnosticUrl } from './diagnosticUrl';
+
 export const TUNNEL_PATH =
   typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_TRADETUNNEL_STAGING === '1'
     ? '/tunnel-staging'
@@ -199,7 +201,7 @@ export const isRelayUrl = (url: string): boolean => {
 export const parseRelayUrl = (url: string): { tunnelUrl: string; upstream: string } => {
   const parsed = new URL(url);
   const upstream = parsed.searchParams.get(RELAY_QUERY_PARAM);
-  if (!upstream) throw new Error(`not a relay url: ${url}`);
+  if (!upstream) throw new Error(`not a relay url: ${diagnosticUrl(url)}`);
   parsed.searchParams.delete(RELAY_QUERY_PARAM);
   return { tunnelUrl: parsed.toString(), upstream };
 };

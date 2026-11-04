@@ -79,6 +79,8 @@ export interface EngineCapabilities {
   nukeAccountCancel: boolean;
   /** A symbol cancel can miss an order the store has not seen yet. */
   symbolCancelMissesUnseen: boolean;
+  /** The source writes read covers; a frame-fed page lifts fences on them (Rust ingest only). */
+  orderReadCovers: boolean;
 }
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
 export const STATUS_FLAG: { HEDGED: 1 };
