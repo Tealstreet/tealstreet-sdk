@@ -1,5 +1,6 @@
 //! KuCoin Classic Futures on the sans-I/O engine.
 mod account;
+mod clock;
 mod funding;
 mod history;
 mod identity;
@@ -85,7 +86,11 @@ impl Options {
 }
 
 pub enum Pending {
-    Identity(CommandId),
+    Identity {
+        command: CommandId,
+        root: safe_cex_engine::request_context::Context,
+    },
+    Read(Box<clock::Request<Pending>>),
     Leverage(leverage::Read),
     Account(account::Request),
     Trade(trading::Request),
@@ -112,6 +117,43 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
+}
+
+impl Pending {
+    fn read_root(
+        &self,
+        cx: &mut Cx<'_, Self>,
+    ) -> Result<
+        Option<safe_cex_engine::request_context::Context>,
+        safe_cex_engine::request_context::Error,
+    > {
+        Ok(match self {
+            Self::Account(_) => Some(cx.http_context(
+                safe_cex_engine::request_context::Scope::Background,
+                crate::local_read_command_policy(),
+            )?),
+            Self::Identity { root, .. } => Some(root.clone()),
+            Self::Leverage(read) => Some(read.context().clone()),
+            Self::History(read) => Some(read.root().clone()),
+            Self::Funding(read) => Some(read.root().clone()),
+            _ => None,
+        })
+    }
+    fn stop_read_retries(&mut self) {
+        match self {
+            Self::Account(read) => read.retries = u8::MAX,
+            Self::History(read) => read.retries = u8::MAX,
+            Self::Funding(read) => read.retries = u8::MAX,
+            _ => {}
+        }
+    }
+    fn set_read_leg(&mut self, leg: safe_cex_engine::request_context::Context) {
+        match self {
+            Self::History(read) => read.leg = Some(leg),
+            Self::Funding(read) => read.leg = Some(leg),
+            _ => {}
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -291,32 +333,55 @@ impl Kucoin {
             },
         )
     }
+    #[allow(clippy::too_many_arguments)]
     fn issue(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
         body: Option<String>,
         pending: Pending,
         role: CredentialRole,
-    ) -> safe_cex_engine::RequestId {
-        let selected = self.slots().select(role).ok().map(|(selection, identity)| {
-            (
-                selection,
-                sign::dispatch::Http::new(
-                    identity.clone(),
-                    method,
+        stream: Option<ArrayAt>,
+    ) {
+        let selected = self
+            .slots()
+            .select(role)
+            .ok()
+            .map(|(selection, identity)| (selection, identity.clone()));
+        if method == Method::Get {
+            let root = match pending.read_root(cx) {
+                Ok(root) => root,
+                Err(error) => {
+                    self.on_sign_error(cx, pending, error.venue_error());
+                    return;
+                }
+            };
+            if let Some(root) = root {
+                match clock::send(
+                    cx,
+                    root,
+                    selected,
                     REST,
                     path.into(),
-                    body.clone(),
                     self.options
                         .broker
                         .as_ref()
                         .map(sign::BrokerOptions::descriptor),
-                ),
-            )
-        });
+                    pending,
+                    stream,
+                    Pending::Read,
+                ) {
+                    Ok(_) => {}
+                    Err((pending, error)) => {
+                        self.on_sign_error(cx, pending, error);
+                    }
+                }
+                return;
+            }
+        }
         let headers = sign::public_headers();
+        let body_for_signing = body.clone();
         let request = cx.request(
             method,
             format!("{REST}{}", encoded_path(path)),
@@ -324,10 +389,23 @@ impl Kucoin {
             body,
             pending,
         );
-        if let Some((selection, recipe)) = selected {
+        if let Some((selection, identity)) = selected {
+            let recipe = sign::dispatch::Http::new(
+                identity,
+                method,
+                REST,
+                path.into(),
+                body_for_signing,
+                self.options
+                    .broker
+                    .as_ref()
+                    .map(sign::BrokerOptions::descriptor),
+            );
             selection.sign(cx, request, Box::new(recipe));
         }
-        request
+        if let Some(at) = stream {
+            cx.stream_response(request, at);
+        }
     }
     fn legacy_role(method: Method) -> CredentialRole {
         if method == Method::Get {
@@ -337,17 +415,25 @@ impl Kucoin {
         }
     }
     pub(crate) fn signed(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
         body: Option<String>,
         pending: Pending,
     ) {
-        self.issue(cx, method, path, body, pending, Self::legacy_role(method));
+        self.issue(
+            cx,
+            method,
+            path,
+            body,
+            pending,
+            Self::legacy_role(method),
+            None,
+        );
     }
     pub(crate) fn signed_streamed(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
@@ -355,11 +441,24 @@ impl Kucoin {
         at: ArrayAt,
         pending: Pending,
     ) {
-        let request = self.issue(cx, method, path, body, pending, Self::legacy_role(method));
-        cx.stream_response(request, at);
+        self.issue(
+            cx,
+            method,
+            path,
+            body,
+            pending,
+            Self::legacy_role(method),
+            Some(at),
+        );
     }
-    fn public(&self, cx: &mut Cx<'_, Pending>, path: &str, at: Option<ArrayAt>, pending: Pending) {
-        let request = self.issue(
+    fn public(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        at: Option<ArrayAt>,
+        pending: Pending,
+    ) {
+        self.issue(
             cx,
             Method::Get,
             path,
@@ -369,10 +468,8 @@ impl Kucoin {
                 reason: PrimaryReason::Catalog,
                 scope: None,
             },
+            at,
         );
-        if let Some(at) = at {
-            cx.stream_response(request, at);
-        }
     }
     fn token(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.connections[channel];
@@ -399,10 +496,11 @@ impl Kucoin {
                 None,
                 pending,
                 CredentialRole::SessionAuth,
+                None,
             );
         }
     }
-    fn discovery_read(&self, cx: &mut Cx<'_, Pending>, tickers: bool) {
+    fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
         self.public(
             cx,
             if tickers {
@@ -983,6 +1081,10 @@ impl Venue for Kucoin {
         self.reconnect_later(cx, channel);
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Pending::Read(read) = pending {
+            self.on_item(cx, &mut read.pending, item);
+            return;
+        }
         match pending {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::History(request) => self.history_item(cx, request, item),
@@ -1029,8 +1131,36 @@ impl Venue for Kucoin {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        if let Pending::Identity(command) = pending {
-            self.identity_response(cx, command, response);
+        if let Pending::Read(read) = pending {
+            match clock::respond(cx, read, &response, Pending::Read) {
+                clock::Delivery::Page {
+                    mut pending,
+                    leg,
+                    root,
+                    retried,
+                } => {
+                    if retried {
+                        pending.stop_read_retries();
+                    }
+                    pending.set_read_leg(leg.clone());
+                    self.on_response(cx, pending, response);
+                    let _ = cx.finish_http_context(&leg);
+                    if matches!(
+                        root.owner(),
+                        safe_cex_engine::request_context::Owner::Background { .. }
+                    ) {
+                        let _ = cx.finish_http_context(&root);
+                    }
+                }
+                clock::Delivery::Failed(pending, error) => {
+                    self.on_request_failed(cx, pending, &error.message)
+                }
+                clock::Delivery::Waiting => {}
+            }
+            return;
+        }
+        if let Pending::Identity { command, root } = pending {
+            self.identity_response(cx, command, root, response);
             return;
         }
         if let Pending::Leverage(read) = pending {
@@ -1044,7 +1174,7 @@ impl Venue for Kucoin {
             self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
         }
         match pending {
-            Pending::Identity(_) | Pending::Leverage(_) => unreachable!(),
+            Pending::Read(_) | Pending::Identity { .. } | Pending::Leverage(_) => unreachable!(),
             Pending::Account(request) => self.account_response(cx, request, status, body),
             Pending::Trade(request) => self.trading_response(cx, request, status, body),
             Pending::History(request) => self.history_response(cx, request, status, body),
@@ -1197,15 +1327,32 @@ impl Venue for Kucoin {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Read(mut read) => {
+                if read.retried {
+                    read.pending.stop_read_retries();
+                }
+                let (pending, error) = clock::failed(cx, *read, error);
+                self.on_sign_error(cx, pending, error);
+            }
             Pending::Trade(request) => self.trading_sign_failed(cx, request, error),
-            Pending::Identity(command) => self.identity_failed(cx, command, error),
+            Pending::Identity { command, root } => self.identity_failed(cx, command, root, error),
             Pending::Account(request) => self.account_failed(cx, request, Some(&error)),
             other => self.on_request_failed(cx, other, &error.message),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Identity(command) = pending {
-            self.identity_failed(cx, command, error);
+        if let Pending::Read(read) = pending {
+            let mut read = read;
+            if read.retried {
+                read.pending.stop_read_retries();
+            }
+            let (pending, error) =
+                clock::failed(cx, *read, safe_cex_engine::VenueError::new(error));
+            self.on_request_failed(cx, pending, &error.message);
+            return;
+        }
+        if let Pending::Identity { command, root } = pending {
+            self.identity_failed(cx, command, root, error);
             return;
         }
         if let Pending::Leverage(read) = pending {
@@ -1242,7 +1389,7 @@ impl Venue for Kucoin {
                 let pause = self.discovery_paused_until - cx.now;
                 self.discovery.failed_after(cx, true, pause);
             }
-            Pending::Identity(_) | Pending::Leverage(_) => unreachable!(),
+            Pending::Read(_) | Pending::Identity { .. } | Pending::Leverage(_) => unreachable!(),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

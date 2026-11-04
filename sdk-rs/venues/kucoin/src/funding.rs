@@ -2,7 +2,7 @@
 use crate::history::local_read_policy;
 use crate::wire::Envelope;
 use crate::{Kucoin, Pending};
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory as CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Method, Outcome, Query, TimerId, VenueError};
@@ -20,6 +20,7 @@ pub struct Funding {
     waiting: HashMap<TimerId, Request>,
 }
 pub struct Request {
+    pub(crate) leg: Option<safe_cex_engine::request_context::Context>,
     owner: Box<CursorHistory<Income>>,
     symbol: String,
     api_symbol: String,
@@ -33,10 +34,14 @@ pub struct Request {
     page_minimum: Option<u64>,
     page_count: usize,
     invalid: bool,
-    retries: u8,
+    pub(crate) retries: u8,
     requests: u32,
 }
 impl Request {
+    pub(crate) fn root(&self) -> &safe_cex_engine::request_context::Context {
+        self.owner.root()
+    }
+
     fn wire_bounds(&self) -> (u64, u64) {
         if self.start == self.end {
             if self.start > 0 {
@@ -206,17 +211,23 @@ impl Kucoin {
             let _ = cx.done_context(&context, "[]".into());
             return;
         }
+        let api_symbol = market.id.clone();
+        let Ok(root) = cx.admit_caller_read_root(None, None) else {
+            return;
+        };
         self.funding_schedule(
             cx,
             Request {
+                leg: None,
                 owner: Box::new(CursorHistory::new(
-                    Completion::new(command),
+                    ReadCompletion::from_context(cx, command, root)
+                        .expect("fresh KuCoin read root"),
                     CursorWalk::new(MAX_REQUESTS),
                     |_| "KuCoin funding exceeded page safety bound".into(),
                     |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
                 )),
                 symbol,
-                api_symbol: market.id.clone(),
+                api_symbol,
                 from,
                 start: from.max(end.saturating_sub(WINDOW - 1)),
                 end,
@@ -246,7 +257,7 @@ impl Kucoin {
     fn funding_send(&mut self, cx: &mut Cx<'_, Pending>, mut request: Request) {
         request.requests += 1;
         if request.requests > MAX_REQUESTS {
-            request.owner.reject(
+            let _ = request.owner.reject(
                 cx,
                 VenueError::new("KuCoin funding exceeded page safety bound"),
             );
@@ -332,7 +343,8 @@ impl Kucoin {
                 .as_ref()
                 .is_ok_and(|e| e.code == "200000" && e.data.is_some());
         if !valid {
-            if (status == 0 || status == 429 || status >= 500 || rejected)
+            if !envelope.as_ref().is_ok_and(|e| e.code == "400002")
+                && (status == 0 || status == 429 || status >= 500 || rejected)
                 && request.retries < if rejected { 1 } else { 3 }
             {
                 request.retries += 1;
@@ -362,7 +374,7 @@ impl Kucoin {
         // Never subtract one from an incomplete timestamp boundary: it may hide
         // additional settlements at exactly the same millisecond.
         if page.has_more && request.page_minimum.is_none_or(|time| time >= request.end) {
-            request.owner.reject(
+            let _ = request.owner.reject(
                 cx,
                 VenueError::new(
                     "KuCoin funding cursor cannot prove complete same-timestamp coverage",
@@ -372,8 +384,17 @@ impl Kucoin {
         }
         let mut fresh = 0;
         for row in request.page.drain(..) {
-            if request.owner.fresh(row.tran_id.clone()) {
-                request.owner.stage(row);
+            if request
+                .owner
+                .admit(cx, request.leg.as_ref().unwrap())
+                .unwrap()
+                .fresh(row.tran_id.clone())
+            {
+                request
+                    .owner
+                    .admit(cx, request.leg.as_ref().unwrap())
+                    .unwrap()
+                    .stage(row);
                 fresh += 1;
             }
         }
@@ -396,21 +417,27 @@ impl Kucoin {
             None
         };
         let next = next_bounds.map(|(start, end)| format!("{start}:{end}"));
-        match request.owner.advance(CursorPage {
-            next,
-            rows: request.page_count,
-            fresh,
-            want_more: true,
-        }) {
+        match request
+            .owner
+            .admit(cx, request.leg.as_ref().unwrap())
+            .unwrap()
+            .advance(CursorPage {
+                next,
+                rows: request.page_count,
+                fresh,
+                want_more: true,
+            }) {
             CursorStep::More(_) => {
                 request.retries = 0;
                 self.funding_schedule(cx, request, 0.0);
             }
             CursorStep::Done => self.funding_finish(cx, request, Ok(())),
-            CursorStep::Stalled(_) => request.owner.reject(
-                cx,
-                VenueError::new("KuCoin funding exceeded page safety bound"),
-            ),
+            CursorStep::Stalled(_) => {
+                let _ = request.owner.reject(
+                    cx,
+                    VenueError::new("KuCoin funding exceeded page safety bound"),
+                );
+            }
         }
     }
     fn funding_finish(
@@ -421,7 +448,7 @@ impl Kucoin {
     ) {
         let limit = request.limit;
         let uncapped = request.explicit_range;
-        request.owner.finish_with(cx, result, |mut rows| {
+        let _ = request.owner.finish_with(cx, result, |mut rows| {
             rows.sort_by(|a, b| {
                 b.timestamp
                     .cmp(&a.timestamp)

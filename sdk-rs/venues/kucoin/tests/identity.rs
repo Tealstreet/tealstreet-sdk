@@ -43,10 +43,8 @@ fn identity_request(engine: &mut TestEngine) -> HttpRequest {
     assert_eq!(request.method, Method::Get);
     assert_eq!(request.body, None);
     assert_eq!(
-        request.route,
-        (header(&request, "KC-API-KEY") == "read-key")
-            .then_some(safe_cex_engine::RequestRoute::Secondary),
-        "selected credential egress"
+        request.route, None,
+        "managed requests carry credential intent in Context"
     );
     request
 }

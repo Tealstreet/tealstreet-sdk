@@ -673,7 +673,7 @@
       },
       "requiresCors": false,
       "enforceWsTunnel": true,
-      "supportsTunnel": false,
+      "supportsTunnel": true,
       "privateProxyRegions": []
     },
     "phemex": {
