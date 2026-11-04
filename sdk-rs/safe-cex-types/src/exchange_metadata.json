@@ -5539,7 +5539,7 @@
       "supportsPartialStops": true,
       "supportsInfinityStops": false,
       "supportsMaxCrossLeverage": true,
-      "supportsTunnel": false,
+      "supportsTunnel": true,
       "supportsWsRoute": false,
       "requiresOmniKeySeed": false,
       "leverageSliderDisabled": false,
