@@ -3,6 +3,7 @@ import type { TunnelOutage } from '@tealstreet/http-over-websocket/src/tunnelEnd
 import type { HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
+import type { BybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } from './types';
 
 import { AxiosHeaders } from 'axios';
@@ -19,6 +20,7 @@ import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/
 import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
+import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
 import { getTransport } from './registry';
@@ -453,6 +455,7 @@ const httpTransport = (
   publicPrefix?: string,
   proxyAuthorization?: ProxyAuthorizationNotice,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
+  onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
 ): {
   mode: 'direct' | 'how';
   request: Transport['request'];
@@ -789,6 +792,16 @@ const httpTransport = (
                 : withProxyTokenProvider(proxyTokenProvider, () => tunnelAdapter(finalConfig));
               return untilAborted(response, signal).then((value) => {
                 if (typeof value.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
+                if (onBybitPublicRateLimit && (intent === undefined || intent === 'public')) {
+                  const notice = bybitPublicRateLimitNotice(packet, value.data, value.headers);
+                  if (notice) {
+                    try {
+                      onBybitPublicRateLimit(notice);
+                    } catch {
+                      /* Telemetry cannot fail the request. */
+                    }
+                  }
+                }
                 return {
                   status: value.status,
                   headers: responseHeaders(value.headers),
@@ -942,6 +955,7 @@ export const createEngineTransport = (
   credentials?: { hasSecondary: boolean },
   onProxyAuthorizationFailure?: (message: string) => void,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
+  onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
 ): Transport => {
   assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
@@ -1012,6 +1026,7 @@ export const createEngineTransport = (
     undefined,
     proxyAuthorization,
     onTunnelProxyFallback,
+    onBybitPublicRateLimit,
   );
   // Explicit public requests bypass account proxy/tunnel policy. URLs stay in
   // the host; venues choose only the typed route name.
@@ -1035,6 +1050,7 @@ export const createEngineTransport = (
         undefined,
         proxyAuthorization,
         onTunnelProxyFallback,
+        onBybitPublicRateLimit,
       )
     : undefined;
   return {
