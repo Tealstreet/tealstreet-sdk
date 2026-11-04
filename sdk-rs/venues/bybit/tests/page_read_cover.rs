@@ -8,6 +8,8 @@ use support::{Harness, Options};
 
 const EMPTY_LIST: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":"","category":"linear"},"retExtInfo":{},"time":1684765770483}"#;
 const WALLET: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"accountType":"UNIFIED","totalEquity":"1100","totalWalletBalance":"1000","totalInitialMargin":"10","totalMaintenanceMargin":"1","totalAvailableBalance":"900","coin":[]}]}}"#;
+/// A flat one-way BTCUSDT row: the source learns its position mode.
+const FLAT_BTC: &str = r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"BTCUSDT","positionIdx":0,"side":"","size":"0","avgPrice":"0","markPrice":"51000","positionValue":"0","leverage":"10","unrealisedPnl":"0","curRealisedPnl":"0","positionIM":"0"}],"nextPageCursor":"","category":"linear"}}"#;
 const STREAMED_ORDER: &str = r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"streamed","side":"Buy","orderType":"Limit","orderStatus":"New","price":"50000","qty":"0.01","leavesQty":"0.01","cumExecQty":"0","updatedTime":"1672364262457"}]}"#;
 
 /// A started source with its first orders read out.
@@ -21,6 +23,15 @@ fn source() -> Harness {
     h.respond("/v5/account/info", 200, support::ACCOUNT_INFO);
     h.load_public();
     assert!(h.has_request("/v5/order/realtime"), "{:?}", h.paths());
+    // Its position mode reaches the page; the orders read stays out.
+    for (path, body) in [
+        ("/v5/position/list", FLAT_BTC),
+        ("/v5/account/wallet-balance", WALLET),
+    ] {
+        while h.has_request(path) {
+            h.respond(path, 200, body);
+        }
+    }
     h
 }
 
