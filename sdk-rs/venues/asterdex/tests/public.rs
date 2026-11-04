@@ -338,6 +338,94 @@ fn aggregate_and_raw_events_preserve_partial_fields_and_funding_zero() {
 }
 
 #[test]
+fn aggregate_decoder_preserves_reordered_escaped_and_typed_error_frames() {
+    let cases = [
+        (
+            r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}]}"#,
+            101.0,
+        ),
+        (
+            r#"{"data":[{"s":"BTCUSDT","c":"101"}],"stream":"!ticker@arr"}"#,
+            101.0,
+        ),
+        (
+            r#"{"str\u0065am":"\u0021ticker@arr","data":[{"s":"BTC\u0055SDT","c":"101"}]}"#,
+            101.0,
+        ),
+        (
+            r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"},{"s":"BTCUSDT","c":102},{"s":"BTCUSDT","c":"103"}]}"#,
+            101.0,
+        ),
+        (
+            r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"},{"s":"BTCUSDT","c":null}]}"#,
+            101.0,
+        ),
+        (
+            r#"[{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}]},{"e":"24hrTicker","s":"BTCUSDT","c":"102"}]"#,
+            102.0,
+        ),
+    ];
+    for (text, expected) in cases {
+        let mut h = Harness::ready();
+        h.message(text);
+        assert_eq!(
+            h.engine.store().ticker("BTCUSDT").unwrap().last,
+            expected,
+            "{text}"
+        );
+    }
+    for stream in ["!markPrice@arr", "!markPrice@arr@1s"] {
+        for data_first in [false, true] {
+            let mut h = Harness::ready();
+            let data = r#"[{"s":"BTCUSDT","p":"100","i":"99","r":"0","T":1700000100000},{"s":"BTCUSDT","p":101}]"#;
+            let text = if data_first {
+                format!(r#"{{"data":{data},"stream":"{stream}"}}"#)
+            } else {
+                format!(r#"{{"stream":"{stream}","data":{data}}}"#)
+            };
+            h.message(&text);
+            let ticker = h.engine.store().ticker("BTCUSDT").unwrap();
+            assert_eq!(
+                (
+                    ticker.mark,
+                    ticker.index,
+                    ticker.funding_rate,
+                    ticker.funding_time
+                ),
+                (100.0, 99.0, 0.0, 1700000100000.0)
+            );
+        }
+    }
+}
+
+#[test]
+fn aggregate_decoder_validates_whole_envelope_before_publishing_rows() {
+    let cases = [
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"id":1}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"e":4}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"id":"1"}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"stream":"!ticker@arr"}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"data":[]}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"e":null,"e":null}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"id":null,"id":null}"#,
+        r#"{"stream":null,"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}]}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"},]}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}],"other":[}"#,
+        r#"{"stream":"!ticker@arr","data":[{"s":"BTCUSDT","c":"101"}]} garbage"#,
+    ];
+    for text in cases {
+        let mut h = Harness::ready();
+        let before = h.engine.store().ticker("BTCUSDT").unwrap().clone();
+        h.message(text);
+        assert_eq!(
+            h.engine.store().ticker("BTCUSDT").unwrap(),
+            &before,
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn single_and_wrapped_interest_payloads_and_failure_retain_values() {
     let mut h = Harness::ready();
     h.advance(15_000.0);

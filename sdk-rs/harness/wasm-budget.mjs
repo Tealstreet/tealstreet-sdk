@@ -113,6 +113,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
 // #3023 page rule at 2495abee4f1: cut run 41799876396 measured kraken 2,111,267, kucoinspot 2,224,069,
 // lighter 1,980,286 and woo 2,377,495 B; ddi2il ruling: CI size plus 10 KiB rounded up, siblings equal.
+// #3027 single-pass aggregate decoding: CI run 41800378776 measured AsterDEX 2,110,514 and BingX 2,009,588 B.
+// ddi2il ruling: CI size plus 10 KiB rounded up to the KiB; typed envelope/row staging removes repeated JSON scans.
 // #3035 CI run 41810769240: bitrue 1,803,160 B; txflow 1,819,613 B.
 // CI + 10 KiB rounded up; TxFlow retains #3031's cap from pre-refactor CI 1,819,696 B.
 // #3019 KuCoin 400002 resync: CI run 41794279458 measured kucoin 1,657,796 and kucoinspot 2,237,656 B.
@@ -120,10 +122,10 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // admission code is newly linked by KuCoin; Binance already carries this machinery.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_970_176,
-  asterdex: 2_109_440,
+  asterdex: 2_121_728,
   backpack: 1_871_872,
   binance: 2_183_168,
-  bingx: 2_013_184,
+  bingx: 2_020_352,
   bitget: 2_304_000,
   bitgetusdc: 2_304_000,
   bitrue: 1_813_504,
