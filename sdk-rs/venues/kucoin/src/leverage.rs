@@ -54,7 +54,7 @@ impl Read {
 }
 
 impl Kucoin {
-    pub(crate) fn fetch_leverage(&self, cx: &mut Cx<'_, Pending>, symbol: String) {
+    pub(crate) fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
         // The engine owns an admission refusal. The context owns completion only:
         // signing stays on the `signed` wrapper, as for every private read here.
         let Ok(context) = cx.admit_http_command(crate::local_read_command_policy()) else {
@@ -83,7 +83,7 @@ impl Kucoin {
         self.send_leverage_read(cx, read);
     }
 
-    fn send_leverage_read(&self, cx: &mut Cx<'_, Pending>, read: Read) {
+    fn send_leverage_read(&mut self, cx: &mut Cx<'_, Pending>, read: Read) {
         let id = api_symbol(cx.store, &read.symbol);
         let path = match read.step {
             Step::Margin => format!("/api/v2/position/getMarginMode?symbol={id}"),
@@ -93,7 +93,7 @@ impl Kucoin {
     }
 
     pub(crate) fn leverage_response(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         mut read: Read,
         response: Response<'_>,

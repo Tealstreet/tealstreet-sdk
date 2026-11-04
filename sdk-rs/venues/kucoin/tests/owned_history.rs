@@ -548,10 +548,11 @@ fn owned_history_retry_exhaustion_recovers_the_prior_page_without_dispatching_ag
             let next = h
                 .actions
                 .iter()
-                .find_map(|a| match a {
-                    Action::SetTimer { at_ms, .. } => Some(*at_ms),
+                .filter_map(|a| match a {
+                    Action::SetTimer { at_ms, .. } if *at_ms > before => Some(*at_ms),
                     _ => None,
                 })
+                .min_by(f64::total_cmp)
                 .unwrap();
             assert_eq!(next - before, 1000.0 * f64::from(attempt + 1));
         }

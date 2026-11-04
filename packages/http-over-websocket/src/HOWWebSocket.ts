@@ -294,14 +294,18 @@ export class HOWWebSocket {
       this.ws.onmessage = this.onMessage.bind(this);
       this.ws.onclose = this.onClose.bind(this);
 
-      if (!this.lifecycleDocument && typeof document !== 'undefined') {
-        this.lifecycleDocument = document;
-        document.addEventListener('visibilitychange', this.checkConnectOnVisibility);
-        document.addEventListener('resume', this.checkConnectOnResume);
+      // Next constant-folds typeof checks on window/document to true in worker chunks,
+      // so a bare global there throws; read them off globalThis instead.
+      const page = (globalThis as { document?: Document }).document;
+      if (!this.lifecycleDocument && page?.addEventListener) {
+        this.lifecycleDocument = page;
+        page.addEventListener('visibilitychange', this.checkConnectOnVisibility);
+        page.addEventListener('resume', this.checkConnectOnResume);
       }
-      if (!this.lifecycleWindow && typeof window !== 'undefined') {
-        this.lifecycleWindow = window;
-        window.addEventListener('pageshow', this.checkConnectOnResume);
+      const browserWindow = (globalThis as { window?: Window }).window;
+      if (!this.lifecycleWindow && browserWindow?.addEventListener) {
+        this.lifecycleWindow = browserWindow;
+        browserWindow.addEventListener('pageshow', this.checkConnectOnResume);
       }
       this.scheduleConnectCheck();
     }

@@ -500,6 +500,39 @@ fn explicit_signature_rejection_retries_only_once() {
     assert!(!h.has("/api/v1/orders"));
     assert!(h.done(1).is_err());
 }
+
+#[test]
+fn timestamp_refusal_does_not_resend_a_placement_or_cancel() {
+    let mut h = Harness::new();
+    place(&mut h, vec![order()]);
+    h.metadata(false, "CROSS");
+    let request = h.take("/api/v1/orders");
+    assert_eq!(request.method, Method::Post);
+    h.response(
+        &request,
+        400,
+        r#"{"code":"400002","msg":"Invalid KC-API-TIMESTAMP"}"#,
+    );
+    h.pace();
+    assert!(h.done(1).is_err());
+    assert!(!h.has("/timestamp") && !h.has("/api/v1/orders"));
+
+    let mut h = Harness::new();
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["unknown".into()],
+    });
+    let request = h.take("/api/v1/orders/unknown");
+    assert_eq!(request.method, Method::Delete);
+    h.response(
+        &request,
+        400,
+        r#"{"code":"400002","msg":"Invalid KC-API-TIMESTAMP"}"#,
+    );
+    h.pace();
+    assert!(h.done(1).is_err());
+    assert!(!h.has("/timestamp") && !h.has("/api/v1/orders"));
+}
 #[test]
 fn cancel_replace_uses_remaining_native_once_and_a_new_client_id() {
     let mut h = Harness::new();

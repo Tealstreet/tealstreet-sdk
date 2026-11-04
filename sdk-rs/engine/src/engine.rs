@@ -1838,6 +1838,72 @@ struct IoCore {
 }
 
 impl IoCore {
+    // Keep common completion bookkeeping out of every Engine<V> instance.
+    // Managed delivery and legacy failures still return to the venue caller.
+    #[inline(never)]
+    fn finish_signing(
+        &mut self,
+        now: f64,
+        attempt: RequestId,
+        result: Result<crate::signing::SignResult, crate::signing::SignError>,
+    ) -> Option<crate::signing_dispatch::Completion> {
+        use crate::signing_dispatch::Completion;
+        let completion =
+            self.signing
+                .finish(attempt, now, self.protocol_clock.revision(), result)?;
+        if match &completion {
+            Completion::Ready(pending, _)
+            | Completion::Stale(pending)
+            | Completion::NonceStale(pending)
+            | Completion::Failed(pending, _) => pending.managed,
+        } {
+            return Some(completion);
+        }
+        match completion {
+            Completion::Ready(pending, outbound) => {
+                if pending.timer.0 != 0 {
+                    self.actions.push(Action::ClearTimer {
+                        timer: pending.timer,
+                    });
+                }
+                self.signing.ready(attempt, pending);
+                self.actions.push(Action::SignedOutbound {
+                    attempt,
+                    outbound: Box::new(outbound),
+                });
+            }
+            Completion::Stale(mut pending) | Completion::NonceStale(mut pending) => {
+                if pending.timer.0 != 0 {
+                    self.actions.push(Action::ClearTimer {
+                        timer: pending.timer,
+                    });
+                    pending.timer = TimerId(0);
+                }
+                // New identity invalidates every late completion from the old attempt.
+                let next = self.signing.next_id();
+                self.signing.retry(next, pending);
+                self.actions.push(Action::Sign {
+                    attempt: next,
+                    work: crate::signing::SignRequest {
+                        receipt: Default::default(),
+                        operations: Vec::new(),
+                        context: Default::default(),
+                    },
+                    timeout_ms: 0,
+                });
+            }
+            Completion::Failed(pending, error) => {
+                if pending.timer.0 != 0 {
+                    self.actions.push(Action::ClearTimer {
+                        timer: pending.timer,
+                    });
+                }
+                return Some(Completion::Failed(pending, error));
+            }
+        }
+        None
+    }
+
     /// A trusted local seal, read only under the provider that sealed it.
     fn verified_public_key(
         &self,
@@ -6261,63 +6327,12 @@ impl<V: Venue> Engine<V> {
         {
             return;
         }
-        let Some(completion) = self.io.core.signing.finish(
-            attempt,
-            now,
-            self.io.core.protocol_clock.revision(),
-            result,
-        ) else {
-            return;
-        };
-        if match &completion {
-            Completion::Ready(pending, _)
-            | Completion::Stale(pending)
-            | Completion::NonceStale(pending)
-            | Completion::Failed(pending, _) => pending.managed,
-        } {
-            self.managed_sign_completed(now, completion);
-            return;
-        }
-        match completion {
-            Completion::Ready(pending, outbound) => {
-                if pending.timer.0 != 0 {
-                    self.io.core.actions.push(Action::ClearTimer {
-                        timer: pending.timer,
-                    });
+        if let Some(completion) = self.io.core.finish_signing(now, attempt, result) {
+            match completion {
+                Completion::Failed(pending, error) if !pending.managed => {
+                    self.sign_failed(now, pending.outbound, error);
                 }
-                self.io.core.signing.ready(attempt, pending);
-                self.io.core.actions.push(Action::SignedOutbound {
-                    attempt,
-                    outbound: Box::new(outbound),
-                });
-            }
-            Completion::Stale(mut pending) | Completion::NonceStale(mut pending) => {
-                if pending.timer.0 != 0 {
-                    self.io.core.actions.push(Action::ClearTimer {
-                        timer: pending.timer,
-                    });
-                    pending.timer = TimerId(0);
-                }
-                // New identity invalidates every late completion from the old attempt.
-                let next = self.io.core.signing.next_id();
-                self.io.core.signing.retry(next, pending);
-                self.io.core.actions.push(Action::Sign {
-                    attempt: next,
-                    work: crate::signing::SignRequest {
-                        receipt: Default::default(),
-                        operations: Vec::new(),
-                        context: Default::default(),
-                    },
-                    timeout_ms: 0,
-                });
-            }
-            Completion::Failed(pending, error) => {
-                if pending.timer.0 != 0 {
-                    self.io.core.actions.push(Action::ClearTimer {
-                        timer: pending.timer,
-                    });
-                }
-                self.sign_failed(now, pending.outbound, error);
+                completion => self.managed_sign_completed(now, completion),
             }
         }
     }
