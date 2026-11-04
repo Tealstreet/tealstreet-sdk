@@ -1371,6 +1371,11 @@ impl Venue for BinanceFutures {
     fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         !self.is_spot()
     }
+    // Every open-orders census commits its cover (`settle_orders`); options
+    // reads commit none yet.
+    fn refreshes_orders(&self) -> bool {
+        !self.is_options()
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         if self.is_options() {
             self.options_reconcile(cx);
@@ -1414,7 +1419,7 @@ impl Venue for BinanceFutures {
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        match self.options.variant {
+        let capabilities = match self.options.variant {
             Variant::UsdM | Variant::PortfolioMargin => safe_cex_engine::Capabilities {
                 position_history: if self.options.variant == Variant::UsdM {
                     safe_cex_engine::PositionHistory::FillsSymbol
@@ -1442,6 +1447,10 @@ impl Venue for BinanceFutures {
                 fresh_positions: true,
                 ..safe_cex_engine::Capabilities::NO_HISTORY
             },
+        };
+        safe_cex_engine::Capabilities {
+            order_read_covers: self.refreshes_orders(),
+            ..capabilities
         }
     }
 
