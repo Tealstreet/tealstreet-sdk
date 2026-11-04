@@ -3207,20 +3207,15 @@ export class RustEngineExchange extends BaseExchange {
     return copyHistoryCompleteness(rows, records);
   };
 
-  /** As the TS venues: reported rows only, newest close first; a failed read reports and yields []. */
+  /** Reported rows only, newest close first; failures propagate so refreshes keep their last result. */
   private fetchReportedClosedPnl = async (opts: HistoricalTradeOptions): Promise<ClosedPnlEntry[]> => {
     if (this.isPublicDataOnly) return [];
     const ready = this.capabilitiesFor('fetchClosedPnl');
     const capabilities = ready instanceof Promise ? await ready : ready;
     const format = capabilities.closedPositionFormat;
-    let rows: Array<Record<string, any>>;
-    try {
-      // TS okx/blofin treat an empty symbol as account-wide; bybit and bitunix send it as given.
-      const symbol = format === 'okx' || format === 'blofin' ? opts.symbol || undefined : opts.symbol;
-      rows = await this.fetchClosedPositionRows({ ...opts, symbol });
-    } catch {
-      return [];
-    }
+    // OKX/Blofin treat an empty symbol as account-wide; Bybit and Bitunix send it as given.
+    const symbol = format === 'okx' || format === 'blofin' ? opts.symbol || undefined : opts.symbol;
+    const rows = await this.fetchClosedPositionRows({ ...opts, symbol });
     const account = opts.accountName || '';
     const entries: ClosedPnlEntry[] = [];
     for (const row of rows) {
