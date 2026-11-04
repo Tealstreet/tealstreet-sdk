@@ -32,7 +32,7 @@ type RecordRow = {
 const consumerFixture = (records: RecordRow[], name: string, privateAccount: boolean, advanceResponses = false) => {
   const startedAt = Date.now();
   const venue = venueOf(name);
-  const tape = new Tape(records, venue, privateAccount);
+  const tape = new Tape(records, venue, privateAccount, undefined, 'rust');
   const requests: string[] = [];
   const failures: string[] = [];
   const sockets: string[] = [];

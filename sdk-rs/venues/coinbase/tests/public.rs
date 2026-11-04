@@ -256,8 +256,8 @@ fn candle_fetch_uses_public_route_and_orders_chronologically() {
             symbol: SYMBOL.into(),
             interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
-            from_ms: None,
-            to_ms: None,
+            from_ms: Some(120000.),
+            to_ms: Some(240000.),
         }),
     );
     let r = requests(&mut e).pop().unwrap();

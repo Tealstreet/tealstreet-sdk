@@ -555,15 +555,23 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
       `${root}${route}?granularity=ONE_MINUTE&start=${epoch / 1000 - 120}&end=${epoch / 1000}&limit=2`,
       candles,
       undefined,
-      { afterCommand: candleCommand },
+      { afterCommand: candleCommand, impl: 'ts' },
     );
+  // Rust's bounded pages exclude the next page's first second; TS keeps its route.
+  http(
+    'GET',
+    `${root}/market/products/${main}/candles?granularity=ONE_MINUTE&start=${epoch / 1000 - 120}&end=${epoch / 1000 - 1}&limit=2`,
+    candles,
+    undefined,
+    { afterCommand: candleCommand, impl: 'rust' },
+  );
   // TS sends the limit only in its range calculation.
   http(
     'GET',
     `${root}/products/${main}/candles?granularity=ONE_MINUTE&start=${epoch / 1000 - 120}&end=${epoch / 1000}`,
     candles,
     undefined,
-    { afterCommand: candleCommand },
+    { afterCommand: candleCommand, impl: 'ts' },
   );
   user('snapshot', active.map(wsOrder));
   heartbeat();
