@@ -317,6 +317,57 @@ describe('HOWWebSocket reconnect recovery (real socket stack, fake tunnel)', () 
     );
   });
 
+  it('a readiness failure names what it was waiting for and the socket loop state', async () => {
+    FakeTunnelSocket.defaultMode = { neverOpen: true };
+    const neverOpened = track(adapter(instrumentsInfo(90_000)));
+    await advance(30_500);
+    expect(neverOpened.error()).toMatchObject({
+      name: 'TradeTunnelReadinessError',
+      readiness: { stage: 'connect', lanePort: '443', tunnelOutage: false },
+    });
+    expect(['connecting', 'retry-scheduled']).toContain(neverOpened.error().readiness.socketPhase);
+    expect(String(neverOpened.error().message)).toMatch(
+      /^HTTP tunnel was not ready within 30 s: \S+ \(waiting for the socket to open; socket (connecting|retry-scheduled) for \d+ s, lane 443\)$/,
+    );
+
+    // The pending dial finally opens, to a tunnel that never answers rpc.auth.
+    FakeTunnelSocket.defaultMode = { ignoreAuthFrames: Infinity };
+    FakeTunnelSocket.latest().mode = FakeTunnelSocket.defaultMode;
+    FakeTunnelSocket.latest().serverAccept();
+    const unanswered = track(adapter(instrumentsInfo(90_000)));
+    await advance(31_000);
+    expect(unanswered.error()).toMatchObject({
+      name: 'TradeTunnelReadinessError',
+      readiness: { stage: 'authReply', socketPhase: 'connected' },
+    });
+    expect(String(unanswered.error().message)).toContain('waiting for the tunnel to accept the proxy token');
+  });
+
+  it('a request waiting on a socket that is backing off redials it at once, once per wait', async () => {
+    FakeTunnelSocket.defaultMode = { neverOpen: true };
+    const read = track(adapter(instrumentsInfo(90_000)));
+    await advance(100);
+    expect(FakeTunnelSocket.instances).toHaveLength(1);
+    // The 4 s connect timeout fails the dial; the loop schedules a retry at least 1 s out.
+    await advance(4_000);
+    await advance(100);
+    expect(FakeTunnelSocket.instances, 'redialed without waiting out the backoff').toHaveLength(2);
+    // The redial also fails: this wait has spent its redial, so the loop backs off as before.
+    await advance(4_000);
+    await advance(100);
+    expect(FakeTunnelSocket.instances).toHaveLength(2);
+    expect(read.state()).toBe('pending');
+  });
+
+  it('a proxy token fetch still pending at the readiness cap fails as missing proxy authorization', async () => {
+    configureHOW({ getProxyToken: () => new Promise<string>(() => {}), isTokenExpired: () => false });
+    const read = track(adapter(instrumentsInfo(90_000)));
+    await advance(30_500);
+    expect(read.state()).toBe('rejected');
+    expect(read.error()).toMatchObject({ name: 'ProxyTokenUnavailableError' });
+    expect(String(read.error()?.message)).toContain('Tealstreet proxy authorization missing');
+  });
+
   it.each(['legacy', 'managed'] as const)('%s keeps a caller deadline shorter than the readiness cap', async (mode) => {
     FakeTunnelSocket.defaultMode = { neverOpen: true };
     const config = instrumentsInfo(8_000);
