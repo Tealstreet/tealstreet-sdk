@@ -101,3 +101,28 @@ it('accepts failure enums before the watchdog, without inferring a kind from err
   emit({});
   expect(exchange.lastFailedPrivateReadKind).toBe('spot');
 });
+
+it('invalidates cached catalogues only on typed discovery failures', () => {
+  const exchange = new RustEngineExchange(
+    'hyperliquid',
+    { key: '', secret: '', publicDataOnly: true },
+    new DefaultStore(),
+  );
+  accounts.push(exchange);
+  exchange.on('error', vi.fn());
+  const invalidate = vi.fn();
+  (exchange as any).invalidateInfoCatalogue = invalidate;
+  const emit = (code: string, kind?: string) =>
+    (exchange as any).receiveEvent({
+      code,
+      level: 'warning',
+      message: 'discovery failed',
+      fields: { lastFailedPrivateReadKind: kind },
+    });
+  emit('request.failed');
+  emit('request.failed', 'orders');
+  emit('startup.incomplete', 'discovery');
+  expect(invalidate).not.toHaveBeenCalled();
+  emit('request.failed', 'discovery');
+  expect(invalidate).toHaveBeenCalledTimes(1);
+});

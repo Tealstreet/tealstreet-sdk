@@ -25,14 +25,14 @@ afterEach(() => {
 const flushDatabase = async () => {
   for (let i = 0; i < 12; i++) await new Promise<void>((resolve) => setImmediate(resolve));
 };
-const state = () => ({
+const state = (account = 0) => ({
   assetPositions: [],
-  marginSummary: { accountValue: '1000', totalMarginUsed: '0' },
+  marginSummary: { accountValue: String(1000 + account), totalMarginUsed: '0' },
   time: Date.now(),
 });
 
 it.each([0, 8000])(
-  'cold starts four real engines with twelve discovery reads each inside 120s (%i ms role response)',
+  'shares twelve catalogue reads across four cold engines (%i ms role response)',
   async (roleLatencyMs) => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     vi.setSystemTime(1_000_000);
@@ -41,12 +41,8 @@ it.each([0, 8000])(
     const startedAt = Date.now();
     const stores: DefaultStore[] = [];
     const events: EngineEvent[] = [];
+    const loadedAt = [0, 0, 0, 0];
     const sends: Array<{ account: number; type: string; dex: string; at: number }> = [];
-    let discoveryCompleted = 0;
-    let releaseDiscovery!: () => void;
-    const discovery = new Promise<void>((resolve) => {
-      releaseDiscovery = resolve;
-    });
     for (let account = 0; account < 4; account++) {
       // Separate module state models account worker realms sharing only IndexedDB.
       vi.resetModules();
@@ -68,11 +64,6 @@ it.each([0, 8000])(
           let body: unknown;
           switch (type) {
             case 'metaAndAssetCtxs':
-              if (dex === DEXES.at(-1)) {
-                discoveryCompleted += 1;
-                if (discoveryCompleted === 4) releaseDiscovery();
-                await discovery;
-              }
               body = [
                 { universe: [{ name: dex ? `${dex}:BTC` : 'BTC', szDecimals: 5, maxLeverage: 20 }] },
                 [{ midPx: '100', markPx: '100', oraclePx: '100', prevDayPx: '90' }],
@@ -95,9 +86,11 @@ it.each([0, 8000])(
               body = 30;
               break;
             case 'clearinghouseState':
-              body = state();
+              expect(JSON.parse(request.body!).user).toBe(key);
+              body = state(account);
               break;
             case 'frontendOpenOrders':
+              expect(JSON.parse(request.body!).user).toBe(key);
               body = [];
               break;
             default:
@@ -125,7 +118,7 @@ it.each([0, 8000])(
                   if (sent.subscription.type === 'clearinghouseState')
                     deliver({
                       channel: 'clearinghouseState',
-                      data: { dex: sent.subscription.dex ?? '', clearinghouseState: state() },
+                      data: { dex: sent.subscription.dex ?? '', clearinghouseState: state(account) },
                     });
                 } else if (sent.method === 'ping') deliver({ channel: 'pong' });
               });
@@ -151,6 +144,9 @@ it.each([0, 8000])(
       await flushDatabase();
       await vi.advanceTimersByTimeAsync(100);
       hosts.forEach((host) => host.flush());
+      stores.forEach((store, i) => {
+        if (!loadedAt[i] && Object.values(store.loaded).every(Boolean)) loadedAt[i] = Date.now() - startedAt;
+      });
       const allScopesRead = stores.every(
         (_, account) =>
           new Set(
@@ -163,10 +159,12 @@ it.each([0, 8000])(
     expect(stores.map((store) => store.loaded)).toEqual(
       Array.from({ length: 4 }, () => ({ markets: true, tickers: true, balance: true, orders: true, positions: true })),
     );
-    expect(Date.now() - startedAt).toBeLessThan(110_000);
+    expect(Date.now() - startedAt).toBeLessThan(60_000);
+    expect(Math.max(...loadedAt)).toBeLessThan(60_000);
+    expect(stores.map((store) => store.balance.total)).toEqual([1000, 1001, 1002, 1003]);
+    expect(sends.filter((row) => row.type === 'metaAndAssetCtxs' || row.type === 'perpDexs')).toHaveLength(12);
     for (let account = 0; account < 4; account++) {
       const sent = sends.filter((row) => row.account === account);
-      expect(sent.filter((row) => row.type === 'metaAndAssetCtxs' || row.type === 'perpDexs')).toHaveLength(12);
       expect(sent.filter((row) => row.type === 'userRole')).toHaveLength(1);
       expect(sent.filter((row) => row.type === 'userAbstraction')).toHaveLength(1);
       expect(new Set(sent.filter((row) => row.type === 'frontendOpenOrders').map((row) => row.dex))).toEqual(

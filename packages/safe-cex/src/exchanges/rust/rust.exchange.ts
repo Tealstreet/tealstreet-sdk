@@ -477,6 +477,7 @@ export class RustEngineExchange extends BaseExchange {
   private nativeStartupTags: Record<string, string> = {};
   private nativeStartupSampleAt?: number;
   private httpStartupDiagnostics?: () => Record<string, string>;
+  private invalidateInfoCatalogue?: () => void;
   get startupDiagnostics(): Record<string, string> {
     return {
       ...this.nativeStartupTags,
@@ -1459,6 +1460,7 @@ export class RustEngineExchange extends BaseExchange {
       },
     );
     this.httpStartupDiagnostics = routedTransport.startupDiagnostics;
+    this.invalidateInfoCatalogue = routedTransport.invalidateCatalogue;
     const transport = withRequestsLog(routedTransport, this.name, (event, message) =>
       this.emitter.emit(event, message),
     );
@@ -2156,6 +2158,11 @@ export class RustEngineExchange extends BaseExchange {
     if (event.code === 'request.failed' || event.code === 'startup.incomplete')
       this.lastFailedPrivateReadKind =
         failedPrivateReadKind(event.fields?.lastFailedPrivateReadKind) ?? this.lastFailedPrivateReadKind;
+    if (
+      event.code === 'request.failed' &&
+      failedPrivateReadKind(event.fields?.lastFailedPrivateReadKind) === 'discovery'
+    )
+      this.invalidateInfoCatalogue?.();
     if (event.code === 'request.failed' || event.code === 'auth.rejected') this.lastReadFailure = event.message;
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
