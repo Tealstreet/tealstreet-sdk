@@ -146,3 +146,94 @@ fn same_clock_stream_source_and_rows_survive_refused_snapshot() {
     assert_eq!(state(&mut h), metadata);
     assert_eq!(account_cover(&mut h).1, before);
 }
+
+/// BloFin advertises read covers in its own snapshot.
+#[test]
+fn blofin_advertises_read_covers() {
+    let mut h = Harness::new();
+    let frame = h.e.snapshot_frame(h.now).to_vec();
+    let (_, payload) = safe_cex_engine::wire::sections(&frame)
+        .find(|(kind, _)| *kind == section::CAPABILITIES)
+        .unwrap();
+    let flags = u32::from_le_bytes(payload[..4].try_into().unwrap());
+    assert_ne!(
+        flags & 1 << safe_cex_engine::Capabilities::ORDER_READ_COVERS_BIT,
+        0
+    );
+}
+
+fn reads(h: &Harness) -> usize {
+    h.pending
+        .iter()
+        .filter(|r| r.url.contains("/orders-pending"))
+        .count()
+}
+
+fn ask(h: &mut Harness, at: f64, command: u32, symbols: Option<Vec<String>>) {
+    h.handle(
+        at,
+        Event::Command(safe_cex_engine::Command::Venue {
+            command,
+            action: safe_cex_engine::VenueAction::RefreshOrders { symbols },
+        }),
+    );
+    h.collect();
+}
+
+/// Answers a whole census (every family) at `at`.
+fn answer(h: &mut Harness, at: f64) {
+    for path in [
+        "orders-pending",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        let read = h.take(path);
+        h.respond_at(read, EMPTY, at);
+    }
+}
+
+/// A seeded account with no census out.
+fn loaded() -> Harness {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    assert_eq!(reads(&h), 0);
+    h
+}
+
+/// A refresh ask reads every order family, and the census publishes an
+/// account cover at the ask's send time.
+#[test]
+fn a_refresh_ask_reads_orders_and_publishes_its_send_time() {
+    for symbols in [None, Some(vec!["BTC-USDT".to_owned()])] {
+        let mut h = loaded();
+        ask(&mut h, 5_000., 50, symbols.clone());
+        assert_eq!(reads(&h), 1, "{symbols:?}: the ask reads");
+        answer(&mut h, 6_000.);
+        assert_eq!(account_cover(&mut h).1, Some(5_000.), "{symbols:?}");
+        assert_eq!(reads(&h), 0, "{symbols:?}: nothing more");
+    }
+}
+
+/// H7/H3: asks while the read is out start nothing; exactly one follow-up
+/// census starts after it lands, and none after that.
+#[test]
+fn asks_while_a_read_is_out_get_one_follow_up() {
+    let mut h = loaded();
+    ask(&mut h, 5_000., 50, None);
+    assert_eq!(reads(&h), 1);
+    for command in 51..150 {
+        ask(
+            &mut h,
+            5_000. + f64::from(command),
+            command,
+            Some(vec!["BTC-USDT".to_owned()]),
+        );
+    }
+    assert_eq!(reads(&h), 1, "H7");
+    answer(&mut h, 6_000.);
+    assert_eq!(reads(&h), 1, "one follow-up");
+    answer(&mut h, 7_000.);
+    assert_eq!(account_cover(&mut h).1, Some(6_000.));
+    assert_eq!(reads(&h), 0, "none after it");
+}

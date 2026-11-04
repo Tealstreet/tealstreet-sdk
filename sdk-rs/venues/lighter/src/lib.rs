@@ -893,6 +893,11 @@ impl Venue for Lighter {
         self.refresh_account(cx);
         self.reconcile_orders(cx);
     }
+    // Every orders read is the one account-wide census, which lands through
+    // `commit_orders_read_from` or owes a follow-up census that does.
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,
@@ -943,6 +948,7 @@ impl Venue for Lighter {
             account: safe_cex_engine::AccountLookup::Query,
             fresh_positions: true,
             symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }

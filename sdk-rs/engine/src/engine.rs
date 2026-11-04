@@ -4181,6 +4181,11 @@ pub trait Venue {
     fn guard_order_mutations(&self) -> bool {
         false
     }
+    /// `guard_order_mutations` for one command, for a venue that serializes only
+    /// the mutations whose own steps (such as a cancel-then-replace) must not overlap.
+    fn guards_order_mutation(&self, _store: &Store, _command: &Command) -> bool {
+        false
+    }
     /// Data source: the venue-private state a frame-fed engine's writes need and
     /// the store does not hold (the VENUE_STATE frame section), in the venue's
     /// own compact encoding. `None` when the venue needs none.
@@ -4203,6 +4208,12 @@ pub trait Venue {
     /// Cancel and amend route only through stored orders: hold one naming an
     /// acknowledged placement until the store has it (`placement_acks`).
     fn cancel_needs_stored_order(&self) -> bool {
+        false
+    }
+    /// The venue judges this stop or take profit edit's trigger itself: it may turn
+    /// the order into the other kind by where the new price lies, or check a native
+    /// kind the stored one does not show. The engine then keeps only its implausible-price guard.
+    fn judges_protective_amend(&self, _store: &Store, _order: &crate::model::Order) -> bool {
         false
     }
     /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
@@ -4856,6 +4867,7 @@ impl<V: Venue> Engine<V> {
             ));
         }
         self.expire_read_roots(now);
+        self.store.set_clock(now);
         let parsed = crate::ingest::parse(frame)?;
         let expired = self.io.core.setting_holds.expire(now);
         let kept = self.io.core.setting_holds.keep(&self.store);
@@ -5070,6 +5082,7 @@ impl<V: Venue> Engine<V> {
     ) -> Result<(), &'static str> {
         self.assert_live();
         self.expire_read_roots(now);
+        self.store.set_clock(now);
         if self.public_feed_policy() != PublicFeedPolicy::Shared {
             return Err("publicFeedUpdate requires shared public feed policy");
         }
@@ -5632,6 +5645,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn handle_event_scoped(&mut self, now: f64, mut event: Event<'_>, _physical_timeout: bool) {
+        self.store.set_clock(now);
         // A new event cannot borrow an in-flight managed command's generation.
         // Sibling legs originate under Cx authority, not a repeated wire command.
         if let Event::Command(command) = &event
@@ -5942,9 +5956,46 @@ impl<V: Venue> Engine<V> {
                     "symbol-aware amendment is unsupported by this venue",
                 );
             }
+            // A stop or take profit edit that cannot stand: refused before its cancel.
+            Event::Command(Command::AmendOrder {
+                command,
+                ref id,
+                price,
+                ..
+            }) if crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                self.venue.judges_protective_amend(store, order)
+            })
+            .is_some() =>
+            {
+                let reason =
+                    crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                        self.venue.judges_protective_amend(store, order)
+                    });
+                cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
+            }
+            #[cfg(feature = "command-kucoinspot")]
+            Event::Command(Command::AmendOrderWithSymbol {
+                command,
+                ref id,
+                price,
+                ..
+            }) if crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                self.venue.judges_protective_amend(store, order)
+            })
+            .is_some() =>
+            {
+                let reason =
+                    crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                        self.venue.judges_protective_amend(store, order)
+                    });
+                cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
+            }
             Event::Command(command) => {
                 #[cfg(feature = "order-locks")]
-                if self.venue.guard_order_mutations() {
+                let guarded = self.venue.guard_order_mutations()
+                    || self.venue.guards_order_mutation(cx.store, &command);
+                #[cfg(feature = "order-locks")]
+                if guarded {
                     let id = match &command {
                         Command::PlaceOrders { command, .. }
                         | Command::AmendOrder { command, .. }
@@ -6010,7 +6061,7 @@ impl<V: Venue> Engine<V> {
                 // venue declares), and a placement or amend is marked so its own
                 // Unknown outcome fences its symbols.
                 #[cfg(feature = "order-locks")]
-                if !(self.venue.guard_order_mutations()
+                if !(guarded
                     && (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements()))
                     && let Err(id) = cx.io.core.order_locks.admit_unscoped(

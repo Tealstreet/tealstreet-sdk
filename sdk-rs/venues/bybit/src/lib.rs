@@ -2374,6 +2374,13 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
         set(&mut t.volume, volume);
         set(&mut t.quote_volume, quote_volume);
     });
+    // A field this message carries is an observation even when unchanged; an
+    // omitted one (a delta) is not.
+    let observed = [(2, d.last_price), (3, d.mark_price), (4, d.index_price)]
+        .into_iter()
+        .filter(|(_, value)| value.is_some())
+        .fold(0u16, |mask, (bit, _)| mask | (1 << bit));
+    cx.store.observe_ticker_fields(&d.symbol, observed);
 }
 
 fn ticker_from_rest(t: &TickerRow<'_>, inverse: bool) -> Ticker {
@@ -2721,6 +2728,38 @@ impl Venue for BybitLinear {
         !self.variant.is_spot()
     }
 
+    fn judges_protective_amend(
+        &self,
+        _store: &safe_cex_engine::store::Store,
+        order: &safe_cex_engine::model::Order,
+    ) -> bool {
+        self.partial_stop(order)
+    }
+    // A Partial stop edit cancels, then replaces or puts back: no other edit or cancel
+    // of that stop, and no cancel-all (its row may already be gone), may overlap it.
+    fn guards_order_mutation(
+        &self,
+        store: &safe_cex_engine::store::Store,
+        command: &safe_cex_engine::Command,
+    ) -> bool {
+        use safe_cex_engine::Command;
+        let partial = |id: &str| {
+            store
+                .order(id)
+                .is_some_and(|order| self.partial_stop(order))
+        };
+        match command {
+            Command::AmendOrder { id, .. } | Command::AmendOrderWithSymbol { id, .. } => {
+                partial(id)
+            }
+            Command::CancelOrders { ids, .. } => ids.iter().any(|id| partial(id)),
+            Command::CancelOrdersWithSymbols { orders, .. } => {
+                orders.iter().any(|order| partial(&order.id))
+            }
+            Command::CancelSymbolOrders { .. } => true,
+            _ => false,
+        }
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }

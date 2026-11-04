@@ -306,12 +306,27 @@ fn unmapped_owned_rest_rows_keep_their_own_position_and_protection_while_peers_u
 fn unmappable_ws_position_row_does_not_discard_valid_snapshot_row() {
     let mut h = Harness::classic();
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[{"symbol":"UNKNOWNUSDT","total":"1"},{"symbol":"BTCUSDT","holdSide":"short","total":"2","openPriceAvg":"100","posMode":"one_way_mode"}]}"#);
-    assert_eq!(h.engine.store().positions().len(), 1);
-    assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
     assert_eq!(
-        h.engine.store().positions()[0].side,
-        safe_cex_engine::model::PositionSide::Short
+        h.engine.store().positions().len(),
+        2,
+        "WS omission retains the cached long"
     );
+    let short = h
+        .engine
+        .store()
+        .positions()
+        .iter()
+        .find(|p| p.side == safe_cex_engine::model::PositionSide::Short)
+        .unwrap();
+    assert_eq!(short.contracts, 2.0);
+    let long = h
+        .engine
+        .store()
+        .positions()
+        .iter()
+        .find(|p| p.side == safe_cex_engine::model::PositionSide::Long)
+        .unwrap();
+    assert_eq!(long.contracts, 1.0);
     assert!(
         h.logs
             .iter()
@@ -464,7 +479,7 @@ fn stale_rest_after_side_write_uses_matching_leg_setting_even_without_position()
 }
 
 #[test]
-fn unmappable_snapshot_rows_protect_only_their_identity_but_empty_lists_clear_it() {
+fn unmappable_snapshot_rows_protect_their_identity_until_a_clean_rest_omission() {
     let mut h = Harness::classic();
     h.respond(
         "/all-position",
@@ -479,7 +494,17 @@ fn unmappable_snapshot_rows_protect_only_their_identity_but_empty_lists_clear_it
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[{"symbol":"BTCUSDT","total":"-1"}]}"#);
     assert_eq!(h.engine.store().positions().len(), 1);
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[]}"#);
-    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(
+        h.engine.store().positions().len(),
+        1,
+        "empty WS is not absence"
+    );
+    h.timer_after(500.0);
+    h.respond("/all-position", 200, r#"{"code":"00000","data":[]}"#);
+    assert!(
+        h.engine.store().positions().is_empty(),
+        "fresh REST proves absence"
+    );
     let mut h = Harness::classic();
     h.respond("/all-position", 200, r#"{"code":"00000","data":[]}"#);
     h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);

@@ -30,6 +30,7 @@ mod order_locks;
 pub mod order_read_cover;
 pub mod paging;
 mod placement_acks;
+pub mod protective_amend;
 mod protocol_clock;
 pub mod public_feed;
 pub mod read_scheduler;

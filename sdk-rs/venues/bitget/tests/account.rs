@@ -71,12 +71,21 @@ fn failed_and_malformed_snapshots_never_clear_account() {
 }
 
 #[test]
-fn empty_position_snapshot_blocks_older_rest_and_zero_updates_cannot_reopen() {
+fn empty_position_snapshot_preserves_rows_and_zero_updates_cannot_reopen() {
     let mut h = Harness::classic();
     let request = h.take("/all-position");
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[]}"#);
+    assert_eq!(
+        h.engine.store().positions().len(),
+        1,
+        "WS omission is not closure"
+    );
     h.reply(request.id, 200, POSITION);
-    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(
+        h.engine.store().positions().len(),
+        1,
+        "REST row must remain admissible"
+    );
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"update","data":[{"symbol":"BTCUSDT","holdSide":"long","total":"1","openPriceAvg":"90","posMode":"one_way_mode","marginMode":"crossed","uTime":"200"}]}"#);
     h.timer_after(500.0);
     let request = h.take("/all-position");
@@ -435,6 +444,21 @@ fn row_engine(unified: bool) -> Harness {
         Harness::classic()
     }
 }
+fn position_census(h: &mut Harness, unified: bool, rows: serde_json::Value) {
+    let (path, body) = if unified {
+        (
+            "/current-position",
+            serde_json::json!({"code":"00000","data":{"list":rows}}),
+        )
+    } else {
+        (
+            "/all-position",
+            serde_json::json!({"code":"00000","data":rows}),
+        )
+    };
+    h.respond(path, 200, &body.to_string());
+}
+
 fn position_message(rows: serde_json::Value) -> String {
     serde_json::json!({"arg":{"channel":"positions","topic":"position"},"action":"snapshot","data":rows}).to_string()
 }
@@ -446,10 +470,12 @@ fn malformed_ws_positions_retain_cached_leg_and_admit_peers_for_classic_and_uta(
     for unified in [false, true] {
         for malformed in [serde_json::json!({"bad":1}), serde_json::json!("-1")] {
             let mut h = row_engine(unified);
-            h.private_message(&position_message(serde_json::json!([
+            let seed = serde_json::json!([
                 hedge_row("long", serde_json::json!("2")),
                 hedge_row("short", serde_json::json!("3"))
-            ])));
+            ]);
+            position_census(&mut h, unified, seed.clone());
+            h.private_message(&position_message(seed));
             h.private_message(&position_message(serde_json::json!([
                 hedge_row("long", malformed),
                 hedge_row("short", serde_json::json!("5"))
@@ -478,9 +504,20 @@ fn malformed_ws_positions_retain_cached_leg_and_admit_peers_for_classic_and_uta(
                     .any(|m| m.contains("skipped Bitget position stream record"))
             );
             h.private_message(&position_message(serde_json::json!([])));
+            assert_eq!(
+                h.engine.store().positions().len(),
+                2,
+                "empty WS retains both legs"
+            );
+            h.now += 5_001.0;
+            h.command(safe_cex_engine::Command::Venue {
+                command: 880,
+                action: safe_cex_engine::VenueAction::ReadPositions,
+            });
+            position_census(&mut h, unified, serde_json::json!([]));
             assert!(
                 h.engine.store().positions().is_empty(),
-                "authoritative empty follow-up clears retained leg"
+                "clean REST absence clears retained legs"
             );
         }
     }
@@ -488,10 +525,12 @@ fn malformed_ws_positions_retain_cached_leg_and_admit_peers_for_classic_and_uta(
 #[test]
 fn unidentified_ws_position_row_holds_absence_while_known_peer_updates() {
     let mut h = row_engine(false);
-    h.private_message(&position_message(serde_json::json!([
+    let seed = serde_json::json!([
         hedge_row("long", serde_json::json!("2")),
         hedge_row("short", serde_json::json!("3"))
-    ])));
+    ]);
+    position_census(&mut h, false, seed.clone());
+    h.private_message(&position_message(seed));
     h.private_message(&position_message(serde_json::json!([
         {},
         hedge_row("short", serde_json::json!("5"))
@@ -601,21 +640,25 @@ fn repeated_malformed_ws_snapshot_cannot_starve_fresh_rest_only_position_peer() 
 }
 
 #[test]
-fn malformed_snapshot_cannot_erase_clean_empty_proof_for_an_older_rest_read() {
-    let mut h = Harness::classic();
+fn empty_then_malformed_ws_snapshot_cannot_fabricate_a_rest_absence_fence() {
+    let mut h = two_market_rows();
     let read = h.take("/all-position");
     h.private_message(&position_message(serde_json::json!([])));
+    assert_eq!(h.engine.store().positions().len(), 1);
     h.now += 1.0;
     h.private_message(&position_message(serde_json::json!([{}])));
-    let peer = hedge_row("short", serde_json::json!("3"));
+    let mut peer = hedge_row("long", serde_json::json!("3"));
+    peer["symbol"] = serde_json::json!("ETHUSDT");
+    peer["posMode"] = serde_json::json!("one_way_mode");
     h.reply(
         read.id,
         200,
         &serde_json::json!({"code":"00000","data":[peer]}).to_string(),
     );
-    assert!(
-        h.engine.store().positions().is_empty(),
-        "bad snapshot erased earlier clean-empty read fence"
+    assert_eq!(
+        h.engine.store().positions().len(),
+        2,
+        "malformed BTC is retained and REST-only ETH is admitted"
     );
     h.timer_after(499.0);
     h.respond(
@@ -626,19 +669,21 @@ fn malformed_snapshot_cannot_erase_clean_empty_proof_for_an_older_rest_read() {
     assert_eq!(
         h.engine.store().positions().len(),
         1,
-        "fresh read after clean proof must heal normally"
+        "fresh REST heals the malformed observation"
     );
+    assert_eq!(h.engine.store().positions()[0].symbol, "ETHUSDT");
 }
+
 #[test]
 fn rejected_ws_leg_protects_mode_coherence_through_an_older_rest_join() {
     let mut h = Harness::classic();
     let hedge = hedge_row("long", serde_json::json!("2"));
-    h.private_message(&position_message(serde_json::json!([hedge])));
     h.respond(
         "/all-position",
         200,
         &serde_json::json!({"code":"00000","data":[hedge]}).to_string(),
     );
+    h.private_message(&position_message(serde_json::json!([hedge])));
     h.timer_after(500.0);
     let old = h.take("/all-position");
     h.now += 1.0;
@@ -730,12 +775,12 @@ fn rejected_ws_protection_retains_cancel_route_against_older_rest_plan_metadata(
 fn rejected_ws_leg_does_not_erase_prior_valid_financial_timestamp() {
     let mut h = Harness::classic();
     let seed = hedge_row("long", serde_json::json!("2"));
-    h.private_message(&position_message(serde_json::json!([seed])));
     h.respond(
         "/all-position",
         200,
         &serde_json::json!({"code":"00000","data":[seed]}).to_string(),
     );
+    h.private_message(&position_message(serde_json::json!([seed])));
     h.now += 1.0;
     h.private_message(&position_message(serde_json::json!([hedge_row(
         "long",
@@ -819,10 +864,21 @@ fn partial_and_mixed_ws_modes_cannot_flip_global_mode_across_symbols() {
                     .iter()
                     .all(|p| p.position_mode == Some(safe_cex_engine::model::PositionMode::Oneway))
             );
-            // A complete consistent proof can still change account mode.
             eth["posMode"] = serde_json::json!("hedge_mode");
             eth["total"] = serde_json::json!("3");
             h.private_message(&position_message(serde_json::json!([btc, eth])));
+            assert!(
+                !h.engine.store().hedged(),
+                "even a coherent WS frame cannot prove the prior mode absent"
+            );
+            // Retire the old read, then issue a repair beyond the row freshness hold.
+            position_census(&mut h, false, serde_json::json!([]));
+            h.now += 5_001.0;
+            h.command(safe_cex_engine::Command::Venue {
+                command: 881,
+                action: safe_cex_engine::VenueAction::ReadPositions,
+            });
+            position_census(&mut h, false, serde_json::json!([btc, eth]));
             assert!(h.engine.store().hedged());
             assert!(
                 h.engine
@@ -852,8 +908,13 @@ fn initial_authenticated_malformed_snapshot_cannot_load_empty_positions() {
     assert!(h.engine.store().positions().is_empty());
     h.private_message(&position_message(serde_json::json!([])));
     assert!(
+        !h.engine.store().loaded().positions,
+        "empty WS is not a census"
+    );
+    position_census(&mut h, false, serde_json::json!([]));
+    assert!(
         h.engine.store().loaded().positions,
-        "valid empty proof must establish readiness"
+        "clean empty REST establishes readiness"
     );
 }
 
