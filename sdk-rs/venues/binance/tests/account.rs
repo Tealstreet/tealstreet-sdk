@@ -1975,12 +1975,12 @@ fn a_take_profit_moved_past_the_price_is_refused_before_its_cancel() {
 }
 
 #[test]
-fn a_stop_moved_far_from_the_mark_is_refused_before_its_cancel() {
+fn a_stop_moved_to_another_symbols_price_is_refused_before_its_cancel() {
     use safe_cex_engine::model::StopTriggerType::MarkPrice;
     let mut h = ready();
     let id = protective(&mut h, OrderType::StopLoss, MarkPrice);
-    // The right side of the price, but 58% away: a price meant for another symbol.
-    amend(&mut h, &id, 40_000.0);
+    // The right side of the price, but 1/19th of it: a price meant for another symbol.
+    amend(&mut h, &id, 5_000.0);
     assert!(!h.has_request("/fapi/v1/algoOrder"));
     assert_eq!(failure(&h).outcome, Some(safe_cex_engine::error::Outcome::NotSent));
 }

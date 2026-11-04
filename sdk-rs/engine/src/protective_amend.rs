@@ -6,8 +6,31 @@ use crate::store::Store;
 
 /// A ticker older than this does not count as the price the venue will check.
 pub const FRESH_TICKER_MS: f64 = 5_000.0;
-/// Further than this from the symbol's own price is a price meant for something else.
-const IMPLAUSIBLE_DISTANCE: f64 = 0.5;
+/// A trigger this many times above or below the symbol's own price is a price meant
+/// for another symbol. Far but real stops (30-90% away on an alt) stay allowed.
+const IMPLAUSIBLE_RATIO: f64 = 10.0;
+
+/// A leg named after the order it belongs to (`{id}__tp`, `{id}_sl`, as in
+/// `order_locks`), or one naming its parent.
+fn attached(store: &Store, order: &crate::model::Order) -> bool {
+    const LEG_SUFFIXES: [&str; 8] = [
+        "__stop_loss",
+        "__take_profit",
+        "__trailing_stop_loss",
+        "__tp",
+        "__sl",
+        "_tsl",
+        "_sl",
+        "_tp",
+    ];
+    order.parent_id.is_some()
+        || LEG_SUFFIXES.iter().any(|suffix| {
+            order
+                .id
+                .strip_suffix(suffix)
+                .is_some_and(|parent| store.order(parent).is_some())
+        })
+}
 
 /// The refusal as the caller sees it: invalid input, and nothing was sent.
 pub fn refused(reason: Option<String>) -> crate::error::VenueError {
@@ -26,8 +49,8 @@ pub fn fresh_ticker(store: &Store, symbol: &str, now: f64) -> bool {
 }
 
 /// Why an amend of order `id` to `price` must not be sent, if it must not.
-/// Where the venue `reclassifies` the order by its new price, only the
-/// implausible-distance guard applies here; the venue judges the rest.
+/// Where the venue judges the trigger itself (`Venue::judges_protective_amend`),
+/// only the implausible-price guard applies here.
 pub fn refusal(
     store: &Store,
     id: &str,
@@ -36,8 +59,8 @@ pub fn refusal(
     reclassifies: impl FnOnce(&crate::model::Order) -> bool,
 ) -> Option<String> {
     let order = store.order(id)?;
-    // An attached leg is a field of its parent order, amended in place: nothing is canceled.
-    if order.parent_id.is_some() {
+    // An attached or virtual leg is a field of its parent order, amended in place.
+    if attached(store, order) {
         return None;
     }
     let name = match order.kind {
@@ -50,18 +73,21 @@ pub fn refusal(
         return None;
     }
     let ticker = store.ticker(&order.symbol)?;
+    // Only a fresh price stands for the venue's; a stale one refuses nothing.
+    if !fresh_ticker(store, &order.symbol, now) {
+        return None;
+    }
     let usable = |price: f64| (price.is_finite() && price > 0.0).then_some(price);
     let unchanged = format!("your {} {name} is unchanged", order.symbol);
     if let Some(own) = usable(ticker.mark).or(usable(ticker.last))
-        && (trigger - own).abs() / own > IMPLAUSIBLE_DISTANCE
+        && (trigger / own > IMPLAUSIBLE_RATIO || own / trigger > IMPLAUSIBLE_RATIO)
     {
         return Some(format!(
-            "A {name} at {trigger} is more than {:.0}% from the {} price {own}; {unchanged}",
-            IMPLAUSIBLE_DISTANCE * 100.0,
+            "A {name} at {trigger} is over {IMPLAUSIBLE_RATIO}x away from the {} price {own}, a price for another symbol; {unchanged}",
             order.symbol,
         ));
     }
-    if !fresh_ticker(store, &order.symbol, now) || reclassifies(order) {
+    if reclassifies(order) {
         return None;
     }
     let references: &[(&str, f64)] = match order.trigger_type {
@@ -160,19 +186,29 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_ticker_refuses_nothing_but_the_implausible() {
+    fn a_stale_ticker_refuses_nothing() {
         let store = fixture(OrderType::StopLoss, OrderSide::Sell, Some(StopTriggerType::MarkPrice));
         let later = 1_000.0 + FRESH_TICKER_MS + 1.0;
         assert!(refusal(&store, "o", Some(100.0), later, |_| false).is_none());
-        assert!(refusal(&store, "o", Some(1_880.0), later, |_| false).is_some());
-        assert!(refusal(&store, "o", Some(40.0), later, |_| false).is_some());
+        assert!(refusal(&store, "o", Some(18_800.0), later, |_| false).is_none());
+    }
+
+    #[test]
+    fn a_far_but_real_stop_stands_and_another_symbols_price_does_not() {
+        let store = fixture(OrderType::StopLoss, OrderSide::Sell, Some(StopTriggerType::MarkPrice));
+        // 60% below a volatile alt's price is a real stop.
+        assert!(refusal(&store, "o", Some(40.0), 1_000.0, |_| false).is_none());
+        assert!(refusal(&store, "o", Some(9.0), 1_000.0, |_| false).is_some());
+        let store = fixture(OrderType::TakeProfit, OrderSide::Sell, Some(StopTriggerType::LastPrice));
+        assert!(refusal(&store, "o", Some(250.0), 1_000.0, |_| false).is_none());
+        assert!(refusal(&store, "o", Some(1_880.0), 1_000.0, |_| false).is_some());
     }
 
     #[test]
     fn a_reclassifying_venue_keeps_only_the_implausible_guard() {
         let store = fixture(OrderType::StopLoss, OrderSide::Sell, Some(StopTriggerType::MarkPrice));
         assert!(refusal(&store, "o", Some(100.0), 1_000.0, |_| true).is_none());
-        assert!(refusal(&store, "o", Some(1_880.0), 1_000.0, |_| true).is_some());
+        assert!(refusal(&store, "o", Some(18_800.0), 1_000.0, |_| true).is_some());
     }
 
     #[test]

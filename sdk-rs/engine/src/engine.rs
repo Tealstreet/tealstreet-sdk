@@ -3784,9 +3784,10 @@ pub trait Venue {
     fn cancel_needs_stored_order(&self) -> bool {
         false
     }
-    /// An amend of this stop or take profit may turn it into the other kind by
-    /// where its new price lies; the venue then judges which kind stands.
-    fn amend_reclassifies(&self, _order: &crate::model::Order) -> bool {
+    /// The venue judges this stop or take profit edit's trigger itself: it may turn
+    /// the order into the other kind by where the new price lies, or check a native
+    /// kind the stored one does not show. The engine then keeps only its implausible-price guard.
+    fn judges_protective_amend(&self, _order: &crate::model::Order) -> bool {
         false
     }
     /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
@@ -5353,12 +5354,12 @@ impl<V: Venue> Engine<V> {
             Event::Command(Command::AmendOrder {
                 command, ref id, price, ..
             }) if crate::protective_amend::refusal(cx.store, id, price, now, |order| {
-                self.venue.amend_reclassifies(order)
+                self.venue.judges_protective_amend(order)
             })
             .is_some() =>
             {
                 let reason = crate::protective_amend::refusal(cx.store, id, price, now, |order| {
-                    self.venue.amend_reclassifies(order)
+                    self.venue.judges_protective_amend(order)
                 });
                 cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
             }
@@ -5366,12 +5367,12 @@ impl<V: Venue> Engine<V> {
             Event::Command(Command::AmendOrderWithSymbol {
                 command, ref id, price, ..
             }) if crate::protective_amend::refusal(cx.store, id, price, now, |order| {
-                self.venue.amend_reclassifies(order)
+                self.venue.judges_protective_amend(order)
             })
             .is_some() =>
             {
                 let reason = crate::protective_amend::refusal(cx.store, id, price, now, |order| {
-                    self.venue.amend_reclassifies(order)
+                    self.venue.judges_protective_amend(order)
                 });
                 cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
             }

@@ -663,6 +663,23 @@ SDK.
   accepts the old ID there, because a rejection silently falls back to
   cancel+replace.
 
+## Protective edits never drop the protection
+
+Most venues amend a stop or take profit by cancel-then-place, so a replacement
+the venue refuses would leave the position unprotected. Before the cancel, the
+engine (`sdk-rs/engine/src/protective_amend.rs`) refuses `notSent` an amend
+whose new trigger already fires against the order's own reference (mark or last
+per its trigger type, both when unknown) or sits over 10x from the symbol's
+price (a price meant for another symbol), but only on a ticker that changed in
+the last 5 s; attached and virtual legs (edited in place on the parent) are
+exempt. A venue that judges the trigger itself (`Venue::judges_protective_amend`:
+Bybit's Partial drag and Hyperliquid's TP-to-SL reclassify by price, BingX
+checks its native kind) keeps only the 10x guard. When Binance or Bybit refuse
+a replacement after its cancel landed, the old order is placed again exactly,
+once; the error then carries `protection: 'restored' | 'unprotected'`
+(`ExchangeError.protection`, kept by `serializeCommandError`). A stop the cancel
+found already gone (filled or triggered) is never put back.
+
 ## Automatic retries are for reads only
 
 **Never let `axios-retry` resend a write.** A connection reset after the venue

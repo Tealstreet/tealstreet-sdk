@@ -205,12 +205,14 @@ fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
             ),
         );
         e.drain_plain().for_each(drop);
+        // A sell stop moves below the price, a take profit above it.
+        let moved = if raw.starts_with("take-profit") { 103. } else { 97. };
         e.handle(
             NOW,
             Event::Command(Command::AmendOrder {
                 command: 5,
                 id: "TRIGGER".into(),
-                price: Some(97.),
+                price: Some(moved),
                 amount: None,
             }),
         );
@@ -224,7 +226,7 @@ fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
                 })
                 .unwrap();
             assert!(r.url.ends_with("AmendOrder"));
-            assert!(r.body.unwrap().contains("trigger_price=97"));
+            assert!(r.body.unwrap().contains(&format!("trigger_price={moved}")));
         } else {
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(

@@ -719,7 +719,6 @@ fn a_stop_against_the_open_position_goes_through_trading_stop() {
 #[test]
 fn amends_in_place_and_moves_attached_brackets_on_the_parent() {
     let mut h = ready();
-    price_at(&mut h, "ETHUSDT", 1_700.0);
     h.command(Command::AmendOrder {
         command: 12,
         id: ORDER_ID.into(),
@@ -4167,7 +4166,6 @@ fn a_frame_fed_engine_refuses_a_trailing_take_profit_amend_from_the_source_state
 #[test]
 fn an_id_no_longer_trailing_amends_as_an_ordinary_full_take_profit() {
     let mut h = ready();
-    price_at(&mut h, "BTCUSDT", 99_000.0);
     let mut row = trailing_profit_row();
     row["symbol"] = serde_json::json!("BTCUSDT");
     row["triggerPrice"] = serde_json::json!("100000");

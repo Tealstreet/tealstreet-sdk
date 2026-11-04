@@ -1183,7 +1183,7 @@ fn a_partial_stop_moved_to_another_symbols_price_is_refused_before_its_cancel() 
         assert!(!h.has_request(profile.cancel_path()), "{profile:?}");
         assert!(!h.has_request("/v5/position/trading-stop"));
         let error = h.result(91).unwrap().as_ref().unwrap_err();
-        assert!(error.contains("50%"), "{error}");
+        assert!(error.contains("another symbol"), "{error}");
     }
 }
 

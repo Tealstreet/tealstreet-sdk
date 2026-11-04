@@ -90,6 +90,8 @@ export interface VenueErrorDetail {
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
+  /** A stop or take-profit edit refused after its cancel: the old order was put back, or nothing protects the position. */
+  protection?: 'restored' | 'unprotected';
   partial?: { orderIds: string[]; total?: number; failedIndex?: number };
   builderAuthorization?: BuilderAuthorizationDetail;
 }
@@ -194,6 +196,7 @@ export class ExchangeError extends Error {
   readonly venueCode?: string;
   readonly venueMessage?: string;
   readonly retryAfterMs?: number;
+  readonly protection?: NonNullable<VenueErrorDetail['protection']>;
   readonly partialOrderIds?: string[];
   readonly partialOrderCount?: number;
   readonly totalOrderCount?: number;

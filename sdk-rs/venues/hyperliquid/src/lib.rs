@@ -1053,7 +1053,11 @@ impl Venue for Hyperliquid {
     }
     fn on_open(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId) {}
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
-    fn cancel_needs_stored_order(&self) -> bool {
+    /// A take profit amended through the price is replaced as a stop (`trading.rs`).
+    fn judges_protective_amend(&self, order: &safe_cex_engine::model::Order) -> bool {
+        order.kind == safe_cex_engine::model::OrderType::TakeProfit
+    }
+        fn cancel_needs_stored_order(&self) -> bool {
         true
     }
 

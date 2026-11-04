@@ -81,6 +81,8 @@ export type SerializedCommandError = {
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
+  /** A stop or take-profit edit refused after its cancel: the old order was put back, or nothing protects the position. */
+  protection?: 'restored' | 'unprotected';
   clientOrderId?: string;
   clientOrderIds?: string[];
   /** Correlates this immutable snapshot with later native receipt events. */
@@ -130,6 +132,7 @@ export const serializeCommandError = (value: unknown): SerializedCommandError =>
   if (typeof source.retryAfterMs === 'number' && Number.isFinite(source.retryAfterMs) && source.retryAfterMs >= 0) {
     result.retryAfterMs = source.retryAfterMs;
   }
+  if (source.protection === 'restored' || source.protection === 'unprotected') result.protection = source.protection;
   for (const key of ['clientOrderIds', 'actualClientOrderIds', 'partialOrderIds'] as const) {
     const ids = source[key];
     if (Array.isArray(ids) && ids.every((id): id is string => typeof id === 'string')) result[key] = [...ids];

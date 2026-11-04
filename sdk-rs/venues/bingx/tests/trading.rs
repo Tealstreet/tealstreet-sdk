@@ -34,6 +34,10 @@ struct TestVenue {
 }
 impl Venue for TestVenue {
     type Pending = Pending;
+    // As `Bingx`: its native trigger kind decides and it checks the trigger itself.
+    fn judges_protective_amend(&self, _order: &Order) -> bool {
+        true
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.trading.set_min_order_value("BTC-USDT", 2.0);
         cx.store.set_markets(vec![market()]);
@@ -1115,7 +1119,7 @@ fn last_price_trigger_amendment_rejects_a_crossed_last_even_when_mark_is_safe() 
         h.requests.is_empty(),
         "must not cancel the existing protective stop"
     );
-    assert!(h.done[0].as_ref().unwrap_err().contains("immediately"));
+    assert!(h.done[0].as_ref().unwrap_err().contains("immediately"), "{:?}", h.done);
     assert_eq!(
         h.engine.store().order(&order().id).unwrap().status,
         OrderStatus::Open

@@ -2718,7 +2718,7 @@ impl Venue for BybitLinear {
         !self.variant.is_spot()
     }
 
-    fn amend_reclassifies(&self, order: &safe_cex_engine::model::Order) -> bool {
+    fn judges_protective_amend(&self, order: &safe_cex_engine::model::Order) -> bool {
         self.partial_stop(order)
     }
         fn cancel_needs_stored_order(&self) -> bool {
