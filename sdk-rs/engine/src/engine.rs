@@ -4889,6 +4889,7 @@ impl<V: Venue> Engine<V> {
             }
         });
         let covers = covers.flatten();
+        #[cfg(feature = "order-locks")]
         let cover = covers.as_ref().and_then(|covers| covers.account);
         cx.io.core.source_orders_covers = covers;
         self.venue.on_frame_ingested(&mut cx);
