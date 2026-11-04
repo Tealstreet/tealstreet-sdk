@@ -17,3 +17,10 @@ test('malformed URLs, methods and arbitrarily deep paths stay bounded without ca
   assert.ok(facts.path.endsWith('/:more'));
   assert.doesNotMatch(facts.path, /SECRET/);
 });
+
+test('the real BloFin startup order families remain distinct without their cursor or signature', () => {
+  for (const endpoint of ['orders-pending', 'orders-tpsl-pending', 'orders-algo-pending'])
+    assert.deepEqual(requestFailureFields({ method: 'GET', url: `https://openapi.blofin.com/api/v1/trade/${endpoint}?after=SECRET&signature=SECRET` }),
+      { method: 'GET', path: `/api/v1/trade/${endpoint}` });
+  assert.ok(requestFailureFields({ method: 'GET', url: 'https://venue.test/' + 'batch-leverage-info/'.repeat(100) }).path.length <= 160);
+});
