@@ -97,3 +97,13 @@ sixteen-pair case. Relative to nine pairs on these same runners, sixteen adds
 about 39–42 s per case, or 28–30 aggregate runner-minutes over the 43 public
 cases before any eligible second measurements. The overseer approved that
 cost. Twenty-four pairs would cost another 44–48 s per case over sixteen.
+
+
+Independent original run `41876207480` retained four more complete A/A
+cohorts: 8370C, 9V45 and two 9V74 runners. Every sixteen-pair arm passed the
+unchanged strict objectives, with matching A/B verdicts. Together the two
+runs cover eight runners and 512 original performance children: sixteen-pair
+verdicts agree on all eight, while twelve pairs disagree on the first run's
+7763. The second 9V45's raw contrast was still 6.1% apart. Sixteen is the
+smallest evaluated budget with consistent strict verdicts across this evidence,
+not a guarantee against future variance or an exemption for the 7763 failure.
