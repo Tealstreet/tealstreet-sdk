@@ -1722,6 +1722,19 @@ that origin's entries and leases. Cache hits make no physical request and consum
 no quota. Invalidation after native parsing uses the closed `discovery` failure
 kind supplied by #3046; HTTP/JSON errors already invalidate at the cache boundary.
 
+The same `SharedCatalogue` coordinator owns anonymous Binance `exchangeInfo`
+GET sharing. Binance and Hyperliquid have separate closed eligibility/validation
+policies; account requests, writes, tokens and candles never participate. Binance
+keys include exact endpoint/query, network and resolved public route. Valid replies
+have a 5 s TTL and an 8 MiB cap; leases last at most 25 s and never exceed their
+owner's original managed deadline. Followers never bypass an active lease or
+cooldown. Failed physical reads publish owner-fenced 1/2/4/8/16/30 s cooldowns,
+honoring Retry-After up to five minutes before followers can elect again.
+Unavailable storage from startup preserves independent native discovery/backoff.
+After a successful coordination transaction, storage loss refuses preparation
+instead of bypassing an unknown lease. Waiter cancellation never deletes a peer's
+lease/cooldown; each engine still parses and publishes its own catalogue.
+
 Rust account `socketHealth.reconnectDiagnostics` carries bounded last-close
 snapshots for public/private/business channels and the primary HOW adapter,
 plus maximum hidden timer lateness across engine/HOW callbacks. These are TS

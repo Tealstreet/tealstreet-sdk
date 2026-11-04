@@ -9,7 +9,7 @@ import type { HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
 import type { BybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
-import type { CatalogueRead } from './hyperliquidCatalogue';
+import type { CatalogueRead } from './sharedCatalogue';
 import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } from './types';
 
 import { AxiosHeaders } from 'axios';
@@ -31,6 +31,7 @@ import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/
 import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
+import { sharedBinanceCatalogue } from './binanceCatalogue';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
@@ -728,10 +729,36 @@ const httpTransport = (
           signal,
         );
         if (catalogueRead) catalogueOrigins.add(original.origin);
+      } else if (['binance', 'binancepm', 'binanceinverse', 'binancespot'].includes(exchange)) {
+        // Only resolved public routing facts enter the anonymous catalogue key.
+        const routeEndpoint = tunnelAdapter
+          ? new URL(tunnelEgressUrl(routing.howEgress))
+          : prefix
+            ? new URL(prefix)
+            : undefined;
+        if (
+          !routeEndpoint ||
+          !(routeEndpoint.username || routeEndpoint.password || routeEndpoint.search || routeEndpoint.hash)
+        ) {
+          catalogueRead = await untilAborted(
+            sharedBinanceCatalogue.prepare({ ...request, intent }, signal, started + deadlineMs, {
+              network: options.testnet ? 'testnet' : 'mainnet',
+              route: tunnelAdapter
+                ? `how:${routing.howEgress}:${routeEndpoint!.href}`
+                : routeEndpoint
+                  ? `proxy:${routeEndpoint.href}`
+                  : 'direct',
+            }),
+            signal,
+          );
+        }
       }
       const cached = catalogueRead?.cached;
       const cacheFresh = () =>
         !cached || (Date.now() >= catalogueRead!.cachedAt! && Date.now() < catalogueRead!.expiresAt!);
+      const leaseFresh = () =>
+        catalogueRead?.leaseExpiresAt === undefined ||
+        (Date.now() >= catalogueRead.leaseStartedAt! && Date.now() < catalogueRead.leaseExpiresAt);
       const how = tunnelAdapter as Partial<DisposableAxiosAdapter> | undefined;
       if (!cached && tunnelAdapter) {
         const prepareTunnel = intent === undefined ? how?.prepareLegacy : how?.prepare;
@@ -903,12 +930,16 @@ const httpTransport = (
           return {
             ...(budgetGeneration === undefined ? {} : { admitDispatch }),
             ready() {
-              return beforeRelease(() => !sent && ready());
+              return beforeRelease(() => {
+                if (!leaseFresh()) throw new HttpPreparationError('stale');
+                return !sent && ready();
+              });
             },
             dispatch() {
               if (budgetGeneration !== undefined && !admitted) return admitDispatch(() => this.dispatch());
               beforeRelease(() => {
                 if (sent) throw new HttpPreparationError('invalid');
+                if (!leaseFresh()) throw new HttpPreparationError('stale');
               });
               sent = true;
               if (!cached) infoRead?.sent();
@@ -934,13 +965,17 @@ const httpTransport = (
                   })
                   .then(wrap)
                   .catch((error) => {
-                    // No answer through the relay, and nobody called it off: the relay is down.
-                    if (tunnelAdapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
-                      proxyAuthorization?.failed(
-                        relayFailed(exchange, error instanceof Error ? error : new Error(String(error))),
-                      );
-                    cancel();
-                    throw error;
+                    const report = (): never => {
+                      // No answer through the relay, and nobody called it off: the relay is down.
+                      if (tunnelAdapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
+                        proxyAuthorization?.failed(
+                          relayFailed(exchange, error instanceof Error ? error : new Error(String(error))),
+                        );
+                      cancel();
+                      throw error;
+                    };
+                    const failed = catalogueRead?.failed?.();
+                    return failed ? failed.then(report) : report();
                   });
               } catch (error) {
                 cancel();
