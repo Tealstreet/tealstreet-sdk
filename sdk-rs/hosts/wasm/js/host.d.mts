@@ -43,7 +43,9 @@ export interface PreparedHttp {
 }
 export interface BoundHttp {
   ready(): boolean;
-  /** Invoke the transport API synchronously, return its response promise. */
+  /** Recheck shared admission, then invoke claim + dispatch synchronously in handoff. Not group-compatible. */
+  admitDispatch?(handoff: () => void): Promise<void>;
+  /** Invoke synchronously inside admitDispatch when supplied; otherwise synchronously at call. */
   dispatch(): Promise<HttpResponse>;
   cancel?(): void;
 }

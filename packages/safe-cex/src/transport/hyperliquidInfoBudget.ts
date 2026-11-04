@@ -293,7 +293,7 @@ function waitUntil(at: number, signal: AbortSignal): Promise<void> {
 export class HyperliquidInfoBudget {
   constructor(private readonly backend: InfoBudgetStorage = storage()) {}
 
-  async wait(origin: string, body: string | undefined, deadline: number, signal: AbortSignal): Promise<void> {
+  async wait(origin: string, body: string | undefined, deadline: number, signal: AbortSignal): Promise<number> {
     const weight = hyperliquidInfoWeight(body);
     for (;;) {
       signal.throwIfAborted();
@@ -310,8 +310,39 @@ export class HyperliquidInfoBudget {
       signal.throwIfAborted();
       const current = await this.backend.update(origin, (state) => state.generation === grant.generation);
       if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
-      if (current) return;
+      if (current) return grant.generation;
     }
+  }
+
+  admitDispatch<T>(
+    origin: string,
+    generation: number,
+    deadline: number,
+    signal: AbortSignal,
+    send: () => T,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      let handedOff = false;
+      void this.backend
+        .update(origin, (state) => {
+          // Storage recovery may repeat the callback; a transport handoff is single-use.
+          if (handedOff) return;
+          signal.throwIfAborted();
+          if (Date.now() >= deadline || state.pausedUntil > Date.now() || state.generation !== generation)
+            throw new HttpPreparationError('timedOut');
+          handedOff = true;
+          try {
+            resolve(send());
+          } catch (error) {
+            reject(error);
+          }
+        })
+        .catch((error) => {
+          if (!handedOff) reject(error);
+          // A transaction failure after handoff cannot invalidate or repeat the send.
+          else warnHyperliquidInfoBudgetUnavailable();
+        });
+    });
   }
 
   async response(origin: string, status: number, headers: string): Promise<void> {

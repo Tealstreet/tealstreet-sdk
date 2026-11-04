@@ -1149,7 +1149,11 @@ prepared interface fails explicitly instead of invoking its legacy sender.
 Preparation and binding never send HTTP. Binding preserves signed URL/query/body
 bytes and rejects conflicting host headers; `ready()` rechecks the original
 request deadline and resource, and `dispatch()` invokes fetch/WebSocket.send
-synchronously after the engine release claim. Cancellation releases only that
+synchronously after the engine release claim. A bound resource with `admitDispatch`
+first checks shared admission asynchronously, then invokes claim plus dispatch
+synchronously within its handoff callback. Grouped sends refuse these individual
+guards before claim. Direct callers of guarded dispatch perform the same check.
+Cancellation releases only that
 request's prepared/bound resources. Opaque legacy requests share the executor but
 retain their older routing and carry no managed release/outcome guarantee.
 

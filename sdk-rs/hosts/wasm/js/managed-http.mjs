@@ -114,8 +114,15 @@ export class ManagedHttp {
     } catch (error) { this.fail(token, resource, preparationReason(error, 'network')); }
   }
 
-  claim(token, resource, permit, request) {
+  claim(token, resource, permit, request, admitted = false) {
     if (!this.live(token, resource)) return;
+    if (!admitted && resource.bound.admitDispatch) {
+      try {
+        void Promise.resolve(resource.bound.admitDispatch(() => this.claim(token, resource, permit, request, true)))
+          .catch((error) => this.fail(token, resource, preparationReason(error, 'invalid')));
+      } catch (error) { this.fail(token, resource, preparationReason(error, 'invalid')); }
+      return;
+    }
     const { host } = this;
     let response;
     try {

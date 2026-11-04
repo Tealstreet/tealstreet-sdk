@@ -40,7 +40,10 @@ join preserves orders and retries instead of silently ending the read.
 The SDK transport admits all `/info` reads through one weighted token bucket per
 API origin, including metadata, candles and history. Its initial 1,000-weight
 capacity permits cold discovery immediately, then refills at 1,000 weight/minute.
-A 429 empties the bucket and pauses refill until Retry-After ends.
+A 429 empties the bucket and pauses refill until Retry-After ends. Immediately
+before dispatch, an atomic shared-state check refuses prepared reads whose grant
+generation changed or whose origin is paused. Managed claim and send execute
+synchronously within that check, before the transaction releases its lock.
 Atomic IndexedDB transactions share admission and 429 pauses across account
 workers/tabs; runtimes without
 IndexedDB share a budget within their JS realm. Storage operations have a 1.5-second
@@ -51,6 +54,7 @@ storage failures use one-quarter speed because shared and local budgets may spli
 After a 30-second cooldown, reads retry IndexedDB and max-merge local
 reservations and 429 pauses back into shared state, invalidating prior grants.
 While storage is unavailable, independent realms cannot share their 429 pauses.
+If IDB never opens, each realm has its own full 1,000-weight initial bucket.
 Only pacing timestamps and retry counters are stored, never account or request
 data. Persisted pauses/reservations are
 bounded relative to the current clock, and Retry-After pauses cap at five minutes.

@@ -26,6 +26,7 @@ export function bindGroup(manager, action, reason) {
         resource.phase = 'bound';
         resource.groupRequest = member.packet.request;
       }
+      if (resource.bound?.admitDispatch) { failGroup(manager, members, 'unsupported'); return; }
       if (!resource.bound || typeof resource.bound.ready !== 'function' || typeof resource.bound.dispatch !== 'function') throw new Error('Invalid bound HTTP group resource');
     }
   } catch (error) { const code = reason(error, 'invalid'); failGroup(manager, members, code === 'stale' ? 'invalid' : code); return; }

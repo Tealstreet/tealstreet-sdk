@@ -2,7 +2,7 @@ import type { HyperliquidInfoBudget } from './hyperliquidInfoBudget';
 
 import { setImmediate } from 'node:timers';
 
-import { IDBDatabase, IDBFactory } from 'fake-indexeddb';
+import { IDBDatabase, IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
@@ -133,7 +133,7 @@ describe('unavailable shared storage', () => {
     });
     await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
     const controller = new AbortController();
-    let pending: Promise<PromiseSettledResult<void>[]> | undefined;
+    let pending: Promise<PromiseSettledResult<number>[]> | undefined;
     if (mode === 'pause') {
       await a.response(ORIGIN, 429, 'Retry-After: 60');
       await vi.advanceTimersByTimeAsync(30_000);
@@ -654,4 +654,114 @@ describe('managed transport admission', () => {
       b.dispose?.();
     }
   });
+});
+
+describe('independent review boundaries', () => {
+  it('review: independent module realms share the healthy bucket atomically', async () => {
+    const a = client();
+    await spend(a);
+    vi.resetModules();
+    const realm = await import('./hyperliquidInfoBudget');
+    const b = new realm.HyperliquidInfoBudget(new realm.IndexedInfoBudgetStorage(factory));
+    let admitted = false;
+    const waiting = b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => (admitted = true));
+    await flushDatabase();
+    expect(admitted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1199);
+    expect(admitted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await waiting;
+    expect(admitted).toBe(true);
+  });
+
+  it('review: documents cold unavailable storage multiplying the burst across realms', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const unavailable = {
+      open: () => {
+        throw new DOMException('denied', 'SecurityError');
+      },
+    } as unknown as IDBFactory;
+    const a = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
+    await spend(a);
+    vi.resetModules();
+    const realm = await import('./hyperliquidInfoBudget');
+    const b = new realm.HyperliquidInfoBudget(new realm.IndexedInfoBudgetStorage(unavailable));
+    await spend(b);
+    expect(Date.now()).toBe(1_000_000);
+  });
+
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    'prepared unsent read respects a later 429: separate realms=%s, already bound=%s',
+    async (separateRealm, alreadyBound) => {
+      vi.stubGlobal('indexedDB', factory);
+      const { createEngineTransport } = await import('./engine');
+      const sends: string[] = [];
+      const packet = { request: 1, method: 'POST' as const, url: ORIGIN + '/info', headers: {}, body: ORDERS };
+      const a = createEngineTransport(
+        'hyperliquid',
+        { key: '', secret: '', publicDataOnly: true },
+        {
+          ...nativeTransport(),
+          prepareHttp: () => ({
+            bind: () => ({
+              ready: () => true,
+              dispatch: async () => {
+                sends.push('prepared after 429');
+                return { status: 200, headers: '', body: new Uint8Array() };
+              },
+            }),
+          }),
+        },
+      );
+      if (separateRealm) vi.resetModules();
+      const createOther = separateRealm ? (await import('./engine')).createEngineTransport : createEngineTransport;
+      const b = createOther(
+        'hyperliquidspot',
+        { key: '', secret: '', publicDataOnly: true },
+        {
+          ...nativeTransport(),
+          request: async () => {
+            sends.push('429');
+            return { status: 429, headers: 'Retry-After: 30', body: new Uint8Array() };
+          },
+        },
+      );
+      try {
+        const prepared = await a.prepareHttp!({ ...packet, intent: 'public' });
+        const bound = alreadyBound ? prepared.bind(packet) : undefined;
+        expect(sends).toEqual([]);
+        expect((await b.request({ ...packet, request: 2 })).status).toBe(429);
+        await expect(b.request({ ...packet, request: 3 })).rejects.toMatchObject({
+          code: 'HTTP_PREPARATION_TIMED_OUT',
+        });
+        await expect(Promise.resolve().then(() => (bound ?? prepared.bind(packet)).dispatch())).rejects.toMatchObject({
+          code: 'HTTP_PREPARATION_TIMED_OUT',
+        });
+        expect(sends).toEqual(['429']);
+      } finally {
+        a.dispose?.();
+        b.dispose?.();
+      }
+    },
+  );
+});
+
+it('does not repeat a physical send when its final admission transaction fails after handoff', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const budget = client();
+  const controller = new AbortController();
+  const generation = await budget.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal);
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(() => {
+    throw new DOMException('full', 'QuotaExceededError');
+  });
+  const send = vi.fn(() => 42);
+  expect(await budget.admitDispatch(ORIGIN, generation, Date.now() + 20_000, controller.signal, send)).toBe(42);
+  await flushDatabase();
+  expect(send).toHaveBeenCalledOnce();
+  expect(warn).toHaveBeenCalledOnce();
 });

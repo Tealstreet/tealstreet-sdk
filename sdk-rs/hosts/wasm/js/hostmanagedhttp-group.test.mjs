@@ -41,6 +41,7 @@ function rig(options = {}) {
       return { bind() {
         if (options.bindFailure === request.request) throw new Error('private bind detail');
         return {
+          ...(options.admission ? { admitDispatch: options.admission } : {}),
           ready() { events.push(['ready', request.request]); return options.ready?.(host, request.request) ?? true; },
           dispatch() {
             events.push(['send', request.request]);
@@ -239,3 +240,13 @@ for (const missing of ['httpGroupPending', 'httpClaimGroup']) {
     r.host.dispose();
   });
 }
+
+
+test('shared asynchronous admission refuses grouped resources before claim or send', async () => {
+  const r = rig({ admission() { assert.fail('individual guard cannot protect a group claim'); } });
+  await r.start();
+  assert.equal(r.events.filter(([kind]) => kind === 'claim' || kind === 'send').length, 0);
+  assert.deepEqual(r.events.find(([kind]) => kind === 'preparationFailed'), ['preparationFailed', tokens[0], 'unsupported']);
+  assert.equal(r.host.managedHttp.resources.size, 0);
+  r.host.dispose();
+});
