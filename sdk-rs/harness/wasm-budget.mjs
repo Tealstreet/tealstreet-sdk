@@ -134,6 +134,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #3018 protective amend at 824ff543b6d: CI run 41854021043 measured apexomni 1,972,043, backpack 1,874,324,
 // binance 2,183,974, bybit 2,189,768, coinbase 1,813,226, grvt 1,770,412, phemex 2,038,226, polymarket
 // 1,590,031 and weex 1,923,438 B; ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
+// #3018 after merging master 78bc1ae5a39: CI run 41870743418 at c9d4de158d5 measured bybit 2,201,340 and
+// kraken 2,125,098 B; ddi2il ruling: CI size plus 10 KiB rounded up to the KiB, krakenspot equal to kraken.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
   asterdex: 2_124_800,
@@ -146,14 +148,14 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitunix: 1_849_344,
   blofin: 1_963_008,
   breakoutprop: 1_512_448,
-  bybit: 2_200_576,
+  bybit: 2_211_840,
   coinbase: 1_826_816,
   cryptocom: 1_727_488,
   grvt: 1_780_736,
   hyperliquid: 2_106_368,
   hyperliquidspot: 2_106_368,
-  kraken: 2_121_728,
-  krakenspot: 2_121_728,
+  kraken: 2_136_064,
+  krakenspot: 2_136_064,
   kucoin: 1_681_408,
   kucoinspot: 2_264_064,
   lighter: 2_001_920,
