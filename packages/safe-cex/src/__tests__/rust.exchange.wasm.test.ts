@@ -1458,6 +1458,7 @@ describe('RustEngineExchange', () => {
     const topics: string[] = [];
     let token = 0;
     const transport: Transport = {
+      prepareHttp: prepareRecordedHttp,
       now: () => Date.now(),
       connect: (url, handlers) => {
         expect(url).toMatch(/^wss:\/\/kucoin.test\/socket\?token=token-/);
@@ -1525,6 +1526,7 @@ describe('RustEngineExchange', () => {
     exchange.listenOrderBook('BTCUSDT', () => {});
     await until(() => books.length > 0);
     expect(books[0].bids[0].amount).toBe(3);
+    expect(requests.map(({ url }) => new URL(url).pathname)).not.toContain('/api/v1/timestamp');
     main.dispose();
   });
 

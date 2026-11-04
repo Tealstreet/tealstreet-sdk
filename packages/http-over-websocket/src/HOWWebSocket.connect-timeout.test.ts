@@ -226,3 +226,36 @@ describe('HOW wall-clock connect expiry', () => {
     expect(fallback).not.toHaveBeenCalled();
   });
 });
+
+describe('HOW in a browser worker (no window or document)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    resetTunnelLane();
+    vi.useRealTimers();
+  });
+
+  it('dials and still expires a stuck connect by wall-clock age', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('window', undefined);
+    vi.stubGlobal('document', undefined);
+    resetTunnelLane(true);
+    ConnectingSocket.instances = [];
+    const how = new HOWWebSocket(TOKYO_HOW_EGRESS, ConnectingSocket as unknown as typeof WebSocket);
+    expect(() => how.connectAndSubscribe()).not.toThrow();
+    await vi.advanceTimersByTimeAsync(1);
+    const first = ConnectingSocket.instances[0];
+    vi.setSystemTime(Date.now() + 997_000);
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect(first.closeCalls).toBe(1);
+    how.dispose();
+  });
+
+  it('never guards page globals with typeof, which Next folds to "object" in worker chunks', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('./HOWWebSocket.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/typeof (window|document)\b/);
+  });
+});

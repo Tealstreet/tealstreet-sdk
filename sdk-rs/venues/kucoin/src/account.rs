@@ -37,7 +37,7 @@ pub struct Request {
     /// A position row without a symbol: absence removes no stored position.
     unidentified: bool,
     page: u32,
-    retries: u8,
+    pub(crate) retries: u8,
     invalid: bool,
 }
 impl Request {
@@ -816,7 +816,9 @@ impl Kucoin {
             && envelope.as_ref().is_ok_and(|e| e.code == "200000");
         let rejected_signature = envelope.as_ref().is_ok_and(|e| e.code == "400005");
         if !good {
-            if request.retries < if rejected_signature { 1 } else { 2 } {
+            if !envelope.as_ref().is_ok_and(|e| e.code == "400002")
+                && request.retries < if rejected_signature { 1 } else { 2 }
+            {
                 request.retries += 1;
                 request.invalid = false;
                 // A failed page cannot leave rows staged from that page.

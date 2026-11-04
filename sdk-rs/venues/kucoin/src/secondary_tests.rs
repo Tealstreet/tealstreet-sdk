@@ -1,7 +1,21 @@
 use super::*;
 use crate::support::credentials::Options;
 use crate::support::native_sign as sign;
-use safe_cex_engine::test_support::{ProbeVenue, http_requests};
+use safe_cex_engine::test_support::ProbeVenue;
+fn http_requests<V: safe_cex_engine::Venue>(
+    engine: &mut safe_cex_engine::Engine<V>,
+) -> Vec<safe_cex_engine::HttpRequest> {
+    crate::support::actions(engine)
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
 use safe_cex_engine::{Action, Event, Notice, Query, ReadCredentials};
 fn options() -> Options {
     Options {

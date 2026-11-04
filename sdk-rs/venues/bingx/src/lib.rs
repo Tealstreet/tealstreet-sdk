@@ -454,7 +454,7 @@ impl Bingx {
         if text == "Pong" {
             return;
         }
-        let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
+        let Ok(message) = Message::decode(text) else {
             return;
         };
         if message.ping.is_some() {
@@ -464,66 +464,73 @@ impl Bingx {
         if message.pong.is_some() {
             return;
         }
-        let Some(data) = message.data else { return };
         if message.data_type == "market.contracts" {
-            let result = safe_cex_engine::json::each_in_field::<LiveTicker<'_>>(
-                data.get(),
-                "contracts",
-                |row| {
-                    let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
-                        return;
-                    };
-                    // Before the seed commits, a staged row keeps live fields for its overlay;
-                    // afterwards, like TS, markets the daily or funding read omitted stay absent.
-                    let ticker = match self.seed_index.get(market as usize).copied().flatten() {
-                        Some(ticker) => ticker,
-                        None if !self.tickers_committed => {
-                            let symbol = cx.store.markets()[market as usize].symbol.clone();
-                            let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
-                                return;
-                            };
-                            if !self.staged_tickers.contains(&symbol) {
-                                self.staged_tickers.push(symbol);
-                            }
-                            ticker as usize
+            let mut update = |row: LiveTicker<'_>| {
+                let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
+                    return;
+                };
+                // Before the seed commits, a staged row keeps live fields for its overlay;
+                // afterwards, like TS, markets the daily or funding read omitted stay absent.
+                let ticker = match self.seed_index.get(market as usize).copied().flatten() {
+                    Some(ticker) => ticker,
+                    None if !self.tickers_committed => {
+                        let symbol = cx.store.markets()[market as usize].symbol.clone();
+                        let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
+                            return;
+                        };
+                        if !self.staged_tickers.contains(&symbol) {
+                            self.staged_tickers.push(symbol);
                         }
-                        None => return,
-                    };
-                    let step = cx.store.markets()[market as usize].precision.price;
-                    let mut mask = (1 << 3) | (1 << 4) | (1 << 7);
-                    if row.trade_price > 0.0 {
-                        mask |= 7;
+                        ticker as usize
                     }
-                    if row.change_percentage.is_some() {
-                        mask |= 1 << 5;
+                    None => return,
+                };
+                let step = cx.store.markets()[market as usize].precision.price;
+                let mut mask = (1 << 3) | (1 << 4) | (1 << 7);
+                if row.trade_price > 0.0 {
+                    mask |= 7;
+                }
+                if row.change_percentage.is_some() {
+                    mask |= 1 << 5;
+                }
+                if row.volume.is_some() {
+                    mask |= 1 << 9;
+                }
+                if row.value.is_some() {
+                    mask |= 1 << 10;
+                }
+                cx.store.update_ticker_at(ticker as u32, |t| {
+                    if row.trade_price > 0. {
+                        t.last = row.trade_price;
+                        (t.bid, t.ask) = touch(row.trade_price, step)
                     }
-                    if row.volume.is_some() {
-                        mask |= 1 << 9;
-                    }
-                    if row.value.is_some() {
-                        mask |= 1 << 10;
-                    }
-                    cx.store.update_ticker_at(ticker as u32, |t| {
-                        if row.trade_price > 0. {
-                            t.last = row.trade_price;
-                            (t.bid, t.ask) = touch(row.trade_price, step)
-                        }
-                        t.mark = row.fair_price;
-                        t.index = row.index_price;
-                        t.funding_rate = row.funding_rate / 100.;
-                        t.percentage = row.change_percentage.unwrap_or_default();
-                        t.volume = row.volume.unwrap_or_default();
-                        t.quote_volume = row.value.unwrap_or_default();
-                        t.funding_time = 0.;
-                    });
-                    let symbol = &cx.store.markets()[market as usize].symbol;
-                    self.live_tickers.record(cx.store, symbol, mask);
-                    if self.live_priced.len() <= market as usize {
-                        self.live_priced.resize(cx.store.markets().len(), false);
-                    }
-                    self.live_priced[market as usize] = true;
-                },
-            );
+                    t.mark = row.fair_price;
+                    t.index = row.index_price;
+                    t.funding_rate = row.funding_rate / 100.;
+                    t.percentage = row.change_percentage.unwrap_or_default();
+                    t.volume = row.volume.unwrap_or_default();
+                    t.quote_volume = row.value.unwrap_or_default();
+                    t.funding_time = 0.;
+                });
+                let symbol = &cx.store.markets()[market as usize].symbol;
+                self.live_tickers.record(cx.store, symbol, mask);
+                if self.live_priced.len() <= market as usize {
+                    self.live_priced.resize(cx.store.markets().len(), false);
+                }
+                self.live_priced[market as usize] = true;
+            };
+            let result = if let Some(rows) = message.tickers {
+                rows.into_iter().for_each(&mut update);
+                Ok(true)
+            } else if let Some(data) = message.data {
+                safe_cex_engine::json::each_in_field::<LiveTicker<'_>>(
+                    data.get(),
+                    "contracts",
+                    update,
+                )
+            } else {
+                return;
+            };
             if result.is_err() {
                 cx.notice(
                     Level::Warn,
@@ -533,6 +540,7 @@ impl Bingx {
             }
             return;
         }
+        let Some(data) = message.data else { return };
         if let Some(rest) = message.data_type.strip_prefix("market.depth.") {
             let Some(id) = rest.strip_suffix(".step0.level100") else {
                 return;

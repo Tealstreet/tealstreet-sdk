@@ -617,6 +617,22 @@ impl AsterDex {
             let _ = json::each::<&RawValue>(text, |item| self.on_public_frame(cx, item.get()));
             return;
         }
+        if let Some(frame) = FastAggregate::decode(text) {
+            match frame {
+                FastAggregate::Tickers(rows) => {
+                    for row in rows {
+                        update_ticker(cx, row);
+                    }
+                }
+                FastAggregate::Marks(rows) => {
+                    for row in rows {
+                        update_mark(cx, row);
+                    }
+                }
+            }
+            return;
+        }
+        // General decoding preserves reordered frames and valid prefixes before a typed-row error.
         let Ok(envelope) = serde_json::from_str::<Envelope>(text) else {
             return;
         };
