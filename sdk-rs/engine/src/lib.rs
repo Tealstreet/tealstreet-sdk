@@ -77,7 +77,8 @@ pub use engine::{
     unsupported_venue_action,
 };
 pub use error::{
-    BuilderAuthorization, BuilderAuthorizationReason, ErrorKind, Outcome, Partial, VenueError,
+    BuilderAuthorization, BuilderAuthorizationReason, ErrorCause, ErrorKind, Outcome, Partial,
+    VenueError,
 };
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};

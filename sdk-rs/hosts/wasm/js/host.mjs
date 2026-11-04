@@ -244,6 +244,7 @@ export class ExchangeError extends Error {
     if (builder) Object.assign(this, builder);
     if (ERROR_KINDS.has(detail.kind)) this.kind = detail.kind;
     if (ERROR_OUTCOMES.has(detail.outcome)) this.outcome = detail.outcome;
+    if (typeof detail.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(detail.causeCode)) this.causeCode = detail.causeCode;
     const venueCode = text(detail.venueCode);
     if (venueCode) this.venueCode = venueCode;
     const venueMessage = text(detail.venueMessage);

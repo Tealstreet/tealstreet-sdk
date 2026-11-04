@@ -87,6 +87,7 @@ export interface VenueErrorDetail {
   kind?: 'rejected' | 'invalidInput' | 'insufficientBalance' | 'authInvalid' | 'authExpired' | 'authPermission'
     | 'rateLimited' | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
   outcome?: 'notSent' | 'rejected' | 'unknown';
+  causeCode?: string;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
@@ -191,6 +192,7 @@ export class ExchangeError extends Error {
   readonly kind?: NonNullable<VenueErrorDetail['kind']>;
   /** `unknown`: the write may have executed; `notSent`/`rejected`: it did not take effect. */
   readonly outcome?: NonNullable<VenueErrorDetail['outcome']>;
+  readonly causeCode?: string;
   readonly venueCode?: string;
   readonly venueMessage?: string;
   readonly retryAfterMs?: number;
