@@ -486,8 +486,11 @@ describe('frame-fed main-thread mirror', () => {
     it('partial lifts keep coalescing even while an earlier ask is unanswered', async () => {
       const { mirror } = await held({ symbols: 'BTCUSDT,ETHUSDT', liftAfterMs: 0 });
       mirror.exchange.off('callMethod');
-      const asks: any[] = [];
-      mirror.exchange.on('callMethod', (event) => { asks.push(event); });
+      type Ask = { requestId: string; args: unknown[] };
+      const asks: Ask[] = [];
+      mirror.exchange.on('callMethod', (event: Ask) => {
+        asks.push(event);
+      });
       await mirror.exchange.placeOrder(order);
       await vi.advanceTimersByTimeAsync(500);
       expect(asks.map((ask) => ask.args)).toEqual([[['BTCUSDT', 'ETHUSDT']]]);
