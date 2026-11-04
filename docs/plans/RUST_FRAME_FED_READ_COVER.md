@@ -51,6 +51,7 @@ implementation.
 | H6 | The hosted server's `segment_frame` splits ORDERS from its cover; the ORDERS segment arrives first and lifts on its stamp | `/tmp/codex-hcmq3f-2990-segmentation.rs` | `orders_never_segment_apart_from_their_read_time` (hosts/native) |
 | H7 | Unbounded source reads: 100 same-clock asks start 200 physical order reads | `/tmp/codex-hcmq3f-2990-recheck-boundaries.patch` (`review_repeated_same_clock_refreshes_have_bounded_physical_reads`) | same name |
 | H8 | An older read lands after a fresh one: old read sent at 0 misses the write at 1; fresh read sent at 5 finds the order; the old read lands last and removes the row while cover 5 stays, and the next frame lifts with the order missing | codex-hcmq3f, #3000 design review (28a0b5d) | `an_older_read_landing_after_a_fresh_one_neither_removes_the_found_order_nor_lifts`, run three ways: the delta, `snapshot_frame` and `account_snapshot_frame` after it |
+| H10 | Same-clock stream race: unknown placement at 1000; a read released at 5000; a stream event inserts the order at the same 5000; the delayed read lacks it and commits at 6000 (by time, 5000 is not older than 5000), removes the order, publishes cover 5000 and lifts fence 1000+3000 | codex-hcmq3f, #3000 re-check (48f1a88087c) | `a_stream_row_after_a_reads_release_at_the_same_millisecond_refuses_that_read` (keeps the order, publishes no cover, the fence stands). Reverse-order control: `a_read_released_after_a_same_millisecond_stream_row_commits` (the read is authoritative). Both run on a real same-clock source; neither may advance the test clock between the two events. |
 | H9 | One scope's fresh send stands for the whole account: an old HIP-3 dex read sent at 0 plus a fresh core read sent at 5 yields account cover 5 and clears a HIP-3 fence. The same shape applies to Bybit products with independent read roots. | codex-hcmq3f, #3000 design review (28a0b5d) | Hyperliquid `an_old_dex_read_keeps_the_account_cover_and_its_fence`; Bybit `an_old_product_read_keeps_the_account_cover` |
 
 Controls that must stay green:
@@ -129,11 +130,23 @@ cover 5 stays, and the next frame lifts the fence with the order missing.
 - Every row replacement from a read goes through the store's existing atomic
   commit (`begin_orders_snapshot` / `commit_orders_snapshot`, whose tokens order
   by begin). It writes the rows and that read's cover in the same call.
-- The commit is refused for every symbol (or scope) whose current row
-  provenance is newer than the read's send. Its rows are dropped and its cover
-  is not applied.
-- Row provenance per symbol is the send time of the read that last committed
-  it, or the receive time of the stream event that last changed it.
+- **Ordering uses a causal sequence, never wall time (H10).** `Date.now`
+  timestamps tie, so a read and a stream event in the same millisecond can't be
+  ordered by time. The store's monotonic `orders_revision`, which advances on
+  every row change, is the order key.
+  - A read records the revision current at its release (its earliest released
+    leg).
+  - Every stream row mutation advances the revision and records it as that
+    symbol's last-mutation sequence.
+  - The commit is refused for every symbol (or scope) whose last-mutation
+    sequence is greater than the read's release sequence, i.e. whose rows
+    changed after the read went out, however close the clock times. Its rows are
+    dropped and its cover is not applied.
+  - A read released after a mutation, even in the same millisecond, has a
+    greater sequence and commits normally.
+- Send **times** remain only for what crosses the wire, the covers compared
+  against fence marks on the page. Every accept or refuse decision on the source
+  is by sequence.
 - A read already in flight when newer rows land therefore can neither lower a
   cover, nor raise it, nor replace the newer rows.
 - Venues that write rows outside `commit_orders_snapshot` today (direct
@@ -300,13 +313,14 @@ logical-read deadline of 60 s on frame-fed sources would make it sound.
 
 1. Engine plus a venue audit:
    - Per-symbol cover provenance in `Store`, with rows and cover committed
-     atomically through `commit_orders_snapshot` and no rollback by an older
-     read (§4.1, H8).
+     atomically through `commit_orders_snapshot`, and no rollback by a read
+     released before the rows last changed, ordered by `orders_revision`
+     sequence (§4.1, H8, H10).
    - Per-scope send times with a minimum account cover (H9), and every
      frame-fed venue's read handlers moved onto that path.
    - Section 23 revision 1 written after ORDERS on every output (§4.2), and the
      segmenter parent mapping (H6).
-   - Tests H2, H4, H5, H6, H8, H9.
+   - Tests H2, H4, H5, H6, H8, H9, H10.
 2. Engine: per-symbol fence marks and the cover-only lift behind the capability
    bit (§4.3, §4.4). Mixed-version tests: an old source keeps the stamp rule; a
    new source's ORDERS without 23 lifts nothing.
