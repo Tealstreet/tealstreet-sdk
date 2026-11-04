@@ -4,7 +4,7 @@ import { IDBDatabase, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nativeTransport } from '@tealstreet/safe-cex-wasm/host';
-import { HyperliquidInfoBudget, hyperliquidInfoWeight, IndexedInfoBudgetStorage } from './hyperliquidInfoBudget';
+import { hyperliquidInfoWeight } from './hyperliquidInfoBudget';
 
 const ORIGIN = 'https://api.hyperliquid.xyz';
 const ORDERS = JSON.stringify({ type: 'frontendOpenOrders', user: 'local-only' });
@@ -13,13 +13,15 @@ const flushDatabase = async () => {
   for (let i = 0; i < 12; i++) await new Promise<void>((resolve) => setImmediate(resolve));
 };
 let factory: IDBFactory;
-const client = () => new HyperliquidInfoBudget(new IndexedInfoBudgetStorage(factory));
+let budgetModule: typeof import('./hyperliquidInfoBudget');
+const client = () => new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(factory));
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules();
   factory = new IDBFactory();
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   vi.setSystemTime(1_000_000);
+  budgetModule = await import('./hyperliquidInfoBudget');
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -28,6 +30,126 @@ afterEach(() => {
 });
 
 describe('unavailable shared storage', () => {
+  it('recovers a denied IndexedDB global accessor after the cooldown', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const opened = vi.spyOn(factory, 'open');
+    let allowed = false;
+    vi.stubGlobal('indexedDB', factory);
+    Object.defineProperty(globalThis, 'indexedDB', {
+      configurable: true,
+      get: () => {
+        if (!allowed) throw new DOMException('storage disabled', 'SecurityError');
+        return factory;
+      },
+    });
+    const a = new budgetModule.HyperliquidInfoBudget();
+    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    expect(opened).not.toHaveBeenCalled();
+    allowed = true;
+    await vi.advanceTimersByTimeAsync(30_000);
+    await a.response(ORIGIN, 200, '');
+    expect(opened).toHaveBeenCalledOnce();
+  });
+
+  const stalledTransaction = () =>
+    ({ objectStore: () => ({ get: () => ({}) }), abort: vi.fn() }) as unknown as IDBTransaction;
+
+  it('retries one transaction timeout without splitting into the local budget', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const a = client();
+    await a.response(ORIGIN, 200, '');
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(stalledTransaction);
+    const waiting = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    await waiting;
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each(['pause', 'reservation'])('rejoins after cooldown and max-merges a local %s', async (mode) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const a = client();
+    const b = client();
+    await b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
+      throw new DOMException('storage disabled', 'InvalidStateError');
+    });
+    await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    if (mode === 'pause') {
+      await a.response(ORIGIN, 429, 'Retry-After: 60');
+      await vi.advanceTimersByTimeAsync(30_000);
+    } else {
+      const candles = JSON.stringify({ type: 'candleSnapshot' });
+      const first = a.wait(ORIGIN, candles, Date.now() + 60_000, signal());
+      const second = a.wait(ORIGIN, candles, Date.now() + 60_000, signal());
+      await vi.advanceTimersByTimeAsync(4800);
+      await first;
+      await vi.advanceTimersByTimeAsync(24_960);
+      await second;
+      await vi.advanceTimersByTimeAsync(240);
+    }
+    await a.response(ORIGIN, 200, '');
+    await expect(b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal())).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+  });
+
+  it('bounds aggregate admission while one worker times out twice and recovers during a burst', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { HyperliquidInfoBudget: Budget, IndexedInfoBudgetStorage: Storage } =
+      await import('./hyperliquidInfoBudget');
+    const degradedConnections = new WeakSet<IDBDatabase>();
+    const unstableFactory = {
+      open: (name: string, version: number) => {
+        const request = factory.open(name, version);
+        request.addEventListener('success', () => degradedConnections.add(request.result));
+        return request;
+      },
+    } as IDBFactory;
+    const original = IDBDatabase.prototype.transaction;
+    let stalls = 2;
+    vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(function (this: IDBDatabase, ...args) {
+      if (degradedConnections.has(this) && stalls > 0) {
+        stalls -= 1;
+        return stalledTransaction();
+      }
+      return original.apply(this, args);
+    });
+    const a = new Budget(new Storage(unstableFactory));
+    const b = new Budget(new Storage(factory));
+    const first = a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushDatabase();
+    await first;
+    const end = Date.now() + 60_000;
+    const sends: number[] = [];
+    const burst = async (budget: InstanceType<typeof Budget>) => {
+      while (Date.now() < end) {
+        try {
+          await budget.wait(ORIGIN, ORDERS, end, signal());
+          if (Date.now() < end) sends.push(Date.now());
+        } catch (error) {
+          expect(error).toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+          return;
+        }
+      }
+    };
+    const bursting = Promise.all([burst(a), burst(b)]);
+    for (let step = 0; step < 300; step++) {
+      await flushDatabase();
+      await vi.advanceTimersByTimeAsync(200);
+    }
+    await flushDatabase();
+    await bursting;
+    expect(stalls).toBe(0);
+    expect(sends.length * 20).toBeLessThanOrEqual(1300);
+    expect(sends.length * 20).toBeGreaterThanOrEqual(900);
+  });
+
   it('keeps a known 429 pause when an established database transaction fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const a = client();
@@ -90,12 +212,13 @@ describe('unavailable shared storage', () => {
       if (failure === 'transactionError') transaction.onerror();
       if (failure === 'quota') readRequest.onsuccess();
     }
-    await vi.advanceTimersByTimeAsync(1500);
+    await vi.advanceTimersByTimeAsync(3000);
+    await flushDatabase();
     await first;
     const next = new Budget().wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
-    await vi.advanceTimersByTimeAsync(1200);
+    await vi.advanceTimersByTimeAsync(4800);
     await next;
-    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledTimes(failure === 'stalled' || failure === 'transactionStalled' ? 2 : 1);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls.flat().join(' ')).not.toContain('private details');
     if (failure === 'stalled' || failure === 'blocked') {
@@ -253,6 +376,38 @@ describe('cross-worker Hyperliquid info admission', () => {
 });
 
 describe('managed transport admission', () => {
+  it('does not spend the storage warning on an aborted 429 response', async () => {
+    vi.stubGlobal('indexedDB', factory);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const response = vi
+      .spyOn(budgetModule.HyperliquidInfoBudget.prototype, 'response')
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockRejectedValue(new Error('storage failure'));
+    const { createEngineTransport } = await import('./engine');
+    const transport = createEngineTransport(
+      'hyperliquid',
+      { key: '', secret: '', publicDataOnly: true },
+      { ...nativeTransport(), request: async () => ({ status: 429, headers: '', body: new Uint8Array() }) },
+    );
+    const controller = new AbortController();
+    const packet = { request: 1, method: 'POST' as const, url: ORIGIN + '/info', headers: {}, body: ORDERS };
+    try {
+      const first = transport.request({ ...packet, signal: controller.signal });
+      await flushDatabase();
+      expect(response).toHaveBeenCalledOnce();
+      controller.abort();
+      expect((await first).status).toBe(429);
+      expect(warn).not.toHaveBeenCalled();
+      const next = transport.request({ ...packet, request: 2 });
+      await flushDatabase();
+      await vi.advanceTimersByTimeAsync(1200);
+      expect((await next).status).toBe(429);
+      expect(warn).toHaveBeenCalledOnce();
+    } finally {
+      transport.dispose?.();
+    }
+  });
+
   it.each(['rejected', 'thrown', 'stalled'])(
     'keeps a successful HTTP answer when response bookkeeping is %s',
     async (failure) => {

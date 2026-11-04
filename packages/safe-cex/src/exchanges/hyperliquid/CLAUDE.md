@@ -40,10 +40,14 @@ join preserves orders and retries instead of silently ending the read.
 The SDK transport admits all `/info` reads through one weighted budget per API
 origin, including metadata, candles and history. Atomic IndexedDB transactions
 share admission and 429 pauses across account workers/tabs; runtimes without
-IndexedDB share a budget within their JS realm. Any storage failure, blocked open,
-or 1.5-second open/transaction timeout switches that realm to the shared local
-budget, retaining known pacing state. Only pacing timestamps and retry counters
-are stored, never account or request data. Persisted pauses/reservations are
+IndexedDB share a budget within their JS realm. Storage operations have a 1.5-second
+timeout and retry once on timeout before degrading. Hard errors or repeated
+timeouts use a shared local budget at one-quarter speed, retaining known pacing
+state. After a 30-second cooldown, reads retry IndexedDB and max-merge local
+reservations and 429 pauses back into shared state, invalidating prior grants.
+While storage is unavailable, independent realms cannot share their 429 pauses.
+Only pacing timestamps and retry counters are stored, never account or request
+data. Persisted pauses/reservations are
 bounded relative to the current clock, and Retry-After pauses cap at five minutes.
 Admission and pauses spend the existing HTTP deadline and abort signal before
 managed send claim. Response bookkeeping never rejects a received answer; a

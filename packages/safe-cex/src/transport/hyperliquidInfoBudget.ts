@@ -4,8 +4,17 @@ import { HttpPreparationError } from '@tealstreet/safe-cex-wasm/host';
 const MS_PER_WEIGHT = 60;
 const MAX_PAUSE_MS = 300_000;
 const STORAGE_TIMEOUT_MS = 1500;
+const STORAGE_COOLDOWN_MS = 30_000;
+const DEGRADED_PACING_MULTIPLIER = 4;
 type BudgetState = { nextAt: number; pausedUntil: number; generation: number; failures: number };
 const emptyState = (): BudgetState => ({ nextAt: 0, pausedUntil: 0, generation: 0, failures: 0 });
+const mergeState = (a: BudgetState, b: BudgetState): BudgetState => ({
+  nextAt: Math.max(a.nextAt, b.nextAt),
+  pausedUntil: Math.max(a.pausedUntil, b.pausedUntil),
+  generation: Math.max(a.generation, b.generation),
+  failures: Math.max(a.failures, b.failures),
+});
+class StorageTimeoutError extends Error {}
 let warned = false;
 export function warnHyperliquidInfoBudgetUnavailable(): void {
   if (warned) return;
@@ -47,7 +56,10 @@ function storageAttempt<T>(
       }
       reject(error ?? new Error('Hyperliquid budget storage unavailable'));
     };
-    const timer = setTimeout(() => fail(), STORAGE_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => fail(new StorageTimeoutError('Hyperliquid budget storage timed out')),
+      STORAGE_TIMEOUT_MS,
+    );
     try {
       cancel = start((value) => {
         if (settled) return false;
@@ -63,13 +75,15 @@ function storageAttempt<T>(
 }
 
 export interface InfoBudgetStorage {
-  update<T>(key: string, change: (state: BudgetState) => T): Promise<T>;
+  update<T>(key: string, change: (state: BudgetState, msPerWeight: number) => T): Promise<T>;
 }
 
 /** One origin database coordinates separate account workers without retaining account data. */
 export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
   private database?: Promise<IDBDatabase>;
-  private degraded = false;
+  private retryAt = 0;
+  private localRevision = 0;
+  private readonly localKeys = new Set<string>();
   private readonly snapshots = new Map<string, BudgetState>();
   constructor(private readonly factory: IDBFactory) {}
   private open(): Promise<IDBDatabase> {
@@ -100,62 +114,81 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
     });
     return attempt;
   }
-  async update<T>(key: string, change: (state: BudgetState) => T): Promise<T> {
+  async update<T>(key: string, change: (state: BudgetState, msPerWeight: number) => T): Promise<T> {
     const local = () => {
       const snapshot = this.snapshots.get(key);
       if (snapshot) {
         memoryStorage.remember(key, snapshot);
         this.snapshots.delete(key);
       }
-      return memoryStorage.update(key, change);
+      this.localKeys.add(key);
+      this.localRevision += 1;
+      return memoryStorage.update(key, change, MS_PER_WEIGHT * DEGRADED_PACING_MULTIPLIER);
     };
-    if (this.degraded) return local();
-    let callbackFailed = false;
-    let callbackError: unknown;
-    try {
-      const database = await this.open();
-      if (this.degraded) return local();
-      return await storageAttempt<T>((done, fail) => {
-        const transaction = database.transaction('budgets', 'readwrite');
-        const store = transaction.objectStore('budgets');
-        const read = store.get(key);
-        let value: T;
-        let expired = false;
-        read.onsuccess = () => {
-          if (expired) return;
-          try {
-            const state = boundedState(read.result ?? emptyState());
-            const changed = { ...state };
+    this.retryAt = Math.min(this.retryAt, Date.now() + STORAGE_COOLDOWN_MS);
+    if (this.retryAt > Date.now()) return local();
+    for (let attempt = 0; ; attempt++) {
+      let callbackFailed = false;
+      let callbackError: unknown;
+      try {
+        const database = await this.open();
+        if (this.retryAt > Date.now()) return local();
+        return await storageAttempt<T>((done, fail) => {
+          const transaction = database.transaction('budgets', 'readwrite');
+          const store = transaction.objectStore('budgets');
+          const read = store.get(key);
+          let value: T;
+          let expired = false;
+          let mergedRevision = this.localRevision;
+          read.onsuccess = () => {
+            if (expired) return;
             try {
-              value = change(changed);
+              let state = boundedState(read.result ?? emptyState());
+              mergedRevision = this.localRevision;
+              if (this.localKeys.has(key)) {
+                state = mergeState(state, memoryStorage.snapshot(key));
+                state.generation += 1;
+              }
+              const changed = { ...state };
+              try {
+                value = change(changed, MS_PER_WEIGHT);
+              } catch (error) {
+                callbackFailed = true;
+                callbackError = error;
+              }
+              // Commit clock normalization even when admission refuses this read.
+              const saved = callbackFailed ? state : changed;
+              this.snapshots.set(key, { ...saved });
+              store.put(saved, key);
             } catch (error) {
-              callbackFailed = true;
-              callbackError = error;
+              fail(error);
             }
-            // Commit clock normalization even when admission refuses this read.
-            const saved = callbackFailed ? state : changed;
-            this.snapshots.set(key, { ...saved });
-            store.put(saved, key);
-          } catch (error) {
-            fail(error);
-          }
-        };
-        transaction.oncomplete = () => (callbackFailed ? fail(callbackError) : done(value));
-        transaction.onabort = transaction.onerror = () => fail(transaction.error);
-        return () => {
-          expired = true;
-          transaction.abort();
-        };
-      });
-    } catch (error) {
-      // Deadline/abort refusals are admission decisions, never storage failures.
-      if (callbackFailed && error === callbackError) throw error;
-      this.degraded = true;
-      void this.database?.then((database) => database.close()).catch(() => undefined);
-      this.database = undefined;
-      warnHyperliquidInfoBudgetUnavailable();
-      if (callbackFailed) throw callbackError;
-      return local();
+          };
+          transaction.oncomplete = () => {
+            // An earlier transaction cannot clear newer fallback admissions.
+            if (mergedRevision === this.localRevision) {
+              this.retryAt = 0;
+              this.localKeys.delete(key);
+            }
+            return callbackFailed ? fail(callbackError) : done(value);
+          };
+          transaction.onabort = transaction.onerror = () => fail(transaction.error);
+          return () => {
+            expired = true;
+            transaction.abort();
+          };
+        });
+      } catch (error) {
+        // Deadline/abort refusals are admission decisions, never storage failures.
+        if (callbackFailed && error === callbackError) throw error;
+        void this.database?.then((database) => database.close()).catch(() => undefined);
+        this.database = undefined;
+        if (!callbackFailed && error instanceof StorageTimeoutError && attempt === 0) continue;
+        this.retryAt = Date.now() + STORAGE_COOLDOWN_MS;
+        warnHyperliquidInfoBudgetUnavailable();
+        if (callbackFailed) throw callbackError;
+        return local();
+      }
     }
   }
 }
@@ -163,19 +196,20 @@ export class IndexedInfoBudgetStorage implements InfoBudgetStorage {
 class MemoryInfoBudgetStorage implements InfoBudgetStorage {
   private readonly states = new Map<string, BudgetState>();
   remember(key: string, snapshot: BudgetState): void {
-    const previous = this.states.get(key) ?? emptyState();
-    this.states.set(key, {
-      nextAt: Math.max(previous.nextAt, snapshot.nextAt),
-      pausedUntil: Math.max(previous.pausedUntil, snapshot.pausedUntil),
-      generation: Math.max(previous.generation, snapshot.generation),
-      failures: Math.max(previous.failures, snapshot.failures),
-    });
+    this.states.set(key, mergeState(this.snapshot(key), snapshot));
   }
-  async update<T>(key: string, change: (state: BudgetState) => T): Promise<T> {
-    const state = boundedState(this.states.get(key));
+  snapshot(key: string): BudgetState {
+    return boundedState(this.states.get(key));
+  }
+  async update<T>(
+    key: string,
+    change: (state: BudgetState, msPerWeight: number) => T,
+    msPerWeight = MS_PER_WEIGHT,
+  ): Promise<T> {
+    const state = this.snapshot(key);
     this.states.set(key, state);
     const changed = { ...state };
-    const result = change(changed);
+    const result = change(changed, msPerWeight);
     this.states.set(key, changed);
     return result;
   }
@@ -187,8 +221,10 @@ const storage = () => {
   try {
     return (sharedStorage = typeof indexedDB === 'undefined' ? memoryStorage : new IndexedInfoBudgetStorage(indexedDB));
   } catch {
-    warnHyperliquidInfoBudgetUnavailable();
-    return (sharedStorage = memoryStorage);
+    // A denied global accessor can become usable after the same cooldown.
+    return (sharedStorage = new IndexedInfoBudgetStorage({
+      open: (name: string, version?: number) => indexedDB.open(name, version),
+    } as IDBFactory));
   }
 };
 
@@ -257,11 +293,11 @@ export class HyperliquidInfoBudget {
     const weight = hyperliquidInfoWeight(body);
     for (;;) {
       signal.throwIfAborted();
-      const grant = await this.backend.update(origin, (state) => {
+      const grant = await this.backend.update(origin, (state, msPerWeight) => {
         signal.throwIfAborted();
         const at = Math.max(Date.now(), state.nextAt, state.pausedUntil);
         if (at >= deadline) throw new HttpPreparationError('timedOut');
-        state.nextAt = at + weight * MS_PER_WEIGHT;
+        state.nextAt = at + weight * msPerWeight;
         return { at, generation: state.generation };
       });
       await waitUntil(grant.at, signal);

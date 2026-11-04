@@ -805,12 +805,15 @@ const httpTransport = (
                   )
                   .then(async (value) => {
                     if (infoBudget && request.method === 'POST' && original.pathname === '/info') {
+                      const reportFailure = () => {
+                        if (!signal.aborted) warnHyperliquidInfoBudgetUnavailable();
+                      };
                       const recorded = Promise.resolve()
                         .then(() => infoBudget.response(original.origin, value.status, value.headers ?? ''))
-                        .catch(warnHyperliquidInfoBudgetUnavailable);
+                        .catch(reportFailure);
                       // Only a 429 must publish its pause before Rust can enqueue its retry.
                       if (value.status === 429)
-                        await untilAborted(recorded, signal).catch(warnHyperliquidInfoBudgetUnavailable);
+                        await untilAborted(recorded, signal).catch(reportFailure);
                     }
                     return value;
                   })
