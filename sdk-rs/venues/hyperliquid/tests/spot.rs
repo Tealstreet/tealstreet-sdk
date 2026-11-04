@@ -1734,7 +1734,7 @@ mod owned_nonpageable {
         assert!(marker.message.contains("INCOMPLETE"));
         assert!(marker.message.contains("Hyperliquid spot"));
         assert!(
-            matches!(marker.fields.as_slice(), [("command", Value::Num(owner))] if *owner == f64::from(command))
+            matches!(marker.fields.as_slice(), [("command", Value::Num(owner)), ("reason", Value::Str(reason))] if *owner == f64::from(command) && reason == "noNativeRead")
         );
     }
 

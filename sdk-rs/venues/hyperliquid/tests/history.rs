@@ -184,9 +184,10 @@ fn rolling_order_retention_marker_owns_its_result_before_done_at_error_only_leve
         .expect("semantic retention marker survives Error-only logging");
     assert_eq!(event.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(1.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(1.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     assert!(event.message.contains("rolling retention limit"));
     let (done_index, result) = actions
         .iter()

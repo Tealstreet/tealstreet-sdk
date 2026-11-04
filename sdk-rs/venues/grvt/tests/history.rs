@@ -931,7 +931,8 @@ fn incomplete_pairs(h: &Harness, command: u32) -> Vec<&Notice> {
         .filter(|notice| match notice {
             Notice::Event(event) => {
                 event.code == code::HISTORY_INCOMPLETE
-                    && event.fields == vec![("command", Value::Num(f64::from(command)))]
+                    && event.fields.first() == Some(&("command", Value::Num(f64::from(command))))
+                    && event.fields.get(1).is_some_and(|field| field.0 == "reason")
             }
             Notice::CommandDone { command: id, .. } | Notice::CommandFailed { command: id, .. } => {
                 *id == command

@@ -222,7 +222,10 @@ impl Hyperliquid {
                     );
                 }
                 Query::Fills { .. } | Query::OrderHistory { .. } | Query::Income { .. } => {
-                    completion.incomplete("history is INCOMPLETE: Hyperliquid spot adapter has no native history read");
+                    completion.incomplete(
+                        safe_cex_engine::history::IncompleteReason::NoNativeRead,
+                        "history is INCOMPLETE: Hyperliquid spot adapter has no native history read",
+                    );
                     HistoryRows::<()>::new(completion, |rows| {
                         serde_json::to_string(rows)
                             .map_err(|error| VenueError::new(error.to_string()))

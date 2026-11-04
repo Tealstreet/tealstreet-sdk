@@ -1,10 +1,8 @@
 //! Typed, streamed rare reads. Native derivative quantities are contract counts.
 use crate::{Okx, Pending, sign};
-use safe_cex_engine::Level;
 use safe_cex_engine::credential_selection::{PrimaryReason, SlotPolicy};
 use safe_cex_engine::history::ReadCompletion;
 use safe_cex_engine::json::ArrayAt;
-use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce};
 use safe_cex_engine::num::parse_decimal;
 use safe_cex_engine::request_context::{
@@ -1183,6 +1181,7 @@ impl Okx {
                 // Each endpoint is read for one page; a full one may hide more rows.
                 if r.open_window && r.count >= r.limit {
                     r.completion.incomplete(
+                        safe_cex_engine::history::IncompleteReason::PageFull,
                         "history is INCOMPLETE: OKX fills read one page and it was full",
                     );
                 }
@@ -1221,14 +1220,9 @@ impl Okx {
                 );
                 return;
             }
-            cx.event(
-                Level::Warn,
-                code::HISTORY_INCOMPLETE,
+            r.completion.incomplete(
+                safe_cex_engine::history::IncompleteReason::PageBudget,
                 format!("OKX history hit {cap}-page cap; older rows were not fetched"),
-                vec![(
-                    "command",
-                    safe_cex_engine::Value::Num(f64::from(r.completion.command())),
-                )],
             );
             r.finish(cx);
             return;
@@ -1246,14 +1240,9 @@ impl Okx {
                 );
                 return;
             }
-            cx.event(
-                Level::Warn,
-                code::HISTORY_INCOMPLETE,
+            r.completion.incomplete(
+                safe_cex_engine::history::IncompleteReason::CursorStalled,
                 "OKX history cursor did not advance; older rows were not fetched",
-                vec![(
-                    "command",
-                    safe_cex_engine::Value::Num(f64::from(r.completion.command())),
-                )],
             );
             r.finish(cx);
             return;
@@ -1286,8 +1275,10 @@ impl Okx {
             let _ = cx.fail_context(r.root(), error);
             return;
         }
-        r.completion
-            .incomplete(format!("history is INCOMPLETE: {}", error.message));
+        r.completion.incomplete(
+            safe_cex_engine::history::IncompleteReason::LaterPageFailed,
+            format!("history is INCOMPLETE: {}", error.message),
+        );
         r.finish(cx);
     }
     pub(crate) fn history_sign_failed(

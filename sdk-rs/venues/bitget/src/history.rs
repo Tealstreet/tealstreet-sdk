@@ -352,8 +352,10 @@ impl BitgetFutures {
             }
         };
         if !public && query_from(&query).is_some_and(|from| from < oldest_kept(cx.now)) {
-            completion
-                .incomplete("Bitget keeps 90 days; the older part of this range was not read");
+            completion.incomplete(
+                safe_cex_engine::history::IncompleteReason::RetentionLimit,
+                "Bitget keeps 90 days; the older part of this range was not read",
+            );
         }
         let window = windows.pop_front().expect("one window");
         let request = Request {

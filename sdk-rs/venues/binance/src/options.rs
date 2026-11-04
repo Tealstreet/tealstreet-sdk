@@ -488,6 +488,7 @@ impl BinanceFutures {
                     match ReadCompletion::from_context(cx, id, request.context.clone()) {
                         Ok(mut completion) => {
                             completion.incomplete(
+                                safe_cex_engine::history::IncompleteReason::PageFull,
                                 "history is INCOMPLETE: Binance Options read one page and it was full",
                             );
                             let _ = completion.finish(cx, Ok(result));
