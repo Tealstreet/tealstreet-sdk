@@ -1119,6 +1119,9 @@ public clients bypass ordinary proxies; WEEX/GRVT/BloFin do not install HOW).
 KuCoin futures and spot install HOW for private clients even if
 `tealstreetTunnel` is false or unset. Paradex payload signing skips its API
 factory's HOW adapter; JWT acquisition uses a direct request in every mode.
+Paradex declares both `supportsTunnel` and `enforceWsTunnel` true because local
+account REST already selects HOW, including unsigned market discovery. This
+describes the existing adapter contract, not a live-connectivity guarantee.
 Account normalization already applies metadata; do not normalize explicit
 headless options again at this boundary. Engine socket effects carry optional
 public/private/business roles; new venues with shared URLs must supply the role.
