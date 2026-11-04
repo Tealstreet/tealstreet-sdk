@@ -1664,3 +1664,7 @@ warning and outcome. Worker candle reads alone retry once through the replacemen
 using its existing 30-second attachment bound. No write is replayed. Tests in
 `rust.candle-routing.test.ts` and `rust.worker-command-contract.test.ts` pin
 page routing, replacement replies, the bound and zero write replay.
+
+Relay-failure notices strip URL queries from upstream error messages before
+reporting reconnect state. Request configs and signed dispatch bytes are retained
+unchanged; the web Sentry hooks provide independent diagnostic redaction.

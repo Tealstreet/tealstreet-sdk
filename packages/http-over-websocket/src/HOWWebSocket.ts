@@ -4,6 +4,7 @@ import Emitter from 'tiny-emitter';
 import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 
 import { getUniqueLatencyDomains, syncServerTime } from './config';
+import { diagnosticUrl, stripDiagnosticUrlQueries } from './diagnosticUrl';
 import { decodeTradeTunnelMessage } from './tradeTunnelBinaryFrame';
 import { noteTunnelDialFailed, noteTunnelDialOpened, tunnelDialUrl } from './tunnelEndpoints';
 import { HOWWebSocketAuthState, LatencyEntry } from './types';
@@ -157,7 +158,7 @@ export class HOWWebSocket {
     const errorMessage = (event as any)?.message || (event as any)?.error?.message || (event as any)?.type;
 
     // Log WebSocket errors (state errors are now prevented in send() method)
-    console.error(`WebSocket error: ${errorMessage || 'Unknown error'}`);
+    console.error(`WebSocket error: ${stripDiagnosticUrlQueries(String(errorMessage || 'Unknown error'))}`);
     return false;
   };
 
@@ -174,15 +175,19 @@ export class HOWWebSocket {
         return false;
       }
 
-      // Create our own error with full context BEFORE the DOMException would occur
+      const request = data?.arg ?? data;
+      const preview = JSON.stringify({
+        type: data?.type,
+        method: request?.method,
+        url: typeof request?.url === 'string' ? diagnosticUrl(request.url) : undefined,
+      });
       const err = new Error(
-        `HOWWebSocket${isTokenSend ? ' sendToken' : ''} not ready for send. State: ${stateName}, Message: ${message.substring(0, 100)}...`,
+        `HOWWebSocket${isTokenSend ? ' sendToken' : ''} not ready for send. State: ${stateName}, Message: ${preview}`,
       );
       err.name = 'WebSocketNotReadyError';
       (err as any).webSocketState = stateName;
       (err as any).webSocketReadyState = wsState;
-      (err as any).messagePreview = message.substring(0, 200);
-      (err as any).fullMessage = message;
+      (err as any).messagePreview = preview;
       (err as any).isHOWWebSocket = true;
       if (isTokenSend) {
         (err as any).isReconnecting = !this.isOpen;

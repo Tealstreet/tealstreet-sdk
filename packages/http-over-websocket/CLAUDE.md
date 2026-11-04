@@ -209,3 +209,8 @@ The 25 s silence watchdog that redials starts on open as well as on each pong,
 so a socket that opens and never speaks is replaced. Both stalls ran every
 request out to its deadline for the connection's lifetime
 (`src/HOWWebSocket.reconnect.test.ts`).
+
+Relay failure, readiness, timeout and send-state diagnostics retain only URL
+origin/path; signed queries and outgoing frame bodies/headers are never copied
+into display messages or previews. Original Axios config and signed wire bytes
+remain intact for interceptors and dispatch.

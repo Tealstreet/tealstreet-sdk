@@ -8,6 +8,7 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { bindProxyToken, isTokenExpired, shouldSimulateHttpOverWebsocket } from './config';
 import { tunnelEgressUrl, tunnelLanePort, tunnelOutage } from './tunnelEndpoints';
 import { isTokyoEgress } from './egressRegion';
+import { diagnosticUrl, stripDiagnosticUrlQueries } from './diagnosticUrl';
 import { HOWWebSocket } from './HOWWebSocket';
 import { CreateAxiosHttpOverWebsocketAdapterOptions, HOWWebSocketAuthState, LatencyEntry } from './types';
 
@@ -48,12 +49,12 @@ export class TradeTunnelTimeoutError extends Error {
       url: string;
     },
   ) {
-    super(message);
+    super(stripDiagnosticUrlQueries(message));
     this.name = 'TradeTunnelTimeoutError';
     this.config = context.config;
     this.method = context.method;
     this.tradeTunnelRoute = context.route;
-    this.url = context.url;
+    this.url = diagnosticUrl(context.url);
   }
 }
 
@@ -100,7 +101,7 @@ export class TradeTunnelReadinessError extends TradeTunnelTimeoutError {
 const proxyTokenMissingBeforeDeadline = (config: any) =>
   Object.assign(
     new Error(
-      `Tealstreet proxy authorization missing: no valid proxy token before the request deadline (${config.url})`,
+      `Tealstreet proxy authorization missing: no valid proxy token before the request deadline (${diagnosticUrl(config.url)})`,
     ),
     { name: 'ProxyTokenUnavailableError', config },
   );
@@ -501,12 +502,12 @@ const createAxiosHttpOverWebsocketAdapter = (
       };
       const createReadinessError = (route: TradeTunnelRouteContext = baseRouteContext) =>
         new TradeTunnelReadinessError(
-          `HTTP tunnel was not ready within ${Math.round((readinessDeadline - (deadline - timeoutMs)) / 1000)} s: ${config.url}`,
+          `HTTP tunnel was not ready within ${Math.round((readinessDeadline - (deadline - timeoutMs)) / 1000)} s: ${diagnosticUrl(websocketRequest.url)}`,
           { config, method: websocketRequest.method, route, url: websocketRequest.url },
           readinessState(),
         );
       const createTimeoutError = (route: TradeTunnelRouteContext = baseRouteContext) =>
-        new TradeTunnelTimeoutError(`WSoverHTTP request timed out: ${config.url}`, {
+        new TradeTunnelTimeoutError(`WSoverHTTP request timed out: ${diagnosticUrl(websocketRequest.url)}`, {
           config,
           method: websocketRequest.method,
           route,
@@ -839,10 +840,10 @@ const createAxiosHttpOverWebsocketAdapter = (
                       if (data && typeof data === 'object' && data.error) {
                         // Create a proper Error object with URL context for better Sentry tracking
                         const tunnelError = new Error(
-                          `${formatTradeTunnelErrorMessage(data.error)} (URL: ${websocketRequest.url})`,
+                          `${stripDiagnosticUrlQueries(formatTradeTunnelErrorMessage(data.error))} (URL: ${diagnosticUrl(websocketRequest.url)})`,
                         );
                         tunnelError.name = 'TradeTunnelError';
-                        (tunnelError as any).url = websocketRequest.url;
+                        (tunnelError as any).url = diagnosticUrl(websocketRequest.url);
                         (tunnelError as any).method = websocketRequest.method;
                         (tunnelError as any).originalError = data.error;
                         (tunnelError as any).tradeTunnelRoute = routeContext;
@@ -878,7 +879,7 @@ const createAxiosHttpOverWebsocketAdapter = (
                       }
                       const tunnelError = error instanceof Error ? error : new Error(String(error));
                       tunnelError.name = 'TradeTunnelResponseDecodeError';
-                      (tunnelError as any).url = websocketRequest.url;
+                      (tunnelError as any).url = diagnosticUrl(websocketRequest.url);
                       (tunnelError as any).method = websocketRequest.method;
                       (tunnelError as any).tradeTunnelRoute = routeContext;
                       (tunnelError as any).config = config;
