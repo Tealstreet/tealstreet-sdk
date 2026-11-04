@@ -4104,6 +4104,9 @@ pub struct Engine<V: Venue> {
     /// host time); a source frame lifts it only once written well after.
     #[cfg(feature = "order-locks")]
     fence_marks: Vec<(u64, f64)>,
+    /// Frame-fed: `orders.held` was emitted for the uncertainty still standing.
+    #[cfg(feature = "order-locks")]
+    orders_held_asked: bool,
     /// Frame-fed: the data source's clock minus this host's, in ms, as the
     /// host measured it (`None` until it has).
     source_clock_offset: Option<f64>,
@@ -4200,6 +4203,8 @@ impl<V: Venue> Engine<V> {
             ingest: Default::default(),
             #[cfg(feature = "order-locks")]
             fence_marks: Vec::new(),
+            #[cfg(feature = "order-locks")]
+            orders_held_asked: false,
             source_clock_offset: None,
             venue_state_sent: None,
             shared_books: HashMap::new(),
@@ -5688,6 +5693,30 @@ impl<V: Venue> Engine<V> {
                 .is_none_or(|(mark, _)| *mark < token)
             {
                 self.fence_marks.push((token, now));
+            }
+            // The source never saw this write, so its orders may never change: ask
+            // for them once per standing uncertainty, when a frame written then lifts it.
+            let uncertain = self.io.core.order_locks.uncertain("");
+            if !uncertain {
+                self.orders_held_asked = false;
+            } else if !self.orders_held_asked {
+                self.orders_held_asked = true;
+                let lift_after = if self.source_clock_offset.is_some() {
+                    crate::frame_fed::FENCE_GRACE_MS
+                } else {
+                    crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
+                };
+                Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                }
+                .event(
+                    Level::Info,
+                    crate::log::code::ORDERS_HELD,
+                    "Holding an uncertain write until the data source sends its orders",
+                    vec![("liftAfterMs", Value::Num(lift_after))],
+                );
             }
             if let Some((timer, _)) = self.reconcile_timer.take() {
                 self.io.core.actions.push(Action::ClearTimer { timer });

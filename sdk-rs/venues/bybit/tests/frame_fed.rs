@@ -575,3 +575,64 @@ fn a_confirmed_margin_switch_outlasts_a_stale_source_and_reads_nothing() {
     h.collect();
     assert_eq!(margin(&h), Some(Cross));
 }
+
+/// The source never sees a page write, so nothing would send the ORDERS frame
+/// that lifts its fence: the engine says it is held, and when a frame would qualify.
+fn orders_held(h: &Harness) -> Vec<f64> {
+    h.notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event)
+                if event.code == safe_cex_engine::log::code::ORDERS_HELD =>
+            {
+                event
+                    .fields
+                    .iter()
+                    .find_map(|(name, value)| match (name, value) {
+                        (&"liftAfterMs", safe_cex_engine::Value::Num(ms)) => Some(*ms),
+                        _ => None,
+                    })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_fence_asks_once_for_the_source_orders_after_its_grace() {
+    let measured = fenced(Some(0.0));
+    assert_eq!(orders_held(&measured), vec![3_000.0]);
+    let unmeasured = fenced(None);
+    assert_eq!(orders_held(&unmeasured), vec![30_000.0]);
+}
+
+#[test]
+fn a_fence_already_waiting_does_not_ask_again() {
+    let mut h = fenced(Some(0.0));
+    h.advance(250.0);
+    // A second lost write before any frame: the same wait covers it.
+    assert!(!retry_after(&mut h, 0.0, 2));
+    h.advance(60_000.0);
+    assert_eq!(orders_held(&h), vec![3_000.0]);
+}
+
+#[test]
+fn a_new_fence_after_a_lift_asks_again() {
+    let mut h = fenced(Some(0.0));
+    h.advance(3_500.0);
+    h.engine
+        .apply_frame(h.now, &source_frame_at(h.now), false)
+        .unwrap();
+    h.collect();
+    h.command(Command::PlaceOrders {
+        command: 2,
+        orders: vec![support::order()],
+    });
+    // The qualifying frame lifted it; this placement is lost too.
+    let lost = h.take("/v5/order/create");
+    h.event(safe_cex_engine::Event::HttpFailed {
+        request: lost.id,
+        error: "connection reset",
+    });
+    assert_eq!(orders_held(&h), vec![3_000.0, 3_000.0]);
+}
