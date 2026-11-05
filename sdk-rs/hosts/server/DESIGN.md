@@ -515,6 +515,31 @@ How FrameServer notices map onto `msg`:
 | `startupFailed` | `start-status` `{ok:false, detail}`, plus `error` |
 | `accountAuth` | `engine-event` with code `accountAuth`. The server always opts in |
 
+### Recovering a refused native startup
+
+FrameServer retains `StartupFailed` for late joins while that engine instance
+is still waiting for its required private startup sections. Once that same
+source engine has markets, balance, positions and orders loaded, the cached
+failure is retired before the next flush or join. Public-only engines,
+frame-fed mirrors, partial account state and terminal engines cannot clear it.
+A new failure on an already-loaded account is not erased by its existing flags.
+This proves bootstrap completion, not that an agent key can place an order.
+
+An auth-kind startup refusal may receive at most three native read-only
+rechecks, after 5, 10 and 20 minutes respectively, each with 0–30 seconds of
+host entropy jitter. A longer venue `retryAfterMs` floor is preserved; a new
+refusal does not reset the attempt budget. Clock rollback cannot accelerate
+the monotonic schedule. Successful completion retires the remaining rechecks.
+
+The venue must explicitly implement `Venue::recheck_startup_reads`; the default
+does nothing and stops further attempts. Hyperliquid is the first adopter:
+it retries only identity/mode and account State/Spot/Orders reads through the
+existing single-flight and admission paths. These hooks are absent from wasm.
+The host never restarts the venue, recreates the actor, replays a command or
+fires arbitrary venue timers. Existing algo/job state stays on that actor.
+After exhaustion, the failure remains visible and an explicit account retry
+can start over; the page's public-only refusal latch is a separate policy.
+
 The client's output to its own consumer stays as today: `op:'store'`
 snapshots, `listenOrderBook` (from `FrameApplier.books`), `listenOHLCV` (from
 `.candles`) and `fill` (from `.fills`). Nothing downstream of

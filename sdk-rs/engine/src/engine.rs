@@ -4508,6 +4508,12 @@ pub trait Venue {
     fn startup_diagnostics(&self, _store: &Store) -> Vec<(&'static str, Value)> {
         Vec::new()
     }
+    /// Native recovery may retry bootstrap reads, never commands or timers.
+    /// Opt in only with a read-only implementation; false stops host rechecks.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn recheck_startup_reads(&mut self, _cx: &mut Cx<'_, Self::Pending>) -> bool {
+        false
+    }
     fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
     fn on_public_feed(&mut self, _cx: &mut Cx<'_, Self::Pending>) {}
@@ -5117,6 +5123,46 @@ impl<V: Venue> Engine<V> {
     /// for an account that can sign, matching the SDK's readiness rule.
     pub fn set_account_startup(&mut self, account: bool) {
         self.account_startup = account;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn private_startup_pending(&self) -> bool {
+        self.started
+            && self.account_startup
+            && !self.frame_fed()
+            && !self.private_startup_complete()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn private_startup_complete(&self) -> bool {
+        let loaded = self.store.loaded();
+        self.started
+            && self.account_startup
+            && !self.frame_fed()
+            && !self.failed()
+            && loaded.markets
+            && loaded.balance
+            && loaded.orders
+            && loaded.positions
+    }
+
+    /// Trusted native-host ingress; no command receipt or mutation authority.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn recheck_startup_reads(&mut self, now: f64) -> bool {
+        self.assert_live();
+        if !now.is_finite() || !self.private_startup_pending() {
+            return false;
+        }
+        self.begin_event_scope();
+        self.store.set_clock(now);
+        self.io.core.dispatch_now = now;
+        let supported = self.venue.recheck_startup_reads(&mut Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        });
+        self.finish_event_scope(now);
+        supported
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
