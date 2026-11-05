@@ -77,6 +77,20 @@ describe('a keyless public-data engine reads through the public CORS proxy, off 
     expect(request.url.startsWith(`${getPublicCorsProxy()}/`)).toBe(false);
   });
 
+  // /api/public_proxy is a host allowlist: Crypto.com and BloFin demo are not on it (403).
+  it('keeps a venue or host the public proxy refuses on the exchange proxy', async () => {
+    const exchangeProxy = getPrivateProxyHost('asia');
+    for (const [exchange, url] of [
+      ['cryptocom', 'https://api.crypto.com/exchange/v1/public/get-candlestick?instrument_name=BTCUSD-PERP'],
+      ['blofin', 'https://demo-trading-openapi.blofin.com/api/v1/market/candles?instId=BTC-USDT'],
+    ] as const) {
+      const request = await sent(exchange, chartSource({ tealstreetTunnel: false }), 'GET', url);
+      expect(request.url, exchange).toBe(`${exchangeProxy}/${url}`);
+    }
+    const mainnet = 'https://openapi.blofin.com/api/v1/market/candles?instId=BTC-USDT';
+    expect((await sent('blofin', chartSource(), 'GET', mainnet)).url).toBe(`${getPublicCorsProxy()}/${mainnet}`);
+  });
+
   it('routes a managed public read (the chart path) the same way', async () => {
     const dispatch = vi.fn(async () => ({ status: 200, body: new Uint8Array() }));
     const bind = vi.fn((_packet: Parameters<Transport['request']>[0]) => ({ ready: () => true, dispatch }));

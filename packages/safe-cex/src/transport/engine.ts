@@ -42,6 +42,7 @@ import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './h
 import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
+import { PUBLIC_PROXY_READ_HOSTS, readsViaPublicProxy } from './tealstreet/publicCorsAllowlist';
 import {
   isTealstreetProxyAuthFailureBody,
   proxyAuthorizationHeader,
@@ -1295,11 +1296,12 @@ export const createEngineTransport = (
         infoFacts,
       )
     : undefined;
-  // A keyless public-data engine (a mirror's chart source) on a proxied venue holds no
-  // credential, so its reads leave through the public CORS proxy and public weight stays
-  // off the trading fleet's IPs; the signed-packet guard still refuses anything credentialed.
+  // A keyless public-data engine (a mirror's chart source) on an opted-in venue holds no
+  // credential, so its reads to allowlisted hosts leave through the public CORS proxy, off the
+  // trading fleet's IPs; the signed-packet guard still refuses anything credentialed.
   const keylessPublicReads =
     publicCorsHttp !== undefined &&
+    PUBLIC_PROXY_READ_HOSTS[exchange] !== undefined &&
     options.publicDataOnly === true &&
     !options.key &&
     !options.secret &&
@@ -1366,7 +1368,7 @@ export const createEngineTransport = (
                 ? readHttp
                 : intent === 'public' && DIRECT_PUBLIC_READS.has(exchange)
                   ? directHttp
-                  : intent === 'public' && keylessPublicReads
+                  : intent === 'public' && keylessPublicReads && readsViaPublicProxy(exchange, packet.url)
                     ? publicCorsHttp
                     : intent === 'public' &&
                       readHttp &&
@@ -1391,7 +1393,7 @@ export const createEngineTransport = (
         (!['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange) ||
           hasHeader(request.headers, secondaryReadHeaders[exchange]!))
         ? readHttp.request(nativeRequest)
-        : keylessPublicReads
+        : keylessPublicReads && readsViaPublicProxy(exchange, request.url)
           ? publicCorsHttp!.request(nativeRequest)
           : http.request(nativeRequest);
     },
