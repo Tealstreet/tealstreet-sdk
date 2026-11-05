@@ -149,6 +149,15 @@ fn full_position_amend_never_replaces_its_zero_size_sentinel_with_new_size() {
             b.get("newSz").is_none(),
             "full-position sentinel is unchanged"
         );
+        let execution = if kind == OrderType::StopLoss {
+            "newSlOrdPx"
+        } else {
+            "newTpOrdPx"
+        };
+        assert!(
+            b.get(execution).is_none(),
+            "close-all stops permit trigger edits, not execution-price edits (51523)"
+        );
         assert_eq!(b["cxlOnFail"], false);
     }
 }

@@ -1088,11 +1088,11 @@ impl Okx {
                 );
             if o.kind == OrderType::StopLoss {
                 a.new_sl_trigger_px = Some(price);
-                a.new_sl_ord_px = Some(order_price);
+                a.new_sl_ord_px = (o.amount != 0.0).then_some(order_price);
                 a.new_sl_trigger_px_type = Some(trigger_name(o.trigger_type));
             } else {
                 a.new_tp_trigger_px = Some(price);
-                a.new_tp_ord_px = Some(order_price);
+                a.new_tp_ord_px = (o.amount != 0.0).then_some(order_price);
                 a.new_tp_trigger_px_type = Some(trigger_name(o.trigger_type));
             }
             job(

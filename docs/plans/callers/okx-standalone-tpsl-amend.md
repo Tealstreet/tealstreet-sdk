@@ -6,6 +6,13 @@ native trigger source, market/limit execution price, zero-size full-position
 semantics and untouched linked sibling fields. Native `trigger` rows use the
 trigger fields; `conditional`/OCO rows use their TP/SL fields. A refused native
 amendment keeps the old protection and emits no cancel or replacement.
+Close-all TP/SL edits omit size and execution-price fields: OKX permits their
+trigger edits but refuses quantity or execution-price edits (51523/51524).
+
+The [official amend-algos contract](https://www.okx.com/docs-v5/en/#order-book-trading-algo-trading-post-amend-algo-order)
+explicitly supports stop and trigger orders, excludes trailing stops, and makes
+`cxlOnFail:false` the retain-on-refusal behavior. No native-modify assumption is
+borrowed from another venue.
 
 Trailing stops retain cancel/place because OKX excludes them from amend-algos.
 The native account reducer retains original size, activation, callback ratio or
