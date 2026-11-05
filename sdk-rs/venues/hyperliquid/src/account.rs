@@ -122,6 +122,15 @@ struct QueuedRead {
     weight: u32,
     priority: ReadPriority,
 }
+impl QueuedRead {
+    fn occupies_account_slot(&self) -> bool {
+        self.priority != ReadPriority::Foreground
+            || matches!(
+                &self.continuation,
+                ReadContinuation::Account(Request::Orders { .. })
+            )
+    }
+}
 struct SettingBarrier {
     at: f64,
     revision: u64,
@@ -364,7 +373,7 @@ impl Hyperliquid {
                 ReadPriority::Background
             },
         };
-        // Foreground reconciliation never waits for a routine snapshot's network round trip.
+        // Foreground reconciliation takes priority without bypassing the Orders fan-out cap.
         if urgent {
             self.account.reads.push_front(read);
         } else {
@@ -412,7 +421,7 @@ impl Hyperliquid {
             .enumerate()
             .filter(|(_, read)| {
                 self.account.background_reads < MAX_BACKGROUND_READS
-                    || read.priority == ReadPriority::Foreground
+                    || !read.occupies_account_slot()
             })
             .min_by_key(|(_, read)| read.priority)
             .map(|(index, _)| index)
@@ -477,15 +486,15 @@ impl Hyperliquid {
                 }
                 read => read,
             };
+            let background = read.occupies_account_slot();
             let QueuedRead {
                 body,
                 continuation,
                 streamed,
                 weight,
-                priority,
+                ..
             } = read;
             self.account.read_weight += weight;
-            let background = priority != ReadPriority::Foreground;
             if background {
                 self.account.background_reads += 1;
             }

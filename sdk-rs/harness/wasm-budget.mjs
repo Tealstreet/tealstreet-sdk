@@ -142,14 +142,16 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // bingx 2,026,253, mexc 1,743,880 and orderly 1,721,849 B; ddi2il ruling: CI size plus 10 KiB rounded up to the KiB.
 // master b0d2122742d (#3018 + #3056) release cut: run 41901638294 measured binance 2,195,793 B;
 // CI size plus 10 KiB rounded up to the KiB.
+// #3073 run 41931095253 measured bitget and bitgetusdc 2,334,811 B.
+// ddi2il ruling: CI size plus 10 KiB rounded up to the KiB; siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
   asterdex: 2_137_088,
   backpack: 1_887_232,
   binance: 2_206_720,
   bingx: 2_036_736,
-  bitget: 2_317_312,
-  bitgetusdc: 2_317_312,
+  bitget: 2_345_984,
+  bitgetusdc: 2_345_984,
   bitrue: 1_821_696,
   bitunix: 1_849_344,
   blofin: 1_963_008,
