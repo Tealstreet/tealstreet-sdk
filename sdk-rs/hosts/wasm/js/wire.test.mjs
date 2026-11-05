@@ -1175,3 +1175,19 @@ test('an ORDERS_READ section beside ORDERS is ignored by this decoder', () => {
   assert.equal(frame.orders().count, 0);
   assert.equal(frame.accountRead(), false);
 });
+
+test('STATUS distinguishes unmeasured latency from a measured zero and legacy samples', () => {
+  const buffer = new ArrayBuffer(40);
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 1, true);
+  view.setUint16(16, SECTION.STATUS, true);
+  view.setUint32(20, 16, true);
+  assert.equal(new Frame(structuredClone(buffer)).status().latency, null);
+  view.setUint32(28, 2, true); // LATENCY_MEASURED, independent of HEDGED.
+  assert.equal(new Frame(structuredClone(buffer)).status().latency, 0);
+  view.setUint32(28, 0, true);
+  view.setFloat64(32, 42.5, true);
+  assert.equal(new Frame(structuredClone(buffer)).status().latency, 42.5);
+});

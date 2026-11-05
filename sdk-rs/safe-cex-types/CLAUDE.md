@@ -291,3 +291,7 @@ refusals are unchanged. JSON string parsing copies unescaped spans together;
 escape/control validation and duplicate-property order keep their existing rules.
 
 StoreData.socketHealth uses RetainedJsonInput so own undefined diagnostic fields survive typed notifications and native Store payloads. Ordinary JSON output omits those keys. StoreUpdate and the Store health getter/merge use the same carrier; a JSON map is an explicit ingress conversion.
+
+StoreData and WritableStoreData latency are required nullable numbers. Null means
+unmeasured, not zero; absent/non-numeric values still refuse. Native STATUS uses
+an explicit presence flag, with legacy positive samples retained.
