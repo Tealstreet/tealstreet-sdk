@@ -7,6 +7,56 @@ use support::Options;
 
 const NOW: f64 = 1_800_000_000_000.0;
 
+#[test]
+fn each_public_list_reports_a_classified_rate_limit_instead_of_a_missing_list() {
+    use safe_cex_engine::{Notice, log::Value};
+    for stage in 0..3 {
+        let mut engine = public_engine();
+        let mut request = catalogue_request(&mut engine);
+        for body in [
+            r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#,
+            r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#,
+        ].into_iter().take(stage) {
+            request = answer(&mut engine, &request, 200, "", body).into_iter().find_map(|a| match a {
+                Action::Http(r) if r.url.contains("/quote/") => Some(r), _ => None,
+            }).unwrap();
+        }
+        let actions = answer(
+            &mut engine,
+            &request,
+            200,
+            "",
+            r#"{"code":100410,"msg":"请稍后重试; unblocked after 1800000090000"}"#,
+        );
+        let events = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(e)) => Some(e),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let event = events
+            .iter()
+            .find(|event| {
+                event
+                    .fields
+                    .contains(&("kind", Value::Str("rateLimited".into())))
+            })
+            .unwrap_or_else(|| panic!("stage {stage}: {events:?}"));
+        assert!(
+            event
+                .fields
+                .contains(&("retryAfterMs", Value::Num(90_000.0)))
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| !event.message.contains("expected list"))
+        );
+        assert_eq!(retry_delay(&actions, NOW), 90_000.0);
+    }
+}
+
 fn drain(engine: &mut Engine<Bingx>, now: f64) -> Vec<Action> {
     safe_cex_engine::test_support::prepared_actions(engine, now)
 }
