@@ -2,6 +2,9 @@ import type { EngineEvent, Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
+
 import { setTunnelEgressUrls } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineTransport } from './engine';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
