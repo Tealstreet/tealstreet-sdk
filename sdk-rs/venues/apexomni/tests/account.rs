@@ -1273,7 +1273,8 @@ fn an_answered_key_refusal_ends_the_start() {
                 },
             );
             for action in e.prepared(20.0) {
-                if let Action::Notice(safe_cex_engine::Notice::StartupFailed { error }) = action {
+                if let Action::Notice(safe_cex_engine::Notice::StartupFailed { error, .. }) = action
+                {
                     failures.push(error);
                 }
             }

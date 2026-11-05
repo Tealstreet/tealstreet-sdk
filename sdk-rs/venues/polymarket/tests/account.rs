@@ -123,7 +123,7 @@ impl H {
                 }
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(safe_cex_engine::Notice::StartupFailed { error }) => self
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { error, .. }) => self
                     .errors
                     .push(format!("startup failed: {}", error.message)),
                 _ => {}
