@@ -39,6 +39,8 @@ existing identity behavior. Identity is normalized at client initialization and
 on error and session paths. Metric and log identities are rewritten on their
 serialized envelopes, after the SDK merges scope attributes. Sessions are
 omitted without an image release because the Sentry session schema requires one.
+Transaction and streamed-span envelope items are dropped while tracing is
+disabled; their identity must be normalized before tracing can be enabled.
 
 ## The default integration set is the leak, not the events
 

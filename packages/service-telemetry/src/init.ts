@@ -108,6 +108,11 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
           client.on('beforeEnvelope', (envelope) => {
             for (let i = envelope[1].length - 1; i >= 0; i--) {
               const [header, payload] = envelope[1][i];
+              // Tracing is disabled; normalize these items before ever enabling it.
+              if (header.type === 'transaction' || header.type === 'span') {
+                envelope[1].splice(i, 1);
+                continue;
+              }
               // Sessions require a release; never send a caller's inferred fallback instead.
               if (!imageRelease && ['session', 'sessions'].includes(header.type)) {
                 envelope[1].splice(i, 1);

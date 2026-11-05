@@ -204,3 +204,46 @@ for (const service of ['exchange-server', 'exchange-gateway']) {
       expect.soft(log.attributes[key]).toBeUndefined();
   });
 }
+
+for (const service of ['exchange-server', 'exchange-gateway']) {
+  for (const configured of [false, true]) {
+    it(`review real SDK ${service} drops transaction envelope configured=${configured}`, async () => {
+      vi.stubEnv('TEALSTREET_BOX', configured ? 'exchange-01' : '');
+      vi.stubEnv('TEALSTREET_RELEASE', configured ? 'image-revision-123' : '');
+      initServiceSentry({ dsn: 'https://public@o1.ingest.us.sentry.io/2', service });
+      const event = {
+        type: 'transaction' as const,
+        transaction: 'identity-review',
+        start_timestamp: 1,
+        timestamp: 2,
+        server_name: 'transaction-host',
+        release: 'undefined',
+        tags: { box: 'scope-box', region: 'eu', venue: 'bitget' },
+      };
+      Sentry.captureEvent(event);
+      await Sentry.flush(1000);
+      const tx = probe.envelopes.flatMap((e) => e[1]).find(([h]: any) => h.type === 'transaction')?.[1];
+      expect(tx).toBeUndefined();
+    });
+    it(`review real SDK ${service} drops streamed span envelope configured=${configured}`, async () => {
+      vi.stubEnv('TEALSTREET_BOX', configured ? 'exchange-01' : '');
+      vi.stubEnv('TEALSTREET_RELEASE', configured ? 'image-revision-123' : '');
+      initServiceSentry({ dsn: 'https://public@o1.ingest.us.sentry.io/2', service });
+      Object.assign(Sentry.getClient()!.getOptions(), { tracesSampleRate: 1 });
+      Sentry.getCurrentScope().setAttributes({
+        'server.address': 'span-host',
+        'sentry.release': 'undefined',
+        box: 'scope-box',
+        region: 'eu',
+        venue: 'bitget',
+      });
+      Sentry.startSpan({ name: 'identity-span-review', forceTransaction: true }, () => {});
+      await Sentry.flush(1000);
+      const spans = probe.envelopes
+        .flatMap((e) => e[1])
+        .filter(([h]: any) => h.type === 'span')
+        .flatMap(([, p]: any) => p.items);
+      expect(spans).toHaveLength(0);
+    });
+  }
+}
