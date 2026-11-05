@@ -257,9 +257,9 @@ test('master b0d2122742d release cut (run 41901638294) retains the ruled binance
   assert.match(wasmBudgetError(cap + 1, 'venue', 'binance'), /exceeds/);
 });
 
-
-test('#3101 partial-stop release guard (run 42069819046) retains measured Bybit headroom', () => {
-  const measured = 2_212_121, cap = 2_223_104;
+test('#3094 batch acknowledgements (run 42062090938) retain Bybit headroom', () => {
+  const measured = 2_214_254;
+  const cap = 2_225_152;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   assert.equal(WASM_VENUE_OVERRIDES.bybit, cap);
   assert.equal(wasmBudgetError(measured, 'venue', 'bybit'), undefined);

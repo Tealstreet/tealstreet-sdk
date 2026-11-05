@@ -1360,6 +1360,7 @@ fn signing_context_uses_only_signing_stream_and_redraws_after_clock_revision() {
                 channel,
                 context,
                 binary,
+                ..
             } => Some((id, url, headers, channel, context, binary)),
             _ => None,
         })

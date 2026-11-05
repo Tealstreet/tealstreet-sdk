@@ -73,6 +73,7 @@ impl Harness {
             .find_map(|a| match a {
                 Action::WsConnect {
                     binary,
+                    public_topics,
                     socket,
                     url,
                     headers,
@@ -80,6 +81,10 @@ impl Harness {
                     context,
                 } if url.contains("/private?") => {
                     assert!(!binary, "KuCoin sockets use the text protocol");
+                    assert!(
+                        !public_topics,
+                        "KuCoin private feeds do not carry public topics"
+                    );
                     assert!(
                         headers.is_empty(),
                         "KuCoin authenticates with a bullet token"

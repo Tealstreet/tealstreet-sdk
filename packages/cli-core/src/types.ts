@@ -55,7 +55,7 @@ export interface ExchangeLike {
     balance?: Balance;
     loaded?: StoreDataLoaded;
     lastReceivedMessage?: LastReceivedMessage;
-    latency?: number;
+    latency?: number | null;
     /** WS health, set by BaseExchange. Read by the trading health gate
      *  to block exposure-increasing writes when the private stream is
      *  stale (TSBUG-106). */

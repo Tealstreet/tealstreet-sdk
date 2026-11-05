@@ -29,7 +29,7 @@ impl Transport for Opens {
 }
 
 /// Connects one private-role socket at start, as account feeds do.
-struct PrivateFeed(Book);
+struct PrivateFeed(Book, bool, bool);
 impl Venue for PrivateFeed {
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities::BASE
@@ -38,8 +38,12 @@ impl Venue for PrivateFeed {
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         cx.connect(SocketSpec {
             channel: Some(SocketChannel::Private),
+            public_topics: self.1,
             ..SocketSpec::new("wss://private.example")
         });
+        if self.2 {
+            cx.connect(SocketSpec::new("wss://public.example"));
+        }
     }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
@@ -58,15 +62,35 @@ impl Venue for PrivateFeed {
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_private_socket_that_opens_and_takes_a_frame_reports_initialized() {
+    assert_initialized(false, false).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_mixed_private_socket_also_reports_public_initialized() {
+    assert_initialized(true, false).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn independent_public_and_private_sockets_still_report_both_initialized() {
+    assert_initialized(false, true).await;
+}
+
+async fn assert_initialized(public_topics: bool, second_public: bool) {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let engine = safe_cex_engine::test_support::seeded_engine(PrivateFeed(Book::default()));
+            let engine = safe_cex_engine::test_support::seeded_engine(PrivateFeed(
+                Book::default(),
+                public_topics,
+                second_public,
+            ));
             let (handle, _task) =
                 safe_cex_native::spawn_account(Host::new(engine, Opens), ServerConfig::default())
                     .unwrap();
             let mut summary = handle.socket_health().summary(now_ms() as u64);
             for _ in 0..50 {
-                if summary.private_initialized {
+                if summary.private_initialized
+                    && (!(public_topics || second_public) || summary.public_initialized)
+                {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -78,6 +102,14 @@ async fn a_private_socket_that_opens_and_takes_a_frame_reports_initialized() {
                 handle.socket_health()
             );
             assert!(summary.private_healthy);
+            assert_eq!(summary.public_initialized, public_topics || second_public);
+            assert!(summary.public_healthy);
+            let health = handle.socket_health();
+            assert_eq!(health.private.open, 1);
+            assert_eq!(
+                health.public.open,
+                u32::from(public_topics || second_public)
+            );
             handle.dispose();
         })
         .await;

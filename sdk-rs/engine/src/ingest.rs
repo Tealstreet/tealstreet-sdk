@@ -888,7 +888,9 @@ fn status(
         bits.positions = has(loaded_flag::POSITIONS);
     });
     store.set_hedged(flags & status_flag::HEDGED != 0);
-    store.set_latency(latency);
+    store.set_latency_sample(
+        (flags & status_flag::LATENCY_MEASURED != 0 || latency > 0.0).then_some(latency),
+    );
     Ok(())
 }
 
@@ -1549,6 +1551,28 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn latency_presence_survives_frame_fed_ingest() {
+        let mut source = Store::default();
+        let mut target = Store::default();
+        let mut state = IngestState::default();
+        target.set_latency(9.0);
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        source.write(&source.account_snapshot(), &mut writer);
+        let frame = writer.finish();
+        apply(&mut target, &mut state, &parse(&frame).unwrap(), true).unwrap();
+        assert_eq!(target.latency(), None);
+        source.set_latency(0.0);
+        ingest(&mut source, &mut state, &mut target, false);
+        assert_eq!(target.latency(), Some(0.0));
+        source.set_latency(25.0);
+        ingest(&mut source, &mut state, &mut target, false);
+        assert_eq!(target.latency(), Some(25.0));
+        source.set_latency_sample(None);
+        ingest(&mut source, &mut state, &mut target, false);
+        assert_eq!(target.latency(), None);
+    }
+
+    #[test]
     fn status_carries_account_loaded_bits_hedged_and_latency_but_not_markets() {
         let mut source = Store::default();
         source.set_hedged(true);
@@ -1561,7 +1585,7 @@ pub(crate) mod tests {
         let mut store = Store::default();
         ingest(&mut source, &mut IngestState::default(), &mut store, true);
         assert!(store.hedged());
-        assert_eq!(store.latency(), 42.5);
+        assert_eq!(store.latency(), Some(42.5));
         let loaded = store.loaded();
         assert!(loaded.balance && loaded.positions);
         assert!(!loaded.orders && !loaded.tickers && !loaded.markets);

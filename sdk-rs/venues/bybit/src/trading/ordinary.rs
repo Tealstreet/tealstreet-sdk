@@ -1649,7 +1649,10 @@ impl BybitLinear {
                     return Self::unproven(
                         cx,
                         context,
-                        "Bybit create-batch acknowledgement does not prove its orders",
+                        &format!(
+                            "Bybit create-batch acknowledgement does not prove its orders ({})",
+                            ack::create_diagnostic(result, ext, &refs),
+                        ),
                         &evidence,
                     );
                 };
