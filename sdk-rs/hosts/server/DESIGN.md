@@ -69,8 +69,9 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/*`; either missing/invalid value disables Access-authenticated proof, heartbeat and interruption-header handling and logs once at startup |
 | `TEALSTREET_IDLE_RELEASE_TTL_MS` | `20000` | Idle-release lease in milliseconds; operator drains never expire |
 | `CONNECT_REGION` | unset | Region label. Routing uses it for `proxyRegion` defaults; it also appears in `/health` and logs |
-| `TEALSTREET_RELEASE` | unset | Release id, sent to Sentry and shown in `/health` |
-| `EXCHANGE_SERVER_SENTRY_DSN` | unset | Sentry is off when unset |
+| `TEALSTREET_RELEASE` | unset | Image revision shown in `/health`; whitespace and placeholder values (`undefined`, `null`, `unknown`) are omitted |
+| `TEALSTREET_BOX` | unset | Bun wrapper only: stable Sentry `server_name` and `box` tag (for example `exchange-01`); no hostname fallback |
+| `EXCHANGE_SERVER_SENTRY_DSN` | unset | Bun wrapper only: Sentry is off when unset |
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
@@ -79,6 +80,14 @@ Images do not contain credentials and the workflows do not deploy hosts.
 `TEALSTREET_WORKERS`, `TEALSTREET_GATEWAY_PORT` and `TEALSTREET_HEALTH_PORT`
 belong to the Bun gateway and have no meaning here. One process serves all
 connections.
+
+The native binary currently emits JSON logs, not Sentry events. The Bun gateway
+and exchange workers initialize Sentry through `packages/service-telemetry`.
+They use the existing runtime `TEALSTREET_RELEASE` image revision, never the
+literal `undefined`. Image OCI revision labels are external metadata, not
+process environment variables. Box identity comes only from `TEALSTREET_BOX`;
+missing or invalid labels are omitted. Their Sentry events omit `region` because
+`CONNECT_REGION` can be a legacy routing default rather than the box location.
 
 ## HTTP routes
 
@@ -613,7 +622,8 @@ default exactly where the TS server reads it.
     src/signer.rs     4yjlw0 (wires safe-cex-remote-signer)
 
 Dependencies: `axum` (with `ws`), `tokio`, `jsonwebtoken`, `base64`, `serde_json`
-and `safe-cex-native`. Optional `sentry`.
+and `safe-cex-native`. Sentry capture currently belongs to the Bun wrapper,
+not this native crate.
 
 ## Algos (claude-tbz5hr chaser, 55ao7t TWAP, zs5e83 exec)
 
