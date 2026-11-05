@@ -304,7 +304,17 @@ fn saturate(engine: &mut Engine<WeightedReads>, now: f64) -> (Vec<Action>, usize
 
 fn queued_census_retains_its_creation_epoch(spot: bool) {
     let mut engine = bootstrap(spot);
-    let (mut saturated, builders) = saturate(&mut engine, 2000.);
+    let (saturated, builders) = saturate(&mut engine, 2000.);
+    assert!(
+        builders > 0 && builders < 40,
+        "normal reads stop before the 200-weight critical reserve"
+    );
+    assert!(
+        saturated.iter().any(
+            |a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms > 2000. && *at_ms <= 3200.)
+        ),
+        "continuous refill arms a bounded weight timer"
+    );
     engine.handle(
         2000.,
         Event::Command(Command::SetTickerSymbols {
@@ -315,19 +325,8 @@ fn queued_census_retains_its_creation_epoch(spot: bool) {
     assert!(
         !actions
             .iter()
-            .any(|a| matches!(a, Action::Http(r) if kind(r) == "frontendOpenOrders"))
-    );
-    saturated.extend(actions);
-    let (timer, at) = saturated
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 60_000. => Some((*timer, *at_ms)),
-            _ => None,
-        })
-        .expect("real weight-budget timer holds the logical Orders read");
-    assert!(
-        builders >= 40,
-        "saturation must issue genuine weighted requests"
+            .any(|a| matches!(a, Action::Http(r) if kind(r) == "frontendOpenOrders")),
+        "the ordinary census is genuinely queued before uncertainty"
     );
     let actions = place(&mut engine, 3000., 101, spot);
     let write = actions
@@ -346,9 +345,6 @@ fn queued_census_retains_its_creation_epoch(spot: bool) {
     );
     let actions = prepared_now(&mut engine);
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 101, error }) if error.outcome == Some(Outcome::Unknown))));
-    assert_fenced(&place(&mut engine, 4000., 102, spot), 102);
-    engine.handle(at, Event::TimerFired { timer });
-    let actions = prepared_now(&mut engine);
     let orders: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {
@@ -359,8 +355,10 @@ fn queued_census_retains_its_creation_epoch(spot: bool) {
     assert_eq!(
         orders.len(),
         1,
-        "the queued logical read issues only after the mark"
+        "the promoted old census uses the critical reserve immediately after the mark"
     );
+    assert_fenced(&place(&mut engine, 3500., 102, spot), 102);
+    let at = 3500.;
     for action in &actions {
         if let Action::Http(request) = action {
             match kind(request).as_str() {
@@ -416,14 +414,15 @@ fn symbols(engine: &mut Engine<WeightedReads>, now: f64, name: &str) -> Vec<Acti
 fn a_fence_read_goes_ahead_of_queued_routine_reads() {
     let mut engine = bootstrap(false);
     let (actions, builders) = saturate(&mut engine, 2000.);
-    assert!(builders >= 40);
-    let (timer, at) = actions
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == 60_000. => Some((*timer, *at_ms)),
-            _ => None,
-        })
-        .expect("budget spent, reads queued");
+    assert!(
+        builders > 0 && builders < 40,
+        "routine reads cannot consume the critical reserve"
+    );
+    assert!(
+        actions.iter().any(
+            |a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms > 2000. && *at_ms <= 3200.)
+        )
+    );
     let actions = place(&mut engine, 3000., 101, false);
     let write = actions
         .iter()
@@ -439,15 +438,13 @@ fn a_fence_read_goes_ahead_of_queued_routine_reads() {
             error: "placement reply lost",
         },
     );
-    prepared_now(&mut engine);
-    engine.handle(at, Event::TimerFired { timer });
     let first = prepared_now(&mut engine)
         .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(kind(&r)),
             _ => None,
         })
-        .unwrap();
+        .expect("fence read uses reserved weight without waiting for a routine refill");
     assert_eq!(first, "frontendOpenOrders");
 }
 
