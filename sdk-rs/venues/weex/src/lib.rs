@@ -26,6 +26,7 @@ use safe_cex_engine::request_context::{
     Context, Egress, Operation, Owner, Policy, RetryPolicy, Scope,
 };
 use safe_cex_engine::selected_read::{ReadRole, SelectedRead};
+use safe_cex_engine::text::JoinWith;
 
 use safe_cex_engine::{
     Command, CommandId, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId,
@@ -1133,7 +1134,7 @@ impl Venue for WeexFutures {
                 format!(
                     "WEEX skipped {} malformed {kind} row(s): {}",
                     p.skipped.len(),
-                    p.skipped.join(", ")
+                    p.skipped.join_with(", ")
                 ),
             );
         }

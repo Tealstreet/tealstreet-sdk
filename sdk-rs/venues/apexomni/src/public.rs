@@ -12,6 +12,7 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::selected_read::{BackgroundReadError, ReadPolicy, ReadRole, SelectedRead};
 use safe_cex_engine::socket_lifecycle::{FeedId, Interest, SocketError};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, VenueError,
 };
@@ -372,7 +373,10 @@ impl ApexOmni {
                     cx.notice(
                         Level::Warn,
                         code::ROW_SKIPPED,
-                        format!("ApeX skipped malformed market rows ({})", labels.join(", ")),
+                        format!(
+                            "ApeX skipped malformed market rows ({})",
+                            labels.join_with(", ")
+                        ),
                     );
                 }
                 self.public.unlisted = skipped

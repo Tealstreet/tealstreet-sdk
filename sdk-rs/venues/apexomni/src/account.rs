@@ -16,6 +16,7 @@ use safe_cex_engine::selected_read::{
 };
 use safe_cex_engine::socket_lifecycle::{FeedId, SocketError};
 use safe_cex_engine::store::Store;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, Cx, Fill, Response, SocketId, TimerId, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1496,7 +1497,7 @@ impl ApexOmni {
                     code::ROW_SKIPPED,
                     format!(
                         "ApeX private stream skipped malformed {kind} rows ({})",
-                        skipped.join(", ")
+                        skipped.join_with(", ")
                     ),
                 );
             }

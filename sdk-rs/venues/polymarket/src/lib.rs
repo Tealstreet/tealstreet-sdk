@@ -15,6 +15,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::request_context::{Context, Operation, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
+use safe_cex_engine::text::JoinWith;
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
@@ -896,7 +897,7 @@ impl Venue for Polymarket {
                         format!(
                             "Skipped {} malformed Polymarket market rows: {}",
                             skipped.len(),
-                            skipped.join(", ")
+                            skipped.join_with(", ")
                         ),
                     );
                     self.walk_skipped_slugs.extend(skipped);

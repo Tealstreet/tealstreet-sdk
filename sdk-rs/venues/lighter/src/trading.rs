@@ -7,6 +7,7 @@ use safe_cex_engine::request_context::{
     Context, Operation, Plan, Policy, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -1465,7 +1466,7 @@ impl Lighter {
             }
             let mut error = error.into();
             if !job.ids.is_empty() {
-                let indexes = job.ids.join(",");
+                let indexes = job.ids.join_with(",");
                 error.message = format!(
                     "{}; previously placed order indexes: {indexes}",
                     error.message

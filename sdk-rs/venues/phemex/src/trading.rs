@@ -16,6 +16,7 @@ use safe_cex_engine::request_context::{
     Context, Operation, Plan, Preflight, PreflightPolicy, PreflightPurpose,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Response, VenueError, num};
 use serde::Deserialize;
@@ -457,7 +458,7 @@ fn query(pairs: Vec<(&str, String)>) -> String {
         .into_iter()
         .map(|(k, v)| format!("{k}={}", encode(&v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 fn positive(v: f64, step: f64) -> Result<f64, String> {
     let n = num::adjust(v, step);
@@ -924,7 +925,7 @@ impl PhemexPerpetuals {
                     query: query(vec![
                         ("symbol", symbol.clone()),
                         ("posSide", pos.clone()),
-                        ("orderID", chunk.join(",")),
+                        ("orderID", chunk.join_with(",")),
                     ]),
                     call: Call::Cancel {
                         before,
@@ -2602,7 +2603,7 @@ impl PhemexPerpetuals {
         cx.notice(Level::Warn, code::ORDERS_REPLACED,
             format!(
                 "Phemex order {} from an unknown-outcome placement landed after cancel-all on {symbol}; canceling it",
-                ids.join(", ")
+                ids.join_with(", ")
             ),
         );
         match self.cancel_plan(cx, ids) {

@@ -19,6 +19,7 @@ use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
     Interest, Invalidation, LifecycleEvent, RetireReason, SocketError, TrafficPolicy,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -1835,7 +1836,7 @@ impl PhemexPerpetuals {
             format!(
                 "Phemex cancel-all on {symbol} sent while placement {} has an unknown outcome; \
                  it is canceled if the open-order read after its signed expiry finds it",
-                ids.join(", ")
+                ids.join_with(", ")
             ),
         );
         let covered = self.mint_late_subjects(cx, preflight, symbol, &lost);
@@ -1918,7 +1919,7 @@ impl PhemexPerpetuals {
                 code::CHILD_LEG_FAILED,
                 format!(
                     "Phemex order {} landed after cancel-all on {symbol}; check the position",
-                    filled.join(", ")
+                    filled.join_with(", ")
                 ),
             );
         }

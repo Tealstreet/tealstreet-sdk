@@ -4,6 +4,7 @@ use crate::{
     wire::{Envelope, id, number},
 };
 use safe_cex_engine::model::*;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -993,7 +994,7 @@ impl Woo {
                     cx.done(job.command, json(&job.ids).unwrap());
                 } else {
                     // The cancel families are independent; only an unknown one is worth stating.
-                    let error = VenueError::new(job.errors.join("; "));
+                    let error = VenueError::new(job.errors.join_with("; "));
                     let error = if job.errors_unknown {
                         error.outcome(Outcome::Unknown)
                     } else {
