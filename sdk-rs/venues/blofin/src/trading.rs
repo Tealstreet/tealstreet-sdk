@@ -105,7 +105,13 @@ pub(crate) struct Trading {
     /// A job whose Plan the engine sealed itself: restore its Store rows and
     /// reconcile at the next callback that holds Cx.
     retired: Option<Job>,
+    /// Orders put back under new ids after a refused replacement: (original
+    /// native id, new native ids, symbol). A later cancel of the original or its
+    /// market reaches them.
+    restored: VecDeque<(String, Vec<String>, String)>,
 }
+/// How many put-back orders are remembered for a later cancel to follow.
+const RESTORED_KEPT: usize = 64;
 struct Queued {
     preflight: Preflight,
     command: Command,
@@ -150,6 +156,66 @@ struct Job {
     amend_fallback: VecDeque<Step>,
     /// The read-back that must show the kept leg after an accepted amend-tpsl.
     amend_verify: Option<Step>,
+    /// An amend's replaced original, re-checked when its cancel is finally sent.
+    guard: Option<StopGuard>,
+    /// The original placed again, unchanged, once its replacement is refused.
+    restore: VecDeque<Step>,
+    /// The put-back is under way: the replacement was refused.
+    restoring: bool,
+}
+/// The amended order (and the entry it is attached to) as planned, and the
+/// replacement trigger's reference: the cancel goes only while all still hold.
+struct StopGuard {
+    order: Order,
+    parent: Option<Order>,
+    trigger: f64,
+    reference: StopTriggerType,
+    /// The side a live protective trigger must stay on; None when nothing can
+    /// fire at once (an untriggered entry or the leg of an unfilled entry).
+    below: Option<bool>,
+}
+impl StopGuard {
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        let unchanged = || format!("Your {} order was not changed", self.order.symbol);
+        // This cancel's own optimistic Canceling status is not a change.
+        let same = |planned: &Order| {
+            store.order(&planned.id).is_some_and(|current| {
+                current == planned
+                    || (current.status == OrderStatus::Canceling && {
+                        let mut current = current.clone();
+                        current.status = planned.status;
+                        current == *planned
+                    })
+            })
+        };
+        if !same(&self.order) || self.parent.as_ref().is_some_and(|parent| !same(parent)) {
+            return Err(refused(Some(format!(
+                "{}: it changed before cancellation",
+                unchanged()
+            ))));
+        }
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::IndexPrice => "index",
+            StopTriggerType::LastPrice => "last",
+        };
+        let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
+            return Err(refused(Some(format!(
+                "{}: a fresh {label} price is required before cancellation",
+                unchanged()
+            ))));
+        };
+        if let Some(below) = self.below
+            && ((below && self.trigger >= price) || (!below && self.trigger <= price))
+        {
+            return Err(refused(Some(format!(
+                "{}: the replacement would trigger immediately against the {label} price",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
 }
 struct Step {
     receipts: Vec<OrderIdentityReceipt>,
@@ -423,6 +489,9 @@ impl Job {
             replacing_order: None,
             amend_fallback: VecDeque::new(),
             amend_verify: None,
+            guard: None,
+            restore: VecDeque::new(),
+            restoring: false,
         }
     }
 }
@@ -954,6 +1023,87 @@ impl Blofin {
             }
         }
         Ok(out)
+    }
+    /// A stop, take-profit or trigger edit BloFin cannot make in place: its
+    /// cancel is re-checked at the final send, and the original (with its
+    /// attached legs, or the entry carrying it) is placed again if the
+    /// replacement is refused outright.
+    fn guard_replacement(
+        &self,
+        cx: &Cx<'_, Pending>,
+        job: &mut Job,
+        order: &Order,
+        price: Option<f64>,
+    ) -> Result<(), String> {
+        let leg = matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        if !leg && order.kind != OrderType::Conditional {
+            return Ok(());
+        }
+        let source = self.account.sources.get(&order.id);
+        let parent = source
+            .filter(|s| leg && s.tpsl_id.is_empty() && !s.order_id.is_empty())
+            .and_then(|s| cx.store.order(&s.order_id))
+            .cloned();
+        let original = parent.as_ref().unwrap_or(order);
+        let m = cx
+            .store
+            .market(&order.symbol)
+            .ok_or("Unknown replacement market")?;
+        let trigger = num::adjust(price.unwrap_or(order.price), m.precision.price);
+        let kind = match (order.kind, source) {
+            (OrderType::StopLoss, Some(s)) => s.sl_type.as_str(),
+            (OrderType::TakeProfit, Some(s)) => s.tp_type.as_str(),
+            (_, Some(s)) => s.trigger_price_type.as_str(),
+            (_, None) => "",
+        };
+        let reference = match kind {
+            "mark" => StopTriggerType::MarkPrice,
+            "index" => StopTriggerType::IndexPrice,
+            _ => StopTriggerType::LastPrice,
+        };
+        // A leg acts only once its entry has filled; a standalone stop acts at once.
+        let live = leg && parent.as_ref().is_none_or(|p| p.filled > 0.0);
+        let below =
+            live.then(|| (order.kind == OrderType::StopLoss) == (order.side == OrderSide::Sell));
+        let guard = StopGuard {
+            order: order.clone(),
+            parent: parent.clone(),
+            trigger,
+            reference,
+            below,
+        };
+        guard
+            .validate(cx.store, cx.now)
+            .map_err(|error| error.message)?;
+        let mut restore = Job::new(job.command, Intent::Place);
+        Self::add_placements(&mut restore, self.replacement(cx, original, None, None)?);
+        job.guard = Some(guard);
+        job.restore = restore.steps;
+        Ok(())
+    }
+    /// The final-claim re-check of an amend's destructive cancel.
+    pub(crate) fn stop_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Pending::Trade(request) = pending else {
+            return Ok(());
+        };
+        let Effect::Cancel(_) = &request.step.effect else {
+            return Ok(());
+        };
+        let Some(guard) = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|active| active.job.command == request.command && !active.job.restoring)
+            .and_then(|active| active.job.guard.as_ref())
+        else {
+            return Ok(());
+        };
+        guard.validate(store, release.time.raw_ms)
     }
     /// A stop edit BloFin can make in place: the edited field alone (omitted
     /// fields stay unchanged), then a read that must show exactly that edit.
@@ -1512,7 +1662,20 @@ impl Blofin {
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &cancel_ids)?);
                     Self::add_placements(&mut job, rows);
                 }
-                Command::CancelOrders { ids, .. } => {
+                Command::CancelOrders { mut ids, .. } => {
+                    for (old, new, _) in &self.trading.restored {
+                        if ids
+                            .iter()
+                            .any(|id| id.split("__").next() == Some(old.as_str()))
+                        {
+                            ids.extend(
+                                new.iter()
+                                    .filter(|n| !ids.contains(n))
+                                    .cloned()
+                                    .collect::<Vec<_>>(),
+                            );
+                        }
+                    }
                     let mut preserved = Vec::new();
                     let mut seen = HashSet::new();
                     for id in &ids {
@@ -1639,6 +1802,7 @@ impl Blofin {
                     }
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &[id])?);
                     Self::add_placements(&mut job, rows);
+                    self.guard_replacement(cx, &mut job, order, price)?;
                 }
                 Command::SetLeverage {
                     symbol, leverage, ..
@@ -1969,6 +2133,12 @@ impl Blofin {
                 }
                 // Its row ended only because the cancel landed: nothing replaced it.
                 let unknown = error.outcome == Some(safe_cex_engine::Outcome::Unknown);
+                let mut error = error;
+                if active.job.restoring {
+                    error.protection =
+                        (!unknown).then_some(safe_cex_engine::error::Protection::Unprotected);
+                    error.presents = true;
+                }
                 let order_gone = active
                     .job
                     .replacing_order
@@ -2019,6 +2189,40 @@ impl Blofin {
         if let Some((slot, context)) = current {
             let finished = cx.finish_plan_call(plan, slot, context);
             debug_assert!(finished.is_ok(), "Plan call seal stranded");
+        }
+        if active.job.restoring {
+            let what = active
+                .job
+                .replacing_stop
+                .as_ref()
+                .map(|(_, symbol, ..)| format!("{symbol} stop"))
+                .or_else(|| {
+                    active
+                        .job
+                        .replacing_order
+                        .as_ref()
+                        .map(|(_, symbol)| format!("{symbol} order"))
+                })
+                .unwrap_or_else(|| "order".into());
+            let mut error = VenueError::new(format!(
+                "Your {what} is unchanged: its replacement was refused, so the original was put back as a new order"
+            ));
+            error.protection = Some(safe_cex_engine::error::Protection::Restored);
+            error.presents = true;
+            if let Some(guard) = &active.job.guard {
+                let old = guard.parent.as_ref().unwrap_or(&guard.order).id.clone();
+                if self.trading.restored.len() >= RESTORED_KEPT {
+                    self.trading.restored.pop_front();
+                }
+                self.trading.restored.push_back((
+                    old.split("__").next().unwrap_or(&old).to_owned(),
+                    active.job.ids.clone(),
+                    guard.order.symbol.clone(),
+                ));
+            }
+            let failed = cx.fail_plan(plan, error.partial_ids(&active.job.ids));
+            debug_assert!(failed.is_ok(), "Plan terminal stranded");
+            return self.next_job(cx);
         }
         let ids = serde_json::to_string(&active.job.ids).expect("order ids");
         if cx.done_plan(plan, ids).is_ok() {
@@ -2293,6 +2497,16 @@ impl Blofin {
         if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
             if request.step.is_place() {
                 cx.store.invalidate_order_snapshots();
+            }
+            // Only a definite refusal proves no replacement exists: put the original back once.
+            if request.step.is_place()
+                && !active.job.restoring
+                && !active.job.restore.is_empty()
+                && error.outcome != Some(Outcome::Unknown)
+            {
+                active.job.steps = std::mem::take(&mut active.job.restore);
+                active.job.restoring = true;
+                return self.drive(cx, active, At::Data(&request.slot, &request.context));
             }
             return self.end(cx, active, current, error);
         }

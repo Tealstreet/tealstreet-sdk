@@ -235,12 +235,22 @@ fn a_refused_take_profit_edit_leaves_it_in_place() {
     assert!(!h.pending.iter().any(|r| r.url.contains("cancel")));
 }
 
+/// Fresh mark, last and index prices: a replaced stop's cancel needs them.
+fn fresh_prices(h: &mut Harness) {
+    h.e.store_mut().update_ticker("BTCUSDT", |t| {
+        t.mark = 60010.0;
+        t.last = 60005.0;
+        t.index = 60000.0;
+    });
+}
+
 #[test]
 fn conditional_amend_preserves_nested_protection_and_native_execution_provenance() {
     let mut h = Harness::new();
     h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","algoId":"77","orderType":"trigger","side":"buy","size":"3","triggerPrice":"61000","orderPrice":"60900","triggerPriceType":"mark","marginMode":"isolated","positionSide":"long","state":"live","attachAlgoOrders":[{"tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"mark"}]}]}"#);
+    fresh_prices(&mut h);
     h.handle(
         1.0,
         Event::Command(Command::AmendOrder {
@@ -717,6 +727,7 @@ fn editing_inline_virtual_protection_preserves_parent_remainder_despite_child_am
     ] {
         h.reply(path, r#"{"code":"0","data":[]}"#);
     }
+    fresh_prices(&mut h);
     h.handle(
         1.0,
         Event::Command(Command::AmendOrder {

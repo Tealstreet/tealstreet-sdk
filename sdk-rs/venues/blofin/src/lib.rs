@@ -512,6 +512,14 @@ impl Venue for Blofin {
     fn managed_sockets() -> bool {
         true
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.stop_release_veto(store, pending, release)
+    }
     fn socket_capabilities() -> safe_cex_engine::socket_lifecycle::SocketCapabilities {
         safe_cex_engine::socket_lifecycle::SocketCapabilities { handoff: false }
     }
