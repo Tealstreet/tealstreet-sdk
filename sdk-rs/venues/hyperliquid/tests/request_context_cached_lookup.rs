@@ -224,7 +224,7 @@ fn started(testnet: bool, identity: bool) -> Engine<Hyperliquid> {
     engine.take_frame(NOW);
     engine
 }
-fn park(engine: &mut Engine<Hyperliquid>, owner: u32) -> Preparation {
+fn park(engine: &mut Engine<Hyperliquid>, owner: u32) -> Option<Preparation> {
     engine.handle(
         NOW,
         Event::Command(Command::FetchCandles {
@@ -236,16 +236,26 @@ fn park(engine: &mut Engine<Hyperliquid>, owner: u32) -> Preparation {
             to_ms: Some(60_000.),
         }),
     );
-    engine
-        .drain_actions()
-        .find_map(|action| match action {
-            Action::ManagedHttp(action) => match *action {
-                HttpAction::Prepare { preparation, .. } => Some(preparation),
-                _ => None,
-            },
+    let actions: Vec<_> = engine.drain_actions().collect();
+    assert!(
+        terminal(&actions, owner).is_empty(),
+        "every candle retains a genuine live caller root"
+    );
+    let preparation = actions.iter().find_map(|action| match action {
+        Action::ManagedHttp(action) => match action.as_ref() {
+            HttpAction::Prepare { preparation, .. } => Some(*preparation),
             _ => None,
-        })
-        .expect("real perps candle parks genuine managed owner")
+        },
+        _ => None,
+    });
+    if preparation.is_none() {
+        let duplicate = local(engine, NOW, owner, Local::Cached);
+        assert!(
+            matches!(duplicate.as_slice(), [Action::Notice(Notice::Event(event))] if event.code == safe_cex_engine::log::code::COMMAND_DUPLICATE),
+            "queued candle retains genuine entry custody: {duplicate:?}"
+        );
+    }
+    preparation
 }
 fn capacity(read: Local) {
     for testnet in [false, true] {
@@ -259,7 +269,7 @@ fn capacity(read: Local) {
         );
         engine.http_preparation_failed(
             NOW + 1.,
-            peers[0],
+            peers[0].expect("first admitted candle has a physical preparation"),
             Error::State,
             VenueError::new("free peer"),
         );
@@ -269,7 +279,7 @@ fn capacity(read: Local) {
         native(&local(&mut engine, NOW + 2., 600, read), 600, read);
         engine.http_preparation_failed(
             NOW + 3.,
-            peers[1],
+            peers[1].expect("second admitted candle has a physical preparation"),
             Error::State,
             VenueError::new("other peer"),
         );
@@ -300,7 +310,7 @@ fn public_only_uncached_refusal_requires_caller_root_capacity() {
     for full in [false, true] {
         if full {
             for owner in 1..=256 {
-                park(&mut engine, owner);
+                let _ = park(&mut engine, owner);
             }
         }
         let actions = local(&mut engine, NOW, 601, Local::Anonymous);
@@ -336,7 +346,7 @@ fn public_only_uncached_refusal_requires_caller_root_capacity() {
 #[test]
 fn duplicate_entry_cannot_replace_parked_owner() {
     let mut engine = started(false, false);
-    let peer = park(&mut engine, 602);
+    let peer = park(&mut engine, 602).expect("first candle has a physical preparation");
     for read in [Local::Cached, Local::Invalid, Local::Anonymous] {
         let actions = local(&mut engine, NOW + 1., 602, read);
         assert!(terminal(&actions, 602).is_empty());
@@ -365,7 +375,7 @@ fn repeated_synchronous_reads_release_context_capacity() {
         }
     }
     for owner in 1..=256 {
-        park(&mut engine, owner);
+        let _ = park(&mut engine, owner);
     }
 }
 #[test]
