@@ -667,8 +667,9 @@ impl Venue for Cryptocom {
                     );
                     cx.close(socket);
                     self.on_close(cx, socket, 1008);
-                    cx.startup_read_refused(
-                        &safe_cex_engine::VenueError::new(format!(
+                    // REST readiness cannot recover a rejected private stream login.
+                    cx.startup_failed(
+                        safe_cex_engine::VenueError::new(format!(
                             "Crypto.com private login rejected: {}",
                             envelope.message
                         ))
