@@ -1658,6 +1658,15 @@ fn a_take_profit_limit_is_read_and_moved_as_a_take_profit() {
     message(
         &mut e,
         s,
+        1500.,
+        &format!(
+            r#"{{"channel":"clearinghouseState","data":{{"user":"0x14791697260e4c9a71f18484c9f997b308e59325","dex":"","clearinghouseState":{}}}}}"#,
+            STATE.replace("\"szi\":\"2\"", "\"szi\":\"-2\"")
+        ),
+    );
+    message(
+        &mut e,
+        s,
         2000.0,
         &format!(
             r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"B","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Limit","triggerPx":"87"}},"status":"open"}}]}}"#
@@ -1692,15 +1701,22 @@ fn a_take_profit_limit_is_read_and_moved_as_a_take_profit() {
             r#"{{"status":"order","order":{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"B","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Limit","triggerPx":"87"}},"status":"open"}}}}"#
         ),
     );
+    let cancel = write(&mut e);
+    assert_eq!(body(&cancel)["action"]["type"], "cancel");
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
     let r = write(&mut e);
     let b = body(&r);
-    assert_eq!(b["action"]["type"], "modify");
-    assert_eq!(b["action"]["oid"], 9);
-    assert_eq!(b["action"]["order"]["t"]["trigger"]["tpsl"], "tp");
-    assert_eq!(b["action"]["order"]["t"]["trigger"]["isMarket"], false);
-    assert_eq!(b["action"]["order"]["t"]["trigger"]["triggerPx"], "85");
-    assert_eq!(b["action"]["order"]["p"], "80");
-    assert_eq!(b["action"]["order"]["c"], CLOID);
+    assert_eq!(b["action"]["type"], "order");
+    assert_eq!(b["action"]["orders"][0]["t"]["trigger"]["tpsl"], "tp");
+    assert_eq!(b["action"]["orders"][0]["t"]["trigger"]["isMarket"], false);
+    assert_eq!(b["action"]["orders"][0]["t"]["trigger"]["triggerPx"], "85");
+    assert_eq!(b["action"]["orders"][0]["p"], "80");
+    assert_ne!(b["action"]["orders"][0]["c"], CLOID);
 }
 
 // codex-mxb4mq's #3018 reproducers, kept as regression tests.

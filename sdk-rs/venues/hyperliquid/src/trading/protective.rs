@@ -10,7 +10,6 @@ pub(super) struct Amend {
     grouping: Option<&'static str>,
     target_kind: OrderType,
     target: f64,
-    native: bool,
     restoring: bool,
     refusal: Option<VenueError>,
     peers: Vec<String>,
@@ -76,7 +75,7 @@ impl Hyperliquid {
             .steps
             .iter()
             .find_map(|s| match s {
-                Step::Place(o) | Step::Modify { opts: o, .. } => Some(o),
+                Step::Place(o) => Some(o),
                 _ => None,
             })
             .ok_or("Hyperliquid replacement is unavailable")?;
@@ -111,19 +110,15 @@ impl Hyperliquid {
         if row.limit_px <= 0. || (!original.c.is_empty() && !valid_cloid(&original.c)) {
             return Err("Hyperliquid original execution price or client identity is not proven; order unchanged".into());
         }
-        let native = matches!(job.steps.front(), Some(Step::Modify { .. }));
         let grouping = (row.is_position_tpsl == Some(true)
             && row.orig_sz == 0.
             && row.sz == 0.
             && row.reduce_only)
             .then_some("positionTpsl");
-        if !native && (!cx.store.loaded().positions || !has_position(cx.store, old)) {
+        if !cx.store.loaded().positions || !has_position(cx.store, old) {
             return Err(
                 "Hyperliquid position not loaded or already closed; order unchanged".into(),
             );
-        }
-        if !native && grouping.is_none() {
-            return Err("Hyperliquid cannot prove the original protection's placement semantics for safe replacement; order unchanged".into());
         }
         let mut before = old.clone();
         before.amount = row.orig_sz;
@@ -137,7 +132,6 @@ impl Hyperliquid {
             target: price_wire(opts.price.unwrap_or(0.), precision, false)?
                 .parse()
                 .map_err(|_| "Invalid trigger")?,
-            native,
             restoring: false,
             refusal: None,
             peers: cx
@@ -149,17 +143,12 @@ impl Hyperliquid {
                 .collect(),
         };
         let job = self.trading.active.as_mut().unwrap();
-        if native {
-            job.replacement =
-                (!captured.original.c.is_empty()).then(|| captured.original.c.clone());
-        }
         job.protection = Some(Box::new(captured));
         Ok(())
     }
-    pub(super) fn prepare_protective_modify(
+    pub(super) fn prepare_protective_replace(
         &self,
         cx: &Cx<'_, Pending>,
-        before: Box<Order>,
         opts: PlaceOrderOpts,
     ) -> Result<(Action, Effect), String> {
         let protected = self
@@ -167,7 +156,7 @@ impl Hyperliquid {
             .active
             .as_ref()
             .and_then(|j| j.protection.as_ref())
-            .ok_or("Hyperliquid native protective source is not proven")?;
+            .ok_or("Hyperliquid protective source is not proven")?;
         let mut wire = protected.original.clone();
         let precision = cx
             .store
@@ -188,7 +177,7 @@ impl Hyperliquid {
         };
         if !keep_full && (size <= 0. || size * protected.target < MIN_ORDER_VALUE) {
             return Err(
-                "Hyperliquid protective modification is below the minimum; order unchanged".into(),
+                "Hyperliquid protective replacement is below the minimum".into(),
             );
         }
         wire.s = float_wire(size)?;
@@ -196,25 +185,42 @@ impl Hyperliquid {
             unreachable!();
         };
         trigger.trigger_px = float_wire(protected.target)?;
-        let mut after = before.as_ref().clone();
+        trigger.tpsl = if opts.kind == OrderType::TakeProfit {
+            "tp"
+        } else {
+            "sl"
+        };
+        wire.c = opts
+            .client_order_id
+            .clone()
+            .ok_or("Replacement client identity is unavailable")?;
+        let mut after = protected.before.clone();
+        after.id.clear();
+        after.kind = opts.kind;
+        after.status = OrderStatus::Creating;
         after.price = protected.target;
         after.amount = size;
         after.remaining = size;
         after.filled = 0.;
         after.last_update = cx.now;
         after.client_order_id = (!wire.c.is_empty()).then(|| wire.c.clone());
+        let grouping = if keep_full { "positionTpsl" } else { "na" };
+        let builder = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.amend_builder.clone())
+            .filter(|_| self.account.builder_approved == Some(true));
         Ok((
-            Action::Modify {
-                oid: before.id.parse().map_err(|_| "Invalid native order ID")?,
-                order: wire,
+            Action::Order {
+                orders: vec![wire],
+                grouping,
+                builder,
             },
-            Effect::Modify {
-                before,
-                records: vec![Placement {
-                    at: cx.now,
-                    order: after,
-                }],
-            },
+            Effect::Place(vec![Placement {
+                at: cx.now,
+                order: after,
+            }]),
         ))
     }
     pub(crate) fn protective_release_veto(
@@ -238,7 +244,7 @@ impl Hyperliquid {
             return Ok(());
         };
         let restoring = protected.restoring && matches!(trade.effect, Effect::Place(_));
-        if !restoring && !matches!(trade.effect, Effect::Cancel(_) | Effect::Modify { .. }) {
+        if !restoring && !matches!(trade.effect, Effect::Cancel(_)) {
             return Ok(());
         }
         let now = release.time.raw_ms;
@@ -250,6 +256,11 @@ impl Hyperliquid {
             }
             &protected.before
         } else {
+            if !store.loaded().positions || !has_position(store, &protected.before) {
+                return Err(not_sent(
+                    "Hyperliquid position closed or is not loaded; original protection unchanged",
+                ));
+            }
             let source = store.order(&protected.before.id).ok_or_else(|| {
                 not_sent("Hyperliquid original protection is no longer open; amendment not sent")
             })?;
@@ -341,7 +352,7 @@ impl Hyperliquid {
         self.trading
             .active
             .as_ref()
-            .is_some_and(|j| j.effective && j.protection.as_ref().is_some_and(|p| !p.native))
+            .is_some_and(|j| j.effective && j.protection.is_some())
     }
     pub(super) fn protective_trade_failure(
         &mut self,
@@ -354,12 +365,6 @@ impl Hyperliquid {
         let Some(p) = job.protection.as_mut() else {
             return Some(error);
         };
-        if p.native {
-            if matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent)) {
-                error.message = format!("{}; order unchanged by this edit", error.message);
-            }
-            return Some(error);
-        }
         if p.restoring {
             if error.outcome == Some(Outcome::NotSent) && restore_obsolete(cx.store, p) {
                 job.stop_note = Some("Original protection was not restored because the position closed or newer protection superseded it".into());
@@ -380,12 +385,20 @@ impl Hyperliquid {
         let definitive = error.outcome == Some(Outcome::NotSent)
             || (error.outcome == Some(Outcome::Rejected)
                 && custody::known_protective_refusal(&error.message));
-        if !job.effective || !definitive || job.amend_filled || p.grouping.is_none() {
+        if !job.effective || !definitive || job.amend_filled {
             return Some(error);
         }
         if restore_obsolete(cx.store, p) {
             job.stop_note = Some("Original protection was not restored because the position closed or newer protection superseded it".into());
             job.replacing_stop = None;
+            return Some(error);
+        }
+        if p.grouping.is_none() {
+            error.message = format!(
+                "UNPROTECTED: {} stop removed; please re-place protection. Replacement refused: {}",
+                p.before.symbol, error.message
+            );
+            error.protection = Some(Protection::Unprotected);
             return Some(error);
         }
         p.refusal = Some(error);

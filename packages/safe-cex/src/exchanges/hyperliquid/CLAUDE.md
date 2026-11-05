@@ -45,24 +45,27 @@ omit the captured fee. Standalone placements retain their existing approval wait
 `transport.http.timing` distinguishes identity, builder approval, order status,
 cancel and place using closed labels derived from the final bound packet; ordinary info reads remain aggregated.
 
-Same-kind Rust SL/TP edits use native `modify`, with no `always_place`, retaining
-native execution type/price, reduce-only, cloid and full-position sentinel. The
-owner-bound sizing read also verifies the source identity and native parameters.
-The final physical claim requires an own-symbol mark observed within five
-seconds and unchanged source fills/identity. Native refusal preserves the original
-and reports the venue reason with “order unchanged”; a released venue refusal is
-`Rejected`, while a veto before release is `NotSent`.
+Rust SL/TP edits use guarded cancel/place. Hyperliquid's modify contract excludes
+trigger replacements without `always_place`; that flag can place after failed
+cancellation, so it is never used. The owner-bound sizing read verifies source
+identity and native execution parameters. The final cancel claim requires an
+own-symbol mark observed within five seconds, unchanged fills/identity, and a
+loaded live closing-side position. A veto preserves the original. The old
+pre-cancel deadline never abandons replacement after a cancel already left.
 
-Kind-changing cancel/place is admitted only for a proven full-position
-`isPositionTpsl` source with a live closing-side position. Partial/attached
-conversions without proven placement grouping refuse before cancel. A definitive
-replacement refusal permits one original-parameter restore, without a builder
-fee. An unknown replacement never restores or resends. Recovery rechecks current
-position, newer protection and the original trigger at its final claim. Its
-terminal error carries `Protection::Restored` only after an accepted restore, or
+A documented definitive replacement refusal permits one original-parameter
+restore only for a proven full-position `isPositionTpsl` source. An unknown
+replacement never restores or resends. Partial and attached edits remain available
+with the same final veto. When their original grouping is unproven, definitive
+replacement refusal reports typed `Protection::Unprotected` and “stop removed,
+please re-place”, with no invented restore. Exact recovery rechecks position,
+newer protection, late fills and the original fresh trigger at its final claim.
+Its terminal carries `Protection::Restored` after an accepted restore, or
 `Protection::Unprotected` after a failed/unknown restore; obsolete recovery is
-refused visibly. Native ACKs and subsequent stream updates retain the accepted
-trigger and native identity, including when the ACK keeps the same order id.
+refused visibly. Replacement preserves native execution type/price and the fresh
+remaining size. Complete native stream fields take precedence over stale cached
+placement fields. ACKs reconcile accepted parameters into an existing row while
+retaining newer stream fills, remaining quantity, status and observation time.
 
 ## Rust startup reads
 

@@ -71,10 +71,6 @@ enum Step {
         time_ms: Option<u64>,
     },
     Place(PlaceOrderOpts),
-    Modify {
-        before: Box<Order>,
-        opts: PlaceOrderOpts,
-    },
     Restore,
     Cancel(Vec<Order>),
     Leverage {
@@ -105,13 +101,6 @@ enum OrderReply {
 }
 impl OrderReply {
     fn for_action(action: &Action, spot: bool) -> Self {
-        if let Action::Modify { order, .. } = action {
-            return if !spot && order.r && order.s == "0" {
-                Self::FullPosition
-            } else {
-                Self::Rows
-            };
-        }
         let Action::Order {
             orders, grouping, ..
         } = action
@@ -148,10 +137,6 @@ impl OrderReply {
 enum Effect {
     ScheduleCancel,
     Place(Vec<Placement>),
-    Modify {
-        before: Box<Order>,
-        records: Vec<Placement>,
-    },
     Cancel(Vec<Order>),
     Leverage {
         symbol: String,
@@ -160,9 +145,6 @@ enum Effect {
     },
 }
 impl Effect {
-    fn is_native_modify(&self) -> bool {
-        matches!(self, Self::Modify { .. })
-    }
     fn is_cancel(&self) -> bool {
         matches!(self, Self::Cancel(_))
     }
@@ -218,8 +200,6 @@ enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         builder: Option<Builder>,
     },
-    #[serde(rename = "modify")]
-    Modify { oid: u64, order: OrderWire },
     #[serde(rename = "cancel")]
     Cancel { cancels: Vec<CancelWire> },
     #[serde(rename = "updateLeverage")]
@@ -427,17 +407,13 @@ impl Hyperliquid {
                         }
                     }
                 }
-                let native_modify = matches!(old.kind, OrderType::StopLoss | OrderType::TakeProfit)
-                    && opts.kind == old.kind;
-                let cloid = if native_modify {
-                    old.client_order_id.clone()
-                } else {
-                    match mint_cloid(cx) {
-                        Ok(c) => Some(c),
-                        Err(e) => {
-                            cx.refuse_command(Operation::Mutation, not_sent(e));
-                            return;
-                        }
+                // Modify without always_place excludes triggers; always_place can place after failed cancel.
+                // https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#modify-an-order
+                let cloid = match mint_cloid(cx) {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        cx.refuse_command(Operation::Mutation, not_sent(e));
+                        return;
                     }
                 };
                 opts.client_order_id = cloid.clone();
@@ -447,14 +423,7 @@ impl Hyperliquid {
                     return;
                 }
                 amend_source = Some(id);
-                let steps = if native_modify {
-                    VecDeque::from([Step::Modify {
-                        before: Box::new(old),
-                        opts,
-                    }])
-                } else {
-                    VecDeque::from([Step::Cancel(vec![old]), Step::Place(opts)])
-                };
+                let steps = VecDeque::from([Step::Cancel(vec![old]), Step::Place(opts)]);
                 (command, steps)
             }
             Command::SetLeverage {
@@ -718,12 +687,10 @@ impl Hyperliquid {
             return;
         }
         if self.trading.active.as_ref().is_some_and(|job| {
-            matches!(
-                job.steps.front(),
-                Some(Step::Cancel(_) | Step::Modify { .. })
-            ) && job
-                .amend_deadline
-                .is_some_and(|deadline| !before_amend_deadline(cx.now, deadline))
+            matches!(job.steps.front(), Some(Step::Cancel(_)))
+                && job
+                    .amend_deadline
+                    .is_some_and(|deadline| !before_amend_deadline(cx.now, deadline))
         }) {
             self.expire_amend(cx);
             return;
@@ -740,10 +707,8 @@ impl Hyperliquid {
             self.finish_trade(cx, Err(not_sent("Hyperliquid amendment source was filled")));
             return;
         }
-        if matches!(
-            job.steps.front(),
-            Some(Step::Cancel(_) | Step::Modify { .. })
-        ) && let Some(source) = &job.amend_source
+        if matches!(job.steps.front(), Some(Step::Cancel(_)))
+            && let Some(source) = &job.amend_source
             && cx.store.order(source).is_none_or(|order| {
                 !matches!(order.status, OrderStatus::Open | OrderStatus::Creating)
             })
@@ -756,10 +721,8 @@ impl Hyperliquid {
         }
         // Partial fills send no orderUpdates, so the stored row can be far behind:
         // an amend sizes itself from a fresh read, before anything is canceled.
-        if matches!(
-            job.steps.front(),
-            Some(Step::Cancel(_) | Step::Modify { .. })
-        ) && !job.amend_read
+        if matches!(job.steps.front(), Some(Step::Cancel(_)))
+            && !job.amend_read
             && let Some(source) = job.amend_source.clone()
         {
             if let Err(error) = self.park_trade_builder(cx) {
@@ -775,10 +738,8 @@ impl Hyperliquid {
             self.trading.amend_issuing = false;
             return;
         }
-        if matches!(
-            job.steps.front(),
-            Some(Step::Cancel(_) | Step::Modify { .. })
-        ) && job.amend_source.is_some()
+        if matches!(job.steps.front(), Some(Step::Cancel(_)))
+            && job.amend_source.is_some()
             && !job.builder_checked
         {
             let builder = self
@@ -919,6 +880,14 @@ impl Hyperliquid {
             }
 
             Step::Place(opts) => {
+                if self
+                    .trading
+                    .active
+                    .as_ref()
+                    .is_some_and(|job| job.protection.is_some())
+                {
+                    return self.prepare_protective_replace(cx, opts);
+                }
                 let (wires, grouping) = self.wires(cx, &opts)?;
                 let records = wires
                     .iter()
@@ -994,7 +963,6 @@ impl Hyperliquid {
                     Effect::Place(records),
                 ))
             }
-            Step::Modify { before, opts } => self.prepare_protective_modify(cx, before, opts),
             Step::Restore => self.prepare_protective_restore(cx),
             Step::Cancel(orders) => {
                 let cancels = orders
@@ -1168,7 +1136,7 @@ impl Hyperliquid {
                             || matches!(s, Status::Error { .. })
                     })
             }
-            Effect::Place(records) | Effect::Modify { records, .. } => {
+            Effect::Place(records) => {
                 // A refused parent answers one error row for all its legs.
                 kind == "order"
                     && (statuses.len() == records.len()
@@ -1235,22 +1203,9 @@ impl Hyperliquid {
             return;
         }
         let full_position = request.order_reply == OrderReply::FullPosition;
-        let native_modify = request.effect.is_native_modify();
-        if batch_error.is_none()
-            && let Effect::Modify { before, .. } = &request.effect
-        {
-            let retained_id = statuses.iter().any(|status| {
-                matches!(status,
-                Status::Resting { resting } if resting.oid.to_string() == before.id)
-            });
-            if !retained_id {
-                self.account.suppressed.insert(before.id.clone(), cx.now);
-            }
-            cx.store.remove_orders(&[&before.id]);
-        }
         match request.effect {
             Effect::ScheduleCancel => unreachable!(),
-            Effect::Place(records) | Effect::Modify { records, .. } => {
+            Effect::Place(records) => {
                 self.trading.active.as_mut().unwrap().builder_checked = false;
                 if statuses.is_empty() {
                     self.schedule_orders(cx);
@@ -1290,7 +1245,35 @@ impl Hyperliquid {
                     self.trading.active.as_mut().unwrap().ids.push(id.clone());
                     if let Some(mut record) = records.get(index).cloned() {
                         record.order.id = id.clone();
-                        if native_modify && let Some(cloid) = &record.order.client_order_id {
+                        let live_id = cx.store.order(&id).map(|o| o.id.clone()).or_else(|| {
+                            let cloid = record.order.client_order_id.as_ref()?;
+                            cx.store
+                                .orders()
+                                .iter()
+                                .find(|o| o.client_order_id.as_ref() == Some(cloid))
+                                .map(|o| o.id.clone())
+                        });
+                        // A stream row can precede its ACK. Merge accepted parameters while
+                        // retaining that row's newer fills, status and observation time.
+                        if let Some(live_id) = live_id {
+                            cx.store.update_order(&live_id, |live| {
+                                if live.symbol == record.order.symbol
+                                    && live.side == record.order.side
+                                    && (live.client_order_id.is_none()
+                                        || live.client_order_id == record.order.client_order_id)
+                                {
+                                    live.kind = record.order.kind;
+                                    live.price = record.order.price;
+                                    live.reduce_only = record.order.reduce_only;
+                                    live.client_order_id = record.order.client_order_id.clone();
+                                    live.time_in_force = record.order.time_in_force;
+                                }
+                            });
+                            record.order.id = live_id;
+                        }
+                        if let Some(cloid) = &record.order.client_order_id
+                            && !self.account.suppressed.contains_key(&record.order.id)
+                        {
                             self.account.records.insert(cloid.clone(), record.clone());
                         }
                         if self.spot {
@@ -1573,7 +1556,7 @@ impl Hyperliquid {
             if total > 0. && left <= 0. { return Err("Hyperliquid amendment source was filled; order unchanged".into()); }
             let filled = (total - left).max(0.0);
             let Some(opts) = job.steps.iter_mut().find_map(|step| match step {
-                Step::Place(opts) | Step::Modify { opts, .. } => Some(opts),
+                Step::Place(opts) => Some(opts),
                 _ => None,
             }) else {
                 return Err("Hyperliquid amendment has no replacement".into());

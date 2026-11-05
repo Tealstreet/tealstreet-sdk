@@ -341,15 +341,10 @@ fn review_3098_unknown_fee_does_not_wait_for_any_amend_kind_or_partial_fill() {
                 _ => None,
             })
             .expect("cancel after sizing");
-        if kind == OrderType::Limit {
-            let order = replacement(&mut e, &cancel);
-            assert!(body(&order)["action"].get("builder").is_none(), "{kind:?}");
-            assert_eq!(body(&order)["action"]["orders"][0]["s"], "1", "{kind:?}");
-        } else {
-            assert_eq!(body(&cancel)["action"]["type"], "modify");
-            assert!(body(&cancel)["action"].get("builder").is_none(), "{kind:?}");
-            assert_eq!(body(&cancel)["action"]["order"]["s"], "1", "{kind:?}");
-        }
+        assert_eq!(body(&cancel)["action"]["type"], "cancel");
+        let order = replacement(&mut e, &cancel);
+        assert!(body(&order)["action"].get("builder").is_none(), "{kind:?}");
+        assert_eq!(body(&order)["action"]["orders"][0]["s"], "1", "{kind:?}");
     }
 }
 fn kind_of_read(r: &HttpRequest) -> bool {

@@ -245,7 +245,7 @@ impl Hyperliquid {
                 not_sent("Hyperliquid signing key is missing").kind(ErrorKind::AuthInvalid)
             })?;
         let spot = self.spot
-            || matches!(&effect, Effect::Place(records) | Effect::Modify { records, .. }
+            || matches!(&effect, Effect::Place(records)
             if records.first().is_some_and(|record| self.spot_market(cx, &record.order.symbol)));
         let order_reply = OrderReply::for_action(action, spot);
         let job = self.trading.active.as_mut().unwrap();
@@ -298,9 +298,7 @@ impl Hyperliquid {
                     Effect::Cancel(_) if job.amend_source.is_none() => {
                         safe_cex_engine::classify::Intent::Cancel
                     }
-                    Effect::Cancel(_) | Effect::Place(_) | Effect::Modify { .. }
-                        if job.amend_source.is_some() =>
-                    {
+                    Effect::Cancel(_) | Effect::Place(_) if job.amend_source.is_some() => {
                         safe_cex_engine::classify::Intent::Amend
                     }
                     _ => safe_cex_engine::classify::Intent::Place,
@@ -311,7 +309,7 @@ impl Hyperliquid {
         custody.context = Some(context.clone());
         let committed_effect = effect.clone();
         let command = job.command;
-        let cancel_deadline = if matches!(&effect, Effect::Cancel(_) | Effect::Modify { .. }) {
+        let cancel_deadline = if matches!(&effect, Effect::Cancel(_)) {
             job.amend_deadline
         } else {
             None
@@ -491,7 +489,7 @@ impl Request {
         safe_cex_engine::request_context::Error,
     > {
         let entries: Vec<_> = match &self.effect {
-            Effect::Place(rows) | Effect::Modify { records: rows, .. } => rows
+            Effect::Place(rows) => rows
                 .iter()
                 .map(|row| (row.order.symbol.clone(), row.order.client_order_id.clone()))
                 .collect(),
@@ -562,24 +560,18 @@ impl Hyperliquid {
             code: safe_cex_engine::classify::NativeCode::None,
             message: table_message(native_message.unwrap_or(&error.message)),
         };
-        let presented = if request.effect.is_native_modify() && !error.uncertain {
-            format!("{}; order unchanged by this edit", error.message)
-        } else {
-            error.message.clone()
-        };
         cx.http_write_failure(
             &request.context,
             if !error.uncertain
-                && (request.effect.is_native_modify()
-                    || (self.protective_replacement_active()
-                        && known_protective_refusal(&error.message)))
+                && (self.protective_replacement_active()
+                    && known_protective_refusal(&error.message))
             {
                 &PROTECTIVE_REFUSAL
             } else {
                 &NATIVE_ERROR
             },
             Some(&native),
-            presented,
+            error.message.clone(),
             None,
         )
         .map(drop)
@@ -661,17 +653,9 @@ impl Hyperliquid {
                 _ => BatchItem::Accepted(ids[index].as_str()),
             })
             .collect();
-        let unchanged = format!("{message}; order unchanged by this edit");
-        let message = if request.effect.is_native_modify()
-            && statuses.iter().all(|s| matches!(s, Status::Error { .. }))
-        {
-            unchanged.as_str()
-        } else {
-            message
-        };
         cx.http_write_batch(
             &request.context,
-            if statuses.iter().all(|s| matches!(s, Status::Error { .. })) && (request.effect.is_native_modify() || (self.protective_replacement_active() && statuses.iter().all(|s| matches!(s, Status::Error { error } if known_protective_refusal(error))))) { &PROTECTIVE_REFUSAL } else { &BATCH },
+            if statuses.iter().all(|s| matches!(s, Status::Error { .. })) && (self.protective_replacement_active() && statuses.iter().all(|s| matches!(s, Status::Error { error } if known_protective_refusal(error)))) { &PROTECTIVE_REFUSAL } else { &BATCH },
             statuses.len(),
             &items,
             if message.is_empty() && statuses.iter().any(|status| matches!(status, Status::Text(_))) {

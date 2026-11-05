@@ -1969,8 +1969,10 @@ fn a_price_only_amend_of_a_partly_filled_order_sends_what_is_left() {
 }
 
 #[test]
-fn a_native_stop_modify_refusal_keeps_the_original_protection() {
+fn a_partial_stop_replacement_refusal_names_the_removed_protection() {
     let (mut e, socket) = boot();
+    let state = support::STATE.replace("\"szi\":\"2\"", "\"szi\":\"-10\"");
+    e.handle(1400.,Event::WsMessage {socket,text:&format!(r#"{{"channel":"clearinghouseState","data":{{"user":"0x14791697260e4c9a71f18484c9f997b308e59325","dex":"","clearinghouseState":{state}}}}}"#)});
     let row = json!({"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Stop Market","triggerPx":"110","reduceOnly":true,"isTrigger":true});
     e.handle(
         1500.,
@@ -1981,7 +1983,6 @@ fn a_native_stop_modify_refusal_keeps_the_original_protection() {
         },
     );
     e.drain_actions().for_each(drop);
-    let before = e.store().order("9").unwrap().clone();
     let amended = command(
         &mut e,
         NOW,
@@ -1997,29 +1998,48 @@ fn a_native_stop_modify_refusal_keeps_the_original_protection() {
         &amended,
         &json!({"status":"order","order":{"order":row,"status":"open"}}).to_string(),
     );
-    let modify = native_release(&mut e, &amended);
-    let payload: Value = serde_json::from_str(modify.body.as_deref().unwrap()).unwrap();
-    assert_eq!(payload["action"]["type"], "modify");
-    assert_eq!(payload["action"]["oid"], 9);
+    let cancel = native_release(&mut e, &amended);
     respond(
         &mut e,
         NOW + 1.,
-        &modify,
+        &cancel,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    let paced = prepare_for_pacing(&mut e, NOW + 1., &a);
+    let (timer, at) = paced
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > NOW + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(at, Event::TimerFired { timer });
+    let a: Vec<_> = e.drain_actions().collect();
+    let replacement = native_release_at(&mut e, at, &a);
+    respond(
+        &mut e,
+        at + 1.,
+        &replacement,
         200,
         &statuses_reply("Invalid TP/SL price."),
     );
-    let settled: Vec<_> = e.drain_actions().collect();
-    let result = results(&settled, OWNER);
+    let a: Vec<_> = e.drain_actions().collect();
+    let result = results(&a, OWNER);
     assert_eq!(result.len(), 1);
     let error = result[0].as_ref().unwrap_err();
-    assert_eq!(error.outcome, Some(Outcome::Rejected));
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
     assert!(
-        error.message.contains("Invalid TP/SL price.") && error.message.contains("order unchanged"),
+        error.message.contains("stop removed") && error.message.contains("please re-place"),
         "{}",
         error.message
     );
-    assert_eq!(e.store().order("9"), Some(&before));
-    no_trade(&settled);
+    assert!(e.store().order("9").is_none());
+    no_trade(&a);
 }
 
 #[test]
