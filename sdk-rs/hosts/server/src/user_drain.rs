@@ -450,6 +450,16 @@ impl Users {
             "checkedAt":crate::accounts::now_ms()})
     }
 
+    pub(crate) fn users_with_sockets(&self) -> std::collections::HashSet<String> {
+        self.entries
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, entry)| entry.state.lock().unwrap().sockets > 0)
+            .map(|(user, _)| user.clone())
+            .collect()
+    }
+
     pub fn list(&self) -> Result<Value, &'static str> {
         let entries: Vec<_> = self
             .entries
@@ -750,6 +760,23 @@ mod tests {
         server.abort();
     }
 
+    #[test]
+    fn summary_socket_users_are_deduplicated_and_exclude_latches_and_closed_sockets() {
+        let users = Users::default();
+        let first = users.socket("connected");
+        let second = users.socket("connected");
+        users.start("operator-latch-only", DEFAULT_CAP_MS);
+        let pending = users.reserve_socket("pending-upgrade").unwrap();
+        assert_eq!(
+            users.users_with_sockets(),
+            std::collections::HashSet::from(["connected".into(), "pending-upgrade".into()])
+        );
+        drop(first);
+        assert!(users.users_with_sockets().contains("connected"));
+        drop(second);
+        drop(pending);
+        assert!(users.users_with_sockets().is_empty());
+    }
     #[tokio::test(start_paused = true)]
     async fn lease_fenced_and_parked_work_refuses_idle_release_without_mutating_work() {
         let users = Users::default();

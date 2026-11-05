@@ -1,6 +1,6 @@
 //! Router ownership assertions and generation-bound account IO authority.
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
@@ -185,6 +185,15 @@ impl User {
     }
 }
 
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Counts {
+    pub tracked_users: usize,
+    pub fenced_users: usize,
+    pub would_fence_users: usize,
+    pub live_users_without_lease: usize,
+}
+
 pub struct Users {
     config: Config,
     policy: Arc<Mutex<Policy>>,
@@ -235,6 +244,23 @@ impl Users {
         });
         entries.insert(user.to_owned(), entry.clone());
         Some(entry)
+    }
+    pub fn counts(&self, live_users: &HashSet<String>) -> Counts {
+        let entries = self.entries.lock().unwrap();
+        let mut counts = Counts {
+            tracked_users: entries.len(),
+            ..Default::default()
+        };
+        for entry in entries.values() {
+            let status = entry.status();
+            counts.fenced_users += usize::from(status.fenced);
+            counts.would_fence_users += usize::from(status.would_fence);
+        }
+        counts.live_users_without_lease = live_users
+            .iter()
+            .filter(|user| !entries.contains_key(*user))
+            .count();
+        counts
     }
     pub fn accept(&self, heartbeat: &Heartbeat) -> Result<usize, &'static str> {
         let now = (self.clock)();
@@ -366,6 +392,57 @@ mod tests {
     async fn advance(now: &AtomicU64, ms: u64) {
         now.fetch_add(ms, Ordering::Relaxed);
         tokio::time::advance(Duration::from_millis(ms)).await;
+    }
+    #[tokio::test(start_paused = true)]
+    async fn summary_counts_use_status_predicate_and_never_create_absent_lease_records() {
+        let (users, now) = setup(false);
+        let empty = users.get("empty").unwrap();
+        users
+            .accept(&beat(now.load(Ordering::Relaxed), 1, 1))
+            .unwrap();
+        let granted = users.get("u").unwrap();
+        let live = HashSet::from([
+            "u".into(),
+            "empty".into(),
+            "socket-only".into(),
+            "account-only".into(),
+        ]);
+        let before = users.counts(&live);
+        assert_eq!(before.tracked_users, 2);
+        assert_eq!(before.fenced_users, 0);
+        assert_eq!(
+            before.would_fence_users,
+            usize::from(empty.status().would_fence) + usize::from(granted.status().would_fence)
+        );
+        assert_eq!(before.would_fence_users, 1);
+        assert_eq!(before.live_users_without_lease, 2);
+        advance(&now, 45_001).await;
+        let after = users.counts(&live);
+        assert_eq!(after.would_fence_users, 2);
+        assert_eq!(after.fenced_users, 0);
+        assert_eq!(after.tracked_users, 2);
+        assert_eq!(after.live_users_without_lease, 2);
+    }
+    #[tokio::test(start_paused = true)]
+    async fn summary_counts_include_monotonic_expiry_after_wall_rollback_and_actual_fences() {
+        for enforce in [false, true] {
+            let (users, now) = setup(enforce);
+            users
+                .accept(&beat(now.load(Ordering::Relaxed), 1, 1))
+                .unwrap();
+            let granted = users.get("u").unwrap();
+            now.fetch_sub(20_000, Ordering::Relaxed);
+            tokio::time::advance(Duration::from_millis(DEFAULT_LEASE_MS + 1)).await;
+            let counts = users.counts(&HashSet::new());
+            assert_eq!(counts.tracked_users, 1);
+            assert_eq!(counts.would_fence_users, 1);
+            assert_eq!(
+                counts.would_fence_users,
+                usize::from(granted.status().would_fence)
+            );
+            assert_eq!(counts.fenced_users, usize::from(enforce));
+            assert_eq!(counts.live_users_without_lease, 0);
+        }
     }
     #[tokio::test(start_paused = true)]
     async fn accepted_lease_fences_at_its_half_window_and_old_permits_never_revive() {

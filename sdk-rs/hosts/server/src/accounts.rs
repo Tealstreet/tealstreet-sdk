@@ -782,6 +782,19 @@ impl Registry {
         self.ids.fetch_add(1, Ordering::Relaxed)
     }
 
+    pub fn router_lease_counts(&self) -> crate::router_lease::Counts {
+        let mut users = self.user_drains.users_with_sockets();
+        users.extend(
+            self.accounts
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|account| !account.is_public())
+                .map(|account| account.user.clone()),
+        );
+        self.router_leases.counts(&users)
+    }
+
     pub fn account_count(&self) -> usize {
         self.accounts.lock().unwrap().len()
     }
@@ -2271,6 +2284,80 @@ pub(crate) mod tests {
         ))
     }
 
+    #[tokio::test]
+    async fn summary_counts_account_and_socket_users_once_without_creating_lease_records() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let link = SignerLink::new(0, Arc::new(|_| false));
+                let (first, _inbox) = account_on(
+                    Idle,
+                    ("parked-private", "first", "bitget"),
+                    Some(link.clone()),
+                    String::new(),
+                    Arc::default(),
+                );
+                let (second, _inbox) = account_on(
+                    Idle,
+                    ("parked-private", "second", "bitget"),
+                    Some(link),
+                    String::new(),
+                    Arc::default(),
+                );
+                let (public, _inbox) = account_on(
+                    Idle,
+                    ("", PUBLIC_ACCOUNT, PUBLIC_EXCHANGE),
+                    None,
+                    String::new(),
+                    Arc::default(),
+                );
+                for account in [&first, &second, &public] {
+                    registry.accounts.lock().unwrap().insert(
+                        (account.user.clone(), account.name.clone()),
+                        (*account).clone(),
+                    );
+                }
+                let socket = registry.user_drains.socket("socket-only");
+                let duplicate = registry.user_drains.socket("parked-private");
+                registry.user_drains.start("latch-only", 1000);
+                let counts = registry.router_lease_counts();
+                assert_eq!(counts.live_users_without_lease, 2);
+                assert_eq!(counts.tracked_users, 0);
+                registry.router_leases.get("socket-only").unwrap();
+                let counts = registry.router_lease_counts();
+                assert_eq!(counts.live_users_without_lease, 1);
+                assert_eq!(counts.tracked_users, 1);
+                assert_eq!(counts.would_fence_users, 1);
+                drop(socket);
+                drop(duplicate);
+                assert_eq!(
+                    registry.router_lease_counts().live_users_without_lease,
+                    1,
+                    "parked account remains live without any socket"
+                );
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .remove(&(first.user.clone(), first.name.clone()));
+                assert_eq!(
+                    registry.router_lease_counts().live_users_without_lease,
+                    1,
+                    "second private account keeps the same user live"
+                );
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .remove(&(second.user.clone(), second.name.clone()));
+                assert_eq!(
+                    registry.router_lease_counts().live_users_without_lease,
+                    0,
+                    "public account and operator latch do not count as hosted activity"
+                );
+            })
+            .await;
+    }
     #[tokio::test(start_paused = true)]
     async fn a_stop_notice_reaches_its_owner_past_another_session_and_expires_after_a_day() {
         tokio::task::LocalSet::new()
