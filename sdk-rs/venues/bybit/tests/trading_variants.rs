@@ -33,6 +33,14 @@ fn ready_with(options: Options) -> Harness {
 }
 
 fn ready_listing(options: Options, open_orders: &str) -> Harness {
+    ready_listing_with_instruments(options, open_orders, None)
+}
+
+fn ready_listing_with_instruments(
+    options: Options,
+    open_orders: &str,
+    instruments_override: Option<String>,
+) -> Harness {
     let variant = options.variant;
     let mut h = Harness::started(options);
     if h.has_request("/v5/account/info") {
@@ -55,7 +63,11 @@ fn ready_listing(options: Options, open_orders: &str) -> Harness {
     } else {
         support::INSTRUMENTS.to_owned()
     };
-    h.respond("/v5/market/instruments-info", 200, &instruments);
+    h.respond(
+        "/v5/market/instruments-info",
+        200,
+        &instruments_override.unwrap_or(instruments),
+    );
     let tickers = if variant.is_inverse() {
         support::TICKERS
             .replace("BTCUSDT", "BTCUSD")
@@ -158,6 +170,96 @@ fn place(h: &mut Harness, command: u32, orders: Vec<PlaceOrderOpts>) {
 }
 fn body(request: &HttpRequest) -> &str {
     request.body.as_deref().unwrap()
+}
+
+#[test]
+fn market_quantity_cap_splits_each_reduce_only_child_but_keeps_the_limit_cap() {
+    for (kind, reduce_only, expected) in [
+        (OrderType::Market, false, vec![500.0, 500.0, 100.0]),
+        (OrderType::Market, true, vec![500.0, 500.0, 100.0]),
+        (OrderType::Limit, false, vec![1100.0]),
+    ] {
+        let mut h = ready(Variant::Demo);
+        let mut opts = order("BTCUSDT", 1100.0);
+        opts.kind = kind;
+        opts.reduce_only = Some(reduce_only);
+        place(&mut h, 1, vec![opts]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let children = payload["request"].as_array().unwrap();
+        let quantities: Vec<f64> = children
+            .iter()
+            .map(|child| child["qty"].as_str().unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(quantities, expected, "{kind:?}, reduceOnly={reduce_only}");
+        assert!(
+            children
+                .iter()
+                .all(|child| child["reduceOnly"] == reduce_only)
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .market("BTCUSDT")
+                .unwrap()
+                .limits
+                .amount
+                .max,
+            500.0
+        );
+    }
+}
+
+#[test]
+fn market_quantity_cap_never_exceeds_limit_cap_and_missing_field_keeps_limit_cap() {
+    for (instrument, expected) in [
+        (support::INSTRUMENTS.replace("500.000", "2000.000"), 1190.0),
+        (
+            support::INSTRUMENTS.replace(",\"maxMktOrderQty\":\"500.000\"", ""),
+            1190.0,
+        ),
+    ] {
+        let mut h = ready_listing_with_instruments(options(Variant::Demo), EMPTY, Some(instrument));
+        let mut opts = order("BTCUSDT", 1500.0);
+        opts.kind = OrderType::Market;
+        opts.reduce_only = Some(true);
+        place(&mut h, 1, vec![opts]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        assert_eq!(
+            payload["request"][0]["qty"]
+                .as_str()
+                .unwrap()
+                .parse::<f64>()
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            payload["request"][1]["qty"]
+                .as_str()
+                .unwrap()
+                .parse::<f64>()
+                .unwrap(),
+            1500.0 - expected
+        );
+    }
+}
+
+#[test]
+fn market_quantity_cap_refuses_caller_identity_that_would_span_children() {
+    let mut h = ready(Variant::Demo);
+    let mut opts = order("BTCUSDT", 1100.0);
+    opts.kind = OrderType::Market;
+    opts.client_order_id = Some("cap-control".into());
+    place(&mut h, 1, vec![opts]);
+    assert!(!h.has_request("/v5/order/create"));
+    assert!(
+        h.done
+            .iter()
+            .any(|(command, outcome)| *command == 1 && outcome.is_err())
+    );
 }
 /// D2: an absent-order answer is no Cancelled transition; the engine's one
 /// reconcile order read decides. Answer it (empty: the rows are gone).

@@ -16,6 +16,118 @@ fn place(h: &mut Harness, values: Vec<Value>) {
 fn limit() -> Value {
     json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.0021,"price":90.04})
 }
+
+fn classic_with_market_cap(cap: Option<&str>) -> Harness {
+    let mut h = Harness::started(FixtureOptions {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..FixtureOptions::default()
+    });
+    let contracts = cap.map_or_else(
+        || CONTRACTS.to_owned(),
+        |cap| {
+            CONTRACTS.replace(
+                "\"maxOrderQty\":\"120\"",
+                &format!("\"maxOrderQty\":\"120\",\"maxMarketOrderQty\":\"{cap}\""),
+            )
+        },
+    );
+    h.respond("/contracts", 200, &contracts);
+    h.respond("/tickers", 200, TICKERS);
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, POSITION);
+    h.respond("/account/accounts", 200, ACCOUNT);
+    h.orders(OPEN_ORDER);
+    h.login();
+    h
+}
+
+#[test]
+fn market_quantity_cap_splits_reduce_only_children_but_keeps_the_limit_cap() {
+    for (kind, reduce_only, expected) in [
+        ("market", false, vec![40.0, 40.0, 20.0]),
+        ("market", true, vec![40.0, 40.0, 20.0]),
+        ("limit", false, vec![100.0]),
+    ] {
+        let mut h = classic_with_market_cap(Some("40"));
+        place(
+            &mut h,
+            vec![
+                json!({"symbol":"BTCUSDT", "type":kind, "side":"sell", "amount":100.0, "price":100.0, "reduceOnly":reduce_only}),
+            ],
+        );
+        let (_, payload) = body(&mut h, "/batch-place-order");
+        let children = payload["orderList"].as_array().unwrap();
+        let quantities: Vec<f64> = children
+            .iter()
+            .map(|child| child["size"].as_str().unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(quantities, expected, "{kind}, reduceOnly={reduce_only}");
+        assert!(
+            children
+                .iter()
+                .all(|child| child["reduceOnly"] == if reduce_only { "YES" } else { "NO" })
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .market("BTCUSDT")
+                .unwrap()
+                .limits
+                .amount
+                .max,
+            40.0
+        );
+    }
+}
+
+#[test]
+fn market_quantity_cap_never_exceeds_limit_and_missing_field_keeps_previous_cap() {
+    for cap in [None, Some("200")] {
+        let mut h = classic_with_market_cap(cap);
+        place(
+            &mut h,
+            vec![
+                json!({"symbol":"BTCUSDT", "type":"market", "side":"sell", "amount":150.0, "reduceOnly":true}),
+            ],
+        );
+        let (_, payload) = body(&mut h, "/batch-place-order");
+        let quantities: Vec<f64> = payload["orderList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|child| child["size"].as_str().unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(quantities, vec![120.0, 30.0]);
+    }
+}
+
+#[test]
+fn market_quantity_cap_refuses_a_caller_identity_spanning_children_or_invalid_cap() {
+    for (cap, client_id) in [("40", Some("cap-control")), ("0", None)] {
+        let mut h = classic_with_market_cap(Some(cap));
+        let mut order = json!({"symbol":"BTCUSDT", "type":"market", "side":"sell", "amount":100.0, "reduceOnly":true});
+        if let Some(id) = client_id {
+            order["clientOrderId"] = json!(id);
+        }
+        place(&mut h, vec![order]);
+        assert!(
+            !h.requests
+                .iter()
+                .any(|request| request.url.contains("/batch-place-order"))
+        );
+        assert!(
+            h.done
+                .iter()
+                .any(|(id, result)| *id == 1 && result.is_err())
+        );
+    }
+}
 fn body(h: &mut Harness, path: &str) -> (safe_cex_engine::RequestId, Value) {
     let request = h.take(path);
     (

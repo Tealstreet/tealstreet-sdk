@@ -29,6 +29,71 @@ fn page(symbols: &[&str], cursor: &str, label: &str) -> String {
 }
 
 #[test]
+fn refreshed_market_quantity_caps_replace_both_native_split_bounds() {
+    for (kind, quantities) in [
+        (OrderType::Market, vec![200.0, 200.0, 100.0]),
+        (OrderType::Limit, vec![500.0]),
+    ] {
+        let mut h = Harness::started(support::Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            ..Default::default()
+        });
+        h.respond("/v5/account/info", 200, support::ACCOUNT_INFO);
+        h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+        h.load_public();
+        refresh(&mut h, 30);
+        h.respond(
+            "status=PreLaunch",
+            200,
+            r#"{"retCode":0,"result":{"list":[]}}"#,
+        );
+        h.respond(
+            "/v5/market/instruments-info",
+            200,
+            &INSTRUMENTS
+                .replace("1190.000", "800.000")
+                .replace("500.000", "200.000"),
+        );
+        assert!(h.result(30).unwrap().is_ok());
+        assert_eq!(
+            h.engine
+                .store()
+                .market("BTCUSDT")
+                .unwrap()
+                .limits
+                .amount
+                .max,
+            200.0
+        );
+        let mut order = support::order();
+        order.kind = kind;
+        order.amount = 500.0;
+        order.reduce_only = Some(true);
+        h.command(Command::PlaceOrders {
+            command: 31,
+            orders: vec![order],
+        });
+        if h.has_request("symbol=BTCUSDT") {
+            h.respond(
+                "symbol=BTCUSDT",
+                200,
+                r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+            );
+        }
+        let request = h.take("/v5/order/create-batch");
+        let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        let actual: Vec<f64> = body["request"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|child| child["qty"].as_str().unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(actual, quantities, "{kind:?}");
+    }
+}
+
+#[test]
 fn pages_commit_atomically_preserving_fees_financial_state_books_and_subscriptions() {
     let mut h = Harness::new();
     h.engine.store_mut().update_markets(|market| {

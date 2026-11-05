@@ -79,7 +79,7 @@ impl Pending {
 }
 
 pub enum Discovered {
-    Markets(Vec<Market>),
+    Markets(Vec<Market>, HashMap<String, (f64, f64)>),
     Tickers(Vec<Ticker>),
 }
 
@@ -144,6 +144,50 @@ pub struct BitgetFutures {
     refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
     /// When an unreadable public message was last logged; at most one per minute.
     public_parse_logged_at: Option<f64>,
+    order_caps: HashMap<String, OrderCaps>,
+}
+
+#[derive(Clone, Copy)]
+struct OrderCaps {
+    limit: f64,
+    market: f64,
+}
+
+impl OrderCaps {
+    fn from_wire(row: &Contract<'_>, inverse: bool) -> Self {
+        let limit = if inverse {
+            row.max_trade_num.0.filter(|n| *n > 0.0)
+        } else {
+            [
+                row.max_order_qty,
+                row.max_market_order_qty,
+                row.max_trade_num,
+            ]
+            .iter()
+            .find_map(|n| n.0.filter(|n| *n > 0.0))
+        }
+        .unwrap_or(f64::INFINITY);
+        Self {
+            limit,
+            market: row.max_market_order_qty.0.unwrap_or(limit),
+        }
+    }
+
+    fn shared(self) -> f64 {
+        self.limit.min(self.market)
+    }
+
+    fn for_order(self, shared: f64, market: bool) -> f64 {
+        // Expand only our own conservative publication for limits. A tighter
+        // store override or source frame remains a bound for either kind.
+        if market {
+            shared.min(self.shared())
+        } else if shared == self.shared() {
+            self.limit
+        } else {
+            shared
+        }
+    }
 }
 
 /// A refused subscription is sent again after 1 s, 2 s and 4 s, then left refused.
@@ -216,6 +260,7 @@ impl BitgetFutures {
             candles: HashMap::new(),
             refused_topics: HashMap::new(),
             public_parse_logged_at: None,
+            order_caps: HashMap::new(),
         }
     }
 
@@ -241,7 +286,7 @@ impl BitgetFutures {
             rows: if tickers {
                 Discovered::Tickers(vec![])
             } else {
-                Discovered::Markets(vec![])
+                Discovered::Markets(vec![], HashMap::new())
             },
         };
         match cx.request_managed_with_headers(
@@ -663,14 +708,7 @@ fn market(row: &Contract<'_>) -> Market {
         limits: Limits {
             amount: MinMax {
                 min: row.min_trade_num.get(),
-                max: [
-                    row.max_order_qty,
-                    row.max_market_order_qty,
-                    row.max_trade_num,
-                ]
-                .iter()
-                .find_map(|v| v.0.filter(|v| *v > 0.0))
-                .unwrap_or(f64::INFINITY),
+                max: OrderCaps::from_wire(row, false).shared(),
             },
             leverage: MinMax {
                 min: row.min_lever.0.filter(|n| *n != 0.0).unwrap_or(1.0),
@@ -986,7 +1024,8 @@ impl Venue for BitgetFutures {
                     return;
                 }
                 match rows {
-                    Discovered::Markets(rows) => match serde_json::from_str::<Contract>(item) {
+                    Discovered::Markets(rows, caps) => match serde_json::from_str::<Contract>(item)
+                    {
                         Ok(row) if row.quote_coin == self.quote() => {
                             if row.symbol.is_empty()
                                 || row.base_coin.is_empty()
@@ -1007,11 +1046,6 @@ impl Venue for BitgetFutures {
                                         mapped.limits.leverage.min = 1.0;
                                     }
                                     mapped.is_inverse = Some(true);
-                                    mapped.limits.amount.max = row
-                                        .max_trade_num
-                                        .0
-                                        .filter(|n| *n > 0.0)
-                                        .unwrap_or(f64::INFINITY);
                                     if row.max_lever.get() == 0.0 {
                                         mapped.limits.leverage.max = 20.0;
                                     }
@@ -1021,6 +1055,12 @@ impl Venue for BitgetFutures {
                                 {
                                     safe_cex_engine::startup::skipped_row(cx);
                                 } else {
+                                    let limits = OrderCaps::from_wire(&row, self.inverse());
+                                    mapped.limits.amount.max = limits.shared();
+                                    caps.insert(
+                                        mapped.symbol.clone(),
+                                        (limits.limit, limits.market),
+                                    );
                                     rows.push(mapped);
                                 }
                             }
@@ -1121,7 +1161,7 @@ impl Venue for BitgetFutures {
             Pending::Discovery { context, rows } => {
                 let tickers = matches!(rows, Discovered::Tickers(_));
                 let empty = match &rows {
-                    Discovered::Markets(rows) => rows.is_empty(),
+                    Discovered::Markets(rows, _) => rows.is_empty(),
                     Discovered::Tickers(rows) => rows.is_empty(),
                 };
                 // A product with no contracts cannot appear by retrying.
@@ -1146,7 +1186,13 @@ impl Venue for BitgetFutures {
                     return self.public_failed(cx, tickers, error);
                 }
                 match rows {
-                    Discovered::Markets(rows) => cx.store.set_markets(rows),
+                    Discovered::Markets(rows, caps) => {
+                        self.order_caps = caps
+                            .into_iter()
+                            .map(|(symbol, (limit, market))| (symbol, OrderCaps { limit, market }))
+                            .collect();
+                        cx.store.set_markets(rows);
+                    }
                     Discovered::Tickers(mut rows) => {
                         self.live_tickers.finish(cx.store, &mut rows);
                         cx.store.set_tickers(rows);
