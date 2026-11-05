@@ -19,7 +19,12 @@ fn candle_rate_limit_is_typed_before_list_decode_for_keyless_and_signed_reads() 
                 r#"{"code":100410,"msg":"请稍后重试; unblocked after 0000000090011"}"#,
                 Some(90_000.0),
             ),
-            (429, "Retry-After: 120", "Too Many Requests", Some(120_000.0)),
+            (
+                429,
+                "Retry-After: 120",
+                "Too Many Requests",
+                Some(120_000.0),
+            ),
         ] {
             let mut engine = support::engine(support::Options {
                 key: keyed.then(|| "key".into()),
