@@ -299,6 +299,8 @@ impl Hyperliquid {
             "unknown-market"
         } else if !self.candles.contains_key(&(symbol.clone(), *interval)) {
             "not-subscribed"
+        } else if self.connection.feed_refused {
+            "feed-refused"
         } else if self.connection.feed.is_none() {
             "feed-not-started"
         } else {
@@ -375,7 +377,7 @@ impl Hyperliquid {
         let feed = if let Some(feed) = self.connection.feed {
             feed
         } else {
-            let feed = cx.register_socket_feed(FeedPolicy {
+            let registered = cx.register_socket_feed(FeedPolicy {
                 role: if self.options.public_data_only {
                     safe_cex_engine::SocketChannel::Public
                 } else {
@@ -397,7 +399,15 @@ impl Hyperliquid {
                 subscription_interval_ms: 0.,
                 close_floors: &[],
                 data_silence: None,
-            })?;
+            });
+            let feed = match registered {
+                Ok(feed) => feed,
+                Err(error) => {
+                    self.connection.feed_refused = true;
+                    return Err(error);
+                }
+            };
+            self.connection.feed_refused = false;
             self.connection.feed = Some(feed);
             feed
         };
@@ -559,5 +569,97 @@ impl Hyperliquid {
             })?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod repair_readiness_tests {
+    use super::*;
+    use safe_cex_engine::test_support::{ProbeVenue, seeded_engine};
+    use safe_cex_engine::{Action, Notice, Venue};
+
+    #[test]
+    fn a_refused_feed_registration_keeps_later_candle_repairs_visible() {
+        let venue = Hyperliquid::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        });
+        let mut engine = seeded_engine(ProbeVenue::new(venue, |venue, cx| {
+            cx.store.set_markets(vec![Market {
+                id: "HYPE".into(),
+                symbol: "HYPE-PERP".into(),
+                pretty_symbol: None,
+                base: "HYPE".into(),
+                quote: "USDC".into(),
+                active: true,
+                precision: Precision {
+                    amount: 1.,
+                    price: 1.,
+                },
+                limits: Limits {
+                    amount: MinMax {
+                        min: 1.,
+                        max: 1000.,
+                    },
+                    leverage: MinMax { min: 1., max: 50. },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: None,
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            }]);
+            venue.candles.insert(("HYPE-PERP".into(), Interval::H4), 1);
+            let policy = FeedPolicy {
+                role: safe_cex_engine::SocketChannel::Public,
+                supervision: Config::default(),
+                auth: AuthMode::None,
+                recovery: AuthRecovery::Reconnect,
+                permanent_refusal_group: None,
+                traffic: TrafficPolicy::AnyText,
+                controls: ControlPolicy::None,
+                invalidation: Invalidation::Required,
+                subscription_interval_ms: 0.,
+                close_floors: &[],
+                data_silence: None,
+            };
+            for _ in 0..safe_cex_engine::socket_lifecycle::MAX_FEEDS {
+                cx.register_socket_feed(policy.clone()).unwrap();
+            }
+            venue.start_socket(cx);
+            assert!(venue.connection.feed.is_none());
+            for _ in 0..2 {
+                let reason = venue
+                    .repair_subscription(
+                        cx,
+                        &SubscriptionTopic::Candles {
+                            symbol: "HYPE-PERP".into(),
+                            interval: Interval::H4,
+                        },
+                    )
+                    .unwrap()
+                    .unwrap_err();
+                assert!(reason.starts_with("feed-refused"), "{reason}");
+                assert!(reason.contains("symbolKnown=true"), "{reason}");
+            }
+        }));
+        engine.set_log_level(safe_cex_engine::Level::Debug);
+        engine.start(1000.);
+        let actions: Vec<_> = engine.drain_actions().collect();
+        let events: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event)) => Some(event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events.len(), 1, "{actions:?}");
+        assert_eq!(events[0].level, safe_cex_engine::Level::Error);
+        assert!(events[0].message.contains("Capacity"));
+        assert_eq!(actions.len(), 1, "no new IO or repair timer: {actions:?}");
     }
 }

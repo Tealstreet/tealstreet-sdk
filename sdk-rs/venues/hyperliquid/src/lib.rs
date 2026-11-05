@@ -133,6 +133,7 @@ struct InfoSuccessor {
 #[derive(Default)]
 struct Connection {
     feed: Option<FeedId>,
+    feed_refused: bool,
     // Native topic eligibility, updated only by accepted shared lifecycle events.
     open: bool,
     private_bootstrap: socket_codec::PrivateBootstrap,

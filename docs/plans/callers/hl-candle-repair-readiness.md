@@ -10,11 +10,13 @@ replays that demand when discovery completes.
 An unnamed managed topic may use the existing venue repair hook to defer or
 explain the refusal. Hyperliquid defers only known, demanded candles with no
 registered feed, with a Debug `subscription.deferred` event. Unknown markets stay
-visible as `subscription.rejected`, including while discovery is pending. Other
+visible as `subscription.rejected`, including while discovery is pending. A
+refused feed registration is latched: later demanded candle repairs return a
+visible `feed-refused` reason, rather than deferring indefinitely. Other
 managed venues retain the default refusal; the normal named-stream repair,
 silence escalation and reconnect paths are unchanged.
 
-Attribution carries `feed-not-started` or `unknown-market`, `engineBoot`,
+Attribution carries `feed-not-started`, `feed-refused` or `unknown-market`, `engineBoot`,
 `symbolKnown`, `catalogueSize`, `discovery` and `feedRegistered`. The boot sequence
 identifies a native venue instance within its runtime, remains stable across
 transport reconnects, and is diagnostic only. Catalogue fields come from that
