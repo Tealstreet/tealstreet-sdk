@@ -202,8 +202,13 @@ fn sl_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
 }
 
 fn tp_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
-    match opts.tp_trigger_type {
+    take_profit_reference(opts.tp_trigger_type)
+}
+
+fn take_profit_reference(trigger: Option<StopTriggerType>) -> &'static str {
+    match trigger {
         Some(StopTriggerType::MarkPrice) => "MarkPrice",
+        Some(StopTriggerType::IndexPrice) => "IndexPrice",
         _ => "LastPrice",
     }
 }
@@ -1063,11 +1068,7 @@ impl BybitLinear {
                 "takeProfit",
                 "tpTriggerBy",
                 "tpSize",
-                if trigger == Some(StopTriggerType::MarkPrice) {
-                    "MarkPrice"
-                } else {
-                    "LastPrice"
-                },
+                take_profit_reference(trigger),
             )
         };
         let body = Body::new()
@@ -1178,10 +1179,10 @@ impl BybitLinear {
             let (body, reference) =
                 self.trading_stop_body(cx, order, kind, price, trigger, amount, limit);
             // Judged against the price that fires the kind it became, on a fresh ticker.
-            let (label, by) = if reference == "LastPrice" {
-                ("last", StopTriggerType::LastPrice)
-            } else {
-                ("mark", StopTriggerType::MarkPrice)
+            let (label, by) = match reference {
+                "LastPrice" => ("last", StopTriggerType::LastPrice),
+                "IndexPrice" => ("index", StopTriggerType::IndexPrice),
+                _ => ("mark", StopTriggerType::MarkPrice),
             };
             if let Some(current) = safe_cex_engine::protective_amend::fresh_reference(
                 cx.store,
@@ -1260,7 +1261,11 @@ impl BybitLinear {
         if self.variant != crate::Variant::Inverse {
             body = body.str("tpslMode", "Partial");
         }
-        body = body.opt_str(level, price.map(number).as_deref());
+        body = body.opt_str(level, price.map(number).as_deref()).opt_str(
+            "tpTriggerBy",
+            (order.kind == OrderType::TakeProfit)
+                .then(|| take_profit_reference(order.trigger_type)),
+        );
         if self.variant != crate::Variant::Inverse {
             body = body.str(size, &number(amount.unwrap_or(order.amount)));
         }
@@ -1315,7 +1320,16 @@ impl BybitLinear {
             } else {
                 "takeProfit"
             };
-            return amend(base().str("orderId", parent).str(field, &number(price)));
+            return amend(
+                base()
+                    .str("orderId", parent)
+                    .str(field, &number(price))
+                    .opt_str(
+                        "tpTriggerBy",
+                        (order.kind == OrderType::TakeProfit)
+                            .then(|| take_profit_reference(order.trigger_type)),
+                    ),
+            );
         }
         if order.kind == OrderType::TrailingStopLoss {
             let target = price.ok_or("A trailing stop moves by price")?;
@@ -1354,11 +1368,15 @@ impl BybitLinear {
             } else {
                 ("takeProfit", "tpTriggerBy")
             };
-            let by_value = match order.trigger_type {
-                Some(StopTriggerType::MarkPrice) => Some("MarkPrice"),
-                Some(StopTriggerType::LastPrice) => Some("LastPrice"),
-                Some(StopTriggerType::IndexPrice) => Some("IndexPrice"),
-                None => None,
+            let by_value = if order.kind == OrderType::TakeProfit {
+                Some(take_profit_reference(order.trigger_type))
+            } else {
+                match order.trigger_type {
+                    Some(StopTriggerType::MarkPrice) => Some("MarkPrice"),
+                    Some(StopTriggerType::LastPrice) => Some("LastPrice"),
+                    Some(StopTriggerType::IndexPrice) => Some("IndexPrice"),
+                    None => None,
+                }
             };
             let body = Body::new()
                 .str("category", self.category_for(&order.symbol).as_str())
