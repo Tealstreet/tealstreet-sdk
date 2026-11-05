@@ -65,6 +65,7 @@ impl Config {
                 u64::try_from(router_lease_ms)
                     .map_err(|_| "TEALSTREET_ROUTER_LEASE_MS is out of range")?,
                 var("TEALSTREET_ROUTER_LEASE_ENFORCE").as_deref(),
+                var("TEALSTREET_ROUTER_LEASE_ENABLE_GRACE_UNTIL").as_deref(),
             )?,
             idle_release_ttl,
             access: crate::access::Config::parse(
