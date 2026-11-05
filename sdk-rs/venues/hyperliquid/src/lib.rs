@@ -1305,6 +1305,14 @@ impl Venue for Hyperliquid {
             }
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn rechecks_startup_reads() -> bool {
+        true
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn recheck_startup_reads(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        self.recheck_account_startup(cx)
+    }
     /// VENUE_STATE v1: `[1, builder]`, builder 0 unknown, 1 refused, 2 approved.
     /// The one write-path fact the store lacks: whether placements carry the builder.
     fn export_venue_state(&self) -> Option<Vec<u8>> {

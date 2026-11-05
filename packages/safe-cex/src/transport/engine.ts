@@ -43,6 +43,7 @@ import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
+import { PUBLIC_PROXY_READ_HOSTS, readsViaPublicProxy } from './tealstreet/publicCorsAllowlist';
 import {
   isTealstreetProxyAuthFailureBody,
   proxyAuthorizationHeader,
@@ -1339,6 +1340,18 @@ export const createEngineTransport = (
         infoFacts,
       )
     : undefined;
+  // A keyless public-data engine (a mirror's chart source) on an opted-in venue holds no
+  // credential, so its reads to allowlisted hosts leave through the public CORS proxy, off the
+  // trading fleet's IPs; the signed-packet guard still refuses anything credentialed.
+  const keylessPublicReads =
+    publicCorsHttp !== undefined &&
+    PUBLIC_PROXY_READ_HOSTS[exchange] !== undefined &&
+    options.publicDataOnly === true &&
+    !options.key &&
+    !options.secret &&
+    !options.passphrase &&
+    options.tealstreetProxy === true &&
+    !DIRECT_PUBLIC_READS.has(exchange);
   const readOptions =
     SECONDARY_READ_KEYS_ENABLED && credentials?.hasSecondary
       ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
@@ -1416,7 +1429,9 @@ export const createEngineTransport = (
                 ? readHttp
                 : intent === 'public' && DIRECT_PUBLIC_READS.has(exchange)
                   ? directHttp
-                  : intent === 'public' &&
+                  : intent === 'public' && keylessPublicReads && readsViaPublicProxy(exchange, packet.url)
+                    ? publicCorsHttp
+                    : intent === 'public' &&
                       readHttp &&
                       !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
                     ? readHttp
@@ -1441,7 +1456,9 @@ export const createEngineTransport = (
         (!['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange) ||
           hasHeader(request.headers, secondaryReadHeaders[exchange]!))
         ? readHttp.request(nativeRequest)
-        : http.request(nativeRequest);
+        : keylessPublicReads && readsViaPublicProxy(exchange, request.url)
+          ? publicCorsHttp!.request(nativeRequest)
+          : http.request(nativeRequest);
     },
     dispose: () => {
       http.dispose();
