@@ -181,7 +181,7 @@ fn managed_split_market_close_accepts_server_echoes_without_caller_ids() {
         let ids: Vec<String> = (0..count).map(|index| format!("native-{index}")).collect();
         let results: Vec<_> = ids
             .iter()
-            .map(|id| serde_json::json!({"orderId":id,"orderLinkId":"server-echo"}))
+            .map(|id| serde_json::json!({"orderId":id,"orderLinkId":format!("server-{id}")}))
             .collect();
         let statuses: Vec<_> = ids
             .iter()
@@ -194,6 +194,31 @@ fn managed_split_market_close_accepts_server_echoes_without_caller_ids() {
         );
         assert!(!h.unknown.contains(&130));
         assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+#[test]
+fn managed_create_batch_conflicting_echoes_remain_unknown_without_publication_or_resend() {
+    for (first_echo, second_echo, requested) in [
+        ("caller-b", "caller-b", Some("caller-b")),
+        ("caller-b", "", Some("caller-b")),
+        ("same", "same", None),
+    ] {
+        let mut h = ready(Variant::Demo);
+        let mut second = order("BTCUSDT", 0.02);
+        second.client_order_id = requested.map(str::to_owned);
+        place(&mut h, 132, vec![order("BTCUSDT", 0.01), second]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        h.reply(request.id, 200, &serde_json::json!({"retCode":0,"result":{"list":[
+            {"orderId":"first","orderLinkId":first_echo},{"orderId":"second","orderLinkId":second_echo}
+        ]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}).to_string());
+        assert!(h.result(132).unwrap().is_err());
+        assert!(h.unknown.contains(&132));
+        assert!(h.engine.store().order("first").is_none());
+        assert!(h.engine.store().order("second").is_none());
+        assert!(!h.has_request("/v5/order/create"));
+        assert!(!h.has_request("/v5/order/create-batch"));
     }
 }
 

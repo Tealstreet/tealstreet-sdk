@@ -249,13 +249,29 @@ pub(crate) fn targeted(result: Option<&RawValue>, order_id: &str) -> Result<(), 
 }
 
 /// Create-batch: `result.list` and `retExtInfo.list` must each have exactly one
-/// row per request. Requested client echoes must agree; unrequested server
-/// echoes carry no attribution. No accepted native ID may repeat.
+/// row per request. Requested echoes must agree; unsolicited nonempty echoes
+/// must be unique and cannot name any requested link. Native IDs cannot repeat.
 pub(crate) fn created_rows(
     result: Option<&RawValue>,
     ext: Option<&RawValue>,
     order_link_ids: &[Option<&str>],
 ) -> Result<Vec<Row>, Malformed> {
+    let identities = rows_of(list(result.ok_or(Malformed)?)?, Identity::read)?;
+    for (index, row) in identities.iter().enumerate() {
+        if order_link_ids.get(index) != Some(&None) {
+            continue;
+        }
+        if let Some(echo) = row.order_link_id.as_deref().filter(|echo| !echo.is_empty())
+            && (order_link_ids.contains(&Some(echo))
+                || identities
+                    .iter()
+                    .filter(|row| row.order_link_id.as_deref() == Some(echo))
+                    .count()
+                    != 1)
+        {
+            return Err(Malformed);
+        }
+    }
     let rows = rows(
         result,
         ext,
@@ -335,6 +351,11 @@ fn child_diagnostic(
         .max(statuses.map_or(0, <[_]>::len))
         .max(links.len())
         .max(targets.len());
+    let echoed_links: Vec<_> = results
+        .unwrap_or_default()
+        .iter()
+        .map(|row| Identity::read(row).ok().and_then(|row| row.order_link_id))
+        .collect();
     let mut children = Vec::new();
     for index in 0..total.min(DIAGNOSTIC_CHILDREN) {
         let row = results.and_then(|rows| rows.get(index)).copied();
@@ -342,7 +363,23 @@ fn child_diagnostic(
         let echo = if targets.is_empty() {
             match links.get(index) {
                 None => "unmatched",
-                Some(None) => "unrequested",
+                Some(None) => match identity.as_ref() {
+                    None => "invalid",
+                    Some(identity) => match identity.order_link_id.as_deref() {
+                        None | Some("") => "absent",
+                        Some(echo) if links.contains(&Some(echo)) => "requested-elsewhere",
+                        Some(echo)
+                            if echoed_links
+                                .iter()
+                                .filter(|other| other.as_deref() == Some(echo))
+                                .count()
+                                > 1 =>
+                        {
+                            "duplicated"
+                        }
+                        Some(_) => "unrequested",
+                    },
+                },
                 Some(Some(sent)) => match identity.as_ref() {
                     None => "invalid",
                     Some(identity) => match identity.order_link_id.as_deref() {
@@ -570,12 +607,13 @@ pub(crate) fn cancel_diagnostic(
         }
     }
     let summary = format!(
-        "targets={}; result.list={result_shape}/{}; retExtInfo.list={status_shape}/{}; orderId fields/nonempty/matched={native_fields}/{native_ids}/{target_matches}; orderLinkId fields/nonempty={client_fields}/{client_ids}; statuses success/failed/invalid={success}/{failed}/{invalid}; failure codes={}; duplicated targets={}",
+        "targets={}; result.list={result_shape}/{}; retExtInfo.list={status_shape}/{}; orderId fields/nonempty/matched={native_fields}/{native_ids}/{target_matches}; orderLinkId fields/nonempty={client_fields}/{client_ids}; statuses success/failed/invalid={success}/{failed}/{invalid}; failure codes={}; duplicated targets={}; foreign rows={}",
         order_ids.len(),
         results.as_ref().map_or(0, Vec::len),
         statuses.as_ref().map_or(0, Vec::len),
         failure_codes.join(","),
         echoed_targets.iter().filter(|count| **count > 1).count(),
+        native_ids - target_matches,
     );
     format!(
         "{summary}; {}",
