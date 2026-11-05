@@ -853,6 +853,38 @@ fn a_batch_cancel_that_also_cancelled_an_unnamed_order_confirms_its_target_and_r
 }
 
 #[test]
+fn a_one_target_batch_cancel_with_one_unnamed_success_echo_is_confirmed() {
+    // Live 06b73631 (release 7dd55432): targets=1; result.list=2; orderId
+    // nonempty/matched=2/1; orderLinkId nonempty=0; statuses success 2/0/0.
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    let target = "5cf98598-39a7-459e-97bf-76ca765ee020";
+    h.command(Command::CancelOrders {
+        command: 17,
+        ids: vec![target.into()],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    assert!(!h.has_request("/v5/order/realtime"));
+    h.reply(
+        cancel.id,
+        200,
+        &format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{{"category":"linear","symbol":"BTCUSDT","orderId":"{target}","orderLinkId":""}},{{"category":"linear","symbol":"BTCUSDT","orderId":"cascaded-child","orderLinkId":""}}]}},"retExtInfo":{{"list":[{{"code":0,"msg":"OK"}},{{"code":0,"msg":"OK"}}]}},"time":1}}"#
+        ),
+    );
+    assert_eq!(
+        h.engine.store().order(target).unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(h.result(17), Some(&Ok("[]".to_owned())));
+    assert!(!h.logs.iter().any(|m| m.contains("could not be confirmed")));
+    assert!(h.has_request("/v5/order/realtime"));
+}
+
+#[test]
 fn cancel_all_for_a_symbol() {
     let mut h = ready();
     h.command(Command::CancelSymbolOrders {
