@@ -407,9 +407,8 @@ async fn router_heartbeat(
         return StatusCode::BAD_REQUEST.into_response();
     };
     match proof.registry.router_leases.accept(&heartbeat) {
-        Ok(accepted) => {
-            let mut response =
-                axum::Json(json!({"accepted":accepted,"checkedAt":now_ms()})).into_response();
+        Ok(ack) => {
+            let mut response = axum::Json(ack).into_response();
             response
                 .headers_mut()
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -1181,6 +1180,10 @@ mod tests {
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["accepted"], 1);
+        assert_eq!(value["enforcing"], false);
+        assert!(value.get("graceUntil").unwrap().is_null());
+        assert_eq!(value.as_object().unwrap().len(), 4);
+        assert!(value["checkedAt"].as_u64().unwrap() >= now);
         assert!(!String::from_utf8_lossy(&bytes).contains("private-user-sentinel"));
         let repeated = call(headers.clone(), body.clone()).await;
         let value: serde_json::Value = serde_json::from_slice(

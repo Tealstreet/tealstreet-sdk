@@ -75,9 +75,19 @@ pub struct Assertion {
     pub not_after: u64,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ack {
+    pub accepted: usize,
+    pub checked_at: u64,
+    pub enforcing: bool,
+    pub grace_until: Option<u64>,
+}
+
 struct Policy {
     enforce: bool,
     grace_until: Instant,
+    grace_until_ms: u64,
 }
 struct State {
     accepted: Option<(u64, u64)>,
@@ -200,6 +210,7 @@ impl Users {
             policy: Arc::new(Mutex::new(Policy {
                 enforce: config.enforce,
                 grace_until: Instant::now() + Duration::from_millis(config.lease_ms),
+                grace_until_ms: clock().saturating_add(config.lease_ms),
             })),
             config,
             entries: Mutex::default(),
@@ -236,7 +247,7 @@ impl Users {
         entries.insert(user.to_owned(), entry.clone());
         Some(entry)
     }
-    pub fn accept(&self, heartbeat: &Heartbeat) -> Result<usize, &'static str> {
+    pub fn accept(&self, heartbeat: &Heartbeat) -> Result<Ack, &'static str> {
         let now = (self.clock)();
         if self.config.box_id.as_deref() != Some(&heartbeat.r#box)
             || heartbeat.r#box.is_empty()
@@ -291,13 +302,24 @@ impl Users {
             state.fenced = false;
             accepted += 1;
         }
-        Ok(accepted)
+        let policy = self.policy.lock().unwrap();
+        let checked_at = (self.clock)();
+        // Readiness waits for the full shared grace, even for already-heartbeated users.
+        let in_grace = policy.enforce
+            && (Instant::now() <= policy.grace_until || checked_at <= policy.grace_until_ms);
+        Ok(Ack {
+            accepted,
+            checked_at,
+            enforcing: policy.enforce && !in_grace,
+            grace_until: in_grace.then_some(policy.grace_until_ms),
+        })
     }
     #[cfg(test)]
     fn enforce(&self, enabled: bool) {
         let mut policy = self.policy.lock().unwrap();
         if enabled && !policy.enforce {
             policy.grace_until = Instant::now() + Duration::from_millis(self.config.lease_ms);
+            policy.grace_until_ms = (self.clock)().saturating_add(self.config.lease_ms);
         }
         policy.enforce = enabled;
     }
@@ -333,7 +355,7 @@ mod tests {
         let mut heartbeat = beat(1_000_000, 1, 1);
         assert!(users.accept(&heartbeat).is_err());
         heartbeat.r#box = "01".into();
-        assert_eq!(users.accept(&heartbeat).unwrap(), 1);
+        assert_eq!(users.accept(&heartbeat).unwrap().accepted, 1);
     }
 
     fn setup(enforce: bool) -> (Users, Arc<AtomicU64>) {
@@ -366,6 +388,95 @@ mod tests {
     async fn advance(now: &AtomicU64, ms: u64) {
         now.fetch_add(ms, Ordering::Relaxed);
         tokio::time::advance(Duration::from_millis(ms)).await;
+    }
+    fn ack(users: &Users, now: &AtomicU64, sequence: u64) -> serde_json::Value {
+        serde_json::to_value(
+            users
+                .accept(&beat(now.load(Ordering::Relaxed), 1, sequence))
+                .unwrap(),
+        )
+        .unwrap()
+    }
+    #[tokio::test(start_paused = true)]
+    async fn heartbeat_ack_reports_shadow_and_the_full_enable_grace_live() {
+        let (users, now) = setup(false);
+        let shadow = ack(&users, &now, 1);
+        assert_eq!(shadow["accepted"], 1);
+        assert_eq!(shadow["enforcing"], false);
+        assert_eq!(shadow["graceUntil"], serde_json::Value::Null);
+        advance(&now, 300_000).await;
+        users.enforce(true);
+        let enabled_at = now.load(Ordering::Relaxed);
+        let grace = ack(&users, &now, 2);
+        assert_eq!(grace["enforcing"], false);
+        assert_eq!(grace["graceUntil"], enabled_at + DEFAULT_LEASE_MS);
+        advance(&now, DEFAULT_LEASE_MS).await;
+        assert_eq!(ack(&users, &now, 3)["enforcing"], false);
+        advance(&now, 1).await;
+        let active = ack(&users, &now, 4);
+        assert_eq!(active["enforcing"], true);
+        assert_eq!(active["graceUntil"], serde_json::Value::Null);
+        assert_eq!(active["checkedAt"], now.load(Ordering::Relaxed));
+        users.enforce(false);
+        assert_eq!(ack(&users, &now, 5)["enforcing"], false);
+        users.enforce(true);
+        assert_eq!(ack(&users, &now, 6)["enforcing"], false);
+    }
+    #[tokio::test(start_paused = true)]
+    async fn heartbeat_ack_restarts_its_grace_and_does_not_trust_wall_clock_jumps() {
+        let (users, now) = setup(true);
+        let start = now.load(Ordering::Relaxed);
+        now.store(start + DEFAULT_LEASE_MS + 1, Ordering::Relaxed);
+        assert_eq!(ack(&users, &now, 1)["enforcing"], false);
+        tokio::time::advance(Duration::from_millis(DEFAULT_LEASE_MS + 1)).await;
+        assert_eq!(ack(&users, &now, 2)["enforcing"], true);
+        let clock = now.clone();
+        let restarted = Users::with_clock(
+            users.config.clone(),
+            Arc::new(move || clock.load(Ordering::Relaxed)),
+        );
+        let grace = ack(&restarted, &now, 1);
+        assert_eq!(grace["enforcing"], false);
+        assert_eq!(
+            grace["graceUntil"],
+            now.load(Ordering::Relaxed) + DEFAULT_LEASE_MS
+        );
+        advance(&now, DEFAULT_LEASE_MS + 1).await;
+        assert_eq!(ack(&restarted, &now, 2)["enforcing"], true);
+        now.store(start, Ordering::Relaxed);
+        assert_eq!(ack(&restarted, &now, 3)["enforcing"], false);
+    }
+    #[tokio::test(start_paused = true)]
+    async fn heartbeat_ack_is_conservative_for_known_and_new_users_in_a_batch() {
+        let (users, now) = setup(false);
+        users
+            .accept(&beat(now.load(Ordering::Relaxed), 1, 1))
+            .unwrap();
+        users.enforce(true);
+        let mut batch = beat(now.load(Ordering::Relaxed), 1, 2);
+        batch.users.push(Assertion {
+            user_id: "new-user".into(),
+            owner_epoch: 1,
+            sequence: 1,
+            not_after: batch.issued_at + 45_000,
+        });
+        let grace = serde_json::to_value(users.accept(&batch).unwrap()).unwrap();
+        assert_eq!(grace["accepted"], 2);
+        assert_eq!(grace["enforcing"], false);
+        assert_eq!(
+            grace["graceUntil"],
+            now.load(Ordering::Relaxed) + DEFAULT_LEASE_MS
+        );
+        advance(&now, DEFAULT_LEASE_MS + 1).await;
+        batch.issued_at = now.load(Ordering::Relaxed);
+        for user in &mut batch.users {
+            user.sequence += 1;
+            user.not_after = batch.issued_at + 45_000;
+        }
+        let active = serde_json::to_value(users.accept(&batch).unwrap()).unwrap();
+        assert_eq!(active["accepted"], 2);
+        assert_eq!(active["enforcing"], true);
+        assert_eq!(active["graceUntil"], serde_json::Value::Null);
     }
     #[tokio::test(start_paused = true)]
     async fn accepted_lease_fences_at_its_half_window_and_old_permits_never_revive() {
@@ -442,12 +553,12 @@ mod tests {
         users.accept(&first).unwrap();
         let user = users.get("u").unwrap();
         let mut old = beat(start, 1, 100);
-        assert_eq!(users.accept(&old), Ok(0));
+        assert_eq!(users.accept(&old).unwrap().accepted, 0);
         old.users[0].owner_epoch = 2;
         old.users[0].sequence = 2;
-        assert_eq!(users.accept(&old), Ok(0));
+        assert_eq!(users.accept(&old).unwrap().accepted, 0);
         old.users[0].sequence = 3;
-        assert_eq!(users.accept(&old), Ok(0));
+        assert_eq!(users.accept(&old).unwrap().accepted, 0);
         assert_eq!(user.status().not_after, Some(start + 45_000));
         now.store(start - 10_000, Ordering::Relaxed);
         assert!(users.accept(&beat(start, 3, 1)).is_err());

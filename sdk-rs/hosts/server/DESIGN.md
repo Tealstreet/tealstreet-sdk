@@ -258,8 +258,20 @@ mode continues and reports `routerBoxId: null`. `TEALSTREET_BOX` is only a
 display/Sentry label and is not an ownership identifier. The router
 must return public 404 for `/lease/*`, as for `/proof/*` and `/admin/*`.
 
-`POST /lease/router-heartbeat` returns `{accepted, checkedAt}` with Unix
-milliseconds. A batch contains 1–256 distinct users, user IDs at most 512 bytes,
+`POST /lease/router-heartbeat` returns
+`{accepted, checkedAt, enforcing, graceUntil}` with Unix milliseconds. `enforcing`
+is true only with enforcement on and past the full enable/start grace (90 s by
+default), even if a heartbeat has already ended a user's missing-heartbeat
+exception. The ACK is conservative for the entire submitted batch: every named
+user must be past grace. Users currently share one process policy deadline;
+`graceUntil` is that latest outstanding grace deadline, or null with enforcement
+off or grace complete. These fields are computed from the current runtime
+policy on every ACK; restart and re-enable begin a fresh grace. They confer no
+lease extension or release proof, and do not replace the router's persisted
+maximum `notAfter` and skew wait for takeover. Clock jumps cannot end ACK grace
+early: both the monotonic and wall-clock deadlines must have elapsed.
+
+A batch contains 1–256 distinct users, user IDs at most 512 bytes,
 and a body at most 256 KiB. Epoch and sequence are positive JS-safe integers.
 Old or duplicate tuples never extend a grant; invalid assertions return 400.
 A separate bounded peer limiter allows a 1024-request burst and 512 requests/s,
