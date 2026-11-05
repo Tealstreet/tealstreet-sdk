@@ -804,7 +804,12 @@ impl BybitLinear {
         let tif = (limit_price.is_some() || execution.bbo_side.is_some())
             .then(|| tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel)));
 
-        let max = market.limits.amount.max;
+        let max = self
+            .order_caps
+            .get(&opts.symbol)
+            .map_or(market.limits.amount.max, |caps| {
+                caps.for_order(market.limits.amount.max, order_type == "Market")
+            });
         if !max.is_finite() || max <= 0.0 {
             return Err("Market has no valid maximum order quantity".into());
         }
