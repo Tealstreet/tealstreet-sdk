@@ -35,7 +35,9 @@ allowed; automatic container hostnames stay stripped. Their release comes from
 the supplied release or runtime `TEALSTREET_RELEASE` image revision. Missing,
 blank and placeholder values are omitted. Their `region` tag is removed because
 `CONNECT_REGION` can be a stale routing default. Other services keep their
-existing identity behavior.
+existing identity behavior. Identity is normalized at client initialization and
+on error, metric, log and session paths; sessions are omitted without an image
+release because the Sentry session schema requires one.
 
 ## The default integration set is the leak, not the events
 

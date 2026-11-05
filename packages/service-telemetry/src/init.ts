@@ -59,10 +59,25 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
     if (box) scopeTags.box = box;
   }
 
+  const identityAttributes = (attributes: Record<string, unknown> = {}): Record<string, unknown> => {
+    const normalized = { ...attributes };
+    delete normalized['server.address'];
+    delete normalized['sentry.release'];
+    delete normalized.region;
+    delete normalized.box;
+    if (box) {
+      normalized['server.address'] = box;
+      normalized.box = box;
+    }
+    if (imageRelease) normalized['sentry.release'] = imageRelease;
+    return normalized;
+  };
+
   Sentry.init({
     dsn,
-    release: imageRelease,
-    serverName: box,
+    // An explicit empty release stops the SDK's SENTRY_RELEASE/build inference.
+    release: exchange ? (imageRelease ?? '') : imageRelease,
+    serverName: exchange ? (box ?? '') : undefined,
     environment,
     initialScope: { tags: scopeTags },
 
@@ -91,7 +106,40 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
      * timed out`, every few seconds per session) reaches Sentry exactly that
      * way. That is the flood this package exists to bound, billed per event.
      */
-    integrations: (defaults) => defaults.filter((integration) => !DROPPED_INTEGRATIONS.has(integration.name)),
+    integrations: (defaults) => {
+      const retained = defaults.filter((integration) => !DROPPED_INTEGRATIONS.has(integration.name));
+      if (!exchange) return retained;
+      const identity: (typeof defaults)[number] = {
+        name: 'ServiceBoxIdentity',
+        beforeSetup(client) {
+          // Bun replaces blank serverName; clear it before any integration starts a session.
+          Object.assign(client.getOptions(), { serverName: box ?? '', release: imageRelease });
+          client.on('beforeSendSession', (session) => {
+            if ('aggregates' in session) {
+              session.attrs = { ...session.attrs, release: imageRelease };
+            } else session.release = imageRelease;
+          });
+          client.on('beforeEnvelope', (envelope) => {
+            // Sessions require a release; never send a caller's inferred fallback instead.
+            if (!imageRelease) {
+              for (let i = envelope[1].length - 1; i >= 0; i--) {
+                if (['session', 'sessions'].includes(envelope[1][i][0].type)) envelope[1].splice(i, 1);
+              }
+            }
+          });
+        },
+      };
+      return [identity, ...retained];
+    },
+
+    beforeSendMetric(metric) {
+      if (exchange) metric.attributes = identityAttributes(metric.attributes);
+      return metric;
+    },
+    beforeSendLog(log) {
+      if (exchange) log.attributes = identityAttributes(log.attributes);
+      return log;
+    },
 
     beforeSend(event) {
       for (const exception of event.exception?.values ?? []) {

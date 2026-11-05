@@ -48,8 +48,8 @@ for (const service of ['exchange-server', 'exchange-gateway']) {
         vi.stubEnv('TEALSTREET_BOX', value);
         vi.stubEnv('TEALSTREET_RELEASE', value);
         enable(service, value);
-        expect(initOptions().serverName).toBeUndefined();
-        expect(initOptions().release).toBeUndefined();
+        expect(initOptions().serverName).toBe('');
+        expect(initOptions().release).toBe('');
         expect(initOptions().initialScope.tags).toEqual({ service });
         const event = initOptions().beforeSend({
           server_name: 'container',
@@ -74,7 +74,7 @@ for (const service of ['exchange-server', 'exchange-gateway']) {
       vi.stubEnv('TEALSTREET_RELEASE', 'env-revision');
       enable(service, 'image-revision');
       expect(initOptions().release).toBe('image-revision');
-      expect(initOptions().serverName).toBeUndefined();
+      expect(initOptions().serverName).toBe('');
     });
   });
 }
