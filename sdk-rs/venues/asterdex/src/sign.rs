@@ -98,6 +98,13 @@ impl Query {
         }
     }
 
+    pub(crate) fn value(&self, name: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+
     pub fn as_str(&self) -> String {
         join(&self.0, false)
     }

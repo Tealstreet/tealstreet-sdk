@@ -240,6 +240,9 @@ struct Job {
     /// The next serial call's slot, from admission or the last continuation.
     slot: Option<Slot>,
     reserved_places: usize,
+    guard: Option<StopGuard>,
+    restore: Option<Planned>,
+    restoring: bool,
     steps: VecDeque<Planned>,
     ids: Vec<String>,
     successes: usize,
@@ -280,6 +283,63 @@ pub struct TradingState {
     // Placement ACKs can precede both REST reconciliation and the private NEW.
     // Keep routing provenance only until Store/terminal sees the ID or cancellation.
     acknowledged: HashMap<String, String>,
+    pub(crate) protections: HashMap<String, NativeProtection>,
+}
+
+#[derive(Clone)]
+pub(crate) struct NativeProtection {
+    pub(crate) order: Order,
+    pub(crate) query: Query,
+    pub(crate) reference: StopTriggerType,
+    pub(crate) price_protect: bool,
+}
+
+struct StopGuard {
+    order: Order,
+    price: f64,
+    reference: StopTriggerType,
+}
+impl StopGuard {
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        let unchanged = || format!("Your {} stop was not changed", self.order.symbol);
+        if store.order(&self.order.id) != Some(&self.order) {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "{}: the original order changed before cancellation",
+                unchanged()
+            ))));
+        }
+        let current = store
+            .reference_seen_at(&self.order.symbol, self.reference)
+            .filter(|seen| *seen <= now)
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    store,
+                    &self.order.symbol,
+                    self.reference,
+                    now,
+                )
+            });
+        let label = if self.reference == StopTriggerType::MarkPrice {
+            "mark"
+        } else {
+            "last"
+        };
+        let Some(current) = current else {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "{}: a fresh {label} price is required before cancellation",
+                unchanged()
+            ))));
+        };
+        let below =
+            (self.order.kind == OrderType::StopLoss) == (self.order.side == OrderSide::Sell);
+        if (below && self.price >= current) || (!below && self.price <= current) {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "{}: the replacement would trigger immediately against the {label} price",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
 }
 
 /// TS's exact decimal policy: plain decimals, at most 18 fractional digits,
@@ -627,7 +687,7 @@ impl AsterDex {
                     .steps
                     .iter()
                     .filter(|step| matches!(step.call, Call::Place { .. }))
-                    .count();
+                    .count() + usize::from(job.restore.is_some());
                 if job.reserved_places > 0 {
                     let reserved = self
                         .trading
@@ -782,7 +842,10 @@ impl AsterDex {
         let Some(job) = self.trading.jobs.get_mut(&id) else {
             return;
         };
-        let next = if job.error.is_some() && !job.continue_on_error {
+        let next = if job.error.is_some()
+            && !job.continue_on_error
+            && !(job.restoring && !job.steps.is_empty())
+        {
             None
         } else {
             job.steps.pop_front()
@@ -1089,11 +1152,36 @@ impl AsterDex {
                     .map(|_| None),
             };
         }
+        if was_place && let Some(job) = self.trading.jobs.get_mut(&command) {
+            if outcome.is_err() && !job.restoring && !transport && !unproven && !replied {
+                let definitive = outcome.as_ref().err().is_some_and(|(code, message)| {
+                    matches!(
+                        failure(*code, message.clone()).outcome,
+                        Some(Outcome::Rejected)
+                    )
+                });
+                if definitive && let Some(restore) = job.restore.take() {
+                    job.steps.clear();
+                    job.steps.push_back(restore);
+                    job.restoring = true;
+                }
+            } else if outcome.is_ok()
+                && job.restoring
+                && let Some(error) = &mut job.error
+            {
+                error.protection = Some(safe_cex_engine::error::Protection::Restored);
+                error.presents = true;
+                error.message = format!(
+                    "Your {} stop is unchanged: its replacement was refused, so the old stop was put back as a new order",
+                    job.replacing_stop.as_ref().map_or("", |(s, _, _)| s)
+                );
+            }
+        }
         // The fact is recorded: continue the serial plan into the next native
         // step, or settle this last call before the terminal.
         if let (Some(leg), Some((plan, slot))) = (leg, &plan) {
             let continues = self.trading.jobs.get(&command).is_some_and(|job| {
-                !job.steps.is_empty() && (job.continue_on_error || outcome.is_ok())
+                !job.steps.is_empty() && (job.continue_on_error || outcome.is_ok() || job.restoring)
             });
             if continues {
                 match cx.continue_serial_plan(plan, slot, leg, serial()) {
@@ -1138,6 +1226,9 @@ impl AsterDex {
                     let unknown = error.outcome == Some(Outcome::Unknown);
                     job.sweep_failed |= was_sweep;
                     if was_place && let Some(gone) = job.gone_text(unknown) {
+                        error.protection =
+                            (!unknown).then_some(safe_cex_engine::error::Protection::Unprotected);
+                        error.presents = true;
                         error.message = format!("{gone}: {}", error.message);
                     }
                     job.error = Some(error);
@@ -1199,6 +1290,42 @@ impl AsterDex {
             ..Job::default()
         }
     }
+    // Only the destructive cancel is guarded; the final claim reads current
+    // Store state synchronously and a veto follows the engine's normal unwind.
+    pub(crate) fn stop_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Pending::Signed(signed) = pending else {
+            return Ok(());
+        };
+        let Pending::Trade(request) = &signed.pending else {
+            return Ok(());
+        };
+        if let Call::Cancel {
+            filled_at_amend: Some(_),
+            ..
+        } = &request.call
+            && let Some(guard) = self
+                .trading
+                .jobs
+                .get(&request.command)
+                .filter(|job| {
+                    request.plan.as_ref().is_some_and(|(plan, _)| {
+                        job.plan
+                            .as_ref()
+                            .is_some_and(|own| own.owner() == plan.owner())
+                    })
+                })
+                .and_then(|job| job.guard.as_ref())
+        {
+            guard.validate(store, release.time.raw_ms)?;
+        }
+        Ok(())
+    }
+
     fn plan_amend(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1245,28 +1372,6 @@ impl AsterDex {
                 "Aster replacement worth {value} is below the {minimum} minimum; the order is unchanged"
             ));
         }
-        // A stop that would trigger at once is refused after the old one is gone.
-        if conditional
-            && let Some(trigger) = price
-            && let Some(reference) = cx
-                .store
-                .ticker(&order.symbol)
-                .map(|t| {
-                    if order.trigger_type == Some(StopTriggerType::LastPrice) {
-                        t.last
-                    } else {
-                        t.mark
-                    }
-                })
-                .filter(|p| p.is_finite() && *p > 0.0)
-        {
-            let below = (order.kind == OrderType::StopLoss) == (order.side == OrderSide::Sell);
-            if (below && trigger >= reference) || (!below && trigger <= reference) {
-                return Err(format!(
-                    "Aster would trigger this stop immediately: {trigger} is past {reference}; the order was not changed"
-                ));
-            }
-        }
         let replacement = PlaceOrderOpts {
             symbol: order.symbol.clone(),
             kind: order.kind,
@@ -1285,6 +1390,42 @@ impl AsterDex {
             return Err(error.message);
         }
         let mut job = self.plan_cancel(std::slice::from_ref(order), false);
+        if conditional {
+            let native = self.trading.protections.get(id)
+                .filter(|native| native.order == *order)
+                .ok_or_else(|| format!("Your {} stop was not changed: its exact native parameters must be refreshed before cancellation", order.symbol))?;
+            if order.filled != 0.0 {
+                return Err(format!(
+                    "Your {} stop was not changed: it already has fills",
+                    order.symbol
+                ));
+            }
+            let step = place
+                .steps
+                .front()
+                .ok_or("Aster replacement has no native order")?;
+            let trigger = step
+                .query
+                .value("stopPrice")
+                .and_then(|p| p.parse::<f64>().ok())
+                .ok_or("Aster replacement has no trigger")?;
+            let guard = StopGuard {
+                order: order.clone(),
+                price: trigger,
+                reference: native.reference,
+            };
+            guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
+            job.guard = Some(guard);
+            job.restore = Some(Planned {
+                method: Method::Post,
+                endpoint: "order",
+                query: native.query.clone(),
+                call: Call::Place {
+                    symbol: order.symbol.clone(),
+                    position_side,
+                },
+            });
+        }
         job.steps.extend(place.steps);
         job.replacing_stop = conditional.then(|| (order.symbol.clone(), order.side, order.kind));
         job.replacing_order = (!conditional).then(|| order.symbol.clone());

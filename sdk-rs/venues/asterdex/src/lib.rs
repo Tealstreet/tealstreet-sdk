@@ -699,6 +699,9 @@ impl AsterDex {
             let price = num::parse(&event.p);
             cx.store
                 .update_ticker(&event.s, |ticker| ticker.last = price);
+            if price.is_finite() && price > 0.0 {
+                cx.store.observe_ticker_fields(&event.s, 1 << 2);
+            }
         }
     }
 
@@ -778,6 +781,11 @@ fn is_partial_stream(stream: &str) -> bool {
 }
 
 fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
+    let observed = event
+        .c
+        .as_deref()
+        .and_then(num::parse_decimal)
+        .is_some_and(|p| p > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
         if let Some(value) = event.c.as_deref().filter(|s| !s.is_empty()) {
             ticker.last = num::parse(value);
@@ -792,9 +800,17 @@ fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
             ticker.quote_volume = num::parse(value);
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 2);
+    }
 }
 
 fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
+    let observed = event
+        .p
+        .as_deref()
+        .and_then(num::parse_decimal)
+        .is_some_and(|p| p > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
         if let Some(value) = event.p.as_deref().filter(|s| !s.is_empty()) {
             ticker.mark = num::parse(value);
@@ -809,6 +825,9 @@ fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
             ticker.funding_time = value;
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 3);
+    }
 }
 
 fn collect_interest(body: &str, output: &mut HashMap<String, f64>) {
@@ -922,6 +941,15 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
 }
 
 impl Venue for AsterDex {
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.stop_release_veto(store, pending, release)
+    }
+
     #[inline]
     fn managed_sockets() -> bool {
         true
