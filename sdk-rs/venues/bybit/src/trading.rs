@@ -1315,7 +1315,21 @@ impl BybitLinear {
             } else {
                 "takeProfit"
             };
-            return amend(base().str("orderId", parent).str(field, &number(price)));
+            return amend(
+                base()
+                    .str("orderId", parent)
+                    .str(field, &number(price))
+                    .opt_str(
+                        "slTriggerBy",
+                        (order.kind == OrderType::StopLoss && !self.variant.is_spot()).then_some(
+                            match order.trigger_type {
+                                Some(StopTriggerType::LastPrice) => "LastPrice",
+                                Some(StopTriggerType::IndexPrice) => "IndexPrice",
+                                _ => "MarkPrice",
+                            },
+                        ),
+                    ),
+            );
         }
         if order.kind == OrderType::TrailingStopLoss {
             let target = price.ok_or("A trailing stop moves by price")?;

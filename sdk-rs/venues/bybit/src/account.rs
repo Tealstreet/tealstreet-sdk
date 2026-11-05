@@ -812,7 +812,11 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
                     amount
                 },
                 client_order_id: None,
-                trigger_type: trigger(present(by)).or(parent.trigger_type),
+                trigger_type: if kind == OrderType::StopLoss {
+                    trigger(present(by))
+                } else {
+                    trigger(present(by)).or(parent.trigger_type)
+                },
                 extra: inverse.then(|| OrderExtra {
                     remaining_native: Some(remaining),
                     remaining_notional: Some(remaining),
