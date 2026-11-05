@@ -144,6 +144,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // CI size plus 10 KiB rounded up to the KiB.
 // #3073 run 41931095253 measured bitget and bitgetusdc 2,334,811 B.
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB; siblings equal.
+// #3101 run 42069819046 measured bybit 2,212,121 B.
+// Standing policy: CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
   asterdex: 2_137_088,
@@ -156,7 +158,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitunix: 1_849_344,
   blofin: 1_963_008,
   breakoutprop: 1_512_448,
-  bybit: 2_211_840,
+  bybit: 2_223_104,
   coinbase: 1_826_816,
   cryptocom: 1_727_488,
   grvt: 1_780_736,
