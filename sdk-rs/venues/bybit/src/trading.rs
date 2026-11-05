@@ -1375,6 +1375,16 @@ impl BybitLinear {
                         "tpTriggerBy",
                         (order.kind == OrderType::TakeProfit && !self.variant.is_spot())
                             .then(|| take_profit_reference(order.trigger_type)),
+                    )
+                    .opt_str(
+                        "slTriggerBy",
+                        (order.kind == OrderType::StopLoss && !self.variant.is_spot()).then_some(
+                            match order.trigger_type {
+                                Some(StopTriggerType::LastPrice) => "LastPrice",
+                                Some(StopTriggerType::IndexPrice) => "IndexPrice",
+                                _ => "MarkPrice",
+                            },
+                        ),
                     ),
             );
         }

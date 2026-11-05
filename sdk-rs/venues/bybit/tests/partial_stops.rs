@@ -1993,3 +1993,82 @@ fn tp_add_uses_a_known_requested_reference_for_linear_and_inverse() {
         }
     }
 }
+
+#[test]
+fn attached_sl_amend_preserves_own_native_reference_or_existing_mark_default() {
+    use safe_cex_engine::model::StopTriggerType;
+    for profile in PROFILES {
+        for (native, expected, typed) in [
+            (
+                Some("MarkPrice"),
+                "MarkPrice",
+                Some(StopTriggerType::MarkPrice),
+            ),
+            (
+                Some("LastPrice"),
+                "LastPrice",
+                Some(StopTriggerType::LastPrice),
+            ),
+            (
+                Some("IndexPrice"),
+                "IndexPrice",
+                Some(StopTriggerType::IndexPrice),
+            ),
+            (Some("UNKNOWN"), "MarkPrice", None),
+            (Some("NEW_NATIVE_TRIGGER"), "MarkPrice", None),
+            (Some(""), "MarkPrice", None),
+            (None, "MarkPrice", None),
+        ] {
+            let mut h = ready(profile);
+            h.message(
+                "/v5/private",
+                &serde_json::json!({"topic":"position","data":[{
+                    "category":profile.category(),"symbol":profile.symbol(),"side":"Buy","size":"0",
+                    "avgPrice":"0","markPrice":"100","leverage":"10","positionIdx":0
+                }]})
+                .to_string(),
+            );
+            let mut row = serde_json::json!({
+                "category":profile.category(),"symbol":profile.symbol(),"orderId":"sl-parent",
+                "side":"Buy","orderType":"Limit","orderStatus":"New","stopOrderType":"Stop",
+                "qty":"7","cumExecQty":"0","price":"110","leavesQty":"7",
+                "triggerPrice":"110","triggerBy":"LastPrice","stopLoss":"90","positionIdx":0
+            });
+            if let Some(native) = native {
+                row["slTriggerBy"] = native.into();
+            }
+            h.message(
+                "/v5/private",
+                &serde_json::json!({"topic":"order","data":[row]}).to_string(),
+            );
+            assert_eq!(
+                h.engine.store().order("sl-parent").unwrap().trigger_type,
+                Some(StopTriggerType::LastPrice)
+            );
+            assert_eq!(
+                h.engine
+                    .store()
+                    .order("sl-parent__stop_loss")
+                    .unwrap()
+                    .trigger_type,
+                typed,
+                "{profile:?}/{native:?}"
+            );
+            h.command(Command::AmendOrder {
+                command: 95,
+                id: "sl-parent__stop_loss".into(),
+                price: Some(85.0),
+                amount: None,
+            });
+            let request = h.take("/v5/order/amend");
+            let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            assert_eq!(payload["category"], profile.category());
+            assert_eq!(payload["orderId"], "sl-parent");
+            assert_eq!(payload["stopLoss"], "85");
+            assert_eq!(payload["slTriggerBy"], expected, "{profile:?}/{native:?}");
+            assert!(payload.get("tpTriggerBy").is_none());
+            assert!(!h.has_request(profile.cancel_path()));
+            assert!(!h.has_request("/v5/position/trading-stop"));
+        }
+    }
+}

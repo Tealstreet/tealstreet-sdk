@@ -4917,3 +4917,26 @@ fn spot_attached_take_profit_amend_omits_derivative_trigger_reference() {
     );
     assert!(!h.has_request("/v5/order/cancel"));
 }
+
+#[test]
+fn spot_attached_stop_loss_amend_omits_derivative_trigger_reference() {
+    let mut h = ready(Variant::Spot);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"spot","symbol":"BTCUSDT","orderId":"spot-parent","side":"Buy","orderType":"Limit","orderStatus":"New","qty":"1","price":"100","leavesQty":"1","stopLoss":"90","slTriggerBy":"IndexPrice"}]}"#);
+    assert!(h.engine.store().order("spot-parent__stop_loss").is_some());
+    h.command(Command::AmendOrder {
+        command: 981,
+        id: "spot-parent__stop_loss".into(),
+        price: Some(85.0),
+        amount: None,
+    });
+    let request = h.take("/v5/order/amend");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["category"], "spot");
+    assert_eq!(body["orderId"], "spot-parent");
+    assert_eq!(body["stopLoss"], "85");
+    assert!(
+        body.get("slTriggerBy").is_none(),
+        "spot omits derivative reference: {body}"
+    );
+    assert!(!h.has_request("/v5/order/cancel"));
+}
