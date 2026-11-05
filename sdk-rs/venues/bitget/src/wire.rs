@@ -722,13 +722,6 @@ impl<'de> Deserialize<'de> for Flag {
     }
 }
 
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct PageMeta {
-    pub end_id: Option<String>,
-    pub cursor: Option<String>,
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FillRow<'a> {
