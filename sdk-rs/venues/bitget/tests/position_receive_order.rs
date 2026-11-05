@@ -94,6 +94,50 @@ fn a_recent_pre_send_open_survives_omission_and_owes_a_re_read() {
         "stale omission must schedule a re-read"
     );
 }
+
+#[test]
+fn a_zero_recent_at_release_survives_a_delayed_stale_reply_then_a_fresh_read_heals() {
+    let mut h = ready();
+    ws(&mut h, 0, "100");
+    repair_at(&mut h, 1000.0);
+    assert!(h.requests.iter().any(|r| r.url.contains("/all-position")));
+    h.now += 5001.0;
+    rest(&mut h, json!([row(1, "999999")]));
+    assert_eq!(
+        size(&h),
+        0.0,
+        "the first release fixed receipt grace before the slow reply"
+    );
+    repair_at(&mut h, 500.0);
+    rest(&mut h, json!([row(1, "0")]));
+    assert_eq!(
+        size(&h),
+        1.0,
+        "a genuinely later release after grace may heal the closed leg"
+    );
+}
+
+#[test]
+fn an_open_recent_at_release_survives_a_delayed_omission_then_a_fresh_read_heals() {
+    let mut h = ready();
+    ws(&mut h, 2, "100");
+    repair_at(&mut h, 1000.0);
+    assert!(h.requests.iter().any(|r| r.url.contains("/all-position")));
+    h.now += 5001.0;
+    rest(&mut h, json!([]));
+    assert_eq!(
+        size(&h),
+        2.0,
+        "a slow response cannot age a protected open out of its first release cut"
+    );
+    repair_at(&mut h, 500.0);
+    rest(&mut h, json!([]));
+    assert_eq!(
+        size(&h),
+        0.0,
+        "a genuinely later release after grace may prove absence"
+    );
+}
 #[test]
 fn same_connection_receive_order_and_a_post_send_observation_are_preserved() {
     let mut h = ready();

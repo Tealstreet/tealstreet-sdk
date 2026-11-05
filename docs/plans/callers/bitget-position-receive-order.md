@@ -24,8 +24,10 @@ census; an older reply neither publishes nor settles `readPositions`.
 
 REST has no read-your-writes guarantee. The existing five-second grace is kept
 as a bounded heuristic using local receipt time only. A recent pre-send WS row
-or zero also wins over conflicting REST; matching pre-send financial state can
-settle immediately. Post-send WS evidence still holds the read even if values
+or zero also wins over conflicting REST. Its age is fixed at the census's first
+physical release, so a slow response cannot expire that read's protection.
+Matching pre-send financial state can settle immediately. Post-send WS evidence
+still holds the read even if values
 agree. Once the grace passes without a newer WS observation, a fresh read
 may heal it. This cannot establish that a fill was included in a position row.
 

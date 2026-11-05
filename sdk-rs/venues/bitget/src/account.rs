@@ -133,6 +133,7 @@ struct WsPosition {
 }
 
 // The existing 5 s grace is a local receipt heuristic, never a causal barrier.
+// Fix pre-send age at the first physical release, not at response delivery.
 const POSITION_RECEIPT_GRACE_MS: f64 = 5_000.0;
 
 #[derive(Default)]
@@ -1861,7 +1862,7 @@ impl BitgetFutures {
                                 }) || mark.observed.is_some_and(|r| {
                                     r.epoch == cut.epoch
                                         && (r.ordinal > cut.ordinal
-                                            || cx.now - r.at <= POSITION_RECEIPT_GRACE_MS)
+                                            || cut.at - r.at <= POSITION_RECEIPT_GRACE_MS)
                                 })
                             })
                 }) {
@@ -1880,7 +1881,7 @@ impl BitgetFutures {
                         .observed
                         .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal);
                     let financial = mark.observed.is_some_and(|r| {
-                        r.epoch == cut.epoch && cx.now - r.at <= POSITION_RECEIPT_GRACE_MS
+                        r.epoch == cut.epoch && cut.at - r.at <= POSITION_RECEIPT_GRACE_MS
                     });
                     let same = cx
                         .store
@@ -1915,7 +1916,7 @@ impl BitgetFutures {
                             || m.observed.is_some_and(|r| {
                                 r.epoch == cut.epoch
                                     && (r.ordinal > cut.ordinal
-                                        || cx.now - r.at <= POSITION_RECEIPT_GRACE_MS)
+                                        || cut.at - r.at <= POSITION_RECEIPT_GRACE_MS)
                             })
                     })
             {
