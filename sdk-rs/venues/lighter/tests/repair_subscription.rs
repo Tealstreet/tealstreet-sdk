@@ -20,6 +20,7 @@ struct H {
     timers: Vec<(TimerId, f64)>,
     sent: Vec<(SocketId, String)>,
     warnings: Vec<String>,
+    urls: Vec<String>,
 }
 
 impl H {
@@ -37,6 +38,7 @@ impl H {
             timers: vec![],
             sent: vec![],
             warnings: vec![],
+            urls: vec![],
         };
         let request = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now)
             .into_iter()
@@ -61,7 +63,10 @@ impl H {
     fn collect(&mut self) {
         for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
-                Action::WsConnect { socket, .. } => self.socket = Some(socket),
+                Action::WsConnect { socket, url, .. } => {
+                    self.socket = Some(socket);
+                    self.urls.push(url);
+                }
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
@@ -234,4 +239,33 @@ fn a_repair_while_the_public_socket_is_down_sends_nothing_and_the_reconnect_resu
     let resubscribed = h.frames(|h| h.event(Event::WsOpened { socket }));
     let books: Vec<_> = resubscribed.iter().filter(|(_, c)| c == BOOK).collect();
     assert_eq!(books, [&frame("subscribe", BOOK)], "{resubscribed:?}");
+}
+
+/// A repair-forced reconnect is the engine's, not Lighter refusing the route:
+/// repeated ones never move the public feed to `?readonly=true`.
+#[test]
+fn repair_forced_silent_reconnects_never_go_read_only() {
+    let mut h = H::ready();
+    h.command(Command::SubscribeOrderBook {
+        symbol: "ETH".into(),
+    });
+    for _ in 0..3 {
+        let old = h.socket.unwrap();
+        // A repeat repair inside its window reconnects the feed as silent.
+        h.command(Command::RepairSubscription(book()));
+        h.command(Command::RepairSubscription(book()));
+        while h.socket == Some(old) {
+            let until = h.now + 100.0;
+            h.advance(until);
+            assert!(h.now < 120_000.0, "no reconnect");
+        }
+        let socket = h.socket.unwrap();
+        h.event(Event::WsOpened { socket });
+    }
+    assert_eq!(h.urls.len(), 4, "{:?}", h.urls);
+    assert!(
+        h.urls.iter().all(|url| !url.contains("readonly")),
+        "{:?}",
+        h.urls
+    );
 }

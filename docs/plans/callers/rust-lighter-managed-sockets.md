@@ -14,7 +14,8 @@ Master's legacy-socket behaviours carry over onto the managed feeds:
   1006/1008 private closes, reconnect that feed on `?readonly=true`; a routed
   account (`ws_routed`) never switches. The read-only private socket sends
   every other engine ping, legacy's 20 s cadence, and skips stream recovery.
-  A connect that times out counts as 1006, as the legacy supervisors closed it.
+  A connect or idle timeout counts as 1006, as the legacy supervisors closed
+  it; a silent reconnect (the engine's repair) never counts.
 - Ticker pacing: ticker channels join the public feed's interests two a second,
   displayed symbols first; a retired feed paces them again on reopen rather
   than replaying them at once.

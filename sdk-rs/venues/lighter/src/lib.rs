@@ -1353,9 +1353,13 @@ impl Venue for Lighter {
             LifecycleEvent::Retired {
                 reason, close_code, ..
             } => {
-                // Legacy counted refused and early-closed connects toward read-only;
-                // a timeout reads as 1006, as its supervisors closed one.
-                if matches!(reason, RetireReason::Closed | RetireReason::Timeout(_)) {
+                // Legacy counted refused and early-closed connects toward read-only; a
+                // connect or idle timeout reads as 1006, as its supervisors closed one.
+                // A silent reconnect is the engine's repair, never Lighter refusing us.
+                if matches!(
+                    reason,
+                    RetireReason::Closed | RetireReason::Timeout(Timeout::Connect | Timeout::Idle)
+                ) {
                     let code = close_code.unwrap_or(1006);
                     match channel {
                         Channel::Public => self.note_public_close(cx, code),
