@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTunnelEgressUrls } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineTransport } from './engine';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
-import { PUBLIC_CORS_PROXY } from './tealstreet/transportResolution';
+import { SignedPublicProxyRefusal } from './publicProxyGuard';
 
 const tunnels = vi.hoisted(
   () =>
@@ -165,7 +165,7 @@ describe('engine through the real HOW package', () => {
       headers: { 'x-site-id': 'BRA_BTL' },
     });
   });
-  it('Aster secondary reads keep AWS CORS inside the real HOW RPC while writes keep the primary path', async () => {
+  it('Aster secondary reads to public CORS are refused before the HOW RPC while writes keep the primary path', async () => {
     const raw = rawTransport();
     const route = createEngineTransport(
       'asterdex',
@@ -182,12 +182,12 @@ describe('engine through the real HOW package', () => {
     const state = tunnelState(TOKYO_HOW_EGRESS);
     state.reply = { status: 200, data_raw: '{"balance":"1.2300"}', headers: {} };
     const url = 'https://fapi.asterdex.com/fapi/v3/account?user=owner&nonce=1001&signature=exact%2Bbytes';
-    await route.request({ method: 'GET', url, headers: { 'X-MBX-APIKEY': 'read-wallet' } });
-    expect(state.sent.at(-1)?.arg).toMatchObject({
-      method: 'GET',
-      url: `${PUBLIC_CORS_PROXY}/${url}`,
-      headers: { 'X-MBX-APIKEY': 'read-wallet' },
-    });
+    const sentBefore = state.sent.length;
+    // Secondary read keys are deprecated; their public-proxy read fails closed (publicProxyGuard).
+    await expect(route.request({ method: 'GET', url, headers: { 'X-MBX-APIKEY': 'read-wallet' } })).rejects.toThrow(
+      SignedPublicProxyRefusal,
+    );
+    expect(state.sent.length).toBe(sentBefore);
     await route.request({ method: 'POST', url, headers: { 'X-MBX-APIKEY': 'primary-wallet' } });
     expect(state.sent.at(-1)?.arg).toMatchObject({
       method: 'POST',

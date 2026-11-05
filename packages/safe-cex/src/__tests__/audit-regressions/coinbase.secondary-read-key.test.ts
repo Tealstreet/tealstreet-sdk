@@ -23,11 +23,21 @@ describe('Coinbase saved read-only key on the Rust engine', () => {
   it.each<ExchangeName>(['coinbase', 'coinbasespot'])(
     '%s read route keeps the proxied Coinbase authorization alias',
     (name) => {
-      const plan = resolveEngineRoutingPlan(name, options({ tealstreetProxy: true }), 'https://api.coinbase.com');
+      const plan = resolveEngineRoutingPlan(
+        name,
+        options({ tealstreetProxy: true, secondaryProxyUrl: 'https://read-proxy.invalid' }),
+        'https://api.coinbase.com',
+      );
       expect(plan.readHttp).toBeDefined();
       expect(plan.readHeader).toBe('Authorization');
       expect(plan.readHttp?.headerAliases).toEqual({ Authorization: 'Coinbase-Authorization' });
       expect(JSON.stringify(plan)).not.toContain('unused-read-secret');
     },
   );
+
+  // Secondary read keys are deprecated: the default public-proxy read egress gets no route.
+  it.each<ExchangeName>(['coinbase', 'coinbasespot'])('%s has no read route on the public proxy', (name) => {
+    const plan = resolveEngineRoutingPlan(name, options({ tealstreetProxy: true }), 'https://api.coinbase.com');
+    expect(plan).not.toHaveProperty('readHttp');
+  });
 });
