@@ -7,7 +7,13 @@ import { PUBLIC_CORS_HOSTS, PUBLIC_PROXY_READ_HOSTS, readsViaPublicProxy } from 
 
 const PUBLIC_CORS_CONFIG = resolve(__dirname, '../../../../../terraform/exchange-proxy-haproxy-tokyo.cfg');
 const VENUES = resolve(__dirname, '../../../../../sdk-rs/venues');
-const CRATE: Record<string, string> = { bitgetinverse: 'bitget', bitgetusdc: 'bitget', coinbasespot: 'coinbase' };
+const CRATE: Record<string, string> = {
+  bitgetinverse: 'bitget',
+  bitgetusdc: 'bitget',
+  bybitinverse: 'bybit',
+  bybitspot: 'bybit',
+  coinbasespot: 'coinbase',
+};
 
 const crateSource = (crate: string): string => {
   const dir = resolve(VENUES, crate, 'src');
@@ -43,6 +49,8 @@ describe('public CORS proxy allowlist', () => {
     expect(readsViaPublicProxy('cryptocom', 'https://api.crypto.com/exchange/v1/public/get-candlestick')).toBe(false);
     expect(readsViaPublicProxy('blofin', 'https://demo-trading-openapi.blofin.com/api/v1/market/candles')).toBe(false);
     expect(readsViaPublicProxy('okx', 'https://www.okx.com/api/v5/market/candles')).toBe(false);
+    expect(readsViaPublicProxy('bybit', 'https://api-demo.bybit.com/v5/market/kline')).toBe(false);
+    expect(readsViaPublicProxy('bybitdemo', 'https://api-demo.bybit.com/v5/market/kline')).toBe(false);
     expect(readsViaPublicProxy('blofin', 'https://openapi.blofin.com/api/v1/market/candles')).toBe(true);
     expect(readsViaPublicProxy('bingx', 'https://open-api.bingx.com.evil.invalid/openApi/swap/v3/quote/klines')).toBe(
       false,

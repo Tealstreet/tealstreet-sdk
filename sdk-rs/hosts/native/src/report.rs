@@ -36,6 +36,8 @@ pub struct ErrorReport<'a> {
     /// The engine's error kind and the venue's code, for a start failure.
     pub error_kind: Option<&'a str>,
     pub venue_code: Option<&'a str>,
+    /// The venue a transport serves, when its host named one (`with_venue`).
+    pub venue: Option<&'a str>,
 }
 
 static SINK: OnceLock<fn(&ErrorReport<'_>)> = OnceLock::new();
