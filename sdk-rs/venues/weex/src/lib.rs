@@ -26,6 +26,7 @@ use safe_cex_engine::request_context::{
     Context, Egress, Operation, Owner, Policy, RetryPolicy, Scope,
 };
 use safe_cex_engine::selected_read::{ReadRole, SelectedRead};
+use safe_cex_engine::text::JoinWith;
 
 use safe_cex_engine::{
     Command, CommandId, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId,
@@ -1037,9 +1038,7 @@ impl Venue for WeexFutures {
             } else if p.invalid {
                 request.failed(cx, "malformed REST row".into());
             } else {
-                request
-                    .rows
-                    .sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut request.rows);
                 let result = serde_json::to_string(&request.rows).expect("candles");
                 let _ = request.completion.finish(cx, Ok(result));
                 if let Some(leg) = request.leg {
@@ -1135,7 +1134,7 @@ impl Venue for WeexFutures {
                 format!(
                     "WEEX skipped {} malformed {kind} row(s): {}",
                     p.skipped.len(),
-                    p.skipped.join(", ")
+                    p.skipped.join_with(", ")
                 ),
             );
         }

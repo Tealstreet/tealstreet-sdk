@@ -8,6 +8,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, PageRow, RangeWalk, Step};
 use safe_cex_engine::request_context::Operation;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, TimerId, VenueError, num};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -439,7 +440,7 @@ fn side(raw: &str) -> Option<(&'static str, &'static str)> {
         .replace('_', " ")
         .split_whitespace()
         .collect::<Vec<_>>()
-        .join(" ");
+        .join_with(" ");
     Some(match value.as_str() {
         "BUY" => ("buy", "both"),
         "SELL" => ("sell", "both"),
@@ -734,7 +735,7 @@ impl Woo {
                 .into_iter()
                 .map(|(k, v)| format!("{k}={v}"))
                 .collect::<Vec<_>>()
-                .join("&");
+                .join_with("&");
             cx.request_streamed(
                 Method::Get,
                 format!("{}{path}?{query}", self.rest),

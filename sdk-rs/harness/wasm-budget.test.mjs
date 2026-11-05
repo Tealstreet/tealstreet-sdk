@@ -145,8 +145,6 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
     ['blofin', 1_952_470, 1_963_008],
     ['breakoutprop', 1_501_277, 1_512_448],
     ['coinbase', 1_816_299, 1_826_816],
-    ['hyperliquid', 2_095_474, 2_106_368],
-    ['hyperliquidspot', 2_095_474, 2_106_368],
     ['okx', 1_936_660, 1_947_648],
     ['paradex', 2_223_483, 2_234_368],
     ['txflow', 1_827_125, 1_838_080],
@@ -234,7 +232,6 @@ test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom
 
 test('#3018 after merging d171fbb0e31 (run 41893192741 at b94d76fa368) retains the ruled headroom', () => {
   for (const [venue, measured, cap] of [
-    ['asterdex', 2_125_918, 2_137_088],
     ['bingx', 2_026_253, 2_036_736],
     ['mexc', 1_743_880, 1_755_136],
     ['orderly', 1_721_849, 1_732_608],
@@ -275,4 +272,25 @@ test('#2314 Lighter managed sockets (job 127434185656) retain headroom and sibli
   assert.equal(wasmBudgetError(measured, 'venue', 'lighter'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'lighter'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'lighter'), /exceeds/);
+});
+
+test('#3118 Aster protection guard (run 42112075305) retains measured headroom', () => {
+  const [venue, measured, cap] = ['asterdex', 2_139_837, 2_150_400];
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+});
+
+test('#3114 cold-path sharing (run 42104530272) retains Hyperliquid headroom and siblings match', () => {
+  const measured = 2_106_596;
+  const cap = 2_117_632;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });

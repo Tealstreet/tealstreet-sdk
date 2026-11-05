@@ -147,9 +147,12 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #3094 run 42062090938 measured bybit 2,214,254 B; CI size plus 10 KiB rounded up to the KiB.
 // #2314 Lighter managed sockets: job 127434185656 measured lighter 2,034,142 B;
 // CI size plus 10 KiB rounded up to the KiB, lighter-robinhood equal to lighter.
+// #3118 run 42112075305 measured asterdex 2,139,837 B; CI size plus 10 KiB, rounded up to the KiB.
+// #3114 run 42104530272 measured hyperliquid 2,106,596 B: a single-venue family pays the outlined
+// shared-ticker/orders-held calls without the combined dedup. CI size plus 10 KiB rounded up; siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
-  asterdex: 2_137_088,
+  asterdex: 2_150_400,
   backpack: 1_887_232,
   binance: 2_206_720,
   bingx: 2_036_736,
@@ -163,8 +166,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   coinbase: 1_826_816,
   cryptocom: 1_727_488,
   grvt: 1_780_736,
-  hyperliquid: 2_106_368,
-  hyperliquidspot: 2_106_368,
+  hyperliquid: 2_117_632,
+  hyperliquidspot: 2_117_632,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_681_408,

@@ -1838,7 +1838,7 @@ impl Venue for Lighter {
                     );
                     return;
                 }
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 if command.is_some() {
                     {
                         let result: Result<String, String> =

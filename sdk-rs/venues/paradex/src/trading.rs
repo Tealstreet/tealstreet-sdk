@@ -11,6 +11,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
 use safe_cex_engine::request_context::{Context, Operation as HttpOperation, Policy, RetryPolicy};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
@@ -160,7 +161,7 @@ impl Job {
         } else {
             let outcome = self.errors[0].outcome;
             let message: Vec<_> = self.errors.iter().map(|e| e.message.as_str()).collect();
-            let error = VenueError::new(message.join("; "));
+            let error = VenueError::new(message.join_with("; "));
             match outcome {
                 Some(outcome) if self.errors.iter().all(|e| e.outcome == Some(outcome)) => {
                     error.outcome(outcome)
@@ -1701,7 +1702,7 @@ fn decode_placement(
                 .iter()
                 .map(|e| format!("{}: {}", e.error, e.message))
                 .collect::<Vec<_>>()
-                .join("; ")
+                .join_with("; ")
         ))
     } else if !missing.is_empty() {
         return Err("Paradex placement missing client results".into());

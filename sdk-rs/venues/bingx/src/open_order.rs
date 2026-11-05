@@ -1,6 +1,7 @@
 //! REST display recovery; execution frames retain the strict NativeOrder decoder.
 use super::{OrderMeta, map_order, observation};
 use crate::account_wire::{NativeOrder, boolean, identifier};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, model::Order};
 use serde::{
     Deserialize, Deserializer,
@@ -87,7 +88,7 @@ pub fn log_issues(
             safe_cex_engine::log::code::ROW_SKIPPED,
             format!(
                 "BingX {action} row {identity} (malformed fields: {})",
-                issue.fields.join(", ")
+                issue.fields.join_with(", ")
             ),
         );
     }
