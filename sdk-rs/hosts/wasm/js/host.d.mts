@@ -2,6 +2,14 @@
 import type { EngineCapabilities } from './wire.mjs';
 
 export type { EngineCapabilities };
+export type HistoryDecodeDetail = {
+  schema: 'bitgetClassicFills' | 'bitgetUtaFills' | 'bitgetClassicOrders' | 'bitgetUtaOrders'
+    | 'bitgetClassicIncome' | 'bitgetUtaIncome' | 'bitgetPublicTrades' | 'krakenFills' | 'krakenOrders' | 'krakenIncome';
+  reason: 'rowShape' | 'identity' | 'symbol' | 'quantity' | 'filledQuantity' | 'timestamp'
+    | 'timestampOrder' | 'side' | 'orderStatus' | 'orderType' | 'fee' | 'market' | 'economics';
+};
+export function historyDecodeOf(value: unknown): HistoryDecodeDetail | undefined;
+
 export const DEFAULT_COMMAND_TIMEOUT_MS: 120000;
 
 export interface Socket {
@@ -90,6 +98,7 @@ export interface VenueErrorDetail {
     | 'rateLimited' | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
   outcome?: 'notSent' | 'rejected' | 'unknown';
   causeCode?: string;
+  historyDecode?: HistoryDecodeDetail;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
@@ -197,6 +206,7 @@ export class ExchangeError extends Error {
   /** `unknown`: the write may have executed; `notSent`/`rejected`: it did not take effect. */
   readonly outcome?: NonNullable<VenueErrorDetail['outcome']>;
   readonly causeCode?: string;
+  readonly historyDecode?: HistoryDecodeDetail;
   readonly venueCode?: string;
   readonly venueMessage?: string;
   readonly retryAfterMs?: number;

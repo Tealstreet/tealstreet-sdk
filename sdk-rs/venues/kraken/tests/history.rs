@@ -1126,3 +1126,37 @@ fn history_refusals_keep_typed_kind_closed_cause_and_native_code() {
             && error.message.starts_with("Kraken history failed: response did not contain the expected list:" ))
     );
 }
+
+#[test]
+fn order_row_refusal_names_the_closed_predicate_without_exposing_row_values() {
+    for (field, value, reason) in [
+        ("uid", json!(""), "identity"),
+        ("quantity", json!("0"), "quantity"),
+        ("filled", json!("3"), "filledQuantity"),
+        ("timestamp", json!("-1"), "timestamp"),
+        (
+            "lastUpdateTimestamp",
+            json!(NOW - 20_000.0),
+            "timestampOrder",
+        ),
+    ] {
+        let (mut e, _) = ready();
+        let request = query(&mut e, orders());
+        let mut row = event("event", "native-order", "OrderPlaced", NOW);
+        row["event"]["OrderPlaced"]["order"][field] = value;
+        answer(&mut e, &request, "elements", vec![row]);
+        let error = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .expect("strict history rejection");
+        let detail = serde_json::to_value(error).unwrap();
+        assert_eq!(detail["causeCode"], "HISTORY_DECODE");
+        assert_eq!(
+            detail["historyDecode"],
+            json!({"schema":"krakenOrders","reason":reason})
+        );
+    }
+}

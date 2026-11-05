@@ -560,6 +560,15 @@ Actual empty reads and public-only sessions still return empty arrays. Journal
 and ingestion use the separate strict `fetchHistoricalPositions` path, so this
 change confers no ingestion completion or new history capability.
 
+## Native history row diagnostics
+
+Bitget and Kraken row refusals carry `causeCode: HISTORY_DECODE` and a closed
+`historyDecode: { schema, reason }` record through host and worker errors. The
+record contains no row values, identities or response text. Bitget rejects a
+proven invalid row immediately instead of replaying the same page; transport
+and envelope failures retain their bounded retry policy. Native strict checks
+and Kraken's existing accepted-prefix incomplete policy remain unchanged.
+
 ## Rust incomplete history
 
 A successful partial Rust history read returns the available rows with a
