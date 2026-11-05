@@ -1295,6 +1295,17 @@ export const createEngineTransport = (
         infoFacts,
       )
     : undefined;
+  // A keyless public-data engine (a mirror's chart source) on a proxied venue holds no
+  // credential, so its reads leave through the public CORS proxy and public weight stays
+  // off the trading fleet's IPs; the signed-packet guard still refuses anything credentialed.
+  const keylessPublicReads =
+    publicCorsHttp !== undefined &&
+    options.publicDataOnly === true &&
+    !options.key &&
+    !options.secret &&
+    !options.passphrase &&
+    options.tealstreetProxy === true &&
+    !DIRECT_PUBLIC_READS.has(exchange);
   const readOptions = credentials?.hasSecondary
     ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
     : options.secondary_key
@@ -1355,7 +1366,9 @@ export const createEngineTransport = (
                 ? readHttp
                 : intent === 'public' && DIRECT_PUBLIC_READS.has(exchange)
                   ? directHttp
-                  : intent === 'public' &&
+                  : intent === 'public' && keylessPublicReads
+                    ? publicCorsHttp
+                    : intent === 'public' &&
                       readHttp &&
                       !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
                     ? readHttp
@@ -1378,7 +1391,9 @@ export const createEngineTransport = (
         (!['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange) ||
           hasHeader(request.headers, secondaryReadHeaders[exchange]!))
         ? readHttp.request(nativeRequest)
-        : http.request(nativeRequest);
+        : keylessPublicReads
+          ? publicCorsHttp!.request(nativeRequest)
+          : http.request(nativeRequest);
     },
     dispose: () => {
       http.dispose();
