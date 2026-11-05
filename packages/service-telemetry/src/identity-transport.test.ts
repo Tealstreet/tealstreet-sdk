@@ -135,11 +135,11 @@ for (const service of ['exchange-server', 'exchange-gateway']) {
       });
     }
   }
-  it(`real SDK ${service} removes inherited metric scope identity`, async () => {
+  it(`real SDK ${service} removes current metric scope identity`, async () => {
     vi.stubEnv('TEALSTREET_BOX', '');
     vi.stubEnv('SENTRY_RELEASE', 'undefined');
     initServiceSentry({ dsn: 'https://public@o1.ingest.us.sentry.io/2', service });
-    Sentry.setAttributes({
+    Sentry.getCurrentScope().setAttributes({
       'server.address': 'scope-host',
       'sentry.release': 'undefined',
       region: 'eu',
@@ -151,5 +151,56 @@ for (const service of ['exchange-server', 'exchange-gateway']) {
     const metric = items.find(([header]: any) => header.type === 'trace_metric')?.[1].items[0];
     for (const key of ['server.address', 'sentry.release', 'region', 'box'])
       expect(metric.attributes[key]).toBeUndefined();
+  });
+}
+
+for (const service of ['exchange-server', 'exchange-gateway']) {
+  it(`review working real SDK ${service} configured identities override current scope`, async () => {
+    vi.stubEnv('TEALSTREET_BOX', 'exchange-01');
+    vi.stubEnv('TEALSTREET_RELEASE', 'image-revision-123');
+    initServiceSentry({ dsn: 'https://public@o1.ingest.us.sentry.io/2', service });
+    Sentry.getCurrentScope().setAttributes({
+      'server.address': 'current-scope-host',
+      'sentry.release': 'undefined',
+      box: 'scope-box',
+      region: 'eu',
+      venue: 'bitget',
+    });
+    Object.assign(Sentry.getClient()!.getOptions(), { enableLogs: true });
+    Sentry.logger.info('configured identity log');
+    recordServiceMetrics({ prefix: 'working', counts: { seen: 1 }, gauges: {}, attributes: {} });
+    await Sentry.flush(1000);
+    const metric = probe.envelopes
+      .flatMap((envelope) => envelope[1])
+      .find(([header]: any) => header.type === 'trace_metric')?.[1].items[0];
+    const log = probe.envelopes.flatMap((envelope) => envelope[1]).find(([header]: any) => header.type === 'log')?.[1]
+      .items[0];
+    expect(log).toBeDefined();
+    for (const item of [metric, log]) {
+      expect(item.attributes['server.address']?.value).toBe('exchange-01');
+      expect(item.attributes['sentry.release']?.value).toBe('image-revision-123');
+      expect(item.attributes.box?.value).toBe('exchange-01');
+      expect(item.attributes.region).toBeUndefined();
+      expect(item.attributes.venue?.value).toBe('bitget');
+    }
+  });
+  it(`review real SDK ${service} final log scope identity cannot bypass normalization`, async () => {
+    vi.stubEnv('TEALSTREET_BOX', '');
+    vi.stubEnv('TEALSTREET_RELEASE', '');
+    initServiceSentry({ dsn: 'https://public@o1.ingest.us.sentry.io/2', service });
+    Object.assign(Sentry.getClient()!.getOptions(), { enableLogs: true });
+    Sentry.getCurrentScope().setAttributes({
+      'server.address': 'current-scope-host',
+      'sentry.release': 'undefined',
+      region: 'eu',
+      box: 'scope-box',
+    });
+    Sentry.logger.info('review scope log');
+    await Sentry.flush(1000);
+    const log = probe.envelopes.flatMap((envelope) => envelope[1]).find(([header]: any) => header.type === 'log')?.[1]
+      .items[0];
+    expect(log).toBeDefined();
+    for (const key of ['server.address', 'sentry.release', 'region', 'box'])
+      expect.soft(log.attributes[key]).toBeUndefined();
   });
 }

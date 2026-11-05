@@ -59,20 +59,6 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
     if (box) scopeTags.box = box;
   }
 
-  const identityAttributes = (attributes: Record<string, unknown> = {}): Record<string, unknown> => {
-    const normalized = { ...attributes };
-    delete normalized['server.address'];
-    delete normalized['sentry.release'];
-    delete normalized.region;
-    delete normalized.box;
-    if (box) {
-      normalized['server.address'] = box;
-      normalized.box = box;
-    }
-    if (imageRelease) normalized['sentry.release'] = imageRelease;
-    return normalized;
-  };
-
   Sentry.init({
     dsn,
     // An explicit empty release stops the SDK's SENTRY_RELEASE/build inference.
@@ -120,25 +106,32 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
             } else session.release = imageRelease;
           });
           client.on('beforeEnvelope', (envelope) => {
-            // Sessions require a release; never send a caller's inferred fallback instead.
-            if (!imageRelease) {
-              for (let i = envelope[1].length - 1; i >= 0; i--) {
-                if (['session', 'sessions'].includes(envelope[1][i][0].type)) envelope[1].splice(i, 1);
+            for (let i = envelope[1].length - 1; i >= 0; i--) {
+              const [header, payload] = envelope[1][i];
+              // Sessions require a release; never send a caller's inferred fallback instead.
+              if (!imageRelease && ['session', 'sessions'].includes(header.type)) {
+                envelope[1].splice(i, 1);
+                continue;
+              }
+              if (header.type !== 'trace_metric' && header.type !== 'log') continue;
+              // Scope attributes are merged after beforeSendMetric/beforeSendLog.
+              const container = payload as { items: { attributes: Record<string, unknown> }[] };
+              for (const { attributes } of container.items) {
+                delete attributes['server.address'];
+                delete attributes['sentry.release'];
+                delete attributes.region;
+                delete attributes.box;
+                if (box) {
+                  attributes['server.address'] = { type: 'string', value: box };
+                  attributes.box = { type: 'string', value: box };
+                }
+                if (imageRelease) attributes['sentry.release'] = { type: 'string', value: imageRelease };
               }
             }
           });
         },
       };
       return [identity, ...retained];
-    },
-
-    beforeSendMetric(metric) {
-      if (exchange) metric.attributes = identityAttributes(metric.attributes);
-      return metric;
-    },
-    beforeSendLog(log) {
-      if (exchange) log.attributes = identityAttributes(log.attributes);
-      return log;
     },
 
     beforeSend(event) {
