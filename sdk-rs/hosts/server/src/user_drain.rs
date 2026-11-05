@@ -46,6 +46,7 @@ struct Drain {
     capped: bool,
     ready: bool,
     forcing: bool,
+    forced: bool,
     idle: Option<IdleRelease>,
 }
 
@@ -149,6 +150,26 @@ impl User {
         self.snapshot()["state"]
             .as_str()
             .is_some_and(|state| matches!(state, "closing" | "drained"))
+    }
+
+    pub(crate) fn forced(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .drain
+            .as_ref()
+            .is_some_and(|drain| drain.forced)
+    }
+
+    pub(crate) fn planned_move(&self) -> bool {
+        self.should_close()
+            && self
+                .state
+                .lock()
+                .unwrap()
+                .drain
+                .as_ref()
+                .is_some_and(|drain| !drain.forced)
     }
 
     fn snapshot(&self) -> Value {
@@ -333,6 +354,7 @@ impl Users {
             capped: false,
             ready: true,
             forcing: false,
+            forced: false,
             idle: Some(IdleRelease {
                 request_id: request.into(),
                 checked_at,
@@ -373,6 +395,7 @@ impl Users {
                 capped: false,
                 ready: false,
                 forcing: false,
+                forced: false,
                 idle: None,
             });
         }
@@ -422,6 +445,7 @@ impl Users {
         }
         drain.capped = false;
         drain.forcing = true;
+        drain.forced = true;
         retire_idle(&mut state);
         Some(
             state
