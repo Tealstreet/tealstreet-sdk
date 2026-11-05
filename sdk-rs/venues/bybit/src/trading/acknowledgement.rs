@@ -249,8 +249,8 @@ pub(crate) fn targeted(result: Option<&RawValue>, order_id: &str) -> Result<(), 
 }
 
 /// Create-batch: `result.list` and `retExtInfo.list` must each have exactly one
-/// row per request, each accepted row must carry a consistent client echo, and
-/// no native ID may repeat.
+/// row per request. Requested client echoes must agree; unrequested server
+/// echoes carry no attribution. No accepted native ID may repeat.
 pub(crate) fn created_rows(
     result: Option<&RawValue>,
     ext: Option<&RawValue>,
@@ -264,7 +264,9 @@ pub(crate) fn created_rows(
         true,
         &mut |index, row| {
             let row = row.ok_or(Malformed)?;
-            if !echo_matches(row.order_link_id, order_link_ids[index]) {
+            if order_link_ids[index].is_some()
+                && !echo_matches(row.order_link_id, order_link_ids[index])
+            {
                 return Err(Malformed);
             }
             native_id(row.order_id)
@@ -284,6 +286,100 @@ pub(crate) fn created_rows(
         return Err(Malformed);
     }
     Ok(rows)
+}
+
+/// Bounded shape and native status codes, never identity/message values.
+pub(crate) fn create_diagnostic(
+    result: Option<&RawValue>,
+    ext: Option<&RawValue>,
+    links: &[Option<&str>],
+) -> String {
+    let (result_shape, results) = list_shape(result);
+    let (status_shape, statuses) = list_shape(ext);
+    format!(
+        "targets={}; result.list={result_shape}/{}; retExtInfo.list={status_shape}/{}; {}",
+        links.len(),
+        results.as_ref().map_or(0, Vec::len),
+        statuses.as_ref().map_or(0, Vec::len),
+        child_diagnostic(results.as_deref(), statuses.as_deref(), links, &[]),
+    )
+}
+
+const DIAGNOSTIC_CHILDREN: usize = 8;
+
+fn identity_field_shape(row: Option<&RawValue>, name: &str) -> &'static str {
+    match row.map(object) {
+        None => "missing-row",
+        Some(Err(_)) => "invalid-row",
+        Some(Ok(fields)) => match fields.raw(name) {
+            Ok(None) => "missing",
+            Ok(Some(raw)) if is_null(raw) => "null",
+            Ok(Some(raw)) => match string(raw) {
+                Ok(text) if text.is_empty() => "empty",
+                Ok(_) => "nonempty",
+                Err(_) => "invalid",
+            },
+            Err(_) => "duplicate",
+        },
+    }
+}
+
+fn child_diagnostic(
+    results: Option<&[&RawValue]>,
+    statuses: Option<&[&RawValue]>,
+    links: &[Option<&str>],
+    targets: &[&str],
+) -> String {
+    let total = results
+        .map_or(0, <[_]>::len)
+        .max(statuses.map_or(0, <[_]>::len))
+        .max(links.len())
+        .max(targets.len());
+    let mut children = Vec::new();
+    for index in 0..total.min(DIAGNOSTIC_CHILDREN) {
+        let row = results.and_then(|rows| rows.get(index)).copied();
+        let identity = row.and_then(|raw| Identity::read(raw).ok());
+        let echo = if targets.is_empty() {
+            match links.get(index) {
+                None => "unmatched",
+                Some(None) => "unrequested",
+                Some(Some(sent)) => match identity.as_ref() {
+                    None => "invalid",
+                    Some(identity) => match identity.order_link_id.as_deref() {
+                        None | Some("") => "absent",
+                        Some(echo) if echo == *sent => "matched",
+                        Some(_) => "mismatched",
+                    },
+                },
+            }
+        } else {
+            match identity
+                .as_ref()
+                .and_then(|identity| identity.order_id.as_deref())
+            {
+                None | Some("") => "absent",
+                Some(id) if targets.contains(&id) => "matched",
+                Some(_) => "foreign",
+            }
+        };
+        let (status, code) = match statuses.and_then(|rows| rows.get(index)) {
+            None => ("missing", "missing".to_owned()),
+            Some(raw) => match Status::read(raw) {
+                Ok(status) => ("valid", status.code.to_string()),
+                Err(_) => ("invalid", "invalid".to_owned()),
+            },
+        };
+        children.push(format!(
+            "{index}:orderId={},orderLinkId={},status={status},code={code},echo={echo}",
+            identity_field_shape(row, "orderId"),
+            identity_field_shape(row, "orderLinkId"),
+        ));
+    }
+    format!(
+        "children=[{}]; omitted={}",
+        children.join(";"),
+        total.saturating_sub(DIAGNOSTIC_CHILDREN)
+    )
 }
 
 /// Cancel-batch: every status must have a target. Named echoes are matched by
@@ -466,18 +562,24 @@ pub(crate) fn cancel_diagnostic(
             Ok(status) if status.code == 0 => success += 1,
             Ok(status) => {
                 failed += 1;
-                failure_codes.push(status.code.to_string());
+                if failure_codes.len() < DIAGNOSTIC_CHILDREN {
+                    failure_codes.push(status.code.to_string());
+                }
             }
             Err(_) => invalid += 1,
         }
     }
-    format!(
+    let summary = format!(
         "targets={}; result.list={result_shape}/{}; retExtInfo.list={status_shape}/{}; orderId fields/nonempty/matched={native_fields}/{native_ids}/{target_matches}; orderLinkId fields/nonempty={client_fields}/{client_ids}; statuses success/failed/invalid={success}/{failed}/{invalid}; failure codes={}; duplicated targets={}",
         order_ids.len(),
         results.as_ref().map_or(0, Vec::len),
         statuses.as_ref().map_or(0, Vec::len),
         failure_codes.join(","),
         echoed_targets.iter().filter(|count| **count > 1).count(),
+    );
+    format!(
+        "{summary}; {}",
+        child_diagnostic(results.as_deref(), statuses.as_deref(), &[], order_ids)
     )
 }
 

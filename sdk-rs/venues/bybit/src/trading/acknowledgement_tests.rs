@@ -120,6 +120,88 @@ fn created_rows_match_by_count_echo_and_unique_ids() {
 }
 
 #[test]
+fn create_batch_unrequested_server_echoes_do_not_contradict_accepted_children() {
+    for echo in ["", "server-link"] {
+        let body = format!(
+            r#"{{"retCode":0,"result":{{"list":[{{"orderId":"first","orderLinkId":"{echo}"}},{{"orderId":"second","orderLinkId":"{echo}"}}]}},"retExtInfo":{{"list":[{{"code":0,"msg":"OK"}},{{"code":0,"msg":"OK"}}]}}}}"#
+        );
+        let (result, ext) = success(&body);
+        assert_eq!(
+            created_rows(result, ext, &[None, None]),
+            Ok(vec![
+                Row::Accepted("first".into()),
+                Row::Accepted("second".into())
+            ])
+        );
+    }
+}
+
+#[test]
+fn create_batch_requested_echo_status_count_and_identity_guards_remain_strict() {
+    for body in [
+        r#"{"retCode":0,"result":{"list":[{"orderId":"first","orderLinkId":"wrong"},{"orderId":"second","orderLinkId":"caller-b"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"first"},{"orderId":"second"}]},"retExtInfo":{"list":[{"code":0}]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"first"},{"orderId":"second"}]},"retExtInfo":{"list":[{"code":0},{"msg":"OK"}]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"first"},{"orderId":"first"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
+        r#"{"retCode":0,"result":{"list":[{"orderId":"first"},{"orderId":"second"}]},"retExtInfo":{"list":[{"code":0},{"code":10001}]}}"#,
+    ] {
+        let (result, ext) = success(body);
+        assert_eq!(
+            created_rows(result, ext, &[Some("caller-a"), Some("caller-b")]),
+            Err(Malformed)
+        );
+    }
+}
+
+#[test]
+fn batch_diagnostics_bound_child_details_and_never_include_identity_or_message_values() {
+    let results: Vec<_> = (0..20)
+        .map(|_| serde_json::json!({"orderId":"PRIVATE_NATIVE", "orderLinkId":"PRIVATE_LINK"}))
+        .collect();
+    let statuses: Vec<_> = (0..20)
+        .map(|_| serde_json::json!({"code":10001,"msg":"PRIVATE_MESSAGE"}))
+        .collect();
+    let body =
+        serde_json::json!({"retCode":0,"result":{"list":results},"retExtInfo":{"list":statuses}})
+            .to_string();
+    let (result, ext) = success(&body);
+    let links = vec![Some("PRIVATE_REQUESTED"); 20];
+    for diagnostic in [
+        create_diagnostic(result, ext, &links),
+        cancel_diagnostic(result, ext, &["PRIVATE_TARGET"]),
+    ] {
+        assert!(diagnostic.contains("omitted=12"), "{diagnostic}");
+        assert!(diagnostic.contains("code=10001"), "{diagnostic}");
+        assert!(diagnostic.contains("orderId=nonempty"), "{diagnostic}");
+        assert!(diagnostic.len() < 2000, "{}", diagnostic.len());
+        assert!(!diagnostic.contains("PRIVATE"), "{diagnostic}");
+        assert_eq!(diagnostic.matches("status=valid").count(), 8);
+    }
+}
+
+#[test]
+fn batch_diagnostics_distinguish_missing_invalid_and_unrequested_fields() {
+    let body = r#"{"retCode":0,"result":{"list":[{"orderId":null,"orderLinkId":7},{"orderId":"native","orderLinkId":"wrong"}]},"retExtInfo":{"list":[{"code":"bad"}]}}"#;
+    let (result, ext) = success(body);
+    let diagnostic = create_diagnostic(result, ext, &[None, Some("expected")]);
+    for expected in [
+        "orderId=null",
+        "orderLinkId=invalid",
+        "status=invalid,code=invalid",
+        "echo=unrequested",
+        "status=missing,code=missing",
+        "echo=mismatched",
+    ] {
+        assert!(diagnostic.contains(expected), "{expected}: {diagnostic}");
+    }
+    assert!(!diagnostic.contains("wrong"));
+    assert!(!diagnostic.contains("expected"));
+    let diagnostic = create_diagnostic(None, None, &[None]);
+    assert!(diagnostic.contains("result.list=missing/0"));
+    assert!(diagnostic.contains("orderId=missing-row"));
+}
+
+#[test]
 fn cancelled_rows_need_one_status_per_order_and_the_requested_target() {
     let body = r#"{"retCode":0,"result":{"list":[{"orderId":"a"},{"orderId":"b"}]},
         "retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110001,"msg":"order not exists"}]}}"#;
@@ -404,7 +486,7 @@ fn cancel_shape_diagnostic_never_contains_response_values() {
     let diagnostic = cancel_diagnostic(result, ext, &["private-native-needle", "other"]);
     assert_eq!(
         diagnostic,
-        "targets=2; result.list=array/1; retExtInfo.list=array/1; orderId fields/nonempty/matched=1/1/1; orderLinkId fields/nonempty=1/1; statuses success/failed/invalid=0/1/0; failure codes=10005; duplicated targets=0"
+        "targets=2; result.list=array/1; retExtInfo.list=array/1; orderId fields/nonempty/matched=1/1/1; orderLinkId fields/nonempty=1/1; statuses success/failed/invalid=0/1/0; failure codes=10005; duplicated targets=0; children=[0:orderId=nonempty,orderLinkId=nonempty,status=valid,code=10005,echo=matched;1:orderId=missing-row,orderLinkId=missing-row,status=missing,code=missing,echo=absent]; omitted=0"
     );
     for value in [
         "private-ret-message",
@@ -533,7 +615,7 @@ fn cancel_diagnostic_names_failure_codes_and_duplicated_targets() {
     let (result, ext) = success(body);
     assert_eq!(
         cancel_diagnostic(result, ext, &["a", "b"]),
-        "targets=2; result.list=array/3; retExtInfo.list=array/3; orderId fields/nonempty/matched=3/3/3; orderLinkId fields/nonempty=0/0; statuses success/failed/invalid=1/2/0; failure codes=110020,110001; duplicated targets=1"
+        "targets=2; result.list=array/3; retExtInfo.list=array/3; orderId fields/nonempty/matched=3/3/3; orderLinkId fields/nonempty=0/0; statuses success/failed/invalid=1/2/0; failure codes=110020,110001; duplicated targets=1; children=[0:orderId=nonempty,orderLinkId=missing,status=valid,code=0,echo=matched;1:orderId=nonempty,orderLinkId=missing,status=valid,code=110020,echo=matched;2:orderId=nonempty,orderLinkId=missing,status=valid,code=110001,echo=matched]; omitted=0"
     );
 }
 

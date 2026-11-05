@@ -159,6 +159,86 @@ fn place(h: &mut Harness, command: u32, orders: Vec<PlaceOrderOpts>) {
 fn body(request: &HttpRequest) -> &str {
     request.body.as_deref().unwrap()
 }
+
+#[test]
+fn managed_split_market_close_accepts_server_echoes_without_caller_ids() {
+    for (amount, count) in [(1500.0, 2), (2500.0, 3)] {
+        let mut h = ready(Variant::Demo);
+        let mut opts = order("BTCUSDT", amount);
+        opts.kind = OrderType::Market;
+        opts.reduce_only = Some(true);
+        place(&mut h, 130, vec![opts]);
+        resolve_mode(&mut h, "BTCUSDT");
+        let request = h.take("/v5/order/create-batch");
+        let sent: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+        let children = sent["request"].as_array().unwrap();
+        assert_eq!(children.len(), count);
+        assert!(
+            children
+                .iter()
+                .all(|child| child["reduceOnly"] == true && child.get("orderLinkId").is_none())
+        );
+        let ids: Vec<String> = (0..count).map(|index| format!("native-{index}")).collect();
+        let results: Vec<_> = ids
+            .iter()
+            .map(|id| serde_json::json!({"orderId":id,"orderLinkId":"server-echo"}))
+            .collect();
+        let statuses: Vec<_> = ids
+            .iter()
+            .map(|_| serde_json::json!({"code":0,"msg":"OK"}))
+            .collect();
+        h.reply(request.id, 200, &serde_json::json!({"retCode":0,"result":{"list":results},"retExtInfo":{"list":statuses}}).to_string());
+        assert_eq!(
+            h.result(130),
+            Some(&Ok(serde_json::to_string(&ids).unwrap()))
+        );
+        assert!(!h.unknown.contains(&130));
+        assert!(!h.has_request("/v5/order/create"));
+    }
+}
+
+#[test]
+fn managed_unproven_create_batch_reports_redacted_child_shape_without_values() {
+    let mut h = ready(Variant::Demo);
+    place(
+        &mut h,
+        131,
+        vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
+    );
+    resolve_mode(&mut h, "BTCUSDT");
+    let request = h.take("/v5/order/create-batch");
+    h.reply(request.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"PRIVATE_NATIVE","orderLinkId":"PRIVATE_LINK"},{"orderId":"SECOND_NATIVE"}]},"retExtInfo":{"list":[{"code":0,"msg":"PRIVATE_MESSAGE"},{"code":10001,"msg":"PRIVATE_REASON"}]}}"#);
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed {
+                command: 131,
+                error,
+            } => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        error.partial.as_ref().unwrap().order_ids,
+        ["PRIVATE_NATIVE", "SECOND_NATIVE"]
+    );
+    let error = &error.message;
+    assert!(error.contains("result.list=array/2"), "{error}");
+    assert!(error.contains("retExtInfo.list=array/2"), "{error}");
+    assert!(error.contains("code=10001"), "{error}");
+    for secret in [
+        "PRIVATE_NATIVE",
+        "PRIVATE_LINK",
+        "SECOND_NATIVE",
+        "PRIVATE_MESSAGE",
+        "PRIVATE_REASON",
+    ] {
+        assert!(!error.contains(secret), "{error}");
+    }
+    assert!(h.unknown.contains(&131));
+    assert!(!h.has_request("/v5/order/create"));
+}
 /// D2: an absent-order answer is no Cancelled transition; the engine's one
 /// reconcile order read decides. Answer it (empty: the rows are gone).
 fn answer_reconcile(h: &mut Harness) {
@@ -2420,11 +2500,11 @@ fn managed_create_batch_native_shapes_are_validated_before_any_local_publication
     ];
     for (case, reply) in replies.into_iter().enumerate() {
         let mut h = ready(Variant::Demo);
-        place(
-            &mut h,
-            96,
-            vec![order("BTCUSDT", 0.01), order("BTCUSDT", 0.02)],
-        );
+        let mut first = order("BTCUSDT", 0.01);
+        if case == 4 {
+            first.client_order_id = Some("requested-echo".into());
+        }
+        place(&mut h, 96, vec![first, order("BTCUSDT", 0.02)]);
         resolve_mode(&mut h, "BTCUSDT");
         let create = h.take("/v5/order/create-batch");
         h.reply(create.id, 200, &reply);
