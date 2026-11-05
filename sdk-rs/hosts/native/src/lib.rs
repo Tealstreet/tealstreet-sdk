@@ -323,6 +323,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 host.report_terminal(&mut on_notice);
                 if cleanup.is_err() {
                     on_notice(Notice::StartupFailed {
+                        read_refusal: false,
                         error: VenueError::new("Address setup cleanup failed")
                             .kind(safe_cex_engine::ErrorKind::Internal),
                     });
@@ -402,6 +403,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
             // Deliberately outside the panic classifier: consumer failures are
             // never disguised as another engine terminal result.
             on_notice(Notice::StartupFailed {
+                read_refusal: false,
                 error: error.clone(),
             });
         }
@@ -825,7 +827,7 @@ mod timer_tests {
         assert!(events.is_closed());
         let notices = notices.lock().unwrap();
         assert_eq!(notices.len(), 1);
-        assert!(matches!(&notices[0], Notice::StartupFailed { error }
+        assert!(matches!(&notices[0], Notice::StartupFailed { error, .. }
             if error.kind == Some(safe_cex_engine::ErrorKind::Internal)
             && error.outcome == Some(safe_cex_engine::Outcome::Unknown)));
     }
@@ -871,7 +873,7 @@ mod timer_tests {
         assert!(!engine.failed());
         assert_eq!(notices.len(), 1);
         assert!(
-            matches!(&notices[0], Notice::StartupFailed { error } if error.message == "fixture startup refusal")
+            matches!(&notices[0], Notice::StartupFailed { error, .. } if error.message == "fixture startup refusal")
         );
     }
 

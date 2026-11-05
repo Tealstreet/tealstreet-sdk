@@ -324,6 +324,9 @@ pub enum Notice {
     /// account the venue refuses); hosts fail `start` with it.
     StartupFailed {
         error: VenueError,
+        /// Only a refused bootstrap read can recover from later account reads.
+        #[cfg(not(target_arch = "wasm32"))]
+        read_refusal: bool,
     },
     /// Completes a command with a structured failure; hosts report it like a
     /// `CommandDone` error, plus the detail.
@@ -3189,7 +3192,7 @@ impl<P> Cx<'_, P> {
             return false;
         }
         self.notice_error(Level::Error, log_code::for_startup_error(error), error);
-        self.startup_failed(error.clone());
+        self.push_startup_failure(error.clone(), true);
         let now = self.now;
         let (polls, mut sink) = self.io.polls();
         polls.hold_off_refused(now, &mut sink);
@@ -3197,12 +3200,22 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
-        let error = error.into().with_ip_whitelist_hint();
+        self.push_startup_failure(error.into(), false);
+    }
+
+    fn push_startup_failure(&mut self, error: VenueError, read_refusal: bool) {
+        let error = error.with_ip_whitelist_hint();
         count_auth_failure(&mut self.io.core, Some(&error));
+        #[cfg(target_arch = "wasm32")]
+        let _ = read_refusal;
         self.io
             .core
             .actions
-            .push(Action::Notice(Notice::StartupFailed { error }));
+            .push(Action::Notice(Notice::StartupFailed {
+                error,
+                #[cfg(not(target_arch = "wasm32"))]
+                read_refusal,
+            }));
     }
 
     /// Legacy numeric finalization. Managed commands use `fail_context`.
@@ -4511,6 +4524,13 @@ pub trait Venue {
     /// Native recovery may retry bootstrap reads, never commands or timers.
     /// Opt in only with a read-only implementation; false stops host rechecks.
     #[cfg(not(target_arch = "wasm32"))]
+    fn rechecks_startup_reads() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     fn recheck_startup_reads(&mut self, _cx: &mut Cx<'_, Self::Pending>) -> bool {
         false
     }
@@ -5140,6 +5160,7 @@ impl<V: Venue> Engine<V> {
             && self.account_startup
             && !self.frame_fed()
             && !self.failed()
+            && !self.io.core.signing.refused()
             && loaded.markets
             && loaded.balance
             && loaded.orders
@@ -5150,7 +5171,7 @@ impl<V: Venue> Engine<V> {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn recheck_startup_reads(&mut self, now: f64) -> bool {
         self.assert_live();
-        if !now.is_finite() || !self.private_startup_pending() {
+        if !V::rechecks_startup_reads() || !now.is_finite() || !self.private_startup_pending() {
             return false;
         }
         self.begin_event_scope();
@@ -7742,6 +7763,8 @@ impl SigningLatch {
         if startup {
             actions.push(Action::Notice(Notice::StartupFailed {
                 error: error.venue_error(),
+                #[cfg(not(target_arch = "wasm32"))]
+                read_refusal: false,
             }));
         }
     }

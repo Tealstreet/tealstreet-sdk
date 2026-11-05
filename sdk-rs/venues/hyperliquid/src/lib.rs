@@ -1260,6 +1260,10 @@ impl Venue for Hyperliquid {
         }
     }
     #[cfg(not(target_arch = "wasm32"))]
+    fn rechecks_startup_reads() -> bool {
+        true
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     fn recheck_startup_reads(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
         self.recheck_account_startup(cx)
     }

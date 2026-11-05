@@ -2362,7 +2362,7 @@ fn c4s_a_credential_only_socket_login_latches_through_signing_ref() {
     let startup_failed: Vec<_> = actions
         .iter()
         .filter_map(|action| match action {
-            Action::Notice(Notice::StartupFailed { error }) => Some(error.clone()),
+            Action::Notice(Notice::StartupFailed { error, .. }) => Some(error.clone()),
             _ => None,
         })
         .collect();
@@ -2534,4 +2534,35 @@ fn schnorr_public_key_requests_validate_with_a_forty_byte_answer() {
             Err(SignError::InvalidResult)
         );
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn private_startup_completion_never_masks_a_signing_refusal() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_account_startup(true);
+    engine.start(1000.);
+    engine.store.set_loaded(|loaded| loaded.markets = true);
+    engine.store.set_balance(crate::model::Balance::default());
+    engine.store.set_positions(vec![]);
+    engine.store.set_orders(vec![]);
+    assert!(engine.private_startup_complete());
+    assert!(engine.io.core.signing.refuse());
+    assert!(!engine.private_startup_complete());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn non_opt_in_startup_recheck_never_enters_an_engine_turn() {
+    let mut engine = crate::test_support::seeded_engine(TestVenue::default());
+    engine.set_account_startup(true);
+    engine.start(1000.);
+    assert!(engine.private_startup_pending());
+    engine.io.core.auth_failure_counted = true;
+    let dispatch_now = engine.io.core.dispatch_now;
+    let actions = engine.io.core.actions.len();
+    assert!(!engine.recheck_startup_reads(9000.));
+    assert_eq!(engine.io.core.dispatch_now, dispatch_now);
+    assert!(engine.io.core.auth_failure_counted);
+    assert_eq!(engine.io.core.actions.len(), actions);
 }

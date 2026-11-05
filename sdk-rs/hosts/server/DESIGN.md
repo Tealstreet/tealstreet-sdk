@@ -517,13 +517,20 @@ How FrameServer notices map onto `msg`:
 
 ### Recovering a refused native startup
 
-FrameServer retains `StartupFailed` for late joins while that engine instance
-is still waiting for its required private startup sections. Once that same
-source engine has markets, balance, positions and orders loaded, the cached
-failure is retired before the next flush or join. Public-only engines,
-frame-fed mirrors, partial account state and terminal engines cannot clear it.
-A new failure on an already-loaded account is not erased by its existing flags.
+FrameServer retains `StartupFailed` for late joins. Only a failure originating
+in `Cx::startup_read_refused` while required private startup was incomplete
+can retire: that same source engine must load markets, balance, positions and
+orders with no signing refusal. Public-only engines, frame-fed mirrors, partial
+state, terminal engines and non-read failures (including a missing signing key)
+cannot clear it. A new failure on an already-loaded account is retained.
 This proves bootstrap completion, not that an agent key can place an order.
+
+Connected peers receive the recovery store frame. NX re-derives essential
+readiness and clears health/terminal failure in
+`exchangeAccountController.ts:2574-2624`; no new wire notice is needed. That NX
+branch currently checks loaded flags alone, so unsigned frames can also clear
+its UI latch for a non-read signing failure. This pre-existing NX limitation is
+separate; native late-join replay retains that failure.
 
 An auth-kind startup refusal may receive at most three native read-only
 rechecks, after 5, 10 and 20 minutes respectively, each with 0–30 seconds of
@@ -531,8 +538,9 @@ host entropy jitter. A longer venue `retryAfterMs` floor is preserved; a new
 refusal does not reset the attempt budget. Clock rollback cannot accelerate
 the monotonic schedule. Successful completion retires the remaining rechecks.
 
-The venue must explicitly implement `Venue::recheck_startup_reads`; the default
-does nothing and stops further attempts. Hyperliquid is the first adopter:
+The venue must opt in via `Venue::rechecks_startup_reads` and implement
+`Venue::recheck_startup_reads`; non-adopters return before any engine turn.
+Hyperliquid is the first adopter:
 it retries only identity/mode and account State/Spot/Orders reads through the
 existing single-flight and admission paths. These hooks are absent from wasm.
 The host never restarts the venue, recreates the actor, replays a command or

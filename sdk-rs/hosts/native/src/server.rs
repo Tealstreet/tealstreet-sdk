@@ -965,7 +965,10 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     })),
                     |peer| peer.account_auth,
                 ),
-                Notice::StartupFailed { error } => {
+                Notice::StartupFailed {
+                    error,
+                    read_refusal,
+                } => {
                     self.note_start_failure(&error);
                     let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     if text.len() > self.config.max_frame_bytes {
@@ -978,10 +981,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         bounded.outcome = error.outcome;
                         text = encode_notice(ServerNotice::StartupFailed { detail: &bounded });
                     }
-                    let private_pending = self.host.engine.private_startup_pending();
+                    let private_pending =
+                        read_refusal && self.host.engine.private_startup_pending();
                     let mut recheck = self
                         .startup_failure
                         .take()
+                        .filter(|_| private_pending)
                         .and_then(|failure| failure.recheck);
                     if private_pending
                         && matches!(
@@ -3006,6 +3011,9 @@ mod tests {
     }
     impl Venue for FailsStartup {
         type Pending = ();
+        fn rechecks_startup_reads() -> bool {
+            true
+        }
         fn start(&mut self, cx: &mut Cx<'_, ()>) {
             cx.store.set_markets(vec![safe_cex_engine::model::Market {
                 id: "BTC".into(),
@@ -3035,8 +3043,8 @@ mod tests {
                 taker_fee: None,
                 maker_fee: None,
             }]);
-            cx.startup_failed(
-                VenueError::new("key rejected").kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            cx.startup_read_refused(
+                &VenueError::new("key rejected").kind(safe_cex_engine::ErrorKind::AuthInvalid),
             );
         }
         fn recheck_startup_reads(&mut self, cx: &mut Cx<'_, ()>) -> bool {
@@ -3060,10 +3068,14 @@ mod tests {
             true
         }
         fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, _: &str) {
-            cx.startup_failed(
-                VenueError::new("key rejected again").kind(safe_cex_engine::ErrorKind::AuthInvalid),
-            );
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            let error =
+                VenueError::new("key rejected again").kind(safe_cex_engine::ErrorKind::AuthInvalid);
+            if text == "refuse again" {
+                cx.startup_read_refused(&error);
+            } else {
+                cx.startup_failed(error);
+            }
         }
         fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
         fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
@@ -3170,6 +3182,90 @@ mod tests {
         );
     }
 
+    struct SignerMissingAtStartup;
+    impl Venue for SignerMissingAtStartup {
+        type Pending = ();
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            cx.store.set_markets(vec![safe_cex_engine::model::Market {
+                id: "BTC".into(),
+                symbol: "BTCUSDT".into(),
+                pretty_symbol: None,
+                base: "BTC".into(),
+                quote: "USDT".into(),
+                active: true,
+                precision: safe_cex_engine::model::Precision {
+                    amount: 0.001,
+                    price: 0.1,
+                },
+                limits: safe_cex_engine::model::Limits {
+                    amount: safe_cex_engine::model::MinMax {
+                        min: 0.001,
+                        max: 100.,
+                    },
+                    leverage: safe_cex_engine::model::MinMax { min: 1., max: 50. },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: Some(true),
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            }]);
+            // As SigningLatch::missing_key reports it: primary material can never sign.
+            cx.startup_failed(
+                VenueError::new("Signing key is not installed")
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput)
+                    .outcome(safe_cex_engine::Outcome::NotSent),
+            );
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_a_non_read_startup_failure_survives_unsigned_read_completion() {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(SignerMissingAtStartup);
+        engine.set_account_startup(true);
+        let mut actor = Account::new(Host::new(engine, NoTransport), ServerConfig::default());
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        let failure = actor.startup_failure.as_ref().unwrap();
+        assert!(!failure.private_pending);
+        assert!(failure.recheck.is_none());
+        // Unsigned (or secondary-key) account reads then load every section.
+        actor
+            .host
+            .engine
+            .store_mut()
+            .set_balance(safe_cex_engine::model::Balance::default());
+        actor.host.engine.store_mut().set_positions(vec![]);
+        actor.host.engine.store_mut().set_orders(vec![]);
+        let (outgoing, mut late) = mpsc::channel(4);
+        actor
+            .join(9, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(matches!(late.try_recv(), Ok(Outgoing::Frame(_))));
+        assert!(
+            matches!(late.try_recv(), Ok(Outgoing::Text(_))),
+            "a signing/config startup failure was retired by read completion"
+        );
+    }
+
     #[tokio::test]
     async fn recovered_private_startup_does_not_replay_its_old_failure_to_late_joins() {
         let mut engine = safe_cex_engine::test_support::seeded_engine(FailsStartup::default());
@@ -3198,6 +3294,7 @@ mod tests {
             matches!(partial.try_recv(), Ok(Outgoing::Text(_))),
             "balance alone must not clear the refusal"
         );
+        while early.try_recv().is_ok() {}
         actor.host.engine.store_mut().set_positions(vec![]);
         actor.host.engine.store_mut().set_orders(vec![]);
         let (outgoing, mut recovered) = mpsc::channel(4);
@@ -3208,6 +3305,15 @@ mod tests {
         assert!(
             recovered.try_recv().is_err(),
             "same-actor recovery must retire obsolete StartupFailed replay"
+        );
+        assert!(actor.host.engine.private_startup_complete());
+        assert!(
+            matches!(early.try_recv(), Ok(Outgoing::Frame(_))),
+            "connected peers must receive the frame whose loaded flags clear NX health"
+        );
+        assert!(
+            early.try_recv().is_err(),
+            "obsolete failure must not follow recovery"
         );
     }
     #[tokio::test(start_paused = true)]

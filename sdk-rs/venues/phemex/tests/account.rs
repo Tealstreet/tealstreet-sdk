@@ -2115,7 +2115,7 @@ fn an_ip_mismatch_on_positions_ends_the_start() {
         let failed: Vec<_> = e
             .drain_actions()
             .filter_map(|a| match a {
-                Action::Notice(Notice::StartupFailed { error }) => Some(error),
+                Action::Notice(Notice::StartupFailed { error, .. }) => Some(error),
                 _ => None,
             })
             .collect();
