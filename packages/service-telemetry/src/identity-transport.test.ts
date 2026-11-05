@@ -247,3 +247,117 @@ for (const service of ['exchange-server', 'exchange-gateway']) {
     });
   }
 }
+
+for (const service of ['exchange-server', 'exchange-gateway']) {
+  for (const configured of [false, true]) {
+    it(`review real SDK ${service} mixed adjacent trace items configured=${configured}`, async () => {
+      vi.stubEnv('TEALSTREET_BOX', configured ? 'exchange-01' : '');
+      vi.stubEnv('TEALSTREET_RELEASE', configured ? 'image-revision-123' : '');
+      initServiceSentry({ dsn: 'https://public@o1.ingest.us.sentry.io/2', service });
+      const attrs = () => ({
+        'server.address': { type: 'string', value: 'old-host' },
+        'sentry.release': { type: 'string', value: 'undefined' },
+        box: { type: 'string', value: 'old-box' },
+        region: { type: 'string', value: 'eu' },
+        venue: { type: 'string', value: 'bitget' },
+      });
+      const metric = { items: [{ attributes: attrs() }, { attributes: attrs() }] };
+      const log = { items: [{ attributes: attrs() }, { attributes: attrs() }] };
+      const report = { discarded_events: [{ reason: 'sample_rate', category: 'error', quantity: 1 }] };
+      const attachment = new Uint8Array([1, 2, 3]);
+      const env: any = [
+        {},
+        [
+          [{ type: 'transaction' }, { server_name: 'old-host' }],
+          [{ type: 'span' }, { items: [{ attributes: attrs() }] }],
+          [{ type: 'span' }, { items: [{ attributes: attrs() }] }],
+          [{ type: 'trace_metric' }, metric],
+          [{ type: 'transaction' }, { server_name: 'old-host' }],
+          [{ type: 'log' }, log],
+          [{ type: 'client_report' }, report],
+          [{ type: 'attachment', filename: 'fixture.bin' }, attachment],
+          [{ type: 'session' }, { attrs: { release: configured ? 'image-revision-123' : undefined } }],
+          [{ type: 'sessions' }, { attrs: { release: configured ? 'image-revision-123' : undefined }, aggregates: [] }],
+          [{ type: 'span' }, { items: [] }],
+        ],
+      ];
+      await Sentry.getClient()!.sendEnvelope(env);
+      expect(probe.envelopes).toHaveLength(1);
+      const out = probe.envelopes[0][1];
+      expect(out.map(([h]: any) => h.type)).toEqual(
+        configured ? ['trace_metric', 'log', 'session', 'sessions'] : ['trace_metric', 'log'],
+      );
+      for (const container of [metric, log])
+        for (const item of container.items) {
+          expect(item.attributes.venue).toEqual({ type: 'string', value: 'bitget' });
+          expect((item.attributes as any)['server.address']?.value).toBe(configured ? 'exchange-01' : undefined);
+          expect((item.attributes as any)['sentry.release']?.value).toBe(configured ? 'image-revision-123' : undefined);
+          expect((item.attributes as any).box?.value).toBe(configured ? 'exchange-01' : undefined);
+          expect((item.attributes as any).region).toBeUndefined();
+        }
+      expect(out.find(([h]: any) => h.type === 'client_report')).toBeUndefined();
+      expect(out.find(([h]: any) => h.type === 'attachment')).toBeUndefined();
+    });
+    it(`review real SDK ${service} drops feedback configured=${configured}`, async () => {
+      vi.stubEnv('TEALSTREET_BOX', configured ? 'exchange-01' : '');
+      vi.stubEnv('TEALSTREET_RELEASE', configured ? 'image-revision-123' : '');
+      initServiceSentry({ dsn: 'https://public@o1.ingest.us.sentry.io/2', service });
+      Sentry.getCurrentScope().addEventProcessor((event) => ({
+        ...event,
+        server_name: 'feedback-host',
+        release: 'undefined',
+      }));
+      Sentry.captureEvent({
+        message: 'ordinary error control',
+        tags: { box: 'scope-box', region: 'eu', venue: 'bitget' },
+      });
+      Sentry.captureFeedback({ message: 'review feedback', tags: { box: 'scope-box', region: 'eu', venue: 'bitget' } });
+      await Sentry.flush(1000);
+      const normal = probe.envelopes.flatMap((e) => e[1]).find(([h]: any) => h.type === 'event')?.[1];
+      expect(normal).toBeDefined();
+      expect(normal.server_name).toBe(configured ? 'exchange-01' : undefined);
+      expect(normal.release).toBe(configured ? 'image-revision-123' : undefined);
+      expect(normal.tags.box).toBe(configured ? 'exchange-01' : undefined);
+      expect(normal.tags.region).toBeUndefined();
+      expect(normal.tags.venue).toBe('bitget');
+      const item = probe.envelopes.flatMap((e) => e[1]).find(([h]: any) => h.type === 'feedback')?.[1];
+      expect(item).toBeUndefined();
+    });
+  }
+}
+
+for (const service of ['exchange-server', 'exchange-gateway'])
+  for (const configured of [false, true]) {
+    it(`review ${service} drops unsupported check-in configured=${configured}`, async () => {
+      vi.stubEnv('TEALSTREET_BOX', configured ? 'exchange-01' : '');
+      vi.stubEnv('TEALSTREET_RELEASE', configured ? 'image-revision-123' : '');
+      initServiceSentry({ dsn: 'https://public@o1.ingest.us.sentry.io/2', service });
+      Sentry.getCurrentScope().setAttributes({
+        'server.address': 'scope-host',
+        'sentry.release': 'undefined',
+        box: 'scope-box',
+        region: 'eu',
+      });
+      Sentry.captureCheckIn({ monitorSlug: 'identity-review', status: 'ok' });
+      await Sentry.flush(1000);
+      const checkIn = probe.envelopes.flatMap((e) => e[1]).find(([h]: any) => h.type === 'check_in')?.[1];
+      expect(checkIn).toBeUndefined();
+    });
+  }
+
+for (const service of ['exchange-server', 'exchange-gateway']) {
+  it(`real SDK ${service} drops future unknown envelope types without dropping metrics`, async () => {
+    vi.stubEnv('TEALSTREET_BOX', '');
+    initServiceSentry({ dsn: 'https://public@o1.ingest.us.sentry.io/2', service });
+    const metric = { items: [{ attributes: { venue: { type: 'string', value: 'bitget' } } }] };
+    await Sentry.getClient()!.sendEnvelope([
+      {},
+      [
+        [{ type: 'future_identity_item' }, { server_name: 'old-host', release: 'undefined' }],
+        [{ type: 'trace_metric' }, metric],
+      ],
+    ] as any);
+    expect(probe.envelopes).toHaveLength(1);
+    expect(probe.envelopes[0][1]).toEqual([[{ type: 'trace_metric' }, metric]]);
+  });
+}

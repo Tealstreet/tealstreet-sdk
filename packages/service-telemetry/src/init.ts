@@ -108,8 +108,9 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
           client.on('beforeEnvelope', (envelope) => {
             for (let i = envelope[1].length - 1; i >= 0; i--) {
               const [header, payload] = envelope[1][i];
-              // Tracing is disabled; normalize these items before ever enabling it.
-              if (header.type === 'transaction' || header.type === 'span') {
+              // Only these payload types have identity normalization.
+              // Normalize any additional type before allowing it, including tracing.
+              if (!['event', 'session', 'sessions', 'trace_metric', 'log'].includes(header.type)) {
                 envelope[1].splice(i, 1);
                 continue;
               }
