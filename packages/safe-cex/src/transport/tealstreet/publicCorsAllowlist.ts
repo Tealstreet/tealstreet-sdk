@@ -110,6 +110,10 @@ export const PUBLIC_PROXY_READ_HOSTS: Partial<Record<ExchangeName, readonly stri
   bitgetinverse: ['api.bitget.com'],
   bitgetusdc: ['api.bitget.com'],
   blofin: ['openapi.blofin.com'],
+  // Linear, spot and inverse share one REST host; demo and testnet keep the exchange proxy.
+  bybit: ['api.bybit.com'],
+  bybitinverse: ['api.bybit.com'],
+  bybitspot: ['api.bybit.com'],
   coinbase: ['api.coinbase.com', 'api.international.coinbase.com'],
   coinbasespot: ['api.coinbase.com', 'api.international.coinbase.com'],
   grvt: [
