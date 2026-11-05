@@ -61,6 +61,8 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | Variable | Default | Meaning |
 |---|---|---|
 | `TEALSTREET_PORT` | `23456` | Listen port |
+| `TEALSTREET_ACCESS_TEAM_DOMAIN` | unset | Bare `<team>.cloudflareaccess.com` host for release-proof JWT verification; no scheme, port or path |
+| `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/user-drain`; either missing/invalid value disables only that endpoint and logs once at startup |
 | `CONNECT_REGION` | unset | Region label. Routing uses it for `proxyRegion` defaults; it also appears in `/health` and logs |
 | `TEALSTREET_RELEASE` | unset | Release id, sent to Sentry and shown in `/health` |
 | `EXCHANGE_SERVER_SENTRY_DSN` | unset | Sentry is off when unset |
@@ -99,6 +101,89 @@ chase or TWAP is cut short. `scripts/roll.sh` runs the whole roll on the box.
   - A moved socket releases its accounts instead of parking them: its page is reconnecting elsewhere.
 - **Break-glass:** it stops every account through the SIGTERM path. Each live page gets the algo host's own stop notice ("Chase on X stopped: the server is restarting."), and the cancels settle while browsers can still sign. Only then does every socket get the moved close, with the stop notice flushed first.
 - **`roll.sh [--now] [--ceiling SECONDS] [--unit NAME] [ADMIN_URL]`:** drains, then polls `/health` until no chase or TWAP runs. The ceiling defaults to 1800s; past it the script fails and leaves the box drained. It then runs `systemctl restart exchange-server`, waits up to 120s for `/health` ok, and undrains. `--now` uses break-glass instead of waiting.
+
+### Per-user drain (psmp2r-1)
+
+These routes move one user while `/health` and everyone else keep serving. All
+admin requests below use POST and the existing on-box `admin_peer` check, with
+no forwarded headers. JSON bodies are bounded to 2 KiB. Never send them through
+the public router. Only the on-box inventory response contains raw user IDs;
+new drain logs contain `user_tag` only.
+
+| Path | JSON body | Result |
+|---|---|---|
+| `/admin/user-drain/start` | `{userId, capMs?}` | Install an admission latch and return the summary below. Default cap 1,800,000 ms; accepted range 1–86,400,000 ms. Repeating start returns the same drainId and original cap. |
+| `/admin/user-drain/status` | `{userId}` | Current summary, including users with no socket and parked algos. Does not start a drain. |
+| `/admin/user-drain/cancel` | `{userId, drainId}` | Remove that exact latch and return status. Stale/missing ID, an in-progress force, or sockets already committed to close returns 409. |
+| `/admin/user-drain/force` | `{userId, drainId}` | Explicit break-glass for that user only; return summary plus `settled`. Stale/missing ID or another force in progress returns 409. |
+| `/admin/users` | none | `{users:[{userId,userTag,liveSockets,hasRunningAlgo,runningJobs,drain}]}` sorted by userTag. `drain` is the same summary as status, or null. Includes idle parked accounts, parked jobs, live sockets and installed latches. More than 4096 inventory entries returns 503, never a partial roll inventory. |
+
+The summary is `{userTag,drainId,state,capMs,elapsedMs,hasRunningAlgo,algosDone,
+pendingStarts,runningJobs,liveSockets,released,closeCode:4100}`. `drainId` and
+`capMs` are null when off. States are `off`, `waiting`, `capped`, `forcing`,
+`closing`, `drained`. Each running job is `{accountName,kind:'chase'|'twap',id}`;
+stopped chases still cleaning up and paused TWAPs count. `pendingStarts` also
+conservatively counts outstanding EXEC continuations that may hand off an algo and TWAP slice placements whose row has already stopped.
+`hasRunningAlgo` includes that pending work, even before it has a book row.
+
+Starting the latch stops `chaser:start`, `twap:start`, `twap:resume`, `twap:state`
+and `exec` immediately before actor dispatch. Queued but undispatched starts get
+`ServerDraining`, `kind:venueUnavailable`, `outcome:notSent`; nothing is replayed.
+Box drain uses the same admission refusal. Stop, pause, terminate, cleanup and
+signing remain available. Nuke remains available while waiting/capped and is counted through settlement; once closing or force starts, a queued nuke is refused before dispatch. The dispatch fence includes synchronous job creation
+and publication of its running-work snapshot, so admission cannot race an idle
+proof. Already-running jobs continue, including through the resume grace.
+
+Before the cap, observed completion of all the user's jobs and pending work
+closes every one of that user's sockets with 4100, `draining: reconnect`.
+An idle tab stays while another account or parked session of that user runs a
+job. Closed sockets release rather than park their accounts. A latched user's
+new sockets receive 4100 once jobs are done; they cannot restore schedules here.
+The latch remains until explicitly canceled. Once closing is committed, cancel waits until all closing sockets have left (409 meanwhile); it cannot reopen admission under a pending 4100 handoff.
+
+At the cap, `capped` keeps jobs, signing sockets and the admission latch intact.
+It does not kill or move anything, even if completion is first observed later.
+The caller must choose force or cancel. Force uses the existing algo stop,
+notice and cancellation-settlement path, bounded to 25 seconds; disconnecting
+its HTTP client does not abandon cleanup. Live pages receive stop notices
+before 4100; parked pages retain them for the next init here. If work still
+runs at the bound, `settled:false` reports it and leaves the latch in place;
+there is no release proof. As with box break-glass, canceled/stopped algos can
+leave uncertain resting venue orders: their notices tell the user to check.
+`released` proves that no hosted algo remains, not that every venue order was
+canceled or filled.
+
+### Live release proof and placement handshake
+
+`POST /proof/user-drain {userId,drainId}` is read-only and returns exactly
+`{userTag,drainId,released:boolean,checkedAt}` (`checkedAt` is Unix milliseconds).
+It never returns job lists, account names or the raw user ID. Unknown or stale
+IDs return 200 with `released:false`. True requires the same installed latch,
+`algosDone`, zero `pendingStarts`, and zero live sockets. An unlatched idle
+observation or a 4100 close alone is not placement authority.
+
+The edge must require the Cloudflare Access service-token policy. Independently,
+the box verifies `Cf-Access-Jwt-Assertion`: RS256 signature against
+`https://<TEALSTREET_ACCESS_TEAM_DOMAIN>/cdn-cgi/access/certs`, exact issuer
+`https://<host>`, the configured AUD in `aud`, and unexpired `exp` (no leeway).
+It checks `nbf` when present. Team config accepts only a bare single-label team
+host under `cloudflareaccess.com`; URLs, paths, userinfo and ports are refused.
+JWKS has a five-minute TTL, a 256 KiB/64-key bound, a two-second HTTPS deadline,
+no redirects and a single-flight refresh; unknown-kid refresh is limited to
+once per 30 seconds. An expired or unavailable key set fails closed. Invalid
+JWTs get 403 without logging tokens. Proof requests allow a burst of 40 then
+10/second per direct peer IP, with at most 1024 active source entries; all calls
+through one cloudflared peer share that limit. Responses have `Cache-Control:
+no-store` and no CORS. The public router must 404 both `/proof/*` and `/admin/*`.
+
+Roll/rebalance sequence: start locally, retain drainId, poll until released,
+then let the router obtain a fresh Access-authenticated proof from the source
+box immediately before pin/apply. If capped, explicitly force or cancel. A
+normal 1006 close cannot authorize moving parked jobs. Keep the source latch
+installed throughout the placement decision; do not race cancel against apply.
+After destination ownership is confirmed, the router's same-owner reconnect
+path needs no transfer proof. The NX consumer is PR #8936. No endpoint transfers
+algo state or replays writes, and no server deployment is performed by this PR.
 
 ## Authentication
 

@@ -565,6 +565,17 @@ Actual empty reads and public-only sessions still return empty arrays. Journal
 and ingestion use the separate strict `fetchHistoricalPositions` path, so this
 change confers no ingestion completion or new history capability.
 
+## Native history row diagnostics
+
+Bitget and Kraken row refusals carry `causeCode: HISTORY_DECODE` and a closed
+`historyDecode: { schema, reason }` record through host and worker errors. The
+record contains no row values, identities or response text. Only Bitget and
+Kraken enable the non-default `history-row-diagnostics` engine feature; the JS
+validator remains available when native detail is absent. Bitget rejects a
+proven invalid row immediately instead of replaying the same page; transport
+and envelope failures retain their bounded retry policy. Native strict checks
+and Kraken's existing accepted-prefix incomplete policy remain unchanged.
+
 ## Rust incomplete history
 
 A successful partial Rust history read returns the available rows with a
@@ -1047,6 +1058,12 @@ loads the real registry and enforces the following minimum contracts:
 - `supportsPublicOnly` requires construction with `publicDataOnly: true` and a
   non-fallback `start` implementation;
 - TP/SL trigger defaults must belong to the unique advertised trigger set.
+
+Rust public capabilities also retain the loaded engine record, including
+`orderHistoryNeedsSymbol` and other authoritative policy flags. Those fields
+remain absent before engine/worker capability adoption; method-derived booleans
+retain their existing checks. Symbol-scoped collectors must read this record,
+not guess from a venue name or send a symbol-less query as an empty census.
 
 The fills-history runtime gate is deliberately not metadata. Ingestion checks
 `exchange.capabilities.fillHistory` and then applies

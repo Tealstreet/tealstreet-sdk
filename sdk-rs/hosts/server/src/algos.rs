@@ -11,8 +11,8 @@ use serde_json::Value;
 use std::cell::{Cell, Ref, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 
@@ -126,6 +126,8 @@ pub struct Running {
     twaps: AtomicUsize,
     /// Bumped whenever an account's count falls, so drained sockets recheck.
     ended: Arc<tokio::sync::watch::Sender<u64>>,
+    user: OnceLock<Arc<crate::user_drain::User>>,
+    work: Mutex<(Vec<crate::user_drain::Job>, usize)>,
 }
 
 impl Running {
@@ -134,6 +136,8 @@ impl Running {
             chases: AtomicUsize::new(0),
             twaps: AtomicUsize::new(0),
             ended,
+            user: OnceLock::new(),
+            work: Mutex::default(),
         }
     }
 
@@ -147,6 +151,37 @@ impl Running {
 
     pub fn any(&self) -> bool {
         self.counts() != (0, 0)
+    }
+
+    pub(crate) fn attach(&self, user: Arc<crate::user_drain::User>) {
+        let _ = self.user.set(user);
+    }
+
+    pub(crate) fn jobs(&self) -> (Vec<crate::user_drain::Job>, usize) {
+        self.work.lock().unwrap().clone()
+    }
+
+    pub(crate) fn refresh(&self, chases: &[ActiveChaser], twaps: &[Value], pending: usize) {
+        let mut jobs: Vec<_> = chases
+            .iter()
+            .map(|chase| crate::user_drain::Job {
+                kind: "chase",
+                id: chase.id.clone(),
+            })
+            .collect();
+        jobs.extend(twaps.iter().filter_map(|twap| {
+            Some(crate::user_drain::Job {
+                kind: "twap",
+                id: twap.get("id")?.as_str()?.to_owned(),
+            })
+        }));
+        let pending = pending + chases.len() + twaps.len() - jobs.len();
+        let previous = std::mem::replace(&mut *self.work.lock().unwrap(), (jobs, pending));
+        if previous.1 > pending {
+            self.ended
+                .send_modify(|revision| *revision = revision.wrapping_add(1));
+        }
+        self.set(chases.len(), twaps.len());
     }
 
     fn set(&self, chases: usize, twaps: usize) {
@@ -830,14 +865,18 @@ pub async fn run(
     // On its own task, since `feed.next()` must not be cancelled by a timer. Stopped
     // chases count until their cleanup ends: it may still need a signature.
     {
-        let (book, twap, name) = (book.clone(), twap.clone(), name.clone());
+        let (book, twap, exec, name) = (book.clone(), twap.clone(), exec.clone(), name.clone());
         let running = running.clone();
         cx.spawn(async move {
             let mut every = tokio::time::interval(RECOUNT_EVERY);
             every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 every.tick().await;
-                running.set(book.active_chasers().len(), twap.active_twaps(&name).len());
+                running.refresh(
+                    &book.active_chasers(),
+                    &twap.active_twaps(&name),
+                    exec.pending_operations() + twap.pending_placements(),
+                );
             }
         });
     }
@@ -899,7 +938,22 @@ pub async fn run(
                         let change = port.apply(snapshot, Vec::new(), false);
                         port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                     }
-                    let dispatched = registry.dispatch(&op, &data, &cx);
+                    let dispatch = || {
+                        let result = registry.dispatch(&op, &data, &cx);
+                        running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
+                        result
+                    };
+                    let dispatched = if crate::user_drain::starts_job(&op) {
+                        if let Some(user) = running.user.get() {
+                            match user.admit() {
+                                Ok(_admission) => dispatch(),
+                                Err(error) => {
+                                    port.emit("error", error.to_string());
+                                    continue;
+                                }
+                            }
+                        } else { dispatch() }
+                    } else { dispatch() };
                     let result = match &dispatched {
                         Some(Ok(())) => Value::from("ok"),
                         Some(Err(error)) => {
@@ -922,7 +976,10 @@ pub async fn run(
                         port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                         loaded
                     });
-                    let started = match seen {
+                    let admission = running.user.get().map(|user| user.admit_cleanup());
+                    let started = match admission.as_ref() {
+                        Some(Err(error)) => Err(error.clone()),
+                        _ => match seen {
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>
                         {
@@ -932,7 +989,10 @@ pub async fn run(
                             "message": crate::methods::NUKE_NOT_LOADED,
                             "outcome": "notSent",
                         })),
+                        },
                     };
+                    running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
+                    drop(admission);
                     let (port, name, who) = (port.clone(), name.clone(), who.clone());
                     let settle = move |outcome: Result<Value, Value>| {
                         let audit = match &outcome {
@@ -1092,6 +1152,7 @@ pub async fn run(
     }
     scope.dispose();
     handle.leave(feed.client());
+    *running.work.lock().unwrap() = (Vec::new(), 0);
     running.set(0, 0);
     if !disposing {
         crate::state::Log::warn(&format!(

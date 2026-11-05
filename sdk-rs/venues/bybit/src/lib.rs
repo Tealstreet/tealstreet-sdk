@@ -873,9 +873,20 @@ impl BybitLinear {
         root: &safe_cex_engine::request_context::Context,
         signed: bool,
     ) -> Result<safe_cex_engine::request_context::Context, VenueError> {
-        let policy = self.read_policy(signed, PAGE_WINDOW_MS).ok_or_else(|| {
+        self.page_leg_paced(cx, root, signed, None)
+    }
+
+    fn page_leg_paced(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        root: &safe_cex_engine::request_context::Context,
+        signed: bool,
+        pacing: Option<safe_cex_engine::request_context::Pacing>,
+    ) -> Result<safe_cex_engine::request_context::Context, VenueError> {
+        let mut policy = self.read_policy(signed, PAGE_WINDOW_MS).ok_or_else(|| {
             VenueError::new("Bybit signed read has no credential").kind(ErrorKind::AuthInvalid)
         })?;
+        policy.pacing = pacing;
         cx.http_leg_context(root, policy)
             .map_err(|error| error.venue_error())
     }
@@ -2637,6 +2648,9 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        &[history::ORDER_HISTORY_PACING]
+    }
     fn managed_sockets() -> bool {
         true
     }

@@ -1,3 +1,5 @@
+import { historyDecodeOf } from './history-decode.mjs';
+export { historyDecodeOf } from './history-decode.mjs';
 import { ManagedHttp, prepareFetch } from './managed-http.mjs';
 export { HttpPreparationError } from './managed-http.mjs';
 
@@ -246,6 +248,8 @@ export class ExchangeError extends Error {
     if (ERROR_KINDS.has(detail.kind)) this.kind = detail.kind;
     if (ERROR_OUTCOMES.has(detail.outcome)) this.outcome = detail.outcome;
     if (typeof detail.causeCode === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(detail.causeCode)) this.causeCode = detail.causeCode;
+    const historyDecode = historyDecodeOf(detail.historyDecode);
+    if (historyDecode) this.historyDecode = historyDecode;
     const venueCode = text(detail.venueCode);
     if (venueCode) this.venueCode = venueCode;
     const venueMessage = text(detail.venueMessage);

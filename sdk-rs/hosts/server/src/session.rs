@@ -73,6 +73,7 @@ struct Joined {
 }
 
 pub struct Session {
+    user_socket: Option<crate::user_drain::Socket>,
     registry: Arc<Registry>,
     metrics: Arc<Metrics>,
     identity: Identity,
@@ -178,6 +179,10 @@ impl Session {
         let (loaded, loaded_rx) = tokio::sync::mpsc::unbounded_channel();
         let (dropped, dropped_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
+            user_socket: identity
+                .user
+                .as_deref()
+                .map(|user| registry.user_drains.socket(user)),
             registry,
             metrics,
             identity,
@@ -197,23 +202,41 @@ impl Session {
         }
     }
 
+    pub fn user_draining(&self) -> bool {
+        self.user_socket
+            .as_ref()
+            .is_some_and(crate::user_drain::Socket::latched)
+    }
+
     /// Whether a drain moves this socket now: break-glass moves every socket,
     /// a waiting drain only one whose accounts run no chase or TWAP.
     pub fn drain_close(&mut self) -> Option<Close> {
-        let moves = match self.registry.drain_state() {
-            crate::accounts::Drain::Off => false,
-            crate::accounts::Drain::Now => true,
-            crate::accounts::Drain::Waiting => !self
-                .joined
-                .values()
-                .any(|joined| joined.account.running.any()),
-        };
+        let user_moves = self
+            .user_socket
+            .as_ref()
+            .is_some_and(crate::user_drain::Socket::should_close);
+        let moves = user_moves
+            || match self.registry.drain_state() {
+                crate::accounts::Drain::Off => false,
+                crate::accounts::Drain::Now => true,
+                crate::accounts::Drain::Waiting => !self
+                    .joined
+                    .values()
+                    .any(|joined| joined.account.running.any()),
+            };
         self.moved |= moves;
         moves.then_some(Close::Moved)
     }
 
     /// A draining box admits inits only from users already live on it.
     fn moved_by_drain(&self) -> bool {
+        if self
+            .user_socket
+            .as_ref()
+            .is_some_and(crate::user_drain::Socket::should_close)
+        {
+            return true;
+        }
         match self.registry.drain_state() {
             crate::accounts::Drain::Off => false,
             crate::accounts::Drain::Now => true,
@@ -315,6 +338,14 @@ impl Session {
     /// Called once after the upgrade, for `resumable=1` sockets.
     pub async fn open(&mut self) {
         if !self.identity.resumable {
+            return;
+        }
+        if self
+            .user_socket
+            .as_ref()
+            .is_some_and(crate::user_drain::Socket::should_close)
+        {
+            self.send(envelope::session(&self.resume_id, false));
             return;
         }
         let mut resumed = false;

@@ -305,7 +305,7 @@ export const CAPABILITY_METHODS = {
 } as const satisfies Record<string, BaseCapabilityMethod>;
 
 /** What this venue can answer. The only supported way to ask; never inspect the methods. */
-export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean>;
+export type ExchangeCapabilities = Record<keyof typeof CAPABILITY_METHODS, boolean> & Partial<EngineCapabilities>;
 
 export type EngineSnapshot = {
   frame: ArrayBuffer;
@@ -809,7 +809,7 @@ export class BaseExchange implements Exchange {
   get capabilities(): ExchangeCapabilities {
     const answers = {} as ExchangeCapabilities;
     for (const [capability, method] of Object.entries(CAPABILITY_METHODS) as Array<
-      [keyof ExchangeCapabilities, BaseCapabilityMethod]
+      [keyof typeof CAPABILITY_METHODS, BaseCapabilityMethod]
     >)
       answers[capability] = !isInertCapability(this[method], method);
     return answers;
