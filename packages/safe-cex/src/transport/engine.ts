@@ -702,8 +702,11 @@ const httpTransport = (
       const target = route.baseURL ?? request.url;
       const publicProxy = provider.publicCorsProxy();
       const payloadSigned = payloadSignedViaPublicProxy(exchange, options);
+      const testnet = options.testnet;
       refuseSignedPublicProxy({
         exchange,
+        method: request.method,
+        testnet,
         publicProxy,
         target,
         url: request.url,
@@ -895,6 +898,8 @@ const httpTransport = (
           const url = intent === undefined ? target : `${prefix}${packet.url}`;
           beforeRelease(() => refuseSignedPublicProxy({
             exchange,
+            method: packet.method,
+            testnet,
             publicProxy,
             target: url,
             url: packet.url,

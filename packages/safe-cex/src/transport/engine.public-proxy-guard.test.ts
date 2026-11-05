@@ -38,6 +38,8 @@ const options = (extra: Partial<ExchangeOptions> = {}): ExchangeOptions => ({
   ...extra,
 });
 
+const LIGHTER_READ_TOKEN = `1700000060:42:3:${'ab'.repeat(80)}`;
+
 const DUAL = 'https://fapi.binance.com/fapi/v1/positionSide/dual?timestamp=1&signature=abc';
 
 afterEach(() => {
@@ -265,6 +267,216 @@ describe('a signed request is never sent toward the public proxy', () => {
       expect(() => bound.dispatch()).toThrow();
     } finally {
       routed.dispose?.();
+    }
+  });
+
+  it.each([
+    ['GET', '/api/v1/trades'],
+    ['GET', '/api/v1/accountInactiveOrders'],
+    ['GET', '/api/v1/positionFunding'],
+    ['GET', '/api/v1/accountLimits'],
+    ['POST', '/api/v1/changeAccountTier'],
+  ])('preserves Lighter read-token Authorization for %s %s', async (method, path) => {
+    const raw = makeRaw();
+    const dispatch = vi.fn(async () => ({ status: 200, body: new Uint8Array() }));
+    const bind = vi.fn((_packet: Parameters<Transport['request']>[0]) => ({ ready: () => true, dispatch }));
+    const routed = createEngineTransport('lighter', options({ tealstreetProxy: false }), {
+      ...raw,
+      prepareHttp: async () => ({ bind }),
+    });
+    const original = {
+      request: 81,
+      method,
+      intent: 'primary' as const,
+      url: `https://mainnet.zklighter.elliot.ai${path}?account_index=42`,
+      headers: {},
+      timeoutMs: 20_000,
+    };
+    try {
+      const prepared = await routed.prepareHttp!(original);
+      const bound = prepared.bind({
+        ...original,
+        headers: { authorization: LIGHTER_READ_TOKEN },
+        ...(method === 'POST' ? { body: 'account_index=42&new_tier=premium' } : {}),
+      });
+      expect(bind.mock.calls[0]![0]).toMatchObject({
+        url: `${getPublicCorsProxy()}/${original.url}`,
+        headers: { authorization: LIGHTER_READ_TOKEN },
+      });
+      expect(dispatch).not.toHaveBeenCalled();
+      await bound.dispatch();
+      expect(dispatch).toHaveBeenCalledOnce();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it.each([
+    ['GET', '/api/v1/account'],
+    ['POST', '/api/v1/accountInactiveOrders'],
+    ['GET', '/api/v1/changeAccountTier'],
+    ['DELETE', '/api/v1/accountLimits'],
+    ['GET', '/api/v1/accountLimits/extra'],
+  ])('refuses Lighter Authorization outside the exact method/path set: %s %s', async (method, path) => {
+    const raw = makeRaw();
+    const bind = vi.fn(() => ({ ready: () => true, dispatch: vi.fn() }));
+    const routed = createEngineTransport('lighter', options({ tealstreetProxy: false }), {
+      ...raw,
+      prepareHttp: async () => ({ bind }),
+    });
+    const original = {
+      request: 82,
+      method,
+      intent: 'primary' as const,
+      url: `https://mainnet.zklighter.elliot.ai${path}`,
+      headers: {},
+      timeoutMs: 20_000,
+    };
+    try {
+      const prepared = await routed.prepareHttp!(original);
+      expect(() => prepared.bind({ ...original, headers: { Authorization: LIGHTER_READ_TOKEN } })).toThrow(
+        SignedPublicProxyRefusal,
+      );
+      expect(bind).not.toHaveBeenCalled();
+      expect(raw.request).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it.each(['signature=abc', 'sign=abc', '%73ignature=abc'])(
+    'refuses %s even with the Lighter payload capability',
+    async (query) => {
+      const raw = makeRaw();
+      const bind = vi.fn(() => ({ ready: () => true, dispatch: vi.fn() }));
+      const routed = createEngineTransport('lighter', options({ tealstreetProxy: false }), {
+        ...raw,
+        prepareHttp: async () => ({ bind }),
+      });
+      const original = {
+        request: 83,
+        method: 'GET',
+        intent: 'primary' as const,
+        url: 'https://mainnet.zklighter.elliot.ai/api/v1/trades',
+        headers: {},
+        timeoutMs: 20_000,
+      };
+      try {
+        const prepared = await routed.prepareHttp!(original);
+        expect(() => prepared.bind({ ...original, url: `${original.url}?${query}`, headers: {} })).toThrow(
+          SignedPublicProxyRefusal,
+        );
+        expect(bind).not.toHaveBeenCalled();
+      } finally {
+        routed.dispose?.();
+      }
+    },
+  );
+
+  it.each(['X-MBX-APIKEY', 'APIKey', 'ACCESS-KEY', 'X-API-Key'])(
+    'still refuses other credentials on a Lighter token path: %s',
+    async (header) => {
+      const raw = makeRaw();
+      const bind = vi.fn(() => ({ ready: () => true, dispatch: vi.fn() }));
+      const routed = createEngineTransport('lighter', options({ tealstreetProxy: false }), {
+        ...raw,
+        prepareHttp: async () => ({ bind }),
+      });
+      const original = {
+        request: 84,
+        method: 'GET',
+        intent: 'primary' as const,
+        url: 'https://mainnet.zklighter.elliot.ai/api/v1/trades',
+        headers: {},
+        timeoutMs: 20_000,
+      };
+      try {
+        const prepared = await routed.prepareHttp!(original);
+        expect(() =>
+          prepared.bind({ ...original, headers: { authorization: LIGHTER_READ_TOKEN, [header]: 'api-secret' } }),
+        ).toThrow(SignedPublicProxyRefusal);
+        expect(bind).not.toHaveBeenCalled();
+      } finally {
+        routed.dispose?.();
+      }
+    },
+  );
+
+  it('does not grant the same token to another venue, origin, or opaque secret value', async () => {
+    for (const [exchange, origin, token] of [
+      ['binance', 'https://mainnet.zklighter.elliot.ai', LIGHTER_READ_TOKEN],
+      ['lighter', 'https://other.invalid', LIGHTER_READ_TOKEN],
+      ['lighter', 'https://mainnet.zklighter.elliot.ai', 'api-secret'],
+    ] as const) {
+      const raw = makeRaw();
+      const bind = vi.fn(() => ({ ready: () => true, dispatch: vi.fn() }));
+      const routed = createEngineTransport(exchange, options({ tealstreetProxy: false }), {
+        ...raw,
+        prepareHttp: async () => ({ bind }),
+      });
+      const original = {
+        request: 85,
+        method: 'GET',
+        route: 'publicCors' as const,
+        intent: 'public' as const,
+        url: `${origin}/api/v1/trades`,
+        headers: {},
+        timeoutMs: 20_000,
+      };
+      try {
+        const prepared = await routed.prepareHttp!(original);
+        expect(() => prepared.bind({ ...original, headers: { Authorization: token } })).toThrow(
+          SignedPublicProxyRefusal,
+        );
+        expect(bind).not.toHaveBeenCalled();
+      } finally {
+        routed.dispose?.();
+      }
+    }
+  });
+
+  it.each([
+    ['lighter', false, 'https://mainnet.zklighter.elliot.ai'],
+    ['lighter', true, 'https://testnet-api.lighter.xyz'],
+    ['lighter-robinhood', false, 'https://api.rh.lighter.xyz'],
+  ] as const)('permits the same token in legacy and managed %s testnet=%s reads', async (exchange, testnet, origin) => {
+    const raw = makeRaw();
+    const routed = createEngineTransport(exchange, options({ tealstreetProxy: false, testnet }), raw);
+    try {
+      await routed.request({
+        method: 'GET',
+        url: `${origin}/api/v1/trades`,
+        headers: { Authorization: LIGHTER_READ_TOKEN },
+      });
+      expect(raw.request.mock.calls[0]![0]).toMatchObject({
+        url: `${getPublicCorsProxy()}/${origin}/api/v1/trades`,
+        headers: { Authorization: LIGHTER_READ_TOKEN },
+      });
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it('refuses tokens for another deployment and for a profile without the capability', async () => {
+    for (const [exchange, origin] of [
+      ['lighter', 'https://mainnet.zklighter.elliot.ai'],
+      ['lighter-robinhood', 'https://api.rh-testnet.lighter.xyz'],
+    ] as const) {
+      const raw = makeRaw();
+      const routed = createEngineTransport(exchange, options({ tealstreetProxy: false, testnet: true }), raw);
+      try {
+        await expect(
+          routed.request({
+            route: 'publicCors',
+            method: 'GET',
+            url: `${origin}/api/v1/trades`,
+            headers: { Authorization: LIGHTER_READ_TOKEN },
+          }),
+        ).rejects.toThrow(SignedPublicProxyRefusal);
+        expect(raw.request).not.toHaveBeenCalled();
+      } finally {
+        routed.dispose?.();
+      }
     }
   });
 
