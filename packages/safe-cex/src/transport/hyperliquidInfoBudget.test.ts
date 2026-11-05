@@ -1193,7 +1193,7 @@ it('the real managed transport admits a critical sizing read while its bulk look
   };
   try {
     let prepared: Awaited<ReturnType<NonNullable<typeof transport.prepareHttp>>> | undefined;
-    const pending = transport.prepareHttp!(packet).then((value) => {
+    const pending = Promise.resolve(transport.prepareHttp!(packet)).then((value) => {
       prepared = value;
     });
     void pending.catch(() => undefined);
