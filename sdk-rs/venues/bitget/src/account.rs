@@ -128,6 +128,8 @@ pub struct PositionCut {
 }
 
 struct WsPosition {
+    // A per-leg receipt protects its exact row, not a cached alias from another mode.
+    id: String,
     observed: Option<PositionCut>,
     rejected: Option<PositionCut>,
 }
@@ -1860,7 +1862,8 @@ impl BitgetFutures {
                                 mark.rejected.is_some_and(|r| {
                                     r.epoch == cut.epoch && r.ordinal > cut.ordinal
                                 }) || mark.observed.is_some_and(|r| {
-                                    r.epoch == cut.epoch
+                                    old.id == mark.id
+                                        && r.epoch == cut.epoch
                                         && (r.ordinal > cut.ordinal
                                             || cut.at - r.at <= POSITION_RECEIPT_GRACE_MS)
                                 })
@@ -1887,7 +1890,9 @@ impl BitgetFutures {
                         .store
                         .positions()
                         .iter()
-                        .find(|old| old.symbol == p.symbol && old.side == p.side)
+                        .find(|old| {
+                            old.symbol == p.symbol && old.side == p.side && old.id == mark.id
+                        })
                         .map_or(p.contracts == 0.0, |old| positions_agree(old, &p));
                     if rejection || after_send || financial && !same {
                         held.set(true);
@@ -1895,7 +1900,9 @@ impl BitgetFutures {
                             .store
                             .positions()
                             .iter()
-                            .find(|old| old.symbol == p.symbol && old.side == p.side)
+                            .find(|old| {
+                                old.symbol == p.symbol && old.side == p.side && old.id == mark.id
+                            })
                             .cloned();
                     }
                 }
@@ -1914,7 +1921,8 @@ impl BitgetFutures {
                         m.rejected
                             .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal)
                             || m.observed.is_some_and(|r| {
-                                r.epoch == cut.epoch
+                                current.id == m.id
+                                    && r.epoch == cut.epoch
                                     && (r.ordinal > cut.ordinal
                                         || cut.at - r.at <= POSITION_RECEIPT_GRACE_MS)
                             })
@@ -2335,6 +2343,7 @@ impl BitgetFutures {
                             .entry((p.symbol.clone(), Some(p.side)))
                             .and_modify(|mark| mark.rejected = Some(observation))
                             .or_insert(WsPosition {
+                                id: p.id.clone(),
                                 observed: None,
                                 rejected: Some(observation),
                             });
@@ -2346,6 +2355,7 @@ impl BitgetFutures {
                     self.account.ws_positions.insert(
                         (p.symbol.clone(), Some(p.side)),
                         WsPosition {
+                            id: p.id.clone(),
                             observed: Some(observation),
                             rejected: None,
                         },

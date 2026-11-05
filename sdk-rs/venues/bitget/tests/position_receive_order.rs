@@ -493,3 +493,77 @@ fn uta_and_classic_demo_keep_recent_opens_and_zero_tombstones() {
         assert_eq!(size(&h), 0.0, "uta={uta}");
     }
 }
+
+#[test]
+fn a_ws_mode_observation_does_not_lend_its_guard_to_an_old_cached_mode() {
+    use safe_cex_engine::model::{PositionMode, PositionSide};
+    for (long_size, include_long) in [(2, false), (2, true), (0, true)] {
+        let mut h = Harness::classic();
+        let old = h.take("/all-position");
+        h.engine.store_mut().set_hedged(true);
+        h.now += 1.0;
+        h.private_message(
+            &json!({"arg":{"channel":"positions"},"action":"update",
+                "data":[hedge_row("long",long_size)]})
+            .to_string(),
+        );
+        let mut rows = vec![hedge_row("short", 4)];
+        if include_long {
+            rows.push(hedge_row("long", 1));
+        }
+        h.reply(
+            old.id,
+            200,
+            &json!({"code":"00000","data":rows}).to_string(),
+        );
+        let positions = h.engine.store().positions();
+        assert_eq!(
+            positions
+                .iter()
+                .find(|p| p.side == PositionSide::Short)
+                .map(|p| p.contracts),
+            Some(4.0),
+            "the stale cached one-way row cannot block healing the unobserved hedge peer"
+        );
+        assert_eq!(
+            positions
+                .iter()
+                .find(|p| p.side == PositionSide::Long)
+                .map(|p| p.contracts),
+            (long_size != 0).then_some(f64::from(long_size)),
+            "retain the observed hedge row or its zero, never the older cached one-way row"
+        );
+        assert!(
+            positions
+                .iter()
+                .all(|p| p.position_mode == Some(PositionMode::Hedged))
+        );
+    }
+}
+
+#[test]
+fn a_confirmed_mode_write_does_not_disconnect_a_receipt_from_its_cached_row() {
+    use safe_cex_engine::{Command, model::PositionMode};
+    let mut h = ready();
+    h.now += 1.0;
+    ws(&mut h, 2, "100");
+    read_positions(&mut h, 95);
+    let old = h.take("/all-position");
+    h.now += 1.0;
+    h.command(Command::SetPositionMode {
+        command: 96,
+        hedged: true,
+        symbol: None,
+    });
+    h.respond("/set-position-mode", 200, r#"{"code":"00000","data":{}}"#);
+    h.reply(
+        old.id,
+        200,
+        &json!({"code":"00000","data":[row(1,"999999")]}).to_string(),
+    );
+    let positions = h.engine.store().positions();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].contracts, 2.0);
+    assert_eq!(positions[0].position_mode, Some(PositionMode::Hedged));
+    assert!(h.engine.store().hedged());
+}

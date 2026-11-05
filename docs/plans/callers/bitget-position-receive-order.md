@@ -9,9 +9,13 @@ sequence, loss-detection or fill-coverage contract. Native `uTime` and gateway
 
 Each valid observation records its connection epoch, local receive ordinal and
 local receipt time, keyed by symbol and side. A zero retains the same marker
-after the Store row disappears. Malformed observations preserve prior financial
-evidence and only hold the affected identity across an older read. Hedge peers
-remain independently eligible for REST healing. A conflicting one-way side or
+after the Store row disappears. Each marker also retains its observed Store
+row ID: a stale cached row from another mode cannot borrow that marker to block
+an unobserved hedge peer, replace the current row or resurrect a zero. Confirmed
+setting writes may update that row in place without severing its receipt guard.
+Malformed observations preserve prior financial evidence and only hold the
+affected identity across an older read. Hedge peers remain independently eligible
+for REST healing. A conflicting one-way side or
 position mode cannot coexist with a protected current row.
 
 Every REST positions census records its first physical signing-release cut,
