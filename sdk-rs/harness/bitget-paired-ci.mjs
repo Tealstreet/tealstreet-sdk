@@ -43,17 +43,25 @@ export async function selectCpuComparison({ reader, runId, root, jobName, gitRea
       item.base?.ref === 'master' && item.base?.repo?.full_name === 'Tealstreet/tealstreet-sdk');
     insist(matching.length === 1, 'missing/ambiguous exact open or merged PR for this run');
     pull = await reader.getPull(matching[0].number);
-    insist((pull.state === 'open' || mergedPull(pull) && pull.merged === true) && pull.head?.sha === run.head_sha &&
+    const confirmedMerged = mergedPull(pull) && pull.merged === true;
+    insist((pull.state === 'open' || confirmedMerged) && pull.head?.sha === run.head_sha &&
       pull.base?.ref === 'master' && pull.base.repo?.full_name === 'Tealstreet/tealstreet-sdk' &&
       run.repository.full_name === 'Tealstreet/tealstreet-sdk', 'open or confirmed merged PR must name the authenticated Rust landing base');
     let associatedBase;
     if (run.event === 'pull_request') {
-      const snapshots = run.pull_requests?.filter(item => item.number === pull.number && item.head?.sha === run.head_sha);
-      insist(snapshots?.length === 1 && snapshots[0].base?.ref === pull.base.ref &&
-        snapshots[0].base.repo?.url === `https://api.github.com/repos/${run.repository.full_name}` &&
-        snapshots[0].head.repo?.url === `https://api.github.com/repos/${run.repository.full_name}`,
-      'missing exact run PR association');
-      associatedBase = snapshots[0].base.sha;
+      // GitHub clears merged runs' PR snapshots; authenticate both head repositories instead.
+      if (confirmedMerged && Array.isArray(run.pull_requests) && run.pull_requests.length === 0) {
+        insist(pull.head.repo?.full_name === 'Tealstreet/tealstreet-sdk' &&
+          run.head_repository?.full_name === run.repository.full_name,
+        'merged PR without run snapshot requires authenticated same-repository heads');
+      } else {
+        const snapshots = run.pull_requests?.filter(item => item.number === pull.number && item.head?.sha === run.head_sha);
+        insist(snapshots?.length === 1 && snapshots[0].base?.ref === pull.base.ref &&
+          snapshots[0].base.repo?.url === `https://api.github.com/repos/${run.repository.full_name}` &&
+          snapshots[0].head.repo?.url === `https://api.github.com/repos/${run.repository.full_name}`,
+        'missing exact run PR association');
+        associatedBase = snapshots[0].base.sha;
+      }
     }
     const checkout = await reader.getCommit(checkoutSha);
     const localParents = gitRead('show', '-s', '--format=%P', checkoutSha).split(' ');

@@ -7,8 +7,8 @@ import { RETIRED_RUST_LANDING_TIP, selectBitgetPair } from './bitget-paired-ci.m
 const A = 'a'.repeat(40), B = 'b'.repeat(40), H = 'c'.repeat(40), TREE = 'd'.repeat(40);
 function fixture() {
   const run = { id: 10, run_attempt: 1, head_sha: H, event: 'pull_request',
-    repository: { full_name: 'Tealstreet/tealstreet-sdk' } };
-  const pull = { number: 20, id: 21, state: 'open', head: { sha: H, repo: { url: 'https://api.github.com/repos/Tealstreet/tealstreet-sdk' } },
+    repository: { full_name: 'Tealstreet/tealstreet-sdk' }, head_repository: { full_name: 'Tealstreet/tealstreet-sdk' } };
+  const pull = { number: 20, id: 21, state: 'open', head: { sha: H, repo: { full_name: 'Tealstreet/tealstreet-sdk', url: 'https://api.github.com/repos/Tealstreet/tealstreet-sdk' } },
     base: { sha: A, ref: 'master', repo: { full_name: 'Tealstreet/tealstreet-sdk', url: 'https://api.github.com/repos/Tealstreet/tealstreet-sdk' } } };
   run.pull_requests = [structuredClone(pull)];
   const jobs = [{ id: 30, runner_id: 40, run_id: 10, run_attempt: 1, head_sha: H,
@@ -77,9 +77,35 @@ test('an exact merged PR retains the authenticated original comparison', async (
   assert.deepEqual(await selectBitgetPair(x.context), expected);
 });
 
+test('an exact merged PR with an empty run snapshot retains the original comparison', async () => {
+  const x = fixture(), expected = await selectBitgetPair(x.context);
+  mergePull(x.pull);
+  x.run.pull_requests = [];
+  assert.deepEqual(await selectBitgetPair(x.context), expected);
+});
+
+test('empty merged snapshots retain authenticated head repository fences', async t => {
+  const cases = [
+    ['fork pull head', x => { x.pull.head.repo.full_name = 'fork/tealstreet-sdk'; }],
+    ['fork run head', x => { x.run.head_repository.full_name = 'fork/tealstreet-sdk'; }],
+    ['missing pull head repository', x => { delete x.pull.head.repo; }],
+    ['missing run head repository', x => { delete x.run.head_repository; }],
+    ['missing snapshot inventory', x => { delete x.run.pull_requests; }],
+    ['malformed snapshot inventory', x => { x.run.pull_requests = ''; }],
+  ];
+  for (const [name, mutate] of cases) await t.test(name, async () => {
+    const x = fixture();
+    mergePull(x.pull);
+    x.run.pull_requests = [];
+    mutate(x);
+    await assert.rejects(selectBitgetPair(x.context));
+  });
+});
+
 test('replay family selection accepts the same authenticated merged PR', async () => {
   const x = fixture();
   mergePull(x.pull);
+  x.run.pull_requests = [];
   x.jobs[0].name = 'Rust / replay measurement (binance)';
   const result = await familyComparisonAuthority({ ...x.context, suite: 'binance' });
   assert.equal(result.baseline, A);
@@ -112,7 +138,8 @@ test('merged selection retains ambiguity and refreshed source checks', async t =
     ['missing merge commit', x => { x.pull.merge_commit_sha = null; }],
     ['head changed after association', x => { x.pull.head.sha = A; }],
     ['foreign base after association', x => { x.pull.base.repo.full_name = 'fork/tealstreet-sdk'; }],
-    ['missing exact run association', x => { x.run.pull_requests = []; }],
+    ['present but mismatched run association', x => { x.run.pull_requests[0].head.sha = A; }],
+    ['present duplicate run association', x => { x.run.pull_requests.push(structuredClone(x.run.pull_requests[0])); }],
   ];
   for (const [name, mutate] of cases) await t.test(name, async () => {
     const x = fixture();
