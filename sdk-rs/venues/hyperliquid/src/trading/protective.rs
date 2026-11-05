@@ -176,9 +176,7 @@ impl Hyperliquid {
             num::adjust(opts.amount, precision)
         };
         if !keep_full && (size <= 0. || size * protected.target < MIN_ORDER_VALUE) {
-            return Err(
-                "Hyperliquid protective replacement is below the minimum".into(),
-            );
+            return Err("Hyperliquid protective replacement is below the minimum".into());
         }
         wire.s = float_wire(size)?;
         let WireType::Trigger { trigger } = &mut wire.t else {
