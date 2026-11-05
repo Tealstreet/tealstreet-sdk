@@ -1,7 +1,8 @@
 //! Error reports for a host's telemetry. The native host logs to stderr only;
 //! a host that reports errors elsewhere (the exchange server's Sentry) installs
-//! one sink. Reports carry hosts, routes and codes, never a URL query, token,
-//! credential or payload, and are already rate-limited where they are raised.
+//! one sink. Reports carry hosts, routes and codes only, never error text, a URL
+//! query, token, credential or payload, and are already rate-limited where they
+//! are raised.
 use std::sync::OnceLock;
 
 /// What failed. Each kind is one alertable condition.
@@ -26,7 +27,7 @@ impl ErrorKind {
 }
 
 /// One report. `label` is the account's log label (`user_tag account venue`)
-/// where there is one; `detail` is raw error text and the sink must scrub it.
+/// where there is one.
 pub struct ErrorReport<'a> {
     pub kind: ErrorKind,
     pub label: Option<&'a str>,
@@ -35,7 +36,6 @@ pub struct ErrorReport<'a> {
     /// The engine's error kind and the venue's code, for a start failure.
     pub error_kind: Option<&'a str>,
     pub venue_code: Option<&'a str>,
-    pub detail: &'a str,
 }
 
 static SINK: OnceLock<fn(&ErrorReport<'_>)> = OnceLock::new();

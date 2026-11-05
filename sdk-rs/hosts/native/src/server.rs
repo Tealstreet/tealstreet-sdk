@@ -1015,7 +1015,6 @@ impl<V: Venue, T: Transport> Account<V, T> {
             target: None,
             error_kind: error.kind.map(|kind| kind.as_str()),
             venue_code: error.venue_code.as_deref(),
-            detail: &error.message,
         });
     }
 

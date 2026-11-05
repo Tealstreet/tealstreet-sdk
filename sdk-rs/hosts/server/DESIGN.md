@@ -93,7 +93,9 @@ from `TEALSTREET_BOX`; missing or invalid labels are omitted. Events omit
 the box location. The SDK infers no host, release or environment.
 
 What it captures:
-- panics, through the panic hook;
+- panics, through a panic hook that captures without flushing (a caught panic
+  on an engine thread never waits on Sentry), sending the code location and
+  never the payload;
 - `Log::error` conditions: drain and break-glass deadlines, router-lease
   fencing, a failing signer, and algo shutdown deadlines;
 - the native host's account start failures and venue, relay and HTTP-tunnel
@@ -102,7 +104,9 @@ What it captures:
 Warnings are not sent.
 
 Every event is rebuilt from an allowlist:
-- a scrubbed message or exception;
+- a fixed summary per condition, never error text or a venue payload;
+- a scrubbed fingerprint and exception type;
+- stack frames' function, module, file, line and column only;
 - tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue` and
   `target`;
 - extras `user_tag` (a hash, never the user ID) and
@@ -110,9 +114,10 @@ Every event is rebuilt from an allowlist:
 
 Account names, URLs with their query, auth headers, key-shaped strings and
 payloads do not leave. Events are throttled to one per fingerprint per 60 s
-and 30 per minute overall. They are sent from Sentry's transport thread through
-a bounded queue that drops when full, so telemetry never blocks or fails a
-trading path.
+and 30 per minute overall, tracking at most 500 fingerprints. They are sent
+from Sentry's transport thread through a bounded queue that drops when full.
+The only flush is the guard's at shutdown, bounded to 2 s, so telemetry never
+blocks or fails a trading path.
 
 ## HTTP routes
 
@@ -671,7 +676,7 @@ default exactly where the TS server reads it.
 
 Dependencies: `axum` (with `ws`), `tokio`, `jsonwebtoken`, `base64`, `serde_json`,
 `safe-cex-native` and `sentry`. `sentry` runs without default features: only
-the panic integration and the reqwest transport, over the rustls/ring stack the
+its panic event builder and the reqwest transport, over the rustls/ring stack the
 server already links. There is no native-tls, no host contexts and no sessions.
 
 ## Algos (claude-tbz5hr chaser, 55ao7t TWAP, zs5e83 exec)

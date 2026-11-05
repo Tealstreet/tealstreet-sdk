@@ -348,14 +348,13 @@ fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) -> bool {
 }
 
 /// A transport failure the journal just logged, for the host's error sink.
-fn report_failure(kind: crate::report::ErrorKind, target: &str, error: &str) {
+fn report_failure(kind: crate::report::ErrorKind, target: &str) {
     crate::report::report(&crate::report::ErrorReport {
         kind,
         label: None,
         target: Some(target),
         error_kind: None,
         venue_code: None,
-        detail: error,
     });
 }
 
@@ -369,11 +368,7 @@ pub(crate) fn host_of(url: &str) -> String {
 
 pub(crate) fn log_open_failure(url: &str, error: &str) {
     if log_failure(|failures| failures.note(url, error, std::time::Instant::now())) {
-        report_failure(
-            crate::report::ErrorKind::SocketOpenFailed,
-            &host_of(url),
-            error,
-        );
+        report_failure(crate::report::ErrorKind::SocketOpenFailed, &host_of(url));
     }
 }
 
@@ -382,7 +377,7 @@ pub(crate) fn log_request_failure(route: &str, error: &str, elapsed: Duration) {
     if log_failure(|failures| {
         failures.note_request(route, error, elapsed, std::time::Instant::now())
     }) {
-        report_failure(crate::report::ErrorKind::RequestFailed, route, error);
+        report_failure(crate::report::ErrorKind::RequestFailed, route);
     }
 }
 
@@ -889,14 +884,13 @@ mod security_tests {
         assert_eq!(decode_message(b"valid text").unwrap(), "valid text");
     }
 
-    static REPORTED: std::sync::Mutex<Vec<(&'static str, String, String)>> =
+    static REPORTED: std::sync::Mutex<Vec<(&'static str, String)>> =
         std::sync::Mutex::new(Vec::new());
 
     fn record(report: &crate::report::ErrorReport<'_>) {
         REPORTED.lock().unwrap().push((
             report.kind.as_str(),
             report.target.unwrap_or_default().to_owned(),
-            report.detail.to_owned(),
         ));
     }
 
@@ -911,7 +905,7 @@ mod security_tests {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, target, _)| target.starts_with("sink-test.example"))
+            .filter(|(_, target)| target.starts_with("sink-test.example"))
             .cloned()
             .collect();
         assert_eq!(
@@ -919,13 +913,11 @@ mod security_tests {
             [
                 (
                     "transport.socket_open_failed",
-                    "sink-test.example".to_owned(),
-                    "refused".to_owned()
+                    "sink-test.example".to_owned()
                 ),
                 (
                     "transport.request_failed",
-                    "sink-test.example via HTTP tunnel".to_owned(),
-                    "reset".to_owned()
+                    "sink-test.example via HTTP tunnel".to_owned()
                 ),
             ]
         );

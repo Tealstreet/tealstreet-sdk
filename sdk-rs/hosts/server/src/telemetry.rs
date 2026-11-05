@@ -6,13 +6,14 @@
 //! environment.
 //!
 //! This process holds users' exchange credentials, so every event is rebuilt
-//! from an allowlist in `before_send`: a scrubbed message or exception, a
-//! fingerprint, and the tags and extras named below. Nothing else (request
-//! data, user, contexts, breadcrumbs) leaves. Events are throttled per
-//! fingerprint and globally, and sent from Sentry's own transport thread
-//! through a bounded queue that drops when full, so a failure storm can never
-//! slow a trading path.
-use sentry::protocol::{Event, Exception, Level, Value, Values};
+//! from an allowlist in `before_send`: fixed summaries (never error text or a
+//! panic payload), a fingerprint, stack frames' code locations, and the tags
+//! and extras named below. Nothing else (request data, user, contexts,
+//! breadcrumbs, frame variables) leaves. Events are throttled per fingerprint
+//! and globally, and sent from Sentry's own transport thread through a bounded
+//! queue that drops when full; nothing flushes inline, so a failure storm or a
+//! stalled Sentry can never slow a trading path.
+use sentry::protocol::{Event, Exception, Frame, Level, Mechanism, Stacktrace, Value, Values};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -93,6 +94,7 @@ impl Throttle {
         if minute.1 >= GLOBAL_PER_MINUTE {
             // Counted against its key, so the next event that goes reports it.
             self.keys.entry(key.to_owned()).or_insert((now, 0)).1 += 1;
+            self.prune(now);
             return None;
         }
         minute.1 += 1;
@@ -207,58 +209,61 @@ fn strip_query(text: &str) -> String {
     out
 }
 
-/// A credential named by its key (`api_key=…`, `"secret": "…"`,
-/// `Authorization: Bearer …`) loses its value.
+fn word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '_' | '-')
+}
+
+/// A value runs to whitespace or a delimiter.
+fn value_len(text: &str) -> usize {
+    text.find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '&' | ',' | ';' | '}'))
+        .unwrap_or(text.len())
+}
+
+fn blank_len(text: &str) -> usize {
+    text.find(|c: char| !matches!(c, ' ' | '\t'))
+        .unwrap_or(text.len())
+}
+
+/// A credential named by its key (`api_key = …`, `"secret": "…"`,
+/// `Authorization:\tBearer …`) loses its value. Quotes, spaces and tabs may
+/// surround the `=` or `:`; an auth scheme word needs no separator.
 fn redact_named(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut chars = text.char_indices().peekable();
-    let mut word = String::new();
-    while let Some((_, c)) = chars.next() {
-        out.push(c);
-        if c.is_ascii_alphanumeric() || matches!(c, '_' | '-') {
-            word.push(c);
+    let mut rest = text;
+    while let Some(start) = rest.find(word_char) {
+        let end = rest[start..]
+            .find(|c: char| !word_char(c))
+            .map_or(rest.len(), |len| start + len);
+        out.push_str(&rest[..end]);
+        let named = sensitive_key(&rest[start..end]);
+        rest = &rest[end..];
+        if !named {
             continue;
         }
-        let named = sensitive_key(&word);
-        word.clear();
-        if !named || !matches!(c, '=' | ':' | '"') {
+        let gap = rest
+            .find(|c: char| !matches!(c, '=' | ':' | '"' | '\'' | ' ' | '\t'))
+            .unwrap_or(rest.len());
+        let after = &rest[gap..];
+        let scheme_len = value_len(after);
+        let scheme =
+            ["bearer", "basic"].contains(&after[..scheme_len].to_ascii_lowercase().as_str());
+        if !scheme && !rest[..gap].contains(['=', ':']) {
             continue;
         }
-        // Past the separator, quotes and spaces, and an auth scheme word.
-        while let Some(&(_, next)) = chars.peek() {
-            if matches!(next, '=' | ':' | '"' | '\'' | ' ') {
-                out.push(next);
-                chars.next();
-            } else {
-                break;
-            }
-        }
-        let value: String = chars
-            .clone()
-            .map(|(_, c)| c)
-            .take_while(|c| !c.is_whitespace() && !matches!(c, '"' | '\'' | '&' | ',' | ';' | '}'))
-            .collect();
-        let scheme = ["bearer", "basic"].contains(&value.to_ascii_lowercase().as_str());
-        let mut skip = value.chars().count();
+        out.push_str(&rest[..gap]);
+        rest = after;
         if scheme {
-            out.push_str(&value);
-            out.push(' ');
-            skip += 1;
-            let token: String = chars
-                .clone()
-                .skip(skip)
-                .map(|(_, c)| c)
-                .take_while(|c| !c.is_whitespace() && !matches!(c, '"' | '\'' | ',' | ';'))
-                .collect();
-            skip += token.chars().count();
+            let spaced = scheme_len + blank_len(&rest[scheme_len..]);
+            out.push_str(&rest[..spaced]);
+            rest = &rest[spaced..];
         }
-        if skip > 0 {
-            for _ in 0..skip {
-                chars.next();
-            }
+        let value = value_len(rest);
+        if value > 0 {
             out.push_str("[redacted]");
+            rest = &rest[value..];
         }
     }
+    out.push_str(rest);
     out
 }
 
@@ -320,20 +325,29 @@ fn allowlisted(event: Event<'static>, identity: &Identity, suppressed: u32) -> E
             .values
             .into_iter()
             .map(|exception| Exception {
-                ty: exception.ty,
+                ty: scrub(&exception.ty),
                 value: exception.value.as_deref().map(scrub),
-                stacktrace: exception.stacktrace,
-                mechanism: exception.mechanism,
+                stacktrace: exception.stacktrace.map(code_locations),
+                mechanism: exception.mechanism.map(|mechanism| Mechanism {
+                    ty: scrub(&mechanism.ty),
+                    handled: mechanism.handled,
+                    ..Default::default()
+                }),
                 ..Default::default()
             })
             .collect::<Vec<_>>(),
     );
+    let fingerprint: Vec<_> = event
+        .fingerprint
+        .iter()
+        .map(|part| scrub(part).chars().take(200).collect::<String>().into())
+        .collect();
     Event {
         event_id: event.event_id,
         timestamp: event.timestamp,
         level: event.level,
         platform: event.platform,
-        fingerprint: event.fingerprint,
+        fingerprint: fingerprint.into(),
         message: event.message.as_deref().map(scrub),
         exception,
         tags,
@@ -342,6 +356,63 @@ fn allowlisted(event: Event<'static>, identity: &Identity, suppressed: u32) -> E
         server_name: identity.box_label.clone().map(Into::into),
         ..Default::default()
     }
+}
+
+/// A stack trace's code locations only: no variables, source context,
+/// registers or addresses.
+fn code_locations(stacktrace: Stacktrace) -> Stacktrace {
+    Stacktrace {
+        frames: stacktrace
+            .frames
+            .into_iter()
+            .map(|frame| Frame {
+                function: frame.function,
+                module: frame.module,
+                filename: frame.filename,
+                lineno: frame.lineno,
+                colno: frame.colno,
+                in_app: frame.in_app,
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
+/// Captures a panic without flushing: the panicking thread may be an engine
+/// thread every account on it waits for, so delivery stays on the transport
+/// thread. The payload can carry a venue body or user ID; only its location leaves.
+struct PanicCapture;
+
+impl sentry::Integration for PanicCapture {
+    fn name(&self) -> &'static str {
+        "panic-capture"
+    }
+
+    fn setup(&self, _: &mut sentry::ClientOptions) {
+        static HOOK: std::sync::Once = std::sync::Once::new();
+        HOOK.call_once(|| {
+            let next = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                sentry::Hub::with_active(|hub| hub.capture_event(panic_event(info)));
+                next(info);
+            }));
+        });
+    }
+}
+
+fn panic_event(info: &std::panic::PanicHookInfo<'_>) -> Event<'static> {
+    let location = info
+        .location()
+        .map(|at| format!("{}:{}", at.file(), at.line()))
+        .unwrap_or_default();
+    let mut event =
+        sentry::integrations::panic::PanicIntegration::new().event_from_panic_info(info);
+    for exception in &mut event.exception.values {
+        exception.value = Some(format!("panic at {location}"));
+    }
+    event.fingerprint = vec!["panic".into(), location.into()].into();
+    event
 }
 
 /// The throttle key: an explicit fingerprint, else the exception (a panic) or message.
@@ -362,7 +433,7 @@ fn throttle_key(event: &Event<'static>) -> String {
 }
 
 /// Client options for `dsn`: no default integrations (no host contexts,
-/// breadcrumbs or stack attachment), the panic hook, and the allowlist.
+/// breadcrumbs or stack attachment), the non-flushing panic hook, and the allowlist.
 pub fn client_options(dsn: &str, identity: Identity) -> Option<sentry::ClientOptions> {
     let dsn = dsn.trim().parse().ok()?;
     let throttle = Arc::new(Mutex::new(Throttle::default()));
@@ -372,9 +443,7 @@ pub fn client_options(dsn: &str, identity: Identity) -> Option<sentry::ClientOpt
     options.release = identity.release.clone().map(Into::into);
     options.server_name = identity.box_label.clone().map(Into::into);
     options.default_integrations = false;
-    options.integrations = vec![Arc::new(
-        sentry::integrations::panic::PanicIntegration::default(),
-    )];
+    options.integrations = vec![Arc::new(PanicCapture)];
     options.send_default_pii = false;
     options.attach_stacktrace = false;
     options.max_breadcrumbs = 0;
@@ -391,7 +460,7 @@ pub fn client_options(dsn: &str, identity: Identity) -> Option<sentry::ClientOpt
 
 /// Starts capture when `EXCHANGE_SERVER_SENTRY_DSN` is set; otherwise None and
 /// every capture is a no-op. Keep the guard for the process's life: dropping it
-/// flushes for up to two seconds.
+/// at shutdown is the only flush, bounded to two seconds.
 pub fn init_from_env() -> Option<sentry::ClientInitGuard> {
     let dsn = std::env::var("EXCHANGE_SERVER_SENTRY_DSN")
         .ok()
@@ -410,7 +479,7 @@ pub fn init_from_env() -> Option<sentry::ClientInitGuard> {
 }
 
 /// One error condition for Sentry. `summary` is fixed text: never an account
-/// name, URL or venue payload (those go in the journal line only).
+/// name, URL, error text or venue payload (those go in the journal line only).
 #[derive(Default)]
 pub struct Report<'a> {
     pub kind: &'static str,
@@ -420,8 +489,6 @@ pub struct Report<'a> {
     pub target: Option<&'a str>,
     pub error_kind: Option<&'a str>,
     pub venue_code: Option<&'a str>,
-    /// Raw error text; scrubbed before it leaves.
-    pub detail: Option<&'a str>,
 }
 
 impl Report<'_> {
@@ -442,10 +509,6 @@ impl Report<'_> {
         if let Some(user_tag) = &self.user_tag {
             extra.insert("user_tag".to_owned(), Value::String(user_tag.clone()));
         }
-        let message = match self.detail {
-            Some(detail) => format!("{}: {detail}", self.summary),
-            None => self.summary.to_owned(),
-        };
         // One issue per condition and target, not per venue message.
         let fingerprint: Vec<String> = [Some(self.kind), self.target, self.error_kind]
             .into_iter()
@@ -454,7 +517,7 @@ impl Report<'_> {
             .collect();
         Event {
             level: Level::Error,
-            message: Some(message),
+            message: Some(self.summary.to_owned()),
             fingerprint: fingerprint
                 .into_iter()
                 .map(Into::into)
@@ -496,7 +559,6 @@ fn native_report(report: &safe_cex_native::report::ErrorReport<'_>) {
         target: report.target,
         error_kind: report.error_kind,
         venue_code: report.venue_code,
-        detail: Some(report.detail),
     });
 }
 
@@ -621,6 +683,16 @@ mod tests {
             scrub("api_key=abc123 passphrase: p"),
             "api_key=[redacted] passphrase: [redacted]"
         );
+        assert_eq!(scrub("api_key = shortkey"), "api_key = [redacted]");
+        assert_eq!(
+            scrub("Authorization:\tBearer shortkey"),
+            "Authorization:\tBearer [redacted]"
+        );
+        assert_eq!(
+            scrub("authorization\tBasic shortkey"),
+            "authorization\tBasic [redacted]"
+        );
+        assert_eq!(scrub("token refused"), "token refused");
         assert_eq!(
             scrub("key 0123456789abcdef0123456789abcdef0123 refused"),
             "key [redacted] refused"
@@ -648,9 +720,32 @@ mod tests {
                 kind: "account.start_failed",
                 summary: "account start failed",
                 user_tag: Some("a1b2c3d4e5f6".into()),
-                detail: Some("POST https://api.okx.com/x?sig=S failed: secret=s3cr3t"),
                 ..Default::default()
             });
+            event.message = Some("POST https://api.okx.com/x?sig=S failed: secret=s3cr3t".into());
+            event.fingerprint = vec!["api_key=fingerprint-key".into()].into();
+            let mut frame = Frame {
+                function: Some("engine::step".into()),
+                lineno: Some(7),
+                ..Default::default()
+            };
+            frame.vars.insert("secret".into(), "local-key".into());
+            frame.context_line = Some("let key = \"local-key\";".into());
+            event.exception = vec![Exception {
+                ty: "panic".into(),
+                stacktrace: Some(Stacktrace {
+                    frames: vec![frame],
+                    ..Default::default()
+                }),
+                mechanism: Some(Mechanism {
+                    ty: "panic".into(),
+                    description: Some("api_key=k".into()),
+                    data: [("body".to_owned(), "{}".into())].into_iter().collect(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]
+            .into();
             event.tags.insert("account".into(), "Main account".into());
             event
                 .extra
@@ -668,14 +763,32 @@ mod tests {
         let event = &events[0];
         assert_eq!(
             event.message.as_deref(),
-            Some(
-                "account start failed: POST https://api.okx.com/x?[redacted] failed: secret=[redacted]"
-            )
+            Some("POST https://api.okx.com/x?[redacted] failed: secret=[redacted]")
         );
         assert!(!event.tags.contains_key("account"));
         assert_eq!(event.extra.keys().collect::<Vec<_>>(), ["user_tag"]);
         assert!(event.user.is_none() && event.request.is_none());
-        assert_eq!(event.fingerprint.as_ref(), ["account.start_failed"]);
+        assert_eq!(event.fingerprint.as_ref(), ["api_key=[redacted]"]);
+        let exception = &event.exception.values[0];
+        let frame = &exception.stacktrace.as_ref().unwrap().frames[0];
+        assert_eq!(frame.function.as_deref(), Some("engine::step"));
+        assert_eq!(frame.lineno, Some(7));
+        assert!(frame.vars.is_empty() && frame.context_line.is_none());
+        let mechanism = exception.mechanism.as_ref().unwrap();
+        assert!(mechanism.description.is_none() && mechanism.data.is_empty());
+    }
+
+    #[test]
+    fn a_report_carries_its_summary_never_error_text() {
+        let event = report_event(&Report {
+            kind: "account.start_failed",
+            summary: "account start failed",
+            error_kind: Some("auth"),
+            venue_code: Some("10003"),
+            ..Default::default()
+        });
+        assert_eq!(event.message.as_deref(), Some("account start failed"));
+        assert_eq!(event.fingerprint.as_ref(), ["account.start_failed", "auth"]);
     }
 
     #[test]
@@ -698,6 +811,13 @@ mod tests {
             Some(1)
         );
 
+        // A storm of distinct fingerprints past the global limit stays bounded.
+        let mut throttle = Throttle::default();
+        for i in 0..2_000 {
+            let _ = throttle.claim(&format!("condition-{i}"), start);
+        }
+        assert!(throttle.keys.len() <= MAX_TRACKED_KEYS);
+
         // Through the client: a repeat inside the window never reaches the transport.
         let events = captured(Identity::default(), || {
             for _ in 0..5 {
@@ -712,19 +832,48 @@ mod tests {
     }
 
     #[test]
-    fn a_panic_is_captured_scrubbed() {
+    fn a_panic_sends_its_location_never_its_payload() {
         let events = captured(Identity::default(), || {
             let result = std::panic::catch_unwind(|| {
-                panic!("venue refused secret=hunter2 at https://api.x.com/a?sign=s");
+                panic!(
+                    r#"request body: {{"userId":"auth0|user","orders":[{{"symbol":"BTCUSDT"}}]}}"#
+                );
             });
             assert!(result.is_err());
         });
         assert_eq!(events.len(), 1, "{events:?}");
         let exception = &events[0].exception.values[0];
-        assert_eq!(
-            exception.value.as_deref(),
-            Some("venue refused secret=[redacted] at https://api.x.com/a?[redacted]")
+        let value = exception.value.as_deref().unwrap();
+        assert!(
+            value.starts_with("panic at ") && value.contains("telemetry.rs:"),
+            "{value}"
         );
+        assert!(!value.contains("auth0") && !value.contains("BTCUSDT"));
+        assert_eq!(events[0].fingerprint[0], "panic");
         assert_eq!(events[0].level, Level::Fatal);
+    }
+
+    #[test]
+    fn a_caught_panic_never_flushes_on_the_panicking_thread() {
+        use std::sync::atomic::AtomicUsize;
+        static FLUSHES: AtomicUsize = AtomicUsize::new(0);
+        struct StalledTransport;
+        impl sentry::Transport for StalledTransport {
+            fn send_envelope(&self, _: sentry::Envelope) {}
+            fn flush(&self, _: Duration) -> bool {
+                FLUSHES.fetch_add(1, Ordering::SeqCst);
+                false
+            }
+        }
+        let mut options = client_options(DSN, Identity::default()).unwrap();
+        options.transport = Some(Arc::new(Arc::new(StalledTransport)));
+        let hub = Arc::new(sentry::Hub::new(
+            Some(Arc::new(sentry::Client::from(options))),
+            Arc::new(Default::default()),
+        ));
+        sentry::Hub::run(hub, || {
+            let _ = std::panic::catch_unwind(|| panic!("caught on an engine thread"));
+        });
+        assert_eq!(FLUSHES.load(Ordering::SeqCst), 0);
     }
 }
