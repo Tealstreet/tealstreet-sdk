@@ -165,6 +165,81 @@ fn an_ingested_order_cancels_in_exactly_one_request() {
     );
 }
 
+fn source_refreshes(h: &Harness) -> Vec<&safe_cex_engine::LogEvent> {
+    h.notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event) if event.code == "orders.refresh" => Some(event),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_unknown_plain_cancel_asks_its_source_once_without_a_placement_fence() {
+    for level in [safe_cex_engine::Level::Info, safe_cex_engine::Level::Error] {
+        let mut h = frame_fed();
+        load(&mut h);
+        h.engine.set_log_level(level);
+        h.engine.apply_frame(h.now, &source_frame(), true).unwrap();
+        h.collect();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["server-order".into()],
+        });
+        let request = h.take("/v5/order/cancel");
+        h.event(safe_cex_engine::Event::HttpFailed {
+            request: request.id,
+            error: "cancel response lost",
+        });
+        assert_eq!(h.unknown, [1]);
+        assert_eq!(
+            source_refreshes(&h).len(),
+            1,
+            "no placement fence is needed"
+        );
+        assert!(source_refreshes(&h)[0].fields.iter().any(|(key, value)| {
+            // Bybit holds no mutation lock scope: conservatively ask for the account.
+            *key == "symbols" && matches!(value, safe_cex_engine::Value::Str(s) if s.is_empty())
+        }));
+        assert_eq!(
+            h.engine.store().order("server-order").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+        h.advance(120_000.);
+        assert_eq!(source_refreshes(&h).len(), 1, "no automatic ask loop");
+        assert!(h.requests.is_empty(), "no cancel replay or page-side read");
+        h.command(Command::PlaceOrders {
+            command: 2,
+            orders: vec![support::order()],
+        });
+        assert!(
+            h.has_request("/v5/order/create"),
+            "plain cancel creates no placement fence"
+        );
+    }
+}
+
+#[test]
+fn a_confirmed_or_rejected_cancel_does_not_request_an_unknown_cancel_refresh() {
+    for body in [
+        r#"{"retCode":0,"result":{},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+        r#"{"retCode":10001,"retMsg":"invalid argument","result":{}}"#,
+    ] {
+        let mut h = frame_fed();
+        load(&mut h);
+        h.engine.apply_frame(h.now, &source_frame(), true).unwrap();
+        h.collect();
+        h.command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["server-order".into()],
+        });
+        h.respond("/v5/order/cancel", 200, body);
+        assert!(h.unknown.is_empty(), "{body}: {:?}", h.outcomes);
+        assert!(source_refreshes(&h).is_empty(), "{body}");
+    }
+}
+
 #[test]
 fn an_unknown_placement_is_never_re_sent() {
     let mut h = frame_fed();

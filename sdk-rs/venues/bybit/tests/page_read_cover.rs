@@ -68,6 +68,21 @@ fn snapshot(source: &mut Harness, bit: bool) -> Vec<u8> {
 /// A loaded frame-fed page on the source's clock (offset measured as zero),
 /// with one lost BTCUSDT placement fencing it.
 fn fenced_page(source: &mut Harness, bit: bool) -> Harness {
+    let mut page = page(source, bit);
+    page.command(Command::PlaceOrders {
+        command: 1,
+        orders: vec![support::order()],
+    });
+    let request = page.take("/v5/order/create");
+    page.event(Event::HttpFailed {
+        request: request.id,
+        error: "connection reset",
+    });
+    assert_eq!(page.unknown, vec![1]);
+    page
+}
+
+fn page(source: &mut Harness, bit: bool) -> Harness {
     let mut engine = support::engine(Options {
         key: Some("fixture-public".into()),
         secret: Some("fixture-provider".into()),
@@ -81,17 +96,88 @@ fn fenced_page(source: &mut Harness, bit: bool) -> Harness {
     let first = snapshot(source, bit);
     page.engine.apply_frame(page.now, &first, true).unwrap();
     page.collect();
-    page.command(Command::PlaceOrders {
-        command: 1,
-        orders: vec![support::order()],
-    });
-    let request = page.take("/v5/order/create");
-    page.event(Event::HttpFailed {
-        request: request.id,
-        error: "connection reset",
-    });
-    assert_eq!(page.unknown, vec![1]);
     page
+}
+
+#[test]
+fn an_unknown_page_cancel_owes_one_successor_behind_a_pre_cancel_source_read() {
+    let mut source = source();
+    let old: Vec<_> = source
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert!(!old.is_empty());
+    let mut page = page(&mut source, true);
+    source.advance(100.);
+    page.advance(100.);
+    page.command(Command::CancelOrdersWithSymbols {
+        command: 7,
+        orders: vec![safe_cex_engine::model::CancelOrderRef {
+            id: "native-stop".into(),
+            symbol: "BTCUSDT".into(),
+        }],
+    });
+    let cancel = page.take("/v5/order/cancel");
+    page.event(Event::HttpFailed {
+        request: cancel.id,
+        error: "cancel response lost",
+    });
+    assert_eq!(page.unknown, [7]);
+    let asks: Vec<_> = page
+        .notices
+        .iter()
+        .filter_map(|n| match n {
+            safe_cex_engine::Notice::Event(e) if e.code == "orders.refresh" => Some(e),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asks.len(), 1);
+    assert!(asks[0].fields.iter().any(
+        |(k, v)| *k == "symbols" && matches!(v, safe_cex_engine::Value::Str(s) if s.is_empty())
+    ));
+    source.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    });
+    let out: Vec<_> = source
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(out, old, "the ask joins the old read without replacing it");
+    for id in &old {
+        source.requests.retain(|r| r.id != *id);
+        source.reply(*id, 200, EMPTY_LIST);
+    }
+    let fresh: Vec<_> = source
+        .requests
+        .iter()
+        .filter(|r| r.url.contains("/v5/order/realtime"))
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(fresh.len(), old.len(), "one owed successor batch");
+    assert!(fresh.iter().all(|id| !old.contains(id)));
+    answer_account(&mut source);
+    assert!(
+        !source.has_request("/v5/order/realtime"),
+        "clean successor ends the demand"
+    );
+    page.engine
+        .apply_frame(page.now, &snapshot(&mut source, true), false)
+        .unwrap();
+    page.collect();
+    assert_eq!(
+        page.unknown,
+        [7],
+        "a read never rewrites the original cancel result"
+    );
+    assert!(
+        page.requests.is_empty(),
+        "no cancel replay or page-side read"
+    );
 }
 
 /// Ingest the source's snapshot, then try a placement: true when it went out.

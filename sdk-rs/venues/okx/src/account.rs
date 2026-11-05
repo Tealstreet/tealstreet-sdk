@@ -253,6 +253,7 @@ pub struct AccountState {
     read_again: bool,
     generation: u64,
     orders_in_flight: bool,
+    source_orders_owed: bool,
     orders_generation: u64,
     risk: HashMap<String, RiskValues>,
     order_leverage: HashMap<String, (f64, String)>,
@@ -291,6 +292,10 @@ impl Okx {
     pub(crate) fn account_after_uncertain_write(&mut self, cx: &mut Cx<'_, Pending>) {
         // A frame-fed engine's data source reports the outcome in its frames.
         if cx.frame_fed() {
+            return;
+        }
+        if cx.orders_refresh_pending() && self.account.orders_in_flight {
+            self.account.source_orders_owed = true;
             return;
         }
         // A backoff re-ask joins any running read: the seal's own ask already
@@ -479,6 +484,7 @@ impl Okx {
         if self.account.orders_in_flight {
             return;
         }
+        self.account.source_orders_owed = false;
         self.account.orders_in_flight = true;
         self.account.orders_generation += 1;
         self.account.census_unproven.clear();
@@ -1543,6 +1549,12 @@ impl Okx {
         {
             self.account.read_again = false;
             self.account_refresh(cx);
+        }
+        if self.account.source_orders_owed
+            && !self.account.orders_in_flight
+            && self.account.retry.is_none()
+        {
+            self.census(cx);
         }
         self.read_fresh_positions_again(cx);
     }

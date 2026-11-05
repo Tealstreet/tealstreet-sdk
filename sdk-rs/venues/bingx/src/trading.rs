@@ -116,6 +116,7 @@ struct Step {
 struct Job {
     steps: VecDeque<Step>,
     continue_on_error: bool,
+    sets_both_hedged_sides: bool,
     // A trigger move cancels before placing; a failed placement must say so.
     replaces_cancelled: Option<(String, OrderSide, OrderType)>,
     // A limit's cancelReplace may cancel and then refuse the placement.
@@ -131,8 +132,19 @@ struct Run {
     native_ids: Vec<String>,
     error: Option<VenueError>,
 }
-/// What a failed placement leaves the user's position without, if anything.
-fn protection_note(run: &Run, request: &Request, may_be_live: bool) -> Option<String> {
+/// Earlier writes that a later failure cannot roll back.
+fn partial_failure_note(run: &Run, request: &Request, may_be_live: bool) -> Option<String> {
+    if run.job.sets_both_hedged_sides
+        && let Call::Leverage {
+            symbol,
+            side: Some(PositionSide::Short),
+            ..
+        } = &request.call
+    {
+        return Some(format!(
+            "LONG leverage was updated for {symbol}, but SHORT leverage update was not confirmed"
+        ));
+    }
     if !request.places_order() {
         return None;
     }
@@ -694,7 +706,7 @@ impl Trading {
             return;
         };
         // A transport loss arrives here too; only a call never sent is certainly not live.
-        let note = protection_note(run, &request, error.outcome != Some(Outcome::NotSent));
+        let note = partial_failure_note(run, &request, error.outcome != Some(Outcome::NotSent));
         let _ = run.error.get_or_insert(error.clone());
         if run.job.continue_on_error
             && cx
@@ -818,7 +830,7 @@ impl Trading {
             if let Some(note) = self
                 .jobs
                 .get(&request.command)
-                .and_then(|run| protection_note(run, &request, !venue_refused))
+                .and_then(|run| partial_failure_note(run, &request, !venue_refused))
             {
                 message = format!("{note}: {message}");
             }
@@ -1492,15 +1504,11 @@ impl Trading {
             return Err("Market leverage limits are invalid".into());
         }
         let leverage = input.clamp(market.limits.leverage.min, market.limits.leverage.max);
-        let side = if cx.store.hedged() {
-            Some(side.ok_or("Side is required when position mode is hedged")?)
-        } else {
-            None
-        };
-        Ok(one(
-            Method::Post,
-            crate::paths::LEVERAGE,
-            Params::new()
+        let step = |side| Step {
+            receipts: Vec::new(),
+            method: Method::Post,
+            path: crate::paths::LEVERAGE,
+            params: Params::new()
                 .str("symbol", &market.id)
                 .str(
                     "side",
@@ -1511,12 +1519,22 @@ impl Trading {
                     },
                 )
                 .num("leverage", leverage),
-            Call::Leverage {
+            call: Call::Leverage {
                 symbol: symbol.into(),
                 leverage,
                 side,
             },
-        ))
+        };
+        let mut job = Job::default();
+        if cx.store.hedged() && side.is_none() {
+            job.sets_both_hedged_sides = true;
+            job.steps.push_back(step(Some(PositionSide::Long)));
+            job.steps.push_back(step(Some(PositionSide::Short)));
+        } else {
+            job.steps
+                .push_back(step(if cx.store.hedged() { side } else { None }));
+        }
+        Ok(job)
     }
     fn margin(&self, cx: &Cx<'_, Pending>, symbol: &str, isolated: bool) -> Result<Job, String> {
         let market = cx.store.market(symbol).ok_or("Market not found")?;

@@ -25,8 +25,8 @@ const EXCLUDED = new Set([
 ]);
 
 // Harness files that decide whether to publish, or measure, but never shape what is built: a
-// change to one must not force a cut. beta-wasm-inputs.test.mjs proves that no build, loader or
-// release-test script imports any of them.
+// change to one must not force a cut. Tests prove no build, loader or shipped host imports
+// them; release-only size checks may still use the budget.
 export const HARNESS_NOT_BUILT = Object.freeze([
   /^sdk-rs\/harness\/[^/]+\.test\.mjs$/,
   /^sdk-rs\/harness\/beta-wasm-release-guard\.mjs$/,
@@ -34,6 +34,7 @@ export const HARNESS_NOT_BUILT = Object.freeze([
   /^sdk-rs\/harness\/cpu-[^/]+\.mjs$/,
   /^sdk-rs\/harness\/bitget-paired-[^/]+\.mjs$/,
   /^sdk-rs\/harness\/family-measure\.mjs$/,
+  /^sdk-rs\/harness\/wasm-budget\.mjs$/,
 ]);
 const notBuilt = (rel) => HARNESS_NOT_BUILT.some((pattern) => pattern.test(rel));
 
