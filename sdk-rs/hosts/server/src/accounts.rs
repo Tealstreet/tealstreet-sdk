@@ -57,6 +57,8 @@ pub struct Account {
     pub name: String,
     pub venue: String,
     pub handle: AccountHandle,
+    /// Set only before disposal for an operator-planned move.
+    moving: AtomicBool,
     /// Present for every private account; public-only accounts have no signer.
     pub link: Option<Arc<SignerLink>>,
     pub token: ProxyToken,
@@ -182,6 +184,8 @@ pub enum Disposal {
     JoinFailed,
     /// Its last socket closed without resuming.
     SocketClosed,
+    /// Its last socket deliberately moved under an active drain.
+    Moving,
 }
 
 impl Disposal {
@@ -196,6 +200,7 @@ impl Disposal {
             Self::Orphaned => "orphaned",
             Self::JoinFailed => "join_failed",
             Self::SocketClosed => "socket_closed",
+            Self::Moving => "moving",
         }
     }
 
@@ -241,6 +246,10 @@ impl Holders {
 }
 
 impl Account {
+    pub(crate) fn moving(&self) -> bool {
+        self.moving.load(Ordering::Acquire)
+    }
+
     pub fn is_public(&self) -> bool {
         self.link.is_none()
     }
@@ -895,6 +904,7 @@ impl Registry {
             Arc::downgrade(&account),
         );
         if self.user_drains.get(user).latched() {
+            account.moving.store(true, Ordering::Release);
             Self::stop(&account, "the user is draining", None);
             return Err("The user is draining; reconnecting".into());
         }
@@ -1044,6 +1054,7 @@ impl Registry {
             name: init.account_name.clone(),
             venue: init.exchange_name.clone(),
             handle,
+            moving: AtomicBool::new(false),
             link,
             token: proxy_token,
             fingerprint,
@@ -1305,6 +1316,9 @@ impl Registry {
         } else {
             stopped
         };
+        if disposal == Disposal::Moving && self.planned_move(&account.user) {
+            account.moving.store(true, Ordering::Release);
+        }
         Self::stop(account, reason, stopped);
     }
 
@@ -1365,6 +1379,14 @@ impl Registry {
         self.stopping.store(false, Ordering::Relaxed);
         self.drain.send_replace(Drain::Off);
         self.user_drains.box_draining(false);
+    }
+
+    pub(crate) fn planned_move(&self, user: &str) -> bool {
+        let entry = self.user_drains.get(user);
+        if entry.forced() || self.drain_state() == Drain::Now {
+            return false;
+        }
+        self.drain_state() == Drain::Waiting || entry.planned_move()
     }
 
     pub fn start_user_drain(&self, user: &str, cap_ms: u64) -> Value {
@@ -1661,6 +1683,7 @@ pub mod testing {
             name: name.into(),
             venue: venue_name.into(),
             handle,
+            moving: AtomicBool::new(false),
             link,
             token: ProxyToken::new(),
             fingerprint,
@@ -1984,6 +2007,28 @@ pub mod testing {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn a_forced_drain_never_becomes_a_quiet_move_even_after_cleanup() {
+        let registry = registry();
+        let status = registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+        let id = status["drainId"].as_str().unwrap();
+        assert!(registry.planned_move("u"));
+        assert!(registry.user_drains.begin_force("u", id).is_some());
+        registry.user_drains.end_force("u", id);
+        assert!(!registry.planned_move("u"));
+        registry.start_drain();
+        assert!(
+            !registry.planned_move("u"),
+            "a box drain cannot hide a forced user stop"
+        );
+        registry.start_user_drain("other", crate::user_drain::DEFAULT_CAP_MS);
+        registry.drain.send_replace(Drain::Now);
+        assert!(
+            !registry.planned_move("other"),
+            "break-glass box drain wins over a user latch"
+        );
+    }
+
     #[test]
     fn a_rebuild_onto_public_data_is_told_apart_from_new_settings() {
         assert_eq!(Disposal::rebuild(false, true), Disposal::PublicData);

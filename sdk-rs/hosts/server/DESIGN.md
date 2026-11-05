@@ -111,6 +111,8 @@ chase or TWAP is cut short. `scripts/roll.sh` runs the whole roll on the box.
   - Each answers `{drain: "off"|"waiting"|"now", algos: {chases, twaps}}`; break-glass adds `settled`.
 - **`/health` while draining:** 503 with `ok:false` and `draining:true`, so the load balancer pool fails over. `algos: {chases, twaps}` counts the chases and TWAPs on this box, parked accounts included. A stopped chase counts until its cleanup ends, since that may still need a signature; a paused TWAP counts too.
 - **The moved close:** `4100` with reason `draining: reconnect`. It means this box is going away and the page should reconnect.
+  - A join/re-snapshot racing an account deliberately stopped for an active drain may send the original `op:error` frame with optional `data[1].reason: "moving"`. This marker requires the account's deliberate-move disposal cause plus an active drain for its user or this box; a latch alone never relabels a crash. Old clients still receive the same first error argument.
+  - Break-glass disposal never marks a planned move; its `forceToast` algo notices are unchanged and still flush before 4100.
 - **While waiting:** a socket whose accounts run no chase or TWAP gets the moved close when the drain starts, and again as each algo ends. A socket with a running algo stays until those algos end. The drain never stops an algo.
   - An `init` from a user with no account on this box gets the moved close. A user already here (a second tab, a resume) is still accepted.
   - A moved socket releases its accounts instead of parking them: its page is reconnecting elsewhere.
