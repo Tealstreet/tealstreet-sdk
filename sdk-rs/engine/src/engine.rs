@@ -4129,6 +4129,18 @@ pub trait Venue {
         HttpRelease::Mutable(|_, _, _| Ok(crate::request_context::Admission::Unscheduled))
     }
 
+    /// Pure veto at a single request's final claim; reads current Store only.
+    /// No I/O, interior mutation or scheduling; Err must name a NotSent cause.
+    /// A refusal follows normal claim cleanup before any physical release.
+    fn http_release_veto(
+        &self,
+        _store: &Store,
+        _pending: &Self::Pending,
+        _release: &crate::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        Ok(())
+    }
+
     /// Explicit pure group admission; the default refuses group support.
     /// Implementations must not mutate state, schedule work or use interior
     /// mutability here. This first contract accepts only Unscheduled.
