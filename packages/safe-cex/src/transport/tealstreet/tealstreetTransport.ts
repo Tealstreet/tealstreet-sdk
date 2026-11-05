@@ -1,5 +1,6 @@
 import type { CreateAxiosDefaults } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../../types';
+import { payloadSignedViaPublicProxy } from '../publicProxyGuard';
 import type { ResolvedRouting, TransportProvider } from '../types';
 
 import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
@@ -9,7 +10,6 @@ import {
   lastProxyKeyFailure,
   ProxyTokenUnavailableError,
 } from '../../accessToken';
-import { resolveLighterDeploymentProfile } from '../../exchanges/lighter/lighter.types';
 import {
   axiosHttpOverWebsocketAdapter,
   bigIntAxiosHttpOverWebsocketAdapter,
@@ -106,17 +106,13 @@ export const getProxyForAxios = (
       : '';
 
 /** Tealstreet's own proxy pools, tradetunnel and Caddy passthroughs. */
-const lighterUsesRestProxy = (exchange: string, options: { testnet?: boolean }): boolean =>
-  (exchange === 'lighter' || exchange === 'lighter-robinhood') &&
-  resolveLighterDeploymentProfile({ exchangeName: exchange, testnet: options.testnet }).usesRestProxy;
-
 export const tealstreetTransport: TransportProvider = {
   name: 'tealstreet',
 
   rest: ({ exchange, options, config, routing, serverHeaders, credentialIntent }) => {
     // Legacy sent all Lighter REST, reads and sendTx, through the public CORS proxy on the
     // profiles marked usesRestProxy, whatever the account's proxy flag; a tunnel already egresses via us.
-    if (lighterUsesRestProxy(exchange, options) && !options.tealstreetTunnel) {
+    if (payloadSignedViaPublicProxy(exchange, options) && !options.tealstreetTunnel) {
       return { baseURL: `${getPublicCorsProxy()}/${config?.baseURL}`, proxied: false, authorize: async () => {} };
     }
     // GRVT and blofin cannot use the tunnel, so a tunnel request for them means the proxy.

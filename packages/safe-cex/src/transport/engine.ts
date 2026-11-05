@@ -36,6 +36,7 @@ import { sharedBinanceCatalogue } from './binanceCatalogue';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { HttpTiming, httpTimingKind, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
+import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
 import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
@@ -143,6 +144,12 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
   coinbase: 'Authorization',
   coinbasespot: 'Authorization',
 };
+
+/** Headers that carry a venue credential: never sent toward the public proxy. */
+const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
+  'authorization',
+  ...Object.values(secondaryReadHeaders).map((name) => name!.toLowerCase()),
+]);
 
 export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: ExchangeName): void => {
   if (
@@ -302,6 +309,9 @@ export const resolveEngineRoutingPlan = (
   const readPlan = options.secondary_key
     ? resolveEngineRoutingPlan(exchange, secondaryReadOptions(options, provider), baseURL)
     : undefined;
+  // A signed read never goes to the public proxy (publicProxyGuard): the native host
+  // gets no read route there, so its secondary reads fail closed before I/O.
+  const readHttp = readPlan && readPlan.http.prefix !== provider.publicCorsProxy() ? readPlan.http : undefined;
   const productRoutes = publicWsRoutes(exchange, options, provider);
   const privateRoutes = privateWsRoutes(routing);
   return {
@@ -317,11 +327,11 @@ export const resolveEngineRoutingPlan = (
           },
         }
       : {}),
-    ...(readPlan
+    ...(readPlan && readHttp
       ? {
           readHeader: secondaryReadHeaders[exchange],
           readPublic: !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange),
-          readHttp: readPlan.http,
+          readHttp,
           ...(exchange === 'binancespot' && { readPublicHttp: readPlan.publicHttp }),
         }
       : {}),
@@ -690,6 +700,16 @@ const httpTransport = (
       if (infoFacts && request.method === 'POST' && original.pathname === '/info')
         infoRead = infoFacts.begin(tunnelAdapter ? 'how' : route.proxied ? 'proxy' : 'direct', deadlineMs);
       const target = route.baseURL ?? request.url;
+      refuseSignedPublicProxy({
+        exchange,
+        publicProxy: provider.publicCorsProxy(),
+        target,
+        url: request.url,
+        headers: request.headers,
+        intent,
+        credentialHeaders: CREDENTIAL_HEADERS,
+        payloadSigned: payloadSignedViaPublicProxy(exchange, options),
+      });
       const prefix = target.endsWith(request.url) ? target.slice(0, -request.url.length) : undefined;
       if (intent !== undefined && prefix === undefined) throw new HttpPreparationError('unsupported');
       const aliases = httpHeaderAliases(exchange, route.proxied, Boolean(tunnelAdapter));
