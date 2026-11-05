@@ -13,6 +13,7 @@ vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 import { BASE_WS_PRIVATE_URL, BASE_WS_PRIVATE_UTA_URL, BASE_WS_URL } from '../exchanges/bitget/bitget.types';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
+import { payloadSignedViaPublicProxy } from './publicProxyGuard';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 import { setWsRelayEnabled } from './tealstreet/wsRelay';
@@ -316,8 +317,9 @@ const buildCase = async (input: Case) => {
   const http = [];
   const keyModes = input.exchange.startsWith('binance') || input.exchange === 'bitunix' ? [false, true] : [false];
   for (const keyed of keyModes) {
-    // An unkeyed Binance-family request is a public read, which carries no signature.
-    const url = `${input.baseURL}/fixture${input.exchange.startsWith('binance') && !keyed ? '' : '?signature=a%2Fb'}`;
+    // Public Binance reads and Lighter's payload-signed protocol have no signature query.
+    const noQuerySignature = (input.exchange.startsWith('binance') && !keyed) || payloadSignedViaPublicProxy(input.exchange, options);
+    const url = `${input.baseURL}/fixture${noQuerySignature ? '' : '?signature=a%2Fb'}`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(keyed ? { [input.exchange === 'bitunix' ? 'api-key' : 'x-mbx-apikey']: options.secondary_key ?? 'fixture-venue-key' } : {}),

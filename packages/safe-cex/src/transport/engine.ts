@@ -720,7 +720,8 @@ const httpTransport = (
     };
     try {
       signal.throwIfAborted();
-      const original = new URL(request.url);
+      const preparedUrl = request.url;
+      const original = new URL(preparedUrl);
       const signed =
         intent !== undefined || orderlyExchanges.has(exchange) || coinbaseExchanges.has(exchange)
           ? { url: request.url, method: request.method, body: request.body, headers: Object.entries(request.headers) }
@@ -733,15 +734,20 @@ const httpTransport = (
       if (infoFacts && request.method === 'POST' && original.pathname === '/info')
         infoRead = infoFacts.begin(tunnelAdapter ? 'how' : route.proxied ? 'proxy' : 'direct', deadlineMs);
       const target = route.baseURL ?? request.url;
+      const publicProxy = provider.publicCorsProxy();
+      const payloadSigned = payloadSignedViaPublicProxy(exchange, options);
+      const testnet = options.testnet;
       refuseSignedPublicProxy({
         exchange,
-        publicProxy: provider.publicCorsProxy(),
+        method: request.method,
+        testnet,
+        publicProxy,
         target,
         url: request.url,
         headers: request.headers,
         intent,
         credentialHeaders: CREDENTIAL_HEADERS,
-        payloadSigned: payloadSignedViaPublicProxy(exchange, options),
+        payloadSigned,
       });
       const prefix = target.endsWith(request.url) ? target.slice(0, -request.url.length) : undefined;
       if (intent !== undefined && prefix === undefined) throw new HttpPreparationError('unsupported');
@@ -924,6 +930,21 @@ const httpTransport = (
             headers.set(name, value);
           }
           const url = intent === undefined ? target : `${prefix}${packet.url}`;
+          beforeRelease(() => refuseSignedPublicProxy({
+            exchange,
+            method: packet.method,
+            testnet,
+            publicProxy,
+            target: url,
+            url: intent === undefined ? preparedUrl : packet.url,
+            headers: packet.headers,
+            intent,
+            credentialHeaders: CREDENTIAL_HEADERS,
+            payloadSigned,
+          }));
+          beforeRelease(() => {
+            if (intent === undefined && packet.url !== preparedUrl) throw new HttpPreparationError('invalid');
+          });
           const finalConfig = { ...config, url, headers, data: packet.body, timeout: remaining(), signal };
           const network: Request = {
             ...packet,
