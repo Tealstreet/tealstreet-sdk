@@ -10,9 +10,11 @@ reused for the account's lifetime.
   under the chart's 60 s hung-history verdict. A stuck request fails visibly
   and `getBars` retries it.
 - **Self-heal:** if a read fails because the source is broken (failed to start,
-  dead engine, disposed, or markets never loaded), the source is disposed. The
-  next read builds a fresh one after a backoff that starts at 2 s and doubles to
-  1 min, so a persistently failing venue is never spun. Reads inside the backoff
+  dead engine, disposed, or still no markets a minute after it was built), the
+  source is disposed. A source whose markets are only slow is kept, so the next
+  read is served by it once they land. After a disposal, a later read builds a
+  fresh source after a backoff that starts at 2 s and doubles to 1 min, so a
+  persistently failing venue is never spun. Reads inside the backoff
   fail at once with "candle source is recovering".
 
 **Why.** A BingX user's charts did not recover after forced resubscribes on two

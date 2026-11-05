@@ -437,6 +437,8 @@ const WORKER_BRIDGE_WAIT_MS = 30_000;
 const WORKER_BRIDGE_POLL_MS = 25;
 /** A page candle read stays well under the chart's 60 s hung-history verdict, end to end. */
 const PAGE_CANDLE_MARKETS_WAIT_MS = 10_000;
+/** A source still without markets this long after construction is stuck, not slow: rebuild it. */
+const PAGE_CANDLE_MARKETS_STUCK_MS = 60_000;
 const PAGE_CANDLE_COMMAND_TIMEOUT_MS = 20_000;
 /** Rebuilding a broken page candle source backs off from 2 s, doubling to a minute. */
 const PAGE_CANDLE_REBUILD_MIN_MS = 2_000;
@@ -3201,13 +3203,20 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private candleSource?: RustEngineExchange;
+  private readonly constructedAt = Date.now();
   private candleSourceRebuilds = 0;
   private candleSourceRebuildAt = 0;
 
-  /** A source that failed to start, died, or never loaded markets cannot serve a later read. */
+  /**
+   * A source that failed to start or died cannot serve a later read; one whose markets are only
+   * slow (a big catalogue, a tunnel round trip, an instruments 429) keeps loading for the next read.
+   */
   private get candleSourceBroken(): boolean {
     return Boolean(
-      this.isDisposed || this.engineFailure || this.startupFailure || !(this.nativeLoaded & LOADED_FLAG.MARKETS),
+      this.isDisposed ||
+        this.engineFailure ||
+        this.startupFailure ||
+        (!(this.nativeLoaded & LOADED_FLAG.MARKETS) && Date.now() - this.constructedAt >= PAGE_CANDLE_MARKETS_STUCK_MS),
     );
   }
 

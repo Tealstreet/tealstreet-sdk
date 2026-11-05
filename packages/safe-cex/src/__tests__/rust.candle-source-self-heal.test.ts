@@ -17,7 +17,7 @@ const candles = [{ timestamp: 1_700_000_000, open: 1, high: 2, low: 1, close: 2,
  * A mirror whose page candle sources are fake engines: `health` decides, per construction,
  * whether the source loads its markets, never does, or fails to start.
  */
-const fixture = (health: Array<'ok' | 'stuck' | 'fails'>) => {
+const fixture = (health: Array<'ok' | 'late' | 'stuck' | 'fails'>) => {
   const built: Array<{ commands: Array<Record<string, unknown>>; freed: ReturnType<typeof vi.fn> }> = [];
   const Constructor = Object.assign(
     function (_venue: string, json: string) {
@@ -26,12 +26,14 @@ const fixture = (health: Array<'ok' | 'stuck' | 'fails'>) => {
       const state = page ? (health[built.length] ?? 'ok') : 'ok';
       const record = { commands: [] as Array<Record<string, unknown>>, freed: vi.fn() };
       if (page) built.push(record);
+      // 'late': the catalogue lands 15 s after start, past the 10 s per-read wait.
+      let landed = state === 'ok';
       const frame = () =>
         new Uint8Array(
           consumerFrame({
             markets: [],
             tickers: [],
-            loaded: { markets: state === 'ok', tickers: state === 'ok', balance: true, orders: true, positions: true },
+            loaded: { markets: landed, tickers: landed, balance: true, orders: true, positions: true },
           }),
         );
       const idle = () => '[]';
@@ -40,9 +42,12 @@ const fixture = (health: Array<'ok' | 'stuck' | 'fails'>) => {
         capabilities: () => engineCapabilities('bybit'),
         start: () => {
           if (state === 'fails') throw new Error('instrument read refused');
+          return state === 'late' ? JSON.stringify([{ op: 'setTimer', timer: 1, at: Date.now() + 15_000 }]) : '[]';
+        },
+        timer: () => {
+          landed = true;
           return '[]';
         },
-        timer: idle,
         wsOpen: idle,
         wsMessage: idle,
         wsClose: idle,
@@ -100,13 +105,32 @@ it('a page candle read is bounded: a short markets wait and a candle command dea
   expect(built[0].commands.find((command) => command.op === 'fetchCandles')).toMatchObject({ timeoutMs: 20_000 });
 });
 
-it('a source whose markets never load fails within 10 s and is rebuilt after a backoff', async () => {
+// #3095 review: a slow catalogue was torn down at every 10 s read and never converged.
+it('a source whose markets land at 15 s serves the next read itself, not a rebuild', async () => {
+  vi.useFakeTimers();
+  const { exchange, built } = fixture(['late']);
+  const first = await settle(exchange.fetchOHLCV(opts), 10_500);
+  expect(first).toMatchObject({
+    error: expect.objectContaining({ message: expect.stringMatching(/Timed out waiting for native markets/) }),
+  });
+  expect(built[0].freed).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(await settle(exchange.fetchOHLCV(opts))).toEqual({ value: candles });
+  expect(built).toHaveLength(1);
+});
+
+it('a source whose markets never load is kept for a minute, then rebuilt after a backoff', async () => {
   vi.useFakeTimers();
   const { exchange, built } = fixture(['stuck', 'ok']);
   const first = await settle(exchange.fetchOHLCV(opts), 10_500);
   expect(first).toMatchObject({
     error: expect.objectContaining({ message: expect.stringMatching(/Timed out waiting for native markets/) }),
   });
+  expect(built[0].freed).not.toHaveBeenCalled();
+
+  // Reads keep their 10 s bound; at a minute without markets the source is called stuck.
+  await vi.advanceTimersByTimeAsync(40_000);
+  expect(await settle(exchange.fetchOHLCV(opts), 10_500)).toHaveProperty('error');
   expect(built[0].freed).toHaveBeenCalled();
 
   // Within the backoff the chart sees a visible failure, and nothing is rebuilt.
