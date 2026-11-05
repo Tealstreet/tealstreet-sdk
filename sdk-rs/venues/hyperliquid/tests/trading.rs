@@ -283,7 +283,7 @@ fn amend_cancels_then_replaces_with_fresh_cloid_and_tp_to_sl_only() {
         s,
         2000.0,
         &format!(
-            r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"A","limitPx":"95","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Market","triggerPx":"120"}},"status":"open"}}]}}"#
+            r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"A","limitPx":"95","origSz":"0","sz":"0","isPositionTpsl":true,"reduceOnly":true,"orderType":"Take Profit Market","triggerPx":"120"}},"status":"open"}}]}}"#
         ),
     );
     e.handle(
@@ -1676,19 +1676,31 @@ fn a_take_profit_limit_is_read_and_moved_as_a_take_profit() {
             amount: None,
         }),
     );
-    let r = write(&mut e);
+    let actions = prepared_now(&mut e);
+    let read = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(r) if kind(r) == "orderStatus" => Some(r),
+            _ => None,
+        })
+        .expect("fresh native execution parameters");
     reply(
         &mut e,
-        &r,
+        read,
         200,
-        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+        &format!(
+            r#"{{"status":"order","order":{{"order":{{"coin":"BTC","oid":9,"cloid":"{CLOID}","side":"B","limitPx":"80","origSz":"2","sz":"2","reduceOnly":true,"orderType":"Take Profit Limit","triggerPx":"87"}},"status":"open"}}}}"#
+        ),
     );
     let r = write(&mut e);
     let b = body(&r);
-    assert_eq!(
-        b["action"]["orders"][0]["t"]["trigger"]["tpsl"], "tp",
-        "{b}"
-    );
+    assert_eq!(b["action"]["type"], "modify");
+    assert_eq!(b["action"]["oid"], 9);
+    assert_eq!(b["action"]["order"]["t"]["trigger"]["tpsl"], "tp");
+    assert_eq!(b["action"]["order"]["t"]["trigger"]["isMarket"], false);
+    assert_eq!(b["action"]["order"]["t"]["trigger"]["triggerPx"], "85");
+    assert_eq!(b["action"]["order"]["p"], "80");
+    assert_eq!(b["action"]["order"]["c"], CLOID);
 }
 
 // codex-mxb4mq's #3018 reproducers, kept as regression tests.

@@ -1171,6 +1171,14 @@ impl Venue for Hyperliquid {
             Ok(())
         })
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.protective_release_veto(store, pending, release)
+    }
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         &[trading::PACING]
     }

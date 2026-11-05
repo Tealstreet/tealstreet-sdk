@@ -45,6 +45,25 @@ omit the captured fee. Standalone placements retain their existing approval wait
 `transport.http.timing` distinguishes identity, builder approval, order status,
 cancel and place using closed labels derived from the final bound packet; ordinary info reads remain aggregated.
 
+Same-kind Rust SL/TP edits use native `modify`, with no `always_place`, retaining
+native execution type/price, reduce-only, cloid and full-position sentinel. The
+owner-bound sizing read also verifies the source identity and native parameters.
+The final physical claim requires an own-symbol mark observed within five
+seconds and unchanged source fills/identity. Native refusal preserves the original
+and reports the venue reason with “order unchanged”; a released venue refusal is
+`Rejected`, while a veto before release is `NotSent`.
+
+Kind-changing cancel/place is admitted only for a proven full-position
+`isPositionTpsl` source with a live closing-side position. Partial/attached
+conversions without proven placement grouping refuse before cancel. A definitive
+replacement refusal permits one original-parameter restore, without a builder
+fee. An unknown replacement never restores or resends. Recovery rechecks current
+position, newer protection and the original trigger at its final claim. Its
+terminal error carries `Protection::Restored` only after an accepted restore, or
+`Protection::Unprotected` after a failed/unknown restore; obsolete recovery is
+refused visibly. Native ACKs and subsequent stream updates retain the accepted
+trigger and native identity, including when the ACK keeps the same order id.
+
 ## Rust startup reads
 
 Open-order snapshot failures retry per DEX scope with jittered backoff, including

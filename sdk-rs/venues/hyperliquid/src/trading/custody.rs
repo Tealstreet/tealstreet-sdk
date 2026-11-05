@@ -245,7 +245,7 @@ impl Hyperliquid {
                 not_sent("Hyperliquid signing key is missing").kind(ErrorKind::AuthInvalid)
             })?;
         let spot = self.spot
-            || matches!(&effect, Effect::Place(records)
+            || matches!(&effect, Effect::Place(records) | Effect::Modify { records, .. }
             if records.first().is_some_and(|record| self.spot_market(cx, &record.order.symbol)));
         let order_reply = OrderReply::for_action(action, spot);
         let job = self.trading.active.as_mut().unwrap();
@@ -282,8 +282,10 @@ impl Hyperliquid {
         }
         let plan = custody.plan.as_ref().unwrap().clone();
         let slot = custody.slot.as_ref().unwrap().clone();
-        let context = cx
-            .plan_leg_context_with_intent(
+        let context = if matches!(effect, Effect::Cancel(_)) && job.protection.is_some() {
+            cx.plan_protection_cancel_leg_context(&plan, &slot)
+        } else {
+            cx.plan_leg_context_with_intent(
                 &plan,
                 &slot,
                 match &effect {
@@ -296,17 +298,20 @@ impl Hyperliquid {
                     Effect::Cancel(_) if job.amend_source.is_none() => {
                         safe_cex_engine::classify::Intent::Cancel
                     }
-                    Effect::Cancel(_) | Effect::Place(_) if job.amend_source.is_some() => {
+                    Effect::Cancel(_) | Effect::Place(_) | Effect::Modify { .. }
+                        if job.amend_source.is_some() =>
+                    {
                         safe_cex_engine::classify::Intent::Amend
                     }
                     _ => safe_cex_engine::classify::Intent::Place,
                 },
             )
-            .map_err(|e| e.venue_error())?;
+        }
+        .map_err(|e| e.venue_error())?;
         custody.context = Some(context.clone());
         let committed_effect = effect.clone();
         let command = job.command;
-        let cancel_deadline = if matches!(&effect, Effect::Cancel(_)) {
+        let cancel_deadline = if matches!(&effect, Effect::Cancel(_) | Effect::Modify { .. }) {
             job.amend_deadline
         } else {
             None
@@ -486,7 +491,7 @@ impl Request {
         safe_cex_engine::request_context::Error,
     > {
         let entries: Vec<_> = match &self.effect {
-            Effect::Place(rows) => rows
+            Effect::Place(rows) | Effect::Modify { records: rows, .. } => rows
                 .iter()
                 .map(|row| (row.order.symbol.clone(), row.order.client_order_id.clone()))
                 .collect(),
@@ -557,11 +562,24 @@ impl Hyperliquid {
             code: safe_cex_engine::classify::NativeCode::None,
             message: table_message(native_message.unwrap_or(&error.message)),
         };
+        let presented = if request.effect.is_native_modify() && !error.uncertain {
+            format!("{}; order unchanged by this edit", error.message)
+        } else {
+            error.message.clone()
+        };
         cx.http_write_failure(
             &request.context,
-            &NATIVE_ERROR,
+            if !error.uncertain
+                && (request.effect.is_native_modify()
+                    || (self.protective_replacement_active()
+                        && known_protective_refusal(&error.message)))
+            {
+                &PROTECTIVE_REFUSAL
+            } else {
+                &NATIVE_ERROR
+            },
             Some(&native),
-            error.message.clone(),
+            presented,
             None,
         )
         .map(drop)
@@ -643,9 +661,17 @@ impl Hyperliquid {
                 _ => BatchItem::Accepted(ids[index].as_str()),
             })
             .collect();
+        let unchanged = format!("{message}; order unchanged by this edit");
+        let message = if request.effect.is_native_modify()
+            && statuses.iter().all(|s| matches!(s, Status::Error { .. }))
+        {
+            unchanged.as_str()
+        } else {
+            message
+        };
         cx.http_write_batch(
             &request.context,
-            &BATCH,
+            if statuses.iter().all(|s| matches!(s, Status::Error { .. })) && (request.effect.is_native_modify() || (self.protective_replacement_active() && statuses.iter().all(|s| matches!(s, Status::Error { error } if known_protective_refusal(error))))) { &PROTECTIVE_REFUSAL } else { &BATCH },
             statuses.len(),
             &items,
             if message.is_empty() && statuses.iter().any(|status| matches!(status, Status::Text(_))) {
@@ -715,4 +741,21 @@ impl Hyperliquid {
 /// waitingForFill, a filled parent's says waitingForTrigger.
 fn deferred_child(text: &str) -> bool {
     text == "waitingForFill" || text == "waitingForTrigger"
+}
+
+const PROTECTIVE_REFUSAL: safe_cex_engine::classify::CodeTable =
+    safe_cex_engine::classify::CodeTable {
+        rows: &[],
+        success: &[],
+        status: &[],
+        unlisted: safe_cex_engine::classify::Verdict::Refused(ErrorKind::Rejected),
+    };
+pub(super) fn known_protective_refusal(message: &str) -> bool {
+    let message = table_message(message);
+    matches!(
+        message,
+        "Invalid TP/SL price." | "Price must be divisible by tick size."
+    ) || BATCH.rows.iter().any(
+        |row| matches!(row.key, safe_cex_engine::classify::Key::Message(text) if text == message),
+    )
 }
