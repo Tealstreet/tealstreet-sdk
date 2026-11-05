@@ -62,7 +62,8 @@ Images do not contain credentials and the workflows do not deploy hosts.
 |---|---|---|
 | `TEALSTREET_PORT` | `23456` | Listen port |
 | `TEALSTREET_ACCESS_TEAM_DOMAIN` | unset | Bare `<team>.cloudflareaccess.com` host for release-proof JWT verification; no scheme, port or path |
-| `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/user-drain`; either missing/invalid value disables only that endpoint and logs once at startup |
+| `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/*`; either missing/invalid value disables both proof endpoints and logs once at startup |
+| `TEALSTREET_IDLE_RELEASE_TTL_MS` | `20000` | Idle-release lease in milliseconds; operator drains never expire |
 | `CONNECT_REGION` | unset | Region label. Routing uses it for `proxyRegion` defaults; it also appears in `/health` and logs |
 | `TEALSTREET_RELEASE` | unset | Release id, sent to Sentry and shown in `/health` |
 | `EXCHANGE_SERVER_SENTRY_DSN` | unset | Sentry is off when unset |
@@ -184,6 +185,74 @@ installed throughout the placement decision; do not race cancel against apply.
 After destination ownership is confirmed, the router's same-owner reconnect
 path needs no transfer proof. The NX consumer is PR #8936. No endpoint transfers
 algo state or replays writes, and no server deployment is performed by this PR.
+
+### Lazy owner moves and idle-release lease
+
+Rebalancing is lazy: move on reconnect, unless capacity or urgency requires an
+operator move. Every move uses the same admission gate and job-release decision;
+urgency does not itself stop, park or cancel work. Only the existing explicit
+force/settlement path may stop algos. Idle release only observes and fences.
+
+`POST /proof/user-idle-release {userId,requestId}` uses the same fail-closed
+Access verifier, request limits and no-store/no-CORS policy as `/proof/user-drain`.
+The public router must return 404 for this path too. `requestId` is a
+router-generated UUID per attempt. Under `User::state`, the same lock held by
+`User::admit` through dispatch and `Running::refresh`, idle release checks jobs,
+pending starts and live/pending sockets and installs the latch atomically.
+An authenticated upgrade reserves a socket under this lock before returning 101;
+it cannot slip between the idle check and latch installation.
+
+Success is 200 `{userTag,drainId,released:true,checkedAt,expiresAt}`. Refusal is 409
+`{released:false,reason,checkedAt}` and changes no admission or job state. The
+closed reasons are `live-socket`, `running-jobs`, `parked-jobs`, `pending-starts`
+and `already-draining`. Paused TWAPs and jobs held by a parked session still
+prevent release. No job is stopped, parked, canceled or replayed by this route.
+
+Both timestamps are Unix wall-clock milliseconds, captured once with
+`expiresAt = checkedAt + TEALSTREET_IDLE_RELEASE_TTL_MS`. A repeat of the same
+`(userId,requestId)` while the idle latch lives returns the exact original proof,
+including both timestamps; another requestId gets `already-draining`. It never
+renews the lease. The router accepts only a checkedAt within 5 seconds of its
+clock and an expiresAt at least 5 seconds ahead. It must durably commit the new
+owner before expiresAt minus 5 seconds; otherwise abandon the move and stay on
+the owner. On an uncertain timeout, retry once with the same requestId to recover
+the proof, then give up. Expiry bounds an orphaned latch to 20 seconds by default.
+
+An expiry timer clears only its exact idle-release drainId, only with no live or
+pending sockets. Admission also checks expiry, using the monotonic deadline as
+well as wall time, so a clock rollback cannot extend a lease. A newer latch or
+an operator drain is never cleared by that timer. Explicit admin cancel with the
+same drainId still works after destination ownership commits; the router does
+not require admin access. An operator start/force takes over an idle latch as a
+permanent operator drain; ordinary operator drain behavior is unchanged.
+
+### Future: long-lived job handoff
+
+The intended future contract is an external store holding the job queue, with
+state transitions executed in memory: pause new transitions, wait only for
+in-flight transitions to commit (seconds, not the job lifetime), then hand off.
+The destination picks jobs up from that store. Completion or a committed durable
+handoff could satisfy the same release decision; today only completion does.
+No external store or transition-based algo refactor is implemented here.
+
+The single start/commit boundary belongs at `User::admit` and the synchronous
+`Running::refresh` publication in `algos::run`. The new idle-release decision
+uses that same lock. A future transition reservation would start there and stay
+counted until its durable commit, with the latch pausing new reservations.
+`Users::idle_release` and `User::snapshot` would accept a proven jobs-movable
+handoff alternative instead of requiring every job to finish; operator force
+would remain separate.
+
+Chase transitions would split around a quote decision, place/amend/cancel and
+its settled result; TWAP transitions around slice scheduling, placement and its
+settled result; EXEC continuations remain counted until their handoff commits.
+Job records must keep a stable id and user owner independent of sockets and box.
+Today's `Job` id/kind and the `Users` owner key preserve that identity, but are
+not a durable resume format. `Registry::park`, its `Parked` account records and
+`Registry::resume` are the self-fencing/resume hook points: a future serializable
+parked record must retain schedule, progress, outstanding command identities
+and uncertainty needed to resume safely. Today's parked accounts are in-memory
+Arcs; neither they nor a release proof claim a durable or transferable handoff.
 
 ## Authentication
 

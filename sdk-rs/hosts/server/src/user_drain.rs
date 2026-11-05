@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
 
+pub const DEFAULT_IDLE_RELEASE_TTL_MS: u64 = 20_000;
+
 pub const DEFAULT_CAP_MS: u64 = 1_800_000;
 pub const MAX_CAP_MS: u64 = 86_400_000;
 
@@ -26,6 +28,8 @@ pub fn refusal() -> Value {
 pub struct Job {
     pub kind: &'static str,
     pub id: String,
+    #[serde(skip)]
+    pub parked: bool,
 }
 
 struct Tracked {
@@ -41,6 +45,28 @@ struct Drain {
     capped: bool,
     ready: bool,
     forcing: bool,
+    idle: Option<IdleRelease>,
+}
+
+struct IdleRelease {
+    request_id: String,
+    checked_at: u64,
+    expires_at: u64,
+    deadline: Instant,
+}
+
+fn expire_idle(state: &mut Activity) {
+    if state.sockets == 0
+        && state
+            .drain
+            .as_ref()
+            .and_then(|drain| drain.idle.as_ref())
+            .is_some_and(|idle| {
+                Instant::now() >= idle.deadline || crate::accounts::now_ms() >= idle.expires_at
+            })
+    {
+        state.drain = None;
+    }
 }
 
 #[derive(Default)]
@@ -58,7 +84,8 @@ pub struct User {
 impl User {
     /// Held through synchronous dispatch and publication of its running-work snapshot.
     pub(crate) fn admit(&self) -> Result<MutexGuard<'_, Activity>, Value> {
-        let state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        expire_idle(&mut state);
         if state.drain.is_some() || self.box_draining.load(Ordering::Acquire) {
             return Err(refusal());
         }
@@ -66,7 +93,8 @@ impl User {
     }
 
     pub(crate) fn admit_cleanup(&self) -> Result<MutexGuard<'_, Activity>, Value> {
-        let state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        expire_idle(&mut state);
         if state
             .drain
             .as_ref()
@@ -78,7 +106,9 @@ impl User {
     }
 
     pub fn latched(&self) -> bool {
-        self.state.lock().unwrap().drain.is_some()
+        let mut state = self.state.lock().unwrap();
+        expire_idle(&mut state);
+        state.drain.is_some()
     }
 
     pub fn should_close(&self) -> bool {
@@ -92,6 +122,7 @@ impl User {
 
     fn snapshot(&self) -> Value {
         let mut state = self.state.lock().unwrap();
+        expire_idle(&mut state);
         let mut jobs = Vec::new();
         let mut pending = 0;
         state
@@ -216,18 +247,92 @@ impl Users {
         Socket(entry)
     }
 
+    /// Reserve before returning HTTP 101; waiting operator drains still need signers.
+    pub(crate) fn reserve_socket(&self, user: &str) -> Result<Socket, ()> {
+        let entry = self.get(user);
+        {
+            let mut state = entry.state.lock().unwrap();
+            expire_idle(&mut state);
+            if state.drain.as_ref().is_some_and(|drain| drain.ready) {
+                return Err(());
+            }
+            state.sockets += 1;
+        }
+        Ok(Socket(entry))
+    }
+
+    /// The same critical section as job dispatch: no socket/start can cross this proof.
+    pub(crate) fn idle_release(
+        &self,
+        user: &str,
+        request: &str,
+        ttl: Duration,
+    ) -> Result<Value, Value> {
+        let entry = self.get(user);
+        let mut state = entry.state.lock().unwrap();
+        expire_idle(&mut state);
+        if let Some(drain) = &state.drain
+            && let Some(idle) = &drain.idle
+            && idle.request_id == request
+        {
+            return Ok(idle_proof(user, drain, idle));
+        }
+        let reason = idle_refusal(&state);
+        if let Some(reason) = reason {
+            return Err(
+                json!({"released":false,"reason":reason,"checkedAt":crate::accounts::now_ms()}),
+            );
+        }
+        let checked_at = crate::accounts::now_ms();
+        let deadline = Instant::now() + ttl;
+        let drain = Drain {
+            id: crate::accounts::resume_id(),
+            started: Instant::now(),
+            cap_ms: DEFAULT_CAP_MS,
+            capped: false,
+            ready: true,
+            forcing: false,
+            idle: Some(IdleRelease {
+                request_id: request.into(),
+                checked_at,
+                expires_at: checked_at
+                    + u64::try_from(ttl.as_millis()).expect("validated idle TTL"),
+                deadline,
+            }),
+        };
+        let proof = idle_proof(user, &drain, drain.idle.as_ref().unwrap());
+        let id = drain.id.clone();
+        state.drain = Some(drain);
+        drop(state);
+        let entry = Arc::downgrade(&entry);
+        tokio::spawn(async move {
+            tokio::time::sleep_until(deadline).await;
+            if let Some(entry) = entry.upgrade() {
+                let mut state = entry.state.lock().unwrap();
+                if state.drain.as_ref().is_some_and(|drain| drain.id == id) {
+                    expire_idle(&mut state);
+                }
+            }
+        });
+        Ok(proof)
+    }
+
     pub fn start(&self, user: &str, cap_ms: u64) -> Value {
         let entry = self.get(user);
         {
             let mut state = entry.state.lock().unwrap();
-            state.drain.get_or_insert_with(|| Drain {
+            expire_idle(&mut state);
+            let drain = state.drain.get_or_insert_with(|| Drain {
                 id: crate::accounts::resume_id(),
                 started: Instant::now(),
                 cap_ms,
                 capped: false,
                 ready: false,
                 forcing: false,
+                idle: None,
             });
+            // An explicit operator start takes over permanently, including an idle lease.
+            drain.idle = None;
         }
         self.status(user)
     }
@@ -249,6 +354,7 @@ impl Users {
             return false;
         };
         let mut state = entry.state.lock().unwrap();
+        expire_idle(&mut state);
         if state.sockets > 0 && state.drain.as_ref().is_some_and(|drain| drain.ready) {
             return false;
         }
@@ -266,12 +372,14 @@ impl Users {
     pub fn begin_force(&self, user: &str, id: &str) -> Option<Vec<Arc<Account>>> {
         let entry = self.find(user)?;
         let mut state = entry.state.lock().unwrap();
+        expire_idle(&mut state);
         let drain = state.drain.as_mut()?;
         if drain.id != id || drain.forcing {
             return None;
         }
         drain.capped = false;
         drain.forcing = true;
+        drain.idle = None;
         Some(
             state
                 .tracked
@@ -339,6 +447,48 @@ impl Users {
     }
 }
 
+fn idle_proof(user: &str, drain: &Drain, idle: &IdleRelease) -> Value {
+    json!({"userTag":crate::accounts::user_tag(user),"drainId":drain.id,
+        "released":true,"checkedAt":idle.checked_at,"expiresAt":idle.expires_at})
+}
+
+fn idle_refusal(state: &Activity) -> Option<&'static str> {
+    if state.drain.is_some() {
+        return Some("already-draining");
+    }
+    if state.sockets > 0 {
+        return Some("live-socket");
+    }
+    let mut active = false;
+    let mut parked = false;
+    for tracked in &state.tracked {
+        if let Some(running) = tracked.running.upgrade() {
+            let (jobs, pending) = running.jobs();
+            if pending > 0 {
+                return Some("pending-starts");
+            }
+            let account_parked = tracked
+                .account
+                .upgrade()
+                .is_some_and(|account| account.has_parked_holders());
+            for job in jobs {
+                if job.parked || account_parked {
+                    parked = true
+                } else {
+                    active = true
+                }
+            }
+        }
+    }
+    if active {
+        Some("running-jobs")
+    } else if parked {
+        Some("parked-jobs")
+    } else {
+        None
+    }
+}
+
 pub struct Socket(Arc<User>);
 impl Socket {
     pub fn latched(&self) -> bool {
@@ -350,7 +500,9 @@ impl Socket {
 }
 impl Drop for Socket {
     fn drop(&mut self) {
-        self.0.state.lock().unwrap().sockets -= 1;
+        let mut state = self.0.state.lock().unwrap();
+        state.sockets -= 1;
+        expire_idle(&mut state);
     }
 }
 
@@ -364,6 +516,243 @@ mod tests {
         let running = Arc::new(Running::default());
         users.track(user, "acct", &running, Weak::new());
         running
+    }
+
+    const REQUEST: &str = "12345678-1234-4234-8234-123456789abc";
+    const OTHER_REQUEST: &str = "87654321-1234-4234-8234-123456789abc";
+    const TTL: Duration = Duration::from_millis(DEFAULT_IDLE_RELEASE_TTL_MS);
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_release_latches_atomically_and_retries_return_the_original_proof() {
+        let users = Users::default();
+        let before = crate::accounts::now_ms();
+        let proof = users.idle_release("u", REQUEST, TTL).unwrap();
+        assert_eq!(proof.as_object().unwrap().len(), 5);
+        assert_eq!(proof["userTag"], crate::accounts::user_tag("u"));
+        assert_eq!(proof["released"], true);
+        assert!(proof["checkedAt"].as_u64().unwrap() >= before);
+        assert_eq!(
+            proof["expiresAt"].as_u64().unwrap() - proof["checkedAt"].as_u64().unwrap(),
+            DEFAULT_IDLE_RELEASE_TTL_MS
+        );
+        assert!(users.get("u").admit().is_err());
+        assert!(users.get("u").admit_cleanup().is_err());
+        assert!(users.reserve_socket("u").is_err());
+        assert!(users.get("other").admit().is_ok());
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert_eq!(
+            users.idle_release("u", REQUEST, TTL).unwrap(),
+            proof,
+            "a retry must not renew either timestamp"
+        );
+        let refusal = users.idle_release("u", OTHER_REQUEST, TTL).unwrap_err();
+        assert_eq!(refusal["reason"], "already-draining");
+        assert_eq!(users.status("u")["drainId"], proof["drainId"]);
+        assert!(!users.cancel("u", "wrong-id"));
+        assert!(users.cancel("u", proof["drainId"].as_str().unwrap()));
+        assert!(users.get("u").admit().is_ok());
+        assert!(users.reserve_socket("u").is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn every_idle_refusal_preserves_the_latch_socket_and_work_state() {
+        let users = Users::default();
+        let live = users.socket("live");
+        let pending_socket = users.reserve_socket("pending-socket").unwrap();
+        let active = tracked(&users, "active");
+        active.refresh(&[], &[json!({"id":"active-job","status":"running"})], 0);
+        let parked = tracked(&users, "parked");
+        parked.refresh(&[], &[json!({"id":"paused-job","status":"paused"})], 0);
+        let pending = tracked(&users, "pending");
+        pending.refresh(&[], &[], 1);
+        users.start("operator", DEFAULT_CAP_MS);
+        for (user, reason) in [
+            ("live", "live-socket"),
+            ("pending-socket", "live-socket"),
+            ("active", "running-jobs"),
+            ("parked", "parked-jobs"),
+            ("pending", "pending-starts"),
+            ("operator", "already-draining"),
+        ] {
+            let before = users.status(user);
+            let refusal = users.idle_release(user, REQUEST, TTL).unwrap_err();
+            assert_eq!(refusal["released"], false);
+            assert_eq!(refusal["reason"], reason);
+            assert_eq!(refusal.as_object().unwrap().len(), 3);
+            assert!(refusal["checkedAt"].is_u64());
+            assert_eq!(
+                users.status(user),
+                before,
+                "{user} must be observation-only"
+            );
+        }
+        assert_eq!(active.jobs().0[0].id, "active-job");
+        assert_eq!(parked.jobs().0[0].id, "paused-job");
+        assert_eq!(pending.jobs().1, 1);
+        drop(live);
+        drop(pending_socket);
+        assert!(users.idle_release("pending-socket", REQUEST, TTL).is_ok());
+    }
+
+    #[tokio::test]
+    async fn an_admitted_start_publishes_its_reservation_before_the_idle_check() {
+        let users = Arc::new(Users::default());
+        let running = tracked(&users, "u");
+        let entry = users.get("u");
+        let admission = entry.admit().unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let contender = {
+            let users = users.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                users.idle_release("u", REQUEST, TTL)
+            })
+        };
+        barrier.wait();
+        running.refresh(&[], &[], 1);
+        drop(admission);
+        assert_eq!(
+            contender.join().unwrap().unwrap_err()["reason"],
+            "pending-starts"
+        );
+        assert!(!entry.latched());
+        running.refresh(&[], &[], 0);
+        assert!(users.idle_release("u", REQUEST, TTL).is_ok());
+        assert!(
+            entry.admit().is_err(),
+            "a start arriving after the proof cannot run"
+        );
+        assert!(
+            users.reserve_socket("u").is_err(),
+            "a socket arriving after the proof cannot join"
+        );
+    }
+
+    #[tokio::test]
+    async fn racing_socket_reservation_and_idle_release_cannot_both_succeed() {
+        for n in 0..32 {
+            let users = Arc::new(Users::default());
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let socket = {
+                let users = users.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    users.reserve_socket("u")
+                })
+            };
+            barrier.wait();
+            let proof = users.idle_release("u", REQUEST, TTL);
+            let socket = socket.join().unwrap();
+            match (proof, socket) {
+                (Ok(proof), Err(())) => assert_eq!(proof["released"], true),
+                (Err(refusal), Ok(_socket)) => assert_eq!(refusal["reason"], "live-socket"),
+                _ => {
+                    panic!("socket admission and release must choose exactly one winner, race {n}")
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_algo_queued_after_idle_release_is_refused_at_real_actor_dispatch() {
+        tokio::task::LocalSet::new().run_until(async {
+            let registry = crate::accounts::tests::registry();
+            let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_|true));
+            let (account, placed) = crate::accounts::tests::held_load_account(link, Some(0.));
+            crate::accounts::testing::register(&registry, &account);
+            let (sent, mut frames) = tokio::sync::mpsc::unbounded_channel();
+            crate::accounts::tests::hold_live(&account, 7, Arc::new(move |frame| sent.send(frame).is_ok()));
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let proof = registry.user_drains.idle_release("u", REQUEST, TTL).unwrap();
+            crate::accounts::testing::algo_op(&account, "chaser:start", r#"{"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"}"#);
+            let refusal = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
+                    if frame["d"]["op"] == "error" { break frame["d"]["data"].clone(); }
+                }
+            }).await.unwrap();
+            assert_eq!(refusal[0]["name"], "ServerDraining", "{refusal}");
+            assert_eq!(refusal[0]["outcome"], "notSent");
+            assert!(!account.running.any());
+            assert_eq!(placed.load(Ordering::Relaxed), 0);
+            assert_eq!(registry.user_drains.status("u")["drainId"], proof["drainId"]);
+        }).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_expiry_runs_without_traffic_and_cannot_clear_a_newer_or_operator_latch() {
+        let users = Users::default();
+        let proof = users.idle_release("expires", REQUEST, TTL).unwrap();
+        let entry = users.get("expires");
+        let replaced = users.idle_release("replaced", REQUEST, TTL).unwrap();
+        assert!(users.cancel("replaced", replaced["drainId"].as_str().unwrap()));
+        let newer = users
+            .idle_release("replaced", OTHER_REQUEST, TTL + Duration::from_secs(10))
+            .unwrap();
+        users.idle_release("operator", REQUEST, TTL).unwrap();
+        let operator = users.start("operator", DEFAULT_CAP_MS);
+        let permanent = users.start("permanent", DEFAULT_CAP_MS);
+        tokio::task::yield_now().await;
+        tokio::time::advance(TTL).await;
+        tokio::task::yield_now().await;
+        assert!(
+            entry.state.lock().unwrap().drain.is_none(),
+            "timer alone must clear the idle latch even when wall time has not advanced"
+        );
+        assert!(crate::accounts::now_ms() < proof["expiresAt"].as_u64().unwrap());
+        assert_eq!(users.status("replaced")["drainId"], newer["drainId"]);
+        assert_eq!(users.status("operator")["drainId"], operator["drainId"]);
+        assert_eq!(users.status("permanent")["drainId"], permanent["drainId"]);
+        assert!(users.get("expires").admit().is_ok());
+        let next = users.idle_release("expires", REQUEST, TTL).unwrap();
+        assert_ne!(next["drainId"], proof["drainId"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expiry_never_clears_a_latch_with_a_socket_and_drop_finishes_expiry() {
+        let users = Users::default();
+        let proof = users.idle_release("u", REQUEST, TTL).unwrap();
+        // Internal conversion can only follow a reserved upgrade; exercise the expiry backstop.
+        let socket = users.socket("u");
+        tokio::task::yield_now().await;
+        tokio::time::advance(TTL).await;
+        tokio::task::yield_now().await;
+        assert_eq!(users.status("u")["drainId"], proof["drainId"]);
+        assert!(users.get("u").admit().is_err());
+        drop(socket);
+        assert!(users.get("u").admit().is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_real_parked_account_job_refuses_without_stopping_or_moving_it() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let link = safe_cex_remote_signer::SignerLink::new(7, Arc::new(|_| true));
+                let (account, _) = crate::accounts::tests::held_load_account(link, Some(0.));
+                crate::accounts::testing::register(&registry, &account);
+                crate::accounts::tests::hold_live(&account, 7, Arc::new(|_| true));
+                account.running.refresh(
+                    &[],
+                    &[json!({"id":"parked-schedule","status":"running"})],
+                    0,
+                );
+                registry.park("resume".into(), "u", vec![(account.clone(), 7)]);
+                let before = registry.user_drains.status("u");
+                assert_eq!(
+                    registry
+                        .user_drains
+                        .idle_release("u", REQUEST, TTL)
+                        .unwrap_err()["reason"],
+                    "parked-jobs"
+                );
+                assert_eq!(registry.user_drains.status("u"), before);
+                assert!(account.has_parked_holders());
+                assert!(account.running.any());
+            })
+            .await;
     }
 
     #[test]
