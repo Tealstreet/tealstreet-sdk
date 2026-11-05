@@ -403,3 +403,117 @@ fn an_amend_with_no_application_id_resolves_the_account_before_its_read() {
         "{read}"
     );
 }
+
+#[test]
+fn a_frame_fed_protective_amend_resolves_identity_and_size_before_cancellation() {
+    let (mut source, socket) = ready_custom("disabled", false, None, "null");
+    message(
+        &mut source,
+        socket,
+        1200.,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","triggerPx":"80","origSz":"0","sz":"0","reduceOnly":true,"orderType":"Stop Market"},"status":"open"}]}"#,
+    );
+    let frame = source.snapshot_frame(1500.).to_vec();
+    for role_ok in [false, true] {
+        let (mut e, _) = page_engine_for(None);
+        e.apply_frame(1500., &frame, true).unwrap();
+        e.handle(
+            2000.,
+            Event::Command(Command::AmendOrder {
+                command: 90,
+                id: "9".into(),
+                price: Some(75.),
+                amount: None,
+            }),
+        );
+        let actions = prepared_now(&mut e);
+        let reads: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            reads.len(),
+            1,
+            "identity first, no cancel or approval query"
+        );
+        assert_eq!(kind(reads[0]), "userRole");
+        assert_eq!(
+            e.store().order("9").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+        if !role_ok {
+            reply(&mut e, reads[0], 500, "unavailable");
+            let actions = prepared_now(&mut e);
+            assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(actions.iter().any(|a| matches!(a,
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 90, error }) if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+            )));
+            assert_eq!(
+                e.store().order("9").unwrap().status,
+                safe_cex_engine::model::OrderStatus::Open
+            );
+            continue;
+        }
+        reply(
+            &mut e,
+            reads[0],
+            200,
+            &format!(r#"{{"role":"agent","data":{{"user":"{ACCOUNT}"}}}}"#),
+        );
+        let actions = prepared_now(&mut e);
+        let reads: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reads.len(), 1, "fresh sizing next, still no cancellation");
+        assert_eq!(kind(reads[0]), "orderStatus");
+        assert_eq!(
+            serde_json::from_str::<Value>(reads[0].body.as_deref().unwrap()).unwrap()["user"],
+            ACCOUNT
+        );
+        answer_order_status(&mut e, reads[0]);
+        let actions = prepared_now(&mut e);
+        let cancel = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
+                _ => None,
+            })
+            .expect("cancel only after both prerequisite replies");
+        reply(
+            &mut e,
+            cancel,
+            200,
+            r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+        );
+        let actions = prepared_now(&mut e);
+        assert!(
+            !actions.iter().any(|a| matches!(a,
+                Action::Http(r) if r.url.ends_with("/info")
+            )),
+            "no optional builder read after cancellation"
+        );
+        let actions = advance_packet_timers(&mut e, actions, 2334.);
+        let writes: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            writes.len(),
+            1,
+            "replacement waits only for native 334ms pacing"
+        );
+        let body: Value = serde_json::from_str(writes[0].body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["action"]["type"], "order");
+        assert!(body["action"].get("builder").is_none());
+    }
+}

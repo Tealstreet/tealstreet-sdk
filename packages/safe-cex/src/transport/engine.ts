@@ -35,7 +35,7 @@ import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { sharedBinanceCatalogue } from './binanceCatalogue';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
-import { HttpTiming, httpTimingKind, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
+import { HttpTiming, httpTimingKind, httpTimingStage, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
 import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
@@ -1022,6 +1022,7 @@ const httpTransport = (
                 timing?.record({
                   route: tunnelAdapter ? 'tunnel' : route.proxied ? 'proxy' : 'direct',
                   kind: httpTimingKind(request.url),
+                  stage: httpTimingStage(request.url, request.body),
                   outcome,
                   queuedMs: dispatchedAt - started,
                   wireMs: Date.now() - dispatchedAt,

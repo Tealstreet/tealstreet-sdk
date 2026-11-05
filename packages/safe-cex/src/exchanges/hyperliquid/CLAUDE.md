@@ -30,6 +30,17 @@ are ignored. Shared ticker input updates native state without replacing local
 market metadata or account settings. Shared quote changes invoke native account
 revaluation so UPNL and available margin follow provider prices.
 
+## Rust amendments
+
+An amend resolves account identity and fresh partial-fill sizing within the
+five-second read bound before cancelling. It captures the optional builder fee
+from the startup/source cache before cancel; unknown approval uses the existing
+no-builder fallback immediately. A replacement never starts or waits for a fee
+check, and a late approval cannot add a fee to that amend. A later refusal may
+omit the captured fee. Standalone placements retain their existing approval wait.
+`transport.http.timing` distinguishes identity, builder approval, order status,
+cancel and place using closed labels; ordinary info reads remain aggregated.
+
 ## Rust startup reads
 
 Open-order snapshot failures retry per DEX scope with jittered backoff, including

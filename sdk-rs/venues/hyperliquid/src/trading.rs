@@ -44,6 +44,8 @@ struct Job {
     /// The read that sizes this amend has been issued.
     amend_read: bool,
     builder_checked: bool,
+    /// Optional fee decision captured before the amendment cancels anything.
+    amend_builder: Option<Builder>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
     /// An amend cancelling this stop before placing its replacement.
@@ -462,6 +464,7 @@ impl Hyperliquid {
                 amend_read: false,
                 amend_filled: false,
                 builder_checked: false,
+                amend_builder: None,
                 effective: false,
                 replacing_stop,
                 replacing_order,
@@ -708,11 +711,26 @@ impl Hyperliquid {
             self.trading.amend_issuing = false;
             return;
         }
+        if matches!(job.steps.front(), Some(Step::Cancel(_)))
+            && job.amend_source.is_some()
+            && !job.builder_checked
+        {
+            let builder = self
+                .account
+                .builder_approved
+                .filter(|approved| *approved)
+                .map(|_| self.builder());
+            let job = self.trading.active.as_mut().unwrap();
+            job.amend_builder = builder;
+            job.builder_checked = true;
+        }
+        let job = self.trading.active.as_ref().unwrap();
         let placing = matches!(job.steps.front(), Some(Step::Place(_)));
+        let standalone_place = placing && job.amend_source.is_none();
         let needs_builder =
-            placing && self.account.builder_approved.is_none() && !job.builder_checked;
+            standalone_place && self.account.builder_approved.is_none() && !job.builder_checked;
         // The fee may have been approved since: re-read without holding this order.
-        if placing
+        if standalone_place
             && !self.spot
             && self.account.builder_approved == Some(false)
             && self.options.application_id.is_some()
@@ -886,11 +904,21 @@ impl Hyperliquid {
                         }
                     })
                     .collect::<Vec<_>>();
-                let builder = self
-                    .account
-                    .builder_approved
-                    .filter(|b| *b)
-                    .map(|_| self.builder());
+                let builder = if let Some(job) = self
+                    .trading
+                    .active
+                    .as_ref()
+                    .filter(|job| job.amend_source.is_some())
+                {
+                    job.amend_builder
+                        .clone()
+                        .filter(|_| self.account.builder_approved == Some(true))
+                } else {
+                    self.account
+                        .builder_approved
+                        .filter(|approved| *approved)
+                        .map(|_| self.builder())
+                };
                 Ok((
                     Action::Order {
                         orders: wires,

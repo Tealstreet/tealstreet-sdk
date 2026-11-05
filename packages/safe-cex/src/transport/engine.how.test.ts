@@ -173,6 +173,7 @@ describe('engine through the real HOW package', () => {
         fields: expect.objectContaining({
           route: 'tunnel',
           requestKind: 'exchange',
+          stage: 'cancel',
           outcome: 'ok',
           httpStatus: 200,
           upstreamMs: 57,
@@ -182,11 +183,17 @@ describe('engine through the real HOW package', () => {
       }),
     ]);
     // No URL, body or address in the event.
-    expect(JSON.stringify(events)).not.toMatch(/hyperliquid\.xyz|cancel|fixture/);
+    expect(JSON.stringify(events)).not.toMatch(/hyperliquid\.xyz|"action"|fixture/);
     await post('/info', '{"type":"clearinghouseState","user":"0x0000000000000000000000000000000000000001"}');
     expect(events).toHaveLength(1);
-    route.dispose?.();
+    await post('/info', '{"type":"orderStatus","user":"private-account","oid":123}');
     expect(events[1]).toMatchObject({
+      code: 'transport.http.timing',
+      fields: { requestKind: 'info', stage: 'orderStatus', queuedMs: expect.any(Number), wireMs: expect.any(Number) },
+    });
+    expect(JSON.stringify(events)).not.toMatch(/private-account|"oid"|hyperliquid\.xyz|"action"|fixture/);
+    route.dispose?.();
+    expect(events[2]).toMatchObject({
       code: 'transport.http.window',
       fields: { route: 'tunnel', count: 1, timeouts: 0, errors: 0 },
     });
