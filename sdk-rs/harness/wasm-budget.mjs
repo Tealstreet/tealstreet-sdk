@@ -145,6 +145,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #3073 run 41931095253 measured bitget and bitgetusdc 2,334,811 B.
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB; siblings equal.
 // #3094 run 42062090938 measured bybit 2,214,254 B; CI size plus 10 KiB rounded up to the KiB.
+// #2314 Lighter managed sockets: job 127434185656 measured lighter 2,034,142 B;
+// CI size plus 10 KiB rounded up to the KiB, lighter-robinhood equal to lighter.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
   asterdex: 2_137_088,
@@ -167,8 +169,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   krakenspot: 2_136_064,
   kucoin: 1_681_408,
   kucoinspot: 2_264_064,
-  lighter: 2_001_920,
-  'lighter-robinhood': 2_001_920,
+  lighter: 2_044_928,
+  'lighter-robinhood': 2_044_928,
   mexc: 1_755_136,
   okx: 1_947_648,
   orderly: 1_732_608,
