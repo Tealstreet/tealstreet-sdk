@@ -729,5 +729,5 @@ fn a_public_pong_reports_half_the_ping_round_trip_as_latency() {
             text: r#"{"channel":"pong","data":1700000000000}"#,
         },
     );
-    assert_eq!(e.store().latency(), 20.0);
+    assert_eq!(e.store().latency(), Some(20.0));
 }

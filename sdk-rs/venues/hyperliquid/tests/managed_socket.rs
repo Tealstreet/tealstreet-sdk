@@ -40,9 +40,13 @@ fn public_connecting() -> (Engine<Hyperliquid>, SocketId) {
                     );
                 }
                 Action::WsConnect {
-                    socket, channel, ..
+                    socket,
+                    channel,
+                    public_topics,
+                    ..
                 } => {
                     assert_eq!(channel, Some(SocketChannel::Public));
+                    assert!(public_topics);
                     assert_ne!(socket, SocketId(0));
                     return (engine, socket);
                 }
@@ -100,9 +104,11 @@ fn private_connecting_before_mode_with_meta(
                 Action::WsConnect {
                     socket: current,
                     channel,
+                    public_topics,
                     ..
                 } => {
                     assert_eq!(channel, Some(SocketChannel::Private));
+                    assert!(public_topics);
                     assert!(socket.replace(current).is_none());
                 }
                 _ => {}

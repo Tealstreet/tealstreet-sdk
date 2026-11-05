@@ -356,7 +356,11 @@ impl Hyperliquid {
         if self.options.public_data_only && cx.public_feed_policy() != PublicFeedPolicy::Direct {
             return Ok(());
         }
-        cx.connect_socket(feed, safe_cex_engine::SocketSpec::new(self.ws()))?;
+        cx.connect_socket(
+            feed,
+            safe_cex_engine::SocketSpec::new(self.ws())
+                .public_topics(cx.public_feed_policy() == PublicFeedPolicy::Direct),
+        )?;
         Ok(())
     }
 
