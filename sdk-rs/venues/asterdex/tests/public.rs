@@ -615,6 +615,47 @@ fn one_off_rest_depth_sorts_levels_and_preserves_quote_totals() {
     );
 }
 #[test]
+fn public_limits_are_sent_only_as_values_aster_accepts() {
+    // Live Aster: klines takes 1..=1500; depth only 5/10/20/50/100/500/1000.
+    let cases = [(0, 1, 5), (25, 25, 50), (1501, 1500, 1000), (5000, 1500, 1000)];
+    for (index, (requested, klines, depth)) in cases.into_iter().enumerate() {
+        let mut h = Harness::ready();
+        let command = 60 + index as u32 * 2;
+        h.command(Command::FetchCandles {
+            command,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: Some(requested),
+            from_ms: None,
+            to_ms: None,
+        });
+        h.command(Command::FetchOrderBook {
+            command: command + 1,
+            symbol: "BTCUSDT".into(),
+            limit: Some(requested),
+        });
+        let sent = |path: &str| {
+            h.requests
+                .iter()
+                .find(|request| request.url.contains(path))
+                .unwrap_or_else(|| panic!("no {path} request for limit {requested}"))
+                .url
+                .clone()
+        };
+        assert!(
+            sent("/klines?").ends_with(&format!("&limit={klines}")),
+            "klines limit {requested}: {}",
+            sent("/klines?")
+        );
+        assert!(
+            sent("/depth?").ends_with(&format!("limit={depth}")),
+            "depth limit {requested}: {}",
+            sent("/depth?")
+        );
+    }
+}
+
+#[test]
 fn ticker_seed_retains_native_rows_without_active_market_metadata() {
     let mut h = Harness::start(Options {
         public_data_only: true,
