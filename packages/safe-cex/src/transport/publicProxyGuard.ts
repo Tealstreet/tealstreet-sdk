@@ -3,9 +3,8 @@ import type { ExchangeName } from '../types';
 import { resolveLighterDeploymentProfile } from '../exchanges/lighter/lighter.types';
 
 /**
- * The public CORS proxy is keyless egress for public reads. A signed or credentialed
- * request must never be sent toward it: the venue key would leave the private fleet,
- * and the proxy's allowlist refuses private paths anyway.
+ * Public egress refuses venue credentials. Lighter alone uses payload signatures
+ * and short-lived read tokens on an explicit set of native API operations.
  */
 export class SignedPublicProxyRefusal extends Error {
   /** The host's `invalid` preparation code: a definite failure, so the request counts as not sent. */
@@ -25,10 +24,38 @@ export const payloadSignedViaPublicProxy = (exchange: string, options: { testnet
   (exchange === 'lighter' || exchange === 'lighter-robinhood') &&
   resolveLighterDeploymentProfile({ exchangeName: exchange, testnet: options.testnet }).usesRestProxy;
 
-const SIGNATURE_PARAM = /[?&](signature|sign)=/i;
+const LIGHTER_READ_AUTH_PATHS = new Set([
+  '/api/v1/trades',
+  '/api/v1/accountInactiveOrders',
+  '/api/v1/accountActiveOrders',
+  '/api/v1/positionFunding',
+  '/api/v1/accountLimits',
+]);
+const LIGHTER_TIER_AUTH_PATH = '/api/v1/changeAccountTier';
+// sign.rs AuthRecipe: deadline:account:key-index:hex(80-byte Schnorr signature).
+const LIGHTER_READ_TOKEN = /^\d{1,20}:\d{1,20}:\d{1,3}:[a-f0-9]{160}$/i;
+
+const allowsLighterToken = (
+  exchange: ExchangeName,
+  testnet: boolean | undefined,
+  method: string,
+  url: string,
+  value: string,
+): boolean => {
+  if (!payloadSignedViaPublicProxy(exchange, { testnet }) || !LIGHTER_READ_TOKEN.test(value)) return false;
+  const target = new URL(url);
+  const profile = resolveLighterDeploymentProfile({ exchangeName: exchange, testnet });
+  if (target.origin !== profile.apiBaseUrl || target.username || target.password) return false;
+  return (
+    (method.toUpperCase() === 'GET' && LIGHTER_READ_AUTH_PATHS.has(target.pathname)) ||
+    (method.toUpperCase() === 'POST' && target.pathname === LIGHTER_TIER_AUTH_PATH)
+  );
+};
 
 export interface PublicProxyCheck {
   exchange: ExchangeName;
+  method: string;
+  testnet?: boolean;
   publicProxy: string | undefined;
   /** The URL the request will actually be sent to. */
   target: string;
@@ -44,6 +71,8 @@ export interface PublicProxyCheck {
 /** Throws before any I/O when a credentialed request would go to the public proxy. */
 export const refuseSignedPublicProxy = ({
   exchange,
+  method,
+  testnet,
   publicProxy,
   target,
   url,
@@ -53,12 +82,28 @@ export const refuseSignedPublicProxy = ({
   payloadSigned = false,
 }: PublicProxyCheck): void => {
   if (!publicProxy || !target.startsWith(`${publicProxy}/`)) return;
-  // Even a payload-signed venue never sends a credential header there.
+  const venueUrl = url ?? target.slice(publicProxy.length + 1);
   const credentialHeader = Object.entries(headers ?? {}).some(
-    ([name, value]) => Boolean(value) && credentialHeaders.has(name.toLowerCase()),
+    ([name, value]) =>
+      Boolean(value) &&
+      credentialHeaders.has(name.toLowerCase()) &&
+      !(
+        payloadSigned &&
+        name.toLowerCase() === 'authorization' &&
+        allowsLighterToken(exchange, testnet, method, venueUrl, value)
+      ),
+  );
+  const query = [...new URL(venueUrl).searchParams.entries()];
+  const signatureParam = query.some(([name]) => name.toLowerCase() === 'signature' || name.toLowerCase() === 'sign');
+  const queryToken = query.some(
+    ([name, value]) =>
+      name.toLowerCase() === 'auth' &&
+      !(payloadSigned && allowsLighterToken(exchange, testnet, method, venueUrl, value)),
   );
   const credentialed =
     credentialHeader ||
-    (!payloadSigned && (intent === 'primary' || intent === 'secondary' || SIGNATURE_PARAM.test(url ?? target)));
-  if (credentialed) throw new SignedPublicProxyRefusal(exchange, url ?? target.slice(publicProxy.length + 1));
+    signatureParam ||
+    queryToken ||
+    (!payloadSigned && (intent === 'primary' || intent === 'secondary'));
+  if (credentialed) throw new SignedPublicProxyRefusal(exchange, venueUrl);
 };
