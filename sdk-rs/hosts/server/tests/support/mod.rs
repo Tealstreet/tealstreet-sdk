@@ -26,6 +26,7 @@ pub fn config(resume_grace: Duration) -> Config {
         idle_timeout: Duration::from_secs(30),
         resume_grace,
         account_flush: Duration::from_millis(60),
+        access: None,
     }
 }
 

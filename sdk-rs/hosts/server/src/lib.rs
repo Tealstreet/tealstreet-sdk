@@ -1,4 +1,5 @@
 //! The native hosted exchange server; see DESIGN.md.
+pub mod access;
 pub mod accounts;
 pub mod algos;
 pub mod audit;
@@ -12,3 +13,4 @@ pub mod pacing;
 pub mod session;
 pub mod state;
 pub mod threads;
+pub mod user_drain;
