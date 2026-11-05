@@ -1037,9 +1037,7 @@ impl Venue for WeexFutures {
             } else if p.invalid {
                 request.failed(cx, "malformed REST row".into());
             } else {
-                request
-                    .rows
-                    .sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut request.rows);
                 let result = serde_json::to_string(&request.rows).expect("candles");
                 let _ = request.completion.finish(cx, Ok(result));
                 if let Some(leg) = request.leg {

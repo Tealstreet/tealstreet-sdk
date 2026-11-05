@@ -1779,7 +1779,7 @@ fn reread_partial<P>(
 }
 
 fn candle_data(mut rows: Vec<Candle>) -> Result<String, String> {
-    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+    safe_cex_engine::model::sort_candles_by_time(&mut rows);
     serde_json::to_string(&rows).map_err(|error| error.to_string())
 }
 

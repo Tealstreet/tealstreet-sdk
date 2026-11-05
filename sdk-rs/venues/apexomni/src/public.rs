@@ -564,7 +564,7 @@ impl ApexOmni {
             let _ = cx.fail_context(&context, "No usable ApeX candles");
             return;
         }
-        rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+        safe_cex_engine::model::sort_candles_by_time(&mut rows);
         {
             let result: Result<String, String> =
                 serde_json::to_string(&rows).map_err(|e| e.to_string());

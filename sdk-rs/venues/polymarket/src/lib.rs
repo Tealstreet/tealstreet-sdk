@@ -1077,7 +1077,7 @@ impl Venue for Polymarket {
                     from_ms.is_none_or(|from| c.timestamp >= from)
                         && to_ms.is_none_or(|to| c.timestamp <= to)
                 });
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 rows.dedup_by(|later, earlier| {
                     if later.timestamp == earlier.timestamp {
                         *earlier = *later;
