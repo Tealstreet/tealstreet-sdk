@@ -604,7 +604,11 @@ wire protocol. See B11 in `docs/plans/RUST_CUTOVER_CALLERS.md`.
 
 Engine venues own their sockets and reconnect policy; the wasm host only
 observes them. `EngineHost.socketHealth()` keeps per-channel (public, business,
-private) open/first-frame/close state, at one property write per frame.
+private) open/first-frame/close state, at one property write per carried channel
+per frame. `SocketSpec::public_topics(true)` declares that a primary private
+socket also carries public topics; it preserves routing/authentication and counts
+the one physical socket in both health channels. Hyperliquid and TxFlow use it
+only when their public topics are direct; separate sockets remain independent.
 `RustEngineExchange` exposes one `RustSocketHandle` per channel through the
 `BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
 CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
@@ -617,6 +621,11 @@ again resets it. Private `privateLastMessage` retains the last received frame's
 page-clock timestamp while the socket is uninitialized or reconnecting; a feed
 that has never received a frame still has no timestamp. Health/initialization
 flags remain independent of this diagnostic age.
+
+`store.latency` is nullable: null means no measurement, including on reset.
+STATUS keeps its fixed layout and uses `LATENCY_MEASURED` to distinguish an
+actual zero sample; positive legacy samples remain readable. Frame-fed engines
+and worker stores preserve null. UI callers must hide unknown latency.
 
 ## Client order ID contract
 
@@ -1343,6 +1352,16 @@ is refused, including on Lighter. Binding repeats the check on the signer's fina
 URL, query tokens and venue headers before raw binding; refusal releases the
 preparation. Legacy binding checks the captured send URL and refuses any URL change.
 Proxy-owned authorization is separate from the venue's signed headers.
+
+**Secondary read keys are bypassed (`src/secondaryReadKeys.ts`,
+`SECONDARY_READ_KEYS_ENABLED = false`).** `withSecondaryReadKeyPolicy` drops the
+saved read key before Rust signer setup and in the engine transport/plan, so
+signed reads use the primary key and route, with no warning. The account's
+`secondaryProxyUrl` remains only as the egress for managed unsigned public GETs
+(TS `publicReadHttp` and the native plan's `publicReadHttp`, no `readHttp`),
+except direct-public venues; POSTs and header-inferred GETs keep the account route. Coinbase drops that egress as
+before. Every secondary path below, and the NX UI and flags, stays intact behind
+the switch; tests pinning today's behaviour mock it to `true`.
 
 The Rust `SecondaryKeyClients` exposes the same get-only split, keeping generic
 request calls on the primary. The raw secondary adapter is private, so its

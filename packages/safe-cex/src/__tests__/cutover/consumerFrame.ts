@@ -250,7 +250,7 @@ export function consumerFrame(
           (Number(data.loaded.markets) << 2) |
           (Number(data.loaded.tickers) << 3) |
           (Number(data.loaded.positions) << 4),
-        Number(data.options?.isHedged),
+        Number(data.options?.isHedged) | (data.latency != null ? 2 : 0),
       ],
       [[data.latency ?? 0]],
     );

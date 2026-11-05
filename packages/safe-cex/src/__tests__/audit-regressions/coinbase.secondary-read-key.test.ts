@@ -1,6 +1,9 @@
 import type { ExchangeName, ExchangeOptions } from '../../types';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 
 import { assertEngineAccountRouting, resolveEngineRoutingPlan } from '../../transport/engine';
 import { tealstreetTransport } from '../../transport/tealstreet/tealstreetTransport';

@@ -386,6 +386,8 @@ pub struct SocketSpec {
     pub url: String,
     /// Logical feed role lets hosts route identical venue URLs independently.
     pub channel: Option<SocketChannel>,
+    /// This physical socket also carries public topics; routing keeps its primary role.
+    pub public_topics: bool,
     pub context: Option<SocketContext>,
     pub headers: Vec<(&'static str, String)>,
     /// Binary protocols still receive text control responses through on_message.
@@ -402,6 +404,11 @@ impl SocketSpec {
 
     pub fn channel(mut self, channel: SocketChannel) -> Self {
         self.channel = Some(channel);
+        self
+    }
+
+    pub fn public_topics(mut self, enabled: bool) -> Self {
+        self.public_topics = enabled;
         self
     }
 
@@ -461,6 +468,7 @@ pub enum Action {
         /// Upgrade authentication; hosts must fail closed if headers are unsupported.
         headers: Vec<(&'static str, String)>,
         channel: Option<SocketChannel>,
+        public_topics: bool,
         context: Option<SocketContext>,
     },
     WsSend {
@@ -512,6 +520,7 @@ impl PartialEq for Action {
                     headers: d,
                     channel: e,
                     context: f,
+                    public_topics: m,
                 },
                 Self::WsConnect {
                     binary: g,
@@ -520,8 +529,9 @@ impl PartialEq for Action {
                     headers: j,
                     channel: k,
                     context: l,
+                    public_topics: n,
                 },
-            ) => (a, b, c, d, e, f) == (g, h, i, j, k, l),
+            ) => (a, b, c, d, e, f, m) == (g, h, i, j, k, l, n),
             (Self::WsSend { socket: a, text: b }, Self::WsSend { socket: c, text: d }) => {
                 (a, b) == (c, d)
             }
@@ -3512,6 +3522,7 @@ impl crate::engine::CoreCx<'_> {
             context,
             headers,
             binary,
+            public_topics,
         } = spec;
         if let Some(channel) = &channel {
             self.io
@@ -3524,6 +3535,7 @@ impl crate::engine::CoreCx<'_> {
         }
         self.io.core.actions.push(Action::WsConnect {
             binary,
+            public_topics,
             socket,
             url,
             headers,

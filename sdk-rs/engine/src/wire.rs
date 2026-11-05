@@ -60,6 +60,7 @@ pub mod section {
 
 pub mod status_flag {
     pub const HEDGED: u32 = 1;
+    pub const LATENCY_MEASURED: u32 = 2;
 }
 
 pub mod market_flag {
