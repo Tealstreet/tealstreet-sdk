@@ -78,6 +78,9 @@ impl Notices {
         );
         Ok(())
     }
+    pub fn has_interruption(&self, user: &str) -> bool {
+        self.pending.lock().unwrap().contains_key(user)
+    }
     pub fn deliver(&self, user: &str, account: &str, out: &Out) -> bool {
         let mut entries = self.pending.lock().unwrap();
         let Some(pending) = entries.get_mut(user) else {

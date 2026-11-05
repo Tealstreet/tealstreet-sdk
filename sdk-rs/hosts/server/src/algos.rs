@@ -132,6 +132,7 @@ pub struct Running {
     work: Mutex<(Vec<crate::user_drain::Job>, usize)>,
     lease: OnceLock<crate::router_lease::Permit>,
     lease_parked: AtomicBool,
+    interrupted_restore: AtomicBool,
 }
 
 impl Running {
@@ -144,9 +145,20 @@ impl Running {
             work: Mutex::default(),
             lease: OnceLock::new(),
             lease_parked: AtomicBool::new(false),
+            interrupted_restore: AtomicBool::new(false),
         }
     }
 
+    pub(crate) fn interrupt_restores(&self) {
+        self.interrupted_restore.store(true, Ordering::Release);
+    }
+    fn restores_must_pause(&self) -> bool {
+        self.interrupted_restore.load(Ordering::Acquire)
+            || self
+                .lease
+                .get()
+                .is_some_and(|lease| lease.restores_must_pause())
+    }
     pub(crate) fn attach_lease(&self, permit: crate::router_lease::Permit) {
         let _ = self.lease.set(permit);
     }
@@ -985,7 +997,7 @@ pub async fn run(
                         port.emit("error", crate::user_drain::refusal().to_string());
                         continue;
                     }
-                    if op == "twap:state" && running.lease.get().is_some_and(|lease| lease.restores_must_pause())
+                    if op == "twap:state" && running.restores_must_pause()
                         && let Ok(mut rows) = serde_json::from_str::<Vec<Value>>(&data) {
                         for row in &mut rows {
                             if let Some(state) = row.get_mut("state").and_then(Value::as_object_mut)

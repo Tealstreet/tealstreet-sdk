@@ -344,7 +344,9 @@ impl BoundHttp for Bound {
                     direct_response(http.execute(*packet), request, response_events, proxied).await
                 }
                 Packet::How(tunnel, packet) => {
-                    tunnel.request(request, packet, response_events).await
+                    tunnel
+                        .request(request, packet, response_events, guard)
+                        .await
                 }
             }
         };

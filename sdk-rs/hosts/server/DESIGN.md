@@ -268,10 +268,16 @@ not duplicate the notice; failed enqueue preserves it for the next account init.
 `fromBox` is a bounded opaque router ID, with no validation against the display
 name. When it matches this box's router ID, the notice uses the configured
 `TEALSTREET_BOX` display name; otherwise it displays the router ID as-is.
-A fresh destination at generation zero has no jobs from the dead box to restore:
-for `owner-released`, the interruption warning is the entire cross-box remedy.
-This change does not invent cross-box restore; durable job recovery belongs to
-psmp2r-39. Same-box paused restore remains a separate existing-state path.
+A fresh destination at generation zero has no server-side jobs from the dead box
+to restore. However, NX can send persisted client TWAP state at account start.
+For either interruption reason, that restored state is forced paused even after
+the one-shot notice has been delivered. Progress and stable IDs are preserved;
+only explicit `twap:resume` restarts the job. No-marker restores keep their normal
+behavior. There is no chase/EXEC restore operation in the current hosted API;
+new restore operations must join this gate. The forced notice tells the user to
+check their algos and orders before resuming. This does not invent a job handoff
+or durable restore from a dead box; that remains psmp2r-39. Same-box lease-fenced
+restore uses the same pause policy through its retired generation.
 The bounded process-local marker ledger is not an external durable job store.
 
 ### Future: long-lived job handoff
@@ -285,7 +291,7 @@ No external store or transition-engine refactor is introduced here.
 
 Today's logical admission hook is `user_drain::User::admit`; the final physical
 transition-start gate is `NetworkTransport::with_io_guard`, `http::Bound::dispatch`
-and the final socket send. A future shared transition token would start there
+and the final socket send (including the queued HOW job's final send). A future shared transition token would start there
 and commit on `HostEvent::HttpEnd`/`HttpFailed` plus owned command completion in
 `Port::settle`; ambiguous network outcomes must be reconciled before handoff.
 A chase would split placement, fill reconciliation and cancel/reprice into

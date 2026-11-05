@@ -128,7 +128,7 @@ pub struct NetworkTransport {
     io_guard: Option<IoGuard>,
 }
 
-type IoGuard = Arc<dyn Fn() -> bool + Send + Sync>;
+pub(crate) type IoGuard = Arc<dyn Fn() -> bool + Send + Sync>;
 fn io_allowed(guard: &Option<IoGuard>) -> bool {
     guard.as_ref().is_none_or(|allowed| allowed())
 }

@@ -1,0 +1,67 @@
+//! Reviewer reproductions through account startup and real hosted algo dispatch.
+mod support;
+use safe_cex_exchange_server::{
+    accounts::{now_ms, testing},
+    auth::{Verifier, unsigned_token},
+    envelope::InitPayload,
+    interruption, router_lease,
+};
+use serde_json::json;
+use std::time::Duration;
+
+async fn restored_state(reason: Option<interruption::Reason>) {
+    tokio::task::LocalSet::new().run_until(async {
+    let mut config=support::config(Duration::from_secs(60));
+    config.router_lease=router_lease::Config{box_id:Some("02".into()),enforce:true,..Default::default()};
+    let app=support::app(config,Verifier::unsigned());
+    let now=now_ms();
+    app.registry.router_leases.accept(&router_lease::Heartbeat{r#box:"02".into(),issued_at:now,
+      users:vec![router_lease::Assertion{user_id:"target".into(),owner_epoch:2,sequence:1,not_after:now+45000}]}).unwrap();
+    let lease=app.registry.router_leases.get("target").unwrap();
+    assert_eq!(lease.status().generation,0,"fresh destination working control");
+    assert!(lease.permit().allowed());
+    if let Some(reason) = reason {
+      app.registry.interruptions.record("target",interruption::Marker{reason,from_box:"01".into(),at:now}).unwrap();
+    }
+    let init:InitPayload=serde_json::from_value(json!({"accountName":"acct","exchangeName":"bybit","key":"k"})).unwrap();
+    let _account=testing::trading_account(&app.registry,"target",&init);
+    let address=support::serve(app).await;
+    let mut page=support::Page::open(&address,&unsigned_token("target",now/1000+3600),None).await;
+    page.init(&init).await;
+    if reason.is_some() {
+      let marker=page.until("error",|d|d["data"][1]["forceToast"]==true).await;
+      assert!(marker["data"][0].as_str().unwrap().contains("previous server"),"working destination warning");
+    } else {
+      page.until("frame", |d| d["snapshot"] == true).await;
+    }
+    let market=json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,
+      "precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true});
+    let options=json!({"accountName":"acct","activeMarket":market,"size":0.1,"duration":10,"ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,"useLimitOrders":false,"useChaserOrders":false,"origin":"web"});
+    let state=json!({"accountName":"acct","activeMarket":market,"size":0.1,"ordersSizes":[0.01,0.01,0.01],"side":"buy","status":"running","ordersCount":10,"ordersExecuted":7,"nextOrderAt":now+60000,"origin":"web","createdAt":now-180000,"startedAt":now-180000});
+    page.op("acct","twap:state",json!([{"id":"transferred-twap","options":options,"state":state}])).await;
+    let store=page.until("store",|d|d["data"]["activeTWAPs"].as_array().is_some_and(|r|!r.is_empty())).await;
+    assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"],7,"progress preserved");
+    assert_eq!(store["data"]["activeTWAPs"][0]["status"], if reason.is_some() { "paused" } else { "running" }, "interrupted cross-box restore must not auto-resume merely because the destination never fenced");
+    if reason.is_some() {
+      page.op("acct", "twap:resume", json!("transferred-twap")).await;
+      let resumed = page.until("store", |d| d["data"]["activeTWAPs"].as_array().is_some_and(|rows| rows.first().is_some_and(|row| row["status"] == "running"))).await;
+      assert!(resumed["data"]["activeTWAPs"][0]["ordersExecuted"].as_u64().unwrap() >= 7);
+    } else {
+      assert!(!page.ops("error").iter().any(|d| d["data"][1]["forceToast"] == true));
+    }
+    page.close().await;
+ }).await;
+}
+
+#[tokio::test]
+async fn lease_expired_marker_pauses_a_fresh_destinations_restored_twap() {
+    restored_state(Some(interruption::Reason::LeaseExpired)).await;
+}
+#[tokio::test]
+async fn owner_released_marker_pauses_a_fresh_destinations_restored_twap() {
+    restored_state(Some(interruption::Reason::OwnerReleased)).await;
+}
+#[tokio::test]
+async fn normal_restore_without_a_marker_keeps_its_running_state() {
+    restored_state(None).await;
+}
