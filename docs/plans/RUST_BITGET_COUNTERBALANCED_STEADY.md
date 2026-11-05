@@ -51,14 +51,25 @@ it does not decide the per-PR non-regression result. EPYC 7763's approximately
 
 ## Pinned cumulative anchor and job cost
 
-A0 is 518d3953c09daf63c1345ea465bbc55bd313f53a, the actual landing used by
-the counterbalanced study. Only an explicit auditor GO with evidence may move
+A0 is 38b69912e461e27198f5252c98cef73b7521b169, a post-#3091 master landing
+with the current public Bitget amount limits. Only an explicit auditor GO with evidence may move
 this source pin. There is no PR, CLI, workflow-input, report, or automatic
 advance path. The coordinator derives anchor authority from the issued tip
 comparison authority and the checked-in fixed pin; uploaded evidence cannot
 issue either authority.
 
-The old A0 source is checked out for its TS preflight and BUILD. Its own checked-in build.sh,
+The previous anchor was 518d3953c09daf63c1345ea465bbc55bd313f53a. Its TS output
+predated the conservative market cap, so its anchor preflight refused certification.
+The approved reset first measured Rust-only drift on one EPYC 7763 runner in
+[run 42125492893](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/42125492893):
+64 samples per arm, A/B/B/A then B/A/A/B, common tape and Node runtime.
+The old median was 449.9615 ms; the new median was 458.1105 ms, ratio 1.0181104383
+(+1.811%), below 1.023110. This is the **drift accepted at reset** baseline;
+correctness was known-changed, and that diagnostic does not certify CPU.
+The calibration freeze, tolerance, R0, and both normal authenticated witnesses
+remain unchanged. Fresh normal paired CI must qualify the new pin.
+
+The pinned A0 source is checked out for its TS preflight and BUILD. Its own checked-in build.sh,
 tool pins, family profile, size checker and ci-wasm archive producer build and
 seal its package. No current runtime source is copied into that checkout. The
 external driver retains source seals, raw/web/node artifacts, metadata bytes

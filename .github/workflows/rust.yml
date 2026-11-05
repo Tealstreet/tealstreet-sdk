@@ -20,10 +20,6 @@ on:
         description: Add separate GC and optimization traces after the A/A experiment
         type: boolean
         default: false
-      bitget_anchor_drift:
-        description: One-off non-certifying Rust CPU drift before the approved Bitget anchor reset
-        type: boolean
-        default: false
       mutation_barrier_size:
         description: Compare standalone Bybit barrier capability off/on on this exact checkout
         type: boolean
@@ -105,8 +101,6 @@ jobs:
         run: |
           if [ '${{ github.event_name }}' = workflow_dispatch ] && [ '${{ inputs.cpu_budget_diagnostic }}' = true ]; then
             echo 'relevant=false' >> "$GITHUB_OUTPUT"
-          elif [ '${{ github.event_name }}' = workflow_dispatch ] && [ '${{ inputs.bitget_anchor_drift }}' = true ]; then
-            echo 'relevant=false' >> "$GITHUB_OUTPUT"
           else
             node sdk-rs/harness/ci-scope.mjs
           fi
@@ -153,77 +147,6 @@ jobs:
         with:
           name: cpu-budget-diagnostic-${{ matrix.slot }}
           path: ${{ runner.temp }}/cpu-budget/
-          if-no-files-found: error
-          retention-days: 14
-
-  bitget-anchor-drift:
-    name: Rust / diagnostic Bitget anchor drift (never certification)
-    if: github.event_name == 'workflow_dispatch' && inputs.bitget_anchor_drift
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: .
-    env:
-      WASM_BINDGEN_VERSION: 0.2.129
-      SAFE_CEX_WASM_OPT: required
-      ESBUILD_WORKER_THREADS: '0'
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-          fetch-tags: false
-      - uses: ./.github/actions/fetch-rust-history
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.23.4
-      - uses: ./.github/actions/prepare-yarn
-        id: yarn
-      - uses: ./.github/actions/install-yarn
-        with:
-          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
-          cache-key: ${{ steps.yarn.outputs.cache-key }}
-          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
-      - name: Install fixed tools
-        run: |
-          rustup toolchain install 1.99.0 --profile minimal --target wasm32-unknown-unknown
-          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
-            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked
-          fi
-      - uses: ./.github/actions/prefetch-cargo
-      - uses: ./.github/actions/install-binaryen
-      - name: Build fixed old and new anchors independently
-        run: |
-          set -euo pipefail
-          measure_head=$(git rev-parse HEAD)
-          trap 'git checkout --detach "$measure_head"' EXIT
-          packages='${{ runner.temp }}/bitget-anchor-packages'
-          mkdir "$packages"
-          for arm in old new; do
-            if [ "$arm" = old ]; then
-              ref=518d3953c09daf63c1345ea465bbc55bd313f53a
-            else
-              ref=38b69912e461e27198f5252c98cef73b7521b169
-            fi
-            git merge-base --is-ancestor "$ref" "$measure_head"
-            git checkout --detach "$ref"
-            bash sdk-rs/harness/build.sh --venue bitget > "$packages/$arm-build.log" 2>&1
-            node sdk-rs/harness/ci-wasm.mjs --venue bitget --archive "$packages/$arm"
-            cargo clean --manifest-path sdk-rs/Cargo.toml
-          done
-      - name: Collect raw Rust drift on one physical runner
-        run: >-
-          node sdk-rs/harness/bitget-anchor-drift.mjs
-          --packages '${{ runner.temp }}/bitget-anchor-packages'
-          --out '${{ runner.temp }}/bitget-anchor-drift'
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: bitget-anchor-drift
-          path: |
-            ${{ runner.temp }}/bitget-anchor-drift/
-            ${{ runner.temp }}/bitget-anchor-packages/
           if-no-files-found: error
           retention-days: 14
 
