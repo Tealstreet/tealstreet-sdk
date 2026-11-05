@@ -271,7 +271,7 @@ display/Sentry label and is not an ownership identifier. The router
 must return public 404 for `/lease/*`, as for `/proof/*` and `/admin/*`.
 
 `POST /lease/router-heartbeat` returns
-`{accepted, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
+`{accepted, untracked, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
 `enforcing` is true only with enforcement on and no active explicit enable grace.
 The ACK stays conservative for the whole submitted batch, including users whose
 first heartbeat has already ended the missing-heartbeat exception. Users share
@@ -293,10 +293,17 @@ and never replaces the persisted maximum-issued `notAfter` and skew wait.
 A batch contains 1–256 distinct users, user IDs at most 512 bytes,
 and a body at most 256 KiB. Epoch and sequence are positive JS-safe integers.
 Old or duplicate tuples never extend a grant; invalid assertions return 400.
+A valid batch skips only assertions that cannot fit the inventory, returning
+`untracked` beside `accepted` in the ACK; later existing users still renew.
+An all-overflow batch returns 200 with `accepted:0` and a nonzero `untracked`.
+The router's singleton renewal requires `accepted:1`, so overflow proves no grant.
 A separate bounded peer limiter allows a 1024-request burst and 512 requests/s,
 without consuming the proof endpoint's smaller allowance. There are at most
 4096 tracked users; epoch high-water marks are retained until process exit and
-capacity exhaustion fails closed. No raw user IDs are logged.
+capacity exhaustion refuses new private starts when enforced. Read-only socket
+fence checks never register users: an unknown user follows explicit missing-user
+grace below capacity, and is fenced whenever enforced at full capacity.
+No raw user IDs are logged.
 
 `POST /admin/router-lease/status {userId}` uses the existing on-box admin guard
 and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,

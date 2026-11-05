@@ -1215,7 +1215,8 @@ mod tests {
         assert_eq!(value["accepted"], 1);
         assert_eq!(value["enforcing"], false);
         assert!(value.get("graceUntil").unwrap().is_null());
-        assert_eq!(value.as_object().unwrap().len(), 5);
+        assert_eq!(value.as_object().unwrap().len(), 6);
+        assert_eq!(value["untracked"], 0);
         assert_eq!(value["bootId"], registry.router_leases.boot_id());
         assert!(value["checkedAt"].as_u64().unwrap() >= now);
         assert!(!String::from_utf8_lossy(&bytes).contains("private-user-sentinel"));

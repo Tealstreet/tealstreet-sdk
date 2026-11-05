@@ -89,6 +89,7 @@ pub struct Assertion {
 #[serde(rename_all = "camelCase")]
 pub struct Ack {
     pub accepted: usize,
+    pub untracked: usize,
     pub checked_at: u64,
     pub enforcing: bool,
     pub grace_until: Option<u64>,
@@ -294,6 +295,14 @@ impl Users {
     pub fn lookup(&self, user: &str) -> Option<Arc<User>> {
         self.entries.lock().unwrap().get(user).cloned()
     }
+    pub fn fenced(&self, user: &str) -> bool {
+        if let Some(entry) = self.lookup(user) {
+            return entry.status().fenced;
+        }
+        let full = self.entries.lock().unwrap().len() >= MAX_TRACKED_USERS;
+        let mut policy = self.policy.lock().unwrap();
+        policy.enforce && (full || policy.grace_until((self.clock)()).is_none())
+    }
     pub fn get(&self, user: &str) -> Option<Arc<User>> {
         self.get_with_warning(user, crate::state::Log::warn)
     }
@@ -398,10 +407,12 @@ impl Users {
             }
         }
         let mut accepted = 0;
+        let mut untracked = 0;
         for assertion in &heartbeat.users {
-            let entry = self
-                .get(&assertion.user_id)
-                .ok_or("router lease inventory full")?;
+            let Some(entry) = self.get(&assertion.user_id) else {
+                untracked += 1;
+                continue;
+            };
             let mut policy = self.policy.lock().unwrap();
             let mut state = entry.state.lock().unwrap();
             if state.accepted.is_some() || state.permit_issued {
@@ -436,6 +447,7 @@ impl Users {
         };
         Ok(Ack {
             accepted,
+            untracked,
             checked_at,
             enforcing: policy.enforce && grace_until.is_none(),
             grace_until,
@@ -453,6 +465,110 @@ impl Users {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn probe_at_capacity_a_new_user_ahead_in_a_heartbeat_does_not_block_existing_renewals() {
+        let (users, now) = setup(true);
+        let at = now.load(Ordering::Relaxed);
+        assert_eq!(users.accept(&beat(at, 5, 10)).unwrap().accepted, 1);
+        for index in 1..4096 {
+            users.get(&format!("user-{index}")).unwrap();
+        }
+        let assertion = |user: &str, sequence| Assertion {
+            user_id: user.into(),
+            owner_epoch: 5,
+            sequence,
+            not_after: at + 45_000,
+        };
+        let mixed = Heartbeat {
+            r#box: "exchange-01".into(),
+            issued_at: at,
+            users: vec![assertion("brand-new", 1), assertion("u", 11)],
+        };
+        let result = users.accept(&mixed);
+        assert_eq!(
+            users.lookup("u").unwrap().status().sequence,
+            Some(11),
+            "existing user after a new one was not renewed: {:?}",
+            result.as_ref().map(|ack| ack.accepted)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unknown_fence_checks_match_fresh_entries_without_consuming_capacity() {
+        for enforce in [false, true] {
+            for grace in [None, Some(1_090_000)] {
+                let (users, now) = setup_with_grace(enforce, grace);
+                for _ in 0..3 {
+                    assert_eq!(users.fenced("viewer"), enforce && grace.is_none());
+                }
+                assert_eq!(users.counts(&HashSet::new()).tracked_users, 0);
+                assert_eq!(
+                    users.get("fresh").unwrap().status().fenced,
+                    users.fenced("viewer")
+                );
+                advance(&now, 90_001).await;
+                assert_eq!(users.fenced("viewer"), enforce);
+                assert_eq!(users.counts(&HashSet::new()).tracked_users, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn capacity_refuses_unknown_users_even_during_enable_grace_without_allocating() {
+        for enforce in [false, true] {
+            let (users, _) = setup_with_grace(enforce, Some(1_090_000));
+            for index in 0..4096 {
+                users
+                    .get_with_warning(&format!("user-{index}"), |_| {})
+                    .unwrap();
+            }
+            assert_eq!(users.fenced("new-viewer"), enforce);
+            assert_eq!(users.counts(&HashSet::new()).tracked_users, 4096);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn mixed_heartbeat_reports_overflow_and_renews_existing_users_on_both_sides() {
+        let (users, now) = setup(true);
+        let at = now.load(Ordering::Relaxed);
+        users.accept(&beat(at, 1, 1)).unwrap();
+        for index in 1..4096 {
+            users
+                .get_with_warning(&format!("user-{index}"), |_| {})
+                .unwrap();
+        }
+        advance(&now, 10_000).await;
+        let at = now.load(Ordering::Relaxed);
+        let assertion = |user: &str, sequence| Assertion {
+            user_id: user.into(),
+            owner_epoch: 1,
+            sequence,
+            not_after: at + 45_000,
+        };
+        let heartbeat = Heartbeat {
+            r#box: "exchange-01".into(),
+            issued_at: at,
+            users: vec![
+                assertion("user-1", 1),
+                assertion("new", 1),
+                assertion("u", 2),
+            ],
+        };
+        let ack = users.accept(&heartbeat).unwrap();
+        assert_eq!((ack.accepted, ack.untracked), (2, 1));
+        assert!(ack.enforcing);
+        assert_eq!(users.accept(&heartbeat).unwrap().untracked, 1);
+        assert!(users.lookup("new").is_none());
+        advance(&now, 35_001).await;
+        for name in ["user-1", "u"] {
+            assert!(!users.fenced(name), "renewal was lost for {name}");
+        }
+        let mut only_new = beat(now.load(Ordering::Relaxed), 1, 1);
+        only_new.users[0].user_id = "new".into();
+        let ack = users.accept(&only_new).unwrap();
+        assert_eq!((ack.accepted, ack.untracked), (0, 1));
+    }
 
     #[test]
     fn status_lookup_never_allocates_and_summary_reports_capacity() {
