@@ -82,6 +82,13 @@ fn spot_depth_topic(coin: &str, n_sig_figs: Option<u8>) -> String {
     .expect("native spot depth topic")
 }
 
+#[derive(Serialize)]
+struct FastDepth<'a> {
+    r#type: &'static str,
+    coin: &'a str,
+    fast: bool,
+}
+
 #[derive(serde::Deserialize)]
 struct EncodedTopic<'a> {
     #[serde(borrow)]
@@ -94,6 +101,8 @@ struct DepthOrder<'a> {
     kind: &'a str,
     #[serde(rename = "nSigFigs", default)]
     figures: Option<u8>,
+    #[serde(default)]
+    fast: bool,
 }
 
 impl Hyperliquid {
@@ -236,16 +245,26 @@ impl Hyperliquid {
     }
 
     /// Every native stream one book on `coin` subscribes: perps' `l2Book` and
-    /// `bbo`, or spot's full-precision depth and each rounded tier.
+    /// fast depth and `bbo`, or spot's full-precision depth and each rounded tier.
     fn book_topics(&self, coin: &str, push: &mut dyn FnMut(String)) {
         if self.spot {
             for n_sig_figs in [None, Some(2), Some(3), Some(4), Some(5)] {
                 push(spot_depth_topic(coin, n_sig_figs));
             }
         } else {
-            for kind in ["l2Book", "bbo"] {
-                push(public_topic(kind, Some(coin), None, None));
-            }
+            push(public_topic("l2Book", Some(coin), None, None));
+            push(
+                serde_json::to_string(&Send {
+                    method: "subscribe",
+                    subscription: FastDepth {
+                        r#type: "l2Book",
+                        coin,
+                        fast: true,
+                    },
+                })
+                .expect("native fast depth topic"),
+            );
+            push(public_topic("bbo", Some(coin), None, None));
         }
     }
 
@@ -427,6 +446,8 @@ impl Hyperliquid {
                     for ladder in self.books.values_mut() {
                         ladder.spot_depth = Default::default();
                         ladder.depth_time = None;
+                        ladder.fast_depth = None;
+                        ladder.depth = Default::default();
                         ladder.bbo = None;
                         ladder.book.clear();
                     }
@@ -442,6 +463,8 @@ impl Hyperliquid {
                 for ladder in self.books.values_mut() {
                     ladder.spot_depth = Default::default();
                     ladder.depth_time = None;
+                    ladder.fast_depth = None;
+                    ladder.depth = Default::default();
                     ladder.book.clear();
                 }
             }
@@ -471,6 +494,9 @@ impl Hyperliquid {
             return Err(SocketError::Stale);
         }
         let desired = self.desired_socket_interests(store, PublicFeedPolicy::Direct);
+        if subscribe && desired.len() > 1000 {
+            return Err(SocketError::Capacity);
+        }
         let ranks: HashMap<_, _> = desired
             .iter()
             .enumerate()
@@ -482,7 +508,8 @@ impl Hyperliquid {
                 let value: EncodedTopic<'_> = serde_json::from_str(&interest.wire_args)
                     .map_err(|_| SocketError::InvalidInterest)?;
                 let figures = value.subscription.figures.unwrap_or(0);
-                let book_order = usize::from(value.subscription.kind == "bbo");
+                let book_order = 2 * usize::from(value.subscription.kind == "bbo")
+                    + usize::from(value.subscription.fast);
                 Ok((
                     interest,
                     ranks

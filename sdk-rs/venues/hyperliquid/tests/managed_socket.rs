@@ -716,6 +716,7 @@ fn final_perps_book_unsubscribe_preserves_native_topic_order() {
         .collect();
     let expected = [
         r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#,
+        r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC","fast":true}}"#,
         r#"{"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}"#,
     ];
     assert_eq!(sent, expected);
