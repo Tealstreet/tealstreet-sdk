@@ -1127,7 +1127,9 @@ impl Okx {
                 replacement.callback_ratio.clear();
             }
             replacement.algo_cl_ord_id = generated_order_id(cx)?;
-            let restore = trailing_step(&o.symbol, native)?;
+            let mut restored = native.clone();
+            restored.algo_cl_ord_id = generated_order_id(cx)?;
+            let restore = trailing_step(&o.symbol, &restored)?;
             let mut result = self.plan_cancel(cx, vec![id.into()])?;
             result
                 .steps
@@ -1990,6 +1992,13 @@ impl Okx {
         let Some(job) = self.trading.jobs.remove(&command) else {
             return;
         };
+        if !uncertain
+            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            && current.is_some_and(|request| request.path == "/api/v5/trade/amend-algos")
+        {
+            error.message = format!("{}; your stop is unchanged by this edit", error.message);
+            error.presents = true;
+        }
         let trailing_canceled = job
             .trailing
             .as_ref()

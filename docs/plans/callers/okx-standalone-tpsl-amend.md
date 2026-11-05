@@ -6,6 +6,8 @@ native trigger source, market/limit execution price, zero-size full-position
 semantics and untouched linked sibling fields. Native `trigger` rows use the
 trigger fields; `conditional`/OCO rows use their TP/SL fields. A refused native
 amendment keeps the old protection and emits no cancel or replacement.
+Definitive native amendment refusals retain the typed venue error and explicitly
+say "your stop is unchanged by this edit"; unknown outcomes make no such claim.
 Close-all TP/SL edits omit size and execution-price fields: OKX permits their
 trigger edits but refuses quantity or execution-price edits (51523/51524).
 
@@ -38,6 +40,8 @@ failed amendment; a refused put-back reports typed `Unprotected`. Unknown
 replacement or put-back outcomes never produce another stop or claim protection;
 callers retain the existing Unknown/reconciliation handling. Existing order locks
 exclude a concurrent edit, cancel or cancel-all throughout cancellation and put-back.
+The put-back uses a fresh `algoClOrdId`, publishes that identity before dispatch,
+and returns its new native order ID; all other original parameters remain exact.
 
 The refusal tests that expected standalone TP/SL cancel/place now assert native
 amend refusal with the old row retained; destructive fallback controls cover

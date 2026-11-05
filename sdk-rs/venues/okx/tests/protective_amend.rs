@@ -120,12 +120,81 @@ fn standalone_stop_and_take_profit_modify_in_place_preserving_execution_and_refe
                     6.,
                 );
                 let out = prepared(&mut e, 6.);
+                let refusal = out
+                    .iter()
+                    .find_map(|a| match a {
+                        Action::Notice(Notice::CommandFailed { command: 20, error }) => Some(error),
+                        _ => None,
+                    })
+                    .expect("typed native amendment refusal");
+                assert_eq!(refusal.venue_code.as_deref(), Some("51280"));
+                assert_eq!(refusal.outcome, Some(safe_cex_engine::Outcome::Rejected));
+                assert!(refusal.message.contains("trigger refused"));
+                assert!(refusal.message.contains("your stop is unchanged"));
                 assert!(!out.iter().any(
                     |a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get)
                 ));
                 assert_eq!(e.store().order(id), Some(&o));
             }
         }
+    }
+}
+
+#[test]
+fn only_definitive_native_amend_refusals_claim_the_stop_is_unchanged() {
+    for (status, response, definitive) in [
+        (200, r#"{"code":"51280","msg":"trigger refused"}"#, true),
+        (200, r#"{"code":"50004","msg":"execution unknown"}"#, false),
+        (200, r#"{"code":"50013","msg":"system busy"}"#, false),
+        (503, r#"{"code":"50013","msg":"system busy"}"#, false),
+    ] {
+        let mut e = trading_engine();
+        let o = stored("91_sl", OrderType::StopLoss);
+        e.store_mut().upsert_order(o.clone());
+        amend(&mut e, &o.id, Some(o.price + 10.), None);
+        let out = prepared(&mut e, 5.);
+        let Action::Http(request) = post(&out, "/amend-algos") else {
+            unreachable!();
+        };
+        e.handle(
+            6.,
+            Event::HttpResponse {
+                request: request.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body: response,
+                },
+            },
+        );
+        let out = prepared(&mut e, 6.);
+        let error = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 20, error }) => Some(error),
+                _ => None,
+            })
+            .expect("native amendment failure reaches caller");
+        assert_eq!(error.message.contains("your stop is unchanged"), definitive);
+        assert_eq!(
+            error.outcome,
+            Some(if definitive {
+                safe_cex_engine::Outcome::Rejected
+            } else {
+                safe_cex_engine::Outcome::Unknown
+            })
+        );
+        if definitive {
+            assert_eq!(error.venue_code.as_deref(), Some("51280"));
+            assert!(error.message.contains("trigger refused"));
+            assert_eq!(e.store().order(&o.id), Some(&o));
+        }
+        assert!(
+            !out.iter().any(|a| matches!(a,
+                Action::Http(r) if r.method != safe_cex_engine::Method::Get
+            )),
+            "native amendment refusal never places or restores another stop"
+        );
     }
 }
 
@@ -238,12 +307,39 @@ fn trailing_replacement_refusal_restores_exact_native_parameters_once() {
         r#"{"code":"1","data":[{"sCode":"51280","sMsg":"replacement refused"}]}"#,
         7.,
     );
-    let restore = post(&prepared(&mut e, 7.), "/order-algo");
+    let restore_out = prepared(&mut e, 7.);
+    let restore = post(&restore_out, "/order-algo");
     let b = body(&restore);
     assert_eq!(b["sz"], "4");
     assert_eq!(b["callbackSpread"], "50");
     assert_eq!(b["activePx"], "41000");
-    assert_eq!(b["algoClOrdId"], "OldTrail91");
+    let restored_client_id = b["algoClOrdId"].as_str().unwrap();
+    assert_ne!(restored_client_id, "OldTrail91");
+    assert_ne!(b["algoClOrdId"], body(&replacement)["algoClOrdId"]);
+    assert_eq!(restored_client_id.len(), 32);
+    assert!(
+        restored_client_id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric())
+    );
+    let mut exact = b.clone();
+    exact.as_object_mut().unwrap().remove("algoClOrdId");
+    assert_eq!(
+        exact,
+        serde_json::json!({
+            "instId":"BTC-USDT-SWAP", "tdMode":"cross", "side":"sell",
+            "posSide":"net", "ordType":"move_order_stop", "sz":"4",
+            "reduceOnly":true, "activePx":"41000", "callbackSpread":"50"
+        }),
+        "every original placement parameter except client identity is exact"
+    );
+    assert!(
+        restore_out.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandProgress { command: 20, receipts })
+            if receipts.iter().any(|r| r.identity == restored_client_id)
+        )),
+        "fresh restore identity is published before dispatch"
+    );
     assert_eq!(b["posSide"], "net");
     reply(
         &mut e,
@@ -253,6 +349,18 @@ fn trailing_replacement_refusal_restores_exact_native_parameters_once() {
     );
     let out = prepared(&mut e, 8.);
     assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.protection == Some(safe_cex_engine::error::Protection::Restored))));
+    let restored = out
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => error.partial.as_ref(),
+            _ => None,
+        })
+        .expect("restored native order identity accompanies the failed edit");
+    assert_eq!(
+        restored.order_ids,
+        ["91", "92"],
+        "canceled and newly restored native identities are both recorded"
+    );
     assert!(
         !out.iter()
             .any(|a| matches!(a, Action::Http(r) if r.method != safe_cex_engine::Method::Get))
@@ -619,7 +727,8 @@ fn frame_fed_writer_reads_native_trailing_parameters_before_cancel_and_can_resto
     assert_eq!(restore["sz"], "4");
     assert_eq!(restore["callbackSpread"], "50");
     assert_eq!(restore["activePx"], "41000");
-    assert_eq!(restore["algoClOrdId"], "OldTrail91");
+    assert_ne!(restore["algoClOrdId"], "OldTrail91");
+    assert_ne!(restore["algoClOrdId"], body(&replace)["algoClOrdId"]);
 }
 
 #[test]
