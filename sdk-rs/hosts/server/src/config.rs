@@ -45,22 +45,13 @@ impl Config {
             idle_timeout: Duration::from_secs(30),
             resume_grace: Duration::from_secs(60),
             account_flush: Duration::from_millis(60),
-            router_lease: crate::router_lease::Config {
-                box_id: var("TEALSTREET_BOX").filter(|value| {
-                    !value.is_empty()
-                        && value.len() <= 128
-                        && value
-                            .bytes()
-                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
-                }),
-                lease_ms: u64::try_from(router_lease_ms)
+            router_lease: crate::router_lease::Config::parse(
+                var("TEALSTREET_ROUTER_BOX_ID"),
+                var("TEALSTREET_BOX"),
+                u64::try_from(router_lease_ms)
                     .map_err(|_| "TEALSTREET_ROUTER_LEASE_MS is out of range")?,
-                enforce: match var("TEALSTREET_ROUTER_LEASE_ENFORCE").as_deref() {
-                    None | Some("0") => false,
-                    Some("1") => true,
-                    _ => return Err("TEALSTREET_ROUTER_LEASE_ENFORCE must be 0 or 1".into()),
-                },
-            },
+                var("TEALSTREET_ROUTER_LEASE_ENFORCE").as_deref(),
+            )?,
             access: crate::access::Config::parse(
                 var("TEALSTREET_ACCESS_TEAM_DOMAIN").as_deref(),
                 var("TEALSTREET_ACCESS_AUD").as_deref(),

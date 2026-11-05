@@ -702,6 +702,10 @@ impl Registry {
     }
 
     pub fn with_router_lease(mut self, config: crate::router_lease::Config) -> Self {
+        self.interruptions = crate::interruption::Notices::with_box(
+            config.box_id.clone(),
+            config.display_name.clone(),
+        );
         self.router_leases = Arc::new(crate::router_lease::Users::new(config));
         self
     }

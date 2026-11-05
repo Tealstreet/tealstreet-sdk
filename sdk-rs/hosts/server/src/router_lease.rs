@@ -14,6 +14,7 @@ const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 #[derive(Clone, Debug)]
 pub struct Config {
     pub box_id: Option<String>,
+    pub display_name: Option<String>,
     pub lease_ms: u64,
     pub enforce: bool,
 }
@@ -21,9 +22,40 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             box_id: None,
+            display_name: None,
             lease_ms: DEFAULT_LEASE_MS,
             enforce: false,
         }
+    }
+}
+
+impl Config {
+    pub fn parse(
+        box_id: Option<String>,
+        display_name: Option<String>,
+        lease_ms: u64,
+        enforce: Option<&str>,
+    ) -> Result<Self, String> {
+        let enforce = match enforce {
+            None | Some("0") => false,
+            Some("1") => true,
+            _ => return Err("TEALSTREET_ROUTER_LEASE_ENFORCE must be 0 or 1".into()),
+        };
+        let box_id = box_id.filter(|id| {
+            !id.trim().is_empty() && id.len() <= 128 && !id.chars().any(char::is_control)
+        });
+        if enforce && box_id.is_none() {
+            return Err(
+                "TEALSTREET_ROUTER_BOX_ID is required when TEALSTREET_ROUTER_LEASE_ENFORCE=1"
+                    .into(),
+            );
+        }
+        Ok(Self {
+            box_id,
+            display_name,
+            lease_ms,
+            enforce,
+        })
     }
 }
 
@@ -166,6 +198,9 @@ impl Users {
             clock,
         }
     }
+    pub fn box_id(&self) -> Option<&str> {
+        self.config.box_id.as_deref()
+    }
     pub fn enforced(&self) -> bool {
         self.policy.lock().unwrap().enforce
     }
@@ -262,6 +297,34 @@ impl Users {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn router_identity_is_separate_from_display_and_required_only_for_enforcement() {
+        assert!(
+            Config::parse(
+                None,
+                Some("exchange-01".into()),
+                DEFAULT_LEASE_MS,
+                Some("1")
+            )
+            .is_err()
+        );
+        let shadow =
+            Config::parse(None, Some("exchange-01".into()), DEFAULT_LEASE_MS, None).unwrap();
+        assert!(shadow.box_id.is_none());
+        let active = Config::parse(
+            Some("01".into()),
+            Some("exchange-01".into()),
+            DEFAULT_LEASE_MS,
+            Some("1"),
+        )
+        .unwrap();
+        let users = Users::with_clock(active, Arc::new(|| 1_000_000));
+        let mut heartbeat = beat(1_000_000, 1, 1);
+        assert!(users.accept(&heartbeat).is_err());
+        heartbeat.r#box = "01".into();
+        assert_eq!(users.accept(&heartbeat).unwrap(), 1);
+    }
 
     fn setup(enforce: bool) -> (Users, Arc<AtomicU64>) {
         let now = Arc::new(AtomicU64::new(1_000_000));

@@ -358,6 +358,7 @@ async fn router_lease_status(
     };
     let mut status = serde_json::to_value(user.status()).unwrap();
     status["userTag"] = crate::accounts::user_tag(&request.user_id).into();
+    status["routerBoxId"] = serde_json::json!(app.registry.router_leases.box_id());
     axum::Json(status).into_response()
 }
 

@@ -24,12 +24,8 @@ impl Marker {
         }
         let marker: Self = serde_json::from_str(header).ok()?;
         if marker.from_box.len() > 128
-            || !marker
-                .from_box
-                .strip_prefix("exchange-")?
-                .bytes()
-                .all(|c| c.is_ascii_digit())
-            || marker.from_box.len() <= "exchange-".len()
+            || marker.from_box.trim().is_empty()
+            || marker.from_box.chars().any(char::is_control)
             || marker.at == 0
             || marker.at > now.saturating_add(crate::router_lease::CLOCK_SKEW_MS)
         {
@@ -37,12 +33,12 @@ impl Marker {
         }
         Some(marker)
     }
-    fn notice(&self, account: &str) -> String {
+    fn notice(&self, account: &str, display: &str) -> String {
         envelope::algo_notice(
             account,
             &format!(
                 "Your algos on the previous server ({}) were stopped. Check your algos and Open Orders before explicitly resuming TWAPs or starting new chases; resting orders may still fill.",
-                self.from_box
+                display
             ),
             None,
         )
@@ -53,10 +49,19 @@ struct Pending {
     sent: bool,
 }
 #[derive(Default)]
-pub struct Notices(Mutex<HashMap<String, Pending>>);
+pub struct Notices {
+    pending: Mutex<HashMap<String, Pending>>,
+    local: Option<(String, String)>,
+}
 impl Notices {
+    pub fn with_box(router: Option<String>, display: Option<String>) -> Self {
+        Self {
+            pending: Mutex::default(),
+            local: router.zip(display),
+        }
+    }
     pub fn record(&self, user: &str, marker: Marker) -> Result<(), &'static str> {
-        let mut entries = self.0.lock().unwrap();
+        let mut entries = self.pending.lock().unwrap();
         if let Some(previous) = entries.get(user) {
             if previous.marker == marker || previous.marker.at >= marker.at {
                 return Ok(());
@@ -74,14 +79,19 @@ impl Notices {
         Ok(())
     }
     pub fn deliver(&self, user: &str, account: &str, out: &Out) -> bool {
-        let mut entries = self.0.lock().unwrap();
+        let mut entries = self.pending.lock().unwrap();
         let Some(pending) = entries.get_mut(user) else {
             return false;
         };
         if pending.sent {
             return false;
         }
-        if !out.send(pending.marker.notice(account)) {
+        let display = self
+            .local
+            .as_ref()
+            .filter(|(id, _)| id == &pending.marker.from_box)
+            .map_or(pending.marker.from_box.as_str(), |(_, name)| name.as_str());
+        if !out.send(pending.marker.notice(account, display)) {
             return false;
         }
         pending.sent = true;
@@ -136,12 +146,34 @@ mod tests {
         let (out, _messages, _) = Out::channel(1);
         assert!(notices.deliver("u", "acct", &out));
     }
+    #[tokio::test]
+    async fn opaque_router_ids_are_displayed_without_display_name_validation() {
+        let notices = Notices::with_box(Some("01".into()), Some("exchange-01".into()));
+        let (out, mut messages, _) = Out::channel(4);
+        for (user, id, display) in [("u", "01", "exchange-01"), ("other", "02", "02")] {
+            let marker = Marker::parse(
+                &serde_json::json!({"reason":"owner-released","fromBox":id,"at":1}).to_string(),
+                1,
+            )
+            .unwrap();
+            notices.record(user, marker).unwrap();
+            assert!(notices.deliver(user, "acct", &out));
+            assert!(
+                messages
+                    .recv()
+                    .await
+                    .unwrap()
+                    .contains(&format!("previous server ({display})"))
+            );
+        }
+    }
+
     #[test]
     fn marker_schema_rejects_arbitrary_reasons_boxes_and_future_time() {
         for raw in [
             r#"{"reason":"other","fromBox":"exchange-01","at":1}"#,
-            r#"{"reason":"lease-expired","fromBox":"untrusted-host","at":1}"#,
-            r#"{"reason":"lease-expired","fromBox":"exchange-","at":1}"#,
+            r#"{"reason":"lease-expired","fromBox":"","at":1}"#,
+            r#"{"reason":"lease-expired","fromBox":"01\n","at":1}"#,
             r#"{"reason":"lease-expired","fromBox":"exchange-01","at":6001}"#,
         ] {
             assert!(Marker::parse(raw, 1000).is_none(), "{raw}");

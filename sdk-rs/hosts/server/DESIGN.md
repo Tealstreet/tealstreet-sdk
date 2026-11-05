@@ -61,7 +61,8 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | Variable | Default | Meaning |
 |---|---|---|
 | `TEALSTREET_PORT` | `23456` | Listen port |
-| `TEALSTREET_BOX` | unset | This box's identity, e.g. `exchange-01`; heartbeat bodies must match |
+| `TEALSTREET_BOX` | unset | Stable display / Sentry box label, e.g. `exchange-01`; never router ownership identity |
+| `TEALSTREET_ROUTER_BOX_ID` | unset | Opaque canonical ID from router `BOXES`, e.g. `01`; required to enable enforcement, exact heartbeat `box` match |
 | `TEALSTREET_ROUTER_LEASE_MS` | `90000` | Full lease / enable grace in milliseconds (20000–3600000); asserted ownership may extend at most half this duration |
 | `TEALSTREET_ROUTER_LEASE_ENFORCE` | `0` | `0` records shadow ownership only; `1` enforces expiry and parks algos |
 | `TEALSTREET_ACCESS_TEAM_DOMAIN` | unset | Bare `<team>.cloudflareaccess.com` host for release-proof JWT verification; no scheme, port or path |
@@ -197,7 +198,10 @@ The frozen router/box interface is:
 Contact means a valid authenticated assertion for that user, including users whose
 sessions are parked. Socket absence, `/health`, and another user's heartbeat do
 not renew ownership. The box verifies the Access JWT using the configured team
-issuer/JWKS and AUD, then matches the body `box` to `TEALSTREET_BOX`. The router
+issuer/JWKS and AUD, then matches the body `box` exactly to `TEALSTREET_ROUTER_BOX_ID`. Missing or invalid
+router identity causes a clear startup error with enforcement enabled; shadow
+mode continues and reports `routerBoxId: null`. `TEALSTREET_BOX` is only a
+display/Sentry label and is not an ownership identifier. The router
 must return public 404 for `/lease/*`, as for `/proof/*` and `/admin/*`.
 
 `POST /lease/router-heartbeat` returns `{accepted, checkedAt}` with Unix
@@ -211,7 +215,7 @@ capacity exhaustion fails closed. No raw user IDs are logged.
 
 `POST /admin/router-lease/status {userId}` uses the existing on-box admin guard
 and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,
-`sequence`, `notAfter`, `generation`, and `missingHeartbeatGraceMs`. It grants
+`sequence`, `notAfter`, `generation`, `routerBoxId`, and `missingHeartbeatGraceMs`. It grants
 no placement, renewal or write authority. Expiry uses both wall-clock
 `notAfter` and a monotonic deadline so a clock rollback cannot extend ownership.
 
@@ -254,13 +258,20 @@ required. A disconnected user receives the retained notice on account init.
 
 For cross-box recovery the router persists a one-shot interruption marker in the
 user DO, strips client-supplied copies, and adds
-`X-Tealstreet-Interrupted: {"reason":"owner-released"|"lease-expired","fromBox":"exchange-0N","at":<ms>}`
+`X-Tealstreet-Interrupted: {"reason":"owner-released"|"lease-expired","fromBox":"01","at":<ms>}`
 on the next successful upgrade to a box. The box accepts it only alongside a
 valid Access JWT and the normal authenticated user's proxy token. On successful
 private account init it sends one #8699 forced notice for that user, saying the
 previous server's algos stopped and must be checked. Missing, malformed or
 unauthenticated markers do nothing. Repeated upgrades with the same marker do
 not duplicate the notice; failed enqueue preserves it for the next account init.
+`fromBox` is a bounded opaque router ID, with no validation against the display
+name. When it matches this box's router ID, the notice uses the configured
+`TEALSTREET_BOX` display name; otherwise it displays the router ID as-is.
+A fresh destination at generation zero has no jobs from the dead box to restore:
+for `owner-released`, the interruption warning is the entire cross-box remedy.
+This change does not invent cross-box restore; durable job recovery belongs to
+psmp2r-39. Same-box paused restore remains a separate existing-state path.
 The bounded process-local marker ledger is not an external durable job store.
 
 ### Future: long-lived job handoff
