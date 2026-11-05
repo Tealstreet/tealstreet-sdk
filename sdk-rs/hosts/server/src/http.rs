@@ -160,6 +160,7 @@ async fn health(State(app): State<Arc<App>>) -> Response {
         "draining": draining,
         "algos": {"chases": chases, "twaps": twaps},
         "runtime": "rust",
+        "bootId": app.registry.router_leases.boot_id(),
         "uptime": app.started.elapsed().as_secs(),
         "release": app.config.release,
         "region": app.config.region,
@@ -175,7 +176,11 @@ async fn health(State(app): State<Arc<App>>) -> Response {
     } else {
         StatusCode::OK
     };
-    cors((status, axum::Json(body)).into_response())
+    let mut response = cors((status, axum::Json(body)).into_response());
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 /// Headers an edge or proxy adds. cloudflared dials this port from loopback, so a
@@ -407,9 +412,8 @@ async fn router_heartbeat(
         return StatusCode::BAD_REQUEST.into_response();
     };
     match proof.registry.router_leases.accept(&heartbeat) {
-        Ok(accepted) => {
-            let mut response =
-                axum::Json(json!({"accepted":accepted,"checkedAt":now_ms()})).into_response();
+        Ok(ack) => {
+            let mut response = axum::Json(ack).into_response();
             response
                 .headers_mut()
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -1181,6 +1185,11 @@ mod tests {
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["accepted"], 1);
+        assert_eq!(value["enforcing"], false);
+        assert!(value.get("graceUntil").unwrap().is_null());
+        assert_eq!(value.as_object().unwrap().len(), 5);
+        assert_eq!(value["bootId"], registry.router_leases.boot_id());
+        assert!(value["checkedAt"].as_u64().unwrap() >= now);
         assert!(!String::from_utf8_lossy(&bytes).contains("private-user-sentinel"));
         let repeated = call(headers.clone(), body.clone()).await;
         let value: serde_json::Value = serde_json::from_slice(
@@ -1565,6 +1574,7 @@ mod tests {
                 let read = async |app: &Arc<App>| {
                     let response = health(State(app.clone())).await;
                     let status = response.status().as_u16();
+                    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
                     let body = axum::body::to_bytes(response.into_body(), 1 << 16)
                         .await
                         .unwrap();
@@ -1576,6 +1586,7 @@ mod tests {
                 let (status, body) = read(&app).await;
                 assert_eq!(status, 200, "{body}");
                 assert_eq!(body["ok"], true);
+                assert_eq!(body["bootId"], registry.router_leases.boot_id());
                 assert_eq!(body["draining"], false);
                 assert_eq!(body["algos"], json!({"chases": 1, "twaps": 1}));
                 registry.start_drain();

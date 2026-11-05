@@ -63,8 +63,9 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `TEALSTREET_PORT` | `23456` | Listen port |
 | `TEALSTREET_BOX` | unset | Stable display / Sentry box label, e.g. `exchange-01`; never router ownership identity |
 | `TEALSTREET_ROUTER_BOX_ID` | unset | Opaque canonical ID from router `BOXES`, e.g. `01`; required to enable enforcement, exact heartbeat `box` match |
-| `TEALSTREET_ROUTER_LEASE_MS` | `90000` | Full lease / enable grace in milliseconds (20000–3600000); asserted ownership may extend at most half this duration |
-| `TEALSTREET_ROUTER_LEASE_ENFORCE` | `0` | `0` records shadow ownership only; `1` enforces expiry and parks algos |
+| `TEALSTREET_ROUTER_LEASE_MS` | `90000` | Full lease in milliseconds (20000–3600000); asserted ownership may extend at most half this duration |
+| `TEALSTREET_ROUTER_LEASE_ENFORCE` | `0` | `0` records shadow ownership only; `1` enforces expiry and parks algos, with missing users fenced immediately unless an explicit enable grace is active |
+| `TEALSTREET_ROUTER_LEASE_ENABLE_GRACE_UNTIL` | unset | Optional absolute Unix-millisecond deadline for the first enforcement flip only, typically now + 90000; unset or past grants no grace, and restart never extends the deadline |
 | `TEALSTREET_ACCESS_TEAM_DOMAIN` | unset | Bare `<team>.cloudflareaccess.com` host for release-proof JWT verification; no scheme, port or path |
 | `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/*`; either missing/invalid value disables Access-authenticated proof, heartbeat and interruption-header handling and logs once at startup |
 | `TEALSTREET_IDLE_RELEASE_TTL_MS` | `20000` | Idle-release lease in milliseconds; operator drains never expire |
@@ -267,8 +268,27 @@ mode continues and reports `routerBoxId: null`. `TEALSTREET_BOX` is only a
 display/Sentry label and is not an ownership identifier. The router
 must return public 404 for `/lease/*`, as for `/proof/*` and `/admin/*`.
 
-`POST /lease/router-heartbeat` returns `{accepted, checkedAt}` with Unix
-milliseconds. A batch contains 1–256 distinct users, user IDs at most 512 bytes,
+`POST /lease/router-heartbeat` returns
+`{accepted, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
+`enforcing` is true only with enforcement on and no active explicit enable grace.
+The ACK stays conservative for the whole submitted batch, including users whose
+first heartbeat has already ended the missing-heartbeat exception. Users share
+one optional absolute grace deadline. `graceUntil` is that active deadline, or
+null when enforcement is off or grace is absent/over. There is no implicit
+startup grace. The configured deadline is not extended on restart; grace expires
+when either its wall-clock or monotonic deadline passes, and never reopens in
+that process after a clock rollback.
+
+`bootId` is a random UUIDv4 generated once per process at startup, shared by
+`/health` and every heartbeat ACK. Both responses are `Cache-Control: no-store`.
+The router binds enforcing evidence to the exact grant and current boot ID;
+observing a different boot invalidates older evidence. Reconnecting to an owner
+must force a new heartbeat rather than coalesce with an old ACK. No-proof
+takeover remains disabled by default and must not be enabled until both the box
+and router changes are deployed and re-reviewed. An ACK is not a release proof
+and never replaces the persisted maximum-issued `notAfter` and skew wait.
+
+A batch contains 1–256 distinct users, user IDs at most 512 bytes,
 and a body at most 256 KiB. Epoch and sequence are positive JS-safe integers.
 Old or duplicate tuples never extend a grant; invalid assertions return 400.
 A separate bounded peer limiter allows a 1024-request burst and 512 requests/s,
@@ -286,12 +306,16 @@ no placement, renewal or write authority. Expiry uses both wall-clock
 
 Enforcement defaults OFF. In shadow mode heartbeats and would-fence state are
 recorded, but IO and algos continue. Roll out the box image with enforcement off,
-then router heartbeats, verify shadow state, then set enforcement on. Environment
-changes take effect on process restart. A user never heartbeated gets one full
-lease (90 s by default) from enable/start before fencing; an existing assertion
-expires at its own `notAfter`. The router must wait for this rollout grace or
-explicit enforce-readiness before a no-proof takeover of a never-granted user;
-the 50 s last-issued-heartbeat rule alone is insufficient during rollout.
+then router heartbeats and verify shadow state. For the first flip roll only,
+the operator may set `TEALSTREET_ROUTER_LEASE_ENABLE_GRACE_UNTIL` to a fixed
+absolute deadline (normally 90 s ahead), then enable enforcement. Remove the
+grace env after this rollout; any retained past deadline grants no grace.
+Environment changes take effect on restart. With enforcement on and no active
+explicit deadline, missing/unknown users are fenced immediately, including after
+a restart; only a valid authenticated heartbeat naming them can authorize IO.
+An existing assertion always expires at its own `notAfter`, even during an
+explicit enable grace. Ordinary rolls drain users first. The router sends fresh
+per-user ownership within 10 s; socket reconnects do not reopen missing authority.
 
 After enforcement, each account holds generation-bound authority. A fresh newer
 assertion can authorize a rebuilt account, but cannot revive an old account's
