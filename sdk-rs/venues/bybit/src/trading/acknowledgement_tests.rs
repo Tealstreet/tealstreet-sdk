@@ -14,6 +14,18 @@ fn success(body: &str) -> (Option<&RawValue>, Option<&RawValue>) {
     }
 }
 
+/// Cancel-batch rows for an answer that names no order beyond its targets.
+fn cancelled(
+    result: Option<&RawValue>,
+    ext: Option<&RawValue>,
+    targets: &[&str],
+) -> Result<Vec<Row>, Malformed> {
+    cancelled_rows(result, ext, targets).map(|cancelled| {
+        assert_eq!(cancelled.foreign, 0);
+        cancelled.rows
+    })
+}
+
 #[test]
 fn the_envelope_needs_an_exact_integer_code_and_an_object_or_absent_result() {
     assert_eq!(
@@ -260,7 +272,7 @@ fn cancelled_rows_need_one_status_per_order_and_the_requested_target() {
         "retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":110001,"msg":"order not exists"}]}}"#;
     let (result, ext) = success(body);
     assert_eq!(
-        cancelled_rows(result, ext, &["a", "b"]),
+        cancelled(result, ext, &["a", "b"]),
         Ok(vec![
             Row::Accepted("a".into()),
             Row::Refused {
@@ -271,7 +283,7 @@ fn cancelled_rows_need_one_status_per_order_and_the_requested_target() {
     );
     // Native ID evidence, rather than original request position, binds each per-row status.
     assert_eq!(
-        cancelled_rows(result, ext, &["b", "a"]),
+        cancelled(result, ext, &["b", "a"]),
         Ok(vec![
             Row::Refused {
                 code: 110001,
@@ -284,12 +296,9 @@ fn cancelled_rows_need_one_status_per_order_and_the_requested_target() {
     let (short, short_ext) = success(
         r#"{"retCode":0,"result":{"list":[{"orderId":"a"},{"orderId":"b"}]},"retExtInfo":{"list":[{"code":0}]}}"#,
     );
-    assert_eq!(
-        cancelled_rows(short, short_ext, &["a", "b"]),
-        Err(Malformed)
-    );
+    assert_eq!(cancelled(short, short_ext, &["a", "b"]), Err(Malformed));
     let (none, _) = success(r#"{"retCode":0,"result":{"list":[{"orderId":"a"}]}}"#);
-    assert_eq!(cancelled_rows(none, None, &["a"]), Err(Malformed));
+    assert_eq!(cancelled(none, None, &["a"]), Err(Malformed));
 }
 
 #[test]
@@ -478,7 +487,7 @@ fn cancelled_rows_match_complete_echoes_by_native_id_instead_of_request_position
         r#"{"retCode":0,"result":{"list":[{"orderId":"b"},{"orderId":"a"}]},"retExtInfo":{"list":[{"code":0},{"code":0}]}}"#,
     );
     assert_eq!(
-        cancelled_rows(result, ext, &["a", "b"]),
+        cancelled(result, ext, &["a", "b"]),
         Ok(vec![Row::Accepted("a".into()), Row::Accepted("b".into())])
     );
 }
@@ -489,7 +498,7 @@ fn cancelled_rows_keep_reordered_statuses_attached_to_their_echoed_order() {
         r#"{"retCode":0,"result":{"list":[{"orderId":"b"},{"orderId":"a"}]},"retExtInfo":{"list":[{"code":110020,"msg":"permission denied"},{"code":0}]}}"#,
     );
     assert_eq!(
-        cancelled_rows(result, ext, &["a", "b"]),
+        cancelled(result, ext, &["a", "b"]),
         Ok(vec![
             Row::Accepted("a".into()),
             Row::Refused {
@@ -511,7 +520,7 @@ fn one_cancel_with_an_empty_echo_still_has_one_unambiguous_success_status() {
             format!(r#"{{"retCode":0,"result":{result},"retExtInfo":{{"list":[{{"code":0}}]}}}}"#);
         let (result, ext) = success(&body);
         assert_eq!(
-            cancelled_rows(result, ext, &["a"]),
+            cancelled(result, ext, &["a"]),
             Ok(vec![Row::Accepted("a".into())])
         );
     }
@@ -528,7 +537,7 @@ fn cancelled_rows_refuse_foreign_duplicate_and_ambiguous_echoes() {
             r#"{{"retCode":0,"result":{{"list":{results}}},"retExtInfo":{{"list":[{{"code":0}},{{"code":0}}]}}}}"#
         );
         let (result, ext) = success(&body);
-        assert_eq!(cancelled_rows(result, ext, &["a", "b"]), Err(Malformed));
+        assert_eq!(cancelled(result, ext, &["a", "b"]), Err(Malformed));
     }
 }
 
@@ -568,7 +577,7 @@ fn cancelled_rows_match_a_sole_unnamed_reordered_status_by_elimination() {
         );
         let (result, ext) = success(&body);
         assert_eq!(
-            cancelled_rows(result, ext, &["b", "a"]),
+            cancelled(result, ext, &["b", "a"]),
             Ok(vec![Row::Accepted("b".into()), expected])
         );
     }
@@ -579,7 +588,7 @@ fn over_count(results: &str, statuses: &str, targets: &[&str]) -> Result<Vec<Row
         r#"{{"retCode":0,"result":{{"list":{results}}},"retExtInfo":{{"list":{statuses}}}}}"#
     );
     let (result, ext) = success(&body);
-    cancelled_rows(result, ext, targets)
+    cancelled(result, ext, targets)
 }
 
 #[test]
@@ -618,7 +627,7 @@ fn an_over_count_keeps_a_target_with_only_a_failed_row_refused_beside_its_twin()
 fn an_over_count_stays_malformed_unless_complete_named_and_order_not_found() {
     let targets = &["a", "b"];
     for (results, statuses) in [
-        // A foreign fifth ID.
+        // A foreign ID carrying a failure code.
         (
             r#"[{"orderId":"a"},{"orderId":"b"},{"orderId":"foreign"}]"#,
             r#"[{"code":0},{"code":0},{"code":110001}]"#,
@@ -683,4 +692,99 @@ fn an_over_count_accepts_a_twin_whose_rows_are_all_successes() {
         ),
         Ok(vec![Row::Accepted("a".into()), Row::Accepted("b".into())])
     );
+}
+
+fn over_count_with_foreign(
+    results: &str,
+    statuses: &str,
+    targets: &[&str],
+) -> Result<Cancelled, Malformed> {
+    let body = format!(
+        r#"{{"retCode":0,"result":{{"list":{results}}},"retExtInfo":{{"list":{statuses}}}}}"#
+    );
+    let (result, ext) = success(&body);
+    cancelled_rows(result, ext, targets)
+}
+
+#[test]
+fn a_foreign_success_beside_a_confirmed_target_is_counted_not_trusted() {
+    // Prod e14185004edf: one target, plus a success echo for an order we never named.
+    assert_eq!(
+        over_count_with_foreign(
+            r#"[{"orderId":"a","orderLinkId":""},{"orderId":"child","orderLinkId":""}]"#,
+            r#"[{"code":0,"msg":"OK"},{"code":0,"msg":"OK"}]"#,
+            &["a"],
+        ),
+        Ok(Cancelled {
+            rows: vec![Row::Accepted("a".into())],
+            foreign: 1,
+        })
+    );
+    // Targets are judged from their own rows only, twins and refusals included.
+    assert_eq!(
+        over_count_with_foreign(
+            r#"[{"orderId":"child"},{"orderId":"b"},{"orderId":"a"},{"orderId":"b"},{"orderId":"leg"}]"#,
+            r#"[{"code":0},{"code":0},{"code":110020,"msg":"permission denied"},{"code":110001},{"code":0}]"#,
+            &["a", "b"],
+        ),
+        Ok(Cancelled {
+            rows: vec![
+                Row::Refused {
+                    code: 110020,
+                    message: "permission denied".into()
+                },
+                Row::Accepted("b".into()),
+            ],
+            foreign: 2,
+        })
+    );
+}
+
+#[test]
+fn a_foreign_row_stays_malformed_when_it_failed_or_nothing_was_cancelled() {
+    for (results, statuses) in [
+        // A failure for an order we never named has no cascade to explain it.
+        (
+            r#"[{"orderId":"a"},{"orderId":"child"}]"#,
+            r#"[{"code":0},{"code":110001}]"#,
+        ),
+        (
+            r#"[{"orderId":"a"},{"orderId":"child"}]"#,
+            r#"[{"code":0},{"code":110020}]"#,
+        ),
+        // A cascade needs a cancelled target to hang from.
+        (
+            r#"[{"orderId":"a"},{"orderId":"child"}]"#,
+            r#"[{"code":110001},{"code":0}]"#,
+        ),
+        // Unnamed, unequal and missing-target shapes keep refusing.
+        (r#"[{"orderId":"a"},{}]"#, r#"[{"code":0},{"code":0}]"#),
+        (
+            r#"[{"orderId":"a"},{"orderId":"child"}]"#,
+            r#"[{"code":0},{"code":0},{"code":0}]"#,
+        ),
+        (
+            r#"[{"orderId":"child"},{"orderId":"leg"}]"#,
+            r#"[{"code":0},{"code":0}]"#,
+        ),
+    ] {
+        assert_eq!(
+            over_count_with_foreign(results, statuses, &["a"]),
+            Err(Malformed),
+            "{results} {statuses}"
+        );
+    }
+}
+
+#[test]
+fn cancel_diagnostic_counts_foreign_rows_without_naming_them() {
+    let body = r#"{"retCode":0,"result":{"list":[{"orderId":"target-needle","orderLinkId":""},{"orderId":"foreign-needle","orderLinkId":""}]},
+        "retExtInfo":{"list":[{"code":0,"msg":"OK"},{"code":0,"msg":"OK"}]}}"#;
+    let (result, ext) = success(body);
+    let diagnostic = cancel_diagnostic(result, ext, &["target-needle"]);
+    assert_eq!(
+        diagnostic,
+        "targets=1; result.list=array/2; retExtInfo.list=array/2; orderId fields/nonempty/matched=2/2/1; orderLinkId fields/nonempty=2/0; statuses success/failed/invalid=2/0/0; failure codes=; duplicated targets=0; foreign rows=1; children=[0:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=matched;1:orderId=nonempty,orderLinkId=empty,status=valid,code=0,echo=foreign]; omitted=0"
+    );
+    assert!(!diagnostic.contains("needle"));
 }

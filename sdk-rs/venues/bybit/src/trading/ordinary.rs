@@ -1706,7 +1706,9 @@ impl BybitLinear {
             }
             Call::Cancel { ids } => {
                 let targets: Vec<&str> = ids.iter().map(String::as_str).collect();
-                let Ok(rows) = ack::cancelled_rows(result, ext, &targets) else {
+                let Ok(ack::Cancelled { rows, foreign }) =
+                    ack::cancelled_rows(result, ext, &targets)
+                else {
                     return Self::unproven(
                         cx,
                         context,
@@ -1740,6 +1742,10 @@ impl BybitLinear {
                         self.note_order_terminal(&canceled);
                         mark_canceled(cx, &canceled, local);
                     }
+                }
+                // Bybit also cancelled orders we never named (attached TP/SL, linked legs).
+                if foreign > 0 {
+                    self.refresh_order_source(cx);
                 }
                 match outcome {
                     WriteResult::Accepted { .. } => Decision::Next(Vec::new()),

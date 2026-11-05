@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -322,10 +322,18 @@ impl Drop for FrameServer {
 pub struct AccountHandle {
     commands: mpsc::Sender<Control>,
     stop: Arc<watch::Sender<bool>>,
+    disposal: Arc<OnceLock<DisposalCause>>,
     config: ServerConfig,
     capabilities: safe_cex_engine::Capabilities,
     events: crate::Events,
     sockets: Arc<std::sync::Mutex<crate::SocketHealth>>,
+}
+
+/// The first disposal request or unrequested actor termination owns this cause.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisposalCause {
+    Stopped,
+    Moving,
 }
 
 /// One book's levels, best first, as `(symbol, bids, asks)`.
@@ -357,6 +365,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
     let (commands, inbox) = mpsc::channel(256);
     let (stop, stopped) = watch::channel(false);
     let actor = Account::new(host, config.clone());
+    let disposal = actor.disposal.clone();
     let task = tokio::task::spawn_local(async move {
         #[cfg(not(feature = "address-nonce"))]
         {
@@ -369,6 +378,7 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
     let handle = AccountHandle {
         commands,
         stop: Arc::new(stop),
+        disposal,
         config,
         capabilities,
         events,
@@ -549,8 +559,25 @@ impl AccountHandle {
         let _ = self.commands.try_send(Control::Leave(client));
     }
 
+    /// Bind the first disposal before host-owned algo cleanup; this does not stop I/O.
+    /// Actor termination or an earlier disposal cannot be relabeled by a later request.
+    pub fn begin_disposal(&self, cause: DisposalCause) {
+        self.disposal.get_or_init(|| {
+            if self.commands.is_closed() || *self.stop.borrow() {
+                DisposalCause::Stopped
+            } else {
+                cause
+            }
+        });
+    }
+
+    pub fn disposal_cause(&self) -> Option<DisposalCause> {
+        self.disposal.get().copied()
+    }
+
     /// Stops the actor: clients are canceled, venue sockets close, timers end.
     pub fn dispose(&self) {
+        self.begin_disposal(DisposalCause::Stopped);
         self.stop.send_replace(true);
     }
 }
@@ -627,6 +654,7 @@ struct Account<V: Venue, T: Transport> {
     /// Warn+ notices mirrored to stderr while clients are attached: per code, the
     /// last line written and how many were held back since.
     mirrored: HashMap<String, (std::time::Instant, u32)>,
+    disposal: Arc<OnceLock<DisposalCause>>,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -648,6 +676,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             next_command: 0,
             startup_failure: None,
             mirrored: HashMap::new(),
+            disposal: Arc::default(),
         }
     }
 
@@ -664,6 +693,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             let result = std::panic::AssertUnwindSafe(self.drive(&mut inbox, &mut shutdown))
                 .catch_unwind()
                 .await;
+            self.disposal.get_or_init(|| DisposalCause::Stopped);
             self.host.stop();
             let cleanup = self
                 .host
@@ -770,6 +800,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             }
             self.execute();
         }
+        self.disposal.get_or_init(|| DisposalCause::Stopped);
         for (_, peer) in self.peers.drain() {
             peer.cancel.send_replace(true);
         }
@@ -1463,6 +1494,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
 
 impl<V: Venue, T: Transport> Drop for Account<V, T> {
     fn drop(&mut self) {
+        self.disposal.get_or_init(|| DisposalCause::Stopped);
         self.host.stop();
     }
 }
@@ -2869,6 +2901,49 @@ mod tests {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn first_disposal_cause_survives_cloned_handles_cleanup_and_actor_abort() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for mode in ["moving", "stopped", "aborted"] {
+                    let (handle, task) = spawn_account(
+                        Host::new(
+                            safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                            NoTransport,
+                        ),
+                        ServerConfig::default(),
+                    )
+                    .unwrap();
+                    let later = handle.clone();
+                    let expected = if mode == "moving" {
+                        handle.begin_disposal(DisposalCause::Moving);
+                        assert!(
+                            handle.snapshot_frame().await.is_some(),
+                            "algo cleanup can still use the live actor"
+                        );
+                        handle.dispose();
+                        task.await.unwrap().unwrap();
+                        DisposalCause::Moving
+                    } else if mode == "stopped" {
+                        handle.dispose();
+                        later.begin_disposal(DisposalCause::Moving);
+                        task.await.unwrap().unwrap();
+                        DisposalCause::Stopped
+                    } else {
+                        task.abort();
+                        assert!(task.await.unwrap_err().is_cancelled());
+                        later.begin_disposal(DisposalCause::Moving);
+                        DisposalCause::Stopped
+                    };
+                    later.begin_disposal(DisposalCause::Moving);
+                    later.begin_disposal(DisposalCause::Stopped);
+                    assert_eq!(handle.disposal_cause(), Some(expected), "{mode}");
+                    assert_eq!(later.disposal_cause(), Some(expected), "{mode}");
+                }
+            })
+            .await;
     }
 
     #[tokio::test(flavor = "current_thread")]
