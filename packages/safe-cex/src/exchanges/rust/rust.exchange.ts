@@ -680,7 +680,7 @@ export class RustEngineExchange extends BaseExchange {
       answers.optionExpiries = false;
       answers.accountGreeks = false;
     }
-    return answers;
+    return { ...this.capabilityRecord, ...answers };
   }
 
   /** Venue-specific answers wait for the engine rather than guessing from the base contract. */

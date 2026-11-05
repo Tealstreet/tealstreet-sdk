@@ -1048,6 +1048,12 @@ loads the real registry and enforces the following minimum contracts:
   non-fallback `start` implementation;
 - TP/SL trigger defaults must belong to the unique advertised trigger set.
 
+Rust public capabilities also retain the loaded engine record, including
+`orderHistoryNeedsSymbol` and other authoritative policy flags. Those fields
+remain absent before engine/worker capability adoption; method-derived booleans
+retain their existing checks. Symbol-scoped collectors must read this record,
+not guess from a venue name or send a symbol-less query as an empty census.
+
 The fills-history runtime gate is deliberately not metadata. Ingestion checks
 `exchange.capabilities.fillHistory` and then applies
 `symbolScopedFills.ts` to decide whether the venue can be asked account-wide or

@@ -3,7 +3,6 @@ vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
   return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
 });
 
-import type { ExchangeCapabilities } from '../../exchanges/base';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -55,7 +54,7 @@ const createImplementation = async (exchangeName: ExchangeName, publicDataOnly =
 
 const expectImplemented = (
   exchange: BaseExchange,
-  capability: keyof ExchangeCapabilities,
+  capability: keyof typeof CAPABILITY_METHODS,
   exchangeName: ExchangeName,
 ) => {
   expect(
