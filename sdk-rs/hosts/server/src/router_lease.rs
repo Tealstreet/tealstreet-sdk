@@ -1,6 +1,6 @@
 //! Router ownership assertions and generation-bound account IO authority.
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
@@ -228,6 +228,26 @@ impl User {
     }
 }
 
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Counts {
+    pub tracked_users: usize,
+    pub fenced_users: usize,
+    pub would_fence_users: usize,
+    pub live_users_without_lease: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    router_box_id: Option<String>,
+    enforced: bool,
+    enable_grace_until: Option<u64>,
+    #[serde(flatten)]
+    counts: Counts,
+    checked_at: u64,
+}
+
 pub struct Users {
     config: Config,
     boot_id: &'static str,
@@ -293,6 +313,39 @@ impl Users {
         });
         entries.insert(user.to_owned(), entry.clone());
         Some(entry)
+    }
+    pub fn counts(&self, live_users: &HashSet<String>) -> Counts {
+        let entries = self.entries.lock().unwrap();
+        let mut counts = Counts {
+            tracked_users: entries.len(),
+            ..Default::default()
+        };
+        for entry in entries.values() {
+            let status = entry.status();
+            counts.fenced_users += usize::from(status.fenced);
+            counts.would_fence_users += usize::from(status.would_fence);
+        }
+        counts.live_users_without_lease = live_users
+            .iter()
+            .filter(|user| !entries.contains_key(*user))
+            .count();
+        counts
+    }
+    pub fn summary(&self, counts: Counts) -> Summary {
+        let mut policy = self.policy.lock().unwrap();
+        let checked_at = (self.clock)();
+        let enable_grace_until = if policy.enforce {
+            policy.grace_until(checked_at)
+        } else {
+            None
+        };
+        Summary {
+            router_box_id: self.config.box_id.clone(),
+            enforced: policy.enforce,
+            enable_grace_until,
+            counts,
+            checked_at,
+        }
     }
     pub fn accept(&self, heartbeat: &Heartbeat) -> Result<Ack, &'static str> {
         let now = (self.clock)();
@@ -622,6 +675,128 @@ mod tests {
         assert_eq!(active["accepted"], 2);
         assert_eq!(active["enforcing"], true);
         assert_eq!(active["graceUntil"], serde_json::Value::Null);
+    }
+    #[tokio::test(start_paused = true)]
+    async fn summary_counts_use_status_predicate_and_never_create_absent_lease_records() {
+        let (users, now) = setup(false);
+        let empty = users.get("empty").unwrap();
+        users
+            .accept(&beat(now.load(Ordering::Relaxed), 1, 1))
+            .unwrap();
+        let granted = users.get("u").unwrap();
+        let live = HashSet::from([
+            "u".into(),
+            "empty".into(),
+            "socket-only".into(),
+            "account-only".into(),
+        ]);
+        let before = users.counts(&live);
+        assert_eq!(before.tracked_users, 2);
+        assert_eq!(before.fenced_users, 0);
+        assert_eq!(
+            before.would_fence_users,
+            usize::from(empty.status().would_fence) + usize::from(granted.status().would_fence)
+        );
+        assert_eq!(before.would_fence_users, 1);
+        assert_eq!(before.live_users_without_lease, 2);
+        advance(&now, 45_001).await;
+        let after = users.counts(&live);
+        assert_eq!(after.would_fence_users, 2);
+        assert_eq!(after.fenced_users, 0);
+        assert_eq!(after.tracked_users, 2);
+        assert_eq!(after.live_users_without_lease, 2);
+    }
+    #[tokio::test(start_paused = true)]
+    async fn summary_counts_include_monotonic_expiry_after_wall_rollback_and_actual_fences() {
+        for enforce in [false, true] {
+            let (users, now) = setup(enforce);
+            users
+                .accept(&beat(now.load(Ordering::Relaxed), 1, 1))
+                .unwrap();
+            let granted = users.get("u").unwrap();
+            now.fetch_sub(20_000, Ordering::Relaxed);
+            tokio::time::advance(Duration::from_millis(DEFAULT_LEASE_MS + 1)).await;
+            let counts = users.counts(&HashSet::new());
+            assert_eq!(counts.tracked_users, 1);
+            assert_eq!(counts.would_fence_users, 1);
+            assert_eq!(
+                counts.would_fence_users,
+                usize::from(granted.status().would_fence)
+            );
+            assert_eq!(counts.fenced_users, usize::from(enforce));
+            assert_eq!(counts.live_users_without_lease, 0);
+        }
+    }
+    #[tokio::test(start_paused = true)]
+    async fn summary_default_deny_counts_unknown_users_without_creating_records() {
+        for until in [None, Some(999_999)] {
+            let (users, now) = setup_with_grace(true, until);
+            let tracked = users.get("u").unwrap();
+            let live = HashSet::from(["u".into(), "socket-only".into()]);
+            let summary = users.summary(users.counts(&live));
+            assert!(summary.enforced);
+            assert_eq!(summary.enable_grace_until, None);
+            assert_eq!(summary.counts.tracked_users, 1);
+            assert_eq!(summary.counts.fenced_users, 1);
+            assert_eq!(summary.counts.would_fence_users, 1);
+            assert_eq!(summary.counts.live_users_without_lease, 1);
+            assert!(!tracked.permit().allowed());
+            assert_eq!(ack(&users, &now, 1)["enforcing"], true);
+            let renewed = users.summary(users.counts(&live));
+            assert_eq!(renewed.counts.fenced_users, 0);
+            assert_eq!(renewed.counts.would_fence_users, 0);
+            assert_eq!(renewed.counts.tracked_users, 1);
+            assert_eq!(renewed.counts.live_users_without_lease, 1);
+        }
+    }
+    #[tokio::test(start_paused = true)]
+    async fn summary_explicit_grace_matches_ack_and_does_not_extend_on_restart() {
+        let until = 1_000_000 + DEFAULT_LEASE_MS;
+        let (users, now) = setup_with_grace(true, Some(until));
+        users.get("unknown").unwrap();
+        let summary = users.summary(users.counts(&HashSet::new()));
+        assert!(summary.enforced);
+        assert_eq!(summary.enable_grace_until, Some(until));
+        assert_eq!(summary.counts.would_fence_users, 1);
+        assert_eq!(summary.counts.fenced_users, 0);
+        assert_eq!(ack(&users, &now, 1)["graceUntil"], until);
+        advance(&now, 1_000).await;
+        let clock = now.clone();
+        let restarted = Users::with_clock(
+            users.config.clone(),
+            Arc::new(move || clock.load(Ordering::Relaxed)),
+        );
+        restarted.get("unknown").unwrap();
+        let summary = restarted.summary(restarted.counts(&HashSet::new()));
+        assert_eq!(summary.enable_grace_until, Some(until));
+        assert_eq!(summary.counts.fenced_users, 0);
+        advance(&now, DEFAULT_LEASE_MS).await;
+        let summary = restarted.summary(restarted.counts(&HashSet::new()));
+        assert_eq!(summary.enable_grace_until, None);
+        assert_eq!(summary.counts.fenced_users, 1);
+        assert_eq!(summary.counts.would_fence_users, 1);
+        assert!(ack(&restarted, &now, 1)["graceUntil"].is_null());
+    }
+    #[tokio::test(start_paused = true)]
+    async fn summary_grace_metadata_is_shadow_safe_and_expiry_never_reopens() {
+        let until = 1_000_000 + DEFAULT_LEASE_MS;
+        let (shadow, _) = setup_with_grace(false, Some(until));
+        assert_eq!(shadow.summary(Counts::default()).enable_grace_until, None);
+        for monotonic in [false, true] {
+            let (users, now) = setup_with_grace(true, Some(until));
+            users.get("unknown").unwrap();
+            if monotonic {
+                tokio::time::advance(Duration::from_millis(DEFAULT_LEASE_MS + 1)).await;
+            } else {
+                now.store(until + 1, Ordering::Relaxed);
+            }
+            assert_eq!(users.summary(Counts::default()).enable_grace_until, None);
+            now.store(1_000_000, Ordering::Relaxed);
+            let summary = users.summary(users.counts(&HashSet::new()));
+            assert_eq!(summary.enable_grace_until, None);
+            assert_eq!(summary.counts.fenced_users, 1);
+            assert_eq!(summary.counts.would_fence_users, 1);
+        }
     }
     #[tokio::test(start_paused = true)]
     async fn accepted_lease_fences_at_its_half_window_and_old_permits_never_revive() {
