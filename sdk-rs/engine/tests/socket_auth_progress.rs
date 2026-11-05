@@ -596,3 +596,113 @@ fn parked_old_signer_cannot_release_after_real_reconnect() {
     assert!(!h.closed(h.socket));
     assert_ne!(h.engine.venue().epochs[0], h.engine.venue().epochs[1]);
 }
+
+mod allocation_budget {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Count {
+        pub calls: usize,
+        pub bytes: usize,
+    }
+    thread_local! {
+        static COUNT: Cell<Option<Count>> = const { Cell::new(None) };
+    }
+    pub struct Allocator;
+    fn note(bytes: usize) {
+        let _ = COUNT.try_with(|slot| {
+            if let Some(mut count) = slot.get() {
+                count.calls += 1;
+                count.bytes += bytes;
+                slot.set(Some(count));
+            }
+        });
+    }
+    unsafe impl GlobalAlloc for Allocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            note(layout.size());
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            note(layout.size());
+            unsafe { System.alloc_zeroed(layout) }
+        }
+        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            note(size);
+            unsafe { System.realloc(pointer, layout, size) }
+        }
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            unsafe { System.dealloc(pointer, layout) }
+        }
+    }
+    pub fn measure<T>(run: impl FnOnce() -> T) -> (T, Count) {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                COUNT.with(|slot| slot.set(None));
+            }
+        }
+        COUNT.with(|slot| {
+            assert!(slot.get().is_none());
+            slot.set(Some(Count::default()));
+        });
+        let reset = Reset;
+        let result = run();
+        let count = COUNT.with(|slot| slot.get().unwrap());
+        drop(reset);
+        (result, count)
+    }
+}
+#[global_allocator]
+static ALLOCATOR: allocation_budget::Allocator = allocation_budget::Allocator;
+
+#[test]
+fn managed_socket_core_keeps_the_baseline_allocation_budget_and_wire_order() {
+    let (mut h, start) = allocation_budget::measure(Harness::new);
+    h.output.reserve(128);
+    h.timers.reserve(32);
+    let (_, open) = allocation_budget::measure(|| h.open(0.));
+    let (_, challenge) = allocation_budget::measure(|| h.message(14_000., "challenge:nonce"));
+    let (_, accepted) = allocation_budget::measure(|| {
+        h.message(18_000., "ack");
+        h.message(18_001., "ack");
+    });
+    let (_, data) = allocation_budget::measure(|| h.message(18_002., "ordinary-data"));
+    let (_, expiry) = allocation_budget::measure(|| h.message(78_002., "too-late"));
+    assert!(h.closed(h.socket));
+    assert_eq!(h.sends("auth-subscription"), 1);
+    assert_eq!(h.sends("ordinary-interest"), 1);
+    let sent: Vec<_> = h
+        .output
+        .iter()
+        .filter_map(|action| match action {
+            Action::WsSend { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        ["key-challenge", "auth-subscription", "ordinary-interest"]
+    );
+    // Recorded before the concrete driver extraction on master 7d9554615dc.
+    for (actual, calls, bytes) in [
+        (start, 34, 24593),
+        (open, 8, 3541),
+        (challenge, 5, 2233),
+        (accepted, 17, 3745),
+        (data, 0, 0),
+        (expiry, 10, 3218),
+    ] {
+        assert!(
+            actual.calls <= calls,
+            "new allocation: {actual:?}, baseline {calls}"
+        );
+        if cfg!(target_pointer_width = "64") {
+            assert!(
+                actual.bytes <= bytes,
+                "more allocation: {actual:?}, baseline {bytes}"
+            );
+        }
+    }
+}
