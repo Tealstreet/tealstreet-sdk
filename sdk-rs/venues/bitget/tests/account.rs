@@ -812,13 +812,26 @@ fn rejected_ws_leg_preserves_local_receipt_protection_until_a_fresh_read_after_g
         200,
         &serde_json::json!({"code":"00000","data":[newer]}).to_string(),
     );
-    assert_eq!(h.engine.store().positions()[0].contracts, 2.0,
-        "a later native timestamp cannot overrule recent WS receipt");
+    assert_eq!(
+        h.engine.store().positions()[0].contracts,
+        2.0,
+        "a later native timestamp cannot overrule recent WS receipt"
+    );
     h.now += 5_001.0;
-    h.command(safe_cex_engine::Command::Venue { command: 98, action: safe_cex_engine::VenueAction::ReadPositions });
-    h.respond("/all-position", 200, &serde_json::json!({"code":"00000","data":[newer]}).to_string());
-    assert_eq!(h.engine.store().positions()[0].contracts, 3.0,
-        "fresh read heals once the bounded receipt protection has passed");
+    h.command(safe_cex_engine::Command::Venue {
+        command: 98,
+        action: safe_cex_engine::VenueAction::ReadPositions,
+    });
+    h.respond(
+        "/all-position",
+        200,
+        &serde_json::json!({"code":"00000","data":[newer]}).to_string(),
+    );
+    assert_eq!(
+        h.engine.store().positions()[0].contracts,
+        3.0,
+        "fresh read heals once the bounded receipt protection has passed"
+    );
 }
 fn two_market_rows() -> Harness {
     let mut h = Harness::classic();

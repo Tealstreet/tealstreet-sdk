@@ -135,7 +135,6 @@ struct WsPosition {
 // The existing 5 s grace is a local receipt heuristic, never a causal barrier.
 const POSITION_RECEIPT_GRACE_MS: f64 = 5_000.0;
 
-
 #[derive(Default)]
 pub struct Account {
     pub(crate) supervisor: Supervisor,
@@ -483,11 +482,22 @@ impl BitgetFutures {
         }
     }
 
-    pub(crate) fn position_read_released(&mut self, pending: &mut Pending, release: safe_cex_engine::SigningRelease) {
-        if let Pending::Account { request: Request::Positions { cut, .. }, .. } = pending
-            && cut.is_none() {
-            *cut = Some(PositionCut { epoch: self.account.position_epoch,
-                ordinal: self.account.position_ordinal, at: release.time().raw_ms });
+    pub(crate) fn position_read_released(
+        &mut self,
+        pending: &mut Pending,
+        release: safe_cex_engine::SigningRelease,
+    ) {
+        if let Pending::Account {
+            request: Request::Positions { cut, .. },
+            ..
+        } = pending
+            && cut.is_none()
+        {
+            *cut = Some(PositionCut {
+                epoch: self.account.position_epoch,
+                ordinal: self.account.position_ordinal,
+                at: release.time().raw_ms,
+            });
         }
     }
 
@@ -972,8 +982,11 @@ impl BitgetFutures {
                     return;
                 }
                 self.account.positions_in_flight = false;
-                let Some(cut) = cut.filter(|c| c.epoch == self.account.position_epoch
-                    && c.epoch != u64::MAX && c.ordinal != u64::MAX) else {
+                let Some(cut) = cut.filter(|c| {
+                    c.epoch == self.account.position_epoch
+                        && c.epoch != u64::MAX
+                        && c.ordinal != u64::MAX
+                }) else {
                     self.owe_position_repair(cx);
                     return;
                 };
@@ -995,7 +1008,10 @@ impl BitgetFutures {
                         .account
                         .ws_positions
                         .get(&(p.symbol.clone(), Some(p.side)))
-                        .is_some_and(|mark| mark.rejected.is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal))
+                        .is_some_and(|mark| {
+                            mark.rejected
+                                .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal)
+                        })
                     {
                         self.position_setting(cx, p);
                     }
@@ -1833,36 +1849,76 @@ impl BitgetFutures {
                 }
                 if cx.store.positions().iter().any(|old| {
                     old.symbol == p.symbol
-                        && (old.position_mode != p.position_mode || old.id == p.id && old.side != p.side)
-                        && self.account.ws_positions.get(&(old.symbol.clone(), Some(old.side)))
-                            .is_some_and(|mark| mark.rejected.is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal)
-                                || mark.observed.is_some_and(|r| r.epoch == cut.epoch &&
-                                    (r.ordinal > cut.ordinal || cx.now - r.at <= POSITION_RECEIPT_GRACE_MS)))
+                        && (old.position_mode != p.position_mode
+                            || p.position_mode == Some(PositionMode::Oneway) && old.side != p.side)
+                        && self
+                            .account
+                            .ws_positions
+                            .get(&(old.symbol.clone(), Some(old.side)))
+                            .is_some_and(|mark| {
+                                mark.rejected.is_some_and(|r| {
+                                    r.epoch == cut.epoch && r.ordinal > cut.ordinal
+                                }) || mark.observed.is_some_and(|r| {
+                                    r.epoch == cut.epoch
+                                        && (r.ordinal > cut.ordinal
+                                            || cx.now - r.at <= POSITION_RECEIPT_GRACE_MS)
+                                })
+                            })
                 }) {
                     held.set(true);
                     return None;
                 }
-                if let Some(mark) = self.account.ws_positions.get(&(p.symbol.clone(), Some(p.side))) {
-                    let rejection = mark.rejected.is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal);
-                    let financial = mark.observed.is_some_and(|r| r.epoch == cut.epoch &&
-                        (r.ordinal > cut.ordinal || cx.now - r.at <= POSITION_RECEIPT_GRACE_MS));
-                    let same = cx.store.positions().iter().find(|old| old.symbol == p.symbol && old.side == p.side)
+                if let Some(mark) = self
+                    .account
+                    .ws_positions
+                    .get(&(p.symbol.clone(), Some(p.side)))
+                {
+                    let rejection = mark
+                        .rejected
+                        .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal);
+                    let after_send = mark
+                        .observed
+                        .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal);
+                    let financial = mark.observed.is_some_and(|r| {
+                        r.epoch == cut.epoch && cx.now - r.at <= POSITION_RECEIPT_GRACE_MS
+                    });
+                    let same = cx
+                        .store
+                        .positions()
+                        .iter()
+                        .find(|old| old.symbol == p.symbol && old.side == p.side)
                         .map_or(p.contracts == 0.0, |old| positions_agree(old, &p));
-                    if rejection || financial && !same {
+                    if rejection || after_send || financial && !same {
                         held.set(true);
-                        return cx.store.positions().iter().find(|old| old.symbol == p.symbol && old.side == p.side).cloned();
+                        return cx
+                            .store
+                            .positions()
+                            .iter()
+                            .find(|old| old.symbol == p.symbol && old.side == p.side)
+                            .cloned();
                     }
                 }
                 Some(p)
             })
             .collect();
         for current in cx.store.positions() {
-            if !rows.iter().any(|p| p.symbol == current.symbol && p.side == current.side)
-                && self.account.ws_positions.get(&(current.symbol.clone(), Some(current.side))).is_some_and(|m| {
-                    m.rejected.is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal)
-                        || m.observed.is_some_and(|r| r.epoch == cut.epoch &&
-                            (r.ordinal > cut.ordinal || cx.now - r.at <= POSITION_RECEIPT_GRACE_MS))
-                }) {
+            if !rows
+                .iter()
+                .any(|p| p.symbol == current.symbol && p.side == current.side)
+                && self
+                    .account
+                    .ws_positions
+                    .get(&(current.symbol.clone(), Some(current.side)))
+                    .is_some_and(|m| {
+                        m.rejected
+                            .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal)
+                            || m.observed.is_some_and(|r| {
+                                r.epoch == cut.epoch
+                                    && (r.ordinal > cut.ordinal
+                                        || cx.now - r.at <= POSITION_RECEIPT_GRACE_MS)
+                            })
+                    })
+            {
                 held.set(true);
                 rows.push(current.clone());
             }
@@ -2261,8 +2317,11 @@ impl BitgetFutures {
                     .cloned()
                     .collect();
                 self.account.position_ordinal = self.account.position_ordinal.saturating_add(1);
-                let observation = PositionCut { epoch: self.account.position_epoch,
-                    ordinal: self.account.position_ordinal, at: cx.now };
+                let observation = PositionCut {
+                    epoch: self.account.position_epoch,
+                    ordinal: self.account.position_ordinal,
+                    at: cx.now,
+                };
                 // Rejections are observation barriers, never a new full financial
                 // snapshot. A fresh read can heal them; unrelated peers remain eligible.
                 for p in &held {
@@ -2275,7 +2334,8 @@ impl BitgetFutures {
                             .entry((p.symbol.clone(), Some(p.side)))
                             .and_modify(|mark| mark.rejected = Some(observation))
                             .or_insert(WsPosition {
-                                observed: None, rejected: Some(observation),
+                                observed: None,
+                                rejected: Some(observation),
                             });
                     }
                 }
@@ -2285,7 +2345,8 @@ impl BitgetFutures {
                     self.account.ws_positions.insert(
                         (p.symbol.clone(), Some(p.side)),
                         WsPosition {
-                            observed: Some(observation), rejected: None,
+                            observed: Some(observation),
+                            rejected: None,
                         },
                     );
                 }
@@ -3218,11 +3279,17 @@ impl BitgetFutures {
 }
 
 fn positions_agree(a: &Position, b: &Position) -> bool {
-    a.contracts == b.contracts && (a.contracts == 0.0 || (
-        a.entry_price == b.entry_price && a.notional == b.notional && a.leverage == b.leverage
-        && a.margin_type == b.margin_type && a.position_mode == b.position_mode
-        && a.unrealized_pnl == b.unrealized_pnl && a.realized_pnl == b.realized_pnl
-        && a.liquidation_price == b.liquidation_price && a.margin_size == b.margin_size))
+    a.contracts == b.contracts
+        && (a.contracts == 0.0
+            || (a.entry_price == b.entry_price
+                && a.notional == b.notional
+                && a.leverage == b.leverage
+                && a.margin_type == b.margin_type
+                && a.position_mode == b.position_mode
+                && a.unrealized_pnl == b.unrealized_pnl
+                && a.realized_pnl == b.realized_pnl
+                && a.liquidation_price == b.liquidation_price
+                && a.margin_size == b.margin_size))
 }
 
 pub(crate) fn clean(v: f64) -> f64 {
