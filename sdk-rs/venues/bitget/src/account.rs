@@ -1012,15 +1012,30 @@ impl BitgetFutures {
                         .ws_positions
                         .get(&(p.symbol.clone(), Some(p.side)))
                         .is_some_and(|mark| {
-                            mark.rejected
-                                .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal)
+                            mark.rejected.is_some_and(|r| {
+                                p.id == mark.id && r.epoch == cut.epoch && r.ordinal > cut.ordinal
+                            })
                         })
                     {
                         self.position_setting(cx, p);
                     }
                 }
+                // An admitted mode replacement inherits the binding, never a new receipt time.
+                for ((symbol, side), mark) in &mut self.account.ws_positions {
+                    if !rows.iter().any(|p| p.id == mark.id)
+                        && let Some(row) = rows
+                            .iter()
+                            .find(|p| p.symbol == *symbol && Some(p.side) == *side)
+                    {
+                        mark.id.clone_from(&row.id);
+                    }
+                }
                 for current in cx.store.positions() {
                     if !rows.iter().any(|p| p.id == current.id)
+                        // Malformed REST retains the bound row, never a superseded mode alias.
+                        && !self.account.ws_positions.get(&(current.symbol.clone(), Some(current.side)))
+                            .is_some_and(|mark| mark.id != current.id && [mark.observed, mark.rejected]
+                                .into_iter().flatten().any(|r| r.epoch == cut.epoch))
                         && [Some(current.side), None]
                             .into_iter()
                             .any(|side| !skipped.allows_absence(&(current.symbol.clone(), side)))
@@ -1817,7 +1832,13 @@ impl BitgetFutures {
         started: f64,
         cut: PositionCut,
     ) -> (Vec<Position>, bool) {
-        let held = std::cell::Cell::new(false);
+        // A post-cut zero has no Store row, but still prevents certifying this read.
+        let held = std::cell::Cell::new(self.account.ws_positions.values().any(|mark| {
+            [mark.observed, mark.rejected]
+                .into_iter()
+                .flatten()
+                .any(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal)
+        }));
         let mut rows: Vec<_> = rows
             .into_iter()
             .filter_map(|mut p| {
@@ -1860,7 +1881,9 @@ impl BitgetFutures {
                             .get(&(old.symbol.clone(), Some(old.side)))
                             .is_some_and(|mark| {
                                 mark.rejected.is_some_and(|r| {
-                                    r.epoch == cut.epoch && r.ordinal > cut.ordinal
+                                    old.id == mark.id
+                                        && r.epoch == cut.epoch
+                                        && r.ordinal > cut.ordinal
                                 }) || mark.observed.is_some_and(|r| {
                                     old.id == mark.id
                                         && r.epoch == cut.epoch
@@ -1918,14 +1941,14 @@ impl BitgetFutures {
                     .ws_positions
                     .get(&(current.symbol.clone(), Some(current.side)))
                     .is_some_and(|m| {
-                        m.rejected
-                            .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal)
-                            || m.observed.is_some_and(|r| {
-                                current.id == m.id
-                                    && r.epoch == cut.epoch
-                                    && (r.ordinal > cut.ordinal
-                                        || cut.at - r.at <= POSITION_RECEIPT_GRACE_MS)
-                            })
+                        m.rejected.is_some_and(|r| {
+                            current.id == m.id && r.epoch == cut.epoch && r.ordinal > cut.ordinal
+                        }) || m.observed.is_some_and(|r| {
+                            current.id == m.id
+                                && r.epoch == cut.epoch
+                                && (r.ordinal > cut.ordinal
+                                    || cut.at - r.at <= POSITION_RECEIPT_GRACE_MS)
+                        })
                     })
             {
                 held.set(true);
@@ -2333,6 +2356,15 @@ impl BitgetFutures {
                 };
                 // Rejections are observation barriers, never a new full financial
                 // snapshot. A fresh read can heal them; unrelated peers remain eligible.
+                // Known zero markers also observe malformed rows despite having no Store row.
+                for ((symbol, side), mark) in &mut self.account.ws_positions {
+                    if [*side, None]
+                        .into_iter()
+                        .any(|side| !rejected.allows_absence(&(symbol.clone(), side)))
+                    {
+                        mark.rejected = Some(observation);
+                    }
+                }
                 for p in &held {
                     if [Some(p.side), None]
                         .into_iter()
@@ -2341,7 +2373,6 @@ impl BitgetFutures {
                         self.account
                             .ws_positions
                             .entry((p.symbol.clone(), Some(p.side)))
-                            .and_modify(|mark| mark.rejected = Some(observation))
                             .or_insert(WsPosition {
                                 id: p.id.clone(),
                                 observed: None,

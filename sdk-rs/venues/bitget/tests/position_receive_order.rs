@@ -567,3 +567,206 @@ fn a_confirmed_mode_write_does_not_disconnect_a_receipt_from_its_cached_row() {
     assert_eq!(positions[0].position_mode, Some(PositionMode::Hedged));
     assert!(h.engine.store().hedged());
 }
+
+#[test]
+fn review_3078_agreeing_mode_alias_keeps_receipt_for_next_stale_read() {
+    use safe_cex_engine::Command;
+    let mut h = ready();
+    h.now += 1.0;
+    ws(&mut h, 2, "100");
+    h.command(Command::SetPositionMode {
+        command: 96,
+        hedged: true,
+        symbol: None,
+    });
+    h.respond("/set-position-mode", 200, r#"{"code":"00000","data":{}}"#);
+    read_positions(&mut h, 97);
+    rest(&mut h, json!([hedge_row("long", 2)]));
+    assert_eq!(size(&h), 2.0, "working agreeing census");
+    read_positions(&mut h, 98);
+    rest(&mut h, json!([hedge_row("long", 1)]));
+    assert_eq!(
+        size(&h),
+        2.0,
+        "a matching new-mode row cannot turn a recent open receipt into a tombstone"
+    );
+}
+
+fn review_3078_malformed_alias(observed_size: u32, confirmed_mode_write: bool) {
+    use safe_cex_engine::model::PositionSide;
+    {
+        let mut h = Harness::classic();
+        let old = h.take("/all-position");
+        if confirmed_mode_write {
+            h.now += 1.0;
+            h.command(safe_cex_engine::Command::SetPositionMode {
+                command: 96,
+                hedged: true,
+                symbol: None,
+            });
+            h.respond("/set-position-mode", 200, r#"{"code":"00000","data":{}}"#);
+        } else {
+            h.engine.store_mut().set_hedged(true);
+        }
+        h.now += 1.0;
+        h.private_message(&json!({"arg":{"channel":"positions"},"action":"update","data":[hedge_row("long", observed_size)]}).to_string());
+        let mut malformed = hedge_row("long", 2);
+        malformed["total"] = json!({"bad":1});
+        h.now += 1.0;
+        h.private_message(
+            &json!({"arg":{"channel":"positions"},"action":"update","data":[malformed]})
+                .to_string(),
+        );
+        h.reply(
+            old.id,
+            200,
+            &json!({"code":"00000","data":[hedge_row("short",4)]}).to_string(),
+        );
+        let positions = h.engine.store().positions();
+        assert_eq!(
+            positions
+                .iter()
+                .find(|p| p.side == PositionSide::Long)
+                .map(|p| p.contracts),
+            (observed_size != 0).then_some(f64::from(observed_size)),
+            "retain exact observed row or zero, never old cached alias: {positions:?}"
+        );
+        assert_eq!(
+            positions
+                .iter()
+                .find(|p| p.side == PositionSide::Short)
+                .map(|p| p.contracts),
+            Some(4.0),
+            "malformed long must not let old-mode alias block the unobserved hedge peer"
+        );
+    }
+}
+
+#[test]
+fn review_3078_post_release_zero_does_not_certify_an_older_empty_census() {
+    let mut h = ready();
+    read_positions(&mut h, 94);
+    h.now += 1.0;
+    ws(&mut h, 0, "100");
+    rest(&mut h, json!([]));
+    assert_eq!(size(&h), 0.0, "working zero publication");
+    assert!(
+        !h.done.iter().any(|(id, _)| *id == 94),
+        "an empty pre-zero census cannot pay the post-release observation debt"
+    );
+    repair_at(&mut h, 500.0);
+    rest(&mut h, json!([]));
+    assert!(h.done.iter().any(|(id, r)| *id == 94 && r.is_ok()));
+}
+
+#[test]
+fn review_3078_malformed_leg_cannot_replace_observed_open_with_cached_alias() {
+    review_3078_malformed_alias(2, false);
+}
+#[test]
+fn review_3078_malformed_leg_cannot_resurrect_cached_alias_after_zero() {
+    review_3078_malformed_alias(0, false);
+}
+
+#[test]
+fn review_3078_confirmed_mode_malformed_leg_keeps_exact_open() {
+    review_3078_malformed_alias(2, true);
+}
+#[test]
+fn review_3078_confirmed_mode_malformed_leg_keeps_zero() {
+    review_3078_malformed_alias(0, true);
+}
+
+#[test]
+fn malformed_rest_cannot_rebind_a_zero_to_a_restored_old_mode_alias() {
+    use safe_cex_engine::Command;
+    let mut h = Harness::classic();
+    let old = h.take("/all-position");
+    h.now += 1.0;
+    h.command(Command::SetPositionMode {
+        command: 96,
+        hedged: true,
+        symbol: None,
+    });
+    h.respond("/set-position-mode", 200, r#"{"code":"00000","data":{}}"#);
+    h.now += 1.0;
+    h.private_message(
+        &json!({"arg":{"channel":"positions"},"action":"update","data":[hedge_row("long",0)]})
+            .to_string(),
+    );
+    let mut malformed = hedge_row("long", 2);
+    malformed["total"] = json!({"bad":1});
+    h.reply(
+        old.id,
+        200,
+        &json!({"code":"00000","data":[malformed,hedge_row("short",4)]}).to_string(),
+    );
+    assert!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .all(|p| p.side != safe_cex_engine::model::PositionSide::Long),
+        "a rejected REST row is not an admitted replacement of the exact zero marker"
+    );
+    assert_eq!(size(&h), 4.0, "the unaffected hedge peer still heals");
+}
+
+#[test]
+fn an_admitted_mode_alias_keeps_the_original_receipt_age() {
+    use safe_cex_engine::Command;
+    let mut h = ready();
+    h.now += 1.0;
+    ws(&mut h, 2, "100");
+    h.command(Command::SetPositionMode {
+        command: 96,
+        hedged: true,
+        symbol: None,
+    });
+    h.respond("/set-position-mode", 200, r#"{"code":"00000","data":{}}"#);
+    h.now += 4000.0;
+    read_positions(&mut h, 97);
+    rest(&mut h, json!([hedge_row("long", 2)]));
+    assert_eq!(size(&h), 2.0);
+    h.now += 1001.0;
+    read_positions(&mut h, 98);
+    rest(&mut h, json!([hedge_row("long", 1)]));
+    assert_eq!(
+        size(&h),
+        1.0,
+        "rebind must not restart the five-second receipt window"
+    );
+}
+
+#[test]
+fn a_malformed_observation_after_a_zero_keeps_its_post_cut_barrier_without_a_store_row() {
+    let mut h = ready();
+    ws(&mut h, 0, "100");
+    h.now += 5001.0;
+    read_positions(&mut h, 97);
+    let mut malformed = row(1, "999999");
+    malformed["total"] = json!({"bad":1});
+    h.now += 1.0;
+    h.private_message(
+        &json!({"arg":{"channel":"positions"},"action":"update","data":[malformed]}).to_string(),
+    );
+    rest(&mut h, json!([row(1, "999999")]));
+    assert_eq!(
+        size(&h),
+        0.0,
+        "no Store row is needed to retain a known zero rejection barrier"
+    );
+    assert!(!h.done.iter().any(|(id, _)| *id == 97));
+    read_positions(&mut h, 98);
+    rest(&mut h, json!([row(1, "0")]));
+    assert_eq!(
+        size(&h),
+        1.0,
+        "a later complete census can heal after the rejection"
+    );
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 97 && result.is_ok())
+    );
+}
