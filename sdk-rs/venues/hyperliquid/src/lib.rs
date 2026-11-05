@@ -1144,7 +1144,12 @@ impl Venue for Hyperliquid {
         true
     }
     fn http_release() -> safe_cex_engine::HttpRelease<Self> {
-        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+        safe_cex_engine::HttpRelease::NonceUnscheduled(|venue, pending, release| {
+            if let Pending::Trade(request) = pending {
+                venue.check_trade_intent(request, release.time.raw_ms)?;
+            }
+            Ok(())
+        })
     }
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         &[trading::PACING]

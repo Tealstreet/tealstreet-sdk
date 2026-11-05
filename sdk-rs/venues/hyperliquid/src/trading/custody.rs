@@ -25,6 +25,10 @@ fn call() -> SerialCall {
 }
 pub(super) struct Custody {
     preflight: Preflight,
+    // Captured once from the genuine caller receipt, before queue or read waits.
+    intent_deadline: f64,
+    intent_timer: Option<TimerId>,
+    intent_expired: bool,
     plan: Option<Plan>,
     slot: Option<Slot>,
     context: Option<Context>,
@@ -72,6 +76,22 @@ impl Hyperliquid {
             cx.refuse_command(Operation::Mutation, error.venue_error());
             return;
         }
+        let remaining = match cx.command_wait() {
+            Some(safe_cex_engine::CommandWait::Remaining(ms)) => ms,
+            Some(safe_cex_engine::CommandWait::Expired) => {
+                let _ = cx.reject_expired_command(Operation::Mutation);
+                return;
+            }
+            None => {
+                cx.refuse_command(
+                    Operation::Mutation,
+                    not_sent("Hyperliquid command has no caller deadline")
+                        .kind(ErrorKind::Internal),
+                );
+                return;
+            }
+        };
+        let intent_deadline = cx.now + f64::from(remaining);
         let preflight = match cx.begin_preflight(PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
             read_credential: None,
@@ -81,12 +101,17 @@ impl Hyperliquid {
             Err(_) => return,
         };
         let ready = self.trading.active.is_none() && self.trading.queue.is_empty();
+        let intent_timer = cx.set_timer(f64::from(remaining));
         if !ready && let Err(error) = cx.park_preflight_for(&preflight, None) {
+            cx.clear_timer(intent_timer);
             let _ = cx.fail_preflight(&preflight, error.venue_error());
             return;
         }
         job.custody = Some(Custody {
             preflight,
+            intent_deadline,
+            intent_timer: Some(intent_timer),
+            intent_expired: false,
             plan: None,
             slot: None,
             context: None,
@@ -98,7 +123,7 @@ impl Hyperliquid {
     }
     pub(crate) fn trade_preflight_ready(&mut self, cx: &mut Cx<'_, Pending>, owner: &Preflight) {
         if self.trading.active.is_none() {
-            self.trading.active = self.trading.queue.pop_front();
+            self.trading.active = self.take_next_trade();
         }
         let Some(custody) = self
             .trading
@@ -145,6 +170,15 @@ impl Hyperliquid {
         self.pump_trades(cx);
     }
     pub(super) fn trade_entry_ready(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        if self.trading.active.as_ref().is_some_and(|job| {
+            !job.effective
+                && job.custody.as_ref().is_some_and(|custody| {
+                    custody.intent_expired || cx.now >= custody.intent_deadline
+                })
+        }) {
+            self.finish_trade(cx, Err(intent_expired()));
+            return false;
+        }
         let custody = self
             .trading
             .active
@@ -168,6 +202,13 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
     ) -> Result<(), VenueError> {
+        let job = self.trading.active.as_ref().unwrap();
+        if !job.effective {
+            let remaining = (job.custody.as_ref().unwrap().intent_deadline - cx.now).floor();
+            if remaining < 1. || job.custody.as_ref().unwrap().intent_expired {
+                return Err(intent_expired());
+            }
+        }
         let custody = self
             .trading
             .active
@@ -300,6 +341,7 @@ impl Hyperliquid {
         custody.context = Some(context.clone());
         let committed_effect = effect.clone();
         let command = job.command;
+        let intent_deadline = (!job.effective).then_some(custody.intent_deadline);
         self.publish_trade_receipts(cx, command, &committed_effect);
         let pending = Pending::Trade(Request {
             command,
@@ -307,6 +349,7 @@ impl Hyperliquid {
             plan,
             context: context.clone(),
             order_reply,
+            intent_deadline,
         });
         match cx.request_signed_managed(
             context,
@@ -344,6 +387,9 @@ impl Hyperliquid {
         result: Result<String, VenueError>,
     ) {
         let custody = job.custody.as_ref().unwrap();
+        if let Some(timer) = custody.intent_timer {
+            cx.clear_timer(timer);
+        }
         if let Some(plan) = &custody.plan {
             match result {
                 Err(error) => {
@@ -369,6 +415,50 @@ impl Hyperliquid {
             };
         }
     }
+    pub(crate) fn check_trade_intent(
+        &self,
+        request: &Request,
+        now: f64,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        request.check_intent_deadline(now)?;
+        if request.intent_deadline.is_some()
+            && self.trading.active.as_ref().is_some_and(|job| {
+                job.command == request.command
+                    && job.custody.as_ref().is_some_and(|custody| {
+                        custody.context.as_ref() == Some(&request.context) && custody.intent_expired
+                    })
+            })
+        {
+            return Err(safe_cex_engine::request_context::Error::TimedOut);
+        }
+        Ok(())
+    }
+    pub(super) fn expire_trade_intent(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if let Some(index) = self.trading.queue.iter().position(|job| {
+            job.custody
+                .as_ref()
+                .is_some_and(|custody| custody.intent_timer == Some(timer))
+        }) {
+            let mut job = self.trading.queue.remove(index).unwrap();
+            job.custody.as_mut().unwrap().intent_timer = None;
+            self.finish_trade_owner(cx, &job, Err(intent_expired()));
+            return true;
+        }
+        let Some(job) = self.trading.active.as_mut().filter(|job| {
+            job.custody
+                .as_ref()
+                .is_some_and(|custody| custody.intent_timer == Some(timer))
+        }) else {
+            return false;
+        };
+        let custody = job.custody.as_mut().unwrap();
+        custody.intent_timer = None;
+        custody.intent_expired = true;
+        if !job.effective && !self.trading.inflight {
+            self.finish_trade(cx, Err(intent_expired()));
+        }
+        true
+    }
     pub(crate) fn trade_owner_retired(
         &mut self,
         retired: &HttpOwnerRetirement,
@@ -391,7 +481,7 @@ impl Hyperliquid {
             self.trading.amend_wait = None;
         }
         if self.trading.active.is_none() {
-            self.trading.active = self.trading.queue.pop_front();
+            self.trading.active = self.take_next_trade();
         }
         self.trading
             .active
