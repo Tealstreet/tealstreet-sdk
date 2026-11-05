@@ -36,6 +36,19 @@ use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use wire::*;
 
+/// Aster refuses a klines limit outside 1..=1500 (-1130).
+const MAX_KLINES: u32 = 1500;
+
+/// The REST depth sizes Aster accepts; any other value is refused (-1130 or -4021).
+/// A request rounds up to the next size, and anything larger asks for the deepest.
+fn depth_limit(requested: u32) -> u32 {
+    const SIZES: [u32; 7] = [5, 10, 20, 50, 100, 500, 1000];
+    SIZES
+        .into_iter()
+        .find(|size| *size >= requested)
+        .unwrap_or(1000)
+}
+
 const INTEREST_MS: f64 = 15_000.0;
 
 fn local_read_policy() -> Policy {
@@ -1544,7 +1557,7 @@ impl Venue for AsterDex {
                 let mut path = format!(
                     "{}?symbol={symbol}&interval={interval}&limit={}",
                     self.path("klines"),
-                    limit.unwrap_or(500)
+                    limit.unwrap_or(500).clamp(1, MAX_KLINES)
                 );
                 if let Some(from) = from_ms {
                     path.push_str(&format!("&startTime={}", num::format(from)));
@@ -1584,7 +1597,7 @@ impl Venue for AsterDex {
                     self.path("depth"),
                     sign::Query::new()
                         .str("symbol", &symbol)
-                        .num("limit", f64::from(limit.unwrap_or(100)))
+                        .num("limit", f64::from(depth_limit(limit.unwrap_or(100))))
                         .as_str()
                 );
                 let Ok(context) = cx.admit_http_command(request::public_read_policy()) else {

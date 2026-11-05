@@ -15,6 +15,10 @@ const TICKERS: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSD","lastPr":"40
 const BALANCE: &str = r#"{"code":"00000","data":[{"marginCoin":"BTC","unionTotalMargin":"2","unionAvailable":"1.5","unrealizedPL":"0.1","usdtEquity":"100000"},{"marginCoin":"ETH","accountEquity":"3","available":"2","unrealizedPL":"0.2","usdtEquity":"0"}]}"#;
 
 fn started(tickers: &str) -> Harness {
+    started_with_contracts(tickers, CONTRACTS)
+}
+
+fn started_with_contracts(tickers: &str, contracts: &str) -> Harness {
     let mut h = Harness::started(Options {
         product: Product::Inverse,
         key: Some("key".into()),
@@ -22,7 +26,7 @@ fn started(tickers: &str) -> Harness {
         passphrase: Some("pass".into()),
         ..Options::default()
     });
-    h.respond("/contracts", 200, CONTRACTS);
+    h.respond("/contracts", 200, contracts);
     h.respond("/tickers", 200, tickers);
     let public = h
         .sockets
@@ -549,4 +553,17 @@ fn an_empty_coin_futures_catalogue_ends_the_start_with_a_reason() {
     assert!(h.sockets.is_empty(), "{:?}", h.sockets);
     assert!(h.requests.is_empty());
     assert!(h.timers.is_empty(), "no retry forever");
+}
+
+#[test]
+fn inverse_keeps_legacy_max_trade_num_until_market_cap_units_are_proven() {
+    let contracts = CONTRACTS.replace(
+        "\"maxTradeNum\":\"2000\"",
+        "\"maxTradeNum\":\"2000\",\"maxOrderQty\":\"100\",\"maxMarketOrderQty\":\"1\"",
+    );
+    let h = started_with_contracts(TICKERS, &contracts);
+    assert_eq!(
+        h.engine.store().market("BTCUSD").unwrap().limits.amount.max,
+        2000.0
+    );
 }

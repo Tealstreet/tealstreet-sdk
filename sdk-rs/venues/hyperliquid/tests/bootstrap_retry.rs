@@ -431,3 +431,33 @@ fn later_live_failures_do_not_restart_the_completed_bootstrap_retry() {
     );
     assert_eq!(run.sent, 2);
 }
+
+#[test]
+fn native_startup_recheck_recovers_role_with_only_info_reads_and_keeps_pending_single_flight() {
+    let mut run = Run::new("userRole", "\"disabled\"");
+    assert!(run.engine.recheck_startup_reads(run.now));
+    run.drain();
+    assert_eq!(run.sent, 1, "an admitted role read remains single flight");
+    let first = run.held.remove(0);
+    run.answer(&first, 200, "", r#"{"role":"missing"}"#);
+    run.drain();
+    assert!(!run.engine.private_startup_complete());
+    assert!(run.engine.recheck_startup_reads(run.now));
+    run.drain();
+    assert_eq!(run.sent, 2);
+    let retry = run.held.remove(0);
+    assert_ne!(first.id, retry.id);
+    assert_eq!(retry.url, "https://api.hyperliquid.xyz/info");
+    assert_eq!(kind(&retry), "userRole");
+    run.answer(
+        &retry,
+        200,
+        "",
+        r#"{"role":"agent","data":{"user":"0x14791697260e4c9a71f18484c9f997b308e59325"}}"#,
+    );
+    run.drain();
+    assert!(run.engine.private_startup_complete());
+    assert!(!run.engine.recheck_startup_reads(run.now));
+    run.drain();
+    assert_eq!(run.sent, 2, "successful recovery retires rechecks");
+}

@@ -42,6 +42,14 @@ impl Log {
     pub fn warn(message: &str) {
         Self::line("warn", message);
     }
+    /// An alertable condition: the journal line, and a Sentry event built only
+    /// from `report` (never from `message`, which may name an account).
+    pub fn error(message: &str, report: &crate::telemetry::Report<'_>) {
+        let line = json!({"level": "error", "service": "exchange-server", "kind": report.kind, "msg": message})
+            .to_string();
+        eprintln!("{line}");
+        crate::telemetry::capture(report);
+    }
 }
 
 #[derive(Default)]
