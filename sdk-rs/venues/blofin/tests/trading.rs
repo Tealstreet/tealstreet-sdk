@@ -186,7 +186,7 @@ fn rejected_cancel_prevents_amend_replacement() {
     only_reconcile_pending(&h);
 }
 #[test]
-fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
+fn a_refused_take_profit_edit_leaves_it_in_place() {
     let mut h = Harness::new();
     h.open_private();
     h.seed();
@@ -209,22 +209,12 @@ fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
         }),
     );
     h.collect();
-    h.reply(
-        "cancel-tpsl",
-        r#"{"code":"0","data":[{"tpslId":"91","code":"0","msg":null}]}"#,
+    let r = h.take("amend-tpsl");
+    let body: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({"instId":"BTC-USDT","tpslId":"91","newTpTriggerPrice":"66000"})
     );
-    let timer = h
-        .actions
-        .iter()
-        .rev()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
-            _ => None,
-        })
-        .unwrap();
-    h.handle(timer.1, Event::TimerFired { timer: timer.0 });
-    h.collect();
-    let r = h.take("order-tpsl");
     h.respond(
         r,
         r#"{"code":"102014","msg":"trigger refused","data":null}"#,
@@ -238,10 +228,11 @@ fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
         })
         .expect("a failure");
     assert!(
-        error.message.contains("BTC") && error.message.contains("no take profit"),
+        error.message.contains("BTCUSDT take profit is unchanged"),
         "{}",
         error.message
     );
+    assert!(!h.pending.iter().any(|r| r.url.contains("cancel")));
 }
 
 #[test]
