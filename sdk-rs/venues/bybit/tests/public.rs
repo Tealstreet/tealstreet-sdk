@@ -33,7 +33,7 @@ fn startup_loads_markets_and_tickers_then_subscribes_every_ticker() {
     );
     assert_eq!(
         (market.limits.amount.min, market.limits.amount.max),
-        (0.001, 1190.0)
+        (0.001, 500.0)
     );
     assert_eq!(market.limits.leverage.max, 100.0);
     assert_eq!(market.is_expiring, Some(false));

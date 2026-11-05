@@ -291,7 +291,7 @@ impl Bingx {
         rows: Vec<Candle>,
         valid: bool,
     ) {
-        if let Some(error) = read_rate_limit(&response, cx.now) {
+        if let Some(error) = candle_rate_limit(&response, cx.now) {
             let _ = cx.command_error_context(context, error.message.clone());
             let _ = cx.fail_context(context, error);
             return;
@@ -768,6 +768,11 @@ const BAN_LONGEST_MS: f64 = 24.0 * 3_600_000.0;
 /// A 100410 envelope or HTTP 429: how long to wait, from the unblock time the
 /// response names (an epoch in the message, or Retry-After), else BAN_FLOOR_MS.
 pub(crate) fn ban_wait_ms(response: &Response<'_>, now: f64) -> Option<f64> {
+    named_ban_wait_ms(response, now).map(|named| named.unwrap_or(BAN_FLOOR_MS))
+}
+
+/// A 100410 envelope or HTTP 429, with the unblock wait the response names, if any.
+fn named_ban_wait_ms(response: &Response<'_>, now: f64) -> Option<Option<f64>> {
     #[derive(Deserialize)]
     struct Envelope {
         code: i64,
@@ -785,11 +790,7 @@ pub(crate) fn ban_wait_ms(response: &Response<'_>, now: f64) -> Option<f64> {
         .and_then(|seconds| seconds.trim().parse::<f64>().ok())
         .map(|seconds| seconds * 1000.0)
         .or_else(|| unblock_at(&envelope?.msg).map(|at| at - now));
-    Some(
-        named
-            .filter(|wait| *wait > 0.0 && *wait <= BAN_LONGEST_MS)
-            .unwrap_or(BAN_FLOOR_MS),
-    )
+    Some(named.filter(|wait| *wait > 0.0 && *wait <= BAN_LONGEST_MS))
 }
 
 /// Classify the envelope before any list codec, using the discovery ban policy.
@@ -797,15 +798,29 @@ pub(crate) fn read_rate_limit(
     response: &Response<'_>,
     now: f64,
 ) -> Option<safe_cex_engine::VenueError> {
-    let wait = ban_wait_ms(response, now)?;
+    rate_limit_error(response, Some(ban_wait_ms(response, now)?))
+}
+
+/// A chart history refusal carries only the wait BingX names: an unnamed 100410
+/// ("please try again later") leaves the backoff to the chart, not a 5 min floor.
+fn candle_rate_limit(response: &Response<'_>, now: f64) -> Option<safe_cex_engine::VenueError> {
+    rate_limit_error(response, named_ban_wait_ms(response, now)?)
+}
+
+fn rate_limit_error(
+    response: &Response<'_>,
+    wait: Option<f64>,
+) -> Option<safe_cex_engine::VenueError> {
     let envelope = serde_json::from_str::<wire::Rejection<'_>>(response.body).ok();
     let mut error = safe_cex_engine::VenueError::new(
         success(*response)
             .err()
             .unwrap_or_else(|| "BingX rate limit".into()),
     )
-    .kind(safe_cex_engine::ErrorKind::RateLimited)
-    .retry_after_ms(wait);
+    .kind(safe_cex_engine::ErrorKind::RateLimited);
+    if let Some(wait) = wait {
+        error = error.retry_after_ms(wait);
+    }
     if let Some(envelope) = envelope {
         if let Some(code) = envelope.code.filter(|code| *code != 0) {
             error = error.venue_code(code.to_string());
@@ -1218,7 +1233,11 @@ impl Venue for Bingx {
             pending => pending,
         };
         if let Err(error) = success(response) {
-            let typed = read_rate_limit(&response, cx.now);
+            let typed = if matches!(pending, Pending::Candles { .. }) {
+                candle_rate_limit(&response, cx.now)
+            } else {
+                read_rate_limit(&response, cx.now)
+            };
             self.note_ban(cx, &response);
             self.request_failed(cx, pending, &error, typed.as_ref());
             self.ban_wait_ms = None;
@@ -1355,7 +1374,7 @@ impl Venue for Bingx {
             }
             Pending::Signed(signed) => {
                 if signed.context().is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
-                    if let Some(error) = read_rate_limit(&response, cx.now) {
+                    if let Some(error) = candle_rate_limit(&response, cx.now) {
                         let context = signed.context().expect("checked candle custody");
                         let _ = cx.command_error_context(context, error.message.clone());
                         let _ = cx.fail_context(context, error);

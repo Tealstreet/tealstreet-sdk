@@ -288,6 +288,44 @@ struct ProductState {
     account: account::AccountState,
 }
 
+#[derive(Clone, Copy)]
+struct OrderCaps {
+    limit: f64,
+    market: f64,
+}
+
+impl OrderCaps {
+    fn from_wire(row: &Instrument<'_>) -> Option<Self> {
+        let lot = row.lot_size_filter.as_ref()?;
+        let limit = float_of(&lot.max_order_qty);
+        let market = present(&lot.max_mkt_order_qty)
+            .map(float)
+            .filter(|cap| cap.is_finite() && *cap > 0.0)
+            .unwrap_or(limit);
+        Some(Self { limit, market })
+    }
+
+    fn shared(self) -> f64 {
+        if self.market.is_finite() && self.market > 0.0 {
+            self.limit.min(self.market)
+        } else {
+            0.0
+        }
+    }
+
+    fn for_order(self, shared: f64, market: bool) -> f64 {
+        // Expand only our own conservative publication for limits. A tighter
+        // store override or source frame remains a bound for either kind.
+        if market {
+            shared.min(self.shared())
+        } else if shared == self.shared() {
+            self.limit
+        } else {
+            shared
+        }
+    }
+}
+
 pub struct BybitLinear {
     /// A Bybit Brazil (`BRA_BTL`) account: REST writes publish their own order
     /// rows, as on Demo, until its proxied private WS is venue-validated.
@@ -307,6 +345,7 @@ pub struct BybitLinear {
     published_seeds: usize,
     classification: HashMap<String, InstrumentClassification>,
     derivatives: HashMap<String, DerivativeProduct>,
+    order_caps: HashMap<String, OrderCaps>,
     wallet: Option<account::Wallet>,
     orders_loaded: HashSet<Category>,
     positions_loaded: HashSet<Category>,
@@ -568,6 +607,7 @@ impl BybitLinear {
             published_seeds: 0,
             classification: HashMap::new(),
             derivatives: HashMap::new(),
+            order_caps: HashMap::new(),
             wallet: None,
             orders_loaded: HashSet::new(),
             positions_loaded: HashSet::new(),
@@ -2534,7 +2574,7 @@ fn market_from_wire(m: &Instrument<'_>, variant: Variant, category: Category) ->
                         .reduce(f64::min)
                         .unwrap_or(f64::NAN)
                     } else {
-                        float_of(&l.max_order_qty)
+                        OrderCaps::from_wire(m).map_or(f64::NAN, OrderCaps::shared)
                     }
                 }),
             },
@@ -2650,6 +2690,14 @@ impl BybitLinear {
 impl Venue for BybitLinear {
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         &[history::ORDER_HISTORY_PACING]
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.partial_stop_release_veto(store, pending, release)
     }
     fn managed_sockets() -> bool {
         true
@@ -3274,6 +3322,11 @@ impl Venue for BybitLinear {
                 {
                     self.classification
                         .insert(row.symbol.to_string(), classification_from_wire(&row));
+                    if !self.variant.is_spot()
+                        && let Some(caps) = OrderCaps::from_wire(&row)
+                    {
+                        self.order_caps.insert(row.symbol.to_string(), caps);
+                    }
                     if let Some(product) = derivative_from_wire(&row, self.category) {
                         self.derivatives.insert(row.symbol.to_string(), product);
                     }

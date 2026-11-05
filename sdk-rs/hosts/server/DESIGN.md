@@ -300,7 +300,7 @@ display/Sentry label and is not an ownership identifier. The router
 must return public 404 for `/lease/*`, as for `/proof/*` and `/admin/*`.
 
 `POST /lease/router-heartbeat` returns
-`{accepted, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
+`{accepted, untracked, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
 `enforcing` is true only with enforcement on and no active explicit enable grace.
 The ACK stays conservative for the whole submitted batch, including users whose
 first heartbeat has already ended the missing-heartbeat exception. Users share
@@ -322,21 +322,35 @@ and never replaces the persisted maximum-issued `notAfter` and skew wait.
 A batch contains 1–256 distinct users, user IDs at most 512 bytes,
 and a body at most 256 KiB. Epoch and sequence are positive JS-safe integers.
 Old or duplicate tuples never extend a grant; invalid assertions return 400.
+A valid batch skips only assertions that cannot fit the inventory, returning
+`untracked` beside `accepted` in the ACK; later existing users still renew.
+An all-overflow batch returns 200 with `accepted:0` and a nonzero `untracked`.
+The router's singleton renewal requires `accepted:1`, so overflow proves no grant.
 A separate bounded peer limiter allows a 1024-request burst and 512 requests/s,
 without consuming the proof endpoint's smaller allowance. There are at most
 4096 tracked users; epoch high-water marks are retained until process exit and
-capacity exhaustion fails closed. No raw user IDs are logged.
+capacity exhaustion refuses new private starts when enforced. Read-only socket
+fence checks never register users: an unknown user follows explicit missing-user
+grace below capacity, and is fenced whenever enforced at full capacity.
+No raw user IDs are logged.
 
 `POST /admin/router-lease/status {userId}` uses the existing on-box admin guard
 and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,
 `sequence`, `notAfter`, `generation`, `routerBoxId`, and `missingHeartbeatGraceMs`. It grants
-no placement, renewal or write authority. Expiry uses both wall-clock
+no placement, renewal or write authority. Lookup does not register a user;
+untracked users return 503 without changing inventory. Expiry uses both wall-clock
 `notAfter` and a monotonic deadline so a clock rollback cannot extend ownership.
 
 `POST /admin/router-lease/summary` accepts an empty body or `{}` under the
 same on-box admin guard. It returns only
-`{routerBoxId, enforced, enableGraceUntil, trackedUsers, fencedUsers,
-wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+`{routerBoxId, enforced, enableGraceUntil, capacity, remaining, trackedUsers,
+fencedUsers, wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+`capacity` stays 4096; `remaining` is capacity minus the same snapshot's
+`trackedUsers`. Inventory holds distinct users for the process lifetime, not
+just active users: accepted epoch/sequence high-water marks are never evicted.
+One count-only journal warning is emitted at each 80% and 95% crossing (3277 and
+3892 users); plan a drain/roll before exhaustion. Safe eviction would require a
+future authenticated router retirement watermark; expiry alone is insufficient.
 `wouldFenceUsers` counts the exact per-user `wouldFence` predicate, including
 wall-clock and monotonic expiry, independently of shadow/enforcement mode.
 `fencedUsers` counts the per-user actual `fenced` flag. Hosted users with private
@@ -543,6 +557,39 @@ How FrameServer notices map onto `msg`:
 | `deactivate` | `deactivate-status` |
 | `startupFailed` | `start-status` `{ok:false, detail}`, plus `error` |
 | `accountAuth` | `engine-event` with code `accountAuth`. The server always opts in |
+
+### Recovering a refused native startup
+
+FrameServer retains `StartupFailed` for late joins. Only a failure originating
+in `Cx::startup_read_refused` while required private startup was incomplete
+can retire: that same source engine must load markets, balance, positions and
+orders with no signing refusal. Public-only engines, frame-fed mirrors, partial
+state, terminal engines and non-read failures (including a missing signing key)
+cannot clear it. A new failure on an already-loaded account is retained.
+This proves bootstrap completion, not that an agent key can place an order.
+
+Connected peers receive the recovery store frame. NX re-derives essential
+readiness and clears health/terminal failure in
+`exchangeAccountController.ts:2574-2624`; no new wire notice is needed. That NX
+branch currently checks loaded flags alone, so unsigned frames can also clear
+its UI latch for a non-read signing failure. This pre-existing NX limitation is
+separate; native late-join replay retains that failure.
+
+An auth-kind startup refusal may receive at most three native read-only
+rechecks, after 5, 10 and 20 minutes respectively, each with 0–30 seconds of
+host entropy jitter. A longer venue `retryAfterMs` floor is preserved; a new
+refusal does not reset the attempt budget. Clock rollback cannot accelerate
+the monotonic schedule. Successful completion retires the remaining rechecks.
+
+The venue must opt in via `Venue::rechecks_startup_reads` and implement
+`Venue::recheck_startup_reads`; non-adopters return before any engine turn.
+Hyperliquid is the first adopter:
+it retries only identity/mode and account State/Spot/Orders reads through the
+existing single-flight and admission paths. These hooks are absent from wasm.
+The host never restarts the venue, recreates the actor, replays a command or
+fires arbitrary venue timers. Existing algo/job state stays on that actor.
+After exhaustion, the failure remains visible and an explicit account retry
+can start over; the page's public-only refusal latch is a separate policy.
 
 The client's output to its own consumer stays as today: `op:'store'`
 snapshots, `listenOrderBook` (from `FrameApplier.books`), `listenOHLCV` (from

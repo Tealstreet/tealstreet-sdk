@@ -295,7 +295,7 @@ fn account_http_failures_keep_kind_status_and_code_without_response_bodies() {
         );
         assert_eq!(
             actions.iter().any(|action| matches!(action,
-            Action::Notice(Notice::StartupFailed { error }) if error.kind == Some(expected))),
+            Action::Notice(Notice::StartupFailed { error, .. }) if error.kind == Some(expected))),
             auth
         );
         assert!(

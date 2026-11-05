@@ -542,6 +542,21 @@ pub fn order_side(text: Option<&str>) -> Option<OrderSide> {
     }
 }
 
+fn note_unknown_order_trigger(cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) {
+    if [
+        (&row.trigger_by, &row.trigger_price),
+        (&row.tp_trigger_by, &row.take_profit),
+        (&row.sl_trigger_by, &row.stop_loss),
+    ]
+    .iter()
+    .any(|(reference, level)| {
+        float_of(level) > 0.0
+            && present(reference).is_some_and(|name| trigger(Some(name)).is_none())
+    }) {
+        cx.notice(Level::Warn, "order.trigger_unknown", "Bybit order has an unrecognized trigger reference; a TP write will use LastPrice when no reference is known");
+    }
+}
+
 fn trigger(text: Option<&str>) -> Option<StopTriggerType> {
     match text? {
         "MarkPrice" => Some(StopTriggerType::MarkPrice),
@@ -812,7 +827,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
                     amount
                 },
                 client_order_id: None,
-                trigger_type: trigger(present(by)).or(parent.trigger_type),
+                trigger_type: trigger(present(by)),
                 extra: inverse.then(|| OrderExtra {
                     remaining_native: Some(remaining),
                     remaining_notional: Some(remaining),
@@ -2435,6 +2450,7 @@ impl BybitLinear {
         mut mapped: Mapped,
     ) {
         let status = row.order_status.as_ref();
+        note_unknown_order_trigger(cx, row);
         self.note_unpriced_tpsl(&mapped);
         if self.stale_terminal_snapshot(&mapped) {
             return;
@@ -2711,6 +2727,7 @@ impl BybitLinear {
                         self.reject_order_item(cx, rejected, item);
                     }
                 } else if let Some(mapped) = mapped {
+                    note_unknown_order_trigger(cx, &row);
                     self.note_unpriced_tpsl(&mapped);
                     rows.push(mapped);
                 }

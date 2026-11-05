@@ -480,7 +480,7 @@ async fn router_lease_status(
         Ok(request) => request,
         Err(status) => return status.into_response(),
     };
-    let Some(user) = app.registry.router_leases.get(&request.user_id) else {
+    let Some(user) = app.registry.router_leases.lookup(&request.user_id) else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let mut status = serde_json::to_value(user.status()).unwrap();
@@ -1231,7 +1231,8 @@ mod tests {
         assert_eq!(value["accepted"], 1);
         assert_eq!(value["enforcing"], false);
         assert!(value.get("graceUntil").unwrap().is_null());
-        assert_eq!(value.as_object().unwrap().len(), 5);
+        assert_eq!(value.as_object().unwrap().len(), 6);
+        assert_eq!(value["untracked"], 0);
         assert_eq!(value["bootId"], registry.router_leases.boot_id());
         assert!(value["checkedAt"].as_u64().unwrap() >= now);
         assert!(!String::from_utf8_lossy(&bytes).contains("private-user-sentinel"));

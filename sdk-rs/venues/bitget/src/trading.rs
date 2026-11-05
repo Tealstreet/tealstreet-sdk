@@ -1612,10 +1612,18 @@ impl BitgetFutures {
             if total <= 0.0 {
                 continue;
             }
-            let max = if m.limits.amount.max > 0.0 && m.limits.amount.max.is_finite() {
-                floor_lot(m.limits.amount.max, m.precision.amount)
-            } else {
+            let cap = self
+                .order_caps
+                .get(&o.symbol)
+                .map_or(m.limits.amount.max, |caps| {
+                    caps.for_order(m.limits.amount.max, o.kind == OrderType::Market)
+                });
+            let max = if cap > 0.0 && cap.is_finite() {
+                floor_lot(cap, m.precision.amount)
+            } else if cap == f64::INFINITY {
                 total
+            } else {
+                return Err("Bitget market has no valid maximum order quantity".into());
             };
             if max <= 0.0 {
                 return Err("Bitget maximum size is smaller than one lot".into());

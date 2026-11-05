@@ -1621,7 +1621,7 @@ fn a_refused_key_ends_the_start_with(refused: &str) {
                         },
                     );
                 }
-                Action::Notice(Notice::StartupFailed { error }) => failures.push(error),
+                Action::Notice(Notice::StartupFailed { error, .. }) => failures.push(error),
                 _ => {}
             }
         }

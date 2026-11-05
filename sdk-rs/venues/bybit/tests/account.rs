@@ -753,7 +753,7 @@ fn amends_in_place_and_moves_attached_brackets_on_the_parent() {
     assert_eq!(
         body(&amend),
         format!(
-            r#"{{"category":"linear","symbol":"ETHUSDT","orderId":"{ORDER_ID}","stopLoss":"1450"}}"#
+            r#"{{"category":"linear","symbol":"ETHUSDT","orderId":"{ORDER_ID}","stopLoss":"1450","slTriggerBy":"LastPrice"}}"#
         )
     );
     h.reply(

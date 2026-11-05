@@ -2138,6 +2138,16 @@ impl<V: Venue> Engine<V> {
             revision: self.io.core.protocol_clock.revision(),
         };
         let mut signing_release = None;
+        let mut release_veto = None;
+        let store = &self.store;
+        let mut check_release = |venue: &V, value: &V::Pending, release: &HttpRelease| {
+            venue
+                .http_release_veto(store, value, release)
+                .map_err(|error| {
+                    release_veto = Some(error);
+                    Error::Revoked
+                })
+        };
         #[cfg(feature = "dispatch-nonce")]
         let mut nonce_stale = false;
         #[cfg(feature = "dispatch-nonce")]
@@ -2150,6 +2160,7 @@ impl<V: Venue> Engine<V> {
                     time,
                     &mut self.io.core.http_pacing,
                     ClaimAdmission::Mutable(&mut |release| {
+                        check_release(&self.venue, &pending.value, release)?;
                         admit(&mut self.venue, &mut pending.value, release)
                     }),
                     &mut signing_release,
@@ -2160,6 +2171,7 @@ impl<V: Venue> Engine<V> {
                     time,
                     &mut self.io.core.http_pacing,
                     ClaimAdmission::NonceUnscheduled(&mut |release| {
+                        check_release(&self.venue, &pending.value, release)?;
                         admit(&self.venue, &pending.value, release)
                     }),
                     &mut signing_release,
@@ -2179,9 +2191,11 @@ impl<V: Venue> Engine<V> {
                         Some(crate::SigningRelease::new(release.signature, release.time)?);
                     match self.http_release {
                         super::HttpRelease::Mutable(admit) => {
+                            check_release(&self.venue, &pending.value, release)?;
                             admit(&mut self.venue, &mut pending.value, release)
                         }
                         super::HttpRelease::NonceUnscheduled(admit) => {
+                            check_release(&self.venue, &pending.value, release)?;
                             admit(&self.venue, &pending.value, release)?;
                             Ok(crate::request_context::Admission::Unscheduled)
                         }
@@ -2200,9 +2214,11 @@ impl<V: Venue> Engine<V> {
                         Some(crate::SigningRelease::new(release.signature, release.time)?);
                     match self.http_release {
                         super::HttpRelease::Mutable(admit) => {
+                            check_release(&self.venue, &pending.value, release)?;
                             admit(&mut self.venue, &mut pending.value, release)
                         }
                         super::HttpRelease::NonceUnscheduled(admit) => {
+                            check_release(&self.venue, &pending.value, release)?;
                             admit(&self.venue, &pending.value, release)?;
                             Ok(crate::request_context::Admission::Unscheduled)
                         }
@@ -2322,7 +2338,12 @@ impl<V: Venue> Engine<V> {
             };
             #[cfg(not(feature = "dispatch-nonce"))]
             let message = "HTTP request was not released";
-            self.http_preparation_failed(now, preparation, error, VenueError::new(message));
+            self.http_preparation_failed(
+                now,
+                preparation,
+                error,
+                release_veto.unwrap_or_else(|| VenueError::new(message)),
+            );
         }
         #[cfg(feature = "release-domains")]
         if V::http_release_domain().is_some() && matches!(result, Ok(Claim::Released(_))) {
@@ -3257,6 +3278,7 @@ mod tests {
         count: usize,
         command: Option<CommandId>,
         deny: bool,
+        store_veto: bool,
         responses: usize,
         items: usize,
         failures: Vec<(Error, Option<crate::Outcome>)>,
@@ -3432,6 +3454,19 @@ mod tests {
                 .unwrap();
                 cx.stream_response(request, ArrayAt::Root);
             }
+        }
+        fn http_release_veto(
+            &self,
+            store: &Store,
+            _pending: &Pending,
+            _: &HttpRelease,
+        ) -> Result<(), VenueError> {
+            if self.store_veto && store.order("veto").is_some() {
+                return Err(VenueError::new("current Store refuses this write")
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(crate::Outcome::NotSent));
+            }
+            Ok(())
         }
         fn http_release() -> crate::HttpRelease<Self> {
             crate::HttpRelease::Mutable(|this, _, release| {
@@ -4771,6 +4806,102 @@ mod tests {
         .expect("public managed mutation must queue");
         let managed = cx.io.core.managed_http.get(&request).unwrap();
         (context, managed.lifecycle.preparation(), managed.timer)
+    }
+
+    #[test]
+    fn store_release_veto_reads_final_snapshot_and_unwinds_claim() {
+        let (mut engine, _) = start(Probe {
+            store_veto: true,
+            ..Probe::default()
+        });
+        let (_, token, _) = mutation(&mut engine, 7, 0.);
+        let permit = bind(&mut engine, token, 1.);
+        engine.store.upsert_order(fixture_order("veto"));
+        assert_eq!(engine.claim_http(2., permit), Err(Error::Revoked));
+        assert!(engine.io.core.managed_http.is_empty());
+        assert!(engine.io.pending.is_empty());
+        assert!(
+            !engine
+                .io
+                .core
+                .http_responses
+                .contains(token.attempt().request)
+        );
+        assert!(engine.venue.releases.is_empty());
+        assert_eq!(
+            engine.venue.failure_messages,
+            ["current Store refuses this write"]
+        );
+        assert_eq!(
+            engine.venue.failures,
+            [(Error::Revoked, Some(crate::Outcome::NotSent))]
+        );
+        assert_eq!(
+            engine.store.order("veto").unwrap().status,
+            crate::model::OrderStatus::Open
+        );
+        engine.store.remove_orders(&["veto"]);
+        let (_, next, _) = mutation(&mut engine, 8, 3.);
+        let permit = bind(&mut engine, next, 4.);
+        assert!(matches!(
+            engine.claim_http(5., permit),
+            Ok(Claim::Released(_))
+        ));
+        assert_eq!(engine.venue.releases.len(), 1);
+    }
+
+    #[test]
+    fn default_release_veto_preserves_request_order_wire_and_release_clock() {
+        let venue = crate::test_support::ProbeVenue::new(Probe::default(), |_, cx| {
+            for suffix in ["first", "second"] {
+                let context = cx
+                    .http_context(
+                        Scope::Background,
+                        Policy {
+                            operation: Operation::Read,
+                            credential: None,
+                            timeout_ms: 100,
+                            pacing: None,
+                            retry: RetryPolicy::Never,
+                        },
+                    )
+                    .unwrap();
+                cx.request_managed(
+                    context.clone(),
+                    None,
+                    Method::Get,
+                    format!("https://venue.test/{suffix}"),
+                    None,
+                    Pending(context),
+                )
+                .unwrap();
+            }
+        });
+        let mut engine = crate::test_support::seeded_engine(venue);
+        engine.start(0.);
+        let packets = crate::test_support::prepared_actions(&mut engine, 15.)
+            .into_iter()
+            .filter_map(|action| {
+                if let Action::Http(packet) = action {
+                    Some(packet)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            packets
+                .iter()
+                .map(|packet| packet.url.as_str())
+                .collect::<Vec<_>>(),
+            ["https://venue.test/first", "https://venue.test/second"]
+        );
+        for packet in packets {
+            assert_eq!(packet.method, Method::Get);
+            assert!(packet.body.is_none());
+            assert!(packet.headers.is_empty());
+            assert_eq!(engine.http_release(packet.id).unwrap().time.raw_ms, 15.);
+        }
     }
 
     fn fixture_order(id: &str) -> crate::model::Order {
@@ -7717,6 +7848,87 @@ mod tests {
             engine.venue.failure_messages,
             ["HTTP nonce capability is unavailable"]
         );
+        assert!(
+            earlier.fresh().unwrap(),
+            "the refused retained nonce must not advance the released floor"
+        );
+    }
+    #[cfg(feature = "dispatch-nonce")]
+    #[test]
+    fn store_release_veto_unwinds_nonce_custody_without_advancing_floor() {
+        use crate::credential_selection::{CredentialRole, SlotPolicy, Slots};
+        use crate::signing::{Identity, KeyRef};
+        let identity = Identity::new(KeyRef("fixture".into()), Some(KeyRef("fixture".into())))
+            .with_stable_id(Some("nonce-release-veto".into()));
+        let mut engine = crate::test_support::seeded_engine(Probe {
+            count: 1,
+            signed: true,
+            store_veto: true,
+            ..Probe::default()
+        });
+        engine
+            .set_identities(crate::signing::Identities {
+                primary: Some(identity),
+                secondary: None,
+            })
+            .unwrap();
+        engine.start(0.);
+        let tokens = engine
+            .drain_actions()
+            .filter_map(|action| match action {
+                Action::ManagedHttp(action) => match *action {
+                    HttpAction::Prepare { preparation, .. } => Some(preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let (attempt, input) = work(&route(&mut engine, tokens[0], 1.));
+        let permit = bound(&signed(&mut engine, 2., attempt, input));
+        let slots = Slots::new(
+            engine.identities().primary.clone(),
+            None,
+            SlotPolicy::default(),
+        );
+        let (_, _, claim) = slots
+            .select_with_nonce(CredentialRole::Read { scope: None }, &crate::nonce::KRAKEN)
+            .unwrap();
+        let authority = claim.authority();
+        let earlier = authority.reserve(2., 2.).unwrap();
+        let later = authority.reserve(2., 2.).unwrap();
+        let recipe = engine
+            .io
+            .core
+            .managed_http
+            .get_mut(&permit.attempt().request)
+            .unwrap()
+            .recipe
+            .as_mut()
+            .unwrap();
+        recipe.install_test_nonce_claim(authority);
+        recipe.nonce = Some(later);
+        engine.io.core.nonce_enabled = true;
+        engine.store.upsert_order(fixture_order("veto"));
+        engine.http_release = crate::HttpRelease::NonceUnscheduled(|probe, _, _| {
+            probe
+                .auth_observations
+                .set(probe.auth_observations.get() + 1);
+            Ok(())
+        });
+        assert!(Probe::dispatch_nonce());
+        assert_eq!(engine.claim_http(3., permit), Err(Error::Revoked));
+        assert_eq!(engine.venue.auth_observations.get(), 0);
+        assert_eq!(engine.venue.receipts, 0);
+        assert_eq!(
+            engine.venue.failures,
+            [(Error::Revoked, Some(crate::Outcome::NotSent))]
+        );
+        assert_eq!(
+            engine.venue.failure_messages,
+            ["current Store refuses this write"]
+        );
+        assert!(engine.io.core.managed_http.is_empty());
+        assert!(engine.io.pending.is_empty());
         assert!(
             earlier.fresh().unwrap(),
             "the refused retained nonce must not advance the released floor"

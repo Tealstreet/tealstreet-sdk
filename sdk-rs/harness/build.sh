@@ -68,12 +68,15 @@ family_args() {
 # Optimize a bound module with binaryen (behaviour-neutral; shrinks every
 # family). CI installs the pinned release (install-binaryen.sh) and sets
 # SAFE_CEX_WASM_OPT=required; a local build without wasm-opt only warns.
-# WASM_OPT_LEVEL defaults to -Oz.
+# WASM_OPT_LEVEL defaults to -Oz, run twice: the second identical pass saved
+# 7,367 B on the combined CI artifact, exports and imports unchanged.
 optimize() {
   if command -v wasm-opt >/dev/null; then
-    wasm-opt "${WASM_OPT_LEVEL:--Oz}" --enable-bulk-memory --enable-bulk-memory-opt \
-      --enable-mutable-globals --enable-sign-ext --enable-nontrapping-float-to-int \
-      --enable-reference-types --enable-multivalue "$1" -o "$1"
+    for _ in 1 2; do
+      wasm-opt "${WASM_OPT_LEVEL:--Oz}" --enable-bulk-memory --enable-bulk-memory-opt \
+        --enable-mutable-globals --enable-sign-ext --enable-nontrapping-float-to-int \
+        --enable-reference-types --enable-multivalue "$1" -o "$1"
+    done
   elif [[ ${SAFE_CEX_WASM_OPT:-} == required ]]; then
     echo "wasm-opt is required (sdk-rs/harness/install-binaryen.sh)" >&2
     exit 1

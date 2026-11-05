@@ -731,10 +731,7 @@ impl Registry {
     }
 
     pub fn user_lease_fenced(&self, user: &str) -> bool {
-        self.router_leases.get(user).map_or_else(
-            || self.router_leases.enforced(),
-            |lease| lease.status().fenced,
-        )
+        self.router_leases.fenced(user)
     }
 
     pub fn park_expired_router_leases(self: &Arc<Self>) {
