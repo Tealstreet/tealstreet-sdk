@@ -42,6 +42,38 @@ fn http(actions: &[Action], kind: &str) -> HttpRequest {
         })
         .unwrap_or_else(|| panic!("missing request {kind}"))
 }
+// These position fixtures hold their State/Orders/Mode replies explicitly.
+// Complete unrelated fee and builder reads so bounded issuance can progress.
+fn settle_ancillary(e: &mut Engine<Hyperliquid>, at: f64, mut actions: Vec<Action>) -> Vec<Action> {
+    let mut retained = Vec::new();
+    for _ in 0..20 {
+        if actions.is_empty() {
+            return retained;
+        }
+        for action in actions {
+            if let Action::Http(request) = &action {
+                #[derive(serde::Deserialize)]
+                struct Kind<'a> {
+                    r#type: &'a str,
+                }
+                let kind: Kind<'_> =
+                    serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+                let answer = match kind.r#type {
+                    "userFees" => Some(r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#),
+                    "maxBuilderFee" => Some("30"),
+                    _ => None,
+                };
+                if let Some(answer) = answer {
+                    reply(e, request, at, answer);
+                    continue;
+                }
+            }
+            retained.push(action);
+        }
+        actions = prepared_now(e);
+    }
+    panic!("ancillary reads did not settle");
+}
 /// The retry timer armed at `sent` plus the engine's jittered `[0.75, 1.0] * nominal`.
 fn retry_timer(actions: &[Action], sent: f64, nominal: f64) -> Option<TimerId> {
     actions.iter().find_map(|a| match a {
@@ -288,6 +320,8 @@ fn unmapped_owned_position_rejects_authoritative_snapshot_and_recovers_without_s
         .unwrap();
     let known = r#"{"assetPositions":[{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"200","unrealizedPnl":"0","marginUsed":"20","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"20"},"time":1000}"#;
     reply(&mut e, &state, 1000.0, known);
+    let actions = prepared_now(&mut e);
+    settle_ancillary(&mut e, 1000.0, actions);
     let before = e.store().positions().to_vec();
     let balance = e.store().balance().clone();
     e.handle(1000.0, Event::WsOpened { socket });
@@ -580,7 +614,11 @@ fn owned_position_on_delisted_hip3_market_is_hidden_without_freezing_the_dex() {
     assert!(e.store().market("XYZ|BTC-PERP").is_some());
     assert!(e.store().market("XYZ|OLD-PERP").is_none());
     assert!(e.store().ticker("XYZ|OLD-PERP").is_none());
-    let state = prepared_now(&mut e)
+    let actions = prepared_now(&mut e);
+    let core_orders = http(&actions, "frontendOpenOrders");
+    reply(&mut e, &core_orders, 1000.0, "[]");
+    let actions = prepared_now(&mut e);
+    let state = settle_ancillary(&mut e, 1000.0, actions)
         .into_iter()
         .find_map(|a| match a {
             Action::Http(r)

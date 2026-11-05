@@ -433,6 +433,11 @@ impl ContextRegistry {
             .is_none_or(|owner| owner.credentialed)
     }
 
+    #[cfg(feature = "order-locks")]
+    pub(super) fn owner_intent(&self, command: CommandId) -> Option<crate::classify::Intent> {
+        self.commands.get(&command).and_then(|owner| owner.intent)
+    }
+
     #[cfg(test)]
     fn issue(
         &mut self,

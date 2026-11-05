@@ -122,11 +122,13 @@ pub struct ManagedCandleRead {
 pub struct ManagedInfoRead {
     context: Context,
     pending: Pending,
+    background: bool,
 }
 struct InfoSuccessor {
     body: String,
     pending: Pending,
     streamed: Option<ArrayAt>,
+    background: bool,
 }
 #[derive(Default)]
 struct Connection {
@@ -376,7 +378,7 @@ impl Hyperliquid {
         }
     }
     fn info(&mut self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
-        self.info_read(cx, body, pending, Some(at));
+        self.info_read(cx, body, pending, Some(at), false);
     }
     fn info_read(
         &mut self,
@@ -384,12 +386,14 @@ impl Hyperliquid {
         body: String,
         pending: Pending,
         streamed: Option<ArrayAt>,
+        background: bool,
     ) {
         if self.info_completing {
             self.info_successors.push_back(InfoSuccessor {
                 body,
                 pending,
                 streamed,
+                background,
             });
             return;
         }
@@ -406,12 +410,14 @@ impl Hyperliquid {
             Ok(context) => context,
             Err(error) => {
                 self.on_request_failed(cx, pending, &error.read_venue_error().message);
+                self.finish_background_read(cx, background);
                 return;
             }
         };
         let pending = Pending::ManagedInfo(Box::new(ManagedInfoRead {
             context: context.clone(),
             pending,
+            background,
         }));
         match cx.request_managed_with_headers(
             context,
@@ -615,6 +621,8 @@ impl Hyperliquid {
                                 t.last = mid;
                                 t.mid_price = Some(mid);
                             });
+                            // A repeated mid is still an observation of last.
+                            cx.store.observe_ticker_fields(symbol, 1 << 2);
                         }
                     }
                 }
@@ -628,6 +636,11 @@ impl Hyperliquid {
                 {
                     for (coin, context) in contexts {
                         if let Some(symbol) = self.symbol(coin) {
+                            let usable =
+                                |v: Option<f64>| v.is_some_and(|v| v.is_finite() && v > 0.0);
+                            // The references this context carries, changed or not (bits: last, mark).
+                            let observed = (u16::from(usable(context.mid_px)) << 2)
+                                | (u16::from(usable(context.mark_px)) << 3);
                             cx.store.update_ticker(symbol, |t| {
                                 if let Some(mark) =
                                     context.mark_px.filter(|v| v.is_finite() && *v > 0.0)
@@ -641,6 +654,7 @@ impl Hyperliquid {
                                     t.mid_price = Some(mid);
                                 }
                             });
+                            cx.store.observe_ticker_fields(symbol, observed);
                         }
                     }
                 }
@@ -1058,6 +1072,18 @@ impl Venue for Hyperliquid {
     }
     fn on_open(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId) {}
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
+    /// A take profit amended through the price is replaced as a stop (`trading.rs`),
+    /// but only where mark, last and index agree enough for that projection to run.
+    fn judges_protective_amend(
+        &self,
+        store: &safe_cex_engine::store::Store,
+        order: &safe_cex_engine::model::Order,
+    ) -> bool {
+        order.kind == safe_cex_engine::model::OrderType::TakeProfit
+            && store
+                .ticker(&order.symbol)
+                .is_some_and(|ticker| trading::tp_projection_reference(ticker).is_some())
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -1077,6 +1103,10 @@ impl Venue for Hyperliquid {
         self.reconcile_order_scopes(cx, symbols);
         self.reconcile_settings(cx);
     }
+    // Every read reads every scope the account cover joins (H9).
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
@@ -1084,6 +1114,7 @@ impl Venue for Hyperliquid {
         if self.spot {
             safe_cex_engine::Capabilities {
                 symbol_cancel_misses_unseen: true,
+                order_read_covers: true,
                 ..safe_cex_engine::Capabilities::NO_HISTORY
             }
         } else {
@@ -1094,6 +1125,7 @@ impl Venue for Hyperliquid {
                 schedule_cancel: true,
                 fresh_positions: true,
                 symbol_cancel_misses_unseen: true,
+                order_read_covers: true,
                 ..safe_cex_engine::Capabilities::BASE
             }
         }
@@ -1370,9 +1402,10 @@ impl Venue for Hyperliquid {
                     let _ = cx.finish_http_context(&read.context);
                     self.info_completing = false;
                     while let Some(next) = self.info_successors.pop_front() {
-                        self.info_read(cx, next.body, next.pending, next.streamed);
+                        self.info_read(cx, next.body, next.pending, next.streamed, next.background);
                     }
                 }
+                self.finish_background_read(cx, read.background);
             }
             Pending::SocketRefresh { .. } => {}
             Pending::SpotMeta {
@@ -1664,6 +1697,7 @@ impl Venue for Hyperliquid {
             Pending::ManagedInfo(read) => {
                 let _ = cx.finish_http_context(&read.context);
                 self.on_request_failed(cx, read.pending, error);
+                self.finish_background_read(cx, read.background);
             }
             Pending::SocketRefresh { .. } => {}
             Pending::ManagedCandles(read) => {

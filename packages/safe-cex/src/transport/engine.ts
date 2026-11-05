@@ -1,15 +1,26 @@
 import type { DisposableAxiosAdapter } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
+import type {
+  AccountReconnectDiagnostics,
+  ConnectionCloseDiagnostic,
+  TimerLatenessBucket,
+} from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import type { TunnelOutage } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import type { HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
 import type { BybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
+import type { CatalogueRead } from './sharedCatalogue';
 import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } from './types';
 
 import { AxiosHeaders } from 'axios';
 
-import { stripDiagnosticUrlQueries } from '@tealstreet/http-over-websocket/src/diagnosticUrl';
 import { TradeTunnelTimeoutError } from '@tealstreet/http-over-websocket/src/axiosHttpOverWebsocketAdapter';
+import {
+  ConnectionDiagnostics,
+  HiddenTimerLateness,
+  maximumTimerLateness,
+} from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
+import { stripDiagnosticUrlQueries } from '@tealstreet/http-over-websocket/src/diagnosticUrl';
 import {
   onTunnelFailing,
   tunnelEgressUrl,
@@ -20,9 +31,12 @@ import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/
 import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
+import { sharedBinanceCatalogue } from './binanceCatalogue';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
+import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
+import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
 import {
@@ -456,8 +470,12 @@ const httpTransport = (
   proxyAuthorization?: ProxyAuthorizationNotice,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
+  infoFacts?: HyperliquidStartupFacts,
 ): {
   mode: 'direct' | 'how';
+  invalidateCatalogue(): void;
+  connectionDiagnostic(): ConnectionCloseDiagnostic | undefined;
+  hiddenTimerLateness(): TimerLatenessBucket;
   request: Transport['request'];
   prepareHttp: NonNullable<Transport['prepareHttp']>;
   dispose(): void;
@@ -475,6 +493,7 @@ const httpTransport = (
   let disposed = false;
   const infoBudget =
     exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidInfoBudget() : undefined;
+  const catalogueOrigins = new Set<string>();
   const pending = new Set<AbortController>();
   // While this realm's tunnel is unreachable, REST goes through the HTTP proxy, which
   // egresses from the same fleet. Decided per request at prepare: a prepared request keeps its path.
@@ -543,9 +562,24 @@ const httpTransport = (
     const deadlineMs = Math.max(1, request.timeoutMs ?? 20_000);
     const remaining = () => Math.max(0, deadlineMs - (Date.now() - started));
     let prepared: PreparedHttp | Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
+    let infoRead: ReturnType<HyperliquidStartupFacts['begin']> | undefined;
+    let catalogueRead: CatalogueRead | undefined;
+    let physicalRequest = false;
+    const settleDeadline = (deadlineFired = false) => {
+      if (
+        physicalRequest &&
+        (deadlineFired || remaining() <= 0) &&
+        !disposed &&
+        !request.signal?.aborted &&
+        !reroute.abandon?.aborted
+      )
+        catalogueRead?.timedOut?.();
+    };
     let bound = false;
     let cancelBound: (() => void) | undefined;
     const cleanup = () => {
+      catalogueRead?.cancel();
+      infoRead?.close();
       clearTimeout(timer);
       pending.delete(controller);
       signal.removeEventListener('abort', onAbort);
@@ -571,12 +605,17 @@ const httpTransport = (
       }
     };
     const onAbort = () => {
+      settleDeadline();
       releaseResources();
       cleanup();
     };
-    const timer = setTimeout(() => controller.abort(new HttpPreparationError('timedOut')), remaining());
+    const timer = setTimeout(() => {
+      settleDeadline(true);
+      controller.abort(new HttpPreparationError('timedOut'));
+    }, remaining());
     signal.addEventListener('abort', onAbort, { once: true });
     const cancel = () => {
+      settleDeadline();
       controller.abort();
       releaseResources();
       cleanup();
@@ -637,6 +676,8 @@ const httpTransport = (
           ? (proxyRoute ??
             restRoute(provider, exchange, restOptions, restRouting, request, transport.serverHeaders, intent))
           : { baseURL: publicPrefix ? `${publicPrefix}/${request.url}` : request.url, proxied: false };
+      if (infoFacts && request.method === 'POST' && original.pathname === '/info')
+        infoRead = infoFacts.begin(tunnelAdapter ? 'how' : route.proxied ? 'proxy' : 'direct', deadlineMs);
       const target = route.baseURL ?? request.url;
       const prefix = target.endsWith(request.url) ? target.slice(0, -request.url.length) : undefined;
       if (intent !== undefined && prefix === undefined) throw new HttpPreparationError('unsupported');
@@ -698,15 +739,57 @@ const httpTransport = (
         );
         return untilAborted(promise, signal);
       };
+      if (infoBudget) {
+        catalogueRead = await untilAborted(
+          sharedHyperliquidCatalogue.prepare({ ...request, intent }, signal, started + deadlineMs),
+          signal,
+        );
+        if (catalogueRead) catalogueOrigins.add(original.origin);
+      } else if (['binance', 'binancepm', 'binanceinverse', 'binancespot'].includes(exchange)) {
+        // Only resolved public routing facts enter the anonymous catalogue key.
+        const routeEndpoint = tunnelAdapter
+          ? new URL(tunnelEgressUrl(routing.howEgress))
+          : prefix
+            ? new URL(prefix)
+            : undefined;
+        if (
+          !routeEndpoint ||
+          !(routeEndpoint.username || routeEndpoint.password || routeEndpoint.search || routeEndpoint.hash)
+        ) {
+          catalogueRead = await untilAborted(
+            sharedBinanceCatalogue.prepare(
+              { ...request, intent },
+              signal,
+              started + deadlineMs,
+              {
+                network: options.testnet ? 'testnet' : 'mainnet',
+                route: tunnelAdapter
+                  ? `how:${routing.howEgress}:${routeEndpoint!.href}`
+                  : routeEndpoint
+                    ? `proxy:${routeEndpoint.href}`
+                    : 'direct',
+              },
+              () => !disposed,
+            ),
+            signal,
+          );
+        }
+      }
+      const cached = catalogueRead?.cached;
+      const cacheFresh = () =>
+        !cached || (Date.now() >= catalogueRead!.cachedAt! && Date.now() < catalogueRead!.expiresAt!);
+      const leaseFresh = () =>
+        catalogueRead?.leaseExpiresAt === undefined ||
+        (Date.now() >= catalogueRead.leaseStartedAt! && Date.now() < catalogueRead.leaseExpiresAt);
       const how = tunnelAdapter as Partial<DisposableAxiosAdapter> | undefined;
-      if (tunnelAdapter) {
+      if (!cached && tunnelAdapter) {
         const prepareTunnel = intent === undefined ? how?.prepareLegacy : how?.prepare;
         if (prepareTunnel)
           prepared = await waitForPrepared(
             withProxyTokenProvider(proxyTokenProvider, () => prepareTunnel.call(tunnelAdapter, config)),
           );
         else if (intent !== undefined) throw new HttpPreparationError('unsupported');
-      } else if (intent !== undefined) {
+      } else if (!cached && intent !== undefined) {
         if (!transport.prepareHttp) throw new HttpPreparationError('unsupported');
         prepared = await waitForPrepared(
           Promise.resolve(
@@ -724,10 +807,13 @@ const httpTransport = (
       }
       signal.throwIfAborted();
       const budgetGeneration =
-        infoBudget && request.method === 'POST' && original.pathname === '/info'
-          ? await untilAborted(infoBudget.wait(original.origin, request.body, started + deadlineMs, signal), signal)
+        !cached && infoBudget && request.method === 'POST' && original.pathname === '/info'
+          ? await untilAborted(
+              infoRead!.wait(() => infoBudget.wait(original.origin, request.body, started + deadlineMs, signal)),
+              signal,
+            )
           : undefined;
-      if (intent !== undefined && (!prepared || typeof prepared.bind !== 'function'))
+      if (!cached && intent !== undefined && (!prepared || typeof prepared.bind !== 'function'))
         throw new HttpPreparationError('invalid');
       const validateBound = <T extends { ready(): boolean; dispatch(): unknown; cancel?(): void }>(
         inner: T | undefined,
@@ -752,7 +838,11 @@ const httpTransport = (
             packet.method !== request.method ||
             new URL(packet.url).origin !== original.origin ||
             packet.route !== request.route ||
-            packet.signal !== request.signal
+            packet.signal !== request.signal ||
+            (catalogueRead &&
+              (packet.url !== signed!.url ||
+                packet.body !== signed!.body ||
+                JSON.stringify(Object.entries(packet.headers)) !== JSON.stringify(signed!.headers)))
           ) {
             cancel();
             throw new HttpPreparationError('invalid');
@@ -782,7 +872,13 @@ const httpTransport = (
           if (intent === undefined) delete network.timeoutMs;
           let send: () => Promise<HttpResponse>;
           let ready: () => boolean;
-          if (tunnelAdapter) {
+          if (cached) {
+            ready = cacheFresh;
+            send = () => {
+              if (!cacheFresh()) throw new HttpPreparationError('timedOut');
+              return Promise.resolve(cached);
+            };
+          } else if (tunnelAdapter) {
             const tunnel = prepared as Awaited<ReturnType<DisposableAxiosAdapter['prepare']>> | undefined;
             const inner = beforeRelease(() => validateBound(tunnel?.bind(finalConfig)));
             ready = inner ? () => inner.ready() : () => true;
@@ -825,15 +921,24 @@ const httpTransport = (
             admitting = true;
             try {
               const result = await untilAborted(
-                infoBudget!.admitDispatch(original.origin, budgetGeneration!, started + deadlineMs, signal, () => {
-                  active();
-                  admitted = true;
-                  try {
-                    return { value: handoff() };
-                  } finally {
-                    admitted = false;
-                  }
-                }),
+                infoRead!.wait(() =>
+                  infoBudget!.admitDispatch(
+                    original.origin,
+                    budgetGeneration!,
+                    started + deadlineMs,
+                    signal,
+                    () => {
+                      active();
+                      admitted = true;
+                      try {
+                        return { value: handoff() };
+                      } finally {
+                        admitted = false;
+                      }
+                    },
+                    () => sent,
+                  ),
+                ),
                 signal,
               );
               return await result.value;
@@ -847,22 +952,29 @@ const httpTransport = (
           return {
             ...(budgetGeneration === undefined ? {} : { admitDispatch }),
             ready() {
-              return beforeRelease(() => !sent && ready());
+              return beforeRelease(() => {
+                if (!leaseFresh()) throw new HttpPreparationError('stale');
+                return !sent && ready();
+              });
             },
             dispatch() {
               if (budgetGeneration !== undefined && !admitted) return admitDispatch(() => this.dispatch());
               beforeRelease(() => {
                 if (sent) throw new HttpPreparationError('invalid');
+                if (!leaseFresh()) throw new HttpPreparationError('stale');
               });
               sent = true;
+              if (!cached) infoRead?.sent();
               try {
                 const response = send();
+                physicalRequest = true;
                 return untilAborted(response, signal)
                   .then((value) =>
                     route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
                   )
                   .then(async (value) => {
-                    if (infoBudget && request.method === 'POST' && original.pathname === '/info') {
+                    if (!cached) infoRead?.response(value.status);
+                    if (!cached && infoBudget && request.method === 'POST' && original.pathname === '/info') {
                       const reportFailure = () => {
                         if (!signal.aborted) warnHyperliquidInfoBudgetUnavailable();
                       };
@@ -872,17 +984,21 @@ const httpTransport = (
                       // Only a 429 must publish its pause before Rust can enqueue its retry.
                       if (value.status === 429) await untilAborted(recorded, signal).catch(reportFailure);
                     }
-                    return value;
+                    return catalogueRead && !cached ? untilAborted(catalogueRead.complete(value), signal) : value;
                   })
                   .then(wrap)
                   .catch((error) => {
-                    // No answer through the relay, and nobody called it off: the relay is down.
-                    if (tunnelAdapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
-                      proxyAuthorization?.failed(
-                        relayFailed(exchange, error instanceof Error ? error : new Error(String(error))),
-                      );
-                    cancel();
-                    throw error;
+                    const report = (): never => {
+                      // No answer through the relay, and nobody called it off: the relay is down.
+                      if (tunnelAdapter && !disposed && !request.signal?.aborted && !packet.signal?.aborted)
+                        proxyAuthorization?.failed(
+                          relayFailed(exchange, error instanceof Error ? error : new Error(String(error))),
+                        );
+                      cancel();
+                      throw error;
+                    };
+                    const failed = catalogueRead?.failed?.();
+                    return failed ? untilAborted(failed, signal).then(report, report) : report();
                   });
               } catch (error) {
                 cancel();
@@ -936,6 +1052,12 @@ const httpTransport = (
   const request: Transport['request'] = async (request) => (await prepare(request)).bind(request).dispatch();
   return {
     mode: adapter ? 'how' : 'direct',
+    invalidateCatalogue: () => {
+      for (const origin of catalogueOrigins) void sharedHyperliquidCatalogue.invalidateOrigin(origin);
+    },
+    connectionDiagnostic: () => (adapter as Partial<DisposableAxiosAdapter> | undefined)?.connectionDiagnostic?.(),
+    hiddenTimerLateness: () =>
+      (adapter as Partial<DisposableAxiosAdapter> | undefined)?.hiddenTimerLateness?.() ?? 'unknown',
     request,
     prepareHttp: (request) => (request.intent === 'public' ? preparePublic(request) : prepare(request, request.intent)),
     dispose: () => {
@@ -947,6 +1069,12 @@ const httpTransport = (
   };
 };
 
+export type EngineTransport = Transport & {
+  reconnectDiagnostics(): AccountReconnectDiagnostics | undefined;
+  startupDiagnostics(): Record<string, string>;
+  invalidateCatalogue(): void;
+};
+
 /** Account options are already normalized by accountToExchangeOptions. */
 export const createEngineTransport = (
   exchange: ExchangeName,
@@ -956,8 +1084,10 @@ export const createEngineTransport = (
   onProxyAuthorizationFailure?: (message: string) => void,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
-): Transport => {
+): EngineTransport => {
   assertEngineAccountRouting(options, exchange);
+  const infoFacts =
+    exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidStartupFacts() : undefined;
   const provider = getTransport(options);
   const { routing, restRouting } = resolved(exchange, options, provider);
   const routes = {
@@ -1001,6 +1131,29 @@ export const createEngineTransport = (
       for (const candidate of candidates) if (candidate) requireSocketHeaders(candidate);
     }
   }
+  const diagnostics: Partial<Pick<AccountReconnectDiagnostics, 'public' | 'private' | 'business'>> = {};
+  const timerLateness = new HiddenTimerLateness();
+  let cachedDiagnostic: AccountReconnectDiagnostics | undefined;
+  let cachedDiagnosticKey = '';
+  const reconnectDiagnostics = (): AccountReconnectDiagnostics | undefined => {
+    const how = http.connectionDiagnostic();
+    const value = {
+      ...diagnostics,
+      ...(how ? { how } : {}),
+      hiddenTimerLateness: maximumTimerLateness(
+        timerLateness.bucket,
+        http.hiddenTimerLateness(),
+        readHttp?.hiddenTimerLateness() ?? 'unknown',
+      ),
+    };
+    const key = JSON.stringify(value);
+    if (key !== cachedDiagnosticKey) {
+      cachedDiagnosticKey = key;
+      cachedDiagnostic =
+        Object.keys(diagnostics).length || how || value.hiddenTimerLateness !== 'unknown' ? value : undefined;
+    }
+    return cachedDiagnostic;
+  };
   const fallbacks = new Map<string, WsDirectFallback>();
   let proxyAuthorizationFailing = false;
   const proxyAuthorization: ProxyAuthorizationNotice = {
@@ -1027,13 +1180,36 @@ export const createEngineTransport = (
     proxyAuthorization,
     onTunnelProxyFallback,
     onBybitPublicRateLimit,
+    infoFacts,
   );
   // Explicit public requests bypass account proxy/tunnel policy. URLs stay in
   // the host; venues choose only the typed route name.
-  const directHttp = httpTransport(exchange, options, transport, provider, restRouting, '');
+  const directHttp = httpTransport(
+    exchange,
+    options,
+    transport,
+    provider,
+    restRouting,
+    '',
+    undefined,
+    undefined,
+    undefined,
+    infoFacts,
+  );
   const publicCorsProxy = provider.publicCorsProxy();
   const publicCorsHttp = publicCorsProxy
-    ? httpTransport(exchange, options, transport, provider, restRouting, publicCorsProxy)
+    ? httpTransport(
+        exchange,
+        options,
+        transport,
+        provider,
+        restRouting,
+        publicCorsProxy,
+        undefined,
+        undefined,
+        undefined,
+        infoFacts,
+      )
     : undefined;
   const readOptions = credentials?.hasSecondary
     ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
@@ -1051,19 +1227,34 @@ export const createEngineTransport = (
         proxyAuthorization,
         onTunnelProxyFallback,
         onBybitPublicRateLimit,
+        infoFacts,
       )
     : undefined;
   return {
     // Protocol negotiation must use the same resolved route as connect(),
     // including hosts (such as Workers) which construct the engine themselves.
+    startupDiagnostics: () => infoFacts?.tags() ?? {},
+    invalidateCatalogue: () => {
+      http.invalidateCatalogue();
+      directHttp.invalidateCatalogue();
+      publicCorsHttp?.invalidateCatalogue();
+      readHttp?.invalidateCatalogue();
+    },
     httpMode: http.mode,
+    reconnectDiagnostics,
     engineOptions: {
       ...transport.engineOptions,
       ...(exchange === 'grvt' ? { grvtSessionProxy: Boolean(routes.private.host) } : {}),
     },
     webSocketHeaders: transport.webSocketHeaders,
     now: () => transport.now(),
-    setTimeout: (fn, ms) => transport.setTimeout(fn, ms),
+    setTimeout: (fn, ms) => {
+      const dueAt = Date.now() + Math.max(0, ms);
+      return transport.setTimeout(() => {
+        timerLateness.observe(dueAt);
+        fn();
+      }, ms);
+    },
     clearTimeout: (handle) => transport.clearTimeout(handle),
     prepareHttp: (request) => {
       const { route, intent, ...packet } = request;
@@ -1157,9 +1348,42 @@ export const createEngineTransport = (
         fallback?.onMessage();
         handlers.onBinary?.(data);
       };
-      if (connection?.kind !== 'relay')
-        return transport.connect(target, { ...handlers, headers, onMessage: receive, onBinary: receiveBinary });
+      const diagnostic = new ConnectionDiagnostics(
+        connection?.kind === 'relay' ? 'relay' : target === url ? 'direct' : 'proxy',
+      );
+      diagnostic.dial(target);
+      let locallyClosed = false;
+      const recordClose = (code?: number) => {
+        diagnostics[channel] = diagnostic.closed(
+          locallyClosed ? 'local' : code === undefined || code === 1006 ? 'unknown' : 'remote',
+        );
+      };
+      if (connection?.kind !== 'relay') {
+        const native = transport.connect(target, {
+          ...handlers,
+          headers,
+          onMessage: receive,
+          onBinary: receiveBinary,
+          onOpen: () => {
+            diagnostic.opened();
+            handlers.onOpen();
+          },
+          onClose: (code) => {
+            recordClose(code);
+            handlers.onClose(code);
+          },
+        });
+        return {
+          send: (text) => native.send(text),
+          close: () => {
+            locallyClosed = true;
+            recordClose();
+            native.close();
+          },
+        };
+      }
       let socket: { send(text: string): void; close(): void } | undefined;
+      let relayDiagnostics: ConnectionDiagnostics | undefined;
       let closed = false;
       let opened = false;
       const pending: string[] = [];
@@ -1176,9 +1400,11 @@ export const createEngineTransport = (
               : new RelayWebSocket(target, [], relayOptions),
           );
           socket = relay;
+          relayDiagnostics = relay.diagnostics;
           relay.addEventListener('open', () => {
             if (!closed) {
               opened = true;
+              diagnostic.opened();
               for (const text of pending) relay.send(text);
               pending.length = 0;
               handlers.onOpen();
@@ -1197,6 +1423,7 @@ export const createEngineTransport = (
                 pending.length = 0;
                 // Browser close() forbids protocol error codes.
                 relay.close();
+                diagnostics[channel] = relay.diagnostics?.lastClose ?? diagnostic.closed('local');
                 handlers.onClose(1007);
               }
             },
@@ -1208,6 +1435,7 @@ export const createEngineTransport = (
           relay.addEventListener('close', (event) => {
             if (!closed) {
               closed = true;
+              diagnostics[channel] = relay.diagnostics?.lastClose ?? diagnostic.closed('unknown');
               handlers.onClose((event as CloseEvent).code);
             }
           });
@@ -1215,6 +1443,7 @@ export const createEngineTransport = (
         .catch(() => {
           if (!closed) {
             closed = true;
+            recordClose(1006);
             handlers.onClose(1006);
           }
         });
@@ -1226,12 +1455,16 @@ export const createEngineTransport = (
             if (pending.length >= 100) {
               closed = true;
               pending.length = 0;
+              locallyClosed = true;
+              diagnostics[channel] = (relayDiagnostics ?? diagnostic).closed('local');
               socket?.close();
               handlers.onClose(1006);
             } else pending.push(text);
           }
         },
         close: () => {
+          locallyClosed = true;
+          diagnostics[channel] = (relayDiagnostics ?? diagnostic).closed('local');
           closed = true;
           pending.length = 0;
           socket?.close();

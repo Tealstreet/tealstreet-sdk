@@ -464,8 +464,16 @@ impl Venue for PhemexPerpetuals {
         true
     }
 
-    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.reconcile_uncertain_orders(cx);
+        if let Some(symbols) = symbols {
+            self.owe_order_reads(cx, symbols);
+        }
+    }
+
+    // Each owed read commits its symbol's cover (`commit_orders_read`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
 
     fn guard_pending_placements(&self) -> bool {
@@ -491,6 +499,7 @@ impl Venue for PhemexPerpetuals {
             fresh_positions: true,
             nuke_account_cancel: true,
             symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -613,7 +622,7 @@ impl Venue for PhemexPerpetuals {
             .filter_map(|order| order.client_order_id.clone())
             .collect();
         self.account.frame_ingested(
-            cx.source_orders_cover().is_some(),
+            cx.source_orders_covers().is_some(),
             cx.store.loaded().orders,
             &client_ids,
         );

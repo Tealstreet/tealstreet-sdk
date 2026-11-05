@@ -66,6 +66,9 @@ impl Venue for WeightedReads {
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.inner.reconcile_uncertain(cx, symbols);
     }
+    fn refreshes_orders(&self) -> bool {
+        self.inner.refreshes_orders()
+    }
     fn unproven_http_evidence(
         &self,
         pending: &Pending,
@@ -187,10 +190,6 @@ impl Venue for WeightedReads {
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         if matches!(&command, Command::SetTickerSymbols { symbols } if symbols == &["queue_orders"])
         {
-            // Saturate through real native helpers, without changing queue or epoch state.
-            for _ in 0..50 {
-                self.inner.check_builder(cx);
-            }
             self.inner.refresh_orders(cx);
         } else if matches!(&command, Command::SetTickerSymbols { symbols } if symbols == &["queue_builders"])
         {
@@ -281,8 +280,31 @@ fn assert_fenced(actions: &[Action], command: u32) {
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
     );
 }
+fn saturate(engine: &mut Engine<WeightedReads>, now: f64) -> (Vec<Action>, usize) {
+    let mut next = symbols(engine, now, "queue_builders");
+    let mut retained = Vec::new();
+    let mut builders = 0;
+    for _ in 0..100 {
+        if next.is_empty() {
+            return (retained, builders);
+        }
+        for action in next {
+            if let Action::Http(request) = action {
+                assert_eq!(kind(&request), "maxBuilderFee");
+                builders += 1;
+                reply(engine, &request, now, "30");
+            } else {
+                retained.push(action);
+            }
+        }
+        next = prepared_now(engine);
+    }
+    panic!("weighted reads did not settle");
+}
+
 fn queued_census_retains_its_creation_epoch(spot: bool) {
     let mut engine = bootstrap(spot);
+    let (mut saturated, builders) = saturate(&mut engine, 2000.);
     engine.handle(
         2000.,
         Event::Command(Command::SetTickerSymbols {
@@ -295,22 +317,14 @@ fn queued_census_retains_its_creation_epoch(spot: bool) {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if kind(r) == "frontendOpenOrders"))
     );
-    let (timer, at) = actions
+    saturated.extend(actions);
+    let (timer, at) = saturated
         .iter()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if *at_ms == 60_000. => Some((*timer, *at_ms)),
             _ => None,
         })
         .expect("real weight-budget timer holds the logical Orders read");
-    let mut builders = 0;
-    for action in actions {
-        if let Action::Http(request) = action {
-            let request_kind = kind(&request);
-            assert_eq!(request_kind, "maxBuilderFee");
-            builders += 1;
-            reply(&mut engine, &request, 2000., "30");
-        }
-    }
     assert!(
         builders >= 40,
         "saturation must issue genuine weighted requests"
@@ -401,7 +415,8 @@ fn symbols(engine: &mut Engine<WeightedReads>, now: f64, name: &str) -> Vec<Acti
 #[test]
 fn a_fence_read_goes_ahead_of_queued_routine_reads() {
     let mut engine = bootstrap(false);
-    let actions = symbols(&mut engine, 2000., "queue_builders");
+    let (actions, builders) = saturate(&mut engine, 2000.);
+    assert!(builders >= 40);
     let (timer, at) = actions
         .iter()
         .find_map(|a| match a {
@@ -409,11 +424,6 @@ fn a_fence_read_goes_ahead_of_queued_routine_reads() {
             _ => None,
         })
         .expect("budget spent, reads queued");
-    for action in actions {
-        if let Action::Http(request) = action {
-            reply(&mut engine, &request, 2000., "30");
-        }
-    }
     let actions = place(&mut engine, 3000., 101, false);
     let write = actions
         .iter()
@@ -473,4 +483,102 @@ fn a_placement_re_reads_a_stale_unapproved_builder_without_waiting() {
         }
     }
     assert_eq!(engine.venue().inner.account.builder_approved, Some(true));
+}
+
+fn queued_census_uses_a_bounded_slot(spot: bool, refresh_ask: bool) {
+    let mut engine = bootstrap(spot);
+    let blocked = symbols(&mut engine, 2000., "queue_builders");
+    assert_eq!(
+        blocked
+            .iter()
+            .filter(|action| matches!(action, Action::Http(_)))
+            .count(),
+        3
+    );
+    let queued = symbols(&mut engine, 2000., "queue_orders");
+    assert!(
+        !queued
+            .iter()
+            .any(|action| matches!(action, Action::Http(r) if kind(r) == "frontendOpenOrders"))
+    );
+    let placed = place(&mut engine, 3000., 101, spot);
+    let write = placed
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(
+        3400.,
+        Event::HttpFailed {
+            request: write.id,
+            error: "placement reply lost",
+        },
+    );
+    if refresh_ask {
+        engine.handle(
+            3500.,
+            Event::Command(Command::Venue {
+                command: 200,
+                action: VenueAction::RefreshOrders {
+                    symbols: Some(vec!["BTC-PERP".into()]),
+                },
+            }),
+        );
+    }
+    let actions = prepared_now(&mut engine);
+    assert!(
+        !actions.iter().any(|action| matches!(action,
+        Action::Http(r) if kind(r) == "frontendOpenOrders")),
+        "foreground Orders also obey the cap"
+    );
+    let builder = blocked
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut engine, builder, 3600., "30");
+    let actions = prepared_now(&mut engine);
+    let older = http(&actions, "frontendOpenOrders");
+    assert_fenced(&place(&mut engine, 4000., 102, spot), 102);
+    reply(&mut engine, &older, 4001., "[]");
+    let actions = prepared_now(&mut engine);
+    let fresh = http(&actions, "frontendOpenOrders");
+    assert_ne!(fresh.id, older.id);
+    assert_fenced(&place(&mut engine, 4002., 103, spot), 103);
+    reply(&mut engine, &fresh, 4003., "[]");
+    if refresh_ask {
+        let frame = engine.snapshot_frame(4003.).to_vec();
+        let (_, data) = safe_cex_engine::wire::sections(&frame)
+            .find(|(section, _)| *section == safe_cex_engine::wire::section::ORDERS_READ)
+            .unwrap();
+        assert_eq!(
+            f64::from_le_bytes(data[8..16].try_into().unwrap()),
+            4001.,
+            "fresh owed successor publishes its own attributable send time"
+        );
+    }
+    let actions = place(&mut engine, 4400., 104, spot);
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+}
+
+#[test]
+fn perps_queued_census_and_fresh_successor_take_priority_within_the_cap() {
+    queued_census_uses_a_bounded_slot(false, false);
+}
+#[test]
+fn spot_queued_census_and_fresh_successor_take_priority_within_the_cap() {
+    queued_census_uses_a_bounded_slot(true, false);
+}
+
+#[test]
+fn queued_before_refresh_ask_keeps_its_epoch_and_owes_a_fresh_attributable_successor() {
+    queued_census_uses_a_bounded_slot(false, true);
 }

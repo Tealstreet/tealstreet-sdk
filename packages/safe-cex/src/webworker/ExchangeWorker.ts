@@ -8,7 +8,6 @@ import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePa
 import throttle from 'lodash/throttle';
 
 import { onTunnelLaneFallback, tunnelLanePort } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-
 import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
@@ -395,6 +394,7 @@ export class ExchangeWorker {
 
       const isRust = this._exchange instanceof RustEngineExchange;
       const startTimeoutMs = isRust ? RUST_START_TIMEOUT_MS : START_TIMEOUT_MS;
+      const startedAt = Date.now();
       const startPromise = this._exchange.start().then(() => 'started' as const);
       // Its calls queue under the engine's own bounds; held here they would wait out the whole start.
       if (isRust) this._flushBufferedCalls();
@@ -403,7 +403,17 @@ export class ExchangeWorker {
           this._startTimedOut = isRust;
           const answered = (this._exchange as { lastReadFailure?: string } | undefined)?.lastReadFailure;
           this._startAnswer = answered;
-          reject(new Error(`Exchange start timed out after ${startTimeoutMs / 1000}s${answered ? `; ${answered}` : ''}`));
+          const error = new Error(
+            `Exchange start timed out after ${startTimeoutMs / 1000}s${answered ? `; ${answered}` : ''}`,
+          );
+          Object.assign(error, {
+            safeCexSentryTags: {
+              ...(this._exchange instanceof RustEngineExchange ? this._exchange.startupDiagnostics : {}),
+              startup_elapsed_ms: String(Math.max(0, Date.now() - startedAt)),
+              startup_deadline_ms: String(startTimeoutMs),
+            },
+          });
+          reject(error);
         }, startTimeoutMs);
       });
 
@@ -1401,7 +1411,11 @@ export class ExchangeWorker {
       this._exchange = null;
       this._clearRuntimePipeline();
       // Notify main thread of deactivation
-      this._ctx.postMessage({ op: 'deactivate-status', data: true, refusal: refusal ?? 'The exchange refused this key.' });
+      this._ctx.postMessage({
+        op: 'deactivate-status',
+        data: true,
+        refusal: refusal ?? 'The exchange refused this key.',
+      });
     });
   }
 }

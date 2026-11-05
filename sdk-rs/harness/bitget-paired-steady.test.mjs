@@ -5,7 +5,7 @@ import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_TOLERAN
   assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
   BITGET_CUMULATIVE_ANCHOR, BITGET_MEASUREMENT_FILES, combineBitgetPairedCertificates,
   assessBitgetUnchangedBytes, readBitgetSteadyCertificate, hasPairedBitgetSteady } from './bitget-paired-steady.mjs';
-import { performanceFailures, performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './performance-policy.mjs';
 import { assessEligibility, decideRemeasurement } from './cpu-remeasure.mjs';
 import { classifyInitialCase, pairedCertificateForRuntime } from './cpu-ci.mjs';
 
@@ -44,12 +44,12 @@ function fixture(q = 1, rA = .85, candidate = B) {
       const bytes = JSON.stringify(output); raw.push({ impl, mode, run, bytes, sha256: sha(bytes) });
     };
     for (const impl of ['ts', 'rust']) add(impl, 'correctness', 0);
-    for (let run = 0; run < 9; run++) for (const impl of performanceOrder(run)) add(impl, 'performance', run);
+    for (let run = 0; run < PUBLIC_REPLAY_PAIRS; run++) for (const impl of performanceOrder(run)) add(impl, 'performance', run);
     const samples = Object.fromEntries(['ts', 'rust'].map(impl => [impl, raw.filter(slot => slot.impl === impl &&
       slot.mode === 'performance').map(slot => JSON.parse(slot.bytes).metrics)]));
     const failures = performanceFailures(samples.ts, samples.rust);
     const report = { schema: 1, venue: 'bitget', tape: 'sdk-rs/harness/fixtures/bitget-public.jsonl.gz',
-      tapeSha256: sha('tape'), books: 'BTCUSDT,ETHUSDT', private: false, runs: 9, correctnessRuns: 1,
+      tapeSha256: sha('tape'), books: 'BTCUSDT,ETHUSDT', private: false, runs: PUBLIC_REPLAY_PAIRS, correctnessRuns: 1,
       requiredImprovement: .1, status: failures.length ? 'FAIL' : 'PASS', failures, samples, fixers: [],
       ciWasm: archives[arm].metadata,
       artifacts: raw.map(({ impl, mode, run }) => ({ impl, mode, run, path: `/out/${index}/${impl}-${mode}-${run}` })) };

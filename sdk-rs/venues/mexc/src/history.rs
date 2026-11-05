@@ -29,6 +29,7 @@ pub struct Request {
     limit: usize,
     size: u32,
     bad: bool,
+    resynced: bool,
 }
 enum Root {
     Private(ReadRoot),
@@ -55,6 +56,10 @@ impl Leg {
     }
 }
 impl Request {
+    pub(crate) fn clock_root(&self, cx: &Cx<'_, Pending>) -> Option<Context> {
+        (matches!(self.root, Root::Private(_)) && !self.resynced && self.current(cx))
+            .then(|| self.root.context().clone())
+    }
     fn current(&self, cx: &Cx<'_, Pending>) -> bool {
         let Some(leg) = &self.leg else {
             return false;
@@ -360,6 +365,7 @@ impl MexcFutures {
                 limit,
                 size: limit.min(100) as u32,
                 bad: false,
+                resynced: false,
             },
         );
     }
@@ -494,6 +500,11 @@ impl MexcFutures {
         if let Err((Pending::History(request), error)) = result {
             self.query_failed(cx, request, &error.venue_error().message);
         }
+    }
+    pub(crate) fn replay_history(&self, cx: &mut Cx<'_, Pending>, mut request: Request) {
+        request.retire(cx);
+        request.resynced = true;
+        self.query_page(cx, request);
     }
     pub fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
         if !r.current(cx) {
@@ -733,8 +744,13 @@ impl MexcFutures {
         }
         let _ = r.owner.finish(cx, Ok(()));
     }
-    pub fn query_failed(&self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
+    pub fn query_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        mut r: Request,
+        error: impl Into<VenueError>,
+    ) {
         r.retire(cx);
-        let _ = r.owner.finish(cx, Err(VenueError::new(error)));
+        let _ = r.owner.finish(cx, Err(error.into()));
     }
 }

@@ -28,6 +28,18 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## Browser request-failure diagnostics
+
+The JS host emits `http.request_failed` at Debug for failed managed HTTP work,
+including engine deadline refusals during preparation or after release. The native
+notice carries only its exact opaque request ID; the JS host joins the original
+resource before cancellation, without inferring a timeout from elapsed time.
+Facts contain only a closed HTTP method, phase, failure kind and a path template:
+fixed API vocabulary survives, all other segments become `:segment`, at most eight
+segments plus `:more`. Origins, queries, fragments, bodies and headers are excluded.
+The SDK adds the actual venue; consumers may retain a bounded recent breadcrumb.
+These diagnostics neither retry requests nor add a second user-facing error.
+
 ## Startup discovery deadlines
 
 Before both markets and tickers load, credential-free Background Reads using the

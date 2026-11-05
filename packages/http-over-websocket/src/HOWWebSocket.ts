@@ -7,6 +7,8 @@ import { getUniqueLatencyDomains, syncServerTime } from './config';
 import { diagnosticUrl, stripDiagnosticUrlQueries } from './diagnosticUrl';
 import { decodeTradeTunnelMessage } from './tradeTunnelBinaryFrame';
 import { noteTunnelDialFailed, noteTunnelDialOpened, tunnelDialUrl } from './tunnelEndpoints';
+import { ConnectionDiagnostics, HiddenTimerLateness } from './connectionDiagnostics';
+
 import { HOWWebSocketAuthState, LatencyEntry } from './types';
 
 // Import ws package for Node.js/Bun - needed because Bun's native WebSocket
@@ -46,6 +48,9 @@ const CONNECT_CHECK_TICK_MS = 1_000;
 export class HOWWebSocket {
   ws?: ReconnectingWebSocket;
 
+  private localClose = false;
+  readonly diagnostics = new ConnectionDiagnostics('HOW');
+  readonly timerLateness = new HiddenTimerLateness();
   pingAt = 0;
   pingTimeoutId?: NodeJS.Timeout;
   isDisposed = false;
@@ -143,6 +148,7 @@ export class HOWWebSocket {
       // A disposed wrapper cannot update another connection's bookkeeping.
       if (this.ws === ws && ws.loopState.phase === 'connecting') {
         this.dialedUrl = dialedUrl;
+        this.diagnostics.dial(dialedUrl);
         this.dialOpened = false;
         this.dialStartedAt = Date.now();
       }
@@ -273,7 +279,7 @@ export class HOWWebSocket {
       this.connectCheckTimeout !== undefined
     )
       return;
-    this.connectCheckTimeout = setTimeout(() => {
+    this.connectCheckTimeout = this.observedTimeout(() => {
       this.connectCheckTimeout = undefined;
       try {
         this.redialIfConnectExpired();
@@ -313,14 +319,22 @@ export class HOWWebSocket {
 
   onOpen = async () => {
     this.epoch++;
+    this.localClose = false;
+    this.diagnostics.opened(true);
     this.dialOpened = true;
     noteTunnelDialOpened(this.dialedUrl);
     if (!this.isDisposed) {
       this.isOpen = true;
+      // A frozen browser can redial a CLOSED socket before its old close event runs.
+      // Never carry clock/auth readiness into a replacement connection.
+      this.isTimeSynced = false;
+      this.isTokenSent = false;
+      this.tokenSentAt = 0;
+      this.authState = HOWWebSocketAuthState.Unknown;
       clearTimeout(this.connectCheckTimeout);
       this.connectCheckTimeout = undefined;
 
-      this.pingTimeoutId = setTimeout(() => this.ping(), 5_000);
+      this.pingTimeoutId = this.observedTimeout(() => this.ping(), 5_000);
       // A socket that opens and then never pongs must be redialed too, not only one that stops.
       this.armSilenceReconnect();
 
@@ -329,11 +343,19 @@ export class HOWWebSocket {
     }
   };
 
+  private observedTimeout = (callback: () => void, delay: number): ReturnType<typeof setTimeout> => {
+    const dueAt = Date.now() + delay;
+    return setTimeout(() => {
+      this.timerLateness.observe(dueAt);
+      callback();
+    }, delay);
+  };
+
   private armSilenceReconnect = () => {
     clearTimeout(this.lastMessageTimeout);
-    this.lastMessageTimeout = setTimeout(() => {
+    this.lastMessageTimeout = this.observedTimeout(() => {
       if (!this.isDisposed) {
-        this.ws?.reconnect?.();
+        this.ws?.retryConnection();
       }
     }, 25_000);
   };
@@ -346,7 +368,7 @@ export class HOWWebSocket {
       if (this.pingTimeoutId) {
         clearTimeout(this.pingTimeoutId);
       }
-      this.pingTimeoutId = setTimeout(this.ping.bind(this), 5_000);
+      this.pingTimeoutId = this.observedTimeout(this.ping.bind(this), 5_000);
     }
   };
 
@@ -396,6 +418,7 @@ export class HOWWebSocket {
           this.isTimeSynced = true;
           syncServerTime(json?.serverTime);
         }
+        if (this.isTimeSynced && this.authState === HOWWebSocketAuthState.Good) this.diagnostics.established();
         if (json?.type === 'rpc.http' && json?.nonce) {
           this.emit(`sub:${json?.nonce}`, json?.data || {});
         }
@@ -406,7 +429,11 @@ export class HOWWebSocket {
     }
   };
 
-  onClose = async () => {
+  onClose = async (event?: { code?: number; initiator?: 'local' | 'remote' | 'unknown' }) => {
+    this.diagnostics.closed(
+      event?.initiator ??
+        (this.localClose ? 'local' : event?.code !== undefined && event.code !== 1006 ? 'remote' : 'unknown'),
+    );
     this.epoch++;
     if (!this.dialOpened && this.dialedUrl && !this.isDisposed) noteTunnelDialFailed(this.dialedUrl);
     this.dialedUrl = '';
@@ -502,7 +529,7 @@ export class HOWWebSocket {
       return;
     }
 
-    this.latencyCheckTimeoutId = setTimeout(() => {
+    this.latencyCheckTimeoutId = this.observedTimeout(() => {
       this.queryStaleLatencies();
       this.scheduleNextLatencyTick();
     }, LATENCY_CHECK_TICK);
@@ -587,10 +614,13 @@ export class HOWWebSocket {
    * @deprecated debug only
    */
   simulateClose = () => {
+    this.localClose = true;
     this.ws?.close();
   };
 
   dispose = () => {
+    this.localClose = true;
+    if (this.ws) this.diagnostics.closed('local');
     this.isDisposed = true;
     this.isOpen = false;
     this.isInitialized = false;

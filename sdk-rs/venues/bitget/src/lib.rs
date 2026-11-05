@@ -744,6 +744,8 @@ impl Venue for BitgetFutures {
             fresh_positions: true,
             nuke_account_cancel: true,
             symbol_cancel_misses_unseen: true,
+            // Every census commits its covers and answers a refresh ask.
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -761,6 +763,20 @@ impl Venue for BitgetFutures {
     ) {
         match action {
             safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            safe_cex_engine::VenueAction::RegisterCancelChecks { orders } => {
+                let root = match cx.admit_caller_read_root(None, None) {
+                    Ok(root) => root,
+                    Err(safe_cex_engine::request_context::CommandEntryError::Revoked) => {
+                        let _ = cx.reject_expired_command(
+                            safe_cex_engine::request_context::Operation::Read,
+                        );
+                        return;
+                    }
+                    Err(safe_cex_engine::request_context::CommandEntryError::Rejected(_)) => return,
+                };
+                self.register_cancel_checks(cx, &orders);
+                let _ = cx.done_context(&root, "null".into());
+            }
             action @ safe_cex_engine::VenueAction::CancelAccountOrders => {
                 self.trade_command(cx, safe_cex_engine::Command::Venue { command, action })
             }
@@ -800,6 +816,12 @@ impl Venue for BitgetFutures {
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_orders(cx);
+    }
+    fn take_source_cancel_checks(&mut self) -> Vec<safe_cex_engine::model::CancelOrderRef> {
+        self.take_retired_cancel_targets()
+    }
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn capture_http_reconciliation(
         &self,

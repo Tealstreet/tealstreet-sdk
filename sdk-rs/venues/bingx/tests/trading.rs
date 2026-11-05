@@ -34,6 +34,14 @@ struct TestVenue {
 }
 impl Venue for TestVenue {
     type Pending = Pending;
+    // As `Bingx`: its native trigger kind decides and it checks the trigger itself.
+    fn judges_protective_amend(
+        &self,
+        _store: &safe_cex_engine::store::Store,
+        _order: &Order,
+    ) -> bool {
+        true
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.trading.set_min_order_value("BTC-USDT", 2.0);
         cx.store.set_markets(vec![market()]);
@@ -598,18 +606,139 @@ fn trigger_replacement_stops_when_cancel_fails() {
     assert!(h.requests.is_empty());
     assert!(h.done[0].is_err());
 }
-#[test]
-fn hedged_leverage_requires_side_without_sending_a_write() {
+fn shared_hedged_leverage() -> Harness {
     let mut h = Harness::new(None);
     h.engine.store_mut().set_hedged(true);
+    h.engine.store_mut().update_setting("BTCUSDT", |s| {
+        s.leverage = 5.0;
+        s.buy_leverage = Some(5.0);
+        s.sell_leverage = Some(7.0);
+    });
     h.command(Command::SetLeverage {
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 20.0,
         side: None,
     });
+    h
+}
+
+#[test]
+fn shared_hedged_leverage_updates_long_then_short_without_an_open_position() {
+    // The shared slider intentionally supplies no side, unlike the legacy refusal.
+    let mut h = shared_hedged_leverage();
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(h.requests.len(), 1);
+    assert!(
+        h.requests[0]
+            .url
+            .contains("/openApi/swap/v2/trade/leverage")
+    );
+    assert!(h.body().contains(r#""side":"LONG""#));
+    assert!(h.body().contains(r#""leverage":20"#));
+    assert!(h.done.is_empty());
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(5.0)
+    );
+    h.reply(r#"{"code":0,"data":{}}"#);
+    assert_eq!(h.requests.len(), 1);
+    assert!(h.body().contains(r#""side":"SHORT""#));
+    assert!(h.body().contains(r#""leverage":20"#));
+    assert!(
+        h.done.is_empty(),
+        "LONG success alone cannot complete the command"
+    );
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(20.0));
+    assert_eq!(setting.sell_leverage, Some(7.0));
+    assert!(h.engine.store().metadata_write_pending("BTCUSDT"));
+    h.reply(r#"{"code":0,"data":{}}"#);
     assert!(h.requests.is_empty());
-    assert!(h.done[0].as_ref().unwrap_err().contains("Side is required"));
+    assert_eq!(h.done.len(), 1);
+    assert!(h.done[0].is_ok());
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(20.0));
+    assert_eq!(setting.sell_leverage, Some(20.0));
+    assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+}
+
+#[test]
+fn shared_hedged_leverage_long_refusal_never_sends_short() {
+    let mut h = shared_hedged_leverage();
+    assert_eq!(h.requests.len(), 1);
+    h.reply(r#"{"code":80014,"msg":"leverage refused"}"#);
+    assert!(h.requests.is_empty());
+    assert_eq!(h.done.len(), 1);
+    assert!(h.done[0].is_err());
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(5.0));
+    assert_eq!(setting.sell_leverage, Some(7.0));
+    assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+}
+
+#[test]
+fn shared_hedged_leverage_short_failure_reports_long_success_without_rollback() {
+    for failure in [
+        Some(r#"{"code":80014,"msg":"SHORT refused"}"#),
+        Some("malformed"),
+        None,
+    ] {
+        let mut h = shared_hedged_leverage();
+        assert_eq!(h.requests.len(), 1);
+        h.reply(r#"{"code":0,"data":{}}"#);
+        assert_eq!(h.requests.len(), 1);
+        match failure {
+            Some(body) => h.reply(body),
+            None => h.failed(),
+        }
+        assert!(h.requests.is_empty(), "no rollback or extra settings write");
+        assert_eq!(h.done.len(), 1);
+        let message = h.done[0].as_ref().unwrap_err();
+        assert!(message.contains("LONG leverage was updated"), "{message}");
+        assert!(
+            message.contains("SHORT leverage update was not confirmed"),
+            "{message}"
+        );
+        assert_eq!(h.failures.len(), 1);
+        let error = &h.failures[0];
+        assert!(error.message.contains("LONG leverage was updated"));
+        assert!(
+            error
+                .message
+                .contains("SHORT leverage update was not confirmed")
+        );
+        match failure {
+            Some(body) if body != "malformed" => assert!(message.contains("SHORT refused")),
+            Some(_) => assert!(message.contains("Invalid BingX trading response")),
+            None => {
+                assert!(message.contains("connection lost"));
+                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
+            }
+        }
+        let setting = h.engine.store().setting("BTCUSDT").unwrap();
+        assert_eq!(setting.buy_leverage, Some(20.0));
+        assert_eq!(setting.sell_leverage, Some(7.0));
+        assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+    }
+}
+
+#[test]
+fn shared_hedged_leverage_rejects_invalid_input_before_either_write() {
+    for leverage in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut h = Harness::new(None);
+        h.engine.store_mut().set_hedged(true);
+        h.command(Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage,
+            side: None,
+        });
+        assert!(h.requests.is_empty());
+        assert_eq!(h.done.len(), 1);
+        assert!(h.done[0].is_err());
+        assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+    }
 }
 
 #[test]
@@ -1115,7 +1244,11 @@ fn last_price_trigger_amendment_rejects_a_crossed_last_even_when_mark_is_safe() 
         h.requests.is_empty(),
         "must not cancel the existing protective stop"
     );
-    assert!(h.done[0].as_ref().unwrap_err().contains("immediately"));
+    assert!(
+        h.done[0].as_ref().unwrap_err().contains("immediately"),
+        "{:?}",
+        h.done
+    );
     assert_eq!(
         h.engine.store().order(&order().id).unwrap().status,
         OrderStatus::Open

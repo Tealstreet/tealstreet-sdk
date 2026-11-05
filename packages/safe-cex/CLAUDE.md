@@ -224,6 +224,11 @@ are reported through `console.error` with venue, event and original cause.
 Reporting emits no error/log event, so failures in those listeners cannot recurse.
 The inherited once/off/context and subscription-snapshot behavior stays intact.
 
+Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
+with the actual SDK venue plus method, redacted path template, phase and closed
+failure kind. Queries, origins and request material are never diagnostic fields;
+this event does not emit another error or change retries/native deadlines.
+
 ## Rust public-feed ownership
 
 Rust accounts use `publicFeed: { mode: 'direct' | 'disabled' }` or
@@ -408,7 +413,24 @@ the engine's own frames fill the UI store. Books, candles and fills still come
 from the source's ops. It signs and sends `FRAME_FED_WRITES` (manual writes,
 settings, nuke, scheduleCancel) itself, including writes the web sends through
 `callMethodInWorker`; a nuke first asks the source for `stopAccountAlgos`. A
-LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
+write whose outcome is unknown fences its symbol. From a source advertising
+`orderReadCovers`, a fence lifts only on a read the source sent after the write
+(`ORDERS_READ`, docs/plans/RUST_FRAME_FED_READ_COVER.md). The engine emits
+`orders.held { symbols, liftAfterMs }` (comma-joined, `''` the account) whenever
+a symbol not yet named turns uncertain or a partial lift leaves some standing,
+and the page asks the source for `refreshAccountOrders(symbols)` once
+`liftAfterMs + 500 ms` has passed: one timer, the latest names, the earliest due
+time. The source's engine (`refreshOrders`) bounds the reads. A plain Unknown
+cancel has no placement fence: for a source-refreshing venue,
+`orders.refresh { symbols }` asks the source once without disturbing that
+placement-hold timer. It preserves the cancel's Unknown error, never replays,
+and never infers a Canceled order from absence.
+Bitget also sends bounded `orders.cancel_check` targets before that same ask.
+The source registers them through read-only `registerCancelChecks`, then runs
+`refreshOrders` even if registration refuses. Only its clean post-registration
+native census can report present/absent before cached-algo retention; it never
+changes the writer's original Unknown command result.
+A LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
 snapshot}`, after the `forwardFrames` op, and keeps posting fill ops.
 
 The web builds a second `RustEngineExchange` on the main thread; the worker's
@@ -662,6 +684,27 @@ SDK.
   rewrite the client ID; changing that needs a live check of whether Bitget
   accepts the old ID there, because a rejection silently falls back to
   cancel+replace.
+
+## Protective edits never drop the protection
+
+Most venues amend a stop or take profit by cancel-then-place, so a replacement
+the venue refuses would leave the position unprotected. Before the cancel, the
+engine (`sdk-rs/engine/src/protective_amend.rs`) refuses `notSent` an amend
+whose new trigger already fires against the order's own reference (mark or last
+per its trigger type, both when unknown) or sits over 10x from the symbol's
+price (a price meant for another symbol), but only against a reference observed
+in the last 5 s: each of mark, last and index carries its own observation time
+(`Store::reference_seen_at`), set when it changes or when a venue reports it
+unchanged (`observe_ticker_fields`; a delta omission is not an observation).
+Attached and virtual legs (edited in place on the parent) are exempt. A venue
+that judges the trigger itself (`Venue::judges_protective_amend`: Bybit's
+Partial drag, Hyperliquid's TP-to-SL only when mark, last and index agree within
+25%, BingX's native kind) keeps only the 10x guard. When Binance or Bybit
+definitively refuse a replacement after its cancel landed, the old order is
+placed again exactly (a Bybit Limit stop keeps its limit price), once; the error
+then carries `protection: 'restored' | 'unprotected'` (`ExchangeError.protection`,
+kept by `serializeCommandError`). An unknown outcome is never restored, and a
+stop the cancel found already gone (filled or triggered) is never put back.
 
 ## Automatic retries are for reads only
 
@@ -1684,3 +1727,69 @@ additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+
+
+Hyperliquid `/info` admission shares a token bucket across account workers through
+IndexedDB. Prepare may wait but reserves no weight. Admission durably reserves
+weight before the final shared Retry-After/generation gate and physical handoff.
+Cancellation or Claim without dispatch refunds only that token generation; a
+request handed to fetch is never refunded. Once IDB has worked in a realm,
+storage failure waits within the original read deadline rather than sending from
+an unshared memory budget. Never-opened IDB keeps the memory-only behavior.
+Role/mode startup reads
+stay single-flight until their managed completion or deadline, including quota wait.
+Each Hyperliquid engine issues at most three routine account reads at once, with
+core Mode/State/Orders ahead of ancillary work. Queued intents acquire their
+managed deadline only when issued. Foreground Orders, including refresh asks,
+Unknown reconciliation and owed successors, retain priority but consume the same
+slots; promoting a queued intent preserves its captured census epoch. Caller-owned
+history, positions and settings retain their independent admission and original
+quota/root deadlines. Only completion of a slotted read releases its slot. Shared
+dispatch waiters use FIFO leases so newer cheap reads cannot starve older Orders;
+100 ms renewal and 2 s expiry bound a dead worker's obstruction without charging
+its abandoned work.
+
+The worker's unchanged 120 s timeout preserves closed native startup fields and
+per-account `/info` route, 429, quota-wait, undispatched and in-flight counters.
+`startup_native_sample_age_ms` identifies the age of the last native watchdog
+snapshot; elapsed/deadline tags on the timeout describe the worker's own bound.
+No request bodies, account addresses, headers or URLs enter these facts.
+
+Public Hyperliquid catalogue reads (`perpDexs`, `metaAndAssetCtxs` and
+`spotMetaAndAssetCtxs`) share byte-exact replies across engines through a separate
+IndexedDB cache. Entries expire after 5 s; a 3 s leader lease bounds follower
+waiting and fences late leaders. Cached preparations recheck payload expiry at
+readiness and handoff; asynchronous publication owns a separate byte buffer.
+Cache storage attempts are bounded to 250 ms;
+unavailable storage bypasses the cache while retaining ordinary quota admission.
+Only anonymous public requests with the exact catalogue shape qualify. Account
+reads, candles and writes are never cached. Typed discovery failures invalidate
+that origin's entries and leases. Cache hits make no physical request and consume
+no quota. Invalidation after native parsing uses the closed `discovery` failure
+kind supplied by #3046; HTTP/JSON errors already invalidate at the cache boundary.
+
+The same `SharedCatalogue` coordinator owns anonymous Binance `exchangeInfo`
+GET sharing. Binance and Hyperliquid have separate closed eligibility/validation
+policies; account requests, writes, tokens and candles never participate. Binance
+keys include exact endpoint/query, network and resolved public route. Valid replies
+have a 5 s TTL and an 8 MiB cap; leases last at most 25 s and never exceed their
+owner's original managed deadline. Followers never bypass an active lease or
+cooldown. Failed physical reads publish owner-fenced 1/2/4/8/16/30 s cooldowns,
+honoring Retry-After up to five minutes before followers can elect again.
+Unavailable storage from startup preserves independent native discovery/backoff.
+After a successful coordination transaction, storage loss refuses preparation
+instead of bypassing an unknown lease. Waiter cancellation never deletes a peer's
+lease/cooldown; each engine still parses and publishes its own catalogue.
+Future-dated strict ownership stays blocking. A dispatched timeout publishes a
+cooldown before abort cleanup without delaying the caller; expired ownership
+retains its minimum failure window until that publication can settle. The original
+deadline callback remains authoritative after wall-clock rollback. Queued Binance
+publications check the transport lifetime at the storage write, including after
+a timeout has already completed request cleanup.
+
+Rust account `socketHealth.reconnectDiagnostics` carries bounded last-close
+snapshots for public/private/business channels and the primary HOW adapter,
+plus maximum hidden timer lateness across engine/HOW callbacks. These are TS
+host observations, not native venue health or server-managed browser evidence.
+Snapshots retain object identity until a bucket changes; the existing health
+sync publishes them without a new polling loop. The wasm binary is unchanged.

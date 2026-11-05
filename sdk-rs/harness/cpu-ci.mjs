@@ -1,6 +1,7 @@
 // Workflow orchestration: original reports remain strict; only the final job
 // can certify an authenticated canonical cohort. There is no rerun API here.
 import { spawnSync } from 'node:child_process';
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
@@ -14,7 +15,7 @@ import { assessGateReport } from './known-failure-policy.mjs';
 import { assessEligibility, decideRemeasurement } from './cpu-remeasure.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
-import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint } from './cpu-runtime.mjs';
+import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint, environmentIdentity, environmentMismatch } from './cpu-runtime.mjs';
 import { loadGateLedger } from './verify-gates.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { selectBitgetPair } from './bitget-paired-ci.mjs';
@@ -178,15 +179,30 @@ const workflowIdentity = run => Object.fromEntries(['id', 'run_number', 'run_att
   'path', 'head_sha', 'head_branch', 'event'].map(key => [key, run[key]]));
 
 async function terminalProducer(context, jobName, stepName) {
-  let inventory = await evidenceInventory(context), originalJob, originalRun;
+  let inventory = await evidenceInventory(context), originalJob, originalRun, physical;
   for (;;) {
     const { run, jobs } = inventory, selected = jobs.filter(job => job.name === jobName);
     insist(run.id === context.runId && run.run_attempt === 1 && selected.length === 1,
       'missing unique artifact physical producer in original workflow attempt1');
     const job = selected[0];
     insist(Number.isSafeInteger(job.id) && job.id > 0 && Number.isSafeInteger(job.runner_id) && job.runner_id > 0 &&
-      job.run_id === run.id && job.run_attempt === 1 && job.head_sha === run.head_sha && job.head_branch === run.head_branch &&
-      job.status === 'completed' && job.conclusion === 'success', 'measurement not successful original physical attempt1');
+      job.run_id === run.id && job.run_attempt === 1 && job.head_sha === run.head_sha && job.head_branch === run.head_branch,
+      'measurement not successful original physical attempt1');
+    const { status, conclusion, ...observed } = producerIdentity(job);
+    physical ??= observed;
+    insist(same(observed, physical), 'producer physical identity changed during step metadata refresh');
+    // The job record can trail its own terminal steps; only a settled record is judged.
+    if (status !== 'completed' || conclusion == null) {
+      context.producerStepRefreshes ??= 0;
+      insist(context.producerStepRefreshes < PRODUCER_STEP_REFRESH_LIMIT,
+        `producer job not terminal after ${PRODUCER_STEP_REFRESH_LIMIT} refreshes: run ${run.id}, job ${job.id} ${job.name} ` +
+        `[${status}/${conclusion}]`);
+      context.producerStepRefreshes++;
+      await new Promise(resolve => setTimeout(resolve, PRODUCER_STEP_REFRESH_MS));
+      inventory = await evidenceInventory(context, true);
+      continue;
+    }
+    insist(job.conclusion === 'success', 'measurement not successful original physical attempt1');
     const identity = producerIdentity(job), workflow = workflowIdentity(run);
     originalJob ??= identity; originalRun ??= workflow;
     insist(same(identity, originalJob) && same(workflow, originalRun), 'producer physical identity changed during step metadata refresh');
@@ -366,6 +382,36 @@ export function validateFirstBindings({ state, evidence, cohortEntries, actualMa
   return { schema: 1, runtimeSha256: fingerprint, manifestSha256: sha256(manifestBytes), nodeSha256: recordedManifest.node.sha256 };
 }
 
+const IMAGE_FIELDS = new Set(['ImageOS', 'ImageVersion']);
+const IMAGE_ROLLED = 'cpu-second/image-rolled.json';
+const MEASURED_MEMBERS = /^(?:second\.json|manifest\.json|cpu-second\/(?:cases|cache|reports)\/.*|cpu-second\/results\.json)$/;
+const imageRollMessage = (suite, receipt) =>
+  `${suite} not certified: runner image rolled ${receipt.expected.ImageVersion}→${receipt.actual.ImageVersion}; fresh run required`;
+
+/** A runner image rollover between first and second jobs cannot form a pair: the
+ * second job records it unmeasured. Every other environment change stays a hard refusal. */
+export function imageRollReceipt({ suite, expected, environment, runId, firstJobId }) {
+  const differences = environmentMismatch(expected, environment);
+  if (!differences.length) return null;
+  insist(differences.every(({ field }) => IMAGE_FIELDS.has(field)), `environment identity mismatch: ${JSON.stringify(differences)}`);
+  return { schema: 1, suite, status: 'image-rolled', measured: false, runId, firstJobId,
+    expected: environmentIdentity(expected), actual: environmentIdentity(environment), differences };
+}
+
+/** The typed per-suite refusal for an authentic unmeasured receipt; never a certificate. */
+export function imageRolledRefusal({ suite, entries, expected, logBytes, runId, firstJobId }) {
+  if (!entries.has(IMAGE_ROLLED)) return null;
+  const receipt = jsonMember(entries, IMAGE_ROLLED);
+  let differences;
+  try { differences = environmentMismatch(expected, receipt.actual); } catch { differences = []; }
+  insist(receipt.schema === 1 && receipt.suite === suite && receipt.status === 'image-rolled' && receipt.measured === false &&
+    receipt.runId === runId && receipt.firstJobId === firstJobId && same(receipt.expected, environmentIdentity(expected)) &&
+    differences.length > 0 && differences.every(({ field }) => IMAGE_FIELDS.has(field)) && same(receipt.differences, differences) &&
+    ![...entries.keys()].some((name) => MEASURED_MEMBERS.test(name)) && !Buffer.from(logBytes).includes('CPU_CASE_BEGIN '),
+  'invalid image-rolled receipt');
+  return imageRollMessage(suite, receipt);
+}
+
 async function secondMeasurement(context, suite, destination) {
   requireCpuRemeasureSuite(suite);
   insist(context.env.GITHUB_RUN_ATTEMPT === '1', 'no third measurement via a job retry');
@@ -379,11 +425,21 @@ async function secondMeasurement(context, suite, destination) {
   insist(firstBundle.meta.id === row.firstArtifactId && firstBundle.meta.digest === row.firstArtifactDigest, 'first artifact changed after planning');
   const firsts = selected.map(({ key, case: item }) => firstEvidence(firstBundle.entries, key, item));
   const state = jsonMember(firstBundle.entries, 'cpu-collection/state.json');
-  const capsule = await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
-    `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha);
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
-  insist(tiny.job.id === firstBundle.job.id && capsule.job.id === firstBundle.job.id, 'first uploads have different physical producers');
+  insist(tiny.job.id === firstBundle.job.id, 'first uploads have different physical producers');
+  const sealedEnvironment = jsonMember(tiny.entries, 'manifest.json').environment;
+  insist(same(state.environment, sealedEnvironment), 'first state environment differs from sealed manifest');
+  const rolled = imageRollReceipt({ suite, expected: sealedEnvironment, runId: context.runId, firstJobId: firstBundle.job.id });
+  if (rolled) {
+    rmSync(resolve(context.root, 'sdk-rs/harness/out'), { recursive: true, force: true });
+    write(resolve(context.root, 'sdk-rs/harness/out', IMAGE_ROLLED), rolled);
+    console.log(`::error::${imageRollMessage(suite, rolled)} (not measured)`);
+    return [];
+  }
+  const capsule = await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
+    `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha);
+  insist(capsule.job.id === firstBundle.job.id, 'first uploads have different physical producers');
   const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
   for (const first of firsts) {
     await authenticateCase(context, first, firstBundle.job, suite);
@@ -417,7 +473,7 @@ async function secondMeasurement(context, suite, destination) {
     mkdirSync(dirname(reportPath), { recursive: true });
     const item = first.claim.case;
     const child = spawnSync(runtime.nodePath, [resolve(context.root, 'sdk-rs/harness/gate.mjs'),
-      '--venue', item.venue, '--tape', item.tape, '--books', item.books, '--runs', '9',
+      '--venue', item.venue, '--tape', item.tape, '--books', item.books, '--runs', String(PUBLIC_REPLAY_PAIRS),
       '--runtime-capsule', destination, '--report', reportPath], {
       cwd: context.root, env: { ...process.env, ...reset.env, CPU_COLLECTION_STATE: '' }, stdio: 'inherit',
     });
@@ -493,7 +549,7 @@ export function validatePlannedCases(plan) {
       Array.isArray(row.cases) && same(row.cases.map(value => gateCaseKey(value.case)).sort(), publicCases(row.suite).map(gateCaseKey).sort()), 'missing/duplicate/substituted complete public roster');
     insist(new Set(row.cases.map(value => value.key)).size === row.cases.length, 'duplicate case key');
     for (const value of row.cases) insist(['first', 'second'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
-      value.case.private === false && value.case.runs === 9 && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
+      value.case.private === false && value.case.runs === PUBLIC_REPLAY_PAIRS && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
   }
   return plan;
 }
@@ -600,6 +656,11 @@ async function certifySuite(context, suite, destination) {
   const family = await familyIdentityForSuite(context, suite, strict, state, tiny);
   const second = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-second-${suite}`,
     `Rust / CPU remeasurement (${suite})`, 'Retain CPU remeasurement results', context.checkoutSha) : null;
+  if (second) {
+    const rolled = imageRolledRefusal({ suite, entries: second.entries, expected: jsonMember(tiny.entries, 'manifest.json').environment,
+      logBytes: second.logBytes, runId: context.runId, firstJobId: strict.job.id });
+    insist(!rolled, rolled);
+  }
   const capsule = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha, true) : null;
   if (capsule) {
@@ -653,23 +714,45 @@ export async function evidenceEndCheck(context) {
   }
 }
 
+/** One refused suite fails only its own replay gate; overall certification stays false. */
+export async function certifySuites(suites, certifyOne) {
+  const certificates = {}, results = { certified: true, suites: {}, reasons: {} };
+  for (const suite of suites) {
+    try {
+      certificates[suite] = await certifyOne(suite);
+      results.suites[suite] = true;
+    } catch (error) {
+      results.certified = false;
+      results.suites[suite] = false;
+      results.reasons[suite] = String(error?.message ?? error).slice(0, 2000);
+    }
+  }
+  return { results, certificates };
+}
+
 async function certifyAll(context, destination) {
-  const certificates = {};
-  for (const suite of CPU_REMEASURE_SUITES) certificates[suite] = await certifySuite(context, suite, resolve(destination, suite));
+  const { results: outcome, certificates } = await certifySuites(CPU_REMEASURE_SUITES, async (suite) => {
+    try { return await certifySuite(context, suite, resolve(destination, suite)); }
+    catch (error) { context.secondDispositions?.delete(suite); throw error; }
+  });
   await evidenceEndCheck(context);
-  const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha,
-    suites: Object.fromEntries(CPU_REMEASURE_SUITES.map(suite => [suite, true])) };
+  const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, ...outcome };
   write(resolve(destination, 'results.json'), results);
   if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `results=${JSON.stringify(results)}\n`, { flag: 'a' });
+  for (const reason of Object.values(outcome.reasons)) console.log(`::error::${reason.replaceAll('\n', ' | ')}`);
   return certificates;
 }
 
 export function requireCertifiedSuite({ suite, results, result, runId, checkoutSha }) {
   requireCpuRemeasureSuite(suite);
+  const suites = results?.suites, refused = suites ? Object.keys(suites).filter(name => suites[name] !== true).sort() : [];
   insist(result === 'success' && results?.schema === 1 && results.runId === runId && results.checkoutSha === checkoutSha &&
-    results.suites && same(Object.keys(results.suites).sort(), [...CPU_REMEASURE_SUITES].sort()) &&
-    Object.values(results.suites).every(value => value === true), 'missing/failed/incomplete shared CPU certification');
-  return results.suites[suite];
+    suites && same(Object.keys(suites).sort(), [...CPU_REMEASURE_SUITES].sort()) &&
+    Object.values(suites).every(value => typeof value === 'boolean') && results.certified === !refused.length &&
+    results.reasons && same(Object.keys(results.reasons).sort(), refused) &&
+    refused.every(name => typeof results.reasons[name] === 'string' && results.reasons[name]), 'missing/failed/incomplete shared CPU certification');
+  if (!suites[suite]) throw new Error(results.reasons[suite]);
+  return true;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

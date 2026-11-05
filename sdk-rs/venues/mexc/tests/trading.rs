@@ -2119,3 +2119,40 @@ fn a_reduce_only_order_with_nothing_to_reduce_is_refused_before_sending() {
         }
     }
 }
+
+#[test]
+fn clock_and_signature_refusals_never_probe_time_or_resend_a_placement() {
+    for code in [513, 602] {
+        let mut e = ready();
+        e.handle(
+            200.,
+            Event::Command(Command::PlaceOrders {
+                command: 991,
+                orders: vec![order()],
+            }),
+        );
+        let request = support::public_requests(&mut e, 200.)
+            .into_iter()
+            .find(|r| r.method == safe_cex_engine::Method::Post)
+            .expect("real placement");
+        reply(
+            &mut e,
+            &request,
+            201.,
+            &format!(r#"{{"success":false,"code":{code},"message":"refused"}}"#),
+        );
+        let actions = support::prepared(&mut e, 201.);
+        assert!(!actions.iter().any(|a| matches!(a,Action::Http(r)
+            if r.method!=safe_cex_engine::Method::Get || r.url.contains("/contract/ping"))));
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 991, .. })
+                ))
+                .count(),
+            1
+        );
+    }
+}

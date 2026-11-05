@@ -218,6 +218,7 @@ function interruptedCommand(error, command, interrupted) {
 const ERROR_KINDS = new Set(['rejected', 'invalidInput', 'insufficientBalance', 'authInvalid', 'authExpired',
   'authPermission', 'rateLimited', 'network', 'timeout', 'venueUnavailable', 'unsupported', 'internal']);
 const ERROR_OUTCOMES = new Set(['notSent', 'rejected', 'unknown']);
+const ERROR_PROTECTIONS = new Set(['restored', 'unprotected']);
 const text = (value) => (typeof value === 'string' && value ? value : undefined);
 const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : undefined);
 
@@ -250,6 +251,7 @@ export class ExchangeError extends Error {
     const venueMessage = text(detail.venueMessage);
     if (venueMessage) this.venueMessage = venueMessage;
     if (Number.isFinite(detail.retryAfterMs) && detail.retryAfterMs >= 0) this.retryAfterMs = detail.retryAfterMs;
+    if (ERROR_PROTECTIONS.has(detail.protection)) this.protection = detail.protection;
     const ids = detail.partial?.orderIds;
     if (Array.isArray(ids) && ids.length && ids.every((id) => typeof id === 'string')) {
       this.partialOrderIds = [...ids];
@@ -1169,7 +1171,19 @@ export class EngineHost {
     if (this.disposed || !actionsJson) return;
     let unknown;
     let callbackFailure;
-    for (const action of JSON.parse(actionsJson)) {
+    const actions = JSON.parse(actionsJson);
+    // Native timeout IDs bind diagnostics before this batch cancels their original resources.
+    for (const action of actions) {
+      const request = action.op === 'event' ? action.fields?.httpTimeoutRequest : undefined;
+      if (typeof request !== 'string' || !/^[1-9][0-9]{0,19}$/.test(request)) continue;
+      for (const resource of this.managedHttp.resources.values()) {
+        if (!Number.isSafeInteger(resource.request) || String(resource.request) !== request) continue;
+        action.fields = { ...action.fields, httpMethod: resource.diagnostic.method, httpPath: resource.diagnostic.path, httpPhase: resource.phase };
+        this.managedHttp.failure(resource, 'timeout');
+        break;
+      }
+    }
+    for (const action of actions) {
       if (this.disposed) return;
       // Unknown protocol actions remain errors, but cannot discard the batch's
       // subsequent command completions. Ordinary callbacks still propagate.

@@ -53,11 +53,11 @@ import type { ClientOrderIdRule, ClientOrderLookup, WorkerOrderIds } from '../cl
 import type { LighterAccountTier } from '../lighter/lighter.account-tier';
 import type { ChaseEnd } from './algoControlWatch';
 import type { AsterDEXPublicSetup } from './asterdexSignerSetup';
+import type { FailedPrivateReadKind } from './startupDiagnostics';
 
 import { DEFAULT_COMMAND_TIMEOUT_MS, EngineHost, ExchangeError, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame, LOADED_FLAG, TICKER_FIELDS } from '@tealstreet/safe-cex-wasm/wire';
 import { engineEventClassified, isErrorReported, markErrorReported } from '../../commandOutcome';
-import { startupDiagnosticTags } from './startupDiagnostics';
 import { exchangeMetadata, getExchangeMetadata } from '../../exchangeMetadata';
 import { copyHistoryCompleteness } from '../../historyCompleteness';
 import { mapBitunixPositionHistory } from '../../journal/bitunix.position-adapter';
@@ -67,10 +67,10 @@ import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
-import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { bybitPublicRateLimitReport } from '../../transport/bybitPublicRateLimitTelemetry';
-import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
+import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { withRequestsLog } from '../../transport/requestsLog';
+import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
 import { nativePositionSize } from '../../utils/nativePositionSize';
 import { multiply } from '../../utils/safe-math';
@@ -144,6 +144,7 @@ import {
   serveInProcessPublicData,
 } from './publicFeed';
 import { RustSocketHandle } from './rustSockets';
+import { failedPrivateReadKind, startupDiagnosticTags } from './startupDiagnostics';
 
 /** The public registry and direct construction share the same beta policy. */
 export const RUST_VENUES: ReadonlySet<ExchangeName> = new Set(BETA_VENUES);
@@ -155,6 +156,10 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const LIGHTER_TIER_SYNC_MS = 15_000;
+/** Past a hold's `liftAfterMs`, so the source's read goes out after the write it must cover. */
+const SOURCE_ORDERS_SLACK_MS = 500;
+/** The engine's unsynced grace, for an `orders.held` event that names none. */
+const UNSYNCED_FENCE_GRACE_MS = 30_000;
 /** TS replaces `balance.info` on each REST balance tick; the engine caches the same payload. */
 const BALANCE_INFO_SYNC_MS = 2_000;
 // ApeX and KuCoin Spot retain their existing getAccount command aliases below.
@@ -467,11 +472,29 @@ export class RustEngineExchange extends BaseExchange {
   protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private readonly defaultHistoricalPositions = (this as BaseExchange).fetchHistoricalPositions;
   private host?: EngineHostType;
+  private readReconnectDiagnostics?: ReturnType<typeof createEngineTransport>['reconnectDiagnostics'];
   private engineNow = (): number => virtualClock.getCurrentTimeMs();
   private engineFailure?: Error;
   private publicFeedDisabled = false;
   /** Why a start that never finishes has not: a venue answer is not a slow connection. */
   lastReadFailure?: string;
+  lastFailedPrivateReadKind?: FailedPrivateReadKind;
+  private nativeStartupTags: Record<string, string> = {};
+  private nativeStartupSampleAt?: number;
+  private httpStartupDiagnostics?: () => Record<string, string>;
+  private invalidateInfoCatalogue?: () => void;
+  get startupDiagnostics(): Record<string, string> {
+    return {
+      ...this.nativeStartupTags,
+      ...(this.nativeStartupSampleAt === undefined
+        ? {}
+        : { startup_native_sample_age_ms: String(Math.max(0, Date.now() - this.nativeStartupSampleAt)) }),
+      ...(this.lastFailedPrivateReadKind
+        ? { startup_last_failed_private_read_kind: this.lastFailedPrivateReadKind }
+        : {}),
+      ...this.httpStartupDiagnostics?.(),
+    };
+  }
 
   /** A native trap is terminal for this instance, including after disposal. */
   get isEngineDead(): boolean {
@@ -1155,6 +1178,71 @@ export class RustEngineExchange extends BaseExchange {
     });
   };
 
+  private sourceOrdersAsk: { symbols: string[] | undefined; due: number } | undefined;
+  private sourceOrdersTimer: ReturnType<typeof setTimeout> | undefined;
+  private sourceCancelChecks: { id: string; symbol: string }[] = [];
+
+  /**
+   * A frame-fed engine holds an uncertain write until its data source sends orders from a read
+   * sent after it. The source never saw that write, so the page asks once `liftAfterMs` has
+   * passed. Each event names every standing symbol (`''` is the account), timed for the oldest:
+   * the latest names replace the ask, and the earliest due time stands.
+   */
+  private askSourceForOrders = (fields: Record<string, unknown> | undefined) => {
+    const liftAfterMs = fields?.liftAfterMs;
+    const lift =
+      typeof liftAfterMs === 'number' && Number.isFinite(liftAfterMs) && liftAfterMs >= 0
+        ? liftAfterMs
+        : UNSYNCED_FENCE_GRACE_MS;
+    const named = typeof fields?.symbols === 'string' ? fields.symbols.split(',') : [''];
+    const symbols = named.includes('') ? undefined : named;
+    const due = Math.min(this.sourceOrdersAsk?.due ?? Infinity, Date.now() + lift + SOURCE_ORDERS_SLACK_MS);
+    this.sourceOrdersAsk = { symbols, due };
+    clearTimeout(this.sourceOrdersTimer);
+    this.sourceOrdersTimer = setTimeout(this.sendSourceOrdersAsk, Math.max(0, due - Date.now()));
+  };
+
+  private sendSourceOrdersAsk = () => {
+    const ask = this.sourceOrdersAsk;
+    this.sourceOrdersAsk = undefined;
+    this.sourceOrdersTimer = undefined;
+    if (!ask || this.isDisposed || this.engineFailure) return;
+    this.refreshSourceOrders(ask.symbols);
+  };
+
+  private refreshSourceOrders = (symbols?: string[]) => {
+    if (this.isDisposed || this.engineFailure) return;
+    const checks = this.sourceCancelChecks;
+    this.sourceCancelChecks = [];
+    void this.refreshAccountOrders(symbols, checks.length ? checks : undefined).catch((error: unknown) => {
+      if (this.isDisposed) return;
+      const reason = error instanceof Error ? error.message : String(error);
+      this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
+    });
+  };
+
+  /** Data source: send orders, for these symbols or the account, from a read sent after this call. */
+  refreshAccountOrders = async (symbols?: string[], cancelChecks?: { id: string; symbol: string }[]): Promise<void> => {
+    if (this.routesToWorker) {
+      // Disposal while the bridge attaches retires the ask: nothing may start after cleanup.
+      await this.untilWorkerBridge();
+      if (this.isDisposed) return;
+      await (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(
+        'refreshAccountOrders',
+        ...(cancelChecks?.length ? [symbols, cancelChecks] : symbols !== undefined ? [symbols] : []),
+      );
+      return;
+    }
+    try {
+      if (cancelChecks?.length) {
+        await this.command({ op: 'registerCancelChecks', orders: cancelChecks }, { report: false });
+      }
+    } finally {
+      // Registration grants no read authority; a refusal must not suppress the repair read.
+      await this.command({ op: 'refreshOrders', ...(symbols !== undefined ? { symbols } : {}) }, { report: false });
+    }
+  };
+
   /** Data source: re-read the settings a frame-fed engine changed, for one symbol or the account. */
   refreshAccountSettings = async (symbol?: string): Promise<void> => {
     if (this.routesToWorker) {
@@ -1425,25 +1513,27 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = options;
     const publicDataOnly = this.isPublicDataOnly;
-    const transport = withRequestsLog(
-      createEngineTransport(
-        this.name,
-        options,
-        (transportFactory ?? synchronizedEngineTransport)(),
-        this.signerSetup,
-        (message) => this.emitAndLogError(message),
-        (notice) => {
-          // Sentry and the log only: the account keeps working, degraded, so no toast.
-          const { message, sentryData } = tunnelProxyFallbackReport(this.name, notice);
-          this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
-        },
-        (notice) => {
-          const { message, sentryData } = bybitPublicRateLimitReport(this.name, notice);
-          this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
-        },
-      ),
+    const routedTransport = createEngineTransport(
       this.name,
-      (event, message) => this.emitter.emit(event, message),
+      options,
+      (transportFactory ?? synchronizedEngineTransport)(),
+      this.signerSetup,
+      (message) => this.emitAndLogError(message),
+      (notice) => {
+        // Sentry and the log only: the account keeps working, degraded, so no toast.
+        const { message, sentryData } = tunnelProxyFallbackReport(this.name, notice);
+        this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
+      },
+      (notice) => {
+        const { message, sentryData } = bybitPublicRateLimitReport(this.name, notice);
+        this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
+      },
+    );
+    this.httpStartupDiagnostics = routedTransport.startupDiagnostics;
+    this.invalidateInfoCatalogue = routedTransport.invalidateCatalogue;
+    this.readReconnectDiagnostics = routedTransport.reconnectDiagnostics;
+    const transport = withRequestsLog(routedTransport, this.name, (event, message) =>
+      this.emitter.emit(event, message),
     );
     const engine = constructEngine(
       WasmEngine,
@@ -2132,9 +2222,59 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   private receiveEvent = (event: EngineEvent) => {
+    if (event.code === 'http.request_failed') event = { ...event, fields: { ...event.fields, venue: this.name } };
+
+    if (event.code === 'startup.incomplete') {
+      this.nativeStartupTags = startupDiagnosticTags(event);
+      this.nativeStartupSampleAt = Date.now();
+    }
+    if (event.code === 'request.failed' || event.code === 'startup.incomplete')
+      this.lastFailedPrivateReadKind =
+        failedPrivateReadKind(event.fields?.lastFailedPrivateReadKind) ?? this.lastFailedPrivateReadKind;
+    if (
+      event.code === 'request.failed' &&
+      failedPrivateReadKind(event.fields?.lastFailedPrivateReadKind) === 'discovery'
+    )
+      this.invalidateInfoCatalogue?.();
     if (event.code === 'request.failed' || event.code === 'auth.rejected') this.lastReadFailure = event.message;
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
+    if (event.code === 'orders.held' && this.frameFed) this.askSourceForOrders(event.fields);
+    if (
+      event.code === 'orders.cancel_check' &&
+      this.frameFed &&
+      typeof event.fields?.targets === 'string' &&
+      event.fields.targets.length <= 32_768
+    ) {
+      try {
+        const targets: unknown = JSON.parse(event.fields.targets);
+        if (Array.isArray(targets) && targets.length <= 64) {
+          for (const target of targets) {
+            if (
+              !target ||
+              typeof target.id !== 'string' ||
+              !target.id ||
+              target.id.length > 128 ||
+              typeof target.symbol !== 'string' ||
+              !target.symbol ||
+              target.symbol.length > 128
+            )
+              continue;
+            this.sourceCancelChecks = this.sourceCancelChecks.filter(
+              (c) => c.id !== target.id || c.symbol !== target.symbol,
+            );
+            this.sourceCancelChecks.push({ id: target.id, symbol: target.symbol });
+            if (this.sourceCancelChecks.length > 64) this.sourceCancelChecks.shift();
+          }
+        }
+      } catch {
+        // An invalid control grants no confirmation and never suppresses the ordinary read.
+      }
+    }
+    if (event.code === 'orders.refresh' && this.frameFed) {
+      const named = typeof event.fields?.symbols === 'string' ? event.fields.symbols.split(',') : [''];
+      this.refreshSourceOrders(named.includes('') ? undefined : named);
+    }
     this.emitter.emit('engine-event', event);
     if (event.level === 'error')
       this.emitAndLogError(
@@ -2162,7 +2302,11 @@ export class RustEngineExchange extends BaseExchange {
     const shared = this.sharedPublicFeed
       ? { isInitialized: this.sharedPublicReady, isHealthy: this.sharedPublicReady }
       : undefined;
-    const health = summarizeSocketHealth(this.getPublicSockets(), this.getPrivateSockets(), shared);
+    const diagnostics = this.readReconnectDiagnostics?.();
+    const health = {
+      ...summarizeSocketHealth(this.getPublicSockets(), this.getPrivateSockets(), shared),
+      ...(diagnostics ? { reconnectDiagnostics: diagnostics } : {}),
+    };
     const current = this.store.socketHealth;
     // A private stream delivering again proves the key; later rejections still count.
     if (health.privateInitialized && !current?.privateInitialized) this.recordAuthSuccess();
@@ -3389,6 +3533,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    clearTimeout(this.sourceOrdersTimer);
+    this.sourceOrdersTimer = undefined;
+    this.sourceOrdersAsk = undefined;
     this.candleSource?.dispose();
     this.candleSource = undefined;
     this.algoControlWatch?.dispose();

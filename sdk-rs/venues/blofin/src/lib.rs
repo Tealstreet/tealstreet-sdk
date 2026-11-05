@@ -600,6 +600,9 @@ impl Venue for Blofin {
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_uncertain_orders(cx);
     }
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
 
     type Pending = Pending;
     fn export_venue_state(&self) -> Option<Vec<u8>> {
@@ -637,6 +640,8 @@ impl Venue for Blofin {
             closed_positions: true,
             fresh_positions: true,
             symbol_cancel_misses_unseen: true,
+            // Every census commits its covers and answers a refresh ask.
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }

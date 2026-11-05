@@ -122,6 +122,24 @@ pub struct VenueError {
     pub partial: Option<Box<Partial>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub builder_authorization: Option<Box<BuilderAuthorization>>,
+    /// A stop or take-profit edit whose replacement was refused after its cancel landed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protection: Option<Protection>,
+    /// A command's fallback whose words describe its outcome better than its first
+    /// failed leg, without claiming `protection` (a put-back of unknown outcome).
+    #[serde(skip)]
+    pub presents: bool,
+}
+
+/// What a refused protective replacement left the position with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "test-support"), derive(serde::Deserialize))]
+#[serde(rename_all = "camelCase")]
+pub enum Protection {
+    /// The old order was placed again, unchanged; only its id differs.
+    Restored,
+    /// Placing the old order again failed too: the position has no such order.
+    Unprotected,
 }
 
 impl VenueError {

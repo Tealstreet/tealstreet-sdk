@@ -576,6 +576,11 @@ pub enum VenueAction {
     /// (`None`: the account) until a read sent after this ask lands
     /// (docs/plans/RUST_FRAME_FED_READ_COVER.md §5.2).
     RefreshOrders { symbols: Option<Vec<String>> },
+    /// Register native identities for the next source census; never cancels or seals a write.
+    #[cfg(feature = "command-bitget")]
+    RegisterCancelChecks {
+        orders: Vec<crate::model::CancelOrderRef>,
+    },
     /// Succeeds only once a positions read issued after this command has
     /// committed to the store; `Capabilities::fresh_positions` advertises it.
     ReadPositions,
@@ -1919,6 +1924,9 @@ struct IoCore {
     /// Data source: a frame-fed page's asks for fresh orders.
     #[cfg(feature = "order-locks")]
     orders_refresh: OrdersRefresh,
+    /// Frame-fed: a plain Unknown cancel owes a source read even without a fence.
+    #[cfg(feature = "order-locks")]
+    cancel_refresh: Option<(Option<Vec<String>>, f64)>,
     actions: Actions,
     placement_acks: crate::placement_acks::PlacementAcks,
     /// One engine timer for the earliest execution-group deadline.
@@ -1954,8 +1962,8 @@ struct IoCore {
     /// unreadable, and whether that outage has already warned.
     venue_state_unreadable: bool,
     venue_state_warned: bool,
-    /// Frame-fed, during `on_frame_ingested`: see `Cx::source_orders_cover`.
-    pub(crate) source_orders_cover: Option<f64>,
+    /// Frame-fed, during `on_frame_ingested`: see `Cx::source_orders_covers`.
+    pub(crate) source_orders_covers: Option<crate::ingest::ReadCovers>,
     /// Attempts a Session resume selected with no delivery in this event: the
     /// resume is their issue custody until the outer Plan flush. Reserved at
     /// park, so a resume never allocates.
@@ -2193,6 +2201,8 @@ impl Default for IoCore {
             order_response_read: None,
             #[cfg(feature = "order-locks")]
             orders_refresh: OrdersRefresh::default(),
+            #[cfg(feature = "order-locks")]
+            cancel_refresh: None,
             actions: Actions::default(),
             placement_acks: Default::default(),
             execution_timer: None,
@@ -2215,7 +2225,7 @@ impl Default for IoCore {
             setting_holds: Default::default(),
             venue_state_unreadable: false,
             venue_state_warned: false,
-            source_orders_cover: None,
+            source_orders_covers: None,
             #[cfg(feature = "http-plans")]
             session_resumed: Vec::new(),
             signing: Default::default(),
@@ -2607,10 +2617,12 @@ impl<P> Cx<'_, P> {
     }
 
     /// Frame-fed, in `on_frame_ingested` for a frame carrying ORDERS: the host
-    /// time up to which those orders speak (written, less the fence grace). A
-    /// write sent before it that they do not show never landed.
-    pub fn source_orders_cover(&self) -> Option<f64> {
-        self.io.core.source_orders_cover
+    /// times up to which those orders speak (`ReadCovers::cover`), less the
+    /// fence grace: the frame's stamp for every symbol, or, from a source with
+    /// read covers, its covers alone. A write sent before a symbol's cover that
+    /// its orders do not show never landed.
+    pub fn source_orders_covers(&self) -> Option<&crate::ingest::ReadCovers> {
+        self.io.core.source_orders_covers.as_ref()
     }
 
     /// Frame-fed: keep a settings write this engine confirmed over the data
@@ -3115,38 +3127,14 @@ impl<P> Cx<'_, P> {
     /// and `retryAfterMs` when the error has them. It keeps the caller's code:
     /// only a caller passing `auth.rejected` (as [`Self::retried_failure_error`]
     /// does for an auth-kind read refusal) counts an auth failure.
+    #[inline]
     pub fn notice_error(&mut self, level: Level, code: &'static str, error: &VenueError) {
-        let mut fields = Vec::new();
-        if let Some(kind) = error.kind {
-            fields.push(("kind", kind.as_str().into()));
-        }
-        if let Some(venue_code) = &error.venue_code {
-            fields.push(("venueCode", venue_code.as_str().into()));
-        }
-        if let Some(venue_message) = &error.venue_message {
-            fields.push(("venueMessage", venue_message.as_str().into()));
-        }
-        if let Some(retry_after_ms) = error.retry_after_ms {
-            fields.push(("retryAfterMs", retry_after_ms.into()));
-        }
-        self.event(level, code, error.message.clone(), fields);
+        self.core().notice_error(level, code, error)
     }
 
+    #[inline]
     fn retried_failure_level(&mut self, site: &'static str, message: &str) -> Level {
-        let shape: String = message
-            .chars()
-            .map(|c| if c.is_ascii_digit() { '#' } else { c })
-            .collect();
-        let now = self.now;
-        match self.io.core.retried_failures.get(site) {
-            Some((at, last)) if *last == shape && now - at < RETRIED_FAILURE_ERROR_EVERY_MS => {
-                Level::Warn
-            }
-            _ => {
-                self.io.core.retried_failures.insert(site, (now, shape));
-                Level::Error
-            }
-        }
+        self.core().retried_failure_level(site, message)
     }
 
     #[inline]
@@ -3258,6 +3246,41 @@ impl<P> Cx<'_, P> {
         return self.io.core.reconcile_reask;
         #[cfg(not(feature = "order-locks"))]
         false
+    }
+
+    /// A source refresh ask is outstanding. Join an older census and owe one
+    /// successor rather than starting a competing read; its cover must still
+    /// come from a release after the ask. This grants no commit authority.
+    pub fn orders_refresh_pending(&self) -> bool {
+        #[cfg(feature = "order-locks")]
+        return self.io.core.orders_refresh.in_flight.is_some();
+        #[cfg(not(feature = "order-locks"))]
+        false
+    }
+
+    /// Forward bounded cancel targets before the ordinary source refresh ask.
+    /// This grants no read-cover, write or reconciliation authority.
+    #[cfg(feature = "command-bitget")]
+    pub fn source_cancel_checks(&mut self, orders: &[crate::model::CancelOrderRef]) {
+        if !self.frame_fed() || orders.is_empty() || orders.len() > 64 {
+            return;
+        }
+        if orders.iter().any(|o| {
+            o.id.is_empty() || o.id.len() > 128 || o.symbol.is_empty() || o.symbol.len() > 128
+        }) {
+            return;
+        }
+        if let Ok(targets) = serde_json::to_string(orders) {
+            self.io
+                .core
+                .actions
+                .push(Action::Notice(Notice::Event(LogEvent {
+                    level: Level::Info,
+                    code: "orders.cancel_check",
+                    message: "Register native targets before the source orders refresh".into(),
+                    fields: vec![("targets", Value::Str(targets))],
+                })));
+        }
     }
 
     /// The order-uncertainty epoch now. A read that spans several contexts (a
@@ -3553,6 +3576,43 @@ impl crate::engine::CoreCx<'_> {
         );
     }
 
+    // Shared across venue pending types; no diagnostic work needs typed custody.
+    #[inline(never)]
+    fn notice_error(&mut self, level: Level, code: &'static str, error: &VenueError) {
+        let mut fields = Vec::new();
+        if let Some(kind) = error.kind {
+            fields.push(("kind", kind.as_str().into()));
+        }
+        if let Some(venue_code) = &error.venue_code {
+            fields.push(("venueCode", venue_code.as_str().into()));
+        }
+        if let Some(venue_message) = &error.venue_message {
+            fields.push(("venueMessage", venue_message.as_str().into()));
+        }
+        if let Some(retry_after_ms) = error.retry_after_ms {
+            fields.push(("retryAfterMs", retry_after_ms.into()));
+        }
+        self.event(level, code, error.message.clone(), fields);
+    }
+
+    #[inline(never)]
+    fn retried_failure_level(&mut self, site: &'static str, message: &str) -> Level {
+        let shape: String = message
+            .chars()
+            .map(|c| if c.is_ascii_digit() { '#' } else { c })
+            .collect();
+        let now = self.now;
+        match self.io.core.retried_failures.get(site) {
+            Some((at, last)) if *last == shape && now - at < RETRIED_FAILURE_ERROR_EVERY_MS => {
+                Level::Warn
+            }
+            _ => {
+                self.io.core.retried_failures.insert(site, (now, shape));
+                Level::Error
+            }
+        }
+    }
+
     /// [`Cx::event`] without fields.
     pub fn notice(&mut self, level: Level, code: &'static str, message: impl Into<String>) {
         self.event(level, code, message, Vec::new());
@@ -3698,6 +3758,9 @@ impl crate::engine::CoreCx<'_> {
         };
         // A credential-free route's auth-kind refusal is no credential evidence.
         let credential_evidence = self.io.core.request_contexts.owner_credentialed(command);
+        #[cfg(feature = "order-locks")]
+        let cancel = self.io.core.request_contexts.owner_intent(command)
+            == Some(crate::classify::Intent::Cancel);
         self.io.finish_command_wait(command);
         self.io.retire_http_command(command);
         if !self.io.core.request_contexts.finish(command) {
@@ -3745,6 +3808,21 @@ impl crate::engine::CoreCx<'_> {
                     _ => 0.,
                 };
                 let delay = delay.clamp(0., crate::startup::MAX_RATE_LIMIT_PAUSE_MS);
+                if self.io.core.frame_fed && unknown && cancel {
+                    let at = if self.now.is_finite() {
+                        self.now + delay
+                    } else {
+                        0.
+                    };
+                    let (symbols, due) = match self.io.core.cancel_refresh.take() {
+                        Some((pending, due)) => {
+                            (OrdersRefresh::merge(pending, scope.clone()), due.max(at))
+                        }
+                        None => (scope.clone(), at),
+                    };
+                    // A long rate-limit wait cannot accumulate unbounded symbol names.
+                    self.io.core.cancel_refresh = Some((symbols.filter(|s| s.len() <= 64), due));
+                }
                 self.io.queue_reconcile(scope, self.now + delay);
             }
             self.io.core.active_commands.remove(&command);
@@ -4078,6 +4156,12 @@ pub trait Venue {
     /// Every complete orders read commits its covers through
     /// `Cx::commit_orders_read*`, so a data source answers `RefreshOrders` by
     /// reading through `reconcile_uncertain` (the page's bounded ask).
+    /// Read-only targets retained by a retired cancel owner, before its source ask.
+    #[cfg(feature = "command-bitget")]
+    fn take_source_cancel_checks(&mut self) -> Vec<crate::model::CancelOrderRef> {
+        vec![]
+    }
+
     fn refreshes_orders(&self) -> bool {
         false
     }
@@ -4146,6 +4230,11 @@ pub trait Venue {
     fn guard_order_mutations(&self) -> bool {
         false
     }
+    /// `guard_order_mutations` for one command, for a venue that serializes only
+    /// the mutations whose own steps (such as a cancel-then-replace) must not overlap.
+    fn guards_order_mutation(&self, _store: &Store, _command: &Command) -> bool {
+        false
+    }
     /// Data source: the venue-private state a frame-fed engine's writes need and
     /// the store does not hold (the VENUE_STATE frame section), in the venue's
     /// own compact encoding. `None` when the venue needs none.
@@ -4168,6 +4257,12 @@ pub trait Venue {
     /// Cancel and amend route only through stored orders: hold one naming an
     /// acknowledged placement until the store has it (`placement_acks`).
     fn cancel_needs_stored_order(&self) -> bool {
+        false
+    }
+    /// The venue judges this stop or take profit edit's trigger itself: it may turn
+    /// the order into the other kind by where the new price lies, or check a native
+    /// kind the stored one does not show. The engine then keeps only its implausible-price guard.
+    fn judges_protective_amend(&self, _store: &Store, _order: &crate::model::Order) -> bool {
         false
     }
     /// Refuse cancel-all while a placement outcome is unknown. A venue that opts
@@ -4821,6 +4916,7 @@ impl<V: Venue> Engine<V> {
             ));
         }
         self.expire_read_roots(now);
+        self.store.set_clock(now);
         let parsed = crate::ingest::parse(frame)?;
         let expired = self.io.core.setting_holds.expire(now);
         let kept = self.io.core.setting_holds.keep(&self.store);
@@ -4869,18 +4965,29 @@ impl<V: Venue> Engine<V> {
             None => sent - crate::frame_fed::UNSYNCED_FENCE_GRACE_MS,
         };
         let read_covers = self.source_read_covers;
-        let cover = applied.orders.then(|| {
+        let covers = applied.orders.then(|| {
             if read_covers {
-                applied.orders_read.as_ref()?.account.map(host_time)
+                let read = applied.orders_read.as_ref()?;
+                Some(crate::ingest::ReadCovers {
+                    account: read.account.map(host_time),
+                    symbols: (read.symbols.iter())
+                        .map(|(symbol, sent)| (symbol.clone(), host_time(*sent)))
+                        .collect(),
+                })
             } else {
                 let stamp = f64::from_le_bytes(frame[8..16].try_into().expect("parsed header"));
-                Some(host_time(stamp))
+                Some(crate::ingest::ReadCovers {
+                    account: Some(host_time(stamp)),
+                    symbols: Vec::new(),
+                })
             }
         });
-        let cover = cover.flatten();
-        cx.io.core.source_orders_cover = cover;
+        let covers = covers.flatten();
+        #[cfg(feature = "order-locks")]
+        let cover = covers.as_ref().and_then(|covers| covers.account);
+        cx.io.core.source_orders_covers = covers;
         self.venue.on_frame_ingested(&mut cx);
-        cx.io.core.source_orders_cover = None;
+        cx.io.core.source_orders_covers = None;
         if applied.orders {
             #[cfg(feature = "order-locks")]
             if read_covers {
@@ -5024,6 +5131,7 @@ impl<V: Venue> Engine<V> {
     ) -> Result<(), &'static str> {
         self.assert_live();
         self.expire_read_roots(now);
+        self.store.set_clock(now);
         if self.public_feed_policy() != PublicFeedPolicy::Shared {
             return Err("publicFeedUpdate requires shared public feed policy");
         }
@@ -5586,6 +5694,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn handle_event_scoped(&mut self, now: f64, mut event: Event<'_>, _physical_timeout: bool) {
+        self.store.set_clock(now);
         // A new event cannot borrow an in-flight managed command's generation.
         // Sibling legs originate under Cx authority, not a repeated wire command.
         if let Event::Command(command) = &event
@@ -5896,9 +6005,46 @@ impl<V: Venue> Engine<V> {
                     "symbol-aware amendment is unsupported by this venue",
                 );
             }
+            // A stop or take profit edit that cannot stand: refused before its cancel.
+            Event::Command(Command::AmendOrder {
+                command,
+                ref id,
+                price,
+                ..
+            }) if crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                self.venue.judges_protective_amend(store, order)
+            })
+            .is_some() =>
+            {
+                let reason =
+                    crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                        self.venue.judges_protective_amend(store, order)
+                    });
+                cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
+            }
+            #[cfg(feature = "command-kucoinspot")]
+            Event::Command(Command::AmendOrderWithSymbol {
+                command,
+                ref id,
+                price,
+                ..
+            }) if crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                self.venue.judges_protective_amend(store, order)
+            })
+            .is_some() =>
+            {
+                let reason =
+                    crate::protective_amend::refusal(cx.store, id, price, now, |store, order| {
+                        self.venue.judges_protective_amend(store, order)
+                    });
+                cx.refuse_before_entry(command, crate::protective_amend::refused(reason));
+            }
             Event::Command(command) => {
                 #[cfg(feature = "order-locks")]
-                if self.venue.guard_order_mutations() {
+                let guarded = self.venue.guard_order_mutations()
+                    || self.venue.guards_order_mutation(cx.store, &command);
+                #[cfg(feature = "order-locks")]
+                if guarded {
                     let id = match &command {
                         Command::PlaceOrders { command, .. }
                         | Command::AmendOrder { command, .. }
@@ -5964,7 +6110,7 @@ impl<V: Venue> Engine<V> {
                 // venue declares), and a placement or amend is marked so its own
                 // Unknown outcome fences its symbols.
                 #[cfg(feature = "order-locks")]
-                if !(self.venue.guard_order_mutations()
+                if !(guarded
                     && (!matches!(command, Command::PlaceOrders { .. })
                         || self.venue.guard_pending_placements()))
                     && let Err(id) = cx.io.core.order_locks.admit_unscoped(
@@ -6246,9 +6392,45 @@ impl<V: Venue> Engine<V> {
                 self.fence_marks.push((token, now));
             }
             self.announce_orders_held(now);
-            if let Some((timer, _)) = self.reconcile_timer.take() {
-                self.io.core.actions.push(Action::ClearTimer { timer });
-            }
+            let next = if self.venue.refreshes_orders() {
+                let due = self.io.core.cancel_refresh.as_ref().map(|(_, at)| *at);
+                if due.is_some_and(|at| at <= now || !now.is_finite()) {
+                    let (symbols, _) = self
+                        .io
+                        .core
+                        .cancel_refresh
+                        .take()
+                        .expect("due cancel refresh");
+                    #[cfg(feature = "command-bitget")]
+                    {
+                        let targets = self.venue.take_source_cancel_checks();
+                        let mut cx = Cx {
+                            now,
+                            store: &mut self.store,
+                            io: &mut self.io,
+                        };
+                        cx.source_cancel_checks(&targets);
+                    }
+                    let named = symbols.map(|s| s.join(",")).unwrap_or_default();
+                    // A control ask must survive the host's diagnostic log filter.
+                    self.io
+                        .core
+                        .actions
+                        .push(Action::Notice(Notice::Event(LogEvent {
+                            level: Level::Info,
+                            code: crate::log::code::ORDERS_REFRESH,
+                            message: "An unknown cancel requests a fresh source orders read".into(),
+                            fields: vec![("symbols", Value::Str(named))],
+                        })));
+                    None
+                } else {
+                    due
+                }
+            } else {
+                self.io.core.cancel_refresh = None;
+                None
+            };
+            self.arm_reconcile_timer(next);
             return;
         }
         // A refresh read that never landed frees its slot; its asks retry once.
@@ -6330,6 +6512,11 @@ impl<V: Venue> Engine<V> {
             .chain(self.io.core.fence_reread.map(|(at, _)| at))
             .chain(self.io.core.orders_refresh.deadline())
             .min_by(f64::total_cmp);
+        self.arm_reconcile_timer(next);
+    }
+
+    #[cfg(feature = "order-locks")]
+    fn arm_reconcile_timer(&mut self, next: Option<f64>) {
         if self.reconcile_timer.map(|(_, at)| at) == next {
             return;
         }
@@ -11180,3 +11367,7 @@ mod read_cover_lift_tests;
 #[cfg(all(test, feature = "order-locks"))]
 #[path = "orders_refresh_tests.rs"]
 mod orders_refresh_tests;
+
+#[cfg(test)]
+#[path = "retried_read_diagnostic_tests.rs"]
+mod retried_read_diagnostic_tests;

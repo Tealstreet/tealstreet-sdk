@@ -41,7 +41,7 @@ const createBase = () => {
     webSocketHeaders: true,
     now: vi.fn(() => 42),
     request: vi.fn(async () => response),
-    connect: vi.fn(() => ({ send: vi.fn(), close: vi.fn() })),
+    connect: vi.fn<EngineHostTransport['connect']>(() => ({ send: vi.fn(), close: vi.fn() })),
     setTimeout: vi.fn(() => 123),
     clearTimeout: vi.fn(),
   } satisfies EngineHostTransport;
@@ -406,7 +406,13 @@ describe('Orderly Rust transport boundary', () => {
     for (const [url, channel, feed] of [[publicUrl, 'public', 'market'], [publicUrl, 'public', 'funding'], [privateUrl, 'private', 'account']] as const) {
       const handlers = { channel, context: { feed, recover: false }, onOpen: vi.fn(), onMessage: vi.fn(), onClose: vi.fn() };
       transport.connect(url, handlers);
-      expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers: {}, onMessage: expect.any(Function), onBinary: expect.any(Function) });
+      // Diagnostics wrap lifecycle callbacks; exact routing and event delivery remain the contract.
+      expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers: {}, onMessage: expect.any(Function), onBinary: expect.any(Function), onOpen: expect.any(Function), onClose: expect.any(Function) });
+      const forwarded = base.connect.mock.lastCall![1];
+      forwarded.onOpen();
+      forwarded.onClose(1006);
+      expect(handlers.onOpen).toHaveBeenCalledExactlyOnceWith();
+      expect(handlers.onClose).toHaveBeenCalledExactlyOnceWith(1006);
     }
     transport.dispose?.();
   });
@@ -448,7 +454,13 @@ describe('Orderly Rust transport boundary', () => {
     expect(base.connect).not.toHaveBeenCalled();
     const capable = createEngineTransport('mode', options(custom), base);
     capable.connect(url, handlers);
-    expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers, onMessage: expect.any(Function), onBinary: expect.any(Function) });
+    // Diagnostics wrap lifecycle callbacks without changing custom upgrade headers.
+    expect(base.connect).toHaveBeenLastCalledWith(url, { ...handlers, headers, onMessage: expect.any(Function), onBinary: expect.any(Function), onOpen: expect.any(Function), onClose: expect.any(Function) });
+    const forwarded = base.connect.mock.lastCall![1];
+    forwarded.onOpen();
+    forwarded.onClose(1006);
+    expect(handlers.onOpen).toHaveBeenCalledExactlyOnceWith();
+    expect(handlers.onClose).toHaveBeenCalledExactlyOnceWith(1006);
     incapable.dispose?.();
     capable.dispose?.();
   });

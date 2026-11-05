@@ -1155,7 +1155,7 @@ fn failed_hip3_orders_retry_after_peer_scope_loaded_and_honor_retry_after() {
     let (mut e, socket) = ready_with_dex("disabled", true);
     assert!(e.store().loaded().orders);
     let (_socket, _) = reconnect(&mut e, socket, 2000.0);
-    let requests = prepared_now(&mut e)
+    let mut requests = prepared_now(&mut e)
         .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
@@ -1166,30 +1166,44 @@ fn failed_hip3_orders_retry_after_peer_scope_loaded_and_honor_retry_after() {
         })
         .collect::<Vec<_>>();
     let mut failed = false;
-    for request in requests {
-        let body: serde_json::Value =
-            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-        if kind(&request) == "frontendOpenOrders" && body["dex"] == "xyz" {
-            failed = true;
-            e.handle(
-                3000.0,
-                Event::HttpResponse {
-                    request: request.id,
-                    response: safe_cex_engine::Response {
-                        status: 429,
-                        headers: "Retry-After: 12\r\n",
-                        body: "Too many requests",
+    let mut retained = Vec::new();
+    for _ in 0..20 {
+        for request in requests {
+            let body: serde_json::Value =
+                serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            if kind(&request) == "frontendOpenOrders" && body["dex"] == "xyz" {
+                failed = true;
+                e.handle(
+                    3000.0,
+                    Event::HttpResponse {
+                        request: request.id,
+                        response: safe_cex_engine::Response {
+                            status: 429,
+                            headers: "Retry-After: 12\r\n",
+                            body: "Too many requests",
+                        },
                     },
-                },
-            );
-        } else if kind(&request) == "frontendOpenOrders" {
-            reply(&mut e, &request, 200, "[]");
-        } else if kind(&request) == "clearinghouseState" {
-            reply(&mut e, &request, 200, STATE);
+                );
+            } else if kind(&request) == "frontendOpenOrders" {
+                reply(&mut e, &request, 200, "[]");
+            } else if kind(&request) == "clearinghouseState" {
+                reply(&mut e, &request, 200, STATE);
+            }
+        }
+        requests = Vec::new();
+        for action in prepared_now(&mut e) {
+            if let Action::Http(request) = action {
+                requests.push(request);
+            } else {
+                retained.push(action);
+            }
+        }
+        if requests.is_empty() {
+            break;
         }
     }
     assert!(failed, "the failed read must belong to the HIP-3 scope");
-    let actions = prepared_now(&mut e);
+    let actions = retained;
     let timer = actions
         .into_iter()
         .find_map(|action| {

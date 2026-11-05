@@ -75,7 +75,22 @@ pub struct OrderSnapshot {
     read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
     /// A page answered outside its read response: the census proves nothing.
     read_lost: bool,
+    cancel_check_serial: u64,
+    cancel_shape_valid: bool,
+    generation: u64,
+    uta: bool,
 }
+
+struct CancelCheck {
+    target: CancelOrderRef,
+    native: String,
+    serial: u64,
+    expires: f64,
+    uta: bool,
+}
+
+const CANCEL_CHECK_LIMIT: usize = 64;
+const CANCEL_CHECK_TTL_MS: f64 = 120_000.0;
 
 /// The one read-cover scope of Bitget's account-wide open-order census.
 const ORDERS_SCOPE: &str = "orders";
@@ -157,10 +172,6 @@ pub struct Account {
     balance_version: u64,
     inverse_assets: Vec<InverseAsset>,
     inverse_unpriced_warned: bool,
-    full_positions_at: Option<f64>,
-    /// After partial traffic, a prior clean snapshot only fences older reads.
-    full_positions_fence_only: bool,
-    full_position_ids: HashSet<String>,
     ws_positions: HashMap<String, WsPosition>,
     terminal: HashMap<String, f64>,
     opened: HashMap<String, f64>,
@@ -176,6 +187,8 @@ pub struct Account {
     write_check: Option<(TimerId, f64)>,
     /// A census the stream outran owes another, no sooner than this timer.
     census_follow_up: Option<TimerId>,
+    cancel_checks: Vec<CancelCheck>,
+    cancel_check_serial: u64,
     degraded: bool,
     /// When positions, balance and orders were last read over REST while live;
     /// `None` after each (re)login, so the first live poll covers the gap.
@@ -524,6 +537,137 @@ impl BitgetFutures {
         }
     }
 
+    /// Store-only registration: the next ordinary refresh owns all native I/O.
+    pub(crate) fn register_cancel_checks(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        targets: &[CancelOrderRef],
+    ) {
+        self.account.cancel_checks.retain(|c| c.expires > cx.now);
+        for target in targets.iter().take(CANCEL_CHECK_LIMIT) {
+            if target.id.is_empty()
+                || target.id.len() > 128
+                || target.symbol.is_empty()
+                || target.symbol.len() > 128
+            {
+                continue;
+            }
+            let Some(row) = cx.store.order(&target.id).filter(|r| {
+                r.symbol == target.symbol
+                    && matches!(r.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                    && !is_preset_child(r)
+            }) else {
+                continue;
+            };
+            if row.parent_id.as_ref().unwrap_or(&row.id).len() > 128
+                || !self.account.plans.contains_key(&row.id)
+            {
+                continue;
+            }
+            let Some(serial) = self.account.cancel_check_serial.checked_add(1) else {
+                continue;
+            };
+            self.account.cancel_check_serial = serial;
+            self.account.cancel_checks.retain(|c| c.target != *target);
+            if self.account.cancel_checks.len() == CANCEL_CHECK_LIMIT {
+                self.account.cancel_checks.remove(0);
+            }
+            self.account.cancel_checks.push(CancelCheck {
+                target: target.clone(),
+                native: row.parent_id.as_ref().unwrap_or(&row.id).clone(),
+                serial,
+                expires: cx.now + CANCEL_CHECK_TTL_MS,
+                uta: self.account.uta,
+            });
+        }
+        if !self.account.cancel_checks.is_empty() {
+            self.account.orders_dirty = true;
+        }
+    }
+
+    pub(crate) fn check_unknown_cancels(&mut self, cx: &mut Cx<'_, Pending>, orders: &[Order]) {
+        let mut targets = Vec::new();
+        for o in orders {
+            if !matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                || is_preset_child(o)
+                || cx.store.order(&o.id).is_some_and(|r| {
+                    matches!(r.status, OrderStatus::Canceled | OrderStatus::Closed)
+                })
+            {
+                continue;
+            }
+            targets.push(CancelOrderRef {
+                id: o.id.clone(),
+                symbol: o.symbol.clone(),
+            });
+            if targets.len() == CANCEL_CHECK_LIMIT {
+                break;
+            }
+        }
+        self.register_cancel_checks(cx, &targets);
+        cx.source_cancel_checks(&targets);
+    }
+
+    fn cancel_check_unproven(&self, cx: &mut Cx<'_, Pending>, reason: &'static str) {
+        if !self.account.cancel_checks.is_empty() {
+            cx.event(
+                Level::Info,
+                "bitget.cancel.unproven",
+                "Native read did not prove the uncertain cancel outcome",
+                vec![
+                    ("result", "unproven".into()),
+                    ("reason", reason.into()),
+                    (
+                        "pendingCount",
+                        (self.account.cancel_checks.len() as f64).into(),
+                    ),
+                ],
+            );
+        }
+    }
+
+    fn native_cancel_evidence(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        snapshot: &OrderSnapshot,
+        refused: &[String],
+    ) -> Vec<(String, bool)> {
+        self.account.cancel_checks.retain(|c| c.expires > cx.now);
+        if snapshot.virtual_only
+            || !snapshot.cancel_shape_valid
+            || snapshot.skipped.rejected() > 0
+            || snapshot.read_lost
+            || snapshot.generation != self.account.generation
+            || snapshot.uta != self.account.uta
+        {
+            self.cancel_check_unproven(cx, "partial-or-stale-census");
+            return vec![];
+        }
+        let mut evidence = Vec::new();
+        for c in &self.account.cancel_checks {
+            if c.serial > snapshot.cancel_check_serial
+                || c.uta != snapshot.uta
+                || refused.contains(&c.target.symbol)
+                || self.order_revision(&c.target.id) > snapshot.stream_revision
+                || snapshot.rows.iter().any(|row| {
+                    (row.id == c.native || row.parent_id.as_ref() == Some(&c.native))
+                        && (row.symbol != c.target.symbol
+                            || !matches!(row.kind, OrderType::StopLoss | OrderType::TakeProfit))
+                })
+            {
+                continue;
+            }
+            evidence.push((
+                c.target.id.clone(),
+                snapshot.rows.iter().any(|row| {
+                    row.symbol == c.target.symbol
+                        && (row.id == c.native || row.parent_id.as_ref() == Some(&c.native))
+                }),
+            ));
+        }
+        evidence
+    }
+
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>, virtual_only: bool) {
         if cx.frame_fed()
             || !self.account.detected
@@ -532,6 +676,9 @@ impl BitgetFutures {
         {
             return;
         }
+        // An owed full census (an Unknown write, a refresh ask) is never answered
+        // by the safety read's normal page alone, which proves no cover.
+        let virtual_only = virtual_only && !self.account.orders_dirty;
         self.account.orders_in_flight = true;
         self.account.orders_dirty = false;
         self.order_page(
@@ -552,6 +699,10 @@ impl BitgetFutures {
                 virtual_only,
                 read: None,
                 read_lost: false,
+                cancel_check_serial: self.account.cancel_check_serial,
+                cancel_shape_valid: true,
+                generation: self.account.generation,
+                uta: self.account.uta,
             }),
         );
     }
@@ -857,21 +1008,36 @@ impl BitgetFutures {
                     None => snapshot.read_lost = true,
                 }
                 #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct CensusMeta {
+                    end_id: Option<String>,
+                    cursor: Option<String>,
+                    entrusted_list: Option<Vec<IgnoredAny>>,
+                    list: Option<Vec<IgnoredAny>>,
+                }
+                #[derive(Deserialize)]
                 #[serde(untagged)]
                 enum Meta {
-                    Object(PageMeta),
+                    Object(CensusMeta),
                     Array(Vec<IgnoredAny>),
                 }
                 let meta = serde_json::from_str::<Envelope<Meta>>(response.body)
                     .ok()
                     .and_then(|e| e.data);
                 let cursor = match meta {
-                    Some(Meta::Object(meta)) => meta.end_id.or(meta.cursor),
+                    Some(Meta::Object(meta)) => {
+                        snapshot.cancel_shape_valid &=
+                            meta.entrusted_list.is_some() || meta.list.is_some();
+                        meta.end_id.or(meta.cursor)
+                    }
                     Some(Meta::Array(rows)) => {
                         debug_assert!(rows.is_empty());
                         None
                     }
-                    None => None,
+                    None => {
+                        snapshot.cancel_shape_valid = false;
+                        None
+                    }
                 }
                 .filter(|cursor| !cursor.is_empty());
                 if snapshot.page_count > 0
@@ -911,14 +1077,6 @@ impl BitgetFutures {
                     self.order_page(cx, snapshot);
                 } else {
                     self.account.orders_in_flight = false;
-                    let rows = self.census_rows(
-                        cx,
-                        snapshot.rows,
-                        &snapshot.skipped,
-                        snapshot.virtual_only,
-                        snapshot.started,
-                        snapshot.stream_revision,
-                    );
                     // What this census may replace, decided before any per-order state
                     // moves (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
                     let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
@@ -930,10 +1088,16 @@ impl BitgetFutures {
                             .read
                             .filter(|_| !snapshot.read_lost)
                             .and_then(|earliest| {
-                                cx.orders_read_refusals_from(earliest, scope, |_| true, &rows)
-                                    .map(|refused| (earliest, refused))
+                                cx.orders_read_refusals_from(
+                                    earliest,
+                                    scope,
+                                    |_| true,
+                                    &snapshot.rows,
+                                )
+                                .map(|refused| (earliest, refused))
                             });
                     let Some((earliest, refused)) = refused else {
+                        self.cancel_check_unproven(cx, "read-cover-refused");
                         // Refused whole, or unprovable: newer rows already stand, and
                         // another read follows to prove what they cannot (absences).
                         self.census_follow_up(cx, snapshot.started);
@@ -947,6 +1111,15 @@ impl BitgetFutures {
                     if !refused.is_empty() {
                         self.census_follow_up(cx, snapshot.started);
                     }
+                    // Native evidence precedes cached-algo retention. A retained row
+                    // can never prove that the exchange still lists this target.
+                    let confirmations = self.native_cancel_evidence(cx, &snapshot, &refused);
+                    let absent: HashSet<_> = confirmations
+                        .iter()
+                        .filter(|(_, present)| !present)
+                        .map(|(id, _)| id.clone())
+                        .collect();
+                    let rows = self.census_rows(cx, &mut snapshot, &absent);
                     let admitted = |id: &str| {
                         rows.iter()
                             .find(|row| row.id == id)
@@ -988,6 +1161,35 @@ impl BitgetFutures {
                         .commit_orders_read_from(earliest, scope, |_| true, rows, &cover_unproven)
                         .is_some()
                     {
+                        for (id, present) in confirmations {
+                            self.account.cancel_checks.retain(|c| c.target.id != id);
+                            if !present {
+                                self.account.plans.remove(&id);
+                                self.account.trailing.remove(&id);
+                            }
+                            cx.event(
+                                Level::Info,
+                                "bitget.cancel.confirmed",
+                                "Native orders read answered an uncertain cancel check",
+                                vec![
+                                    ("orderId", id.into()),
+                                    ("result", if present { "present" } else { "absent" }.into()),
+                                    (
+                                        "accountMode",
+                                        if self.account.uta { "uta" } else { "classic" }.into(),
+                                    ),
+                                    (
+                                        "endpoint",
+                                        if self.account.uta {
+                                            "unfilled-strategy-orders:tpsl"
+                                        } else {
+                                            "orders-plan-pending:profit_loss"
+                                        }
+                                        .into(),
+                                    ),
+                                ],
+                            );
+                        }
                         cx.store.set_orders_loaded();
                         if !snapshot.virtual_only {
                             unproven.extend(refused);
@@ -1026,6 +1228,9 @@ impl BitgetFutures {
 
     /// A failed account read, still `request.failed`, carrying its kind fields.
     fn account_refused(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: VenueError) {
+        if matches!(&request, Request::Orders(_)) {
+            self.cancel_check_unproven(cx, "read-failed");
+        }
         self.clear_in_flight(&request);
         cx.retried_failure_error("bitget.account:870", &error);
         if let Request::Positions { read, .. } = request {
@@ -1535,9 +1740,6 @@ impl BitgetFutures {
         started: f64,
     ) -> (Vec<Position>, bool) {
         let held = std::cell::Cell::new(false);
-        let full_fresh = self.account.full_positions_at.is_some_and(|at| {
-            at >= started || (!self.account.full_positions_fence_only && started - at <= 5_000.0)
-        });
         let mut rows: Vec<_> = rows
             .into_iter()
             .filter_map(|mut p| {
@@ -1579,10 +1781,6 @@ impl BitgetFutures {
                             .get(&old.id)
                             .is_some_and(|mark| mark.rejected_at.is_some_and(|at| at >= started))
                 }) {
-                    held.set(true);
-                    return None;
-                }
-                if full_fresh && !self.account.full_position_ids.contains(&p.id) {
                     held.set(true);
                     return None;
                 }
@@ -1645,12 +1843,16 @@ impl BitgetFutures {
     fn census_rows(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        mut rows: Vec<Order>,
-        skipped: &RowAdmission<String>,
-        virtual_only: bool,
-        started: f64,
-        stream_revision: u64,
+        snapshot: &mut OrderSnapshot,
+        confirmed_absent: &HashSet<String>,
     ) -> Vec<Order> {
+        let mut rows = std::mem::take(&mut snapshot.rows);
+        let (skipped, virtual_only, started, stream_revision) = (
+            &snapshot.skipped,
+            snapshot.virtual_only,
+            snapshot.started,
+            snapshot.stream_revision,
+        );
         self.account.terminal.retain(|_, until| *until > cx.now);
         self.account.opened.retain(|_, until| *until > cx.now);
         let mut seen = HashSet::new();
@@ -1696,6 +1898,7 @@ impl BitgetFutures {
         } else {
             for current in cx.store.orders() {
                 if current.status == OrderStatus::Open
+                    && !confirmed_absent.contains(&current.id)
                     && !is_preset_child(current)
                     && !rows.iter().any(|r| r.id == current.id)
                     && ((is_algo(current.kind)
@@ -1976,17 +2179,14 @@ impl BitgetFutures {
                     return;
                 }
                 let mut rejected = skipped.clone();
-                // Preserve the prior all-unmappable scope hold. With valid peers,
-                // rejected identity coverage alone determines safe omission.
+                // Retain the all-unmappable hold and identity-scoped REST guards
+                // while continuing to admit valid peers.
                 if positions.is_empty() && skipped.rejected() != 0 {
                     skipped.reject(None);
                 }
-                let conflicts = self.coherent_position_modes(
-                    cx,
-                    &mut positions,
-                    &mut skipped,
-                    message.action == "snapshot",
-                );
+                // Neither snapshot nor update proves the identities it omits.
+                let conflicts =
+                    self.coherent_position_modes(cx, &mut positions, &mut skipped, false);
                 for symbol in conflicts {
                     rejected.reject(Some((symbol, None)));
                 }
@@ -2024,34 +2224,6 @@ impl BitgetFutures {
                             });
                     }
                 }
-                if message.action == "snapshot" {
-                    // Validly omitted identities still fence an older read's resurrection.
-                    for old in cx.store.positions() {
-                        if !positions.iter().any(|p| p.id == old.id)
-                            && !held.iter().any(|p| p.id == old.id)
-                        {
-                            self.account.ws_positions.insert(
-                                old.id.clone(),
-                                WsPosition {
-                                    at: Some(cx.now),
-                                    update: None,
-                                    rejected_at: None,
-                                },
-                            );
-                        }
-                    }
-                    if skipped.rejected() == 0 {
-                        self.account.full_positions_at = Some(cx.now);
-                        self.account.full_positions_fence_only = false;
-                        self.account.full_position_ids = positions
-                            .iter()
-                            .filter(|p| p.contracts > 0.0)
-                            .map(|p| p.id.clone())
-                            .collect();
-                    } else {
-                        self.account.full_positions_fence_only = true;
-                    }
-                }
                 for p in &positions {
                     self.account.ws_positions.insert(
                         p.id.clone(),
@@ -2062,15 +2234,8 @@ impl BitgetFutures {
                         },
                     );
                 }
-                positions.extend(held);
-                if message.action == "snapshot" && useful {
-                    cx.store.set_positions(
-                        positions
-                            .into_iter()
-                            .filter(|p| p.contracts > 0.0)
-                            .collect(),
-                    );
-                } else if useful {
+                // Only REST establishes readiness; an explicit zero closes its own ID.
+                if useful {
                     for p in positions {
                         cx.store.upsert_position(p);
                     }
@@ -2445,6 +2610,7 @@ impl BitgetFutures {
     /// A complete order read for an Unknown write. One already in flight may
     /// predate the write, so another follows it; an engine re-ask joins either.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.restore_retired_write(cx);
         if !cx.reconcile_reask() {
             self.account.orders_dirty = true;
         }

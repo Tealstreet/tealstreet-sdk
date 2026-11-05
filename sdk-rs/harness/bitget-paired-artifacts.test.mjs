@@ -1,3 +1,4 @@
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -28,7 +29,7 @@ function fixture(t) {
   const receipts = BITGET_COHORT_ORDER.map((arm, index) => {
     const prefix = `${String(index + 1).padStart(2, '0')}-${arm}`;
     write(`${prefix}/before.json`, { number: index + 1, arm });
-    const artifacts = Array.from({ length: 20 }, (_, i) => {
+    const artifacts = Array.from({ length: 2 + 2 * PUBLIC_REPLAY_PAIRS }, (_, i) => {
       const name = `slot-${i}.json`; write(`${prefix}/${name}`, { impl: i % 2 ? 'rust' : 'ts', metrics: { steadyCpuMs: 1 } });
       return { path: `/producer/out/${name}`, impl: i % 2 ? 'rust' : 'ts', mode: i < 2 ? 'correctness' : 'performance', run: i };
     });
@@ -39,10 +40,10 @@ function fixture(t) {
   return { root, write, json: name => JSON.parse(readFileSync(resolve(root, name), 'utf8')) };
 }
 
-test('reader derives seals from independent package bytes and retains all 160 original slots', t => {
+test('reader derives seals from independent package bytes and retains every fixed-budget original slot', t => {
   const { root } = fixture(t), result = readBitgetPairedEvidence(root);
   assert.equal(result.cohorts.length, 8);
-  assert.ok(result.cohorts.every(row => row.evidence.raw.length === 20));
+  assert.ok(result.cohorts.every(row => row.evidence.raw.length === 2 + 2 * PUBLIC_REPLAY_PAIRS));
   assert.equal(result.archives.baseline.files['safe_cex_wasm_bg.wasm'], sha('fixture'));
 });
 

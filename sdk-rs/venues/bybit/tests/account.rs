@@ -1044,6 +1044,17 @@ fn a_split_preserves_quantity_and_only_the_first_lot_has_brackets() {
 fn partial_stops_cancel_recreate_and_full_stops_keep_the_position_update_path() {
     for mode in ["Partial", "Full"] {
         let mut h = ready();
+        // Partial: 87000 crosses the price and becomes a take profit (owner-decided drag);
+        // Full: the stop stays a stop, below the price.
+        price_at(
+            &mut h,
+            "BTCUSDT",
+            if mode == "Partial" {
+                80_000.0
+            } else {
+                90_000.0
+            },
+        );
         let stop = format!(
             r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"{mode}","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}}]}}"#
         );
@@ -3098,6 +3109,7 @@ fn stale_join_discards_staged_unsupported_diagnostics_without_consuming_memory()
 fn trading_stop_amends_treat_tpsl_not_modified_as_satisfied() {
     for kind in ["full", "trailing"] {
         let mut h = ready();
+        price_at(&mut h, "BTCUSDT", 90_000.0);
         h.message(
             "/v5/private",
             r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Full","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#,
@@ -4119,11 +4131,12 @@ const TRAILING_PROFIT_REFUSAL: &str =
 
 fn assert_amend_refused(h: &mut Harness, command: u32) {
     h.requests.clear();
+    // A size edit: the venue's own refusal decides, not the engine's price checks.
     h.command(Command::AmendOrder {
         command,
         id: TRAILING_PROFIT_ID.into(),
-        price: Some(0.07),
-        amount: None,
+        price: None,
+        amount: Some(0.07),
     });
     assert!(h.requests.is_empty(), "{:?}", h.paths());
     assert_eq!(
@@ -4339,9 +4352,32 @@ fn margin_noop_cannot_satisfy_full_or_partial_protection_writes_or_resend() {
         }
         let request = h.take("/v5/position/trading-stop");
         h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+        if partial {
+            // #3018: the refused replacement's cancel landed, so the old stop goes back once
+            // (a different write: its own 86000 body, not a resend of the replacement).
+            let restore = h.take("/v5/position/trading-stop");
+            assert!(
+                body(&restore).contains(r#""stopLoss":"86000""#),
+                "{}",
+                body(&restore)
+            );
+            h.reply(
+                restore.id,
+                200,
+                r#"{"retCode":0,"retMsg":"OK","result":{}}"#,
+            );
+        }
         assert!(matches!(h.result(704), Some(Err(_))));
         assert_eq!(h.engine.store().positions(), before);
         assert!(!h.has_request("/v5/position/trading-stop"), "no resend");
         assert_eq!(h.done.iter().filter(|(id, _)| *id == 704).count(), 1);
     }
+}
+
+/// Move a symbol's mark and last price, as its ticker stream would.
+fn price_at(h: &mut Harness, symbol: &str, price: f64) {
+    h.engine.store_mut().update_ticker(symbol, |ticker| {
+        ticker.mark = price;
+        ticker.last = price;
+    });
 }

@@ -423,6 +423,11 @@ fn pm_stop_setup() -> Harness {
     ready_with(&OPEN_ORDERS.replace(r#""type":"LIMIT""#, r#""type":"STOP""#))
 }
 fn pm_amend_stays_refused(h: &mut Harness) {
+    // A buy stop above the price stands, so the venue's own stop-limit refusal decides.
+    h.engine.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 85_000.;
+        ticker.last = 85_000.;
+    });
     h.event(Event::Command(Command::AmendOrder {
         command: 990,
         id: "x-s3vFFRQpresting".into(),

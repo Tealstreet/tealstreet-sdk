@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createAxiosHttpOverWebsocketAdapter, TradeTunnelTimeoutError } from './axiosHttpOverWebsocketAdapter';
 import { configureHOW } from './config';
+import { HOWWebSocket } from './HOWWebSocket';
+import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 
 type ServerMode = {
   /** IP-whitelisted: rpc.auth success right after open, no token needed. */
@@ -173,6 +175,218 @@ describe('HOWWebSocket reconnect recovery (real socket stack, fake tunnel)', () 
     expect(request.state(), String(request.error()?.message)).toBe('resolved');
     await expect(request.promise).resolves.toMatchObject({ status: 200, data: '{"retCode":0}' });
   };
+
+  const captureHOW = () => {
+    let current: HOWWebSocket;
+    const create = HOWWebSocket.prototype.createWebsocket;
+    vi.spyOn(HOWWebSocket.prototype, 'createWebsocket').mockImplementation(function (this: HOWWebSocket, ...args) {
+      current = this;
+      return create.apply(this, args);
+    });
+    return () => current;
+  };
+
+  it.each([2, 3])(
+    'native state %s invalidates an old preparation before claim despite cached open flags',
+    async (state) => {
+      const current = captureHOW();
+      await expectOk(track(adapter(instrumentsInfo())));
+      const packet = instrumentsInfo();
+      const old = await adapter.prepare(packet);
+      const bound = old.bind(packet);
+      expect(bound.ready()).toBe(true);
+      const socket = FakeTunnelSocket.latest();
+      socket.readyState = state;
+      expect(current().isOpen).toBe(true);
+      expect(() => bound.ready()).toThrow(expect.objectContaining({ code: 'HTTP_PREPARATION_STALE' }));
+      expect(() => bound.dispatch()).toThrow(expect.objectContaining({ code: 'HTTP_PREPARATION_STALE' }));
+      expect(socket.sent.filter((frame) => frame.type === 'rpc.http')).toHaveLength(1);
+      old.cancel();
+    },
+  );
+
+  it('wake redial cannot prepare on cached authentication while its new native socket is connecting', async () => {
+    const current = captureHOW();
+    await expectOk(track(adapter(instrumentsInfo())));
+    const old = FakeTunnelSocket.latest();
+    old.readyState = 3; // Browser closed during freeze; its close notification has not run.
+    current().ws!.reconnect();
+    await advance(1);
+    expect(current().isOpen).toBe(true);
+    expect(current().ws!.loopState.phase).toBe('connecting');
+    const waiting = track(adapter.prepare(instrumentsInfo()));
+    await advance(1);
+    expect(waiting.state()).toBe('pending');
+    const replacement = FakeTunnelSocket.latest();
+    replacement.readyState = 1; // Native OPEN before the wrapper has handled its open event.
+    await advance(1);
+    expect(waiting.state()).toBe('pending');
+    replacement.readyState = 0;
+    await advance(20);
+    expect(FakeTunnelSocket.latest().readyState).toBe(1);
+    expect(current().isTimeSynced).toBe(false);
+    expect(current().authState).not.toBe('Good');
+    expect(waiting.state()).toBe('pending');
+    await advance(2_000);
+    expect(waiting.state()).toBe('resolved');
+    const packet = instrumentsInfo();
+    const bound = (await waiting.promise).bind(packet);
+    expect(bound.ready()).toBe(true);
+    const response = track(bound.dispatch());
+    await expectOk(response, 20);
+    expect(FakeTunnelSocket.latest().sent.filter((frame) => frame.type === 'rpc.http')).toHaveLength(1);
+  });
+
+  it('stale native state waits under the original deadline and never sends expired work', async () => {
+    const current = captureHOW();
+    await expectOk(track(adapter(instrumentsInfo())));
+    FakeTunnelSocket.latest().readyState = 2;
+    expect(current().isOpen).toBe(true);
+    const waiting = track(adapter.prepare(instrumentsInfo(500)));
+    await advance(100);
+    expect(waiting.state()).toBe('pending');
+    await advance(401);
+    expect(waiting.state()).toBe('rejected');
+    expect(waiting.error()).toBeInstanceOf(TradeTunnelTimeoutError);
+    expect(
+      FakeTunnelSocket.instances.flatMap((socket) => socket.sent).filter((frame) => frame.type === 'rpc.http'),
+    ).toHaveLength(1);
+  });
+
+  it.each(['cancel', 'dispose'])('a wake-time readiness wait stops on %s without sending HTTP', async (mode) => {
+    captureHOW();
+    await expectOk(track(adapter(instrumentsInfo())));
+    const socket = FakeTunnelSocket.latest();
+    socket.readyState = 2;
+    const controller = new AbortController();
+    const waiting = track(adapter.prepare({ ...instrumentsInfo(), signal: controller.signal }));
+    await advance(1);
+    expect(waiting.state()).toBe('pending');
+    if (mode === 'cancel') controller.abort();
+    else adapter.dispose();
+    await advance(1);
+    expect(waiting.state()).toBe('rejected');
+    expect(waiting.error().name).toBe(mode === 'cancel' ? 'TradeTunnelCanceledError' : 'TradeTunnelDisposedError');
+    expect(socket.sent.filter((frame) => frame.type === 'rpc.http')).toHaveLength(1);
+  });
+
+  it('managed history re-prepares before claim, so a wake race spends none of the caller retry budget', async () => {
+    const current = captureHOW();
+    await expectOk(track(adapter(instrumentsInfo())));
+    const started = Date.now();
+    const deadline = started + 10_000;
+    const events: string[] = [];
+    let attempt = 1;
+    let first = true;
+    let host: EngineHost;
+    let succeed!: () => void;
+    let fail!: (error: Error) => void;
+    const history = new Promise<void>((resolve, reject) => {
+      succeed = resolve;
+      fail = reject;
+    });
+    const packet = {
+      request: 7,
+      method: 'GET',
+      url: instrumentsInfo().url,
+      headers: [],
+      body: undefined,
+      timeoutMs: 10_000,
+    };
+    const token = () => `p1:7:1:${attempt}`;
+    const preparing = () => ({
+      op: 'managedHttp',
+      phase: 'prepare',
+      preparation: token(),
+      intent: 'public',
+      packet: { ...packet, timeoutMs: deadline - Date.now() },
+    });
+    const engine = {
+      httpPreparationPending: (value: string) => value === token(),
+      httpPrepared(value: string) {
+        return JSON.stringify([{ op: 'managedHttp', phase: 'bind', preparation: value, permit: 'permit', packet }]);
+      },
+      httpPreparationFailed(value: string, reason: string) {
+        events.push(reason);
+        expect(value).toBe(token());
+        expect(reason).toBe('stale');
+        const old = token();
+        attempt++;
+        return JSON.stringify([{ op: 'managedHttp', phase: 'cancel', preparation: old }, preparing()]);
+      },
+      httpClaim() {
+        events.push('claim');
+        return JSON.stringify({ status: 'released' });
+      },
+      prepareDispatch: () => '',
+      httpStart: () => '',
+      httpChunk: () => '',
+      httpEnd() {
+        succeed();
+        return JSON.stringify([{ op: 'managedHttp', phase: 'cancel', preparation: token() }]);
+      },
+      httpFailed() {
+        fail(new Error('history request failed'));
+        return '';
+      },
+    };
+    host = new EngineHost(
+      engine as never,
+      {
+        now: Date.now,
+        setTimeout,
+        clearTimeout,
+        async prepareHttp(request: { timeoutMs: number; signal: AbortSignal }) {
+          const config = { ...instrumentsInfo(request.timeoutMs), signal: request.signal };
+          const prepared = await adapter.prepare(config);
+          return {
+            cancel: prepared.cancel,
+            bind() {
+              const bound = prepared.bind(config);
+              if (first) {
+                first = false;
+                FakeTunnelSocket.latest().readyState = 3;
+                current().ws!.reconnect();
+              }
+              return {
+                ready: bound.ready,
+                dispatch() {
+                  events.push('send');
+                  return bound
+                    .dispatch()
+                    .then((response) => ({ status: response.status, body: new TextEncoder().encode(response.data) }));
+                },
+              };
+            },
+          };
+        },
+      } as never,
+    );
+    // Same first-load budget as getBars: only a rejected history call spends a retry.
+    let chartRetries = 0;
+    const chart = history.catch((error) => {
+      chartRetries++;
+      throw error;
+    });
+    const observed = track(chart);
+    try {
+      (host as unknown as { execute(action: unknown): void }).execute(preparing());
+      await advance(5);
+      expect(observed.state()).toBe('pending');
+      expect(events).toEqual(['stale']);
+      await advance(2_000);
+      expect(observed.state(), String(observed.error()?.message)).toBe('resolved');
+      expect(events).toEqual(['stale', 'claim', 'send']);
+      expect(chartRetries).toBe(0);
+      expect(attempt).toBe(2);
+      expect(Date.now()).toBeLessThan(deadline);
+      expect(
+        FakeTunnelSocket.instances.flatMap((socket) => socket.sent).filter((frame) => frame.type === 'rpc.http'),
+      ).toHaveLength(2); // Warmup plus one history send.
+    } finally {
+      host.dispose();
+    }
+  });
 
   it('token auth: drop with a request in flight rejects promptly, and new requests succeed after reconnect', async () => {
     await expectOk(track(adapter(instrumentsInfo())));
@@ -411,4 +625,36 @@ describe('HOWWebSocket reconnect recovery (real socket stack, fake tunnel)', () 
       [],
     );
   });
+});
+
+it('automatic HOW silence recovery waits for the existing reconnect backoff', async () => {
+  vi.useFakeTimers();
+  const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  FakeTunnelSocket.instances = [];
+  FakeTunnelSocket.nextModes = [];
+  FakeTunnelSocket.defaultMode = { silent: true };
+  const how = new HOWWebSocket('wss://tunnel.test/tunnel', FakeTunnelSocket as unknown as typeof WebSocket);
+  try {
+    how.connectAndSubscribe();
+    await advance(25_011);
+    expect(how.ws?.loopState.phase).toBe('retry-scheduled');
+    expect(how.ws?.retryCount).toBe(1);
+    expect(how.diagnostics.lastClose).toMatchObject({
+      initiator: 'local',
+      phase: 'handshake',
+      route: 'HOW',
+      port: '443',
+      lifetime: '15-30s',
+    });
+    expect(how.ws?.retryConnection()).toBe(false);
+    expect(FakeTunnelSocket.instances).toHaveLength(1);
+    await advance(6_000);
+    expect(FakeTunnelSocket.instances).toHaveLength(2);
+  } finally {
+    how.dispose();
+    quiet.mockRestore();
+    log.mockRestore();
+    vi.useRealTimers();
+  }
 });

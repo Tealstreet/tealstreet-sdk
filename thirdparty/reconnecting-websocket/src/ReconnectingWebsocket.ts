@@ -294,6 +294,13 @@ export class ReconnectingWebSocket {
   }
 
   /** A supervisor timeout keeps the current wrapper's retry count and backoff. */
+  public retryConnection(): boolean {
+    if (!this._shouldReconnect || this._loopState.phase !== 'connected') return false;
+    this._disconnect(1000, 'supervisor timeout');
+    return true;
+  }
+
+  /** A supervisor handshake timeout preserves the same reconnect policy. */
   public timeoutConnecting(): boolean {
     if (!this._shouldReconnect || this._loopState.phase !== 'connecting' || this._ws?.readyState === this.OPEN)
       return false;
@@ -538,7 +545,7 @@ export class ReconnectingWebSocket {
     this._handleError(new Events.ErrorEvent(Error('TIMEOUT'), this));
   }
 
-  private _disconnect(code = 1000, reason?: string) {
+  private _disconnect(code = 1000, reason?: string, initiator: 'local' | 'unknown' = 'local') {
     this._clearTimeouts();
     this._removeListeners();
     try {
@@ -546,7 +553,7 @@ export class ReconnectingWebSocket {
     } catch (error) {
       // A native close refusal must not suppress the wrapper's close notification.
     }
-    this._handleClose(new Events.CloseEvent(code, reason, this));
+    this._handleClose(new Events.CloseEvent(code, reason, this, initiator));
   }
 
   private _acceptOpen() {
@@ -603,7 +610,11 @@ export class ReconnectingWebSocket {
 
   private _handleError = (event: Events.ErrorEvent) => {
     this._debug('error event', event.message);
-    this._disconnect(undefined, event.message === 'TIMEOUT' ? 'timeout' : undefined);
+    this._disconnect(
+      undefined,
+      event.message === 'TIMEOUT' ? 'timeout' : undefined,
+      event.message === 'TIMEOUT' ? 'local' : 'unknown',
+    );
 
     if (this.onerror) {
       this.onerror(event);
