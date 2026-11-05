@@ -1344,3 +1344,143 @@ fn socket_login_refusal_is_reported_even_after_rest_finishes_startup() {
         assert!(loaded.markets && loaded.balance && loaded.positions && loaded.orders);
     }
 }
+
+fn startup_failures(h: &Harness) -> usize {
+    h.actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            )
+        })
+        .count()
+}
+
+fn reconnect_private(
+    h: &mut Harness,
+    previous: safe_cex_engine::SocketId,
+) -> safe_cex_engine::SocketId {
+    let (timer, at) = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("private reconnect timer");
+    h.now = h.now.max(at);
+    h.event(Event::TimerFired { timer });
+    let socket = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/user") => Some(*socket),
+            _ => None,
+        })
+        .expect("new private socket");
+    assert_ne!(
+        socket, previous,
+        "the reconnect must really replace the private socket"
+    );
+    socket
+}
+
+fn reject_private_login(h: &mut Harness, socket: safe_cex_engine::SocketId) {
+    h.event(Event::WsOpened { socket });
+    h.event(Event::WsMessage {
+        socket,
+        text: r#"{"method":"public/auth","code":40101,"message":"key refused"}"#,
+    });
+}
+
+#[test]
+fn repeated_reconnect_rejections_emit_one_startup_failure() {
+    let mut h = Harness::new();
+    h.engine.set_account_startup(true);
+    h.load();
+    let mut socket = h.socket(true);
+    for round in 0..4 {
+        reject_private_login(&mut h, socket);
+        assert_eq!(startup_failures(&h), 1, "rejected reconnect {round}");
+        socket = reconnect_private(&mut h, socket);
+    }
+}
+
+#[test]
+fn only_successful_private_auth_rearms_the_login_refusal_notice() {
+    let mut h = Harness::new();
+    h.load();
+    let first = h.socket(true);
+    reject_private_login(&mut h, first);
+    let next = reconnect_private(&mut h, first);
+    let public = h.socket(false);
+    h.event(Event::WsMessage {
+        socket: public,
+        text: r#"{"method":"public/auth","code":0}"#,
+    });
+    h.event(Event::WsOpened { socket: next });
+    h.event(Event::WsMessage {
+        socket: next,
+        text: r#"{"method":"public/auth","code":40102,"message":"INVALID_NONCE"}"#,
+    });
+    let still_refused = reconnect_private(&mut h, next);
+    reject_private_login(&mut h, still_refused);
+    assert_eq!(
+        startup_failures(&h),
+        1,
+        "public/transient answers must not reset the latch"
+    );
+    let healthy = reconnect_private(&mut h, still_refused);
+    h.event(Event::WsOpened { socket: healthy });
+    h.event(Event::WsMessage {
+        socket: healthy,
+        text: r#"{"method":"public/auth","code":0}"#,
+    });
+    h.event(Event::WsClosed {
+        socket: healthy,
+        code: 1006,
+    });
+    let later = reconnect_private(&mut h, healthy);
+    reject_private_login(&mut h, later);
+    assert_eq!(
+        startup_failures(&h),
+        2,
+        "successful private auth permits one new refusal notice"
+    );
+    let repeated = reconnect_private(&mut h, later);
+    reject_private_login(&mut h, repeated);
+    assert_eq!(startup_failures(&h), 2);
+}
+
+#[test]
+fn rest_polling_continues_without_resetting_a_socket_login_refusal() {
+    let mut h = Harness::new();
+    let socket = h.socket(true);
+    reject_private_login(&mut h, socket);
+    let next = reconnect_private(&mut h, socket);
+    h.load();
+    let (timer, at) = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + POLL_MS => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("normal REST account poll remains scheduled");
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    h.reply("get-positions", EMPTY);
+    h.reply("user-balance", BALANCE);
+    assert_eq!(startup_failures(&h), 1);
+    reject_private_login(&mut h, next);
+    assert_eq!(
+        startup_failures(&h),
+        1,
+        "successful REST polls must not reset the latch"
+    );
+}

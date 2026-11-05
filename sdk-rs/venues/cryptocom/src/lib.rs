@@ -119,6 +119,7 @@ pub struct Cryptocom {
     options: Options,
     rest: &'static str,
     sockets: [Connection; 2],
+    login_refusal_reported: bool,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     // Instruments rejected as malformed; owned exposure there holds the snapshot.
     malformed_markets: HashSet<String>,
@@ -267,6 +268,7 @@ impl Cryptocom {
             },
             options,
             sockets: [Connection::new(false), Connection::new(true)],
+            login_refusal_reported: false,
             discovery: Default::default(),
             malformed_markets: HashSet::new(),
             reread_stalls: 0,
@@ -668,14 +670,17 @@ impl Venue for Cryptocom {
                     cx.close(socket);
                     self.on_close(cx, socket, 1008);
                     // REST readiness cannot recover a rejected private stream login.
-                    cx.startup_failed(
-                        safe_cex_engine::VenueError::new(format!(
-                            "Crypto.com private login rejected: {}",
-                            envelope.message
-                        ))
-                        .kind(safe_cex_engine::ErrorKind::AuthInvalid),
-                    );
+                    if !std::mem::replace(&mut self.login_refusal_reported, true) {
+                        cx.startup_failed(
+                            safe_cex_engine::VenueError::new(format!(
+                                "Crypto.com private login rejected: {}",
+                                envelope.message
+                            ))
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                        );
+                    }
                 } else if !self.sockets[channel].authenticated {
+                    self.login_refusal_reported = false;
                     self.sockets[channel].authenticated = true;
                     self.sockets[channel].supervisor.authenticated(cx);
                     self.authenticated(cx, &envelope);
