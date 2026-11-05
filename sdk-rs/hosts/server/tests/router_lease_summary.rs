@@ -26,6 +26,26 @@ async fn summary_route_is_on_box_count_only_and_never_creates_lease_records() {
     });
     let client = reqwest::Client::new();
     let url = format!("http://{address}/admin/router-lease/summary");
+    let status_url = format!("http://{address}/admin/router-lease/status");
+    for _ in 0..2 {
+        let response = client
+            .post(&status_url)
+            .body(serde_json::json!({"userId":"private-query-sentinel"}).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            app.registry.router_lease_counts().tracked_users,
+            1,
+            "read-only status must not register an unknown user"
+        );
+        assert_eq!(response.status(), 503);
+    }
+    assert_eq!(
+        app.registry.router_lease_counts().tracked_users,
+        1,
+        "read-only status must not register an unknown user"
+    );
     for body in ["", "{}"] {
         let response = client.post(&url).body(body).send().await.unwrap();
         assert_eq!(response.status(), 200);
@@ -40,7 +60,9 @@ async fn summary_route_is_on_box_count_only_and_never_creates_lease_records() {
             !text.contains("private-live-sentinel") && !text.contains("private-tracked-sentinel")
         );
         let summary: Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(summary.as_object().unwrap().len(), 8);
+        assert_eq!(summary.as_object().unwrap().len(), 10);
+        assert_eq!(summary["capacity"], 4096);
+        assert_eq!(summary["remaining"], 4095);
         assert_eq!(summary["routerBoxId"], "01");
         assert_eq!(summary["enforced"], false);
         assert!(summary.get("enableGraceUntil").unwrap().is_null());
