@@ -40,6 +40,11 @@ join preserves orders and retries instead of silently ending the read.
 The SDK transport admits all `/info` reads through one weighted token bucket per
 API origin, including metadata, candles and history. Its initial 1,000-weight
 capacity permits cold discovery immediately, then refills at 1,000 weight/minute.
+Native pending metadata promotes amend identity/sizing and order-fence reads to
+critical; caller history and candles are bulk. Noncritical work has an 800-weight
+ceiling, leaving 200 for critical work within the same total. Native and shared
+queues keep FIFO within each class, and native refill is continuous. Queued
+candles retain their original 20 s bound, shortened by a smaller caller wait.
 A 429 empties the bucket and pauses refill until Retry-After ends. Immediately
 before dispatch, an atomic shared-state check refuses prepared reads whose grant
 generation changed or whose origin is paused. Managed claim and send execute

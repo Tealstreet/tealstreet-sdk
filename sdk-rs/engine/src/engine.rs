@@ -105,6 +105,16 @@ impl RequestRoute {
     }
 }
 
+/// Admission hints only; never signing, delivery or reconciliation authority.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum HttpReadClass {
+    #[default]
+    Normal = 0,
+    Critical = 1,
+    Bulk = 2,
+}
+
 #[derive(Clone, PartialEq)]
 pub struct HttpRequest {
     pub id: RequestId,
@@ -4022,6 +4032,10 @@ pub trait Venue {
         _owner: &crate::request_context::ConditionOwner,
         _error: VenueError,
     ) {
+    }
+
+    fn http_read_class(&self, _pending: &Self::Pending) -> HttpReadClass {
+        HttpReadClass::Normal
     }
 
     /// Bounded native correlation metadata only. No credential, outbound packet

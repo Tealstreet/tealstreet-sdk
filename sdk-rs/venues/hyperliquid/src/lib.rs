@@ -123,12 +123,14 @@ pub struct ManagedInfoRead {
     context: Context,
     pending: Pending,
     background: bool,
+    read_class: safe_cex_engine::HttpReadClass,
 }
 struct InfoSuccessor {
     body: String,
     pending: Pending,
     streamed: Option<ArrayAt>,
     background: bool,
+    read_class: safe_cex_engine::HttpReadClass,
 }
 #[derive(Default)]
 struct Connection {
@@ -378,7 +380,14 @@ impl Hyperliquid {
         }
     }
     fn info(&mut self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
-        self.info_read(cx, body, pending, Some(at), false);
+        self.info_read(
+            cx,
+            body,
+            pending,
+            Some(at),
+            false,
+            safe_cex_engine::HttpReadClass::Normal,
+        );
     }
     fn info_read(
         &mut self,
@@ -387,6 +396,7 @@ impl Hyperliquid {
         pending: Pending,
         streamed: Option<ArrayAt>,
         background: bool,
+        read_class: safe_cex_engine::HttpReadClass,
     ) {
         if self.info_completing {
             self.info_successors.push_back(InfoSuccessor {
@@ -394,6 +404,7 @@ impl Hyperliquid {
                 pending,
                 streamed,
                 background,
+                read_class,
             });
             return;
         }
@@ -418,6 +429,7 @@ impl Hyperliquid {
             context: context.clone(),
             pending,
             background,
+            read_class,
         }));
         match cx.request_managed_with_headers(
             context,
@@ -1172,6 +1184,15 @@ impl Venue for Hyperliquid {
             self.unproven_trade_evidence(response, evidence);
         }
     }
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::ManagedInfo(read) => read.read_class,
+            Pending::ManagedCandles(_) | Pending::History(_) => {
+                safe_cex_engine::HttpReadClass::Bulk
+            }
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,
@@ -1402,7 +1423,14 @@ impl Venue for Hyperliquid {
                     let _ = cx.finish_http_context(&read.context);
                     self.info_completing = false;
                     while let Some(next) = self.info_successors.pop_front() {
-                        self.info_read(cx, next.body, next.pending, next.streamed, next.background);
+                        self.info_read(
+                            cx,
+                            next.body,
+                            next.pending,
+                            next.streamed,
+                            next.background,
+                            next.read_class,
+                        );
                     }
                 }
                 self.finish_background_read(cx, read.background);
@@ -1823,10 +1851,18 @@ impl Venue for Hyperliquid {
                 from_ms,
                 to_ms,
             } => {
+                let timeout_ms = match cx.command_wait() {
+                    Some(safe_cex_engine::CommandWait::Remaining(left)) => left.min(20_000),
+                    Some(safe_cex_engine::CommandWait::Expired) => {
+                        let _ = cx.reject_expired_command(Operation::Read);
+                        return;
+                    }
+                    None => 20_000,
+                };
                 let Ok(context) = cx.admit_http_command(Policy {
                     operation: Operation::Read,
                     credential: None,
-                    timeout_ms: 20_000,
+                    timeout_ms,
                     pacing: None,
                     retry: RetryPolicy::Never,
                 }) else {
@@ -1844,25 +1880,15 @@ impl Venue for Hyperliquid {
                     let _ = cx.fail_context(&context, "Invalid candle time range");
                     return;
                 };
-                let pending = Pending::ManagedCandles(Box::new(ManagedCandleRead {
-                    context: context.clone(),
-                    candles: Vec::new(),
-                    valid: true,
-                }));
-                match cx.request_managed_with_headers(
-                    context.clone(),
-                    None,
-                    Method::Post,
-                    format!("{}/info", self.rest()),
-                    &[("Content-Type", "application/json")],
-                    Some(body),
-                    pending,
-                ) {
-                    Ok(id) => cx.stream_response(id, ArrayAt::Root),
-                    Err((_pending, error)) => {
-                        let _ = cx.fail_context(&context, error.venue_error());
-                    }
-                }
+                self.queue_candles(
+                    cx,
+                    body,
+                    Box::new(ManagedCandleRead {
+                        context,
+                        candles: Vec::new(),
+                        valid: true,
+                    }),
+                );
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.trade_command(cx, trade),

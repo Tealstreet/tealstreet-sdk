@@ -94,7 +94,7 @@ export class ManagedHttp {
     try {
       if (typeof action.permit !== 'string') throw new Error('Invalid HTTP permit');
       resource.diagnostic = requestFailureFields(action.packet);
-      resource.bound = resource.prepared.bind({ ...action.packet, headers: Object.fromEntries(action.packet.headers), signal: resource.controller.signal });
+      resource.bound = resource.prepared.bind({ ...action.packet, readClass: resource.readClass, headers: Object.fromEntries(action.packet.headers), signal: resource.controller.signal });
       if (!resource.bound || typeof resource.bound.ready !== 'function' || typeof resource.bound.dispatch !== 'function') throw new Error('Invalid bound HTTP resource');
       resource.phase = 'bound';
     } catch (error) { this.fail(token, resource, preparationReason(error, 'invalid')); return; }
@@ -107,12 +107,16 @@ export class ManagedHttp {
     const token = action.preparation;
     if (this.resources.has(token) || host.disposed
       || !host.invoke(host.engine.httpPreparationPending, token)) return;
-    const resource = { controller: new AbortController(), phase: 'preparing',
+    const resource = { readClass: 'normal', controller: new AbortController(), phase: 'preparing',
       diagnostic: requestFailureFields(action.packet), request: action.packet.request };
     this.resources.set(token, resource);
     if (typeof host.transport.prepareHttp !== 'function') { this.fail(token, resource, 'unsupported'); return; }
     try {
-      const prepared = await host.transport.prepareHttp({ ...action.packet, headers: Object.fromEntries(action.packet.headers), intent: action.intent, signal: resource.controller.signal });
+      const nativeReadClass = typeof host.engine.httpReadClass === 'function'
+        ? host.invoke(host.engine.httpReadClass, action.packet.request) : 0;
+      const readClass = nativeReadClass === 1 ? 'critical' : nativeReadClass === 2 ? 'bulk' : 'normal';
+      resource.readClass = readClass;
+      const prepared = await host.transport.prepareHttp({ ...action.packet, readClass, headers: Object.fromEntries(action.packet.headers), intent: action.intent, signal: resource.controller.signal });
       if (!this.live(token, resource) || !host.invoke(host.engine.httpPreparationPending, token)) {
         prepared?.cancel?.();
         if (this.live(token, resource)) this.cancel(token);

@@ -11,7 +11,10 @@ const DISPATCH_LEASE_MS = 2000;
 const MAX_DISPATCH_WAITERS = 128;
 const dispatchRealm = Math.random().toString(36).slice(2);
 let dispatchSequence = 0;
-type DispatchWaiter = { id: string; until: number };
+export type InfoReadClass = 'critical' | 'normal' | 'bulk';
+const rank = (readClass: InfoReadClass = 'normal') => (readClass === 'critical' ? 0 : readClass === 'normal' ? 1 : 2);
+const capacity = (readClass: InfoReadClass) => (readClass === 'critical' ? 1000 : 800);
+type DispatchWaiter = { id: string; until: number; readClass?: InfoReadClass };
 let indexedDBOpenedInRealm = false;
 type BudgetState = {
   nextAt: number;
@@ -52,7 +55,11 @@ function boundedState(raw: Partial<BudgetState> = {}): BudgetState {
               row && typeof row.id === 'string' && row.id.length <= 64 && Number.isFinite(row.until) && row.until > now,
           )
           .slice(0, MAX_DISPATCH_WAITERS)
-          .map((row) => ({ id: row.id, until: Math.min(row.until, now + DISPATCH_LEASE_MS) }))
+          .map((row) => ({
+            id: row.id,
+            until: Math.min(row.until, now + DISPATCH_LEASE_MS),
+            readClass: row.readClass === 'critical' || row.readClass === 'bulk' ? row.readClass : ('normal' as const),
+          }))
       : [],
     nextAt: timestamp(raw.nextAt, MAX_PAUSE_MS + BUCKET_WINDOW_MS),
     pausedUntil: timestamp(raw.pausedUntil, MAX_PAUSE_MS),
@@ -306,7 +313,23 @@ function waitUntil(at: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export type InfoBudgetGrant = { generation: number; weight: number };
+function readClassFor(body: string | undefined, readClass: InfoReadClass): InfoReadClass {
+  if (readClass === 'critical') return 'critical';
+  try {
+    const type: unknown = JSON.parse(body ?? '{}').type;
+    if (type === 'candleSnapshot' || (typeof type === 'string' && LIST_READS.has(type))) return 'bulk';
+  } catch {
+    /* Malformed bodies get no priority. */
+  }
+  return readClass === 'bulk' ? 'bulk' : 'normal';
+}
+export type InfoBudgetGrant = {
+  generation: number;
+  weight: number;
+  readClass?: InfoReadClass;
+  waiterId?: string;
+  cancelWait?: () => void;
+};
 
 /** Admission precedes managed HTTP claim; only a physical handoff consumes tokens. */
 export class HyperliquidInfoBudget {
@@ -317,23 +340,66 @@ export class HyperliquidInfoBudget {
     body: string | undefined,
     deadline: number,
     signal: AbortSignal,
+    readClass: InfoReadClass = 'normal',
   ): Promise<InfoBudgetGrant> {
+    readClass = readClassFor(body, readClass);
     const weight = hyperliquidInfoWeight(body);
-    for (;;) {
-      signal.throwIfAborted();
-      const grant = await this.backend.update(origin, (state) => {
+    let waiterId: string | undefined;
+    let cancelled = false;
+    const cancelWait = () => {
+      if (cancelled) return;
+      cancelled = true;
+      signal.removeEventListener('abort', cancelWait);
+      if (waiterId)
+        void this.backend
+          .update(origin, (state) => {
+            state.dispatchQueue = state.dispatchQueue?.filter((row) => row.id !== waiterId);
+          })
+          .catch(() => warnHyperliquidInfoBudgetUnavailable());
+    };
+    try {
+      for (;;) {
         signal.throwIfAborted();
-        const cost = weight * MS_PER_WEIGHT;
-        // Virtual finish time allows one minute's tokens to burst, then refills by weight.
-        const at = Math.max(Date.now(), state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
-        if (at >= deadline) throw new HttpPreparationError('timedOut');
-        return { at, generation: state.generation };
-      });
-      await waitUntil(grant.at, signal);
-      signal.throwIfAborted();
-      const current = await this.backend.update(origin, (state) => state.generation === grant.generation);
-      if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
-      if (current) return { generation: grant.generation, weight };
+        const grant = await this.backend.update(origin, (state) => {
+          signal.throwIfAborted();
+          const now = Date.now();
+          const at = Math.max(
+            now,
+            state.nextAt + weight * MS_PER_WEIGHT - capacity(readClass) * MS_PER_WEIGHT,
+            state.pausedUntil,
+          );
+          if (at >= deadline) throw new HttpPreparationError('timedOut');
+          if (at > now || waiterId) {
+            const queue = (state.dispatchQueue ?? []).filter((row) => row.until > now);
+            if (
+              !waiterId &&
+              queue.length >= (readClass === 'critical' ? MAX_DISPATCH_WAITERS : readClass === 'normal' ? 96 : 64)
+            )
+              return { at: Math.min(deadline, now + DISPATCH_POLL_MS), ready: false, generation: state.generation };
+            if (!waiterId) {
+              waiterId = `${dispatchRealm}:${++dispatchSequence}`;
+              signal.addEventListener('abort', cancelWait, { once: true });
+            }
+            const row = { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS), readClass };
+            state.dispatchQueue = queue.some((entry) => entry.id === waiterId)
+              ? queue.map((entry) => (entry.id === waiterId ? row : entry))
+              : [...queue, row];
+          }
+          return { at: Math.min(at, now + DISPATCH_POLL_MS), ready: at <= now, generation: state.generation };
+        });
+        if (!grant.ready) {
+          await waitUntil(grant.at, signal);
+          continue;
+        }
+        signal.throwIfAborted();
+        const current = await this.backend.update(origin, (state) => state.generation === grant.generation);
+        if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
+        if (current)
+          return { generation: grant.generation, weight, readClass, ...(waiterId ? { waiterId, cancelWait } : {}) };
+      }
+    } catch (error) {
+      cancelWait();
+      throw error;
     }
   }
 
@@ -346,7 +412,8 @@ export class HyperliquidInfoBudget {
     wasSent: () => boolean = () => true,
   ): Promise<T> {
     const cost = grant.weight * MS_PER_WEIGHT;
-    const waiterId = `${dispatchRealm}:${++dispatchSequence}`;
+    const readClass = grant.readClass ?? 'normal';
+    const waiterId = grant.waiterId ?? `${dispatchRealm}:${++dispatchSequence}`;
     let charged = false;
     let dispatched = false;
     const active = () => {
@@ -361,20 +428,27 @@ export class HyperliquidInfoBudget {
           // Once this realm joined IDB, local-only sends could exceed the peers' budget.
           if (!shared && indexedDBOpenedInRealm) return { at: retryStorageAt() };
           const now = Date.now();
-          const at = Math.max(now, state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
+          const at = Math.max(now, state.nextAt + cost - capacity(readClass) * MS_PER_WEIGHT, state.pausedUntil);
           if (at >= deadline || state.generation !== grant.generation) throw new HttpPreparationError('timedOut');
           const queue = (state.dispatchQueue ?? []).filter((row) => row.until > now);
           const existing = queue.find((row) => row.id === waiterId);
-          if (!existing && queue.length >= MAX_DISPATCH_WAITERS)
+          if (
+            !existing &&
+            queue.length >= (readClass === 'critical' ? MAX_DISPATCH_WAITERS : readClass === 'normal' ? 96 : 64)
+          )
             return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
           // Leases order dispatch attempts across realms without charging queued work.
           state.dispatchQueue = existing
             ? queue.map((row) =>
-                row.id === waiterId ? { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS) } : row,
+                row.id === waiterId
+                  ? { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS), readClass }
+                  : row,
               )
-            : [...queue, { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS) }];
-          if (state.dispatchQueue[0]?.id !== waiterId || at > now)
-            return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
+            : [...queue, { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS), readClass }];
+          // FIFO within each class; critical work can pass queued bulk without spending its tokens.
+          state.dispatchQueue.sort((a, b) => rank(a.readClass) - rank(b.readClass));
+          if (state.dispatchQueue[0]?.id !== waiterId) return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
+          if (at > now) return { at: Math.min(at, now + DISPATCH_POLL_MS) };
           state.nextAt = Math.max(now, state.nextAt) + cost;
           state.dispatchQueue = state.dispatchQueue.filter((row) => row.id !== waiterId);
           return undefined;
@@ -416,6 +490,7 @@ export class HyperliquidInfoBudget {
         await waitUntil(decision.at, signal);
       }
     } finally {
+      grant.cancelWait?.();
       if (!dispatched) {
         await this.backend
           .update(origin, (state) => {

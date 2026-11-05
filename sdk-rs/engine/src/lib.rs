@@ -72,8 +72,8 @@ pub use capabilities::{
 pub use credentials::{READ_CREDENTIALS_INVALID, ReadCredentials};
 pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CommandWait, CredentialSlot, Cx,
-    DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpRelease, HttpRequest,
-    MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PollTimerBounds, Query,
+    DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpReadClass, HttpRelease,
+    HttpRequest, MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PollTimerBounds, Query,
     ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SigningTarget, SocketChannel,
     SocketContext, SocketId, SocketSpec, SubscriptionTopic, TimerId, Venue, VenueAction,
     unsupported_venue_action,

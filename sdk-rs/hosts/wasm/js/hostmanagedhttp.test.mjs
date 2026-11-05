@@ -319,3 +319,28 @@ test('late provider answers and broken diagnostic observers cannot alter cleanup
   assert.equal(r.events.some(([name]) => name === 'claim'), false);
   r.host.dispose();
 });
+
+
+for (const [nativeClass, expected] of [[undefined, 'normal'], [0, 'normal'], [1, 'critical'], [2, 'bulk'], [99, 'normal']]) {
+  test(`managed preparation carries the closed native read class ${nativeClass}`, async () => {
+    const seen = [];
+    const r = rig((prepared) => {
+      seen.push(prepared.readClass);
+      assert.deepEqual(prepared.headers, {});
+      assert.equal(prepared.body, '{}');
+      return {bind(bound) {
+        seen.push(bound.readClass);
+        return {ready: () => true, dispatch: () => Promise.resolve({status: 200, body: new Uint8Array()})};
+      }};
+    });
+    if (nativeClass !== undefined) r.host.engine.httpReadClass = (request) => {
+      assert.equal(request, 7);
+      return nativeClass;
+    };
+    r.host.execute(prepare);
+    await tick();
+    assert.deepEqual(seen, [expected, expected]);
+    assert.equal(r.events.filter(([kind]) => kind === 'claim').length, 1);
+    r.host.dispose();
+  });
+}
