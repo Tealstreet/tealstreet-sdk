@@ -1617,6 +1617,7 @@ export class RustEngineExchange extends BaseExchange {
         lighterWsRoute: Boolean(options.tealstreetWsRoute),
         vault,
         hyperliquidBuilder,
+        hyperliquidFastBook: options.hyperliquidFastBook === true,
         enableSpotMarkets: Boolean(enableSpotMarkets),
         enableInverseMarkets: Boolean(options.enableInverseMarkets && !options.externalPublicData),
         enableOptionMarkets: Boolean(options.enableOptionMarkets),

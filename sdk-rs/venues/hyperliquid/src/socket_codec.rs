@@ -253,17 +253,19 @@ impl Hyperliquid {
             }
         } else {
             push(public_topic("l2Book", Some(coin), None, None));
-            push(
-                serde_json::to_string(&Send {
-                    method: "subscribe",
-                    subscription: FastDepth {
-                        r#type: "l2Book",
-                        coin,
-                        fast: true,
-                    },
-                })
-                .expect("native fast depth topic"),
-            );
+            if self.options.fast_book {
+                push(
+                    serde_json::to_string(&Send {
+                        method: "subscribe",
+                        subscription: FastDepth {
+                            r#type: "l2Book",
+                            coin,
+                            fast: true,
+                        },
+                    })
+                    .expect("native fast depth topic"),
+                );
+            }
             push(public_topic("bbo", Some(coin), None, None));
         }
     }

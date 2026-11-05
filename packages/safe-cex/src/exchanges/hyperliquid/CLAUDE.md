@@ -1639,22 +1639,32 @@ Ordinary successful private snapshots keep the existing valuation cadence.
 
 ## Rust fast public depth
 
-Perpetual books subscribe to slow `l2Book`, `l2Book` with `fast: true`, and
-`bbo` (three topics per unique book; duplicate consumers share them). Live fast
-responses carry `data.fast: true` and at most five levels per side. Slow depth
-remains the deeper baseline. Fast coverage replaces its whole covered range,
-permanently pruning conflicting baseline levels until a new slow snapshot.
-Fast sides shorter than five levels clear the old tail, including empty sides.
-Older timestamps cannot regress depth, and a same-timestamp fast response wins
-in either delivery order. Newer BBO still
-replaces the top. Retirement clears both baselines before reconnect replay.
-Standalone spot retains its five native significant-figure topics.
+Fast depth is opt-in through SDK `ExchangeOptions.hyperliquidFastBook: true`
+(registry JSON `hyperliquidFastBook`, native `Options.fast_book`). The default
+keeps slow `l2Book` plus BBO: two topics per unique perpetual book. Opt-in adds
+`l2Book {fast:true}`, making three; duplicate consumers share the same topics.
+Shared public-feed identities separate opted-in and default-off sources.
+Standalone spot retains its five native significant-figure topics regardless.
 
-A new book or candle that would exceed 1,000 desired topics is refused without
-retaining its demand or changing accepted references. The encoder also refuses an oversized projection before release.
-This is a per-connection ceiling: callers still share Hyperliquid's per-IP
-1,000-subscription allowance across accounts/tabs and must budget other sockets.
-For `M` core markets, `D` HIP-3 scopes, `B` books and `C` candle streams, a keyed
-perp socket has `9 + M + 5D + 3B + C` topics, plus one when spotState is needed.
-A 235-market account with ten scopes and 235 books uses 999 before candles;
-opening every book on several accounts exceeds the shared IP allowance.
+Live fast responses carry `data.fast: true` and at most five levels per side.
+Slow depth remains the deeper baseline. Fast coverage replaces its whole covered
+range and permanently prunes conflicting baseline rows until a new slow snapshot.
+Fast sides shorter than five rows clear the old tail, including empty sides.
+Older timestamps cannot regress depth; equal-time fast data wins in either order.
+Newer BBO replaces the top. Retirement clears both baselines before replay.
+
+New book or candle demand above 1,000 desired topics is visibly refused without
+retaining its key/refcount or changing accepted references. The accepted feed
+stays live; reconnect replays only accepted demand. The encoder independently
+refuses an oversized projection before release.
+
+Hyperliquid's 1,000-subscription limit is per IP across connections, not per
+account. The per-connection check cannot enforce it across accounts/tabs/clients.
+With `M` core markets, `D` HIP-3 scopes, `B` books, `C` candles, keyed Direct feeds
+use `9 + M + 5D + (2+F)B + C` topics, plus one for spotState when needed;
+public-only uses `2 + (2+F)B + C`, where F is 1 only with fast depth enabled.
+At illustrative M=235, D=0, four keyed engines with 20 books each already use
+1,136 by default; enabling fast depth makes 1,216. Three such keyed engines with
+20 candles each plus a public engine with 20 books use 954 default or 1,034
+opted in. Keep fast depth off unless the caller budgets aggregate demand; the
+subscription-diet/shared-public-feed follow-up addresses the existing overage.

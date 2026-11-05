@@ -5,7 +5,52 @@ use safe_cex_engine::{Action, Command, Engine, Event, SocketId};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 
 fn ready() -> (Engine<Hyperliquid>, SocketId) {
-    let (mut e, s) = support::ready("disabled");
+    ready_options(Some(true))
+}
+fn ready_options(fast: Option<bool>) -> (Engine<Hyperliquid>, SocketId) {
+    use safe_cex_engine::Response;
+    use safe_cex_venue_hyperliquid::Options;
+    let mut options = Options {
+        public_data_only: true,
+        ..Options::default()
+    };
+    if let Some(fast) = fast {
+        options.fast_book = fast;
+    }
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(options));
+    e.start(1000.);
+    let mut socket = None;
+    for _ in 0..10 {
+        for action in prepared_now(&mut e) {
+            match action {
+                Action::Http(r) => {
+                    let body = if support::kind(&r) == "perpDexs" {
+                        "[null]"
+                    } else {
+                        support::META
+                    };
+                    e.handle(
+                        1000.,
+                        Event::HttpResponse {
+                            request: r.id,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                Action::WsConnect { socket: s, .. } => socket = Some(s),
+                _ => {}
+            }
+        }
+        if socket.is_some() {
+            break;
+        }
+    }
+    let socket = socket.expect("public native socket");
+    e.handle(1000., Event::WsOpened { socket });
     prepared_now(&mut e).into_iter().for_each(drop);
     e.handle(
         2000.,
@@ -13,7 +58,7 @@ fn ready() -> (Engine<Hyperliquid>, SocketId) {
             symbol: "BTC-PERP".into(),
         }),
     );
-    (e, s)
+    (e, socket)
 }
 fn frame(
     e: &mut Engine<Hyperliquid>,
@@ -236,6 +281,7 @@ fn many_books_stay_under_the_venue_limit_and_refuse_only_the_excess() {
     use safe_cex_venue_hyperliquid::Options;
     let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         public_data_only: true,
+        fast_book: true,
         ..Options::default()
     }));
     e.start(1000.);
@@ -400,7 +446,7 @@ fn keyed_hip3_topic_budget_includes_private_topics_books_and_candles() {
                 _ => None,
             })
             .collect();
-        assert_eq!(topics(sent), 3);
+        assert_eq!(topics(sent), 2);
     }
     e.handle(
         2000.,
@@ -447,6 +493,7 @@ fn review_3110_excess_candle_rolls_back_without_retiring_accepted_topics() {
     use safe_cex_venue_hyperliquid::Options;
     let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         public_data_only: true,
+        fast_book: true,
         ..Options::default()
     }));
     e.start(1000.);
@@ -631,6 +678,7 @@ fn review_3110_reconnect_replays_only_the_accepted_thousand_topics() {
     use safe_cex_venue_hyperliquid::Options;
     let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         public_data_only: true,
+        fast_book: true,
         ..Options::default()
     }));
     e.start(1000.);
@@ -761,4 +809,53 @@ fn review_3110_reconnect_replays_only_the_accepted_thousand_topics() {
             .count(),
         1000
     );
+}
+
+#[test]
+fn default_options_keep_fast_depth_off() {
+    let (mut e, _) = ready_options(None);
+    let sent = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sent.len(), 2);
+    assert!(!sent.iter().any(|s| s.contains("\"fast\":true")));
+}
+
+#[test]
+fn opted_in_book_repair_releases_each_of_its_three_native_topics_once() {
+    let (mut e, _) = ready();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    e.handle(
+        2100.,
+        Event::Command(Command::RepairSubscription(
+            safe_cex_engine::SubscriptionTopic::OrderBook {
+                symbol: "BTC-PERP".into(),
+            },
+        )),
+    );
+    let sent = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sent.len(), 6);
+    for key in [
+        r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#,
+        r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC","fast":true}}"#,
+        r#"{"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}"#,
+    ] {
+        assert_eq!(sent.iter().filter(|f| f.as_str() == key).count(), 1);
+        assert_eq!(
+            sent.iter()
+                .filter(|f| **f == key.replace("subscribe", "unsubscribe"))
+                .count(),
+            1
+        );
+    }
 }

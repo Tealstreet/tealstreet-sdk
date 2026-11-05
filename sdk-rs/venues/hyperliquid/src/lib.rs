@@ -34,6 +34,8 @@ pub struct Options {
     pub builder: Option<Builder>,
     /// TS `enableSpotMarkets`: spot pairs, holdings and orders in the perp account.
     pub enable_spot_markets: bool,
+    /// Extra fast depth topic per book; callers must budget aggregate per-IP subscriptions.
+    pub fast_book: bool,
 }
 safe_cex_crypto::redacted_debug!(Options);
 

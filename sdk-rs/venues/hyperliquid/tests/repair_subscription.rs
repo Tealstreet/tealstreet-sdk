@@ -183,7 +183,6 @@ fn repairing_a_live_perps_book_resubscribes_its_l2_book_and_bbo() {
         book("BTC-PERP"),
         &[
             r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#,
-            r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC","fast":true}}"#,
             r#"{"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}"#,
         ],
     );
