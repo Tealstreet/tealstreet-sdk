@@ -3,6 +3,9 @@ import type { ExchangeOptions } from '../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
+
 import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';

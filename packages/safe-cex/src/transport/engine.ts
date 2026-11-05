@@ -31,15 +31,16 @@ import {
 import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/host';
 import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
+import { SECONDARY_READ_KEYS_ENABLED } from '../secondaryReadKeys';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { sharedBinanceCatalogue } from './binanceCatalogue';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { HttpTiming, httpTimingKind, httpTimingStage, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
-import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
 import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
+import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
 import {
@@ -76,6 +77,8 @@ export interface EngineRoutingPlan {
   publicHttp?: EngineHttpRoute;
   readHttp?: EngineHttpRoute;
   readPublicHttp?: EngineHttpRoute;
+  /** A bypassed read key's egress (secondaryReadKeys.ts): managed public GETs only. */
+  publicReadHttp?: EngineHttpRoute;
   readHeader?: string;
   readPublic?: boolean;
   publicCorsHttp?: EngineHttpRoute;
@@ -151,7 +154,24 @@ const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
   ...Object.values(secondaryReadHeaders).map((name) => name!.toLowerCase()),
 ]);
 
+/** The account without its read credentials while secondary read keys are bypassed (secondaryReadKeys.ts). */
+export const withSecondaryReadKeyPolicy = (options: ExchangeOptions): ExchangeOptions => {
+  if (SECONDARY_READ_KEYS_ENABLED) return options;
+  const { secondary_key: _key, secondary_secret: _secret, secondary_passphrase: _passphrase, ...primary } = options;
+  // Signer setup reads secondary identity metadata as a requested read identity.
+  if (primary.localSigner?.secondary === undefined) return primary;
+  const { secondary: _identity, ...localSigner } = primary.localSigner;
+  return { ...primary, localSigner };
+};
+
+/** A bypassed read key's egress, kept for the account's unsigned public GETs only. */
+const publicReadOptions = (options: ExchangeOptions): ExchangeOptions | undefined =>
+  SECONDARY_READ_KEYS_ENABLED || !options.secondaryProxyUrl
+    ? undefined
+    : { ...options, secondaryProxyUrl: undefined, overrideProxyUrl: options.secondaryProxyUrl };
+
 export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: ExchangeName): void => {
+  options = withSecondaryReadKeyPolicy(options);
   if (
     options.secondary_key === undefined &&
     options.secondary_secret === undefined &&
@@ -271,6 +291,7 @@ export const resolveEngineRoutingPlan = (
   options: ExchangeOptions,
   baseURL: string,
 ): EngineRoutingPlan => {
+  options = withSecondaryReadKeyPolicy(options);
   assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
   if (provider !== directTransport && provider !== tealstreetTransport) {
@@ -312,6 +333,8 @@ export const resolveEngineRoutingPlan = (
   // A signed read never goes to the public proxy (publicProxyGuard): the native host
   // gets no read route there, so its secondary reads fail closed before I/O.
   const readHttp = readPlan && readPlan.http.prefix !== provider.publicCorsProxy() ? readPlan.http : undefined;
+  const publicReadOnly = publicReadOptions(options);
+  const publicReadPlan = publicReadOnly && resolveEngineRoutingPlan(exchange, publicReadOnly, baseURL);
   const productRoutes = publicWsRoutes(exchange, options, provider);
   const privateRoutes = privateWsRoutes(routing);
   return {
@@ -330,9 +353,15 @@ export const resolveEngineRoutingPlan = (
     ...(readPlan && readHttp
       ? {
           readHeader: secondaryReadHeaders[exchange],
-          readPublic: !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange),
+          readPublic: !hasOwnPublicReadRoute(exchange),
           readHttp,
           ...(exchange === 'binancespot' && { readPublicHttp: readPlan.publicHttp }),
+        }
+      : {}),
+    ...(publicReadPlan && publicReadEligible(exchange)
+      ? {
+          publicReadHttp:
+            exchange === 'binancespot' ? (publicReadPlan.publicHttp ?? publicReadPlan.http) : publicReadPlan.http,
         }
       : {}),
     ...(exchange.startsWith('binance') ? { publicHeader: 'X-MBX-APIKEY', publicHttp: http('public') } : {}),
@@ -461,6 +490,17 @@ const PROXY_AUTHORIZATION_MISSING = 'Tealstreet proxy authorization missing';
 // Hyperliquid's public API is CORS-open. Its account traffic takes the tunnel,
 // but market data must not wait on it: the TS adapter read it from a public-only instance.
 const DIRECT_PUBLIC_READS: ReadonlySet<ExchangeName> = new Set(['hyperliquid', 'hyperliquidspot']);
+
+/** Venues whose public reads may take a bypassed read key's egress; the rest keep their own route. */
+/** Binance and AsterDEX public reads keep their own route, never a read key's egress. */
+const hasOwnPublicReadRoute = (exchange: ExchangeName): boolean =>
+  ['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange);
+
+const publicReadEligible = (exchange: ExchangeName): boolean =>
+  !DIRECT_PUBLIC_READS.has(exchange) && !hasOwnPublicReadRoute(exchange);
+
+/** The one method read routing reads: only a GET may take a read or public-read egress. */
+const isGet = (method: string): boolean => method.toUpperCase() === 'GET';
 
 /** REST left (or could not leave) an unreachable tunnel for the HTTP proxy; once per account and outage. */
 export interface TunnelProxyFallbackNotice {
@@ -1170,6 +1210,7 @@ export const createEngineTransport = (
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
   onHttpTiming?: (event: EngineEvent) => void,
 ): EngineTransport => {
+  options = withSecondaryReadKeyPolicy(options);
   assertEngineAccountRouting(options, exchange);
   const infoFacts =
     exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidStartupFacts() : undefined;
@@ -1297,11 +1338,12 @@ export const createEngineTransport = (
         infoFacts,
       )
     : undefined;
-  const readOptions = credentials?.hasSecondary
-    ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
-    : options.secondary_key
-      ? secondaryReadOptions(options, provider)
-      : undefined;
+  const readOptions =
+    SECONDARY_READ_KEYS_ENABLED && credentials?.hasSecondary
+      ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
+      : options.secondary_key
+        ? secondaryReadOptions(options, provider)
+        : undefined;
   const readHttp = readOptions
     ? httpTransport(
         exchange,
@@ -1309,6 +1351,21 @@ export const createEngineTransport = (
         transport,
         provider,
         resolved(exchange, readOptions, provider).restRouting,
+        undefined,
+        proxyAuthorization,
+        onTunnelProxyFallback,
+        onBybitPublicRateLimit,
+        infoFacts,
+      )
+    : undefined;
+  const publicReadOnly = publicReadOptions(options);
+  const publicReadHttp = publicReadOnly
+    ? httpTransport(
+        exchange,
+        publicReadOnly,
+        transport,
+        provider,
+        resolved(exchange, publicReadOnly, provider).restRouting,
         undefined,
         proxyAuthorization,
         onTunnelProxyFallback,
@@ -1325,6 +1382,7 @@ export const createEngineTransport = (
       directHttp.invalidateCatalogue();
       publicCorsHttp?.invalidateCatalogue();
       readHttp?.invalidateCatalogue();
+      publicReadHttp?.invalidateCatalogue();
     },
     httpMode: http.mode,
     reconnectDiagnostics,
@@ -1361,7 +1419,9 @@ export const createEngineTransport = (
                       readHttp &&
                       !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
                     ? readHttp
-                    : http;
+                    : intent === 'public' && publicReadHttp && isGet(packet.method) && publicReadEligible(exchange)
+                      ? publicReadHttp
+                      : http;
       if (!selected) throw new HttpPreparationError('unsupported');
       return selected.prepareHttp({ ...packet, route, intent });
     },
@@ -1376,7 +1436,7 @@ export const createEngineTransport = (
           ? publicCorsHttp.request(nativeRequest)
           : Promise.reject(new Error('Public CORS request routing is not configured'));
       return readHttp &&
-        request.method.toUpperCase() === 'GET' &&
+        isGet(request.method) &&
         (!['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange) ||
           hasHeader(request.headers, secondaryReadHeaders[exchange]!))
         ? readHttp.request(nativeRequest)
@@ -1385,6 +1445,7 @@ export const createEngineTransport = (
     dispose: () => {
       http.dispose();
       readHttp?.dispose();
+      publicReadHttp?.dispose();
       directHttp.dispose();
       publicCorsHttp?.dispose();
       transport.dispose?.();

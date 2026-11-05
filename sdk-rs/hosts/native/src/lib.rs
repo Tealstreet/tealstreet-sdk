@@ -546,9 +546,11 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     url,
                     headers,
                     channel,
+                    public_topics,
                     context,
                 } => {
-                    self.socket_health.connecting(socket, channel.clone());
+                    self.socket_health
+                        .connecting(socket, channel.clone(), public_topics);
                     let outgoing = self.transport.connect_encoding(
                         binary,
                         socket,
