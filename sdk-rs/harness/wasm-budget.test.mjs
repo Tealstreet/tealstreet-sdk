@@ -233,7 +233,6 @@ test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom
 
 test('#3018 after merging d171fbb0e31 (run 41893192741 at b94d76fa368) retains the ruled headroom', () => {
   for (const [venue, measured, cap] of [
-    ['asterdex', 2_125_918, 2_137_088],
     ['bingx', 2_026_253, 2_036_736],
     ['mexc', 1_743_880, 1_755_136],
     ['orderly', 1_721_849, 1_732_608],
@@ -275,6 +274,15 @@ test('#3106 critical reads (run 42097859473) retain measured headroom and equal 
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+});
+
+test('#3118 Aster protection guard (run 42112075305) retains measured headroom', () => {
+  const [venue, measured, cap] = ['asterdex', 2_139_837, 2_150_400];
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
 
 test('#3114 cold-path sharing (run 42104530272) retains Hyperliquid headroom and siblings match', () => {

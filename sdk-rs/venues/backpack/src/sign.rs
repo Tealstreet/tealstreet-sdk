@@ -1,5 +1,6 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use safe_cex_crypto::ed25519;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url;
 use std::collections::BTreeMap;
 
@@ -216,7 +217,7 @@ pub fn query(params: &Params) -> String {
         .iter()
         .map(|(k, v)| format!("{k}={}", url::encode_component(v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 
 pub fn payload(instruction: &str, rows: &[Params], now: f64, window: u32) -> String {
@@ -235,7 +236,7 @@ pub fn payload(instruction: &str, rows: &[Params], now: f64, window: u32) -> Str
             )
         })
         .collect::<Vec<_>>()
-        .join("&");
+        .join_with("&");
     text.push_str(&format!("&timestamp={now:.0}&window={window}"));
     text
 }

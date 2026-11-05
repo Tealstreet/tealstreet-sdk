@@ -20,6 +20,7 @@ use safe_cex_engine::request_context::{
     Context, Operation, Owner, Policy, RejectionReports, RetryPolicy, UnprovenEvidence,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -262,7 +263,7 @@ impl Params {
                 )
             })
             .collect();
-        format!("{{{}}}", fields.join(","))
+        format!("{{{}}}", fields.join_with(","))
     }
 }
 
@@ -1438,7 +1439,8 @@ impl BinanceFutures {
                         receipts: lot.iter().flat_map(identities).collect(),
                         method: Method::Post,
                         path,
-                        query: Query::new().str("batchOrders", &format!("[{}]", batch.join(","))),
+                        query: Query::new()
+                            .str("batchOrders", &format!("[{}]", batch.join_with(","))),
                         call: Call::PlaceBatch {
                             expected: lot.len(),
                             strict: self.is_inverse(),
@@ -1583,7 +1585,7 @@ impl BinanceFutures {
                 // LIST<LONG>: ids stay digits so no precision is lost.
                 let query = Query::new()
                     .str("symbol", &symbol)
-                    .str("orderIdList", &format!("[{}]", lot.join(",")));
+                    .str("orderIdList", &format!("[{}]", lot.join_with(",")));
                 job.steps.push_back(vec![Planned {
                     receipts: Vec::new(),
                     method: Method::Delete,

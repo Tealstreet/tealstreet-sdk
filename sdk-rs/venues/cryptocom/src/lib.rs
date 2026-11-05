@@ -496,7 +496,7 @@ impl Cryptocom {
                 }
                 let mut candles = Vec::new();
                 json::each::<CandleRow>(message.data.get(), |row| candles.push(row.candle()))?;
-                candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut candles);
                 // A subscription's first answer carries history: only its newest row is live.
                 if self.candles_live.insert(message.subscription.to_owned()) {
                     let newest = candles.pop();

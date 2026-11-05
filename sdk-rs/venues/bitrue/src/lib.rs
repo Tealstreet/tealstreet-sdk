@@ -848,7 +848,7 @@ impl Bitrue {
                                             && to.is_none_or(|t| c.timestamp * 1000.0 <= t)
                                     })
                                     .collect();
-                                result.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                                safe_cex_engine::model::sort_candles_by_time(&mut result);
                                 result.dedup_by(|a, b| a.timestamp == b.timestamp);
                                 if result.len() > limit as usize {
                                     result.drain(..result.len() - limit as usize);

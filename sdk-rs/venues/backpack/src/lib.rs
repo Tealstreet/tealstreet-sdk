@@ -14,6 +14,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
@@ -283,7 +284,7 @@ impl Backpack {
                         Pending::Daily { .. } => "ticker",
                         _ => "mark price",
                     },
-                    skipped.join(", ")
+                    skipped.join_with(", ")
                 ),
             );
         }

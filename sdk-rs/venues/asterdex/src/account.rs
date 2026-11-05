@@ -146,6 +146,16 @@ pub(crate) struct OrderRow<'a> {
     #[serde(default, borrow)]
     pub position_side: Option<Cow<'a, str>>,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtectionFlags {
+    #[serde(alias = "pP")]
+    price_protect: Option<bool>,
+    #[serde(alias = "R")]
+    reduce_only: Option<bool>,
+    #[serde(alias = "cp")]
+    close_position: Option<bool>,
+}
 fn new_status<'a>() -> Cow<'a, str> {
     Cow::Borrowed("NEW")
 }
@@ -426,6 +436,92 @@ impl AsterDex {
     pub(crate) fn position_mode_pending(&self) -> bool {
         self.account.mode == ModeLoad::Loading
     }
+    fn remember_protection(
+        &mut self,
+        order: &Order,
+        row: &OpenOrder<'_>,
+        flags: Option<ProtectionFlags>,
+    ) {
+        if order.status != OrderStatus::Open
+            || !matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+        {
+            self.trading.protections.remove(&order.id);
+            return;
+        }
+        let reference = match row.working_type.as_deref() {
+            Some("MARK_PRICE") => StopTriggerType::MarkPrice,
+            Some("CONTRACT_PRICE") => StopTriggerType::LastPrice,
+            _ => {
+                self.trading.protections.remove(&order.id);
+                return;
+            }
+        };
+        let Some(flags) = flags.filter(|f| f.reduce_only.is_some() && f.close_position.is_some())
+        else {
+            self.trading.protections.remove(&order.id);
+            return;
+        };
+        // The documented WS delta omits priceProtect; retain only this same
+        // native order's previously observed flag, never infer a default.
+        let price_protect = flags.price_protect.or_else(|| {
+            self.trading
+                .protections
+                .get(&order.id)
+                .filter(|prior| {
+                    let mut prior_order = prior.order.clone();
+                    prior_order.last_update = order.last_update;
+                    prior_order == *order
+                })
+                .map(|prior| prior.price_protect)
+        });
+        let Some(price_protect) = price_protect else {
+            self.trading.protections.remove(&order.id);
+            return;
+        };
+        let Some(stop) = row
+            .stop_price
+            .as_deref()
+            .filter(|p| parse_decimal(p).is_some_and(|p| p > 0.0))
+        else {
+            return;
+        };
+        let mut query = Query::new()
+            .str("symbol", &row.symbol)
+            .str("side", &row.side)
+            .str("type", &row.kind)
+            .opt_str("positionSide", row.position_side.as_deref())
+            .str("stopPrice", stop)
+            .str("workingType", row.working_type.as_deref().unwrap())
+            .str("priceProtect", if price_protect { "TRUE" } else { "FALSE" })
+            .opt_str("newClientOrderId", row.client_order_id.as_deref());
+        if row.close_position {
+            query = query.str("closePosition", "true");
+        } else {
+            query = query.str("quantity", &row.orig_qty);
+            if row.position_side.as_deref().is_none_or(|s| s == "BOTH") {
+                query = query.str("reduceOnly", if row.reduce_only { "true" } else { "false" });
+            }
+        }
+        if matches!(&*row.kind, "STOP" | "TAKE_PROFIT") {
+            query = query
+                .str("price", &row.price)
+                .opt_str("timeInForce", row.time_in_force.as_deref());
+        }
+        if self.trading.protections.len() < 10_000
+            || self.trading.protections.contains_key(&order.id)
+        {
+            self.trading.protections.insert(
+                order.id.clone(),
+                crate::trading::NativeProtection {
+                    order: order.clone(),
+                    query,
+                    reference,
+                    price_protect,
+                },
+            );
+        }
+    }
+
     pub(crate) fn order_position_side(&self, id: &str) -> Option<PositionSide> {
         self.account.order_position_sides.get(id).copied()
     }
@@ -614,6 +710,11 @@ impl AsterDex {
                                 .order_position_sides
                                 .insert(order.id.clone(), side);
                         }
+                        self.remember_protection(
+                            &order,
+                            &row.row,
+                            serde_json::from_str::<ProtectionFlags>(item).ok(),
+                        );
                         rows.push(order);
                     }
                     None => match serde_json::from_str::<Identity>(item) {
@@ -1052,6 +1153,10 @@ impl AsterDex {
                             }
                             self.account.orders_seeded = true;
                         }
+                        self.trading.protections.retain(|id, _| {
+                            rows.iter()
+                                .any(|o| &o.id == id && o.status == OrderStatus::Open)
+                        });
                         cx.store.set_orders(rows);
                         cx.orders_reconciled_except(&unproven, u64::MAX);
                     }
@@ -1458,6 +1563,33 @@ impl AsterDex {
             stop_loss: None,
             extra: None,
         };
+        #[derive(Deserialize)]
+        struct ProtectionEvent {
+            o: ProtectionFlags,
+        }
+        let flags = serde_json::from_str::<ProtectionEvent>(text)
+            .ok()
+            .map(|e| e.o);
+        self.remember_protection(
+            &order,
+            &OpenOrder {
+                order_id: o.i,
+                symbol: o.s.clone(),
+                kind: o.ot.clone().or(o.o.clone()).unwrap(),
+                side: o.side.clone(),
+                price: o.p.clone(),
+                stop_price: o.sp.clone(),
+                orig_qty: o.q.clone(),
+                executed_qty: o.z.clone(),
+                reduce_only: o.reduce_only,
+                close_position: o.close_position,
+                working_type: o.wt.clone(),
+                time_in_force: o.f.clone(),
+                client_order_id: o.c.clone(),
+                position_side: o.ps.clone(),
+            },
+            flags,
+        );
         if !self.account.terminal.contains_key(&id) || status != OrderStatus::Open {
             cx.store.upsert_order(order.clone());
         }

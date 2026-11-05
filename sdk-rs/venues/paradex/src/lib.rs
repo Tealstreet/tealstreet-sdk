@@ -11,6 +11,7 @@ mod trading;
 mod venue_state;
 mod wire;
 
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue, book::Book};
 
 #[derive(Clone, Default)]
@@ -546,7 +547,7 @@ fn success(response: Response<'_>) -> Result<(), String> {
         return Err(if details.is_empty() {
             context
         } else {
-            let detail: String = details.join(": ").chars().take(512).collect();
+            let detail: String = details.join_with(": ").chars().take(512).collect();
             format!("{context}: {detail}")
         });
     }

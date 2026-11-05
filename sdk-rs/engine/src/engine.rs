@@ -2326,8 +2326,8 @@ struct CoreIo<'a> {
 }
 
 /// The venue-independent view of `Cx<P>`; see `CoreIo`.
-struct CoreCx<'a> {
-    now: f64,
+pub(crate) struct CoreCx<'a> {
+    pub(crate) now: f64,
     #[cfg(feature = "metadata-freshness")]
     store: &'a mut Store,
     io: CoreIo<'a>,
@@ -2345,7 +2345,7 @@ impl<P> Io<P> {
 
 impl<P> Cx<'_, P> {
     #[inline]
-    fn core(&mut self) -> CoreCx<'_> {
+    pub(crate) fn core(&mut self) -> CoreCx<'_> {
         CoreCx {
             now: self.now,
             #[cfg(feature = "metadata-freshness")]
@@ -2485,14 +2485,7 @@ impl<P> Io<P> {
 
     /// Splits the poll registry from the timer state it writes to.
     fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
-        (
-            &mut self.core.polls,
-            TimerSink {
-                next_id: &mut self.core.next_id,
-                timers: &mut self.core.timers,
-                actions: &mut self.core.actions,
-            },
-        )
+        poll_timers(&mut self.core)
     }
 }
 
@@ -2689,10 +2682,7 @@ impl<P> Cx<'_, P> {
 
     /// `SocketId(0)` stands for a connect the engine suppressed.
     fn inert_socket(&self, socket: SocketId) -> bool {
-        socket.0 == 0
-            && (self.io.core.public_feed_policy != PublicFeedPolicy::Direct
-                || self.io.core.signing_latch.roles != 0
-                || self.io.core.frame_fed)
+        self.core_ref().inert_socket(socket)
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
@@ -2789,21 +2779,7 @@ impl<P> Cx<'_, P> {
     /// use this after revoking the epoch, before native invalidation; public
     /// close can then enter retirement without recursively invoking itself.
     fn close_socket_transport(&mut self, socket: SocketId) {
-        if self.inert_socket(socket) {
-            return;
-        }
-        self.io.opaque_entry_activity();
-        for timer in self.io.core.signing.close_socket(socket) {
-            if timer.0 != 0 {
-                self.io.core.actions.push(Action::ClearTimer { timer });
-            }
-        }
-        // The host drops engine-initiated closes without reporting them back.
-        // They are deliberate, so they never make the next connect a reconnect.
-        if self.io.core.sockets.closed(socket, false) {
-            self.io.core.health.count(log_code::WS_CLOSED);
-        }
-        self.io.core.actions.push(Action::WsClose { socket });
+        self.core().close_socket_transport(socket)
     }
 
     /// Issue a request; `pending` comes back with its response.
@@ -2987,12 +2963,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
-        self.io
-            .core
-            .entropy
-            .as_ref()
-            .ok_or("Engine entropy providers are required")?
-            .identity(bytes)
+        self.core_ref().fill_entropy(bytes)
     }
     pub fn fill_signing_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
         self.io
@@ -3007,22 +2978,7 @@ impl<P> Cx<'_, P> {
     /// clients do not retry in lockstep. Apply rate-limit minimums afterwards.
     /// Non-finite and non-positive delays pass through unchanged.
     pub fn jittered(&mut self, delay_ms: f64) -> f64 {
-        if !(delay_ms.is_finite() && delay_ms > 0.0) {
-            return delay_ms;
-        }
-        let mut bytes = [0; 8];
-        if self.fill_entropy(&mut bytes).is_err() {
-            return delay_ms;
-        }
-        crate::backoff::jitter(delay_ms, u64::from_le_bytes(bytes))
-    }
-
-    pub(crate) fn note_socket_backoff(&mut self, timer: TimerId) {
-        let core = &mut self.io.core;
-        let timers = &core.timers;
-        core.socket_backoffs
-            .retain(|waiting| timers.contains_key(waiting));
-        core.socket_backoffs.push(timer);
+        self.core().jittered(delay_ms)
     }
 
     /// The host rearms a timer id in place, so a due backoff fires as usual.
@@ -3037,13 +2993,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
-        let timer = TimerId(self.io.next());
-        self.io.core.timers.insert(timer, ());
-        self.io.core.actions.push(Action::SetTimer {
-            timer,
-            at_ms: self.now + delay_ms,
-        });
-        timer
+        self.core().set_timer(delay_ms)
     }
 
     /// Register one periodic-poll wakeup. The configured positive interval
@@ -3073,10 +3023,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn clear_timer(&mut self, timer: TimerId) {
-        let (polls, mut sink) = self.io.polls();
-        if !polls.clear(timer, &mut sink) {
-            sink.clear(timer);
-        }
+        self.core().clear_timer(timer)
     }
 
     pub fn book_changed(&mut self, symbol: &str) {
@@ -7679,6 +7626,92 @@ impl<V: Venue> Engine<V> {
         self.io.core.candles.clear();
         self.io.core.frame = frame;
         (!empty).then_some(self.io.core.frame.as_slice())
+    }
+}
+
+impl CoreRef<'_> {
+    fn inert_socket(&self, socket: SocketId) -> bool {
+        socket.0 == 0
+            && (self.io.core.public_feed_policy != PublicFeedPolicy::Direct
+                || self.io.core.signing_latch.roles != 0
+                || self.io.core.frame_fed)
+    }
+}
+
+impl CoreCx<'_> {
+    pub(crate) fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.core_ref().fill_entropy(bytes)
+    }
+    pub(crate) fn jittered(&mut self, delay_ms: f64) -> f64 {
+        if !(delay_ms.is_finite() && delay_ms > 0.0) {
+            return delay_ms;
+        }
+        let mut bytes = [0; 8];
+        if self.fill_entropy(&mut bytes).is_err() {
+            return delay_ms;
+        }
+        crate::backoff::jitter(delay_ms, u64::from_le_bytes(bytes))
+    }
+    pub(crate) fn note_socket_backoff(&mut self, timer: TimerId) {
+        let core = &mut self.io.core;
+        let timers = &core.timers;
+        core.socket_backoffs
+            .retain(|waiting| timers.contains_key(waiting));
+        core.socket_backoffs.push(timer);
+    }
+    pub(crate) fn set_timer(&mut self, delay_ms: f64) -> TimerId {
+        let timer = TimerId(self.io.next());
+        self.io.core.timers.insert(timer, ());
+        self.io.core.actions.push(Action::SetTimer {
+            timer,
+            at_ms: self.now + delay_ms,
+        });
+        timer
+    }
+    pub(crate) fn clear_timer(&mut self, timer: TimerId) {
+        let (polls, mut sink) = poll_timers(self.io.core);
+        if !polls.clear(timer, &mut sink) {
+            sink.clear(timer);
+        }
+    }
+    pub(crate) fn close_socket_transport(&mut self, socket: SocketId) {
+        if self.core_ref().inert_socket(socket) {
+            return;
+        }
+        self.io.opaque_entry_activity();
+        for timer in self.io.core.signing.close_socket(socket) {
+            if timer.0 != 0 {
+                self.io.core.actions.push(Action::ClearTimer { timer });
+            }
+        }
+        // The host drops engine-initiated closes without reporting them back.
+        // They are deliberate, so they never make the next connect a reconnect.
+        if self.io.core.sockets.closed(socket, false) {
+            self.io.core.health.count(log_code::WS_CLOSED);
+        }
+        self.io.core.actions.push(Action::WsClose { socket });
+    }
+}
+
+fn poll_timers(core: &mut IoCore) -> (&mut Polls, TimerSink<'_>) {
+    (
+        &mut core.polls,
+        TimerSink {
+            next_id: &mut core.next_id,
+            timers: &mut core.timers,
+            actions: &mut core.actions,
+        },
+    )
+}
+
+impl CoreRef<'_> {
+    fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.io
+            .core
+            .entropy
+            .as_ref()
+            .ok_or("Engine entropy providers are required")?
+            .identity(bytes)
     }
 }
 

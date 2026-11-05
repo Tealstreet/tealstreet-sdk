@@ -147,11 +147,12 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #3094 run 42062090938 measured bybit 2,214,254 B; CI size plus 10 KiB rounded up to the KiB.
 // #3106 run 42097859473, job 127493304972: hyperliquid 2,108,435 B at 8d94727188a.
 // CI size plus 10 KiB rounded up to the KiB; hyperliquidspot shares the family cap.
+// #3118 run 42112075305 measured asterdex 2,139,837 B; CI size plus 10 KiB, rounded up to the KiB.
 // #3114 run 42104530272 measured hyperliquid 2,106,596 B: a single-venue family pays the outlined
 // shared-ticker/orders-held calls without the combined dedup. CI size plus 10 KiB rounded up; siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
-  asterdex: 2_137_088,
+  asterdex: 2_150_400,
   backpack: 1_887_232,
   binance: 2_206_720,
   bingx: 2_036_736,
