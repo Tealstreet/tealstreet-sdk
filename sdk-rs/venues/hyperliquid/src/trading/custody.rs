@@ -31,6 +31,12 @@ pub(super) struct Custody {
     ready: bool,
     wait: Option<ConditionWait>,
 }
+impl Custody {
+    pub(super) fn owner(&self) -> safe_cex_engine::request_context::Owner {
+        self.preflight.owner()
+    }
+}
+
 impl Hyperliquid {
     pub(crate) fn sealed_agent(&self) -> Option<String> {
         let (_, identity) = self.credentials.select(CredentialRole::Mutation).ok()?;
@@ -300,8 +306,14 @@ impl Hyperliquid {
         custody.context = Some(context.clone());
         let committed_effect = effect.clone();
         let command = job.command;
+        let cancel_deadline = if matches!(&effect, Effect::Cancel(_)) {
+            job.amend_deadline
+        } else {
+            None
+        };
         self.publish_trade_receipts(cx, command, &committed_effect);
         let pending = Pending::Trade(Request {
+            cancel_deadline,
             command,
             effect,
             plan,
