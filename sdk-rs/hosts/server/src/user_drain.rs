@@ -2,13 +2,14 @@
 use crate::{accounts::Account, algos::Running};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
 
 pub const DEFAULT_IDLE_RELEASE_TTL_MS: u64 = 20_000;
+pub(crate) const MAX_IDLE_REQUESTS: usize = 64;
 
 pub const DEFAULT_CAP_MS: u64 = 1_800_000;
 pub const MAX_CAP_MS: u64 = 86_400_000;
@@ -53,6 +54,34 @@ struct IdleRelease {
     checked_at: u64,
     expires_at: u64,
     deadline: Instant,
+    ttl: Duration,
+}
+
+struct SpentRequest {
+    id: String,
+    forget_at: Instant,
+}
+
+#[derive(Debug)]
+pub(crate) enum IdleReleaseError {
+    Refused(Value),
+    Capacity,
+}
+
+fn prune_spent(state: &mut Activity) {
+    let now = Instant::now();
+    state.spent_requests.retain(|spent| spent.forget_at > now);
+}
+
+fn retire_idle(state: &mut Activity) {
+    prune_spent(state);
+    if let Some(idle) = state.drain.as_mut().and_then(|drain| drain.idle.take()) {
+        // Issuance reserves this slot; unexpired tombstones are never evicted.
+        state.spent_requests.push_back(SpentRequest {
+            id: idle.request_id,
+            forget_at: Instant::now() + idle.ttl * 2,
+        });
+    }
 }
 
 fn expire_idle(state: &mut Activity) {
@@ -65,6 +94,7 @@ fn expire_idle(state: &mut Activity) {
                 Instant::now() >= idle.deadline || crate::accounts::now_ms() >= idle.expires_at
             })
     {
+        retire_idle(state);
         state.drain = None;
     }
 }
@@ -74,6 +104,7 @@ pub(crate) struct Activity {
     drain: Option<Drain>,
     sockets: usize,
     tracked: Vec<Tracked>,
+    spent_requests: VecDeque<SpentRequest>,
 }
 
 pub struct User {
@@ -193,8 +224,10 @@ impl Users {
             if Arc::strong_count(entry) != 1 {
                 return true;
             }
-            let state = entry.state.lock().unwrap();
-            state.drain.is_some()
+            let mut state = entry.state.lock().unwrap();
+            prune_spent(&mut state);
+            !state.spent_requests.is_empty()
+                || state.drain.is_some()
                 || state.sockets > 0
                 || state.tracked.iter().any(|a| a.running.strong_count() > 0)
         });
@@ -267,21 +300,29 @@ impl Users {
         user: &str,
         request: &str,
         ttl: Duration,
-    ) -> Result<Value, Value> {
+    ) -> Result<Value, IdleReleaseError> {
         let entry = self.get(user);
         let mut state = entry.state.lock().unwrap();
         expire_idle(&mut state);
+        prune_spent(&mut state);
         if let Some(drain) = &state.drain
             && let Some(idle) = &drain.idle
             && idle.request_id == request
         {
             return Ok(idle_proof(user, drain, idle));
         }
-        let reason = idle_refusal(&state);
+        let reason = if state.spent_requests.iter().any(|spent| spent.id == request) {
+            Some("request-spent")
+        } else {
+            idle_refusal(&state)
+        };
         if let Some(reason) = reason {
-            return Err(
+            return Err(IdleReleaseError::Refused(
                 json!({"released":false,"reason":reason,"checkedAt":crate::accounts::now_ms()}),
-            );
+            ));
+        }
+        if state.spent_requests.len() >= MAX_IDLE_REQUESTS {
+            return Err(IdleReleaseError::Capacity);
         }
         let checked_at = crate::accounts::now_ms();
         let deadline = Instant::now() + ttl;
@@ -298,6 +339,7 @@ impl Users {
                 expires_at: checked_at
                     + u64::try_from(ttl.as_millis()).expect("validated idle TTL"),
                 deadline,
+                ttl,
             }),
         };
         let proof = idle_proof(user, &drain, drain.idle.as_ref().unwrap());
@@ -322,7 +364,9 @@ impl Users {
         {
             let mut state = entry.state.lock().unwrap();
             expire_idle(&mut state);
-            let drain = state.drain.get_or_insert_with(|| Drain {
+            // Explicit operator takeover retains the request history but never expires.
+            retire_idle(&mut state);
+            state.drain.get_or_insert_with(|| Drain {
                 id: crate::accounts::resume_id(),
                 started: Instant::now(),
                 cap_ms,
@@ -331,8 +375,6 @@ impl Users {
                 forcing: false,
                 idle: None,
             });
-            // An explicit operator start takes over permanently, including an idle lease.
-            drain.idle = None;
         }
         self.status(user)
     }
@@ -365,6 +407,7 @@ impl Users {
         {
             return false;
         }
+        retire_idle(&mut state);
         state.drain = None;
         true
     }
@@ -379,7 +422,7 @@ impl Users {
         }
         drain.capped = false;
         drain.forcing = true;
-        drain.idle = None;
+        retire_idle(&mut state);
         Some(
             state
                 .tracked
@@ -512,6 +555,15 @@ pub const FORCE_DEADLINE: Duration = Duration::from_secs(25);
 mod tests {
     use super::*;
 
+    impl IdleReleaseError {
+        fn refusal(self) -> Value {
+            match self {
+                Self::Refused(body) => body,
+                Self::Capacity => panic!("expected a refusal, not request history capacity"),
+            }
+        }
+    }
+
     fn tracked(users: &Users, user: &str) -> Arc<Running> {
         let running = Arc::new(Running::default());
         users.track(user, "acct", &running, Weak::new());
@@ -545,7 +597,10 @@ mod tests {
             proof,
             "a retry must not renew either timestamp"
         );
-        let refusal = users.idle_release("u", OTHER_REQUEST, TTL).unwrap_err();
+        let refusal = users
+            .idle_release("u", OTHER_REQUEST, TTL)
+            .unwrap_err()
+            .refusal();
         assert_eq!(refusal["reason"], "already-draining");
         assert_eq!(users.status("u")["drainId"], proof["drainId"]);
         assert!(!users.cancel("u", "wrong-id"));
@@ -575,7 +630,10 @@ mod tests {
             ("operator", "already-draining"),
         ] {
             let before = users.status(user);
-            let refusal = users.idle_release(user, REQUEST, TTL).unwrap_err();
+            let refusal = users
+                .idle_release(user, REQUEST, TTL)
+                .unwrap_err()
+                .refusal();
             assert_eq!(refusal["released"], false);
             assert_eq!(refusal["reason"], reason);
             assert_eq!(refusal.as_object().unwrap().len(), 3);
@@ -613,7 +671,7 @@ mod tests {
         running.refresh(&[], &[], 1);
         drop(admission);
         assert_eq!(
-            contender.join().unwrap().unwrap_err()["reason"],
+            contender.join().unwrap().unwrap_err().refusal()["reason"],
             "pending-starts"
         );
         assert!(!entry.latched());
@@ -647,7 +705,9 @@ mod tests {
             let socket = socket.join().unwrap();
             match (proof, socket) {
                 (Ok(proof), Err(())) => assert_eq!(proof["released"], true),
-                (Err(refusal), Ok(_socket)) => assert_eq!(refusal["reason"], "live-socket"),
+                (Err(refusal), Ok(_socket)) => {
+                    assert_eq!(refusal.refusal()["reason"], "live-socket")
+                }
                 _ => {
                     panic!("socket admission and release must choose exactly one winner, race {n}")
                 }
@@ -706,8 +766,119 @@ mod tests {
         assert_eq!(users.status("operator")["drainId"], operator["drainId"]);
         assert_eq!(users.status("permanent")["drainId"], permanent["drainId"]);
         assert!(users.get("expires").admit().is_ok());
-        let next = users.idle_release("expires", REQUEST, TTL).unwrap();
-        assert_ne!(next["drainId"], proof["drainId"]);
+        drop(entry);
+        // Pruning another user must not erase this user's spent request history.
+        users.get("another-user");
+        let spent = users
+            .idle_release("expires", REQUEST, TTL)
+            .unwrap_err()
+            .refusal();
+        assert_eq!(spent["reason"], "request-spent");
+        assert_eq!(users.status("expires")["state"], "off");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_idle_request_cannot_install_a_new_latch_on_a_delayed_duplicate() {
+        let users = Users::default();
+        let original = users.idle_release("u", REQUEST, TTL).unwrap();
+        assert!(users.cancel("u", original["drainId"].as_str().unwrap()));
+        users.get("another-user");
+        let spent = users.idle_release("u", REQUEST, TTL).unwrap_err().refusal();
+        assert_eq!(spent["reason"], "request-spent");
+        assert_eq!(spent.as_object().unwrap().len(), 3);
+        assert_eq!(users.status("u")["state"], "off");
+        assert!(users.get("u").admit().is_ok());
+        let fresh = users.idle_release("u", OTHER_REQUEST, TTL).unwrap();
+        assert_eq!(users.idle_release("u", OTHER_REQUEST, TTL).unwrap(), fresh);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn spent_request_capacity_never_evicts_a_protected_id_and_recovers_after_retention() {
+        let users = Users::default();
+        let request = |n: usize| format!("12345678-1234-4234-8234-{n:012x}");
+        for n in 0..MAX_IDLE_REQUESTS {
+            let proof = users.idle_release("u", &request(n), TTL).unwrap();
+            assert!(users.cancel("u", proof["drainId"].as_str().unwrap()));
+        }
+        assert_eq!(
+            users.get("u").state.lock().unwrap().spent_requests.len(),
+            MAX_IDLE_REQUESTS
+        );
+        assert!(matches!(
+            users.idle_release("u", REQUEST, TTL),
+            Err(IdleReleaseError::Capacity)
+        ));
+        assert_eq!(users.status("u")["state"], "off");
+        assert!(users.get("u").admit().is_ok());
+        assert!(users.idle_release("other-user", REQUEST, TTL).is_ok());
+        tokio::time::advance(TTL * 2 - Duration::from_millis(1)).await;
+        for n in [0, MAX_IDLE_REQUESTS - 1] {
+            assert_eq!(
+                users
+                    .idle_release("u", &request(n), TTL)
+                    .unwrap_err()
+                    .refusal()["reason"],
+                "request-spent"
+            );
+        }
+        assert!(matches!(
+            users.idle_release("u", REQUEST, TTL),
+            Err(IdleReleaseError::Capacity)
+        ));
+        tokio::time::advance(Duration::from_millis(2)).await;
+        users.get("prune-after-retention");
+        assert!(
+            users.idle_release("u", REQUEST, TTL).is_ok(),
+            "expired history must not exhaust capacity forever"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expiry_retains_spent_ids_for_twice_the_original_ttl_from_retirement() {
+        let users = Users::default();
+        let original_ttl = TTL * 2;
+        let proof = users.idle_release("u", REQUEST, original_ttl).unwrap();
+        tokio::time::advance(original_ttl).await;
+        // Admission performs expiry even if the timer has not yet run.
+        assert!(users.get("u").admit().is_ok());
+        tokio::time::advance(original_ttl * 2 - Duration::from_millis(1)).await;
+        users.get("another-user");
+        assert_eq!(
+            users
+                .idle_release("u", REQUEST, Duration::from_millis(1))
+                .unwrap_err()
+                .refusal()["reason"],
+            "request-spent"
+        );
+        assert_eq!(users.status("u")["state"], "off");
+        assert_eq!(
+            users.proof("u", proof["drainId"].as_str().unwrap())["released"],
+            false
+        );
+        tokio::time::advance(Duration::from_millis(2)).await;
+        assert!(users.idle_release("u", OTHER_REQUEST, TTL).is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn operator_takeover_and_force_preserve_spent_request_identity() {
+        for force in [false, true] {
+            let users = Users::default();
+            let proof = users.idle_release("u", REQUEST, TTL).unwrap();
+            let id = proof["drainId"].as_str().unwrap();
+            if force {
+                assert!(users.begin_force("u", id).is_some());
+                users.end_force("u", id);
+            } else {
+                assert_eq!(users.start("u", DEFAULT_CAP_MS)["drainId"], id);
+            }
+            assert!(users.cancel("u", id));
+            users.get("another-user");
+            assert_eq!(
+                users.idle_release("u", REQUEST, TTL).unwrap_err().refusal()["reason"],
+                "request-spent"
+            );
+            assert_eq!(users.status("u")["state"], "off");
+        }
     }
 
     #[tokio::test(start_paused = true)]
@@ -745,7 +916,8 @@ mod tests {
                     registry
                         .user_drains
                         .idle_release("u", REQUEST, TTL)
-                        .unwrap_err()["reason"],
+                        .unwrap_err()
+                        .refusal()["reason"],
                     "parked-jobs"
                 );
                 assert_eq!(registry.user_drains.status("u"), before);

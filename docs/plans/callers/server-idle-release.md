@@ -10,7 +10,10 @@ service token to request `{userId,requestId}`, and preserve the same UUID on the
 single timeout retry. Accept proof only with checkedAt within 5 seconds and
 expiresAt at least 5 seconds ahead, and durably commit ownership before the
 5-second expiry margin. Otherwise retain the source owner. Repeated proofs
-retain their original timestamps; they do not extend the lease.
+retain their original timestamps; they do not extend the lease. A spent UUID
+returns 409 `request-spent` without re-latching; use a fresh UUID for a new attempt.
+Protected history lasts at least twice the original TTL after expiry/cancel;
+new attempts at the 64-entry per-user capacity receive 429, without eviction.
 
 Idle release never stops jobs. Operator drain and explicit force remain separate.
 No external store, release/pin, secret, or deployment prerequisite is introduced.

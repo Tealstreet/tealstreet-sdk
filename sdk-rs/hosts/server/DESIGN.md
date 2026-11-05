@@ -204,16 +204,24 @@ it cannot slip between the idle check and latch installation.
 
 Success is 200 `{userTag,drainId,released:true,checkedAt,expiresAt}`. Refusal is 409
 `{released:false,reason,checkedAt}` and changes no admission or job state. The
-closed reasons are `live-socket`, `running-jobs`, `parked-jobs`, `pending-starts`
-and `already-draining`. Paused TWAPs and jobs held by a parked session still
-prevent release. No job is stopped, parked, canceled or replayed by this route.
+closed reasons are `live-socket`, `running-jobs`, `parked-jobs`, `pending-starts`,
+`already-draining` and `request-spent`. Paused TWAPs and jobs held by a parked
+session still prevent release. No job is stopped, parked, canceled or replayed by this route.
 
 Both timestamps are Unix wall-clock milliseconds, captured once with
 `expiresAt = checkedAt + TEALSTREET_IDLE_RELEASE_TTL_MS`. A repeat of the same
 `(userId,requestId)` while the idle latch lives returns the exact original proof,
 including both timestamps; another requestId gets `already-draining`. It never
-renews the lease. The router accepts only a checkedAt within 5 seconds of its
-clock and an expiresAt at least 5 seconds ahead. It must durably commit the new
+renews the lease. Expiry, cancel and operator takeover retain a requestId
+tombstone for at least twice that attempt's original TTL after retirement.
+A spent request returns 409 `request-spent`, with no new latch. History survives
+idle-user pruning. Each user has 64 history slots, reserved at issuance; protected
+IDs are never evicted to admit another attempt. A new attempt at capacity returns
+429 without latching; live retries and spent-ID refusals still work. Expired
+history is reclaimed, without refreshing its retention on a lookup.
+
+The router accepts only a checkedAt within 5 seconds of its clock and an
+expiresAt at least 5 seconds ahead. It must durably commit the new
 owner before expiresAt minus 5 seconds; otherwise abandon the move and stay on
 the owner. On an uncertain timeout, retry once with the same requestId to recover
 the proof, then give up. Expiry bounds an orphaned latch to 20 seconds by default.

@@ -309,7 +309,12 @@ async fn user_idle_release(
         proof.idle_release_ttl,
     ) {
         Ok(proof) => (StatusCode::OK, proof),
-        Err(refusal) => (StatusCode::CONFLICT, refusal),
+        Err(crate::user_drain::IdleReleaseError::Refused(refusal)) => {
+            (StatusCode::CONFLICT, refusal)
+        }
+        Err(crate::user_drain::IdleReleaseError::Capacity) => {
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        }
     };
     let mut response = (status, axum::Json(body)).into_response();
     response
@@ -978,6 +983,13 @@ mod tests {
             .unwrap();
         assert_eq!(cancelled.status(), StatusCode::OK);
         assert!(!registry.user_drains.get("u").latched());
+        let spent = call(request.clone()).await.unwrap();
+        assert_eq!(spent.status(), StatusCode::CONFLICT);
+        let spent: serde_json::Value =
+            serde_json::from_slice(&spent.bytes().await.unwrap()).unwrap();
+        assert_eq!(spent["reason"], "request-spent");
+        assert_eq!(spent.as_object().unwrap().len(), 3);
+        assert!(!registry.user_drains.get("u").latched());
         let (mut live, _) =
             tokio_tungstenite::connect_async(format!("ws://{address}/account?proxyToken={proxy}"))
                 .await
@@ -988,12 +1000,45 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
-        let refused = call(request).await.unwrap();
+        let refused =
+            call(json!({"userId":"u","requestId":"87654321-1234-4234-8234-123456789abc"}))
+                .await
+                .unwrap();
         assert_eq!(refused.status(), StatusCode::CONFLICT);
         let refused: serde_json::Value =
             serde_json::from_slice(&refused.bytes().await.unwrap()).unwrap();
         assert_eq!(refused["reason"], "live-socket");
         assert!(!registry.user_drains.get("u").latched());
+        for n in 0..crate::user_drain::MAX_IDLE_REQUESTS {
+            let request = format!("12345678-1234-4234-8234-{n:012x}");
+            let proof = registry
+                .user_drains
+                .idle_release("capacity", &request, ttl)
+                .unwrap();
+            assert!(
+                registry
+                    .user_drains
+                    .cancel("capacity", proof["drainId"].as_str().unwrap())
+            );
+        }
+        let full =
+            call(json!({"userId":"capacity","requestId":"87654321-1234-4234-8234-123456789abc"}))
+                .await
+                .unwrap();
+        assert_eq!(full.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(!registry.user_drains.get("capacity").latched());
+        let spent =
+            call(json!({"userId":"capacity","requestId":"12345678-1234-4234-8234-000000000000"}))
+                .await
+                .unwrap();
+        assert_eq!(
+            spent.status(),
+            StatusCode::CONFLICT,
+            "a spent ID must still be classified at capacity"
+        );
+        let spent: serde_json::Value =
+            serde_json::from_slice(&spent.bytes().await.unwrap()).unwrap();
+        assert_eq!(spent["reason"], "request-spent");
         server.abort();
     }
 

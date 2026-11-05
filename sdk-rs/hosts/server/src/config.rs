@@ -35,8 +35,9 @@ impl Config {
         )? as u64;
         let idle_release_ttl = Duration::from_millis(idle_ms);
         if crate::accounts::now_ms().checked_add(idle_ms).is_none()
-            || std::time::Instant::now()
-                .checked_add(idle_release_ttl)
+            || idle_release_ttl
+                .checked_mul(2)
+                .and_then(|retention| std::time::Instant::now().checked_add(retention))
                 .is_none()
         {
             return Err("TEALSTREET_IDLE_RELEASE_TTL_MS is out of range".into());
