@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { createGithubReader } from './cpu-cohort.mjs';
+import { BitgetOracleChanged, collectBitgetOracle } from './bitget-paired-oracle.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
 import { BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256, BITGET_MEASUREMENT_FILES, BITGET_CUMULATIVE_ANCHOR,
@@ -108,9 +109,11 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
   const script = resolve(destination, 'collect-bitget-paired.py');
   copyFileSync(resolve(root, 'sdk-rs/harness/collect-bitget-paired.py'), script);
   const declarations = JSON.parse(readFileSync(resolve(root, 'sdk-rs/harness/known-gate-failures.json'), 'utf8'));
-  const certificate = await readBitgetSteadyCertificate({ authority, manifest: declarations,
+  let certificate;
+  try { certificate = await readBitgetSteadyCertificate({ authority, manifest: declarations,
     readEvidence: async (name, selected) => {
       const directory = resolve(destination, name); mkdirSync(directory);
+      collectBitgetOracle({ root, directory, authority: selected });
       const authorityPath = resolve(directory, 'authority.json');
       write(authorityPath, { ...selected, protocolSha256: BITGET_PAIRED_PROTOCOL_SHA256,
         freezeSha256: BITGET_PAIRED_FREEZE_SHA256 });
@@ -124,6 +127,16 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
       }
       return readBitgetPairedEvidence(resolve(directory, 'records'));
     } });
+  } catch (error) {
+    if (!(error instanceof BitgetOracleChanged)) throw error;
+    const current = await selectBitgetPair({ reader, runId, root });
+    insist(isDeepStrictEqual(current, authority), 'source/base/physical producer changed during oracle collection');
+    const result = { valid: false, disposition: error.disposition, certified: false, certificate: null,
+      errors: [error.message], oracle: error.receipt };
+    write(resolve(destination, 'steady-assessment.json'), result);
+    console.error(error.message);
+    return result;
+  }
   const current = await selectBitgetPair({ reader, runId, root });
   insist(isDeepStrictEqual(current, authority), 'source/base/physical producer changed during collection');
   const result = { valid: true, errors: [], certificate };
@@ -145,5 +158,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const root = realpathSync(process.cwd()), destination = resolve(values.out);
   mkdirSync(dirname(destination), { recursive: true });
   const reader = createGithubReader({ repository: process.env.GITHUB_REPOSITORY, token: process.env.GITHUB_TOKEN });
-  await collectBitgetPair({ reader, runId: Number(process.env.GITHUB_RUN_ID), root, destination });
+  const result = await collectBitgetPair({ reader, runId: Number(process.env.GITHUB_RUN_ID), root, destination });
+  if (result.disposition === 'NOT-CERTIFIED') process.exitCode = 1;
 }

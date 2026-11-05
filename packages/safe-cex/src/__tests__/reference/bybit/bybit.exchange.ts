@@ -1796,6 +1796,8 @@ export class BybitExchange extends BaseExchange {
 
     const markets: Market[] = [...data.result.list, ...preLaunchMarkets].map((market: Record<string, any>) => {
       const fee = fees.find((f) => f.symbol === market.symbol);
+      const limitCap = parseFloat(market.lotSizeFilter.maxOrderQty);
+      const marketCap = parseFloat(market.lotSizeFilter.maxMktOrderQty);
       return {
         // old id isn't unique with expiring usdc futs
         // id: `${market.baseCoin}/${market.quoteCoin}:${market.settleCoin}`,
@@ -1811,7 +1813,7 @@ export class BybitExchange extends BaseExchange {
         limits: {
           amount: {
             min: parseFloat(market.lotSizeFilter.minOrderQty),
-            max: parseFloat(market.lotSizeFilter.maxOrderQty),
+            max: Number.isFinite(marketCap) && marketCap > 0 ? Math.min(limitCap, marketCap) : limitCap,
           },
           leverage: {
             min: parseFloat(market.leverageFilter.minLeverage),

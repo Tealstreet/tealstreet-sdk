@@ -139,7 +139,7 @@ impl Harness {
                     self.done.push((command, Err(error.legacy_text())));
                     self.failures.push(error);
                 }
-                Action::Notice(Notice::StartupFailed { error }) => {
+                Action::Notice(Notice::StartupFailed { error, .. }) => {
                     assert!(
                         self.expect_startup_failure,
                         "unexpected Bitget startup failure: {error}"

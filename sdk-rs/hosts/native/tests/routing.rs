@@ -1834,7 +1834,7 @@ async fn routed_signed_network_notices(
         let payload = match notice {
             Notice::Event(event) => event.message.clone(),
             Notice::CommandDone { result, .. } => result.clone(),
-            Notice::CommandFailed { error, .. } | Notice::StartupFailed { error } => {
+            Notice::CommandFailed { error, .. } | Notice::StartupFailed { error, .. } => {
                 error.legacy_text()
             }
             Notice::CommandError { message, .. } => message.clone(),

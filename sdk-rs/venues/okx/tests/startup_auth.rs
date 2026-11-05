@@ -34,7 +34,7 @@ impl Rig {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::StartupFailed { error }) => self.failures.push(error),
+                Action::Notice(Notice::StartupFailed { error, .. }) => self.failures.push(error),
                 Action::Notice(Notice::Deactivate) => self.deactivated += 1,
                 other => rest.push(other),
             }
