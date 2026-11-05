@@ -33,7 +33,7 @@ impl Config {
             port: u16::try_from(number("TEALSTREET_PORT", 23456)?)
                 .map_err(|_| "TEALSTREET_PORT is out of range".to_owned())?,
             region: var("CONNECT_REGION"),
-            release: var("TEALSTREET_RELEASE"),
+            release: release_label(var("TEALSTREET_RELEASE")),
             engine_threads: number("TEALSTREET_ENGINE_THREADS", threads)?,
             max_connections: number("TEALSTREET_MAX_CONNECTIONS", 4096)?,
             max_public_per_ip: 8,
@@ -45,5 +45,31 @@ impl Config {
                 var("TEALSTREET_ACCESS_AUD").as_deref(),
             ),
         })
+    }
+}
+
+fn release_label(value: Option<String>) -> Option<String> {
+    let trimmed = value.as_deref()?.trim();
+    (!trimmed.is_empty()
+        && !["undefined", "null", "unknown"]
+            .iter()
+            .any(|placeholder| trimmed.eq_ignore_ascii_case(placeholder)))
+    .then(|| trimmed.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::release_label;
+
+    #[test]
+    fn release_uses_the_image_revision_without_placeholder_strings() {
+        assert_eq!(
+            release_label(Some(" fb652156d52 ".into())).as_deref(),
+            Some("fb652156d52")
+        );
+        assert_eq!(release_label(None), None);
+        for value in ["", " ", "undefined", "null", "unknown", " Undefined "] {
+            assert_eq!(release_label(Some(value.into())), None, "{value}");
+        }
     }
 }

@@ -44,11 +44,27 @@ export function isServiceSentryEnabled(): boolean {
 export function initServiceSentry({ dsn, service, release, environment, tags = {} }: ServiceSentryOptions): boolean {
   if (!dsn || initialised) return initialised;
 
+  const exchange = service === 'exchange-server' || service === 'exchange-gateway';
+  const label = (value: string | undefined): string | undefined => {
+    const trimmed = value?.trim();
+    return trimmed && !['undefined', 'null', 'unknown'].includes(trimmed.toLowerCase()) ? trimmed : undefined;
+  };
+  const configuredBox = exchange ? label(process.env.TEALSTREET_BOX) : undefined;
+  const box = configuredBox && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(configuredBox) ? configuredBox : undefined;
+  const imageRelease = exchange ? (label(release) ?? label(process.env.TEALSTREET_RELEASE)) : release;
+  const scopeTags: Record<string, string> = { ...tags, service };
+  if (exchange) {
+    delete scopeTags.region;
+    delete scopeTags.box;
+    if (box) scopeTags.box = box;
+  }
+
   Sentry.init({
     dsn,
-    release,
+    release: imageRelease,
+    serverName: box,
     environment,
-    initialScope: { tags: { ...tags, service } },
+    initialScope: { tags: scopeTags },
 
     // These processes hold users' exchange credentials and act on their
     // accounts. Keep the restrictive v10 baseline explicit: Sentry v11
@@ -75,8 +91,7 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
      * timed out`, every few seconds per session) reaches Sentry exactly that
      * way. That is the flood this package exists to bound, billed per event.
      */
-    integrations: (defaults) =>
-      defaults.filter((integration) => !DROPPED_INTEGRATIONS.has(integration.name)),
+    integrations: (defaults) => defaults.filter((integration) => !DROPPED_INTEGRATIONS.has(integration.name)),
 
     beforeSend(event) {
       for (const exception of event.exception?.values ?? []) {
@@ -85,9 +100,18 @@ export function initServiceSentry({ dsn, service, release, environment, tags = {
       if (event.message) event.message = scrubString(event.message);
       if (event.extra) event.extra = scrub(event.extra) as Record<string, unknown>;
       if (event.contexts) event.contexts = scrub(event.contexts) as typeof event.contexts;
-      // Container hostnames are shard identifiers, not useful, and they change
-      // every deploy.
+      // Keep only the explicit box identity, never an SDK-inferred container hostname.
       delete event.server_name;
+      if (exchange) {
+        if (box) event.server_name = box;
+        if (imageRelease) event.release = imageRelease;
+        else delete event.release;
+        event.tags = { ...event.tags };
+        // CONNECT_REGION can describe legacy routing, so it is not a box-location fact.
+        delete event.tags.region;
+        delete event.tags.box;
+        if (box) event.tags.box = box;
+      }
       return event;
     },
 
