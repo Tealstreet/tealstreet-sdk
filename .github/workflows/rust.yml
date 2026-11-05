@@ -865,7 +865,7 @@ jobs:
     needs: selection
     if: needs.selection.outputs.replayRequired == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.venue == 'binance' && 45 || 30 }}
     strategy:
       fail-fast: false
       matrix:
