@@ -167,12 +167,14 @@ impl Running {
             .map(|chase| crate::user_drain::Job {
                 kind: "chase",
                 id: chase.id.clone(),
+                parked: false,
             })
             .collect();
         jobs.extend(twaps.iter().filter_map(|twap| {
             Some(crate::user_drain::Job {
                 kind: "twap",
                 id: twap.get("id")?.as_str()?.to_owned(),
+                parked: twap.get("status").and_then(Value::as_str) == Some("paused"),
             })
         }));
         let pending = pending + chases.len() + twaps.len() - jobs.len();

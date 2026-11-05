@@ -14,6 +14,7 @@ pub struct Config {
     pub resume_grace: Duration,
     pub account_flush: Duration,
     pub access: Option<crate::access::Config>,
+    pub idle_release_ttl: Duration,
 }
 
 impl Config {
@@ -28,6 +29,19 @@ impl Config {
                     .ok_or(format!("{name} must be a positive integer"))
             })
         };
+        let idle_ms = number(
+            "TEALSTREET_IDLE_RELEASE_TTL_MS",
+            crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS as usize,
+        )? as u64;
+        let idle_release_ttl = Duration::from_millis(idle_ms);
+        if crate::accounts::now_ms().checked_add(idle_ms).is_none()
+            || idle_release_ttl
+                .checked_mul(2)
+                .and_then(|retention| std::time::Instant::now().checked_add(retention))
+                .is_none()
+        {
+            return Err("TEALSTREET_IDLE_RELEASE_TTL_MS is out of range".into());
+        }
         let threads = std::thread::available_parallelism().map_or(2, usize::from);
         Ok(Self {
             port: u16::try_from(number("TEALSTREET_PORT", 23456)?)
@@ -40,6 +54,7 @@ impl Config {
             idle_timeout: Duration::from_secs(30),
             resume_grace: Duration::from_secs(60),
             account_flush: Duration::from_millis(60),
+            idle_release_ttl,
             access: crate::access::Config::parse(
                 var("TEALSTREET_ACCESS_TEAM_DOMAIN").as_deref(),
                 var("TEALSTREET_ACCESS_AUD").as_deref(),

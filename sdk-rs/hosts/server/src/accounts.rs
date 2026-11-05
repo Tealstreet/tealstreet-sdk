@@ -289,6 +289,15 @@ impl Account {
         self.sign_through(&mut holders, id, &live);
     }
 
+    pub(crate) fn has_parked_holders(&self) -> bool {
+        self.holders
+            .lock()
+            .unwrap()
+            .by_id
+            .values()
+            .any(Option::is_none)
+    }
+
     /// Sends a frame, if given, to every live socket holding this account.
     fn reach_live(&self, text: Option<String>) -> crate::algos::Holding {
         let holders = self.holders.lock().unwrap();

@@ -27,6 +27,9 @@ pub fn config(resume_grace: Duration) -> Config {
         resume_grace,
         account_flush: Duration::from_millis(60),
         access: None,
+        idle_release_ttl: Duration::from_millis(
+            safe_cex_exchange_server::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS,
+        ),
     }
 }
 
