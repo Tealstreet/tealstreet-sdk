@@ -8,7 +8,10 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::time;
-use safe_cex_engine::{Command, Cx, ErrorCause, ErrorKind, Method, Query, Response, VenueError};
+use safe_cex_engine::{
+    Command, Cx, ErrorCause, ErrorKind, HistoryDecodeReason, HistorySchema, Method, Query,
+    Response, VenueError,
+};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, collections::HashMap};
 
@@ -70,6 +73,7 @@ pub struct Request {
     ascending: bool,
     descending: bool,
     failed: Option<String>,
+    decode_reason: Option<HistoryDecodeReason>,
 }
 impl Request {
     fn output_len(&self) -> usize {
@@ -84,6 +88,7 @@ impl Request {
         self.ascending = true;
         self.descending = true;
         self.failed = None;
+        self.decode_reason = None;
     }
     fn observe(&mut self, time: f64, id: &str) -> Result<bool, String> {
         if !time.is_finite() || time < 0.0 || id.is_empty() {
@@ -451,6 +456,7 @@ impl Kraken {
             ascending: true,
             descending: true,
             failed: None,
+            decode_reason: None,
         };
         self.history_request(cx, request);
         true
@@ -528,11 +534,25 @@ impl Kraken {
     }
     fn history_fill(&self, request: &mut Request, text: &str) -> Result<(), String> {
         let row: FillWire<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        let time =
-            timestamp(&row.fill_time).ok_or("Kraken execution has an invalid ISO timestamp")?;
-        let native_side = side(&row.side)?;
+        let time = timestamp(&row.fill_time).ok_or_else(|| {
+            request.decode_reason = Some(HistoryDecodeReason::Timestamp);
+            "Kraken execution has an invalid ISO timestamp"
+        })?;
+        let native_side = side(&row.side).inspect_err(|_| {
+            request.decode_reason = Some(HistoryDecodeReason::Side);
+        })?;
         if row.symbol.is_empty() || row.price <= 0.0 || row.size <= 0.0 {
+            request.decode_reason = Some(if row.symbol.is_empty() {
+                HistoryDecodeReason::Symbol
+            } else if row.price <= 0.0 {
+                HistoryDecodeReason::Economics
+            } else {
+                HistoryDecodeReason::Quantity
+            });
             return Err("Kraken execution has invalid economics".into());
+        }
+        if row.fill_id.0.is_empty() {
+            request.decode_reason = Some(HistoryDecodeReason::Identity);
         }
         if !request.observe(time, &row.fill_id.0)? {
             return Ok(());
@@ -567,7 +587,10 @@ impl Kraken {
     }
     fn history_ledger(&self, request: &mut Request, text: &str) -> Result<(), String> {
         let row: LedgerWire<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        let time = timestamp(&row.date).ok_or("Kraken ledger has an invalid ISO timestamp")?;
+        let time = timestamp(&row.date).ok_or_else(|| {
+            request.decode_reason = Some(HistoryDecodeReason::Timestamp);
+            "Kraken ledger has an invalid ISO timestamp"
+        })?;
         let id = if row.booking_uid.0.is_empty() {
             &row.id.0
         } else {
@@ -578,6 +601,7 @@ impl Kraken {
         let identity = format!("{id}|{}|{}", row.asset, row.contract);
         if id.is_empty() || !request.observe(time, &identity)? {
             return if id.is_empty() {
+                request.decode_reason = Some(HistoryDecodeReason::Identity);
                 Err("Kraken ledger has no booking identity".into())
             } else {
                 Ok(())
@@ -622,6 +646,7 @@ impl Kraken {
             if let (Some(old), Some(new)) = (row.old_balance, row.new_balance) {
                 let delta = new - old;
                 if !delta.is_finite() {
+                    request.decode_reason = Some(HistoryDecodeReason::Economics);
                     return Err("Kraken ledger balance delta overflow".into());
                 }
                 if delta != 0.0 {
@@ -667,7 +692,15 @@ impl Kraken {
         Ok(())
     }
     fn history_order(&self, request: &mut Request, text: &str) -> Result<(), String> {
-        let event: OrderEventWire<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        let event: OrderEventWire<'_> = serde_json::from_str(text).map_err(|e| {
+            request.decode_reason = Some(HistoryDecodeReason::RowShape);
+            e.to_string()
+        })?;
+        if event.uid.is_empty() {
+            request.decode_reason = Some(HistoryDecodeReason::Identity);
+        } else if !event.timestamp.is_finite() || event.timestamp < 0.0 {
+            request.decode_reason = Some(HistoryDecodeReason::Timestamp);
+        }
         if !request.observe(event.timestamp, &event.uid)? {
             return Ok(());
         }
@@ -680,15 +713,23 @@ impl Kraken {
             OrderEvent::EditRejected { .. } => return Ok(()),
         };
         let symbol = order.tradeable.to_ascii_uppercase();
-        if order.uid.is_empty()
-            || symbol.is_empty()
-            || order.quantity < 0.0
-            || (order.quantity == 0.0 && !canceled)
-            || order.filled < 0.0
-            || order.filled > order.quantity
-            || order.timestamp < 0.0
-            || order.last_update_timestamp < order.timestamp
-        {
+        let invalid = if order.uid.is_empty() {
+            Some(HistoryDecodeReason::Identity)
+        } else if symbol.is_empty() {
+            Some(HistoryDecodeReason::Symbol)
+        } else if order.quantity < 0.0 || (order.quantity == 0.0 && !canceled) {
+            Some(HistoryDecodeReason::Quantity)
+        } else if order.filled < 0.0 || order.filled > order.quantity {
+            Some(HistoryDecodeReason::FilledQuantity)
+        } else if order.timestamp < 0.0 {
+            Some(HistoryDecodeReason::Timestamp)
+        } else if order.last_update_timestamp < order.timestamp {
+            Some(HistoryDecodeReason::TimestampOrder)
+        } else {
+            None
+        };
+        if let Some(reason) = invalid {
+            request.decode_reason = Some(reason);
             return Err("Kraken order history has invalid identity, time or economics".into());
         }
         if !request.within(event.timestamp, &symbol) {
@@ -701,8 +742,12 @@ impl Kraken {
         } else {
             return Ok(());
         };
-        let native_side = side(&order.direction)?;
-        let order_kind = kind(&order.order_type, order.limit_price)?;
+        let native_side = side(&order.direction).inspect_err(|_| {
+            request.decode_reason = Some(HistoryDecodeReason::Side);
+        })?;
+        let order_kind = kind(&order.order_type, order.limit_price).inspect_err(|_| {
+            request.decode_reason = Some(HistoryDecodeReason::OrderType);
+        })?;
         let mapped = HistoricalOrder {
             id: order.uid.into_owned(),
             symbol,
@@ -805,7 +850,17 @@ impl Kraken {
             return;
         }
         if let Some(error) = request.failed.take() {
-            self.history_failed(cx, request, &error);
+            let schema = match request.read {
+                Read::Orders => HistorySchema::KrakenOrders,
+                Read::Fills => HistorySchema::KrakenFills,
+                Read::Income => HistorySchema::KrakenIncome,
+            };
+            let reason = request
+                .decode_reason
+                .unwrap_or(HistoryDecodeReason::RowShape);
+            let failure = VenueError::new(format!("Kraken history failed: {error}"))
+                .history_decode(schema, reason);
+            self.history_finish(cx, request, Err(failure));
             return;
         }
         let mut gap = None;

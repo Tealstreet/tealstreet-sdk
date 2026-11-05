@@ -1545,6 +1545,23 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
     assert!(reads.is_empty(), "account cycle must complete");
     policy_poll_after_completion(engine, now);
 }
+// Existing fixtures supply their default-axis rows; the added terminal axes are empty.
+fn finish_empty_terminal_histories(h: &mut Harness) {
+    h.advance(250.0);
+    while let Some(url) = h
+        .requests
+        .iter()
+        .find(|request| {
+            request.url.contains("/v5/order/history") && request.url.contains("orderStatus=")
+        })
+        .map(|request| request.url.clone())
+    {
+        assert!(!url.contains("cursor="));
+        h.respond(&url, 200, EMPTY_LIST);
+        h.advance(250.0);
+    }
+}
+
 fn query_result(
     h: &mut Harness,
     command: u32,
@@ -1557,6 +1574,7 @@ fn query_result(
         let request = h.take(path);
         h.reply(request.id, 200, body);
     }
+    finish_empty_terminal_histories(h);
     h.result(command).unwrap().clone().unwrap()
 }
 
@@ -1686,6 +1704,7 @@ fn omitted_order_history_limit_reads_every_page_instead_of_fifty() {
     let request = h.take("/v5/order/history");
     assert!(request.url.contains("cursor=next"));
     h.reply(request.id, 200, &second);
+    finish_empty_terminal_histories(&mut h);
     let rows =
         serde_json::from_str::<Vec<serde_json::Value>>(h.result(33).unwrap().as_ref().unwrap())
             .unwrap();
@@ -1917,6 +1936,7 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
         let request = h.take("/v5/order/history");
         h.reply(request.id, 200, &body);
     }
+    finish_empty_terminal_histories(&mut h);
     assert!(!h.has_request("/v5/order/history"));
     let rows =
         serde_json::from_str::<Vec<serde_json::Value>>(h.result(35).unwrap().as_ref().unwrap())
@@ -2903,6 +2923,7 @@ fn owned_history_raw_duplicate_limit_wins_over_cursor_refusal() {
                 &owned_history_page(&[owned_history_row(kind, "duplicate")], "same"),
             );
         }
+        finish_empty_terminal_histories(&mut h);
         let rows: Vec<serde_json::Value> =
             serde_json::from_str(h.result(805).unwrap().as_ref().unwrap()).unwrap();
         assert_eq!(rows.len(), 1);
@@ -4415,4 +4436,198 @@ fn price_at(h: &mut Harness, symbol: &str, price: f64) {
         ticker.mark = price;
         ticker.last = price;
     });
+}
+
+#[test]
+fn explicit_terminal_order_history_walks_independent_cursors_and_deduplicates() {
+    let mut h = ready();
+    let (query, path) = owned_history_query(1, None);
+    h.command(Command::Query {
+        command: 910,
+        query,
+    });
+    let filled = owned_history_row(1, "filled").replace("Cancelled", "Filled");
+    h.respond(
+        path,
+        200,
+        &owned_history_page(std::slice::from_ref(&filled), "same"),
+    );
+    h.respond(path, 200, &owned_history_page(&[], ""));
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let first = h.take(path);
+        assert!(first.url.contains(&format!("orderStatus={status}")));
+        assert!(
+            !first.url.contains("cursor="),
+            "each status starts a fresh cursor walk"
+        );
+        let row = owned_history_row(1, status).replace("Cancelled", status);
+        h.reply(first.id, 200, &owned_history_page(&[row], "same"));
+        let second = h.take(path);
+        assert!(second.url.contains(&format!("orderStatus={status}")));
+        assert!(second.url.ends_with("cursor=same"));
+        h.reply(
+            second.id,
+            200,
+            &owned_history_page(std::slice::from_ref(&filled), ""),
+        );
+    }
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(910).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(
+        rows.len(),
+        4,
+        "older API defaults can duplicate terminal rows"
+    );
+    for id in ["filled", "Cancelled", "Rejected", "Deactivated"] {
+        assert!(rows.iter().any(|row| row["id"] == id));
+    }
+    assert!(owned_history_markers(&h, 910).is_empty());
+    assert!(!h.has_request(path));
+}
+
+#[test]
+fn explicit_terminal_history_is_not_skipped_when_default_limit_is_full() {
+    let mut h = ready();
+    let (query, path) = owned_history_query(1, Some(1));
+    h.command(Command::Query {
+        command: 911,
+        query,
+    });
+    h.respond(
+        path,
+        200,
+        &owned_history_page(&[owned_history_row(1, "old")], ""),
+    );
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let request = h.take(&format!("orderStatus={status}"));
+        let rows = if status == "Deactivated" {
+            vec![
+                owned_history_row(1, "new")
+                    .replace("Cancelled", "Deactivated")
+                    .replace("1671999000000", "1671999001000"),
+            ]
+        } else {
+            vec![]
+        };
+        h.reply(request.id, 200, &owned_history_page(&rows, ""));
+    }
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(911).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0]["id"], "new",
+        "limit applies after merging all status axes"
+    );
+}
+
+#[test]
+fn explicit_terminal_history_failure_retains_rows_with_incomplete_marker() {
+    for has_rows in [false, true] {
+        let mut h = ready();
+        h.notices.clear();
+        let (query, path) = owned_history_query(1, None);
+        h.command(Command::Query {
+            command: 912,
+            query,
+        });
+        let rows = if has_rows {
+            vec![owned_history_row(1, "kept")]
+        } else {
+            vec![]
+        };
+        h.respond(path, 200, &owned_history_page(&rows, ""));
+        let terminal = h.take("orderStatus=Cancelled");
+        h.reply(terminal.id, 503, "unavailable");
+        if has_rows {
+            let result = h.result(912).unwrap().as_ref().unwrap();
+            assert!(result.contains("kept"));
+            assert_eq!(owned_history_markers(&h, 912).len(), 1);
+        } else {
+            assert!(h.result(912).unwrap().is_err());
+            assert!(owned_history_markers(&h, 912).is_empty());
+        }
+        assert!(!h.has_request(path));
+    }
+}
+
+#[test]
+fn terminal_order_history_reuses_the_requested_windows_for_each_status() {
+    let mut h = ready();
+    let to = 1_672_300_000_000.0;
+    h.command(Command::Query {
+        command: 913,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(to - 8.0 * 86_400_000.0),
+            to_ms: Some(to),
+            limit: None,
+        },
+    });
+    let mut original = Vec::new();
+    for status in [
+        None,
+        Some("Cancelled"),
+        Some("Rejected"),
+        Some("Deactivated"),
+    ] {
+        for window in 0..2 {
+            let request = h.take("/v5/order/history");
+            assert_eq!(request.url.contains("orderStatus="), status.is_some());
+            if let Some(status) = status {
+                assert!(request.url.contains(&format!("orderStatus={status}")));
+            }
+            let bounds: Vec<_> = request
+                .url
+                .split('&')
+                .filter(|part| part.starts_with("startTime=") || part.starts_with("endTime="))
+                .map(str::to_owned)
+                .collect();
+            assert_eq!(bounds.len(), 2);
+            if status.is_none() {
+                original.push(bounds);
+            } else {
+                assert_eq!(bounds, original[window]);
+            }
+            h.reply(request.id, 200, EMPTY_LIST);
+        }
+    }
+    assert_eq!(h.result(913), Some(&Ok("[]".into())));
+    assert!(!h.has_request("/v5/order/history"));
+}
+
+#[test]
+fn terminal_status_failure_uses_the_same_incomplete_diagnostic_as_default_history() {
+    let mut observations = Vec::new();
+    for terminal in [false, true] {
+        let mut h = ready();
+        h.notices.clear();
+        let (query, path) = owned_history_query(1, None);
+        h.command(Command::Query {
+            command: 914,
+            query,
+        });
+        h.respond(
+            path,
+            200,
+            &owned_history_page(
+                &[owned_history_row(1, "kept")],
+                if terminal { "" } else { "next" },
+            ),
+        );
+        let failed = h.take(path);
+        assert_eq!(failed.url.contains("orderStatus=Cancelled"), terminal);
+        h.reply(failed.id, 503, "unavailable");
+        let markers = owned_history_markers(&h, 914);
+        assert_eq!(markers.len(), 1);
+        let safe_cex_engine::Notice::Event(event) = &h.notices[markers[0]] else {
+            panic!("owned marker");
+        };
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == 914).count(), 1);
+        assert!(!h.notices.iter().any(|notice| matches!(
+            notice,
+            safe_cex_engine::Notice::CommandFailed { command: 914, .. }
+        )));
+        observations.push((h.result(914).unwrap().clone(), format!("{event:?}")));
+    }
+    assert_eq!(observations[0], observations[1]);
 }

@@ -425,6 +425,11 @@ cancel has no placement fence: for a source-refreshing venue,
 `orders.refresh { symbols }` asks the source once without disturbing that
 placement-hold timer. It preserves the cancel's Unknown error, never replays,
 and never infers a Canceled order from absence.
+Bitget also sends bounded `orders.cancel_check` targets before that same ask.
+The source registers them through read-only `registerCancelChecks`, then runs
+`refreshOrders` even if registration refuses. Only its clean post-registration
+native census can report present/absent before cached-algo retention; it never
+changes the writer's original Unknown command result.
 A LOCAL worker forwards one account's frames, stamped `{op: 'frame', data,
 snapshot}`, after the `forwardFrames` op, and keeps posting fill ops.
 
@@ -559,6 +564,17 @@ refreshing consumers retain their last good result and surface the failure.
 Actual empty reads and public-only sessions still return empty arrays. Journal
 and ingestion use the separate strict `fetchHistoricalPositions` path, so this
 change confers no ingestion completion or new history capability.
+
+## Native history row diagnostics
+
+Bitget and Kraken row refusals carry `causeCode: HISTORY_DECODE` and a closed
+`historyDecode: { schema, reason }` record through host and worker errors. The
+record contains no row values, identities or response text. Only Bitget and
+Kraken enable the non-default `history-row-diagnostics` engine feature; the JS
+validator remains available when native detail is absent. Bitget rejects a
+proven invalid row immediately instead of replaying the same page; transport
+and envelope failures retain their bounded retry policy. Native strict checks
+and Kraken's existing accepted-prefix incomplete policy remain unchanged.
 
 ## Rust incomplete history
 
@@ -1043,6 +1059,12 @@ loads the real registry and enforces the following minimum contracts:
   non-fallback `start` implementation;
 - TP/SL trigger defaults must belong to the unique advertised trigger set.
 
+Rust public capabilities also retain the loaded engine record, including
+`orderHistoryNeedsSymbol` and other authoritative policy flags. Those fields
+remain absent before engine/worker capability adoption; method-derived booleans
+retain their existing checks. Symbol-scoped collectors must read this record,
+not guess from a venue name or send a symbol-less query as an empty census.
+
 The fills-history runtime gate is deliberately not metadata. Ingestion checks
 `exchange.capabilities.fillHistory` and then applies
 `symbolScopedFills.ts` to decide whether the venue can be asked account-wide or
@@ -1302,6 +1324,15 @@ routing is **byte-identical** to before. Precedence for the secondary read trans
 secondary client's `overrideProxyUrl`. `createExchangeFromAccount` sets
 `secondaryProxyUrl` to `PUBLIC_CORS_PROXY` — the same
 edge Worker `/api/public_proxy` host `getPublicCorsProxy()` returns (the tunnel hosts' own IPs, never the whitelisted fleet).
+
+**Nothing credentialed goes to the public proxy (`transport/publicProxyGuard.ts`).**
+Engine `prepare` refuses, before I/O, any request bound for `publicCorsProxy()`
+with primary/secondary intent, an `Authorization`/venue key header or a
+`signature`/`sign` query param (`SignedPublicProxyRefusal`, code
+`HTTP_PREPARATION_INVALID`). Secondary read keys are deprecated, so their default
+public-proxy reads fail closed, and the native plan omits a public-proxy
+`readHttp`. Lighter's `usesRestProxy` profiles (`payloadSignedViaPublicProxy`)
+keep payload-signed REST there, but are still refused with a credential header.
 
 The Rust `SecondaryKeyClients` exposes the same get-only split, keeping generic
 request calls on the primary. The raw secondary adapter is private, so its
@@ -1729,9 +1760,11 @@ Role/mode startup reads
 stay single-flight until their managed completion or deadline, including quota wait.
 Each Hyperliquid engine issues at most three routine account reads at once, with
 core Mode/State/Orders ahead of ancillary work. Queued intents acquire their
-managed deadline only when issued. Caller-owned reads and uncertain-write
-reconciliation bypass those slots while retaining the existing quota and root
-deadlines; only completion of an issued routine read releases its slot. Shared
+managed deadline only when issued. Foreground Orders, including refresh asks,
+Unknown reconciliation and owed successors, retain priority but consume the same
+slots; promoting a queued intent preserves its captured census epoch. Caller-owned
+history, positions and settings retain their independent admission and original
+quota/root deadlines. Only completion of a slotted read releases its slot. Shared
 dispatch waiters use FIFO leases so newer cheap reads cannot starve older Orders;
 100 ms renewal and 2 s expiry bound a dead worker's obstruction without charging
 its abandoned work.

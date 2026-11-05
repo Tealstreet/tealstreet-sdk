@@ -540,6 +540,46 @@ describe('frame-fed main-thread mirror', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('forwards native cancel targets on the same single source refresh, then drains them', async () => {
+    const fake = fakeEngine();
+    const mirror = mirrorWith(fake);
+    exchange = mirror.exchange;
+    await exchange.frameFedReady;
+    const targets = [{ id: 'target', symbol: 'BTCUSDT' }];
+    (exchange as any).receiveEvent({
+      level: 'info',
+      code: 'orders.cancel_check',
+      fields: { targets: JSON.stringify(targets) },
+    });
+    expect(mirror.orderAsks).toEqual([]);
+    (exchange as any).receiveEvent({ level: 'info', code: 'orders.refresh', fields: { symbols: 'BTCUSDT' } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mirror.orderAsks).toEqual([[['BTCUSDT'], targets]]);
+    (exchange as any).receiveEvent({ level: 'info', code: 'orders.refresh', fields: { symbols: '' } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mirror.orderAsks).toEqual([[['BTCUSDT'], targets], []]);
+    expect(fake.commands).toEqual([]);
+  });
+
+  it('still requests an ordinary source read when target registration refuses', async () => {
+    exchange = mirrorWith(fakeEngine()).exchange;
+    await exchange.frameFedReady;
+    // The real source method below runs locally, as in the worker; command delivery is the seam.
+    Object.defineProperty(exchange, 'routesToWorker', { get: () => false });
+    const refused = new Error('registration unsupported');
+    const command = vi
+      .spyOn(exchange as any, 'command')
+      .mockRejectedValueOnce(refused)
+      .mockResolvedValueOnce(null);
+    await expect(exchange.refreshAccountOrders(undefined, [{ id: 'target', symbol: 'BTCUSDT' }])).rejects.toBe(refused);
+    expect(command.mock.calls.map(([c]) => c)).toEqual([
+      { op: 'registerCancelChecks', orders: [{ id: 'target', symbol: 'BTCUSDT' }] },
+      { op: 'refreshOrders' },
+    ]);
+  });
+
   it('drops source deltas until a snapshot, then ingests in order', async () => {
     const fake = fakeEngine();
     exchange = mirrorWith(fake).exchange;

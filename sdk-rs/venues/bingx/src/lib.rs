@@ -291,6 +291,11 @@ impl Bingx {
         rows: Vec<Candle>,
         valid: bool,
     ) {
+        if let Some(error) = read_rate_limit(&response, cx.now) {
+            let _ = cx.command_error_context(context, error.message.clone());
+            let _ = cx.fail_context(context, error);
+            return;
+        }
         let result = success(response).and_then(|_| {
             if valid {
                 candle_data(rows)
@@ -594,6 +599,96 @@ impl Bingx {
     }
 }
 
+impl Bingx {
+    fn request_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: &str,
+        typed: Option<&safe_cex_engine::VenueError>,
+    ) {
+        let discovery = matches!(
+            &pending,
+            Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
+        );
+        match pending {
+            Pending::Clock(probe) => {
+                self.clock_failed(cx, probe, error);
+                return;
+            }
+            Pending::Metadata(leg) => {
+                // A failing private read surfaces as an Error at the retried-failure cadence.
+                cx.retried_failure(
+                    "bingx.lib:private",
+                    format!("BingX private request failed: {error}"),
+                );
+                account::fail_metadata_plan(cx, &leg, account::metadata_error(error));
+                return;
+            }
+            Pending::Signed(signed) => {
+                if let Some(context) = signed.context()
+                    && matches!(&signed.inner, Pending::Candles { .. })
+                {
+                    let _ = cx.command_error_context(context, error.to_owned());
+                    let _ = cx.fail_context(context, error);
+                    managed::finish(cx, signed.context().cloned());
+                    return;
+                }
+                let context = signed.context().cloned();
+                self.request_failed(cx, signed.inner, error, typed);
+                managed::finish(cx, context);
+                return;
+            }
+            Pending::Identity(read) => {
+                self.identity_failed(cx, read, error.into());
+                return;
+            }
+            Pending::History(request) => {
+                self.history.on_failed(cx, request, error);
+                return;
+            }
+            Pending::Trade(request) => {
+                self.trading
+                    .on_failed(cx, self.credentials.as_ref(), request, error);
+                return;
+            }
+            Pending::Account(request) => {
+                if let Some(c) = &self.credentials {
+                    self.account.request_failed(cx, request, error, typed, c);
+                }
+                return;
+            }
+            // Only a refused read admission leaves candles without custody.
+            Pending::Candles { command, .. } => {
+                cx.command_error(command, error);
+                refuse_candle_query(cx, error);
+                return;
+            }
+            Pending::Markets { .. } => self.retry_list(cx, List::Markets),
+            Pending::Daily { .. } => self.retry_list(cx, List::Daily),
+            Pending::Premium { .. } => {
+                if !self.tickers_committed {
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "BingX funding read failed; starting without funding rates",
+                    );
+                    self.commit_tickers(cx, true);
+                }
+                self.retry_list(cx, List::Premium)
+            }
+        }
+        let level = if discovery { Level::Warn } else { Level::Error };
+        if let Some(refused) =
+            typed.filter(|error| error.kind == Some(safe_cex_engine::ErrorKind::RateLimited))
+        {
+            cx.notice_error(level, code::REQUEST_FAILED, refused);
+        } else {
+            cx.notice(level, code::REQUEST_FAILED, error);
+        }
+    }
+}
+
 fn touch(last: f64, step: f64) -> (f64, f64) {
     if last <= 0. {
         return (0., 0.);
@@ -695,6 +790,29 @@ pub(crate) fn ban_wait_ms(response: &Response<'_>, now: f64) -> Option<f64> {
             .filter(|wait| *wait > 0.0 && *wait <= BAN_LONGEST_MS)
             .unwrap_or(BAN_FLOOR_MS),
     )
+}
+
+/// Classify the envelope before any list codec, using the discovery ban policy.
+pub(crate) fn read_rate_limit(
+    response: &Response<'_>,
+    now: f64,
+) -> Option<safe_cex_engine::VenueError> {
+    let wait = ban_wait_ms(response, now)?;
+    let envelope = serde_json::from_str::<wire::Rejection<'_>>(response.body).ok();
+    let mut error = safe_cex_engine::VenueError::new(
+        success(*response)
+            .err()
+            .unwrap_or_else(|| "BingX rate limit".into()),
+    )
+    .kind(safe_cex_engine::ErrorKind::RateLimited)
+    .retry_after_ms(wait);
+    if let Some(envelope) = envelope {
+        if let Some(code) = envelope.code.filter(|code| *code != 0) {
+            error = error.venue_code(code.to_string());
+        }
+        error = error.venue_message(envelope.msg.into_owned());
+    }
+    Some(error)
 }
 
 /// The first epoch (13-digit milliseconds or 10-digit seconds) in a ban message.
@@ -1100,8 +1218,9 @@ impl Venue for Bingx {
             pending => pending,
         };
         if let Err(error) = success(response) {
+            let typed = read_rate_limit(&response, cx.now);
             self.note_ban(cx, &response);
-            self.on_request_failed(cx, pending, &error);
+            self.request_failed(cx, pending, &error, typed.as_ref());
             self.ban_wait_ms = None;
             return;
         }
@@ -1236,13 +1355,22 @@ impl Venue for Bingx {
             }
             Pending::Signed(signed) => {
                 if signed.context().is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
+                    if let Some(error) = read_rate_limit(&response, cx.now) {
+                        let context = signed.context().expect("checked candle custody");
+                        let _ = cx.command_error_context(context, error.message.clone());
+                        let _ = cx.fail_context(context, error);
+                        managed::finish(cx, signed.context().cloned());
+                        return;
+                    }
                     self.on_request_failed(
                         cx,
                         Pending::Signed(signed),
-                        &format!(
-                            "response did not contain the expected list: {}",
-                            response.body
-                        ),
+                        &success(response).err().unwrap_or_else(|| {
+                            format!(
+                                "response did not contain the expected list: {}",
+                                response.body
+                            )
+                        }),
                     );
                 } else {
                     let context = signed.context().cloned();
@@ -1267,15 +1395,18 @@ impl Venue for Bingx {
                 {
                     cx.startup_read_refused(&error);
                 }
-                self.account.read_error = account::read_refusal(&response);
+                let typed = account::read_refusal(&response, cx.now);
                 self.note_ban(cx, &response);
-                self.on_request_failed(
+                self.request_failed(
                     cx,
                     pending,
-                    &format!(
-                        "response did not contain the expected list: {}",
-                        response.body
-                    ),
+                    &success(response).err().unwrap_or_else(|| {
+                        format!(
+                            "response did not contain the expected list: {}",
+                            response.body
+                        )
+                    }),
+                    typed.as_ref(),
                 );
                 self.ban_wait_ms = None;
             }
@@ -1295,11 +1426,7 @@ impl Venue for Bingx {
                 self.trading
                     .on_sign_failed(cx, self.credentials.as_ref(), request, error)
             }
-            pending => {
-                self.account.read_error = Some(error.clone());
-                self.on_request_failed(cx, pending, &error.message);
-                self.account.read_error = None;
-            }
+            pending => self.request_failed(cx, pending, &error.message, Some(&error)),
         }
     }
     fn on_http_owner_retired(
@@ -1378,86 +1505,11 @@ impl Venue for Bingx {
             }
             // Provider refusal is typed and is never venue-auth evidence.
             Pending::Metadata(leg) => account::fail_metadata_plan(cx, &leg, error),
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => self.request_failed(cx, pending, &error.message, Some(&error)),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        let discovery = matches!(
-            &pending,
-            Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
-        );
-        match pending {
-            Pending::Clock(probe) => {
-                self.clock_failed(cx, probe, error);
-                return;
-            }
-            Pending::Metadata(leg) => {
-                // A failing private read surfaces as an Error at the retried-failure cadence.
-                cx.retried_failure(
-                    "bingx.lib:private",
-                    format!("BingX private request failed: {error}"),
-                );
-                account::fail_metadata_plan(cx, &leg, account::metadata_error(error));
-                return;
-            }
-            Pending::Signed(signed) => {
-                if let Some(context) = signed.context()
-                    && matches!(&signed.inner, Pending::Candles { .. })
-                {
-                    let _ = cx.command_error_context(context, error.to_owned());
-                    let _ = cx.fail_context(context, error);
-                    managed::finish(cx, signed.context().cloned());
-                    return;
-                }
-                let context = signed.context().cloned();
-                self.on_request_failed(cx, signed.inner, error);
-                managed::finish(cx, context);
-                return;
-            }
-            Pending::Identity(read) => {
-                self.identity_failed(cx, read, error.into());
-                return;
-            }
-            Pending::History(request) => {
-                self.history.on_failed(cx, request, error);
-                return;
-            }
-            Pending::Trade(request) => {
-                self.trading
-                    .on_failed(cx, self.credentials.as_ref(), request, error);
-                return;
-            }
-            Pending::Account(request) => {
-                if let Some(c) = &self.credentials {
-                    self.account.on_request_failed(cx, request, error, c);
-                }
-                return;
-            }
-            // Only a refused read admission leaves candles without custody.
-            Pending::Candles { command, .. } => {
-                cx.command_error(command, error);
-                refuse_candle_query(cx, error);
-                return;
-            }
-            Pending::Markets { .. } => self.retry_list(cx, List::Markets),
-            Pending::Daily { .. } => self.retry_list(cx, List::Daily),
-            Pending::Premium { .. } => {
-                if !self.tickers_committed {
-                    cx.notice(
-                        Level::Warn,
-                        code::REQUEST_FAILED,
-                        "BingX funding read failed; starting without funding rates",
-                    );
-                    self.commit_tickers(cx, true);
-                }
-                self.retry_list(cx, List::Premium)
-            }
-        }
-        cx.notice(
-            if discovery { Level::Warn } else { Level::Error },
-            code::REQUEST_FAILED,
-            error,
-        );
+        self.request_failed(cx, pending, error, None);
     }
     fn read_root_retired(
         &mut self,

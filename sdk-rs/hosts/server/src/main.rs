@@ -16,11 +16,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
     runtime.block_on(async move {
         let threads = EngineThreads::start(config.engine_threads)?;
-        let registry = Arc::new(Registry::new(
-            threads,
-            config.account_flush,
-            config.resume_grace,
-        ));
+        let registry = Arc::new(
+            Registry::new(threads, config.account_flush, config.resume_grace)
+                .with_router_lease(config.router_lease.clone()),
+        );
         let app = Arc::new(App {
             registry,
             metrics: Arc::new(Metrics::default()),

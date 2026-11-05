@@ -197,6 +197,12 @@ replays a potentially submitted trading write. A permanently stuck venue job
 therefore continues to occupy a bounded slot. Exhausted internal IDs fail closed
 rather than wrapping. The server never retries client trading commands.
 
+`AccountHandle::begin_disposal` binds the first disposal cause before host-owned
+algo cleanup, without stopping the actor's I/O. `dispose`, normal termination
+and actor drop record an ordinary stop when no cause is bound. Cloned handles
+share that one-time record: late releases cannot relabel a stopped actor as a
+planned move. `disposal_cause` reads the original cause after cleanup as well.
+
 Diagnostic codes are stable; messages are display data. Engine and host-origin
 warnings use the same event envelope. Warn+ is written to stderr without a
 client. Deploy safe-cex-server's event-aware NativeFrameSession before native

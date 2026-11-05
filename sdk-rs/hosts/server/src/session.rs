@@ -73,6 +73,7 @@ struct Joined {
 }
 
 pub struct Session {
+    user_socket: Option<crate::user_drain::Socket>,
     registry: Arc<Registry>,
     metrics: Arc<Metrics>,
     identity: Identity,
@@ -178,6 +179,10 @@ impl Session {
         let (loaded, loaded_rx) = tokio::sync::mpsc::unbounded_channel();
         let (dropped, dropped_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
+            user_socket: identity
+                .user
+                .as_deref()
+                .map(|user| registry.user_drains.socket(user)),
             registry,
             metrics,
             identity,
@@ -197,23 +202,59 @@ impl Session {
         }
     }
 
+    fn router_fenced(&self) -> bool {
+        self.identity
+            .user
+            .as_deref()
+            .is_some_and(|user| self.registry.user_lease_fenced(user))
+            || self.joined.values().any(|joined| {
+                !joined.account.is_public()
+                    && (!joined.account.running.io_allowed()
+                        || joined.account.running.parked_by_lease())
+            })
+    }
+
+    pub fn user_draining(&self) -> bool {
+        self.router_fenced()
+            || self
+                .user_socket
+                .as_ref()
+                .is_some_and(crate::user_drain::Socket::latched)
+    }
+
     /// Whether a drain moves this socket now: break-glass moves every socket,
     /// a waiting drain only one whose accounts run no chase or TWAP.
     pub fn drain_close(&mut self) -> Option<Close> {
-        let moves = match self.registry.drain_state() {
-            crate::accounts::Drain::Off => false,
-            crate::accounts::Drain::Now => true,
-            crate::accounts::Drain::Waiting => !self
-                .joined
-                .values()
-                .any(|joined| joined.account.running.any()),
-        };
+        let user_moves = self.router_fenced()
+            || self
+                .user_socket
+                .as_ref()
+                .is_some_and(crate::user_drain::Socket::should_close);
+        let moves = user_moves
+            || match self.registry.drain_state() {
+                crate::accounts::Drain::Off => false,
+                crate::accounts::Drain::Now => true,
+                crate::accounts::Drain::Waiting => !self
+                    .joined
+                    .values()
+                    .any(|joined| joined.account.running.any()),
+            };
         self.moved |= moves;
         moves.then_some(Close::Moved)
     }
 
     /// A draining box admits inits only from users already live on it.
     fn moved_by_drain(&self) -> bool {
+        if self.router_fenced() {
+            return true;
+        }
+        if self
+            .user_socket
+            .as_ref()
+            .is_some_and(crate::user_drain::Socket::should_close)
+        {
+            return true;
+        }
         match self.registry.drain_state() {
             crate::accounts::Drain::Off => false,
             crate::accounts::Drain::Now => true,
@@ -315,6 +356,14 @@ impl Session {
     /// Called once after the upgrade, for `resumable=1` sockets.
     pub async fn open(&mut self) {
         if !self.identity.resumable {
+            return;
+        }
+        if self
+            .user_socket
+            .as_ref()
+            .is_some_and(crate::user_drain::Socket::should_close)
+        {
+            self.send(envelope::session(&self.resume_id, false));
             return;
         }
         let mut resumed = false;
@@ -513,7 +562,13 @@ impl Session {
         match account {
             Ok(account) => {
                 self.metrics.note_init();
+                let private = !account.is_public();
                 self.join(account).await;
+                if private && self.joined.contains_key(&init.account_name) {
+                    self.registry
+                        .interruptions
+                        .deliver(self.user(), &init.account_name, &self.out);
+                }
                 // Algos stopped while no browser was attached: say why.
                 // Chases that ended while it was gone are told as their replayed ends.
                 if let Some(kept) = self.registry.take_notice(
@@ -563,7 +618,7 @@ impl Session {
             }
             Err(error) => {
                 self.drop_early(&name, "account did not join");
-                self.send(envelope::error(Some(&name), error));
+                self.account_stop_error(&account, error);
                 self.registry
                     .release(&account, self.socket, Disposal::JoinFailed);
             }
@@ -628,10 +683,23 @@ impl Session {
                 true
             }
             Err(error) => {
-                self.send(envelope::error(Some(name), error));
+                self.account_stop_error(&account, error);
                 false
             }
         }
+    }
+
+    fn account_stop_error(&self, account: &Account, error: &str) {
+        // A latch alone is not evidence: an unrelated actor crash must still report.
+        let frame = if error == "account stopped"
+            && account.moving()
+            && self.registry.planned_move(&account.user)
+        {
+            envelope::moving(&account.name, error)
+        } else {
+            envelope::error(Some(&account.name), error)
+        };
+        self.send(frame);
     }
 
     fn leave(&self, joined: Joined, disposal: Disposal) {
@@ -1131,6 +1199,16 @@ impl Session {
         reply: methods::Reply,
         after_load: bool,
     ) {
+        if !self.joined[name].account.running.io_allowed() {
+            self.reply_failure(
+                name,
+                request_id,
+                "ServerDraining",
+                "Router lease expired; no new work was sent",
+                Some("notSent"),
+            );
+            return;
+        }
         // An after-load wait polls the account like a waiting read, under the same cap.
         let permit = if after_load {
             let account = &self.joined[name].account;
@@ -1231,6 +1309,9 @@ impl Session {
         outcome: Option<&str>,
     ) {
         let mut result = json!({"name": kind, "message": message});
+        if kind == "ServerDraining" {
+            result["kind"] = "venueUnavailable".into();
+        }
         if let Some(outcome) = outcome {
             result["outcome"] = outcome.into();
         }
@@ -1243,6 +1324,11 @@ impl Session {
 
     /// On close: park private accounts for resumable sockets, release the rest.
     pub fn close(mut self) {
+        let disposal = if self.moved && self.registry.planned_move(self.user()) {
+            Disposal::Moving
+        } else {
+            Disposal::SocketClosed
+        };
         let joined: Vec<Joined> = self.joined.drain().map(|(_, joined)| joined).collect();
         let mut parked = Vec::new();
         for joined in joined {
@@ -1258,7 +1344,7 @@ impl Session {
                 parked.push((joined.account, self.socket));
             } else {
                 self.registry
-                    .release(&joined.account, self.socket, Disposal::SocketClosed);
+                    .release(&joined.account, self.socket, disposal);
             }
         }
         if let Some(user) = &self.identity.user {
@@ -1813,6 +1899,91 @@ mod tests {
                     1,
                     "the page is told the chase stopped: {told:?}"
                 );
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn review_3086_crash_before_drain_close_is_not_a_planned_move() {
+        tokio::task::LocalSet::new().run_until(async {
+            for mode in ["user", "box"] {
+                let registry = crate::accounts::tests::registry();
+                let init = acct_init();
+                let account = crate::accounts::testing::trading_account(&registry, "u", &init);
+                let (mut original, _frames) = user_session(registry.clone(), "u");
+                assert!(original.init(init).await.is_ok());
+                account.handle.dispose();
+                tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    while account.handle.join(99_998, true).await.is_ok() {
+                        account.handle.leave(99_998);
+                        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                    }
+                }).await.expect("actor is already dead before any drain disposal");
+                assert!(!account.moving());
+                if mode == "user" {
+                    registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+                } else {
+                    registry.start_drain();
+                }
+                assert_eq!(original.drain_close(), Some(Close::Moved));
+                original.close();
+                let (mut late, mut frames) = user_session(registry, "u");
+                late.join(account).await;
+                let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
+                assert_eq!(frame["d"]["data"], json!(["account stopped"]),
+                    "{mode}: closing a draining session must not relabel an earlier actor crash: {frame}");
+            }
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn planned_move_stop_errors_carry_the_reason_but_real_actor_stops_do_not() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for mode in ["user", "box", "crash", "crash_during_drain"] {
+                    let registry = crate::accounts::tests::registry();
+                    let init = acct_init();
+                    let account = crate::accounts::testing::trading_account(&registry, "u", &init);
+                    let (mut session, _frames) = user_session(registry.clone(), "u");
+                    assert!(session.init(init).await.is_ok());
+                    match mode {
+                        "user" => {
+                            registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+                        }
+                        "box" => registry.start_drain(),
+                        "crash_during_drain" => {
+                            registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+                            account.handle.dispose();
+                        }
+                        _ => account.handle.dispose(),
+                    }
+                    if matches!(mode, "user" | "box") {
+                        assert_eq!(session.drain_close(), Some(Close::Moved));
+                        session.close();
+                    }
+                    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                        while account.handle.join(99_999, true).await.is_ok() {
+                            account.handle.leave(99_999);
+                            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                        }
+                    })
+                    .await
+                    .expect("the account really ended");
+                    let (mut late, mut frames) = user_session(registry, "u");
+                    late.join(account).await;
+                    let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
+                    assert_eq!(frame["d"]["op"], "error");
+                    assert_eq!(frame["d"]["data"][0], "account stopped");
+                    if matches!(mode, "user" | "box") {
+                        assert_eq!(frame["d"]["data"][1]["reason"], "moving", "{mode}: {frame}");
+                    } else {
+                        assert_eq!(
+                            frame["d"]["data"],
+                            json!(["account stopped"]),
+                            "{mode}: {frame}"
+                        );
+                    }
+                }
             })
             .await;
     }

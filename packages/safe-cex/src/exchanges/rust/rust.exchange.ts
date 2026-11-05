@@ -680,7 +680,7 @@ export class RustEngineExchange extends BaseExchange {
       answers.optionExpiries = false;
       answers.accountGreeks = false;
     }
-    return answers;
+    return { ...this.capabilityRecord, ...answers };
   }
 
   /** Venue-specific answers wait for the engine rather than guessing from the base contract. */
@@ -1180,6 +1180,7 @@ export class RustEngineExchange extends BaseExchange {
 
   private sourceOrdersAsk: { symbols: string[] | undefined; due: number } | undefined;
   private sourceOrdersTimer: ReturnType<typeof setTimeout> | undefined;
+  private sourceCancelChecks: { id: string; symbol: string }[] = [];
 
   /**
    * A frame-fed engine holds an uncertain write until its data source sends orders from a read
@@ -1211,7 +1212,9 @@ export class RustEngineExchange extends BaseExchange {
 
   private refreshSourceOrders = (symbols?: string[]) => {
     if (this.isDisposed || this.engineFailure) return;
-    void this.refreshAccountOrders(symbols).catch((error: unknown) => {
+    const checks = this.sourceCancelChecks;
+    this.sourceCancelChecks = [];
+    void this.refreshAccountOrders(symbols, checks.length ? checks : undefined).catch((error: unknown) => {
       if (this.isDisposed) return;
       const reason = error instanceof Error ? error.message : String(error);
       this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
@@ -1219,18 +1222,25 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   /** Data source: send orders, for these symbols or the account, from a read sent after this call. */
-  refreshAccountOrders = async (symbols?: string[]): Promise<void> => {
+  refreshAccountOrders = async (symbols?: string[], cancelChecks?: { id: string; symbol: string }[]): Promise<void> => {
     if (this.routesToWorker) {
       // Disposal while the bridge attaches retires the ask: nothing may start after cleanup.
       await this.untilWorkerBridge();
       if (this.isDisposed) return;
       await (this.callMethodInWorker as (m: string, ...a: unknown[]) => Promise<unknown>)(
         'refreshAccountOrders',
-        ...(symbols !== undefined ? [symbols] : []),
+        ...(cancelChecks?.length ? [symbols, cancelChecks] : symbols !== undefined ? [symbols] : []),
       );
       return;
     }
-    await this.command({ op: 'refreshOrders', ...(symbols !== undefined ? { symbols } : {}) }, { report: false });
+    try {
+      if (cancelChecks?.length) {
+        await this.command({ op: 'registerCancelChecks', orders: cancelChecks }, { report: false });
+      }
+    } finally {
+      // Registration grants no read authority; a refusal must not suppress the repair read.
+      await this.command({ op: 'refreshOrders', ...(symbols !== undefined ? { symbols } : {}) }, { report: false });
+    }
   };
 
   /** Data source: re-read the settings a frame-fed engine changed, for one symbol or the account. */
@@ -1518,6 +1528,7 @@ export class RustEngineExchange extends BaseExchange {
         const { message, sentryData } = bybitPublicRateLimitReport(this.name, notice);
         this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
       },
+      (event) => this.receiveEvent(event),
     );
     this.httpStartupDiagnostics = routedTransport.startupDiagnostics;
     this.invalidateInfoCatalogue = routedTransport.invalidateCatalogue;
@@ -2230,6 +2241,37 @@ export class RustEngineExchange extends BaseExchange {
     if (event.code === 'auth.rejected') this.noteAuthFailure();
     if (event.code === 'settings.held' && this.frameFed) this.refreshSourceSettings(event.fields?.symbol);
     if (event.code === 'orders.held' && this.frameFed) this.askSourceForOrders(event.fields);
+    if (
+      event.code === 'orders.cancel_check' &&
+      this.frameFed &&
+      typeof event.fields?.targets === 'string' &&
+      event.fields.targets.length <= 32_768
+    ) {
+      try {
+        const targets: unknown = JSON.parse(event.fields.targets);
+        if (Array.isArray(targets) && targets.length <= 64) {
+          for (const target of targets) {
+            if (
+              !target ||
+              typeof target.id !== 'string' ||
+              !target.id ||
+              target.id.length > 128 ||
+              typeof target.symbol !== 'string' ||
+              !target.symbol ||
+              target.symbol.length > 128
+            )
+              continue;
+            this.sourceCancelChecks = this.sourceCancelChecks.filter(
+              (c) => c.id !== target.id || c.symbol !== target.symbol,
+            );
+            this.sourceCancelChecks.push({ id: target.id, symbol: target.symbol });
+            if (this.sourceCancelChecks.length > 64) this.sourceCancelChecks.shift();
+          }
+        }
+      } catch {
+        // An invalid control grants no confirmation and never suppresses the ordinary read.
+      }
+    }
     if (event.code === 'orders.refresh' && this.frameFed) {
       const named = typeof event.fields?.symbols === 'string' ? event.fields.symbols.split(',') : [''];
       this.refreshSourceOrders(named.includes('') ? undefined : named);

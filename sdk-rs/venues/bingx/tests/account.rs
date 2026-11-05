@@ -34,6 +34,7 @@ struct Harness {
     sent: Vec<(SocketId, String)>,
     closed: Vec<SocketId>,
     logs: Vec<String>,
+    events: Vec<safe_cex_engine::LogEvent>,
     errors: Vec<String>,
     done: Vec<(u32, Result<String, String>)>,
     command_errors: Vec<(u32, String)>,
@@ -70,6 +71,7 @@ impl Harness {
             sent: Vec::new(),
             closed: Vec::new(),
             logs: Vec::new(),
+            events: Vec::new(),
             errors: Vec::new(),
             done: Vec::new(),
             command_errors: Vec::new(),
@@ -92,6 +94,7 @@ impl Harness {
                 Action::Notice(Notice::Event(event))
                     if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
                 Action::Notice(Notice::Event(event)) => {
+                    self.events.push(event.clone());
                     if event.level == Level::Error {
                         self.errors.push(event.message.clone());
                     }
@@ -258,6 +261,51 @@ impl Harness {
                 )
             })
             .collect()
+    }
+}
+
+#[test]
+fn rate_limit_envelopes_precede_private_list_decode_and_keep_unblock_delay() {
+    use safe_cex_engine::log::Value;
+    for path in [BALANCE, POSITIONS, ORDERS] {
+        for status in [200, 429] {
+            let mut h = Harness::new();
+            h.respond(MODE, 200, r#"{"code":0,"data":{"dualSidePosition":false}}"#);
+            let balance = h.engine.store().balance().clone();
+            let positions = h.engine.store().positions().to_vec();
+            let orders = h.engine.store().orders().to_vec();
+            h.events.clear();
+            h.logs.clear();
+            let body = format!(
+                r#"{{"code":100410,"msg":"请稍后重试, unblocked after {:013.0}"}}"#,
+                h.now + 90_000.0
+            );
+            h.respond(path, status, &body);
+            let event = h
+                .events
+                .iter()
+                .find(|event| {
+                    event.fields.iter().any(|(name, value)| {
+                        *name == "kind" && *value == Value::Str("rateLimited".into())
+                    })
+                })
+                .unwrap_or_else(|| panic!("{path} HTTP {status}: {:?}", h.events));
+            assert!(
+                event
+                    .fields
+                    .contains(&("retryAfterMs", Value::Num(90_000.0))),
+                "{event:?}"
+            );
+            assert!(
+                event
+                    .fields
+                    .contains(&("venueCode", Value::Str("100410".into())))
+            );
+            assert!(h.logs.iter().all(|line| !line.contains("expected list")));
+            assert_eq!(h.engine.store().balance(), &balance);
+            assert_eq!(h.engine.store().positions(), positions);
+            assert_eq!(h.engine.store().orders(), orders);
+        }
     }
 }
 
@@ -2202,6 +2250,35 @@ fn leverage_read_failures_report_once_and_keep_settings() {
 }
 
 #[test]
+fn both_metadata_read_legs_preserve_rate_limit_kind_and_unblock_delay() {
+    for margin in [false, true] {
+        let mut h = Harness::ready();
+        let before = h.engine.store().setting("BTCUSDT");
+        let request = if margin {
+            margin_stage(&mut h, 99)
+        } else {
+            metadata(&mut h, 99)
+        };
+        let body = format!(
+            r#"{{"code":100410,"msg":"请稍后重试; unblocked after {:013.0}"}}"#,
+            h.now + 90_000.0
+        );
+        h.reply(request.id, 200, &body);
+        let error = &h
+            .failures
+            .iter()
+            .find(|(id, _)| *id == 99)
+            .expect("one caller failure")
+            .1;
+        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+        assert_eq!(error.retry_after_ms, Some(90_000.0));
+        assert_eq!(error.venue_code.as_deref(), Some("100410"));
+        assert!(error.message.contains("请稍后重试"));
+        assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    }
+}
+
+#[test]
 fn a_config_update_during_the_read_wins_over_its_snapshot() {
     let mut h = Harness::ready();
     fetch_leverage(&mut h, 12, "BTCUSDT");
@@ -3864,4 +3941,123 @@ fn old_delivery_after_fresh_commit_is_inert() {
     h.reply(read.id, 200, OPEN);
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().price, 59001.);
     assert_eq!(account_cover(&mut h), cover);
+}
+
+#[test]
+fn keepalive_recovery_does_not_taint_a_later_local_deadline() {
+    let mut h = Harness::ready();
+    h.fire_at(1_801_000.);
+    let put = h.take(KEY);
+    assert_eq!(put.method, Method::Put);
+    h.reply(
+        put.id,
+        200,
+        r#"{"code":100410,"msg":"listen key expired; 请稍后重试"}"#,
+    );
+    h.fire_recovery();
+    let key = h.take(KEY);
+    assert_eq!(key.method, Method::Post);
+    h.events.clear();
+    h.fire_at(h.now + 20_000.);
+    let bad: Vec<_> = h
+        .events
+        .iter()
+        .filter(|e| {
+            e.fields.iter().any(|(k, v)| {
+                *k == "kind" && *v == safe_cex_engine::Value::Str("rateLimited".into())
+            })
+        })
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "local timeout inherited a prior response: {bad:?}"
+    );
+}
+
+#[test]
+fn keepalive_rate_evidence_cannot_mask_a_later_provider_refusal() {
+    struct Refusing {
+        inner: safe_cex_engine::signing::Provider,
+        refuse: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl safe_cex_engine::signing::Signer for Refusing {
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn sign(
+            &self,
+            request: safe_cex_engine::signing::SignRequest,
+        ) -> safe_cex_engine::signing::SignFuture {
+            self.inner.sign(request)
+        }
+        fn sign_ready(
+            &self,
+            request: &safe_cex_engine::signing::SignRequest,
+        ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+        {
+            if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+                Some(Err(safe_cex_engine::signing::SignError::Refused))
+            } else {
+                self.inner.sign_ready(request)
+            }
+        }
+    }
+
+    for expired in [false, true] {
+        let refuse = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = refuse.clone();
+        let mut h = Harness::unstarted_with_provider(|inner| {
+            std::sync::Arc::new(Refusing {
+                inner,
+                refuse: flag,
+            })
+        });
+        h.respond("/quote/contracts", 200, MARKETS);
+        h.respond("/quote/ticker", 200, DAILY);
+        h.respond("/quote/premiumIndex", 200, PREMIUM);
+        let mut h = Harness::finish_ready(h, OPEN);
+        h.fire_at(1_801_000.);
+        let put = h.take(KEY);
+        let message = if expired {
+            "listen key expired; 请稍后重试"
+        } else {
+            "请稍后重试"
+        };
+        h.reply(
+            put.id,
+            200,
+            &format!(r#"{{"code":100410,"msg":"{message}"}}"#),
+        );
+        refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+        h.event(Event::Command(Command::Venue {
+            command: 999,
+            action: safe_cex_engine::VenueAction::ReadPositions,
+        }));
+        let error = &h
+            .failures
+            .iter()
+            .find(|(id, _)| *id == 999)
+            .expect("provider refusal")
+            .1;
+        assert_ne!(
+            error.kind,
+            Some(safe_cex_engine::ErrorKind::RateLimited),
+            "expired={expired}: {error:?}"
+        );
+        assert_eq!(error.venue_code, None, "expired={expired}: {error:?}");
+        assert_eq!(error.retry_after_ms, None, "expired={expired}: {error:?}");
+        assert!(
+            error.message.contains(
+                &safe_cex_engine::signing::SignError::Refused
+                    .venue_error()
+                    .message
+            ),
+            "{error:?}"
+        );
+        assert_eq!(
+            error,
+            &safe_cex_engine::signing::SignError::Refused.venue_error()
+        );
+        assert_eq!(h.failures.iter().filter(|(id, _)| *id == 999).count(), 1);
+    }
 }

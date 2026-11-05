@@ -1,11 +1,15 @@
 //! Wire compatibility for the host command decoder (RUST_COMMAND_DECODER.md).
-//! `legacy` is a byte-for-byte copy of the derive-based decoder as it stood
-//! before the borrowed-tag rewrite, kept only here as the oracle.
+//! `legacy` preserves the derive-based decoder's wire contract, with gated
+//! command additions mirrored explicitly, kept only here as the oracle.
 use super::*;
 
 #[allow(clippy::large_enum_variant)]
 mod legacy {
-    #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
+    #[cfg(any(
+        feature = "command-asterdex",
+        feature = "command-kucoinspot",
+        feature = "command-bitget"
+    ))]
     use crate::model::CancelOrderRef;
     #[cfg(feature = "command-asterdex")]
     use crate::model::StpMode;
@@ -153,6 +157,11 @@ mod legacy {
             command: u32,
             #[serde(default)]
             symbols: Option<Vec<String>>,
+        },
+        #[cfg(feature = "command-bitget")]
+        RegisterCancelChecks {
+            command: u32,
+            orders: Vec<CancelOrderRef>,
         },
         ReadPositions {
             command: u32,
@@ -373,6 +382,11 @@ mod legacy {
                 CommandIn::RefreshOrders { command, symbols } => Self::Venue {
                     command,
                     action: crate::VenueAction::RefreshOrders { symbols },
+                },
+                #[cfg(feature = "command-bitget")]
+                CommandIn::RegisterCancelChecks { command, orders } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::RegisterCancelChecks { orders },
                 },
                 CommandIn::ReadPositions { command } => Self::Venue {
                     command,
@@ -701,6 +715,12 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
         ("op", r#""scheduleCancel""#),
         ("command", "30"),
         ("time", "1700000000000"),
+    ]);
+    #[cfg(feature = "command-bitget")]
+    all.push(vec![
+        ("op", r#""registerCancelChecks""#),
+        ("command", "31"),
+        ("orders", r#"[{"id":"7","symbol":"BTCUSDT"}]"#),
     ]);
     all
 }

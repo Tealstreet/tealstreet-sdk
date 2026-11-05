@@ -43,6 +43,8 @@ pub enum Request {
         coins: std::collections::VecDeque<String>,
         started: f64,
         read: u32,
+        cut: Option<PositionCut>,
+        repair: bool,
     },
     Balance {
         row: Option<Amounts>,
@@ -75,7 +77,22 @@ pub struct OrderSnapshot {
     read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
     /// A page answered outside its read response: the census proves nothing.
     read_lost: bool,
+    cancel_check_serial: u64,
+    cancel_shape_valid: bool,
+    generation: u64,
+    uta: bool,
 }
+
+struct CancelCheck {
+    target: CancelOrderRef,
+    native: String,
+    serial: u64,
+    expires: f64,
+    uta: bool,
+}
+
+const CANCEL_CHECK_LIMIT: usize = 64;
+const CANCEL_CHECK_TTL_MS: f64 = 120_000.0;
 
 /// The one read-cover scope of Bitget's account-wide open-order census.
 const ORDERS_SCOPE: &str = "orders";
@@ -103,12 +120,23 @@ pub struct Amounts {
     upnl: f64,
 }
 
-struct WsPosition {
-    at: Option<f64>,
-    update: Option<f64>,
-    /// Observation only: never replaces or renews valid financial timestamps.
-    rejected_at: Option<f64>,
+#[derive(Clone, Copy)]
+pub struct PositionCut {
+    epoch: u64,
+    ordinal: u64,
+    at: f64,
 }
+
+struct WsPosition {
+    // A per-leg receipt protects its exact row, not a cached alias from another mode.
+    id: String,
+    observed: Option<PositionCut>,
+    rejected: Option<PositionCut>,
+}
+
+// The existing 5 s grace is a local receipt heuristic, never a causal barrier.
+// Fix pre-send age at the first physical release, not at response delivery.
+const POSITION_RECEIPT_GRACE_MS: f64 = 5_000.0;
 
 #[derive(Default)]
 pub struct Account {
@@ -157,7 +185,11 @@ pub struct Account {
     balance_version: u64,
     inverse_assets: Vec<InverseAsset>,
     inverse_unpriced_warned: bool,
-    ws_positions: HashMap<String, WsPosition>,
+    ws_positions: HashMap<PositionKey, WsPosition>,
+    position_epoch: u64,
+    position_ordinal: u64,
+    position_connection_seen: bool,
+    position_repair_owed: bool,
     terminal: HashMap<String, f64>,
     opened: HashMap<String, f64>,
     pub plans: HashMap<String, String>,
@@ -172,6 +204,8 @@ pub struct Account {
     write_check: Option<(TimerId, f64)>,
     /// A census the stream outran owes another, no sooner than this timer.
     census_follow_up: Option<TimerId>,
+    cancel_checks: Vec<CancelCheck>,
+    cancel_check_serial: u64,
     degraded: bool,
     /// When positions, balance and orders were last read over REST while live;
     /// `None` after each (re)login, so the first live poll covers the gap.
@@ -355,6 +389,9 @@ impl BitgetFutures {
         socket: safe_cex_engine::SocketId,
     ) {
         self.account.authenticated = false;
+        if std::mem::replace(&mut self.account.position_connection_seen, true) {
+            self.reset_position_connection();
+        }
         if let Some(identity) = self.options.credentials.clone() {
             cx.send_signed(
                 socket,
@@ -435,6 +472,38 @@ impl BitgetFutures {
         );
     }
 
+    fn reset_position_connection(&mut self) {
+        self.account.position_epoch = self.account.position_epoch.saturating_add(1);
+        self.account.ws_positions.clear();
+        self.account.position_repair_owed = true;
+    }
+
+    fn owe_position_repair(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.position_repair_owed = true;
+        if self.account.positions_timer.is_none() {
+            self.account.positions_timer = Some(cx.set_timer(500.0));
+        }
+    }
+
+    pub(crate) fn position_read_released(
+        &mut self,
+        pending: &mut Pending,
+        release: safe_cex_engine::SigningRelease,
+    ) {
+        if let Pending::Account {
+            request: Request::Positions { cut, .. },
+            ..
+        } = pending
+            && cut.is_none()
+        {
+            *cut = Some(PositionCut {
+                epoch: self.account.position_epoch,
+                ordinal: self.account.position_ordinal,
+                at: release.time().raw_ms,
+            });
+        }
+    }
+
     pub(crate) fn refresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
         if cx.frame_fed()
             || !self.account.detected
@@ -444,6 +513,10 @@ impl BitgetFutures {
             return;
         }
         self.account.positions_in_flight = true;
+        let repair = std::mem::take(&mut self.account.position_repair_owed);
+        if repair && let Some(timer) = self.account.positions_timer.take() {
+            cx.clear_timer(timer);
+        }
         self.account.positions_read += 1;
         let read = self.account.positions_read;
         let mut coins = std::collections::VecDeque::new();
@@ -484,6 +557,8 @@ impl BitgetFutures {
                 coins,
                 started: cx.now,
                 read,
+                cut: None,
+                repair,
             },
         );
     }
@@ -520,6 +595,137 @@ impl BitgetFutures {
         }
     }
 
+    /// Store-only registration: the next ordinary refresh owns all native I/O.
+    pub(crate) fn register_cancel_checks(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        targets: &[CancelOrderRef],
+    ) {
+        self.account.cancel_checks.retain(|c| c.expires > cx.now);
+        for target in targets.iter().take(CANCEL_CHECK_LIMIT) {
+            if target.id.is_empty()
+                || target.id.len() > 128
+                || target.symbol.is_empty()
+                || target.symbol.len() > 128
+            {
+                continue;
+            }
+            let Some(row) = cx.store.order(&target.id).filter(|r| {
+                r.symbol == target.symbol
+                    && matches!(r.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                    && !is_preset_child(r)
+            }) else {
+                continue;
+            };
+            if row.parent_id.as_ref().unwrap_or(&row.id).len() > 128
+                || !self.account.plans.contains_key(&row.id)
+            {
+                continue;
+            }
+            let Some(serial) = self.account.cancel_check_serial.checked_add(1) else {
+                continue;
+            };
+            self.account.cancel_check_serial = serial;
+            self.account.cancel_checks.retain(|c| c.target != *target);
+            if self.account.cancel_checks.len() == CANCEL_CHECK_LIMIT {
+                self.account.cancel_checks.remove(0);
+            }
+            self.account.cancel_checks.push(CancelCheck {
+                target: target.clone(),
+                native: row.parent_id.as_ref().unwrap_or(&row.id).clone(),
+                serial,
+                expires: cx.now + CANCEL_CHECK_TTL_MS,
+                uta: self.account.uta,
+            });
+        }
+        if !self.account.cancel_checks.is_empty() {
+            self.account.orders_dirty = true;
+        }
+    }
+
+    pub(crate) fn check_unknown_cancels(&mut self, cx: &mut Cx<'_, Pending>, orders: &[Order]) {
+        let mut targets = Vec::new();
+        for o in orders {
+            if !matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                || is_preset_child(o)
+                || cx.store.order(&o.id).is_some_and(|r| {
+                    matches!(r.status, OrderStatus::Canceled | OrderStatus::Closed)
+                })
+            {
+                continue;
+            }
+            targets.push(CancelOrderRef {
+                id: o.id.clone(),
+                symbol: o.symbol.clone(),
+            });
+            if targets.len() == CANCEL_CHECK_LIMIT {
+                break;
+            }
+        }
+        self.register_cancel_checks(cx, &targets);
+        cx.source_cancel_checks(&targets);
+    }
+
+    fn cancel_check_unproven(&self, cx: &mut Cx<'_, Pending>, reason: &'static str) {
+        if !self.account.cancel_checks.is_empty() {
+            cx.event(
+                Level::Info,
+                "bitget.cancel.unproven",
+                "Native read did not prove the uncertain cancel outcome",
+                vec![
+                    ("result", "unproven".into()),
+                    ("reason", reason.into()),
+                    (
+                        "pendingCount",
+                        (self.account.cancel_checks.len() as f64).into(),
+                    ),
+                ],
+            );
+        }
+    }
+
+    fn native_cancel_evidence(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        snapshot: &OrderSnapshot,
+        refused: &[String],
+    ) -> Vec<(String, bool)> {
+        self.account.cancel_checks.retain(|c| c.expires > cx.now);
+        if snapshot.virtual_only
+            || !snapshot.cancel_shape_valid
+            || snapshot.skipped.rejected() > 0
+            || snapshot.read_lost
+            || snapshot.generation != self.account.generation
+            || snapshot.uta != self.account.uta
+        {
+            self.cancel_check_unproven(cx, "partial-or-stale-census");
+            return vec![];
+        }
+        let mut evidence = Vec::new();
+        for c in &self.account.cancel_checks {
+            if c.serial > snapshot.cancel_check_serial
+                || c.uta != snapshot.uta
+                || refused.contains(&c.target.symbol)
+                || self.order_revision(&c.target.id) > snapshot.stream_revision
+                || snapshot.rows.iter().any(|row| {
+                    (row.id == c.native || row.parent_id.as_ref() == Some(&c.native))
+                        && (row.symbol != c.target.symbol
+                            || !matches!(row.kind, OrderType::StopLoss | OrderType::TakeProfit))
+                })
+            {
+                continue;
+            }
+            evidence.push((
+                c.target.id.clone(),
+                snapshot.rows.iter().any(|row| {
+                    row.symbol == c.target.symbol
+                        && (row.id == c.native || row.parent_id.as_ref() == Some(&c.native))
+                }),
+            ));
+        }
+        evidence
+    }
+
     pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>, virtual_only: bool) {
         if cx.frame_fed()
             || !self.account.detected
@@ -551,6 +757,10 @@ impl BitgetFutures {
                 virtual_only,
                 read: None,
                 read_lost: false,
+                cancel_check_serial: self.account.cancel_check_serial,
+                cancel_shape_valid: true,
+                generation: self.account.generation,
+                uta: self.account.uta,
             }),
         );
     }
@@ -749,6 +959,8 @@ impl BitgetFutures {
                 mut coins,
                 started,
                 read,
+                cut,
+                repair,
             } => {
                 if let Some(coin) = coins.pop_front() {
                     self.account_request(
@@ -766,12 +978,25 @@ impl BitgetFutures {
                             coins,
                             started,
                             read,
+                            cut,
+                            repair,
                         },
                     );
                     return;
                 }
                 self.account.positions_in_flight = false;
-                let (mut rows, stream_held) = self.merge_positions(cx, rows, started);
+                let Some(cut) = cut.filter(|c| {
+                    c.epoch == self.account.position_epoch
+                        && c.epoch != u64::MAX
+                        && c.ordinal != u64::MAX
+                }) else {
+                    self.owe_position_repair(cx);
+                    return;
+                };
+                let (mut rows, stream_held) = self.merge_positions(cx, rows, started, cut);
+                if stream_held && !repair {
+                    self.owe_position_repair(cx);
+                }
                 // Classic reads its mode per symbol, so a flat account never learned it.
                 if !self.account.uta && !self.account.mode_read && rows.is_empty() {
                     self.account.mode_read = true;
@@ -785,14 +1010,32 @@ impl BitgetFutures {
                     if !self
                         .account
                         .ws_positions
-                        .get(&p.id)
-                        .is_some_and(|mark| mark.rejected_at.is_some_and(|at| at >= started))
+                        .get(&(p.symbol.clone(), Some(p.side)))
+                        .is_some_and(|mark| {
+                            mark.rejected.is_some_and(|r| {
+                                p.id == mark.id && r.epoch == cut.epoch && r.ordinal > cut.ordinal
+                            })
+                        })
                     {
                         self.position_setting(cx, p);
                     }
                 }
+                // An admitted mode replacement inherits the binding, never a new receipt time.
+                for ((symbol, side), mark) in &mut self.account.ws_positions {
+                    if !rows.iter().any(|p| p.id == mark.id)
+                        && let Some(row) = rows
+                            .iter()
+                            .find(|p| p.symbol == *symbol && Some(p.side) == *side)
+                    {
+                        mark.id.clone_from(&row.id);
+                    }
+                }
                 for current in cx.store.positions() {
                     if !rows.iter().any(|p| p.id == current.id)
+                        // Malformed REST retains the bound row, never a superseded mode alias.
+                        && !self.account.ws_positions.get(&(current.symbol.clone(), Some(current.side)))
+                            .is_some_and(|mark| mark.id != current.id && [mark.observed, mark.rejected]
+                                .into_iter().flatten().any(|r| r.epoch == cut.epoch))
                         && [Some(current.side), None]
                             .into_iter()
                             .any(|side| !skipped.allows_absence(&(current.symbol.clone(), side)))
@@ -856,21 +1099,36 @@ impl BitgetFutures {
                     None => snapshot.read_lost = true,
                 }
                 #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct CensusMeta {
+                    end_id: Option<String>,
+                    cursor: Option<String>,
+                    entrusted_list: Option<Vec<IgnoredAny>>,
+                    list: Option<Vec<IgnoredAny>>,
+                }
+                #[derive(Deserialize)]
                 #[serde(untagged)]
                 enum Meta {
-                    Object(PageMeta),
+                    Object(CensusMeta),
                     Array(Vec<IgnoredAny>),
                 }
                 let meta = serde_json::from_str::<Envelope<Meta>>(response.body)
                     .ok()
                     .and_then(|e| e.data);
                 let cursor = match meta {
-                    Some(Meta::Object(meta)) => meta.end_id.or(meta.cursor),
+                    Some(Meta::Object(meta)) => {
+                        snapshot.cancel_shape_valid &=
+                            meta.entrusted_list.is_some() || meta.list.is_some();
+                        meta.end_id.or(meta.cursor)
+                    }
                     Some(Meta::Array(rows)) => {
                         debug_assert!(rows.is_empty());
                         None
                     }
-                    None => None,
+                    None => {
+                        snapshot.cancel_shape_valid = false;
+                        None
+                    }
                 }
                 .filter(|cursor| !cursor.is_empty());
                 if snapshot.page_count > 0
@@ -910,14 +1168,6 @@ impl BitgetFutures {
                     self.order_page(cx, snapshot);
                 } else {
                     self.account.orders_in_flight = false;
-                    let rows = self.census_rows(
-                        cx,
-                        snapshot.rows,
-                        &snapshot.skipped,
-                        snapshot.virtual_only,
-                        snapshot.started,
-                        snapshot.stream_revision,
-                    );
                     // What this census may replace, decided before any per-order state
                     // moves (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
                     let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
@@ -929,10 +1179,16 @@ impl BitgetFutures {
                             .read
                             .filter(|_| !snapshot.read_lost)
                             .and_then(|earliest| {
-                                cx.orders_read_refusals_from(earliest, scope, |_| true, &rows)
-                                    .map(|refused| (earliest, refused))
+                                cx.orders_read_refusals_from(
+                                    earliest,
+                                    scope,
+                                    |_| true,
+                                    &snapshot.rows,
+                                )
+                                .map(|refused| (earliest, refused))
                             });
                     let Some((earliest, refused)) = refused else {
+                        self.cancel_check_unproven(cx, "read-cover-refused");
                         // Refused whole, or unprovable: newer rows already stand, and
                         // another read follows to prove what they cannot (absences).
                         self.census_follow_up(cx, snapshot.started);
@@ -946,6 +1202,15 @@ impl BitgetFutures {
                     if !refused.is_empty() {
                         self.census_follow_up(cx, snapshot.started);
                     }
+                    // Native evidence precedes cached-algo retention. A retained row
+                    // can never prove that the exchange still lists this target.
+                    let confirmations = self.native_cancel_evidence(cx, &snapshot, &refused);
+                    let absent: HashSet<_> = confirmations
+                        .iter()
+                        .filter(|(_, present)| !present)
+                        .map(|(id, _)| id.clone())
+                        .collect();
+                    let rows = self.census_rows(cx, &mut snapshot, &absent);
                     let admitted = |id: &str| {
                         rows.iter()
                             .find(|row| row.id == id)
@@ -987,6 +1252,35 @@ impl BitgetFutures {
                         .commit_orders_read_from(earliest, scope, |_| true, rows, &cover_unproven)
                         .is_some()
                     {
+                        for (id, present) in confirmations {
+                            self.account.cancel_checks.retain(|c| c.target.id != id);
+                            if !present {
+                                self.account.plans.remove(&id);
+                                self.account.trailing.remove(&id);
+                            }
+                            cx.event(
+                                Level::Info,
+                                "bitget.cancel.confirmed",
+                                "Native orders read answered an uncertain cancel check",
+                                vec![
+                                    ("orderId", id.into()),
+                                    ("result", if present { "present" } else { "absent" }.into()),
+                                    (
+                                        "accountMode",
+                                        if self.account.uta { "uta" } else { "classic" }.into(),
+                                    ),
+                                    (
+                                        "endpoint",
+                                        if self.account.uta {
+                                            "unfilled-strategy-orders:tpsl"
+                                        } else {
+                                            "orders-plan-pending:profit_loss"
+                                        }
+                                        .into(),
+                                    ),
+                                ],
+                            );
+                        }
                         cx.store.set_orders_loaded();
                         if !snapshot.virtual_only {
                             unproven.extend(refused);
@@ -1025,6 +1319,9 @@ impl BitgetFutures {
 
     /// A failed account read, still `request.failed`, carrying its kind fields.
     fn account_refused(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: VenueError) {
+        if matches!(&request, Request::Orders(_)) {
+            self.cancel_check_unproven(cx, "read-failed");
+        }
         self.clear_in_flight(&request);
         cx.retried_failure_error("bitget.account:870", &error);
         if let Request::Positions { read, .. } = request {
@@ -1282,6 +1579,7 @@ impl BitgetFutures {
     /// login answer, twice in a row, means the route drops sockets silently:
     /// the next connect asks the host for the next route.
     pub(crate) fn private_closed(&mut self, cx: &mut Cx<'_, Pending>, opened: bool) {
+        self.reset_position_connection();
         let answered = std::mem::replace(&mut self.account.login_answered, false);
         if !opened || answered || self.account.authenticated || self.account.route_exhausted {
             self.account.unanswered_closes = 0;
@@ -1532,8 +1830,15 @@ impl BitgetFutures {
         cx: &Cx<'_, Pending>,
         rows: Vec<Position>,
         started: f64,
+        cut: PositionCut,
     ) -> (Vec<Position>, bool) {
-        let held = std::cell::Cell::new(false);
+        // A post-cut zero has no Store row, but still prevents certifying this read.
+        let held = std::cell::Cell::new(self.account.ws_positions.values().any(|mark| {
+            [mark.observed, mark.rejected]
+                .into_iter()
+                .flatten()
+                .any(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal)
+        }));
         let mut rows: Vec<_> = rows
             .into_iter()
             .filter_map(|mut p| {
@@ -1568,40 +1873,83 @@ impl BitgetFutures {
                 }
                 if cx.store.positions().iter().any(|old| {
                     old.symbol == p.symbol
-                        && old.position_mode != p.position_mode
+                        && (old.position_mode != p.position_mode
+                            || p.position_mode == Some(PositionMode::Oneway) && old.side != p.side)
                         && self
                             .account
                             .ws_positions
-                            .get(&old.id)
-                            .is_some_and(|mark| mark.rejected_at.is_some_and(|at| at >= started))
+                            .get(&(old.symbol.clone(), Some(old.side)))
+                            .is_some_and(|mark| {
+                                mark.rejected.is_some_and(|r| {
+                                    old.id == mark.id
+                                        && r.epoch == cut.epoch
+                                        && r.ordinal > cut.ordinal
+                                }) || mark.observed.is_some_and(|r| {
+                                    old.id == mark.id
+                                        && r.epoch == cut.epoch
+                                        && (r.ordinal > cut.ordinal
+                                            || cut.at - r.at <= POSITION_RECEIPT_GRACE_MS)
+                                })
+                            })
                 }) {
                     held.set(true);
                     return None;
                 }
-                if let Some(mark) = self.account.ws_positions.get(&p.id) {
-                    let rejection = mark.rejected_at.is_some_and(|at| at >= started);
-                    let financial = mark.at.is_some_and(|at| {
-                        started - at <= 5_000.0
-                            && (at >= started
-                                || p.last_update.is_none()
-                                || mark
-                                    .update
-                                    .is_some_and(|t| p.last_update.is_some_and(|r| t > r)))
+                if let Some(mark) = self
+                    .account
+                    .ws_positions
+                    .get(&(p.symbol.clone(), Some(p.side)))
+                {
+                    let rejection = mark
+                        .rejected
+                        .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal);
+                    let after_send = mark
+                        .observed
+                        .is_some_and(|r| r.epoch == cut.epoch && r.ordinal > cut.ordinal);
+                    let financial = mark.observed.is_some_and(|r| {
+                        r.epoch == cut.epoch && cut.at - r.at <= POSITION_RECEIPT_GRACE_MS
                     });
-                    if rejection || financial {
+                    let same = cx
+                        .store
+                        .positions()
+                        .iter()
+                        .find(|old| {
+                            old.symbol == p.symbol && old.side == p.side && old.id == mark.id
+                        })
+                        .map_or(p.contracts == 0.0, |old| positions_agree(old, &p));
+                    if rejection || after_send || financial && !same {
                         held.set(true);
-                        return cx.store.position(&p.id).cloned();
+                        return cx
+                            .store
+                            .positions()
+                            .iter()
+                            .find(|old| {
+                                old.symbol == p.symbol && old.side == p.side && old.id == mark.id
+                            })
+                            .cloned();
                     }
                 }
                 Some(p)
             })
             .collect();
         for current in cx.store.positions() {
-            if !rows.iter().any(|p| p.id == current.id)
-                && self.account.ws_positions.get(&current.id).is_some_and(|m| {
-                    m.rejected_at.is_some_and(|at| at >= started)
-                        || m.at.is_some_and(|at| started - at <= 5_000.0)
-                })
+            if !rows
+                .iter()
+                .any(|p| p.symbol == current.symbol && p.side == current.side)
+                && self
+                    .account
+                    .ws_positions
+                    .get(&(current.symbol.clone(), Some(current.side)))
+                    .is_some_and(|m| {
+                        m.rejected.is_some_and(|r| {
+                            current.id == m.id && r.epoch == cut.epoch && r.ordinal > cut.ordinal
+                        }) || m.observed.is_some_and(|r| {
+                            current.id == m.id
+                                && r.epoch == cut.epoch
+                                && (r.ordinal > cut.ordinal
+                                    || cut.at - r.at <= POSITION_RECEIPT_GRACE_MS)
+                        })
+                    })
             {
                 held.set(true);
                 rows.push(current.clone());
@@ -1637,12 +1985,16 @@ impl BitgetFutures {
     fn census_rows(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        mut rows: Vec<Order>,
-        skipped: &RowAdmission<String>,
-        virtual_only: bool,
-        started: f64,
-        stream_revision: u64,
+        snapshot: &mut OrderSnapshot,
+        confirmed_absent: &HashSet<String>,
     ) -> Vec<Order> {
+        let mut rows = std::mem::take(&mut snapshot.rows);
+        let (skipped, virtual_only, started, stream_revision) = (
+            &snapshot.skipped,
+            snapshot.virtual_only,
+            snapshot.started,
+            snapshot.stream_revision,
+        );
         self.account.terminal.retain(|_, until| *until > cx.now);
         self.account.opened.retain(|_, until| *until > cx.now);
         let mut seen = HashSet::new();
@@ -1688,6 +2040,7 @@ impl BitgetFutures {
         } else {
             for current in cx.store.orders() {
                 if current.status == OrderStatus::Open
+                    && !confirmed_absent.contains(&current.id)
                     && !is_preset_child(current)
                     && !rows.iter().any(|r| r.id == current.id)
                     && ((is_algo(current.kind)
@@ -1995,8 +2348,23 @@ impl BitgetFutures {
                     })
                     .cloned()
                     .collect();
+                self.account.position_ordinal = self.account.position_ordinal.saturating_add(1);
+                let observation = PositionCut {
+                    epoch: self.account.position_epoch,
+                    ordinal: self.account.position_ordinal,
+                    at: cx.now,
+                };
                 // Rejections are observation barriers, never a new full financial
                 // snapshot. A fresh read can heal them; unrelated peers remain eligible.
+                // Known zero markers also observe malformed rows despite having no Store row.
+                for ((symbol, side), mark) in &mut self.account.ws_positions {
+                    if [*side, None]
+                        .into_iter()
+                        .any(|side| !rejected.allows_absence(&(symbol.clone(), side)))
+                    {
+                        mark.rejected = Some(observation);
+                    }
+                }
                 for p in &held {
                     if [Some(p.side), None]
                         .into_iter()
@@ -2004,22 +2372,23 @@ impl BitgetFutures {
                     {
                         self.account
                             .ws_positions
-                            .entry(p.id.clone())
-                            .and_modify(|mark| mark.rejected_at = Some(cx.now))
+                            .entry((p.symbol.clone(), Some(p.side)))
                             .or_insert(WsPosition {
-                                at: None,
-                                update: None,
-                                rejected_at: Some(cx.now),
+                                id: p.id.clone(),
+                                observed: None,
+                                rejected: Some(observation),
                             });
                     }
                 }
+                // Bitget says receive order matches commit order per connection/leg
+                // "in practice"; it promises no cross-stream sequence or time barrier.
                 for p in &positions {
                     self.account.ws_positions.insert(
-                        p.id.clone(),
+                        (p.symbol.clone(), Some(p.side)),
                         WsPosition {
-                            at: Some(cx.now),
-                            update: p.last_update,
-                            rejected_at: None,
+                            id: p.id.clone(),
+                            observed: Some(observation),
+                            rejected: None,
                         },
                     );
                 }
@@ -2399,6 +2768,7 @@ impl BitgetFutures {
     /// A complete order read for an Unknown write. One already in flight may
     /// predate the write, so another follows it; an engine re-ask joins either.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.restore_retired_write(cx);
         if !cx.reconcile_reask() {
             self.account.orders_dirty = true;
         }
@@ -2461,8 +2831,8 @@ impl BitgetFutures {
             // Keep stream updates and closures until every collateral read completes.
             if !self.account.positions_in_flight {
                 self.account.ws_positions.retain(|_, m| {
-                    m.at.is_some_and(|at| cx.now - at < 10_000.0)
-                        || m.rejected_at.is_some_and(|at| cx.now - at < 10_000.0)
+                    m.observed.is_some_and(|r| cx.now - r.at < 10_000.0)
+                        || m.rejected.is_some_and(|r| cx.now - r.at < 10_000.0)
                 });
             }
             self.account.tick += 1;
@@ -2948,6 +3318,20 @@ impl BitgetFutures {
         }
         Ok(orders)
     }
+}
+
+fn positions_agree(a: &Position, b: &Position) -> bool {
+    a.contracts == b.contracts
+        && (a.contracts == 0.0
+            || (a.entry_price == b.entry_price
+                && a.notional == b.notional
+                && a.leverage == b.leverage
+                && a.margin_type == b.margin_type
+                && a.position_mode == b.position_mode
+                && a.unrealized_pnl == b.unrealized_pnl
+                && a.realized_pnl == b.realized_pnl
+                && a.liquidation_price == b.liquidation_price
+                && a.margin_size == b.margin_size))
 }
 
 pub(crate) fn clean(v: f64) -> f64 {

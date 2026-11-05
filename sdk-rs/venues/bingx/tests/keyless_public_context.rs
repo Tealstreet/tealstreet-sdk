@@ -7,6 +7,65 @@ mod support;
 
 const COMMAND: u32 = 42;
 
+#[test]
+fn candle_rate_limit_is_typed_before_list_decode_for_keyless_and_signed_reads() {
+    for keyed in [false, true] {
+        for (status, headers, body, expected) in [
+            (200, "", r#"{"code":100410,"msg":"请稍后重试"}"#, 300_000.0),
+            (
+                200,
+                "",
+                r#"{"code":100410,"msg":"请稍后重试; unblocked after 0000000090011"}"#,
+                90_000.0,
+            ),
+            (429, "Retry-After: 120", "Too Many Requests", 120_000.0),
+        ] {
+            let mut engine = support::engine(support::Options {
+                key: keyed.then(|| "key".into()),
+                secret: keyed.then(|| "secret".into()),
+                ..Default::default()
+            });
+            issue_candles(&mut engine);
+            let request = physical(&safe_cex_engine::test_support::prepared_actions(
+                &mut engine,
+                10.,
+            ))
+            .into_iter()
+            .find(|r| r.url.contains("/quote/klines"))
+            .unwrap();
+            engine.handle(
+                11.0,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status,
+                        headers,
+                        body,
+                    },
+                },
+            );
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 11.0);
+            let errors = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed {
+                        command: COMMAND,
+                        error,
+                    }) => Some(error),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(errors.len(), 1, "{actions:?}");
+            assert_eq!(
+                errors[0].kind,
+                Some(safe_cex_engine::ErrorKind::RateLimited)
+            );
+            assert_eq!(errors[0].retry_after_ms, Some(expected));
+            assert!(!errors[0].message.contains("expected list"));
+        }
+    }
+}
+
 fn keyless() -> Engine<Bingx> {
     let mut engine = support::engine(support::Options::default());
     engine.start(0.);

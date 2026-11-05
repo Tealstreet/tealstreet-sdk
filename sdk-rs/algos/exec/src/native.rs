@@ -39,6 +39,11 @@ pub enum CancelAllScope {
 pub type CancelAllScopes = Rc<dyn Fn() -> CancelAllScope>;
 
 impl ExecFactory {
+    /// Work that can still continue into an algo handoff; hosts must not move it.
+    pub fn pending_operations(&self) -> usize {
+        self.parallel.get() + usize::from(self.nuking.get())
+    }
+
     /// The cancel-all a nuke ends with. Without it the sweep cancels each
     /// symbol with an open order in the store.
     pub fn with_cancel_all(mut self, scopes: CancelAllScopes) -> Self {

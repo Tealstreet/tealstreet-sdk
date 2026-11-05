@@ -61,9 +61,18 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | Variable | Default | Meaning |
 |---|---|---|
 | `TEALSTREET_PORT` | `23456` | Listen port |
+| `TEALSTREET_BOX` | unset | Stable display / Sentry box label, e.g. `exchange-01`; never router ownership identity |
+| `TEALSTREET_ROUTER_BOX_ID` | unset | Opaque canonical ID from router `BOXES`, e.g. `01`; required to enable enforcement, exact heartbeat `box` match |
+| `TEALSTREET_ROUTER_LEASE_MS` | `90000` | Full lease in milliseconds (20000–3600000); asserted ownership may extend at most half this duration |
+| `TEALSTREET_ROUTER_LEASE_ENFORCE` | `0` | `0` records shadow ownership only; `1` enforces expiry and parks algos, with missing users fenced immediately unless an explicit enable grace is active |
+| `TEALSTREET_ROUTER_LEASE_ENABLE_GRACE_UNTIL` | unset | Optional absolute Unix-millisecond deadline for the first enforcement flip only, typically now + 90000; unset or past grants no grace, and restart never extends the deadline |
+| `TEALSTREET_ACCESS_TEAM_DOMAIN` | unset | Bare `<team>.cloudflareaccess.com` host for release-proof JWT verification; no scheme, port or path |
+| `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/*`; either missing/invalid value disables Access-authenticated proof, heartbeat and interruption-header handling and logs once at startup |
+| `TEALSTREET_IDLE_RELEASE_TTL_MS` | `20000` | Idle-release lease in milliseconds; operator drains never expire |
 | `CONNECT_REGION` | unset | Region label. Routing uses it for `proxyRegion` defaults; it also appears in `/health` and logs |
-| `TEALSTREET_RELEASE` | unset | Release id, sent to Sentry and shown in `/health` |
-| `EXCHANGE_SERVER_SENTRY_DSN` | unset | Sentry is off when unset |
+| `TEALSTREET_RELEASE` | unset | Image revision shown in `/health`; whitespace and placeholder values (`undefined`, `null`, `unknown`) are omitted |
+| `TEALSTREET_BOX` | unset | Bun wrapper only: stable Sentry `server_name` and `box` tag (for example `exchange-01`); no hostname fallback |
+| `EXCHANGE_SERVER_SENTRY_DSN` | unset | Bun wrapper only: Sentry is off when unset |
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
@@ -72,6 +81,14 @@ Images do not contain credentials and the workflows do not deploy hosts.
 `TEALSTREET_WORKERS`, `TEALSTREET_GATEWAY_PORT` and `TEALSTREET_HEALTH_PORT`
 belong to the Bun gateway and have no meaning here. One process serves all
 connections.
+
+The native binary currently emits JSON logs, not Sentry events. The Bun gateway
+and exchange workers initialize Sentry through `packages/service-telemetry`.
+They use the existing runtime `TEALSTREET_RELEASE` image revision, never the
+literal `undefined`. Image OCI revision labels are external metadata, not
+process environment variables. Box identity comes only from `TEALSTREET_BOX`;
+missing or invalid labels are omitted. Their Sentry events omit `region` because
+`CONNECT_REGION` can be a legacy routing default rather than the box location.
 
 ## HTTP routes
 
@@ -94,11 +111,301 @@ chase or TWAP is cut short. `scripts/roll.sh` runs the whole roll on the box.
   - Each answers `{drain: "off"|"waiting"|"now", algos: {chases, twaps}}`; break-glass adds `settled`.
 - **`/health` while draining:** 503 with `ok:false` and `draining:true`, so the load balancer pool fails over. `algos: {chases, twaps}` counts the chases and TWAPs on this box, parked accounts included. A stopped chase counts until its cleanup ends, since that may still need a signature; a paused TWAP counts too.
 - **The moved close:** `4100` with reason `draining: reconnect`. It means this box is going away and the page should reconnect.
+  - A join/re-snapshot racing an account deliberately stopped for an active drain may send the original `op:error` frame with optional `data[1].reason: "moving"`. This marker requires the native account handle's first disposal cause plus an active drain for its user or this box. Native disposal/termination and host cleanup share a one-time cause record; a later holder release cannot relabel an earlier stop or crash. Old clients still receive the same first error argument.
+  - Break-glass disposal never marks a planned move; its `forceToast` algo notices are unchanged and still flush before 4100.
 - **While waiting:** a socket whose accounts run no chase or TWAP gets the moved close when the drain starts, and again as each algo ends. A socket with a running algo stays until those algos end. The drain never stops an algo.
   - An `init` from a user with no account on this box gets the moved close. A user already here (a second tab, a resume) is still accepted.
   - A moved socket releases its accounts instead of parking them: its page is reconnecting elsewhere.
-- **Break-glass:** it stops every account through the SIGTERM path. Each live page gets the algo host's own stop notice ("Chase on X stopped: the server is restarting."), and the cancels settle while browsers can still sign. Only then does every socket get the moved close, with the stop notice flushed first.
+- **Break-glass:** sticky force intent is published before any cleanup await and excludes planned-move classification until explicit undrain. It stops every account through the SIGTERM path. Each live page gets the algo host's own stop notice ("Chase on X stopped: the server is restarting."), and the cancels settle while browsers can still sign. Only then does every socket get the moved close, with the stop notice flushed first.
 - **`roll.sh [--now] [--ceiling SECONDS] [--unit NAME] [ADMIN_URL]`:** drains, then polls `/health` until no chase or TWAP runs. The ceiling defaults to 1800s; past it the script fails and leaves the box drained. It then runs `systemctl restart exchange-server`, waits up to 120s for `/health` ok, and undrains. `--now` uses break-glass instead of waiting.
+
+### Per-user drain (psmp2r-1)
+
+These routes move one user while `/health` and everyone else keep serving. All
+admin requests below use POST and the existing on-box `admin_peer` check, with
+no forwarded headers. JSON bodies are bounded to 2 KiB. Never send them through
+the public router. Only the on-box inventory response contains raw user IDs;
+new drain logs contain `user_tag` only.
+
+| Path | JSON body | Result |
+|---|---|---|
+| `/admin/user-drain/start` | `{userId, capMs?}` | Install an admission latch and return the summary below. Default cap 1,800,000 ms; accepted range 1–86,400,000 ms. Repeating start returns the same drainId and original cap. |
+| `/admin/user-drain/status` | `{userId}` | Current summary, including users with no socket and parked algos. Does not start a drain. |
+| `/admin/user-drain/cancel` | `{userId, drainId}` | Remove that exact latch and return status. Stale/missing ID, an in-progress force, or sockets already committed to close returns 409. |
+| `/admin/user-drain/force` | `{userId, drainId}` | Explicit break-glass for that user only; return summary plus `settled`. Stale/missing ID or another force in progress returns 409. |
+| `/admin/users` | none | `{users:[{userId,userTag,liveSockets,hasRunningAlgo,runningJobs,drain}]}` sorted by userTag. `drain` is the same summary as status, or null. Includes idle parked accounts, parked jobs, live sockets and installed latches. More than 4096 inventory entries returns 503, never a partial roll inventory. |
+
+The summary is `{userTag,drainId,state,capMs,elapsedMs,hasRunningAlgo,algosDone,
+pendingStarts,runningJobs,liveSockets,released,closeCode:4100}`. `drainId` and
+`capMs` are null when off. States are `off`, `waiting`, `capped`, `forcing`,
+`closing`, `drained`. Each running job is `{accountName,kind:'chase'|'twap',id}`;
+stopped chases still cleaning up and paused TWAPs count. `pendingStarts` also
+conservatively counts outstanding EXEC continuations that may hand off an algo and TWAP slice placements whose row has already stopped.
+`hasRunningAlgo` includes that pending work, even before it has a book row.
+
+Starting the latch stops `chaser:start`, `twap:start`, `twap:resume`, `twap:state`
+and `exec` immediately before actor dispatch. Queued but undispatched starts get
+`ServerDraining`, `kind:venueUnavailable`, `outcome:notSent`; nothing is replayed.
+Box drain uses the same admission refusal. Stop, pause, terminate, cleanup and
+signing remain available. Nuke remains available while waiting/capped and is counted through settlement; once closing or force starts, a queued nuke is refused before dispatch. The dispatch fence includes synchronous job creation
+and publication of its running-work snapshot, so admission cannot race an idle
+proof. Already-running jobs continue, including through the resume grace.
+
+Before the cap, observed completion of all the user's jobs and pending work
+closes every one of that user's sockets with 4100, `draining: reconnect`.
+An idle tab stays while another account or parked session of that user runs a
+job. Closed sockets release rather than park their accounts. A latched user's
+new sockets receive 4100 once jobs are done; they cannot restore schedules here.
+The latch remains until explicitly canceled. Once closing is committed, cancel waits until all closing sockets have left (409 meanwhile); it cannot reopen admission under a pending 4100 handoff.
+
+At the cap, `capped` keeps jobs, signing sockets and the admission latch intact.
+It does not kill or move anything, even if completion is first observed later.
+The caller must choose force or cancel. Force uses the existing algo stop,
+notice and cancellation-settlement path, bounded to 25 seconds; disconnecting
+its HTTP client does not abandon cleanup. Live pages receive stop notices
+before 4100; parked pages retain them for the next init here. If work still
+runs at the bound, `settled:false` reports it and leaves the latch in place;
+there is no release proof. As with box break-glass, canceled/stopped algos can
+leave uncertain resting venue orders: their notices tell the user to check.
+`released` proves that no hosted algo remains, not that every venue order was
+canceled or filled.
+
+### Live release proof and placement handshake
+
+`POST /proof/user-drain {userId,drainId}` is read-only and returns exactly
+`{userTag,drainId,released:boolean,checkedAt}` (`checkedAt` is Unix milliseconds).
+It never returns job lists, account names or the raw user ID. Unknown or stale
+IDs return 200 with `released:false`. True requires the same installed latch,
+`algosDone`, zero `pendingStarts`, and zero live sockets. An unlatched idle
+observation or a 4100 close alone is not placement authority.
+
+The edge must require the Cloudflare Access service-token policy. Independently,
+the box verifies `Cf-Access-Jwt-Assertion`: RS256 signature against
+`https://<TEALSTREET_ACCESS_TEAM_DOMAIN>/cdn-cgi/access/certs`, exact issuer
+`https://<host>`, the configured AUD in `aud`, and unexpired `exp` (no leeway).
+It checks `nbf` when present. Team config accepts only a bare single-label team
+host under `cloudflareaccess.com`; URLs, paths, userinfo and ports are refused.
+JWKS has a five-minute TTL, a 256 KiB/64-key bound, a two-second HTTPS deadline,
+no redirects and a single-flight refresh; unknown-kid refresh is limited to
+once per 30 seconds. An expired or unavailable key set fails closed. Invalid
+JWTs get 403 without logging tokens. Proof requests allow a burst of 40 then
+10/second per direct peer IP, with at most 1024 active source entries; all calls
+through one cloudflared peer share that limit. Responses have `Cache-Control:
+no-store` and no CORS. The public router must 404 both `/proof/*` and `/admin/*`.
+
+Roll/rebalance sequence: start locally, retain drainId, poll until released,
+then let the router obtain a fresh Access-authenticated proof from the source
+box immediately before pin/apply. If capped, explicitly force or cancel. A
+normal 1006 close cannot authorize moving parked jobs. Keep the source latch
+installed throughout the placement decision; do not race cancel against apply.
+After destination ownership is confirmed, the router's same-owner reconnect
+path needs no transfer proof. The NX consumer is PR #8936. No endpoint transfers
+algo state or replays writes, and no server deployment is performed by this PR.
+
+### Lazy owner moves and idle-release lease
+
+Rebalancing is lazy: move on reconnect, unless capacity or urgency requires an
+operator move. Every move uses the same admission gate and job-release decision;
+urgency does not itself stop, park or cancel work. Only the existing explicit
+force/settlement path may stop algos. Idle release only observes and fences.
+
+`POST /proof/user-idle-release {userId,requestId}` uses the same fail-closed
+Access verifier, request limits and no-store/no-CORS policy as `/proof/user-drain`.
+The public router must return 404 for this path too. `requestId` is a
+router-generated UUID per attempt. Under `User::state`, the same lock held by
+`User::admit` through dispatch and `Running::refresh`, idle release checks jobs,
+pending starts and live/pending sockets and installs the latch atomically.
+An authenticated upgrade reserves a socket under this lock before returning 101;
+it cannot slip between the idle check and latch installation.
+
+Success is 200 `{userTag,drainId,released:true,checkedAt,expiresAt}`. Refusal is 409
+`{released:false,reason,checkedAt}` and changes no admission or job state. The
+closed reasons are `live-socket`, `running-jobs`, `parked-jobs`, `pending-starts`,
+`already-draining` and `request-spent`. Paused TWAPs and jobs held by a parked
+session still prevent release. Positive work on a revoked lease or already lease-parked account
+returns `parked-jobs`, including pending work before its actor publishes paused
+rows. The idle-release route never invokes the park or cancel path. Its on-box
+admission reservation is acquired before interruption-header authentication and
+before HTTP 101, then held until `Session` owns the socket count, without a gap.
+No job is stopped, parked, canceled or replayed by this route.
+
+Both timestamps are Unix wall-clock milliseconds, captured once with
+`expiresAt = checkedAt + TEALSTREET_IDLE_RELEASE_TTL_MS`. A repeat of the same
+`(userId,requestId)` while the idle latch lives returns the exact original proof,
+including both timestamps; another requestId gets `already-draining`. It never
+renews the lease. Expiry, cancel and operator takeover retain a requestId
+tombstone for at least twice that attempt's original TTL after retirement.
+A spent request returns 409 `request-spent`, with no new latch. History survives
+idle-user pruning. Each user has 64 history slots, reserved at issuance; protected
+IDs are never evicted to admit another attempt. A new attempt at capacity returns
+429 without latching; live retries and spent-ID refusals still work. Expired
+history is reclaimed, without refreshing its retention on a lookup.
+
+The router accepts only a checkedAt within 5 seconds of its clock and an
+expiresAt at least 5 seconds ahead. It must durably commit the new
+owner before expiresAt minus 5 seconds; otherwise abandon the move and stay on
+the owner. On an uncertain timeout, retry once with the same requestId to recover
+the proof, then give up. Expiry bounds an orphaned latch to 20 seconds by default.
+
+An expiry timer clears only its exact idle-release drainId, only with no live or
+pending sockets. Admission also checks expiry, using the monotonic deadline as
+well as wall time, so a clock rollback cannot extend a lease. A newer latch or
+an operator drain is never cleared by that timer. Explicit admin cancel with the
+same drainId still works after destination ownership commits; the router does
+not require admin access. An operator start/force takes over an idle latch as a
+permanent operator drain; ordinary operator drain behavior is unchanged.
+
+## Router ownership lease and self-fencing
+
+The frozen router/box interface is:
+
+> Ownership is asserted per user by each owning user DO's alarm (every <=10 s, including parked users); there's no directory. POST /lease/router-heartbeat {box, issuedAt, users:[{userId, ownerEpoch, sequence, notAfter}]}, bounded batches, with the same Access service token + on-box JWT verification as /proof (public 404). Box rules: verify the authenticated box identity matches; reject stale or future issuedAt beyond the skew bound; per-user monotonic (ownerEpoch, sequence), so an older epoch/sequence never supersedes a newer accepted one; NEVER extend a user's lease past their notAfter; fence the user when now > notAfter (the box-side lease is notAfter itself, not a box-computed N/2); missing or uncertain state fails closed (fenced). Router side (ih35js, later): persist ownerEpoch/sequence and the max notAfter ever issued BEFORE sending; takeover first retires the sender epoch and stops old alarms, then waits past the max issued notAfter plus the skew margin, never trusting the last ACK. Constants I'm setting: clock-skew bound 5 s; notAfter = issuedAt + 45 s (TEALSTREET_ROUTER_LEASE_MS default 90000 means takeover is no earlier than ~50 s after the last issued heartbeat); heartbeat cadence 10 s. Unfencing needs a fresh valid assertion naming that user with a newer (epoch, sequence).
+
+Contact means a valid authenticated assertion for that user, including users whose
+sessions are parked. Socket absence, `/health`, and another user's heartbeat do
+not renew ownership. The box verifies the Access JWT using the configured team
+issuer/JWKS and AUD, then matches the body `box` exactly to `TEALSTREET_ROUTER_BOX_ID`. Missing or invalid
+router identity causes a clear startup error with enforcement enabled; shadow
+mode continues and reports `routerBoxId: null`. `TEALSTREET_BOX` is only a
+display/Sentry label and is not an ownership identifier. The router
+must return public 404 for `/lease/*`, as for `/proof/*` and `/admin/*`.
+
+`POST /lease/router-heartbeat` returns
+`{accepted, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
+`enforcing` is true only with enforcement on and no active explicit enable grace.
+The ACK stays conservative for the whole submitted batch, including users whose
+first heartbeat has already ended the missing-heartbeat exception. Users share
+one optional absolute grace deadline. `graceUntil` is that active deadline, or
+null when enforcement is off or grace is absent/over. There is no implicit
+startup grace. The configured deadline is not extended on restart; grace expires
+when either its wall-clock or monotonic deadline passes, and never reopens in
+that process after a clock rollback.
+
+`bootId` is a random UUIDv4 generated once per process at startup, shared by
+`/health` and every heartbeat ACK. Both responses are `Cache-Control: no-store`.
+The router binds enforcing evidence to the exact grant and current boot ID;
+observing a different boot invalidates older evidence. Reconnecting to an owner
+must force a new heartbeat rather than coalesce with an old ACK. No-proof
+takeover remains disabled by default and must not be enabled until both the box
+and router changes are deployed and re-reviewed. An ACK is not a release proof
+and never replaces the persisted maximum-issued `notAfter` and skew wait.
+
+A batch contains 1–256 distinct users, user IDs at most 512 bytes,
+and a body at most 256 KiB. Epoch and sequence are positive JS-safe integers.
+Old or duplicate tuples never extend a grant; invalid assertions return 400.
+A separate bounded peer limiter allows a 1024-request burst and 512 requests/s,
+without consuming the proof endpoint's smaller allowance. There are at most
+4096 tracked users; epoch high-water marks are retained until process exit and
+capacity exhaustion fails closed. No raw user IDs are logged.
+
+`POST /admin/router-lease/status {userId}` uses the existing on-box admin guard
+and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,
+`sequence`, `notAfter`, `generation`, `routerBoxId`, and `missingHeartbeatGraceMs`. It grants
+no placement, renewal or write authority. Expiry uses both wall-clock
+`notAfter` and a monotonic deadline so a clock rollback cannot extend ownership.
+
+### Rollout and recovery
+
+Enforcement defaults OFF. In shadow mode heartbeats and would-fence state are
+recorded, but IO and algos continue. Roll out the box image with enforcement off,
+then router heartbeats and verify shadow state. For the first flip roll only,
+the operator may set `TEALSTREET_ROUTER_LEASE_ENABLE_GRACE_UNTIL` to a fixed
+absolute deadline (normally 90 s ahead), then enable enforcement. Remove the
+grace env after this rollout; any retained past deadline grants no grace.
+Environment changes take effect on restart. With enforcement on and no active
+explicit deadline, missing/unknown users are fenced immediately, including after
+a restart; only a valid authenticated heartbeat naming them can authorize IO.
+An existing assertion always expires at its own `notAfter`, even during an
+explicit enable grace. Ordinary rolls drain users first. The router sends fresh
+per-user ownership within 10 s; socket reconnects do not reopen missing authority.
+
+After enforcement, each account holds generation-bound authority. A fresh newer
+assertion can authorize a rebuilt account, but cannot revive an old account's
+queued work. Missing/expired ownership rejects new account, order and algo starts
+with the typed `ServerDraining` refusal (`venueUnavailable`, `notSent`). The final
+native HTTP handoff and every WebSocket send also check authority, including
+prepared HTTP, messages queued behind a socket handshake, and algo continuations.
+All private-account outbound IO is stopped while that account retires; unrelated
+users and public sources continue. No request is replayed on recovery.
+
+`Registry::park_expired_router_leases` sends `AlgoInput::RouterFence`: it pauses
+TWAP scheduling, stops chase repricing, aborts algo continuations and retires the
+account host. It does **not** cancel resting/manual/chase orders. A request already
+handed to the network may still complete or fill, and has no fabricated canceled
+outcome. The same generation check on session cleanup prevents ordinary disposal
+from racing expiry into cancel-on-dispose. Reconnect builds a fresh account;
+restored running TWAP state is forced paused after a lease generation change.
+The user checks Open Orders, explicitly resumes TWAPs, or starts a new chase.
+
+### Interruption warnings
+
+Box break-glass drain and forced user drain retain their existing #8699 forced
+algo notice before closing sockets. Self-fencing also broadcasts a forced notice
+and retains it for same-box reconnect: chases stopped, TWAPs paused, resting
+orders kept, an in-flight order may still fill, and explicit checking/resume is
+required. A disconnected user receives the retained notice on account init.
+
+For cross-box recovery the router persists a one-shot interruption marker in the
+user DO, strips client-supplied copies, and adds
+`X-Tealstreet-Interrupted: {"reason":"owner-released"|"lease-expired","fromBox":"01","at":<ms>}`
+on the next successful upgrade to a box. The box accepts it only alongside a
+valid Access JWT and the normal authenticated user's proxy token. On successful
+private account init it sends one #8699 forced notice for that user, saying the
+previous server's algos stopped and must be checked. Missing, malformed or
+unauthenticated markers do nothing. Repeated upgrades with the same marker do
+not duplicate the notice; failed enqueue preserves it for the next account init.
+`fromBox` is a bounded opaque router ID, with no validation against the display
+name. When it matches this box's router ID, the notice uses the configured
+`TEALSTREET_BOX` display name; otherwise it displays the router ID as-is.
+A fresh destination at generation zero has no server-side jobs from the dead box
+to restore. However, NX can send persisted client TWAP state at account start.
+For either interruption reason, unacknowledged restored jobs are forced paused
+even after the one-shot notice has been delivered. Progress and stable IDs are
+preserved. A successful explicit `twap:resume` that actually makes the paused job
+running acknowledges only that user/account/job and the observed marker plus
+lease generation. Later account rebuilds preserve that job's client state;
+another job or account stays protected. Invalid, refused or ineffective resume
+attempts do not acknowledge. A newer marker or lease generation re-arms the job.
+No-marker/no-fence restores keep their normal behavior. Because there is no
+complete restored-job census, the marker is retained for at most 24 hours,
+measured monotonically and bounded by its original timestamp; it is not cleared
+when the first job resumes. Lease-generation restore guards also expire after
+24 hours without relaxing IO ownership. Acknowledgements are bounded to 4096 per
+user and 4096 users; a full ledger refuses resume before changing job state. There is no chase/EXEC restore operation in the current hosted API;
+new restore operations must join this gate. The forced notice tells the user to
+check their algos and orders before resuming. This does not invent a job handoff
+or durable restore from a dead box; that remains psmp2r-39. Same-box lease-fenced
+restore uses the same pause policy through its retired generation.
+The bounded process-local marker ledger is not an external durable job store.
+
+### Future: long-lived job handoff
+
+Sam's intended future semantics are: "an external store holds the job queue, job
+state transitions happen in memory, draining only has to wait for all jobs to
+move to their next state transition, and new transitions are paused." Drain will
+pause new transitions, wait only for in-flight transitions to commit (seconds,
+not the job lifetime), then hand off; the next box picks jobs up from the store.
+No external store or transition-engine refactor is introduced here.
+
+Today's logical admission hook is `user_drain::User::admit`; the final physical
+transition-start gate is `NetworkTransport::with_io_guard`, `http::Bound::dispatch`
+and the final socket send (including the queued HOW job's final send). A future shared transition token would start there
+and commit on `HostEvent::HttpEnd`/`HttpFailed` plus owned command completion in
+`Port::settle`; ambiguous network outcomes must be reconciled before handoff.
+A chase would split placement, fill reconciliation and cancel/reprice into
+transitions. A TWAP would split due-slice admission, placement reconciliation and
+schedule advance. The existing algo lifecycle is unchanged today.
+
+`user_drain::User::snapshot` (`algosDone`, `pendingStarts`, readiness),
+`Users::idle_release`, and `Registry::live_here`/parked ownership are the hook points for a future
+jobs-movable / committed-handoff alternative to jobs-finished. The drain latch
+must stay installed while that decision commits. Capture a user-owned,
+serializable stable-job-ID record before `AlgoInput::RouterFence` disposes the
+scope: `TwapBook::serialize_state` carries options, progress and in-flight state;
+`ActiveChaser.id`, `ChaserBook::progress` and `currentOrderIds` identify chase
+resume/reconciliation state. Ownership and these records must be independent of
+the socket and box. Today's paused TWAP restore and interruption warning require
+explicit user action; no speculative restore or automatic cross-box replay runs.
 
 ## Authentication
 
@@ -341,7 +648,8 @@ default exactly where the TS server reads it.
     src/signer.rs     4yjlw0 (wires safe-cex-remote-signer)
 
 Dependencies: `axum` (with `ws`), `tokio`, `jsonwebtoken`, `base64`, `serde_json`
-and `safe-cex-native`. Optional `sentry`.
+and `safe-cex-native`. Sentry capture currently belongs to the Bun wrapper,
+not this native crate.
 
 ## Algos (claude-tbz5hr chaser, 55ao7t TWAP, zs5e83 exec)
 

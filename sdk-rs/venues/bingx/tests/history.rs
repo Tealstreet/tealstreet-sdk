@@ -84,6 +84,53 @@ impl Harness {
     }
 }
 
+#[test]
+fn every_history_list_keeps_rate_limit_kind_unblock_delay_and_message() {
+    use safe_cex_engine::ErrorKind;
+    for query in [
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+        Query::PublicTrades {
+            symbol: "BTCUSDT".into(),
+            limit: None,
+        },
+    ] {
+        let mut h = Harness::new(true);
+        h.query(query);
+        let body = format!(
+            r#"{{"code":100410,"msg":"请稍后重试; unblocked after {}"}}"#,
+            h.now + 90_000.0
+        );
+        h.reply(&body);
+        assert_eq!(h.errors.len(), 1);
+        let error = &h.errors[0];
+        assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+        assert_eq!(error.retry_after_ms, Some(90_000.0));
+        assert_eq!(error.venue_code.as_deref(), Some("100410"));
+        assert!(!error.message.contains("expected list"));
+        assert!(error.message.contains("请稍后重试"));
+        assert!(h.requests.is_empty());
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Trade {

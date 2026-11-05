@@ -11,8 +11,8 @@ use serde_json::Value;
 use std::cell::{Cell, Ref, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
 
@@ -32,6 +32,8 @@ pub enum AlgoInput {
     },
     /// A socket joined (a resume or another tab): resend the algo store rows.
     Joined,
+    /// Revoke local scheduling without canceling exchange orders or replaying work.
+    RouterFence { stopped: StopNotice },
     /// The account is going away: settle algos, then dispose the engine.
     /// The reason reaches the order audit log and the client. With no browser
     /// to tell, `stopped` keeps the notice for the account's next init.
@@ -126,6 +128,11 @@ pub struct Running {
     twaps: AtomicUsize,
     /// Bumped whenever an account's count falls, so drained sockets recheck.
     ended: Arc<tokio::sync::watch::Sender<u64>>,
+    user: OnceLock<Arc<crate::user_drain::User>>,
+    work: Mutex<(Vec<crate::user_drain::Job>, usize)>,
+    lease: OnceLock<crate::router_lease::Permit>,
+    lease_parked: AtomicBool,
+    restores: OnceLock<crate::interruption::RestoreGuard>,
 }
 
 impl Running {
@@ -134,9 +141,42 @@ impl Running {
             chases: AtomicUsize::new(0),
             twaps: AtomicUsize::new(0),
             ended,
+            user: OnceLock::new(),
+            work: Mutex::default(),
+            lease: OnceLock::new(),
+            lease_parked: AtomicBool::new(false),
+            restores: OnceLock::new(),
         }
     }
 
+    pub(crate) fn attach_restores(&self, guard: crate::interruption::RestoreGuard) {
+        let _ = self.restores.set(guard);
+    }
+    fn restore_epoch(&self) -> crate::interruption::RestoreEpoch {
+        let lease = self
+            .lease
+            .get()
+            .and_then(|permit| permit.restore_generation());
+        self.restores.get().map_or(
+            crate::interruption::RestoreEpoch {
+                marker: None,
+                lease,
+            },
+            |guard| guard.epoch(lease),
+        )
+    }
+    pub(crate) fn attach_lease(&self, permit: crate::router_lease::Permit) {
+        let _ = self.lease.set(permit);
+    }
+    pub(crate) fn io_allowed(&self) -> bool {
+        self.lease.get().is_none_or(|lease| lease.allowed())
+    }
+    pub(crate) fn claim_lease_park(&self) -> bool {
+        !self.io_allowed() && !self.lease_parked.swap(true, Ordering::AcqRel)
+    }
+    pub(crate) fn parked_by_lease(&self) -> bool {
+        self.lease_parked.load(Ordering::Acquire)
+    }
     /// `(chases, twaps)`.
     pub fn counts(&self) -> (usize, usize) {
         (
@@ -147,6 +187,39 @@ impl Running {
 
     pub fn any(&self) -> bool {
         self.counts() != (0, 0)
+    }
+
+    pub(crate) fn attach(&self, user: Arc<crate::user_drain::User>) {
+        let _ = self.user.set(user);
+    }
+
+    pub(crate) fn jobs(&self) -> (Vec<crate::user_drain::Job>, usize) {
+        self.work.lock().unwrap().clone()
+    }
+
+    pub(crate) fn refresh(&self, chases: &[ActiveChaser], twaps: &[Value], pending: usize) {
+        let mut jobs: Vec<_> = chases
+            .iter()
+            .map(|chase| crate::user_drain::Job {
+                kind: "chase",
+                id: chase.id.clone(),
+                parked: false,
+            })
+            .collect();
+        jobs.extend(twaps.iter().filter_map(|twap| {
+            Some(crate::user_drain::Job {
+                kind: "twap",
+                id: twap.get("id")?.as_str()?.to_owned(),
+                parked: twap.get("status").and_then(Value::as_str) == Some("paused"),
+            })
+        }));
+        let pending = pending + chases.len() + twaps.len() - jobs.len();
+        let previous = std::mem::replace(&mut *self.work.lock().unwrap(), (jobs, pending));
+        if previous.1 > pending {
+            self.ended
+                .send_modify(|revision| *revision = revision.wrapping_add(1));
+        }
+        self.set(chases.len(), twaps.len());
     }
 
     fn set(&self, chases: usize, twaps: usize) {
@@ -253,6 +326,7 @@ struct Port {
     unheard: RefCell<VecDeque<Unheard>>,
     /// Errors raised so far, to tell whether a shutdown raised any.
     errors: Cell<u64>,
+    running: Arc<Running>,
 }
 
 impl AccountPort for Port {
@@ -270,6 +344,15 @@ impl AccountPort for Port {
         id
     }
     fn command(&self, command: Command) -> CommandFuture {
+        if !self.running.io_allowed() {
+            return Box::pin(async {
+                Err(
+                    VenueError::new("Router lease expired; no new work was sent")
+                        .kind(ErrorKind::VenueUnavailable)
+                        .outcome(Outcome::NotSent),
+                )
+            });
+        }
         if let Command::PlaceOrders { orders, .. } = &command {
             self.placed
                 .record(orders.iter().map(|order| order.symbol.as_str()));
@@ -794,6 +877,7 @@ pub async fn run(
         signer: link_signer.clone(),
         unheard: RefCell::default(),
         errors: Cell::new(0),
+        running: running.clone(),
     });
     let scope = Scope::new();
     let cx = AlgoCx::new(port.clone(), scope.clone());
@@ -830,14 +914,18 @@ pub async fn run(
     // On its own task, since `feed.next()` must not be cancelled by a timer. Stopped
     // chases count until their cleanup ends: it may still need a signature.
     {
-        let (book, twap, name) = (book.clone(), twap.clone(), name.clone());
+        let (book, twap, exec, name) = (book.clone(), twap.clone(), exec.clone(), name.clone());
         let running = running.clone();
         cx.spawn(async move {
             let mut every = tokio::time::interval(RECOUNT_EVERY);
             every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 every.tick().await;
-                running.set(book.active_chasers().len(), twap.active_twaps(&name).len());
+                running.refresh(
+                    &book.active_chasers(),
+                    &twap.active_twaps(&name),
+                    exec.pending_operations() + twap.pending_placements(),
+                );
             }
         });
     }
@@ -892,14 +980,81 @@ pub async fn run(
                 }
             }
             input = inbox.recv() => match input {
-                Some(AlgoInput::Op { op, data, origin }) => {
+                Some(AlgoInput::RouterFence { stopped }) => {
+                    for row in twap.active_twaps(&name) {
+                        if let Some(id) = row["id"].as_str() {
+                            let _ = registry.dispatch("twap:pause", &serde_json::to_string(id).unwrap(), &cx);
+                        }
+                    }
+                    let paused = twap.active_twaps(&name);
+                    // No cancellation cleanup: already-dispatched orders may still rest or fill.
+                    scope.dispose();
+                    let kept: Kept = "Router ownership expired: chases stopped and TWAPs paused. Resting orders were kept; an in-flight order may still fill. Check Open Orders, then explicitly resume TWAPs or start a new chase after reconnecting.".into();
+                    for frame in kept.frames(&name) { (port.broadcast)(Some(frame)); }
+                    (port.broadcast)(Some(crate::envelope::msg(&name, "store", serde_json::json!({
+                        "activeChasers": [], "activeTWAPs": paused,
+                    }))));
+                    stopped(kept);
+                    running.refresh(&[], &paused, 0);
+                    handle.dispose();
+                    if let Some(signer) = &link_signer { signer.mark_unavailable(); }
+                    return;
+                }
+                Some(AlgoInput::Op { op, mut data, origin }) => {
+                    if !running.io_allowed() {
+                        port.emit("error", crate::user_drain::refusal().to_string());
+                        continue;
+                    }
                     // The page acted on frames this store may not have read yet (a chase
                     // started right after load found no market): read the engine first.
                     if let Some(snapshot) = handle.read(projection::project).await {
                         let change = port.apply(snapshot, Vec::new(), false);
                         port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                     }
-                    let dispatched = registry.dispatch(&op, &data, &cx);
+                    if !running.io_allowed() {
+                        port.emit("error", crate::user_drain::refusal().to_string());
+                        continue;
+                    }
+                    let epoch = running.restore_epoch();
+                    if op == "twap:state" && let Ok(mut rows) = serde_json::from_str::<Vec<Value>>(&data) {
+                        for row in &mut rows {
+                            let pause = row.get("id").and_then(Value::as_str).is_some_and(|id|
+                                running.restores.get().is_some_and(|guard| guard.must_pause(id, epoch)));
+                            if pause && let Some(state) = row.get_mut("state").and_then(Value::as_object_mut)
+                                && state.get("status").and_then(Value::as_str) == Some("running") {
+                                state.insert("status".into(), "paused".into());
+                            }
+                        }
+                        data = serde_json::to_string(&rows).unwrap();
+                    }
+                    let resume = (op == "twap:resume").then(|| serde_json::from_str::<String>(&data).ok()).flatten()
+                        .filter(|id| twap.active_twaps(&name).iter().any(|row| row["id"] == id.as_str() && row["status"] == "paused"));
+                    if let Some(id) = &resume && let Some(guard) = running.restores.get()
+                        && let Err(error) = guard.reserve_resume(id, epoch) {
+                        port.emit("error", serde_json::to_string(error).unwrap());
+                        continue;
+                    }
+                    let dispatch = || {
+                        let result = registry.dispatch(&op, &data, &cx);
+                        running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
+                        result
+                    };
+                    let dispatched = if crate::user_drain::starts_job(&op) {
+                        if let Some(user) = running.user.get() {
+                            match user.admit() {
+                                Ok(_admission) => dispatch(),
+                                Err(error) => {
+                                    port.emit("error", error.to_string());
+                                    continue;
+                                }
+                            }
+                        } else { dispatch() }
+                    } else { dispatch() };
+                    if matches!(dispatched, Some(Ok(()))) && running.restore_epoch() == epoch
+                        && let Some(id) = &resume && let Some(guard) = running.restores.get()
+                        && twap.active_twaps(&name).iter().any(|row| row["id"] == id.as_str() && row["status"] == "running") {
+                        guard.acknowledge_resume(id, epoch);
+                    }
                     let result = match &dispatched {
                         Some(Ok(())) => Value::from("ok"),
                         Some(Err(error)) => {
@@ -914,6 +1069,12 @@ pub async fn run(
                     publish(&mut published);
                 }
                 Some(AlgoInput::Nuke { mode, request_id }) => {
+                    if !running.io_allowed() {
+                        (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
+                            "requestId":request_id,"success":false,"result":crate::user_drain::refusal(),
+                        })));
+                        continue;
+                    }
                     // The engine may have loaded ahead of this store's frames: read it
                     // now, so the nuke never acts on rows older than what was checked.
                     let seen = handle.read(projection::project).await.map(|snapshot| {
@@ -922,7 +1083,10 @@ pub async fn run(
                         port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
                         loaded
                     });
-                    let started = match seen {
+                    let admission = running.user.get().map(|user| user.admit_cleanup());
+                    let started = match admission.as_ref() {
+                        Some(Err(error)) => Err(error.clone()),
+                        _ => match seen {
                         Some((markets, positions, orders))
                             if crate::methods::nuke_can_see(mode, markets, positions, orders) =>
                         {
@@ -932,7 +1096,10 @@ pub async fn run(
                             "message": crate::methods::NUKE_NOT_LOADED,
                             "outcome": "notSent",
                         })),
+                        },
                     };
+                    running.refresh(&book.active_chasers(), &twap.active_twaps(&name), exec.pending_operations() + twap.pending_placements());
+                    drop(admission);
                     let (port, name, who) = (port.clone(), name.clone(), who.clone());
                     let settle = move |outcome: Result<Value, Value>| {
                         let audit = match &outcome {
@@ -1092,6 +1259,7 @@ pub async fn run(
     }
     scope.dispose();
     handle.leave(feed.client());
+    *running.work.lock().unwrap() = (Vec::new(), 0);
     running.set(0, 0);
     if !disposing {
         crate::state::Log::warn(&format!(
