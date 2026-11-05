@@ -659,6 +659,14 @@ static ALLOCATOR: allocation_budget::Allocator = allocation_budget::Allocator;
 
 #[test]
 fn managed_socket_core_keeps_the_baseline_allocation_budget_and_wire_order() {
+    let (_, timer_table) = allocation_budget::measure(|| HashMap::<TimerId, ()>::with_capacity(1));
+    let (_, fixture_table) =
+        allocation_budget::measure(|| HashMap::<TimerId, f64>::with_capacity(1));
+    assert_eq!(timer_table.calls, 1);
+    assert_eq!(fixture_table.calls, 1);
+    // Baseline ARM64 tables are 44/76 B; x86-64 hashbrown control groups add
+    // 8 B per table. Calibrate only those two existing startup allocations.
+    let start_bytes = 24593 - 44 - 76 + timer_table.bytes + fixture_table.bytes;
     let (mut h, start) = allocation_budget::measure(Harness::new);
     h.output.reserve(128);
     h.timers.reserve(32);
@@ -687,22 +695,16 @@ fn managed_socket_core_keeps_the_baseline_allocation_budget_and_wire_order() {
     );
     // Recorded before the concrete driver extraction on master 7d9554615dc.
     for (actual, calls, bytes) in [
-        (start, 34, 24593),
+        (start, 34, start_bytes),
         (open, 8, 3541),
         (challenge, 5, 2233),
         (accepted, 17, 3745),
         (data, 0, 0),
         (expiry, 10, 3218),
     ] {
-        assert!(
-            actual.calls <= calls,
-            "new allocation: {actual:?}, baseline {calls}"
-        );
+        assert_eq!(actual.calls, calls, "allocation calls differ: {actual:?}");
         if cfg!(target_pointer_width = "64") {
-            assert!(
-                actual.bytes <= bytes,
-                "more allocation: {actual:?}, baseline {bytes}"
-            );
+            assert_eq!(actual.bytes, bytes, "allocation bytes differ: {actual:?}");
         }
     }
 }
