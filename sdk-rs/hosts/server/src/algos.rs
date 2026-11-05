@@ -32,6 +32,8 @@ pub enum AlgoInput {
     },
     /// A socket joined (a resume or another tab): resend the algo store rows.
     Joined,
+    /// Revoke local scheduling without canceling exchange orders or replaying work.
+    RouterFence { stopped: StopNotice },
     /// The account is going away: settle algos, then dispose the engine.
     /// The reason reaches the order audit log and the client. With no browser
     /// to tell, `stopped` keeps the notice for the account's next init.
@@ -128,6 +130,8 @@ pub struct Running {
     ended: Arc<tokio::sync::watch::Sender<u64>>,
     user: OnceLock<Arc<crate::user_drain::User>>,
     work: Mutex<(Vec<crate::user_drain::Job>, usize)>,
+    lease: OnceLock<crate::router_lease::Permit>,
+    lease_parked: AtomicBool,
 }
 
 impl Running {
@@ -138,9 +142,23 @@ impl Running {
             ended,
             user: OnceLock::new(),
             work: Mutex::default(),
+            lease: OnceLock::new(),
+            lease_parked: AtomicBool::new(false),
         }
     }
 
+    pub(crate) fn attach_lease(&self, permit: crate::router_lease::Permit) {
+        let _ = self.lease.set(permit);
+    }
+    pub(crate) fn io_allowed(&self) -> bool {
+        self.lease.get().is_none_or(|lease| lease.allowed())
+    }
+    pub(crate) fn claim_lease_park(&self) -> bool {
+        !self.io_allowed() && !self.lease_parked.swap(true, Ordering::AcqRel)
+    }
+    pub(crate) fn parked_by_lease(&self) -> bool {
+        self.lease_parked.load(Ordering::Acquire)
+    }
     /// `(chases, twaps)`.
     pub fn counts(&self) -> (usize, usize) {
         (
@@ -288,6 +306,7 @@ struct Port {
     unheard: RefCell<VecDeque<Unheard>>,
     /// Errors raised so far, to tell whether a shutdown raised any.
     errors: Cell<u64>,
+    running: Arc<Running>,
 }
 
 impl AccountPort for Port {
@@ -305,6 +324,15 @@ impl AccountPort for Port {
         id
     }
     fn command(&self, command: Command) -> CommandFuture {
+        if !self.running.io_allowed() {
+            return Box::pin(async {
+                Err(
+                    VenueError::new("Router lease expired; no new work was sent")
+                        .kind(ErrorKind::VenueUnavailable)
+                        .outcome(Outcome::NotSent),
+                )
+            });
+        }
         if let Command::PlaceOrders { orders, .. } = &command {
             self.placed
                 .record(orders.iter().map(|order| order.symbol.as_str()));
@@ -829,6 +857,7 @@ pub async fn run(
         signer: link_signer.clone(),
         unheard: RefCell::default(),
         errors: Cell::new(0),
+        running: running.clone(),
     });
     let scope = Scope::new();
     let cx = AlgoCx::new(port.clone(), scope.clone());
@@ -931,7 +960,41 @@ pub async fn run(
                 }
             }
             input = inbox.recv() => match input {
-                Some(AlgoInput::Op { op, data, origin }) => {
+                Some(AlgoInput::RouterFence { stopped }) => {
+                    for row in twap.active_twaps(&name) {
+                        if let Some(id) = row["id"].as_str() {
+                            let _ = registry.dispatch("twap:pause", &serde_json::to_string(id).unwrap(), &cx);
+                        }
+                    }
+                    let paused = twap.active_twaps(&name);
+                    // No cancellation cleanup: already-dispatched orders may still rest or fill.
+                    scope.dispose();
+                    let kept: Kept = "Router ownership expired: chases stopped and TWAPs paused. Resting orders were kept; an in-flight order may still fill. Check Open Orders, then explicitly resume TWAPs or start a new chase after reconnecting.".into();
+                    for frame in kept.frames(&name) { (port.broadcast)(Some(frame)); }
+                    (port.broadcast)(Some(crate::envelope::msg(&name, "store", serde_json::json!({
+                        "activeChasers": [], "activeTWAPs": paused,
+                    }))));
+                    stopped(kept);
+                    running.refresh(&[], &paused, 0);
+                    handle.dispose();
+                    if let Some(signer) = &link_signer { signer.mark_unavailable(); }
+                    return;
+                }
+                Some(AlgoInput::Op { op, mut data, origin }) => {
+                    if !running.io_allowed() {
+                        port.emit("error", crate::user_drain::refusal().to_string());
+                        continue;
+                    }
+                    if op == "twap:state" && running.lease.get().is_some_and(|lease| lease.restores_must_pause())
+                        && let Ok(mut rows) = serde_json::from_str::<Vec<Value>>(&data) {
+                        for row in &mut rows {
+                            if let Some(state) = row.get_mut("state").and_then(Value::as_object_mut)
+                                && state.get("status").and_then(Value::as_str) == Some("running") {
+                                state.insert("status".into(), "paused".into());
+                            }
+                        }
+                        data = serde_json::to_string(&rows).unwrap();
+                    }
                     // The page acted on frames this store may not have read yet (a chase
                     // started right after load found no market): read the engine first.
                     if let Some(snapshot) = handle.read(projection::project).await {
@@ -968,6 +1031,12 @@ pub async fn run(
                     publish(&mut published);
                 }
                 Some(AlgoInput::Nuke { mode, request_id }) => {
+                    if !running.io_allowed() {
+                        (port.emit)(crate::envelope::msg(&name, "callMethod:done", serde_json::json!({
+                            "requestId":request_id,"success":false,"result":crate::user_drain::refusal(),
+                        })));
+                        continue;
+                    }
                     // The engine may have loaded ahead of this store's frames: read it
                     // now, so the nuke never acts on rows older than what was checked.
                     let seen = handle.read(projection::project).await.map(|snapshot| {

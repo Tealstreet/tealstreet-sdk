@@ -27,16 +27,20 @@ pub fn config(resume_grace: Duration) -> Config {
         resume_grace,
         account_flush: Duration::from_millis(60),
         access: None,
+        router_lease: Default::default(),
     }
 }
 
 pub fn app(config: Config, verifier: Verifier) -> Arc<App> {
     Arc::new(App {
-        registry: Arc::new(Registry::new(
-            EngineThreads::start(1).unwrap(),
-            config.account_flush,
-            config.resume_grace,
-        )),
+        registry: Arc::new(
+            Registry::new(
+                EngineThreads::start(1).unwrap(),
+                config.account_flush,
+                config.resume_grace,
+            )
+            .with_router_lease(config.router_lease.clone()),
+        ),
         metrics: Arc::new(Metrics::default()),
         verifier: Arc::new(verifier),
         config,

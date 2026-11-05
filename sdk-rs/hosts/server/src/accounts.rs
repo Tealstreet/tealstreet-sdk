@@ -353,6 +353,8 @@ struct Parked {
 
 pub struct Registry {
     pub user_drains: crate::user_drain::Users,
+    pub router_leases: Arc<crate::router_lease::Users>,
+    pub interruptions: crate::interruption::Notices,
     accounts: Mutex<HashMap<(String, String), Arc<Account>>>,
     parked: Mutex<HashMap<String, Parked>>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
@@ -677,6 +679,8 @@ impl Registry {
     pub fn new(threads: EngineThreads, account_flush: Duration, resume_grace: Duration) -> Self {
         Self {
             user_drains: crate::user_drain::Users::default(),
+            router_leases: Arc::new(crate::router_lease::Users::new(Default::default())),
+            interruptions: Default::default(),
             accounts: Mutex::default(),
             parked: Mutex::default(),
             open: Mutex::default(),
@@ -694,6 +698,50 @@ impl Registry {
             notices: Arc::default(),
             presence: Arc::default(),
             repairs: Mutex::default(),
+        }
+    }
+
+    pub fn with_router_lease(mut self, config: crate::router_lease::Config) -> Self {
+        self.router_leases = Arc::new(crate::router_lease::Users::new(config));
+        self
+    }
+
+    pub fn user_lease_fenced(&self, user: &str) -> bool {
+        self.router_leases.get(user).map_or_else(
+            || self.router_leases.enforced(),
+            |lease| lease.status().fenced,
+        )
+    }
+
+    pub fn park_expired_router_leases(self: &Arc<Self>) {
+        let accounts: Vec<_> = self.accounts.lock().unwrap().values().cloned().collect();
+        for account in accounts {
+            if !account.running.claim_lease_park() {
+                continue;
+            }
+            Log::warn(&format!(
+                "router lease fenced user_tag={}",
+                user_tag(&account.user)
+            ));
+            let stopped = self.keep_notice(&account, "router-lease");
+            if !account.algos.as_ref().is_some_and(|sender| {
+                sender
+                    .send(crate::algos::AlgoInput::RouterFence { stopped })
+                    .is_ok()
+            }) {
+                account.handle.dispose();
+                if let Some(link) = &account.link {
+                    link.mark_unavailable();
+                }
+            }
+            let mut cached = self.accounts.lock().unwrap();
+            let key = (account.user.clone(), account.name.clone());
+            if cached
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, &account))
+            {
+                cached.remove(&key);
+            }
         }
     }
 
@@ -909,6 +957,21 @@ impl Registry {
         let running = Arc::new(crate::algos::Running::new(self.algos_ended.clone()));
         self.user_drains
             .track(user, &init.account_name, &running, std::sync::Weak::new());
+        let lease = if public_only {
+            None
+        } else {
+            match self.router_leases.get(user) {
+                Some(lease) => Some(lease.permit()),
+                None if !self.router_leases.enforced() => None,
+                None => return Err("Router lease unavailable; no account work was sent".into()),
+            }
+        };
+        if let Some(lease) = &lease {
+            if !lease.allowed() {
+                return Err("Router lease expired; no account work was sent".into());
+            }
+            running.attach_lease(lease.clone());
+        }
         let algo_running = running.clone();
         let (algos, algo_inbox) = if public_only {
             (None, None)
@@ -927,7 +990,10 @@ impl Registry {
         };
         let (spawned, receive) = tokio::sync::oneshot::channel();
         let placed = self.threads.place(move |placement| {
-            let transport = NetworkTransport::with_routing(plan, tokens);
+            let mut transport = NetworkTransport::with_routing(plan, tokens);
+            if let Some(lease) = lease {
+                transport = transport.with_io_guard(Arc::new(move || lease.allowed()));
+            }
             let result =
                 safe_cex_native::spawn_venue_account(&venue, &options, transport, signer, config)
                     .map(|(handle, task)| {
@@ -1094,6 +1160,20 @@ impl Registry {
 
     /// With algos, their host settles chases first, then disposes the engine and signer.
     fn stop(account: &Account, reason: &str, stopped: Option<crate::algos::StopNotice>) {
+        if !account.running.io_allowed() {
+            let stopped = stopped.unwrap_or_else(|| Box::new(|_| {}));
+            if !account.algos.as_ref().is_some_and(|sender| {
+                sender
+                    .send(crate::algos::AlgoInput::RouterFence { stopped })
+                    .is_ok()
+            }) {
+                account.handle.dispose();
+                if let Some(link) = &account.link {
+                    link.mark_unavailable();
+                }
+            }
+            return;
+        }
         let handed = account.algos.as_ref().is_some_and(|algos| {
             algos
                 .send(crate::algos::AlgoInput::Dispose {
@@ -1206,6 +1286,11 @@ impl Registry {
         }
         drop(accounts);
         *account.holders.lock().unwrap() = Holders::default();
+        let stopped = if stopped.is_none() && !account.running.io_allowed() {
+            Some(self.keep_notice(account, "router-lease"))
+        } else {
+            stopped
+        };
         Self::stop(account, reason, stopped);
     }
 
@@ -1864,6 +1949,9 @@ pub mod testing {
 
     /// `account` as the registry's account for its (user, name).
     pub fn register(registry: &Registry, account: &Arc<Account>) {
+        if let Some(user) = registry.router_leases.get(&account.user) {
+            account.running.attach_lease(user.permit());
+        }
         registry.user_drains.track(
             &account.user,
             &account.name,

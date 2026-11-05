@@ -58,6 +58,7 @@ struct Prepared {
     route: Option<HttpRoute>,
     proxy_header: Option<(String, String)>,
     tunnel: Option<HowConnection>,
+    guard: Option<super::IoGuard>,
 }
 impl fmt::Debug for Prepared {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -79,6 +80,7 @@ struct Bound {
     proxied: bool,
     /// Venue host and the way it went, for a transport failure's log line; never a URL.
     route: String,
+    guard: Option<super::IoGuard>,
 }
 
 /// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`.
@@ -127,10 +129,14 @@ pub(super) fn prepare(
 ) -> HttpPrepareFuture {
     let http = transport.http.clone();
     let routing = transport.routing.clone();
+    let guard = transport.io_guard.clone();
     let deadline = Instant::now()
         + Duration::from_millis(u64::from(request.timeout_ms.unwrap_or(20_000).max(1)));
     Box::pin(async move {
         let operation = async {
+            if !super::io_allowed(&guard) {
+                return Err(HttpPrepareError::Invalid("account IO authority expired"));
+            }
             let origin = origin(&request.url)?;
             let route = match routing.as_ref() {
                 Some(state) => Some(
@@ -199,6 +205,7 @@ pub(super) fn prepare(
                 route,
                 proxy_header,
                 tunnel,
+                guard,
             }) as Box<dyn PreparedHttp>)
         };
         tokio::time::timeout_at(deadline, operation)
@@ -212,6 +219,9 @@ impl PreparedHttp for Prepared {
         mut self: Box<Self>,
         mut packet: HttpRequest,
     ) -> Result<Box<dyn BoundHttp>, HttpPrepareError> {
+        if !super::io_allowed(&self.guard) {
+            return Err(HttpPrepareError::Invalid("account IO authority expired"));
+        }
         if Instant::now() >= self.deadline {
             return Err(HttpPrepareError::Expired);
         }
@@ -302,13 +312,14 @@ impl PreparedHttp for Prepared {
             packet,
             proxied,
             route,
+            guard: self.guard.clone(),
         }))
     }
 }
 
 impl BoundHttp for Bound {
     fn ready(&self) -> bool {
-        Instant::now() < self.deadline
+        Instant::now() < self.deadline && super::io_allowed(&self.guard)
     }
 
     fn dispatch(self: Box<Self>, events: Events) -> AbortHandle {
@@ -318,18 +329,23 @@ impl BoundHttp for Bound {
             packet,
             proxied,
             route,
+            guard,
         } = *self;
         let started = Instant::now();
         // These are the last controllable transport API calls. Route/token/HOW
         // preparation and packet validation have all finished before this point.
-        let response: Pin<Box<dyn Future<Output = Result<(), String>> + Send>> = match packet {
-            Packet::Direct(http, packet) => {
-                let response = http.execute(*packet);
-                Box::pin(direct_response(response, request, events.clone(), proxied))
+        let response_events = events.clone();
+        let response = async move {
+            if !super::io_allowed(&guard) {
+                return Err("account IO authority expired".to_owned());
             }
-            Packet::How(tunnel, packet) => {
-                let response_events = events.clone();
-                Box::pin(async move { tunnel.request(request, packet, response_events).await })
+            match packet {
+                Packet::Direct(http, packet) => {
+                    direct_response(http.execute(*packet), request, response_events, proxied).await
+                }
+                Packet::How(tunnel, packet) => {
+                    tunnel.request(request, packet, response_events).await
+                }
             }
         };
         tokio::spawn(async move {
@@ -495,6 +511,63 @@ mod tests {
             )
             .await;
         assert!(matches!(result, Err(HttpPrepareError::Unsupported)));
+    }
+
+    #[tokio::test]
+    async fn io_guard_rechecks_bound_and_scheduled_packets_without_sending_them() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        for after_dispatch in [false, true] {
+            let (url, server) = answer_once("200 OK", "ok").await;
+            let allowed = Arc::new(AtomicBool::new(true));
+            let gate = allowed.clone();
+            let transport = NetworkTransport::new()
+                .with_io_guard(Arc::new(move || gate.load(Ordering::Acquire)));
+            let packet = request(&url);
+            let prepared = transport
+                .prepare_http(packet.clone(), RoutingIntent::Primary)
+                .await
+                .unwrap();
+            let bound = prepared.bind(packet).unwrap();
+            assert!(bound.ready());
+            let (events, mut replies) = tokio::sync::mpsc::unbounded_channel();
+            if after_dispatch {
+                bound.dispatch(events);
+                allowed.store(false, Ordering::Release);
+            } else {
+                allowed.store(false, Ordering::Release);
+                assert!(!bound.ready());
+                bound.dispatch(events);
+            }
+            let failure = tokio::time::timeout(Duration::from_secs(2), replies.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(failure, HostEvent::HttpFailed(_, ref text) if text == "account IO authority expired")
+            );
+            assert!(!server.is_finished());
+            server.abort();
+            assert!(server.await.unwrap_err().is_cancelled());
+        }
+        // Working control uses the same executor and a real loopback HTTP responder.
+        let (url, server) = answer_once("200 OK", "ok").await;
+        let transport = NetworkTransport::new().with_io_guard(Arc::new(|| true));
+        let packet = request(&url);
+        let bound = transport
+            .prepare_http(packet.clone(), RoutingIntent::Primary)
+            .await
+            .unwrap()
+            .bind(packet)
+            .unwrap();
+        let (events, _replies) = tokio::sync::mpsc::unbounded_channel();
+        bound.dispatch(events);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("/private/order")
+        );
     }
 
     #[tokio::test]

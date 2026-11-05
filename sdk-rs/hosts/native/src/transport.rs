@@ -125,6 +125,12 @@ pub trait Transport {
 pub struct NetworkTransport {
     http: reqwest::Client,
     routing: Option<Arc<RoutingState>>,
+    io_guard: Option<IoGuard>,
+}
+
+type IoGuard = Arc<dyn Fn() -> bool + Send + Sync>;
+fn io_allowed(guard: &Option<IoGuard>) -> bool {
+    guard.as_ref().is_none_or(|allowed| allowed())
 }
 
 impl NetworkTransport {
@@ -137,7 +143,14 @@ impl NetworkTransport {
                 .build()
                 .expect("an HTTP client with the default configuration"),
             routing: None,
+            io_guard: None,
         }
+    }
+
+    /// A host-owned, generation-bound authority checked at each final IO handoff.
+    pub fn with_io_guard(mut self, guard: Arc<dyn Fn() -> bool + Send + Sync>) -> Self {
+        self.io_guard = Some(guard);
+        self
     }
 
     /// Apply the account plan resolved once by TypeScript, outside the engine.
@@ -424,6 +437,7 @@ impl Transport for NetworkTransport {
     ) -> mpsc::UnboundedSender<String> {
         let (outgoing, mut pending) = mpsc::unbounded_channel::<String>();
         let routing = self.routing.clone();
+        let guard = self.io_guard.clone();
         let headers = headers
             .into_iter()
             .map(|(name, value)| (name.to_owned(), value))
@@ -439,6 +453,10 @@ impl Transport for NetworkTransport {
         tokio::spawn(async move {
             let canceled = events.clone();
             let operation = async move {
+                if !io_allowed(&guard) {
+                    let _ = events.send(HostEvent::WsClosed(socket, 4100));
+                    return;
+                }
                 // Enqueued as ordinary ingress after connect returned; no open or close follows.
                 if selected.as_ref().is_some_and(|selected| selected.exhausted) {
                     let _ = events.send(HostEvent::WsRouteExhausted(socket));
@@ -479,11 +497,18 @@ impl Transport for NetworkTransport {
                     }
                 };
                 if pending.is_closed() {
+                    if !io_allowed(&guard) {
+                        return;
+                    }
                     let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await;
                     return;
                 }
                 let _ = events.send(HostEvent::WsOpened(socket));
                 for message in queued {
+                    if !io_allowed(&guard) {
+                        let _ = events.send(HostEvent::WsClosed(socket, 4100));
+                        return;
+                    }
                     if !matches!(
                         tokio::time::timeout(
                             Duration::from_secs(5),
@@ -513,15 +538,21 @@ impl Transport for NetworkTransport {
                                 if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                                 let _ = events.send(HostEvent::WsMessage(socket, text));
                             }
-                            Some(Ok(Message::Ping(_))) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break (1006, "pong send failed".to_owned()); } }
+                            Some(Ok(Message::Ping(_))) => {
+                                if !io_allowed(&guard) { break (4100, "account IO authority expired".to_owned()); }
+                                if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.flush()).await, Ok(Ok(()))) { break (1006, "pong send failed".to_owned()); }
+                            }
                             Some(Ok(Message::Close(frame))) => break frame.map_or((1005, String::new()), |frame| (u16::from(frame.code), frame.reason.to_string())),
                             Some(Ok(_)) => {}
                             Some(Err(error)) => break (1006, error.to_string()),
                             None => break (1006, "stream ended".to_owned()),
                         },
                         text = pending.recv() => match text {
-                            Some(text) => { if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.send(Message::text(text))).await, Ok(Ok(()))) { break (1006, "send failed".to_owned()); } }
-                            None => { let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await; return; }
+                            Some(text) => {
+                                if !io_allowed(&guard) { break (4100, "account IO authority expired".to_owned()); }
+                                if !matches!(tokio::time::timeout(Duration::from_secs(5), ws.send(Message::text(text))).await, Ok(Ok(()))) { break (1006, "send failed".to_owned()); }
+                            }
+                            None => { if io_allowed(&guard) { let _ = tokio::time::timeout(Duration::from_secs(5), ws.close(None)).await; } return; }
                         },
                     }
                 };
@@ -581,6 +612,48 @@ impl Transport for NetworkTransport {
 mod security_tests {
     use super::*;
     use std::io::Write;
+
+    #[tokio::test]
+    async fn io_guard_drops_a_queued_socket_write_when_the_open_finishes_after_fencing() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/private", listener.local_addr().unwrap());
+        let (connected, waiting) = tokio::sync::oneshot::channel();
+        let (release, held) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            connected.send(()).unwrap();
+            held.await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            let message = tokio::time::timeout(Duration::from_secs(2), socket.next())
+                .await
+                .unwrap();
+            assert!(!matches!(message, Some(Ok(Message::Text(_)))));
+        });
+        let allowed = Arc::new(AtomicBool::new(true));
+        let gate = allowed.clone();
+        let transport =
+            NetworkTransport::new().with_io_guard(Arc::new(move || gate.load(Ordering::Acquire)));
+        let (events, mut replies) = mpsc::unbounded_channel();
+        let socket = transport.connect(SocketId(1), url, events);
+        socket.send("queued-order-sentinel".into()).unwrap();
+        waiting.await.unwrap();
+        allowed.store(false, Ordering::Release);
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if matches!(
+                    replies.recv().await,
+                    Some(HostEvent::WsClosed(SocketId(1), 4100))
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+    }
 
     #[test]
     fn a_failed_venue_socket_open_is_logged_by_host_at_most_once_a_minute() {

@@ -202,19 +202,34 @@ impl Session {
         }
     }
 
+    fn router_fenced(&self) -> bool {
+        self.identity
+            .user
+            .as_deref()
+            .is_some_and(|user| self.registry.user_lease_fenced(user))
+            || self.joined.values().any(|joined| {
+                !joined.account.is_public()
+                    && (!joined.account.running.io_allowed()
+                        || joined.account.running.parked_by_lease())
+            })
+    }
+
     pub fn user_draining(&self) -> bool {
-        self.user_socket
-            .as_ref()
-            .is_some_and(crate::user_drain::Socket::latched)
+        self.router_fenced()
+            || self
+                .user_socket
+                .as_ref()
+                .is_some_and(crate::user_drain::Socket::latched)
     }
 
     /// Whether a drain moves this socket now: break-glass moves every socket,
     /// a waiting drain only one whose accounts run no chase or TWAP.
     pub fn drain_close(&mut self) -> Option<Close> {
-        let user_moves = self
-            .user_socket
-            .as_ref()
-            .is_some_and(crate::user_drain::Socket::should_close);
+        let user_moves = self.router_fenced()
+            || self
+                .user_socket
+                .as_ref()
+                .is_some_and(crate::user_drain::Socket::should_close);
         let moves = user_moves
             || match self.registry.drain_state() {
                 crate::accounts::Drain::Off => false,
@@ -230,6 +245,9 @@ impl Session {
 
     /// A draining box admits inits only from users already live on it.
     fn moved_by_drain(&self) -> bool {
+        if self.router_fenced() {
+            return true;
+        }
         if self
             .user_socket
             .as_ref()
@@ -544,7 +562,13 @@ impl Session {
         match account {
             Ok(account) => {
                 self.metrics.note_init();
+                let private = !account.is_public();
                 self.join(account).await;
+                if private && self.joined.contains_key(&init.account_name) {
+                    self.registry
+                        .interruptions
+                        .deliver(self.user(), &init.account_name, &self.out);
+                }
                 // Algos stopped while no browser was attached: say why.
                 // Chases that ended while it was gone are told as their replayed ends.
                 if let Some(kept) = self.registry.take_notice(
@@ -1162,6 +1186,16 @@ impl Session {
         reply: methods::Reply,
         after_load: bool,
     ) {
+        if !self.joined[name].account.running.io_allowed() {
+            self.reply_failure(
+                name,
+                request_id,
+                "ServerDraining",
+                "Router lease expired; no new work was sent",
+                Some("notSent"),
+            );
+            return;
+        }
         // An after-load wait polls the account like a waiting read, under the same cap.
         let permit = if after_load {
             let account = &self.joined[name].account;
@@ -1262,6 +1296,9 @@ impl Session {
         outcome: Option<&str>,
     ) {
         let mut result = json!({"name": kind, "message": message});
+        if kind == "ServerDraining" {
+            result["kind"] = "venueUnavailable".into();
+        }
         if let Some(outcome) = outcome {
             result["outcome"] = outcome.into();
         }

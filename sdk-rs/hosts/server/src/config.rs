@@ -14,6 +14,7 @@ pub struct Config {
     pub resume_grace: Duration,
     pub account_flush: Duration,
     pub access: Option<crate::access::Config>,
+    pub router_lease: crate::router_lease::Config,
 }
 
 impl Config {
@@ -29,6 +30,10 @@ impl Config {
             })
         };
         let threads = std::thread::available_parallelism().map_or(2, usize::from);
+        let router_lease_ms = number("TEALSTREET_ROUTER_LEASE_MS", 90_000)?;
+        if !(20_000..=3_600_000).contains(&router_lease_ms) {
+            return Err("TEALSTREET_ROUTER_LEASE_MS must be between 20000 and 3600000".into());
+        }
         Ok(Self {
             port: u16::try_from(number("TEALSTREET_PORT", 23456)?)
                 .map_err(|_| "TEALSTREET_PORT is out of range".to_owned())?,
@@ -40,6 +45,22 @@ impl Config {
             idle_timeout: Duration::from_secs(30),
             resume_grace: Duration::from_secs(60),
             account_flush: Duration::from_millis(60),
+            router_lease: crate::router_lease::Config {
+                box_id: var("TEALSTREET_BOX").filter(|value| {
+                    !value.is_empty()
+                        && value.len() <= 128
+                        && value
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+                }),
+                lease_ms: u64::try_from(router_lease_ms)
+                    .map_err(|_| "TEALSTREET_ROUTER_LEASE_MS is out of range")?,
+                enforce: match var("TEALSTREET_ROUTER_LEASE_ENFORCE").as_deref() {
+                    None | Some("0") => false,
+                    Some("1") => true,
+                    _ => return Err("TEALSTREET_ROUTER_LEASE_ENFORCE must be 0 or 1".into()),
+                },
+            },
             access: crate::access::Config::parse(
                 var("TEALSTREET_ACCESS_TEAM_DOMAIN").as_deref(),
                 var("TEALSTREET_ACCESS_AUD").as_deref(),
