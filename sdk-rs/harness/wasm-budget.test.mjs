@@ -257,9 +257,9 @@ test('master b0d2122742d release cut (run 41901638294) retains the ruled binance
   assert.match(wasmBudgetError(cap + 1, 'venue', 'binance'), /exceeds/);
 });
 
-test('#3091 market caps (run 42038051535) retain Bybit family headroom', () => {
-  const measured = 2_213_798;
-  const cap = 2_224_128;
+test('#3094 batch acknowledgements (run 42062090938) retain Bybit headroom', () => {
+  const measured = 2_214_254;
+  const cap = 2_225_152;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   assert.equal(WASM_VENUE_OVERRIDES.bybit, cap);
   assert.equal(wasmBudgetError(measured, 'venue', 'bybit'), undefined);
