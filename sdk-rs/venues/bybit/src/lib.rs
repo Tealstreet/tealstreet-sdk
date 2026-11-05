@@ -2651,6 +2651,14 @@ impl Venue for BybitLinear {
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         &[history::ORDER_HISTORY_PACING]
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.partial_stop_release_veto(store, pending, release)
+    }
     fn managed_sockets() -> bool {
         true
     }
