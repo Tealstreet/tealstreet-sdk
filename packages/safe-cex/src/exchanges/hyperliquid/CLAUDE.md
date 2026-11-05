@@ -1650,8 +1650,8 @@ in either delivery order. Newer BBO still
 replaces the top. Retirement clears both baselines before reconnect replay.
 Standalone spot retains its five native significant-figure topics.
 
-A new book that would exceed 1,000 desired topics is refused without retaining
-its demand. The encoder also refuses an oversized projection before release.
+A new book or candle that would exceed 1,000 desired topics is refused without
+retaining its demand or changing accepted references. The encoder also refuses an oversized projection before release.
 This is a per-connection ceiling: callers still share Hyperliquid's per-IP
 1,000-subscription allowance across accounts/tabs and must budget other sockets.
 For `M` core markets, `D` HIP-3 scopes, `B` books and `C` candle streams, a keyed

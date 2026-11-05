@@ -14,8 +14,9 @@ refreshes deep rows. A fast side shorter than five rows proves exhaustion and
 clears its old tail. Equal-time fast data wins; retired socket data is inert.
 
 Every perp book now costs three subscriptions. The native projection refuses
-more than 1,000 topics before release and a capacity-refused book addition
-rolls back only that new book. This cannot enforce the venue's shared per-IP
+more than 1,000 topics before release and capacity-refused book and candle additions
+roll back only their new key/refcount before proposing interests. The accepted
+feed stays live and reconnect replays only accepted demand. This cannot enforce the venue's shared per-IP
 limit across engines, tabs or other clients; callers must budget their aggregate.
 The keyed count is 9 + core markets + 5*HIP3 scopes + 3*books + candles, with
 one more for spotState when enabled. Public-only uses 2 + 3*books + candles.

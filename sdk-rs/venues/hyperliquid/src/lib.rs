@@ -1904,8 +1904,19 @@ impl Venue for Hyperliquid {
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
-                if *count == 1 && self.coin(cx, &symbol).is_some() {
-                    self.propose_socket_interests(cx);
+                if *count == 1 {
+                    if self
+                        .desired_socket_interests(cx.store, cx.public_feed_policy())
+                        .len()
+                        > 1000
+                    {
+                        self.candles.remove(&(symbol, interval));
+                        Self::socket_refused(cx, SocketError::Capacity);
+                        return;
+                    }
+                    if self.coin(cx, &symbol).is_some() {
+                        self.propose_socket_interests(cx);
+                    }
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {

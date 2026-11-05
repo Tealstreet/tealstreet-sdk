@@ -440,3 +440,325 @@ fn sparse_fast_side_proves_no_deeper_rows_exist_on_that_side() {
         (vec![100., 99.], vec![101., 102., 103., 104., 105., 106.])
     );
 }
+
+#[test]
+fn review_3110_excess_candle_rolls_back_without_retiring_accepted_topics() {
+    use safe_cex_engine::{Notice, Response};
+    use safe_cex_venue_hyperliquid::Options;
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(1000.);
+    let universe = (0..333)
+        .map(|i| serde_json::json!({"name":format!("C{i}"),"szDecimals":2}))
+        .collect::<Vec<_>>();
+    let ctx = (0..333)
+        .map(|_| serde_json::json!({"midPx":"100"}))
+        .collect::<Vec<_>>();
+    let meta = serde_json::json!([{"universe":universe},ctx]).to_string();
+    let mut socket = None;
+    for _ in 0..10 {
+        for a in prepared_now(&mut e) {
+            match a {
+                Action::Http(r) => {
+                    let body = if support::kind(&r) == "perpDexs" {
+                        "[null]"
+                    } else {
+                        &meta
+                    };
+                    e.handle(
+                        1000.,
+                        Event::HttpResponse {
+                            request: r.id,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                Action::WsConnect { socket: s, .. } => socket = Some(s),
+                _ => {}
+            }
+        }
+        if socket.is_some() {
+            break;
+        }
+    }
+    let socket = socket.unwrap();
+    e.handle(1000., Event::WsOpened { socket });
+    let mut sent = prepared_now(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::WsSend { .. }))
+        .count();
+    for i in 0..332 {
+        e.handle(
+            2000.,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: format!("C{i}-PERP"),
+            }),
+        );
+        sent += prepared_now(&mut e)
+            .into_iter()
+            .filter(|a| matches!(a, Action::WsSend { .. }))
+            .count();
+    }
+    assert_eq!(sent, 998);
+    for interval in [
+        safe_cex_engine::model::Interval::M1,
+        safe_cex_engine::model::Interval::M5,
+    ] {
+        e.handle(
+            2000.,
+            Event::Command(Command::SubscribeCandles {
+                symbol: "C0-PERP".into(),
+                interval,
+            }),
+        );
+        let actions = prepared_now(&mut e);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::WsSend { .. }))
+                .count(),
+            1,
+            "first two candle additions are within capacity"
+        );
+        assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
+    }
+    e.handle(
+        2000.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M15,
+        }),
+    );
+    let refused = prepared_now(&mut e);
+
+    assert!(refused.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::SUBSCRIPTION_REJECTED)));
+    assert!(
+        !refused.iter().any(|a| matches!(a, Action::WsClose { .. })),
+        "excess candle must not retire all 1000 accepted topics"
+    );
+    assert!(!refused.iter().any(|a| matches!(a, Action::WsSend { .. })));
+    e.handle(
+        2000.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M15,
+        }),
+    );
+    let again = prepared_now(&mut e);
+    assert!(again.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::SUBSCRIPTION_REJECTED)));
+    assert!(
+        !again
+            .iter()
+            .any(|a| matches!(a, Action::WsSend { .. } | Action::WsClose { .. }))
+    );
+    e.handle(
+        2000.,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    assert_eq!(
+        prepared_now(&mut e)
+            .into_iter()
+            .filter(|a| matches!(a, Action::WsSend { .. }))
+            .count(),
+        1
+    );
+    e.handle(
+        2000.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M15,
+        }),
+    );
+    assert_eq!(
+        prepared_now(&mut e)
+            .into_iter()
+            .filter(|a| matches!(a, Action::WsSend { .. }))
+            .count(),
+        1
+    );
+    e.handle(
+        2000.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M5,
+        }),
+    );
+    assert!(
+        !prepared_now(&mut e)
+            .into_iter()
+            .any(|a| matches!(a, Action::WsSend { .. } | Action::WsClose { .. }))
+    );
+    e.handle(
+        2000.,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M5,
+        }),
+    );
+    assert!(
+        !prepared_now(&mut e)
+            .into_iter()
+            .any(|a| matches!(a, Action::WsSend { .. } | Action::WsClose { .. }))
+    );
+    e.handle(
+        2000.,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M5,
+        }),
+    );
+    assert_eq!(
+        prepared_now(&mut e)
+            .into_iter()
+            .filter(|a| matches!(a, Action::WsSend { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn review_3110_reconnect_replays_only_the_accepted_thousand_topics() {
+    use safe_cex_engine::Response;
+    use safe_cex_venue_hyperliquid::Options;
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(1000.);
+    let universe = (0..333)
+        .map(|i| serde_json::json!({"name":format!("C{i}"),"szDecimals":2}))
+        .collect::<Vec<_>>();
+    let ctx = (0..333)
+        .map(|_| serde_json::json!({"midPx":"100"}))
+        .collect::<Vec<_>>();
+    let meta = serde_json::json!([{"universe":universe},ctx]).to_string();
+    let mut socket = None;
+    for _ in 0..10 {
+        for a in prepared_now(&mut e) {
+            match a {
+                Action::Http(r) => {
+                    let body = if support::kind(&r) == "perpDexs" {
+                        "[null]"
+                    } else {
+                        &meta
+                    };
+                    e.handle(
+                        1000.,
+                        Event::HttpResponse {
+                            request: r.id,
+                            response: Response {
+                                status: 200,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                Action::WsConnect { socket: s, .. } => socket = Some(s),
+                _ => {}
+            }
+        }
+        if socket.is_some() {
+            break;
+        }
+    }
+    let socket = socket.unwrap();
+    e.handle(1000., Event::WsOpened { socket });
+    let mut sent = prepared_now(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::WsSend { .. }))
+        .count();
+    for i in 0..332 {
+        e.handle(
+            2000.,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: format!("C{i}-PERP"),
+            }),
+        );
+        sent += prepared_now(&mut e)
+            .into_iter()
+            .filter(|a| matches!(a, Action::WsSend { .. }))
+            .count();
+    }
+    assert_eq!(sent, 998);
+    for interval in [
+        safe_cex_engine::model::Interval::M1,
+        safe_cex_engine::model::Interval::M5,
+    ] {
+        e.handle(
+            2000.,
+            Event::Command(Command::SubscribeCandles {
+                symbol: "C0-PERP".into(),
+                interval,
+            }),
+        );
+        let actions = prepared_now(&mut e);
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(a, Action::WsSend { .. }))
+                .count(),
+            1,
+            "first two candle additions are within capacity"
+        );
+        assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
+    }
+    e.handle(
+        2000.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M15,
+        }),
+    );
+    let refused = prepared_now(&mut e);
+
+    assert!(
+        !refused.iter().any(|a| matches!(a, Action::WsClose { .. })),
+        "rejected demand leaves the old epoch live"
+    );
+    e.handle(2100., Event::WsClosed { socket, code: 1006 });
+    let closed = prepared_now(&mut e);
+    let (timer, at) = closed
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("captured genuine close retry");
+    e.handle(at, Event::TimerFired { timer });
+    let actions = prepared_now(&mut e);
+    let replacement = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .expect("genuine replacement epoch");
+    e.handle(
+        at,
+        Event::WsOpened {
+            socket: replacement,
+        },
+    );
+    let replay = prepared_now(&mut e);
+    assert!(
+        !replay.iter().any(|a| matches!(a, Action::WsClose { .. })),
+        "retained rejected candle must not poison replacement replay"
+    );
+    assert_eq!(
+        replay
+            .iter()
+            .filter(|a| matches!(a, Action::WsSend { .. }))
+            .count(),
+        1000
+    );
+}
