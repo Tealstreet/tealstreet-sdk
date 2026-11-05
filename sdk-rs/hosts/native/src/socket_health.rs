@@ -103,8 +103,10 @@ impl SocketHealth {
     }
 }
 
+#[derive(Clone)]
 struct Record {
     channel: SocketChannel,
+    public_topics: bool,
     open: bool,
     initialized: bool,
 }
@@ -125,24 +127,33 @@ impl SocketTracker {
         self.shared.clone()
     }
 
-    fn with(&self, channel: &SocketChannel, update: impl FnOnce(&mut SocketStats)) {
+    fn with(&self, record: &Record, mut update: impl FnMut(&mut SocketStats)) {
         let mut health = self
             .shared
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        update(match channel {
+        update(match record.channel {
             SocketChannel::Public => &mut health.public,
             SocketChannel::Business => &mut health.business,
             SocketChannel::Private => &mut health.private,
         });
+        if record.public_topics && record.channel != SocketChannel::Public {
+            update(&mut health.public);
+        }
     }
 
-    pub(crate) fn connecting(&mut self, socket: SocketId, channel: Option<SocketChannel>) {
+    pub(crate) fn connecting(
+        &mut self,
+        socket: SocketId,
+        channel: Option<SocketChannel>,
+        public_topics: bool,
+    ) {
         self.closed(socket, None);
         self.records.insert(
             socket,
             Record {
                 channel: channel.unwrap_or(SocketChannel::Public),
+                public_topics,
                 open: false,
                 initialized: false,
             },
@@ -154,8 +165,8 @@ impl SocketTracker {
             return;
         };
         record.open = true;
-        let channel = record.channel.clone();
-        self.with(&channel, |stats| stats.open += 1);
+        let record = record.clone();
+        self.with(&record, |stats| stats.open += 1);
     }
 
     /// One write per frame; the first frame after open marks the socket initialized.
@@ -165,9 +176,9 @@ impl SocketTracker {
         };
         let first = record.open && !record.initialized;
         record.initialized |= first;
-        let channel = record.channel.clone();
+        let record = record.clone();
         let now = wall_ms();
-        self.with(&channel, |stats| {
+        self.with(&record, |stats| {
             stats.last_received = now;
             if first {
                 stats.initialized += 1;
@@ -182,7 +193,7 @@ impl SocketTracker {
             return;
         };
         let now = wall_ms();
-        self.with(&record.channel, |stats| {
+        self.with(&record, |stats| {
             stats.open -= u32::from(record.open);
             stats.initialized -= u32::from(record.initialized);
             if let Some(code) = code {
@@ -212,7 +223,7 @@ mod tests {
         let cell = tracker.cell();
         let summary = || cell.lock().unwrap().summary(wall_ms());
         assert!(!summary().private_initialized && summary().private_healthy);
-        tracker.connecting(SocketId(1), Some(SocketChannel::Private));
+        tracker.connecting(SocketId(1), Some(SocketChannel::Private), false);
         tracker.received(SocketId(1));
         assert!(
             !summary().private_initialized,
@@ -284,11 +295,64 @@ mod tests {
     fn host_closes_and_clears_drop_live_counts_without_a_close_code() {
         let mut tracker = SocketTracker::default();
         let cell = tracker.cell();
-        tracker.connecting(SocketId(1), None);
+        tracker.connecting(SocketId(1), None, false);
         tracker.opened(SocketId(1));
         tracker.received(SocketId(1));
         tracker.clear();
         let public = cell.lock().unwrap().public;
         assert_eq!((public.open, public.initialized, public.closes), (0, 0, 0));
+    }
+
+    #[test]
+    fn mixed_socket_lifecycle_updates_both_channels_once() {
+        let mut tracker = SocketTracker::default();
+        let cell = tracker.cell();
+        tracker.connecting(SocketId(1), Some(SocketChannel::Private), true);
+        tracker.opened(SocketId(1));
+        tracker.opened(SocketId(1));
+        tracker.received(SocketId(1));
+        tracker.received(SocketId(1));
+        let health = *cell.lock().unwrap();
+        assert_eq!((health.public.open, health.private.open), (1, 1));
+        assert_eq!(
+            (health.public.initialized, health.private.initialized),
+            (1, 1)
+        );
+        assert_eq!(health.public.last_received, health.private.last_received);
+
+        tracker.closed(SocketId(1), Some(1006));
+        tracker.closed(SocketId(1), Some(1006));
+        let health = *cell.lock().unwrap();
+        assert_eq!((health.public.open, health.private.open), (0, 0));
+        assert_eq!(
+            (health.public.initialized, health.private.initialized),
+            (0, 0)
+        );
+        assert_eq!((health.public.closes, health.private.closes), (1, 1));
+        assert_eq!(health.public.last_close_at, health.private.last_close_at);
+
+        tracker.connecting(SocketId(1), Some(SocketChannel::Private), true);
+        tracker.opened(SocketId(1));
+        tracker.received(SocketId(1));
+        tracker.clear();
+        let health = *cell.lock().unwrap();
+        assert_eq!((health.public.open, health.private.open), (0, 0));
+        assert_eq!(
+            (health.public.initialized, health.private.initialized),
+            (0, 0)
+        );
+        assert_eq!((health.public.closes, health.private.closes), (1, 1));
+    }
+
+    #[test]
+    fn a_public_only_socket_is_not_double_counted() {
+        let mut tracker = SocketTracker::default();
+        let cell = tracker.cell();
+        tracker.connecting(SocketId(1), None, true);
+        tracker.opened(SocketId(1));
+        tracker.received(SocketId(1));
+        let health = *cell.lock().unwrap();
+        assert_eq!((health.public.open, health.public.initialized), (1, 1));
+        assert_eq!(health.private, SocketStats::default());
     }
 }

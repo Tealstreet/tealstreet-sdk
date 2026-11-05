@@ -56,7 +56,7 @@ pub struct Store {
     metadata: Option<Box<crate::metadata::State>>,
     hedged: bool,
     loaded: Loaded,
-    latency: f64,
+    latency: Option<f64>,
     changes: Changes,
     rejected_empty_catalogue: bool,
     /// Changed-field bits per ticker, in [`TICKER_FIELDS`] order.
@@ -1120,11 +1120,15 @@ impl Store {
         self.loaded
     }
 
-    pub fn latency(&self) -> f64 {
+    pub fn latency(&self) -> Option<f64> {
         self.latency
     }
 
     pub fn set_latency(&mut self, latency: f64) {
+        self.set_latency_sample(Some(latency));
+    }
+
+    pub(crate) fn set_latency_sample(&mut self, latency: Option<f64>) {
         if latency != self.latency {
             self.latency = latency;
             self.changes.status = true;
@@ -1323,8 +1327,14 @@ impl Store {
             } else {
                 0
             };
+            let flags = flags
+                | if self.latency.is_some() {
+                    wire::status_flag::LATENCY_MEASURED
+                } else {
+                    0
+                };
             w.u32s([loaded, flags]);
-            w.f64(self.latency);
+            w.f64(self.latency.unwrap_or(0.0));
             w.end();
         }
     }

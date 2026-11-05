@@ -190,7 +190,8 @@ impl TxFlow {
                 "{}/{}",
                 REST_URL.replacen("https:", "wss:", 1),
                 if api { "api-ws" } else { "ws" }
-            )),
+            ))
+            .public_topics(!api && cx.public_feed_policy() == PublicFeedPolicy::Direct),
         )?;
         Ok(())
     }

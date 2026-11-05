@@ -675,7 +675,7 @@ export class EngineHost {
     let closed = 0;
     for (const [id, record] of [...this.socketRecords]) {
       // A connect in flight is left alone, as in TS: a second connect would leak it.
-      if ((channel !== undefined && record.channel !== channel) || !record.open || !this.sockets.has(id)) continue;
+      if ((channel !== undefined && !record.channels.includes(channel)) || !record.open || !this.sockets.has(id)) continue;
       const socket = this.sockets.get(id);
       this.sockets.delete(id);
       this.socketClosed(id, 1006);
@@ -697,16 +697,17 @@ export class EngineHost {
     const record = this.socketRecords.get(id);
     if (!record) return;
     this.socketRecords.delete(id);
-    const { stats } = record;
-    if (record.open) stats.open--;
-    if (record.initialized) stats.initialized--;
+    for (const stats of record.stats) {
+      if (record.open) stats.open--;
+      if (record.initialized) stats.initialized--;
+      stats.lastCloseCode = code;
+      stats.lastCloseAt = Date.now();
+      stats.closes++;
+      stats.closeStreak++;
+    }
     // Frames still in flight from a closed socket must not count as recovery.
     record.open = false;
     record.initialized = false;
-    stats.lastCloseCode = code;
-    stats.lastCloseAt = Date.now();
-    stats.closes++;
-    stats.closeStreak++;
     this.socketChanged();
   }
 
@@ -1251,15 +1252,17 @@ export class EngineHost {
           transport.setTimeout(notify, 0);
           break;
         }
-        const stats = this.socketStats[action.channel] ?? this.socketStats.public;
-        const record = { channel: action.channel ?? 'public', stats, open: false, initialized: false };
-        // Health tracking costs one write per frame; state changes notify once.
+        const channel = Object.hasOwn(this.socketStats, action.channel) ? action.channel : 'public';
+        const channels = action.publicTopics === true && channel !== 'public' ? [channel, 'public'] : [channel];
+        const stats = channels.map((role) => this.socketStats[role]);
+        const record = { channels, stats, open: false, initialized: false };
+        // One timestamp per carried channel; state changes notify once per socket.
         const received = () => {
-          stats.lastReceived = Date.now();
+          const now = Date.now();
+          for (const stat of stats) stat.lastReceived = now;
           if (record.initialized || !record.open) return;
           record.initialized = true;
-          stats.initialized++;
-          stats.closeStreak = 0;
+          for (const stat of stats) { stat.initialized++; stat.closeStreak = 0; }
           this.socketChanged();
         };
         this.socketRecords.set(id, record);
@@ -1269,6 +1272,7 @@ export class EngineHost {
           const callbacks = {
             binary: action.binary === true,
             channel: action.channel,
+            publicTopics: action.publicTopics === true,
             context: action.context,
             headers: action.headers && Object.fromEntries(action.headers),
             onOpen: () => {
@@ -1276,7 +1280,7 @@ export class EngineHost {
               if (this.disposed || !(connecting || (socket && this.sockets.get(id) === socket))) return;
               if (this.socketRecords.get(id) === record && !record.open) {
                 record.open = true;
-                stats.open++;
+                for (const stat of stats) stat.open++;
                 this.socketChanged();
               }
               this.run(this.invoke(engine.wsOpen, id, transport.now()));
