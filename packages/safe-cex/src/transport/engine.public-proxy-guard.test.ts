@@ -490,3 +490,212 @@ describe('a signed request is never sent toward the public proxy', () => {
     expect(plan).not.toHaveProperty('readHttp');
   });
 });
+
+describe('review3092 query and legacy binding controls', () => {
+  const lighterRouted = (
+    raw: ReturnType<typeof makeRaw>,
+    bind = vi.fn((_packet: Parameters<Transport['request']>[0]) => ({
+      ready: () => true,
+      dispatch: vi.fn(async () => ({ status: 200, body: new Uint8Array() })),
+    })),
+  ) => {
+    const cancel = vi.fn();
+    const routed = createEngineTransport('lighter', options({ tealstreetProxy: false }), {
+      ...raw,
+      prepareHttp: async () => ({ bind, cancel }),
+    });
+    return { routed, bind, cancel };
+  };
+  // sign.rs AuthPlacement::Query: account.rs:1092 accountActiveOrders appends auth=<token>.
+  it.each(['/api/v1/account?by=index&value=42', '/api/v1/sendTx'])(
+    'refuses a query-placed auth token on the unlisted path %s',
+    async (path) => {
+      const raw = makeRaw();
+      const { routed, bind } = lighterRouted(raw);
+      const url = `https://mainnet.zklighter.elliot.ai${path}`;
+      const original = {
+        request: 90,
+        method: 'GET',
+        intent: 'primary' as const,
+        route: 'primary' as const,
+        url,
+        headers: {},
+        timeoutMs: 20_000,
+      };
+      try {
+        const prepared = await routed.prepareHttp!(original);
+        const sep = url.includes('?') ? '&' : '?';
+        let refused = false;
+        try {
+          prepared.bind({ ...original, url: `${url}${sep}auth=${LIGHTER_READ_TOKEN}` });
+        } catch (e) {
+          refused = e instanceof SignedPublicProxyRefusal;
+        }
+        // Query tokens cannot extend the operation allowlist.
+        expect({ path, refused, bound: bind.mock.calls.length }).toEqual({ path, refused: true, bound: 0 });
+      } finally {
+        routed.dispose?.();
+      }
+    },
+  );
+  it.each([
+    ['GET', '/api/v1/trades'],
+    ['GET', '/api/v1/accountInactiveOrders'],
+    ['GET', '/api/v1/accountActiveOrders'],
+    ['GET', '/api/v1/positionFunding'],
+    ['GET', '/api/v1/accountLimits'],
+    ['POST', '/api/v1/changeAccountTier'],
+  ])('preserves the native query token for %s %s', async (method, path) => {
+    const raw = makeRaw();
+    const { routed, bind } = lighterRouted(raw);
+    const original = {
+      request: 92,
+      method,
+      intent: 'primary' as const,
+      route: 'primary' as const,
+      url: `https://mainnet.zklighter.elliot.ai${path}?account_index=42`,
+      headers: {},
+      timeoutMs: 20_000,
+    };
+    const signed = { ...original, url: `${original.url}&auth=${LIGHTER_READ_TOKEN}` };
+    try {
+      const prepared = await routed.prepareHttp!(original);
+      const bound = prepared.bind(signed);
+      expect(bind).toHaveBeenCalledOnce();
+      expect(bind.mock.lastCall![0].url).toBe(`${getPublicCorsProxy()}/${signed.url}`);
+      expect(raw.request).not.toHaveBeenCalled();
+      expect(bind.mock.results[0]!.value.dispatch).not.toHaveBeenCalled();
+      await bound.dispatch();
+      expect(bind.mock.results[0]!.value.dispatch).toHaveBeenCalledOnce();
+      expect(() => bound.dispatch()).toThrow();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it.each([
+    ['binance', 'GET', 'https://mainnet.zklighter.elliot.ai/api/v1/accountActiveOrders', LIGHTER_READ_TOKEN, 'auth'],
+    ['lighter', 'GET', 'https://other.invalid/api/v1/accountActiveOrders', LIGHTER_READ_TOKEN, 'auth'],
+    ['lighter', 'POST', 'https://mainnet.zklighter.elliot.ai/api/v1/sendTx', LIGHTER_READ_TOKEN, 'auth'],
+    ['lighter', 'GET', 'https://mainnet.zklighter.elliot.ai/api/v1/account', LIGHTER_READ_TOKEN, 'a%75th'],
+    ['lighter', 'GET', 'https://mainnet.zklighter.elliot.ai/api/v1/account', LIGHTER_READ_TOKEN, 'AUTH'],
+    ['lighter', 'GET', 'https://mainnet.zklighter.elliot.ai/api/v1/accountActiveOrders', 'api-secret', 'auth'],
+    ['lighter', 'GET', 'https://mainnet.zklighter.elliot.ai/api/v1/accountActiveOrders', '', 'auth'],
+  ] as const)('refuses unapproved query credentials: %s %s %s %s %s', async (exchange, method, url, token, name) => {
+    const raw = makeRaw();
+    const bind = vi.fn((_packet: Parameters<Transport['request']>[0]) => ({ ready: () => true, dispatch: vi.fn() }));
+    const cancel = vi.fn();
+    const routed = createEngineTransport(exchange, options({ tealstreetProxy: false }), {
+      ...raw,
+      prepareHttp: async () => ({ bind, cancel }),
+    });
+    const original = {
+      request: 93,
+      method,
+      intent: 'public' as const,
+      route: 'publicCors' as const,
+      url,
+      headers: {},
+      timeoutMs: 20_000,
+    };
+    try {
+      const prepared = await routed.prepareHttp!(original);
+      expect(() => prepared.bind({ ...original, url: `${url}?${name}=${token}` })).toThrow(SignedPublicProxyRefusal);
+      expect(bind).not.toHaveBeenCalled();
+      expect(raw.request).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it('refuses an invalid duplicate auth value beside an otherwise valid token', async () => {
+    const raw = makeRaw();
+    const { routed, bind } = lighterRouted(raw);
+    const original = {
+      request: 94,
+      method: 'GET',
+      intent: 'primary' as const,
+      url: 'https://mainnet.zklighter.elliot.ai/api/v1/accountActiveOrders',
+      headers: {},
+      timeoutMs: 20_000,
+    };
+    try {
+      const prepared = await routed.prepareHttp!(original);
+      expect(() =>
+        prepared.bind({ ...original, url: `${original.url}?auth=${LIGHTER_READ_TOKEN}&auth=api-secret` }),
+      ).toThrow(SignedPublicProxyRefusal);
+      expect(bind).not.toHaveBeenCalled();
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it('legacy query tokens work only when the prepared URL already contains the token', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('lighter', options({ tealstreetProxy: false }), raw);
+    const url = `https://mainnet.zklighter.elliot.ai/api/v1/accountActiveOrders?auth=${LIGHTER_READ_TOKEN}`;
+    try {
+      await routed.request({ method: 'GET', url, headers: {} });
+      expect(raw.request).toHaveBeenCalledOnce();
+      expect(raw.request.mock.lastCall![0].url).toBe(`${getPublicCorsProxy()}/${url}`);
+    } finally {
+      routed.dispose?.();
+    }
+  });
+
+  it.each([false, true])(
+    'legacy URL changes are refused even without credentials or with a mutated input: %s',
+    async (mutateInput) => {
+      const raw = makeRaw();
+      const routed = createEngineTransport('lighter', options({ tealstreetProxy: false }), raw);
+      const original = {
+        request: 95,
+        method: 'GET',
+        url: 'https://mainnet.zklighter.elliot.ai/api/v1/account',
+        headers: {},
+      };
+      try {
+        const prepared = await routed.prepareHttp!(original as never);
+        const replacement = 'https://mainnet.zklighter.elliot.ai/api/v1/accountLimits';
+        if (mutateInput) original.url = replacement;
+        expect(() => prepared.bind({ ...original, url: replacement } as never)).toThrow();
+        expect(raw.request).not.toHaveBeenCalled();
+      } finally {
+        routed.dispose?.();
+      }
+    },
+  );
+
+  it('legacy (no intent) bind checks the URL actually sent', async () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('lighter', options({ tealstreetProxy: false }), raw);
+    const original = {
+      request: 91,
+      method: 'GET',
+      url: 'https://mainnet.zklighter.elliot.ai/api/v1/account?by=index&value=42',
+      headers: {},
+    };
+    try {
+      const prepared = await routed.prepareHttp!(original as never);
+      let refused = false;
+      try {
+        const bound = prepared.bind({
+          ...original,
+          url: 'https://mainnet.zklighter.elliot.ai/api/v1/accountLimits?account_index=42',
+          headers: { Authorization: LIGHTER_READ_TOKEN },
+        } as never);
+        await bound.dispatch();
+      } catch (e) {
+        refused = e instanceof SignedPublicProxyRefusal;
+      }
+      const sent = raw.request.mock.calls.map(([r]) => ({
+        url: r.url,
+        auth: r.headers.Authorization ?? r.headers.authorization,
+      }));
+      expect({ refused, sent }).toEqual({ refused: true, sent: [] });
+    } finally {
+      routed.dispose?.();
+    }
+  });
+});

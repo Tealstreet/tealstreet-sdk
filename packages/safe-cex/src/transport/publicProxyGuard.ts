@@ -27,6 +27,7 @@ export const payloadSignedViaPublicProxy = (exchange: string, options: { testnet
 const LIGHTER_READ_AUTH_PATHS = new Set([
   '/api/v1/trades',
   '/api/v1/accountInactiveOrders',
+  '/api/v1/accountActiveOrders',
   '/api/v1/positionFunding',
   '/api/v1/accountLimits',
 ]);
@@ -34,7 +35,7 @@ const LIGHTER_TIER_AUTH_PATH = '/api/v1/changeAccountTier';
 // sign.rs AuthRecipe: deadline:account:key-index:hex(80-byte Schnorr signature).
 const LIGHTER_READ_TOKEN = /^\d{1,20}:\d{1,20}:\d{1,3}:[a-f0-9]{160}$/i;
 
-const allowsLighterAuthorization = (
+const allowsLighterToken = (
   exchange: ExchangeName,
   testnet: boolean | undefined,
   method: string,
@@ -89,13 +90,20 @@ export const refuseSignedPublicProxy = ({
       !(
         payloadSigned &&
         name.toLowerCase() === 'authorization' &&
-        allowsLighterAuthorization(exchange, testnet, method, venueUrl, value)
+        allowsLighterToken(exchange, testnet, method, venueUrl, value)
       ),
   );
-  const signatureParam = [...new URL(venueUrl).searchParams.keys()].some(
-    (name) => name.toLowerCase() === 'signature' || name.toLowerCase() === 'sign',
+  const query = [...new URL(venueUrl).searchParams.entries()];
+  const signatureParam = query.some(([name]) => name.toLowerCase() === 'signature' || name.toLowerCase() === 'sign');
+  const queryToken = query.some(
+    ([name, value]) =>
+      name.toLowerCase() === 'auth' &&
+      !(payloadSigned && allowsLighterToken(exchange, testnet, method, venueUrl, value)),
   );
   const credentialed =
-    credentialHeader || signatureParam || (!payloadSigned && (intent === 'primary' || intent === 'secondary'));
+    credentialHeader ||
+    signatureParam ||
+    queryToken ||
+    (!payloadSigned && (intent === 'primary' || intent === 'secondary'));
   if (credentialed) throw new SignedPublicProxyRefusal(exchange, venueUrl);
 };
