@@ -812,6 +812,179 @@ fn a_stale_crossed_or_changed_stop_at_the_final_send_cancels_nothing() {
     }
 }
 
+/// An untriggered stop ENTRY (not reduce-only): Paradex maps it to Conditional.
+fn with_stop_entry(side: &str, kind: &str, trigger: &str, price: &str) -> Harness {
+    let mut h = private();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: private });
+    h.collect();
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: r#"{"jsonrpc":"2.0","id":0,"result":{}}"#,
+        },
+    );
+    h.collect();
+    let text = format!(
+        r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"orders.ALL","data":{{"id":"321","market":"BTC-USD-PERP","type":"{kind}","status":"UNTRIGGERED","side":"{side}","size":"1","remaining_size":"1","price":"{price}","trigger_price":"{trigger}","flags":[],"instruction":"GTC","stp":"EXPIRE_MAKER","created_at":1700000000000}}}}}}"#
+    );
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket: private,
+            text: &text,
+        },
+    );
+    h.collect();
+    assert_eq!(
+        h.e.store().order("321").unwrap().kind,
+        OrderType::Conditional
+    );
+    h
+}
+
+#[test]
+fn a_stop_its_signer_could_not_put_back_is_refused_before_its_cancel() {
+    // A reduce-only stop limit is a shape the Stark signer does not admit.
+    let mut h = with_untriggered_stop();
+    let private = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            safe_cex_engine::Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"123","market":"BTC-USD-PERP","type":"STOP_LOSS_LIMIT","status":"UNTRIGGERED","side":"SELL","size":"2","remaining_size":"2","price":"89","trigger_price":"90","flags":["REDUCE_ONLY"],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000001000}}}"#});
+    h.collect();
+    amend_stop(&mut h, 13);
+    assert!(!h.pending.iter().any(|r| r.method == Method::Delete));
+    assert!(h.result(13).unwrap_err().contains("not changed"));
+}
+
+#[test]
+fn a_stop_entry_edit_checks_the_entry_direction() {
+    // mark 100.5, last 100: a buy entry fires above the market, a sell below it.
+    for (side, from, to, safe) in [
+        ("BUY", "110", 112., true),
+        ("SELL", "90", 88., true),
+        ("BUY", "110", 99., false),
+        ("SELL", "90", 101., false),
+    ] {
+        let price = if side == "BUY" { "111" } else { "89" };
+        let mut h = with_stop_entry(side, "STOP_LIMIT", from, price);
+        h.command(Command::AmendOrder {
+            command: 13,
+            id: "321".into(),
+            price: Some(to),
+            amount: None,
+        });
+        let cancelled = h.pending.iter().any(|r| r.method == Method::Delete);
+        assert_eq!(cancelled, safe, "{side} {from}->{to}");
+        if !safe {
+            let error = h.result(13).unwrap_err().to_owned();
+            assert!(
+                error.contains("not changed") || error.contains("at once"),
+                "{error}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_refused_stop_entry_replacement_puts_back_the_entry_exactly() {
+    let mut h = with_stop_entry("BUY", "STOP_LIMIT", "110", "111");
+    h.command(Command::AmendOrder {
+        command: 13,
+        id: "321".into(),
+        price: Some(112.),
+        amount: None,
+    });
+    let cancel = take_method(&mut h, Method::Delete, "/orders/321");
+    h.respond(cancel, 204, "");
+    let place = h.take("/orders");
+    h.respond(place, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    let restore = h.take("/orders");
+    let body: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "STOP_LIMIT");
+    assert_eq!(body["trigger_price"], "110");
+    assert_eq!(body["price"], "111");
+    assert_eq!(body["stp"], "EXPIRE_TAKER", "the one mode the signer signs");
+    assert!(body.get("flags").is_none(), "an entry is not reduce-only");
+}
+
+#[test]
+fn a_stale_crossed_or_changed_stop_entry_at_the_final_send_cancels_nothing() {
+    for case in ["stale", "crossed", "changed"] {
+        // A BUY stop entry at 110 (limit 111), moved to 112.
+        let mut h = with_stop_entry("BUY", "STOP_LIMIT", "110", "111");
+        h.now += 181_000.;
+        h.e.handle(h.now, Event::WsOpened { socket: h.public });
+        h.collect();
+        h.e.store_mut().update_ticker("BTC-USD-PERP", |t| {
+            t.mark = 100.6;
+            t.last = 100.1;
+        });
+        h.command(Command::AmendOrder {
+            command: 13,
+            id: "321".into(),
+            price: Some(112.),
+            amount: None,
+        });
+        assert!(
+            !h.pending.iter().any(|r| r.method == Method::Delete),
+            "{case}"
+        );
+        match case {
+            // The market rose through 112 while the cancel waited: it would fire at once.
+            "crossed" => h.e.store_mut().update_ticker("BTC-USD-PERP", |t| {
+                t.mark = 112.5;
+                t.last = 112.5;
+            }),
+            "changed" => {
+                let private = h
+                    .actions
+                    .iter()
+                    .find_map(|a| match a {
+                        safe_cex_engine::Action::WsConnect {
+                            socket,
+                            channel: Some(safe_cex_engine::SocketChannel::Private),
+                            ..
+                        } => Some(*socket),
+                        _ => None,
+                    })
+                    .unwrap();
+                h.e.handle(h.now,Event::WsMessage{socket:private,text:r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"orders.ALL","data":{"id":"321","market":"BTC-USD-PERP","type":"STOP_LIMIT","status":"UNTRIGGERED","side":"BUY","size":"1","remaining_size":"1","price":"111","trigger_price":"109","flags":[],"instruction":"GTC","created_at":1700000000000,"last_updated_at":1700000999000}}}"#});
+                h.collect();
+            }
+            _ => h.now += 6_000.,
+        }
+        h.reply("/auth/", r#"{"jwt_token":"jwt"}"#);
+        assert!(
+            !h.pending.iter().any(|r| r.method == Method::Delete),
+            "{case}: {:?}",
+            h.pending.iter().map(|r| &r.url).collect::<Vec<_>>()
+        );
+        assert!(h.result(13).unwrap_err().contains("not changed"), "{case}");
+    }
+}
+
 #[test]
 fn a_crossed_reference_at_planning_or_an_already_gone_stop_never_restores() {
     let mut h = with_untriggered_stop();

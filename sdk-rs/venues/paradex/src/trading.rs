@@ -1652,13 +1652,14 @@ fn restore_operation(
     account: &Account,
     raw: &NativeOrder,
 ) -> Option<Operation> {
+    // Only shapes the signer admits (hosted::OrderType): a market stop carries
+    // REDUCE_ONLY, a stop limit carries no flag. Anything else is refused
+    // before its cancel rather than put back as something else.
     let kind = match raw.kind.as_str() {
         "STOP_MARKET" => "STOP_MARKET",
         "STOP_LIMIT" => "STOP_LIMIT",
         "STOP_LOSS_MARKET" => "STOP_LOSS_MARKET",
-        "STOP_LOSS_LIMIT" => "STOP_LOSS_LIMIT",
         "TAKE_PROFIT_MARKET" => "TAKE_PROFIT_MARKET",
-        "TAKE_PROFIT_LIMIT" => "TAKE_PROFIT_LIMIT",
         _ => return None,
     };
     let instruction = match raw.instruction.as_str() {
@@ -1678,7 +1679,7 @@ fn restore_operation(
         return None;
     }
     let limit = kind.ends_with("_LIMIT");
-    if limit && raw.price.is_empty() {
+    if (limit && (raw.price.is_empty() || reduce_only)) || (!limit && !reduce_only) {
         return None;
     }
     let payload = Placement {
@@ -1690,6 +1691,8 @@ fn restore_operation(
         trigger_price: Some(raw.trigger_price.clone()),
         instruction,
         flags: reduce_only.then_some(["REDUCE_ONLY"]),
+        // The only self-trade mode this SDK's Stark signer will sign with a
+        // client id (hosted::Stp): the put-back is placed as every stop is.
         stp: Some("EXPIRE_TAKER"),
         signature: String::new(),
         signature_timestamp: 0,
@@ -1757,7 +1760,10 @@ impl StopGuard {
                 unchanged()
             ))));
         }
-        let below = (self.kind == OrderType::StopLoss) == (self.side == OrderSide::Sell);
+        // A stop entry (Conditional) fires like a stop loss: a buy above the
+        // market, a sell below it; a take profit fires the other way.
+        let stops = matches!(self.kind, OrderType::StopLoss | OrderType::Conditional);
+        let below = stops == (self.side == OrderSide::Sell);
         for (reference, label) in [
             (StopTriggerType::MarkPrice, "mark"),
             (StopTriggerType::LastPrice, "last"),

@@ -2473,12 +2473,23 @@ impl Blofin {
         if let Effect::VerifyAmend(check) = &request.step.effect {
             return match amend_mismatch(&response, check) {
                 None => self.drive(cx, active, At::Data(&request.slot, &request.context)),
-                Some(found) => {
+                Some(fault) => {
                     self.reconcile_orders(cx);
-                    let error = VenueError::new(format!(
-                        "BloFin accepted the {} edit, but the order does not read as edited ({found}). Check Open Orders",
-                        check.symbol
-                    ));
+                    // The edit took effect (the journal holds its accepted write, so
+                    // the outcome is never NotSent or Rejected); the kind says why
+                    // it is unconfirmed: an unread order or one that reads otherwise.
+                    let error = match fault {
+                        ReadBackFault::Unread(why) => VenueError::new(format!(
+                            "BloFin accepted the {} edit, but it could not be read back ({why}). Check Open Orders",
+                            check.symbol
+                        ))
+                        .kind(ErrorKind::VenueUnavailable),
+                        ReadBackFault::Differs(found) => VenueError::new(format!(
+                            "BloFin accepted the {} edit, but the order does not read as edited ({found}). Check Open Orders",
+                            check.symbol
+                        ))
+                        .kind(ErrorKind::Internal),
+                    };
                     self.end(cx, active, current, error)
                 }
             };
@@ -2933,41 +2944,80 @@ fn tpsl_keeps_leg(response: &Response<'_>, tpsl_id: &str, kept: OrderType) -> bo
         })
 }
 
-/// What an accepted native edit's read shows that differs from `check`, if anything.
-fn amend_mismatch(response: &Response<'_>, expected: &AmendCheck) -> Option<String> {
-    if !(200..300).contains(&response.status) || check(response).is_err() {
-        return Some(format!("the read answered HTTP {}", response.status));
+/// Why an accepted native edit could not be confirmed.
+enum ReadBackFault {
+    /// The read itself failed: the order's state is unconfirmed.
+    Unread(String),
+    /// The read answered, and the order does not show the edit.
+    Differs(String),
+}
+/// The fields an amend read-back compares, across the three pending reads.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadBackRow<'a> {
+    #[serde(borrow, default)]
+    order_id: crate::wire::Str<'a>,
+    #[serde(borrow, default)]
+    tpsl_id: crate::wire::Str<'a>,
+    #[serde(borrow, default)]
+    algo_id: crate::wire::Str<'a>,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    tp_trigger_price: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    sl_trigger_price: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    size: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    price: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    trigger_price: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    order_price: crate::wire::Number,
+}
+impl ReadBackRow<'_> {
+    fn id(&self, key: &str) -> &str {
+        match key {
+            "orderId" => &self.order_id,
+            "tpslId" => &self.tpsl_id,
+            _ => &self.algo_id,
+        }
     }
-    let Ok(reply) = serde_json::from_str::<serde_json::Value>(response.body) else {
-        return Some("the read was not JSON".into());
+    fn field(&self, name: &str) -> f64 {
+        match name {
+            "tpTriggerPrice" => self.tp_trigger_price.0,
+            "slTriggerPrice" => self.sl_trigger_price.0,
+            "size" => self.size.0,
+            "price" => self.price.0,
+            "triggerPrice" => self.trigger_price.0,
+            _ => self.order_price.0,
+        }
+    }
+}
+/// What an accepted native edit's read shows that differs from `expected`, if anything.
+fn amend_mismatch(response: &Response<'_>, expected: &AmendCheck) -> Option<ReadBackFault> {
+    if !(200..300).contains(&response.status) || check(response).is_err() {
+        return Some(ReadBackFault::Unread(format!(
+            "the read answered HTTP {}",
+            response.status
+        )));
+    }
+    let Ok(reply) = serde_json::from_str::<Data<OneOrMany<ReadBackRow<'_>>>>(response.body) else {
+        return Some(ReadBackFault::Unread("the read was not understood".into()));
     };
-    let rows: Vec<&serde_json::Value> = match &reply["data"] {
-        serde_json::Value::Array(rows) => rows.iter().collect(),
-        row @ serde_json::Value::Object(_) => vec![row],
-        _ => Vec::new(),
+    let rows: Vec<&ReadBackRow<'_>> = match &reply.data {
+        OneOrMany::One(row) => vec![row],
+        OneOrMany::Many(rows) => rows.iter().collect(),
     };
-    let Some(row) = rows
-        .into_iter()
-        .find(|row| row[expected.key.0].as_str() == Some(expected.key.1.as_str()))
-    else {
-        return Some(format!(
-            "{} {} is not listed",
-            expected.key.0, expected.key.1
-        ));
-    };
-    let number = |value: &serde_json::Value| match value {
-        serde_json::Value::String(text) => text.parse::<f64>().ok(),
-        serde_json::Value::Number(number) => number.as_f64(),
-        _ => None,
+    let (key, id) = (&expected.key.0, &expected.key.1);
+    let Some(row) = rows.into_iter().find(|row| row.id(key) == id.as_str()) else {
+        return Some(ReadBackFault::Differs(format!("{key} {id} is not listed")));
     };
     for (field, want) in &expected.fields {
-        let got = number(&row[*field]);
-        let close = got.is_some_and(|got| (got - want).abs() <= want.abs() * 1e-9 + 1e-12);
-        if !close {
-            return Some(format!(
-                "{field} reads {}, expected {want}",
-                got.map_or_else(|| "nothing".into(), |got| got.to_string())
-            ));
+        let got = row.field(field);
+        if (got - want).abs() > want.abs() * 1e-9 + 1e-12 {
+            return Some(ReadBackFault::Differs(format!(
+                "{field} reads {got}, expected {want}"
+            )));
         }
     }
     None

@@ -99,6 +99,34 @@ fn an_accepted_tpsl_edit_that_drops_the_other_leg_is_a_typed_error() {
         !destructive(&h),
         "no cancel or re-place follows a disagreeing read"
     );
+    // The edit took effect (its accepted write leaves no NotSent or Rejected
+    // outcome); what it left does not read as asked.
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Internal));
+    assert_eq!(error.outcome, None);
+}
+
+#[test]
+fn a_failed_read_back_is_typed_apart_from_a_mismatch() {
+    let mut h = Harness::new();
+    bracket(&mut h);
+    amend(&mut h, OrderType::StopLoss, Some(56000.0), None);
+    h.reply(
+        "amend-tpsl",
+        r#"{"code":"0","msg":"success","data":{"tpslId":"500","code":"0","msg":null}}"#,
+    );
+    let read = h.take("orders-tpsl-pending");
+    h.respond_status(read, 503, "");
+    let error = failure(&h).expect("unconfirmed");
+    assert!(
+        error.message.contains("could not be read back"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        error.kind,
+        Some(safe_cex_engine::ErrorKind::VenueUnavailable)
+    );
+    assert_eq!(error.outcome, None, "the accepted edit still took effect");
 }
 
 #[test]
