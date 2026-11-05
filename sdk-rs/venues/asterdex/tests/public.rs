@@ -617,7 +617,12 @@ fn one_off_rest_depth_sorts_levels_and_preserves_quote_totals() {
 #[test]
 fn public_limits_are_sent_only_as_values_aster_accepts() {
     // Live Aster: klines takes 1..=1500; depth only 5/10/20/50/100/500/1000.
-    let cases = [(0, 1, 5), (25, 25, 50), (1501, 1500, 1000), (5000, 1500, 1000)];
+    let cases = [
+        (0, 1, 5),
+        (25, 25, 50),
+        (1501, 1500, 1000),
+        (5000, 1500, 1000),
+    ];
     for (index, (requested, klines, depth)) in cases.into_iter().enumerate() {
         let mut h = Harness::ready();
         let command = 60 + index as u32 * 2;

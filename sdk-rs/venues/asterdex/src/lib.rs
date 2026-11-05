@@ -43,7 +43,10 @@ const MAX_KLINES: u32 = 1500;
 /// A request rounds up to the next size, and anything larger asks for the deepest.
 fn depth_limit(requested: u32) -> u32 {
     const SIZES: [u32; 7] = [5, 10, 20, 50, 100, 500, 1000];
-    SIZES.into_iter().find(|size| *size >= requested).unwrap_or(1000)
+    SIZES
+        .into_iter()
+        .find(|size| *size >= requested)
+        .unwrap_or(1000)
 }
 
 const INTEREST_MS: f64 = 15_000.0;
