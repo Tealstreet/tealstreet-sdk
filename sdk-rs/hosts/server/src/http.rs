@@ -48,7 +48,15 @@ const CLOSE_FRAMES_DEADLINE: Duration = Duration::from_secs(2);
 /// socket 1001 so its page reconnects to the next process.
 pub async fn drain(app: &App) {
     if !app.registry.drain(DRAIN_DEADLINE).await {
-        Log::warn("drain passed its deadline; orders may rest");
+        let summary = "drain passed its deadline; orders may rest";
+        Log::error(
+            summary,
+            &crate::telemetry::Report {
+                kind: "drain.deadline_passed",
+                summary,
+                ..Default::default()
+            },
+        );
     }
     let _ = app.closing.send(true);
     let until = tokio::time::Instant::now() + CLOSE_FRAMES_DEADLINE;
@@ -62,7 +70,15 @@ pub async fn drain(app: &App) {
 pub async fn drain_now(app: &App) -> bool {
     let settled = app.registry.break_glass(DRAIN_DEADLINE).await;
     if !settled {
-        Log::warn("break-glass drain passed its deadline; orders may rest");
+        let summary = "break-glass drain passed its deadline; orders may rest";
+        Log::error(
+            summary,
+            &crate::telemetry::Report {
+                kind: "drain.break_glass_deadline_passed",
+                summary,
+                ..Default::default()
+            },
+        );
     }
     settled
 }
