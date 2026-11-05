@@ -7,8 +7,7 @@ import { createGithubReader } from './cpu-cohort.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
 import { BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_PROTOCOL_SHA256, BITGET_MEASUREMENT_FILES, BITGET_CUMULATIVE_ANCHOR,
-  assessBitgetPairedSteady, bitgetPairedAuthority, bitgetAnchorAuthority,
-  combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
+  readBitgetSteadyCertificate, bitgetPairedAuthority } from './bitget-paired-steady.mjs';
 
 const insist = (ok, message) => { if (!ok) throw new Error(`Bitget paired CI: ${message}`); };
 const git = (root, ...args) => {
@@ -26,9 +25,9 @@ const write = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2
 
 /** Select from authenticated run/PR/commit APIs, never an input baseline flag.
  * The Git tree is recomputed before measuring, not accepted from the PR. */
-export async function selectBitgetPair({ reader, runId, root, gitRead = (...args) => git(root, ...args), sleep }) {
+export async function selectCpuComparison({ reader, runId, root, jobName, gitRead = (...args) => git(root, ...args), sleep }) {
   const { run, selected: candidates } = await relistPhysicalJob(async () =>
-    ({ run: await reader.getRun(runId), jobs: await reader.listJobs(runId) }), 'Rust / Bitget counterbalanced steady CPU', { sleep });
+    ({ run: await reader.getRun(runId), jobs: await reader.listJobs(runId) }), jobName, { sleep });
   insist(candidates.length === 1 && candidates[0].runner_id > 0,
     `missing/duplicate paired physical producer; candidates ${physicalCandidateRows(candidates)}`);
   const checkoutSha = gitRead('rev-parse', 'HEAD'), checkoutTree = gitRead('rev-parse', 'HEAD^{tree}');
@@ -59,7 +58,9 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
     insist(checkout.sha === checkoutSha && checkout.tree?.sha === checkoutTree &&
       apiParents?.length === 2 && localParents.length === 2 && isDeepStrictEqual(apiParents, localParents) &&
       apiParents.every(parent => /^[a-f0-9]{40}$/.test(parent)) && apiParents[1] === run.head_sha,
-    'checkout API/local tree and exact two-parent PR composition must agree');
+    'checkout API/local tree and exact two-parent PR composition must agree: ' +
+      JSON.stringify({ checkoutSha, checkoutTree, apiSha: checkout.sha, apiTree: checkout.tree?.sha,
+        localParents, apiParents, expectedHead: run.head_sha }));
     const baseline = apiParents[0], landingRef = await reader.getRustLanding();
     insist(landingRef.ref === 'refs/heads/master' &&
       landingRef.url === 'https://api.github.com/repos/Tealstreet/tealstreet-sdk/git/refs/heads/master' &&
@@ -89,8 +90,14 @@ export async function selectBitgetPair({ reader, runId, root, gitRead = (...args
     mergeTree = gitRead('merge-tree', '--write-tree', baseline, pull.head.sha);
     insist(/^[a-f0-9]{40}$/.test(mergeTree), 'composition is not a clean automatic tree');
   }
-  const measurementFiles = Object.fromEntries(BITGET_MEASUREMENT_FILES.map(path => [path, gitRead('rev-parse', `${checkoutSha}:${path}`)]));
-  return bitgetPairedAuthority({ run, pull, landing, job: candidates[0], checkoutSha, checkoutTree, mergeTree, measurementFiles });
+  return { run, pull, landing, job: candidates[0], checkoutSha, checkoutTree, mergeTree };
+}
+
+export async function selectBitgetPair(options) {
+  const selection = await selectCpuComparison({ ...options, jobName: 'Rust / Bitget counterbalanced steady CPU' });
+  const gitRead = options.gitRead ?? ((...args) => git(options.root, ...args));
+  const measurementFiles = Object.fromEntries(BITGET_MEASUREMENT_FILES.map(path => [path, gitRead('rev-parse', `${selection.checkoutSha}:${path}`)]));
+  return bitgetPairedAuthority({ ...selection, measurementFiles });
 }
 
 export async function collectBitgetPair({ reader, runId, root, destination, env = process.env }) {
@@ -100,35 +107,33 @@ export async function collectBitgetPair({ reader, runId, root, destination, env 
   mkdirSync(destination, { recursive: false });
   const script = resolve(destination, 'collect-bitget-paired.py');
   copyFileSync(resolve(root, 'sdk-rs/harness/collect-bitget-paired.py'), script);
-  const witnesses = { tip: authority, anchor: bitgetAnchorAuthority(authority) };
-  for (const [name, selected] of Object.entries(witnesses)) {
-    const directory = resolve(destination, name); mkdirSync(directory);
-    const authorityPath = resolve(directory, 'authority.json');
-    write(authorityPath, { ...selected, protocolSha256: BITGET_PAIRED_PROTOCOL_SHA256,
-      freezeSha256: BITGET_PAIRED_FREEZE_SHA256 });
-    try {
-      const child = spawnSync('python3', [script, '--baseline', selected.baseline,
-        '--candidate', selected.candidate, '--authority', authorityPath, '--out', resolve(directory, 'records'),
-        '--module-path', resolve(destination, 'active-module')], { cwd: root, env, stdio: 'inherit' });
-      insist(child.status === 0 && !child.error && !child.signal, `${name} fixed measurement did not complete; no retry`);
-    } finally {
-      git(root, 'checkout', '--detach', authority.candidate);
-    }
-  }
+  const declarations = JSON.parse(readFileSync(resolve(root, 'sdk-rs/harness/known-gate-failures.json'), 'utf8'));
+  const certificate = await readBitgetSteadyCertificate({ authority, manifest: declarations,
+    readEvidence: async (name, selected) => {
+      const directory = resolve(destination, name); mkdirSync(directory);
+      const authorityPath = resolve(directory, 'authority.json');
+      write(authorityPath, { ...selected, protocolSha256: BITGET_PAIRED_PROTOCOL_SHA256,
+        freezeSha256: BITGET_PAIRED_FREEZE_SHA256 });
+      try {
+        const child = spawnSync('python3', [script, '--baseline', selected.baseline,
+          '--candidate', selected.candidate, '--authority', authorityPath, '--out', resolve(directory, 'records'),
+          '--module-path', resolve(destination, 'active-module')], { cwd: root, env, stdio: 'inherit' });
+        insist(child.status === 0 && !child.error && !child.signal, `${name} fixed collection did not complete; no retry`);
+      } finally {
+        git(root, 'checkout', '--detach', authority.candidate);
+      }
+      return readBitgetPairedEvidence(resolve(directory, 'records'));
+    } });
   const current = await selectBitgetPair({ reader, runId, root });
-  insist(isDeepStrictEqual(current, authority), 'source/base/physical producer changed during measurement');
-  const manifest = JSON.parse(readFileSync(resolve(root, 'sdk-rs/harness/known-gate-failures.json'), 'utf8'));
-  const measured = Object.fromEntries(Object.entries(witnesses).map(([name, selected]) => {
-    const result = assessBitgetPairedSteady({ authority: selected,
-      evidence: readBitgetPairedEvidence(resolve(destination, name, 'records')), manifest });
-    insist(result.valid, result.errors.join('\n')); return [name, result.certificate];
-  }));
-  const certificate = combineBitgetPairedCertificates(measured.tip, measured.anchor);
+  insist(isDeepStrictEqual(current, authority), 'source/base/physical producer changed during collection');
   const result = { valid: true, errors: [], certificate };
   write(resolve(destination, 'steady-assessment.json'), result);
-  console.log(JSON.stringify({ tipQ: certificate.tip.q, anchorQ: certificate.anchor.q, tolerance: certificate.tolerance,
-    steadyAccepted: certificate.steadyAccepted, readinessByCpuModel: certificate.readinessByCpuModel,
-    otherObjectivesRemainUnchanged: true }));
+  console.log(JSON.stringify(certificate.measured === false
+    ? { disposition: certificate.disposition, steadyAccepted: true, moduleHashes: certificate.moduleHashes,
+      otherObjectivesRemainUnchanged: true }
+    : { tipQ: certificate.tip.q, anchorQ: certificate.anchor.q, tolerance: certificate.tolerance,
+      steadyAccepted: certificate.steadyAccepted, readinessByCpuModel: certificate.readinessByCpuModel,
+      otherObjectivesRemainUnchanged: true }));
   insist(result.certificate.steadyAccepted, 'counterbalanced non-regression bound exceeded');
   return result;
 }

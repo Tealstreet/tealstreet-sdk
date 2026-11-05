@@ -6,12 +6,26 @@ mod history;
 pub mod hosted_signing;
 mod hyro;
 mod identity;
+mod leverage;
 mod options;
 mod paths;
 mod policy;
 mod refresh;
 mod sign;
 mod trading;
+mod venue_state;
+
+/// Frame-fed: a held position-mode switch, per product category code.
+const MODE_HOLD: &str = "bybit.position_mode";
+
+fn mode_hold(category: u8) -> SettingKey {
+    SettingKey::Venue(MODE_HOLD, category.to_string())
+}
+
+/// A mode switch covers every inverse coin, and on linear only USDT perps.
+fn switched_with_mode(category: u8, quote: &str) -> bool {
+    category == venue_state::category_code(Category::Inverse) || quote == "USDT"
+}
 mod wire;
 
 use paths::Paths;
@@ -25,14 +39,17 @@ use safe_cex_engine::model::{
     Candle, DerivativeProduct, InstrumentClassification, Interval, Limits, Market, MinMax,
     Precision, ProductKind, Ticker,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::socket::{Config, Timeout};
 use safe_cex_engine::socket_lifecycle::{
-    AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy, Interest,
-    Invalidation, LifecycleEvent, MAX_INTERESTS, RetireReason, SocketCapabilities, SocketError,
-    TrafficPolicy,
+    AuthMode, AuthRecovery, Control, ControlPolicy, DataSilence, EncodedBatch, FeedId, FeedPolicy,
+    Interest, Invalidation, LifecycleEvent, MAX_INTERESTS, RetireReason, SocketCapabilities,
+    SocketError, TrafficPolicy,
 };
 use safe_cex_engine::time;
-use safe_cex_engine::{Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue};
+use safe_cex_engine::{
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue,
+};
 use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet};
@@ -63,6 +80,8 @@ const SOCKET: Config = Config {
 /// A book that skipped an update is unsubscribed, then subscribed again for a
 /// fresh snapshot this long after.
 const RESUBSCRIBE_DELAY_MS: f64 = 100.0;
+/// A public feed carrying tickers or books with no data this long has lost its subscriptions.
+const PUBLIC_SILENCE_MS: f64 = 60_000.0;
 /// Bybit closes a public socket that subscribes too fast: ten topics per
 /// message, one message per pace interval.
 const TOPICS_PER_SUBSCRIBE: usize = 10;
@@ -72,6 +91,10 @@ const PRELAUNCH_STARTUP_GRACE_MS: f64 = 1_500.0;
 const MARKETS_PATH: &[&str] = &["result", "list"];
 /// Diagnostics must not leave a definitive startup rejection waiting on another host.
 const ENVIRONMENT_PROBE_TIMEOUT_MS: u32 = 2_000;
+/// Legacy virtualClock's threshold: an answer within a second of the
+/// calibrated clock is network delay, so it never moves the signing clock.
+const CLOCK_DRIFT_MS: f64 = 1_000.0;
+const AUTH_CLOCK_TIMEOUT_MS: u32 = 5_000;
 
 #[derive(Clone, Default)]
 pub struct Options {
@@ -130,6 +153,7 @@ impl Rest {
 /// element (see `Cx::request_streamed`); their continuations collect the rows.
 pub enum Then {
     Identity(safe_cex_engine::request_context::Context),
+    Leverage(leverage::Read),
     Markets {
         prelaunch: bool,
         markets: Vec<Market>,
@@ -139,6 +163,8 @@ pub enum Then {
     RefreshMarkets(refresh::Page),
     /// Diagnostic only: bypass ordinary retries, startup and account success handling.
     EnvironmentProbe,
+    /// Bybit's public clock, read once after a private auth refusal.
+    AuthClock,
     Tickers(Vec<Ticker>),
     OptionSeed {
         base_coin: String,
@@ -155,6 +181,12 @@ pub enum Then {
     Closed(Box<closed::Request>),
 }
 
+impl Then {
+    fn reads_account_snapshot(&self) -> bool {
+        matches!(self, Self::Account(request) if request.is_snapshot_read())
+    }
+}
+
 pub struct Pending {
     category: Category,
     rest: Rest,
@@ -168,6 +200,12 @@ struct EnvironmentProbe {
     /// Background Read authority with the probe's native 2 s window.
     context: safe_cex_engine::request_context::Context,
     message: String,
+}
+
+/// A refused auth's clock read; a socket opened meanwhile waits for it to settle.
+struct AuthClock {
+    context: safe_cex_engine::request_context::Context,
+    waiting: Option<SocketId>,
 }
 
 // Require native integer success before attributing a key to another environment.
@@ -279,9 +317,13 @@ pub struct BybitLinear {
     read_credentials: Option<safe_cex_engine::signing::Identity>,
     /// Set once a startup read proved the key unusable; startup never retries it.
     credentials_rejected: bool,
+    private_startup_timer: Option<TimerId>,
+    private_startup_error: Option<VenueError>,
+    private_startup_failed: bool,
     environment_probe_origin: Option<&'static str>,
     environment_probe_attempted: bool,
     environment_probe: Option<EnvironmentProbe>,
+    auth_clock: Option<AuthClock>,
     public: Connection,
     private: Connection,
     books: HashMap<String, BookState>,
@@ -294,12 +336,16 @@ pub struct BybitLinear {
     startup: Startup,
     /// Discovery retries wait out a rate-limit or IP ban across all products.
     discovery_paused_until: f64,
+    /// Kline reads wait out a refused one's rate limit or IP ban together, sending nothing.
+    candles_paused_until: f64,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
     /// The raw first account of the last good REST wallet read: TS `balance.info`.
     balance_info: Option<String>,
     market_refresh: refresh::State,
+    fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
 }
 
 /// Bybit kline interval codes.
@@ -321,6 +367,15 @@ fn interval_code(interval: Interval) -> Option<&'static str> {
         Mo1 => "M",
         _ => return None,
     })
+}
+
+/// Order book depth per category.
+fn book_depth_for(category: Category) -> u32 {
+    match category {
+        Category::Option => 25,
+        Category::Spot => 200,
+        Category::Linear | Category::Inverse => 1000,
+    }
 }
 
 /// Seconds intervals have no native kline; they are built from trades alone.
@@ -350,6 +405,8 @@ fn candle_start(interval: Interval, time: f64) -> f64 {
 /// resend, IP not allowed, expired key. 10005 (permission) is left out: a key
 /// lacking only this read's scope may still trade.
 const CREDENTIAL_REJECTIONS: [i64; 4] = [10003, 10004, 10010, 33004];
+/// Bybit's 10010 "Unmatched IP" refusal: the key's IP allowlist excludes this egress.
+const IP_REFUSED_HINT: &str = "Bybit refused this API key from this IP address: the key is restricted to other IPs. Add the current Tealstreet IPs to the key's IP allowlist on Bybit, or create a new key";
 
 /// A command read's native refusal, classified so it keeps its kind.
 pub(crate) fn read_refusal(response: &Response<'_>, prefix: &str) -> Option<VenueError> {
@@ -406,20 +463,15 @@ pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     }
 }
 
-/// Bybit's own `retCode`, when the body carries one. An HTTP status is never a
-/// venue code, so a non-JSON or envelope-less failure has none.
-pub(crate) fn native_code(response: &Response<'_>) -> Option<i64> {
-    serde_json::from_str::<Status>(response.body)
-        .ok()
-        .and_then(|status| status.ret_code)
-}
-
-fn discovery_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
-    use safe_cex_engine::startup::{MAX_RATE_LIMIT_PAUSE_MS, rate_limit_pause_ms};
+pub(crate) fn venue_rate_limit_pause_ms(response: &Response<'_>, now: f64) -> f64 {
+    use safe_cex_engine::startup::{
+        MAX_RATE_LIMIT_PAUSE_MS, from_tealstreet_edge, rate_limit_pause_ms,
+    };
 
     // HTTP403 is Bybit's ten-minute IP ban; 10006 is its API rate-limit code.
     // https://bybit-exchange.github.io/docs/v5/rate-limit
-    let http_pause = if response.status == 403 {
+    // Our own edge answers 403 too; that one retries on the normal backoff.
+    let http_pause = if response.status == 403 && !from_tealstreet_edge(response) {
         600_000.0
     } else {
         rate_limit_pause_ms(response, 10_000.0)
@@ -526,10 +578,14 @@ impl BybitLinear {
             credentials,
             read_credentials: options.read_credentials.take(),
             credentials_rejected: false,
+            private_startup_timer: None,
+            private_startup_error: None,
+            private_startup_failed: false,
             environment_probe_origin,
             brazil_site: options.bybit_site_id.as_deref() == Some("BRA_BTL"),
             environment_probe_attempted: false,
             environment_probe: None,
+            auth_clock: None,
             public: Connection::new(),
             private: Connection::new(),
             books: HashMap::new(),
@@ -543,11 +599,14 @@ impl BybitLinear {
                 ..Startup::default()
             },
             discovery_paused_until: 0.0,
+            candles_paused_until: 0.0,
             account: account::AccountState::new(),
             trading: trading::TradingState::default(),
             history: history::HistoryState::default(),
             balance_info: None,
             market_refresh: refresh::State::default(),
+            fresh_positions: Default::default(),
+            fresh_positions_timer: None,
         }
     }
 
@@ -580,13 +639,45 @@ impl BybitLinear {
         if let Some((prefix, _)) = self.paths.public_ws.rsplit_once('/') {
             self.paths.public_ws = format!("{prefix}/{}", self.paths.category);
         }
-        self.paths.book_depth = if self.category == Category::Option {
-            25
-        } else if self.category == Category::Spot {
-            200
-        } else {
-            1000
+        self.paths.book_depth = book_depth_for(self.category);
+    }
+
+    /// The public feed and interest key `topic` streams on, whichever
+    /// category is selected now; `None` when its product has no live feed.
+    fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let symbol = match topic {
+            SubscriptionTopic::Candles { symbol, .. } | SubscriptionTopic::OrderBook { symbol } => {
+                symbol
+            }
         };
+        let category = self.category_for(symbol);
+        let selected = category == self.category;
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => {
+                let depth = if selected {
+                    self.paths.book_depth
+                } else {
+                    book_depth_for(category)
+                };
+                Self::book_topic(depth, symbol)
+            }
+            // Seconds bars are built from trades alone.
+            SubscriptionTopic::Candles { symbol, interval } => Self::kline_topic(symbol, *interval)
+                .or_else(|| {
+                    (!self.variant.is_hyro() && seconds_interval(*interval).is_some())
+                        .then(|| format!("publicTrade.{symbol}"))
+                })?,
+        };
+        let connection = if selected {
+            &self.public
+        } else {
+            &self
+                .products
+                .iter()
+                .find(|state| state.category == category)?
+                .public
+        };
+        Some((connection.feed?, key))
     }
 
     fn category_for(&self, symbol: &str) -> Category {
@@ -607,6 +698,28 @@ impl BybitLinear {
 
     fn any_hedged(&self) -> bool {
         self.account.has_hedged() || self.products.iter().any(|state| state.account.has_hedged())
+    }
+
+    /// Frame-fed: a confirmed switch sets every symbol it covers, since no
+    /// positions read follows to re-learn them, and holds that over the source.
+    pub(crate) fn hold_position_mode(&mut self, cx: &mut Cx<'_, Pending>, hedged: bool) {
+        let category = self.category;
+        let symbols: Vec<String> = cx
+            .store
+            .markets()
+            .iter()
+            .filter(|market| {
+                self.category_for(&market.symbol) == category
+                    && switched_with_mode(venue_state::category_code(category), &market.quote)
+            })
+            .map(|market| market.symbol.clone())
+            .collect();
+        for symbol in symbols {
+            self.account.position_modes.insert(symbol, hedged);
+        }
+        self.account.held_mode = Some(hedged);
+        cx.hold_setting(SettingKey::Hedged);
+        cx.hold_setting(mode_hold(venue_state::category_code(category)));
     }
 
     fn symbol_mode(&self, symbol: &str) -> Option<bool> {
@@ -673,7 +786,21 @@ impl BybitLinear {
         if self.config_error.is_some() {
             return self.on_public_response(cx, then, Err("Bybit options are invalid"));
         }
-        let Some(policy) = self.read_policy(rest.signed, policy::read_policy().timeout_ms) else {
+        let timeout_ms = match &then {
+            Then::Hyro(read) => {
+                let remaining = (read.deadline - cx.now).floor() as u32;
+                if remaining == 0 {
+                    return self.on_public_response(
+                        cx,
+                        then,
+                        Err("Hyro reconciliation deadline expired"),
+                    );
+                }
+                remaining.min(policy::read_policy().timeout_ms)
+            }
+            _ => policy::read_policy().timeout_ms,
+        };
+        let Some(policy) = self.read_policy(rest.signed, timeout_ms) else {
             return self.on_public_response(
                 cx,
                 then,
@@ -746,9 +873,20 @@ impl BybitLinear {
         root: &safe_cex_engine::request_context::Context,
         signed: bool,
     ) -> Result<safe_cex_engine::request_context::Context, VenueError> {
-        let policy = self.read_policy(signed, PAGE_WINDOW_MS).ok_or_else(|| {
+        self.page_leg_paced(cx, root, signed, None)
+    }
+
+    fn page_leg_paced(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        root: &safe_cex_engine::request_context::Context,
+        signed: bool,
+        pacing: Option<safe_cex_engine::request_context::Pacing>,
+    ) -> Result<safe_cex_engine::request_context::Context, VenueError> {
+        let mut policy = self.read_policy(signed, PAGE_WINDOW_MS).ok_or_else(|| {
             VenueError::new("Bybit signed read has no credential").kind(ErrorKind::AuthInvalid)
         })?;
+        policy.pacing = pacing;
         cx.http_leg_context(root, policy)
             .map_err(|error| error.venue_error())
     }
@@ -844,6 +982,12 @@ impl BybitLinear {
                         .outcome(safe_cex_engine::Outcome::NotSent);
                     self.identity_response(cx, context, Err(error));
                 }
+                Then::Leverage(read) => {
+                    let error = error
+                        .venue_error()
+                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    self.leverage_response(cx, read, Err(error));
+                }
                 // A page refused before any send keeps the engine's typed error.
                 Then::History(request) => {
                     let error = error
@@ -914,6 +1058,85 @@ impl BybitLinear {
         true
     }
 
+    /// Calibrate from an answer's own `time` only past network delay, so
+    /// ordinary jitter never moves the clock or restales pending signatures.
+    fn observe_answer_time(cx: &mut Cx<'_, Pending>, body: &str) {
+        let Some(server) = serde_json::from_str::<ServerStamp>(body)
+            .ok()
+            .and_then(|stamp| stamp.time)
+        else {
+            return;
+        };
+        if server > 0.0 && (server - cx.protocol_now()).abs() >= CLOCK_DRIFT_MS {
+            cx.observe_protocol_time(server);
+        }
+    }
+
+    /// One unsigned read of Bybit's public clock per private auth refusal.
+    /// Hyro's own origin is not Bybit's, so it keeps the existing clock.
+    pub(crate) fn read_auth_clock(&mut self, cx: &mut Cx<'_, Pending>) {
+        use safe_cex_engine::request_context::{Policy, Scope};
+        if self.auth_clock.is_some() || self.variant.is_hyro() {
+            return;
+        }
+        let policy = Policy {
+            timeout_ms: AUTH_CLOCK_TIMEOUT_MS,
+            ..policy::read_policy()
+        };
+        let Ok(context) = cx.http_context(Scope::Background, policy) else {
+            return;
+        };
+        let pending = Pending {
+            category: self.category,
+            rest: Rest::get("/v5/market/time", Query::new()),
+            then: Then::AuthClock,
+            read: Some(context.clone()),
+        };
+        if cx
+            .request_managed_with_headers(
+                context.clone(),
+                None,
+                Method::Get,
+                format!("{}/v5/market/time", self.paths.rest),
+                &[("X-Referer", sign::BROKER_ID)],
+                None,
+                pending,
+            )
+            .is_err()
+        {
+            let _ = cx.finish_http_context(&context);
+            return;
+        }
+        self.auth_clock = Some(AuthClock {
+            context,
+            waiting: None,
+        });
+    }
+
+    /// Whether a private socket's auth must wait for the refusal's clock read.
+    pub(crate) fn auth_waits_for_clock(&mut self, socket: SocketId) -> bool {
+        self.auth_clock
+            .as_mut()
+            .map(|clock| clock.waiting = Some(socket))
+            .is_some()
+    }
+
+    /// Settle the one clock read, then send any auth that waited for it;
+    /// a failed read re-auths on the existing clock.
+    fn settle_auth_clock(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(clock) = self.auth_clock.take() else {
+            return;
+        };
+        let _ = cx.finish_http_context(&clock.context);
+        if let Some(socket) = clock
+            .waiting
+            .filter(|socket| self.private.socket == Some(*socket) && self.private.open)
+        {
+            self.select_category(self.primary_category);
+            self.on_private_open(cx, socket);
+        }
+    }
+
     fn open_feed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
         if channel == Channel::Private && !cx.private_feed_policy().streaming() {
             return;
@@ -947,6 +1170,11 @@ impl BybitLinear {
                     invalidation: Invalidation::Required,
                     subscription_interval_ms: SUBSCRIBE_PACE_MS,
                     close_floors: &[],
+                    // Tickers and books stream all session; a socket with only those gone quiet is dead.
+                    data_silence: matches!(channel, Channel::Public).then_some(DataSilence {
+                        after_ms: PUBLIC_SILENCE_MS,
+                        streams: &["tickers.", "orderbook."],
+                    }),
                 });
                 match registered {
                     Ok(feed) => {
@@ -995,6 +1223,9 @@ impl BybitLinear {
             (RetireReason::Timeout(Timeout::Idle), _) => {
                 "Bybit socket closed (idle timeout); reconnecting".into()
             }
+            (RetireReason::Timeout(Timeout::Silent), _) => {
+                "Bybit public stream carried no data; reconnecting".into()
+            }
             (RetireReason::Timeout(_), _) => "Bybit socket timed out; reconnecting".into(),
             (RetireReason::Authentication, _) => {
                 "Bybit socket authentication failed; reconnecting".into()
@@ -1002,6 +1233,9 @@ impl BybitLinear {
             (RetireReason::Closed, None) => "Bybit socket closed; reconnecting".into(),
             (RetireReason::Stopped, _) => "Bybit socket stopped".into(),
             (RetireReason::RouteExhausted, _) => "Bybit socket refused on every route".into(),
+            (RetireReason::RouteRefused, _) => {
+                "Bybit socket route refused; trying the next route".into()
+            }
         };
         cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
     }
@@ -1140,6 +1374,9 @@ impl BybitLinear {
             self.startup.prelaunch_in_flight = true;
             self.request_markets(cx, true, None);
         }
+        if cx.frame_fed() {
+            return;
+        }
         if self.category == Category::Option && self.startup.markets_loaded {
             self.request_option_seeds(cx);
         }
@@ -1178,7 +1415,8 @@ impl BybitLinear {
     /// Only the trading key's own invalid, bad-signature or expired verdicts
     /// deactivate: an IP mismatch or a rejected read-only key leaves it usable.
     fn reject_credentials(&mut self, cx: &mut Cx<'_, Pending>, code: i64, message: &str) {
-        self.reject_credentials_with_hint(cx, code, message, None);
+        let hint = (code == 10010).then_some(IP_REFUSED_HINT);
+        self.reject_credentials_with_hint(cx, code, message, hint);
     }
 
     fn reject_credentials_with_hint(
@@ -1209,13 +1447,12 @@ impl BybitLinear {
         let diagnostic =
             hint.map_or_else(|| message.to_owned(), |hint| format!("{hint} [{message}]"));
         let text = format!("Bybit rejected the {which} ({code}): {diagnostic}");
-        cx.notice(Level::Error, code::AUTH_REJECTED, &text);
-        cx.startup_failed(
-            VenueError::new(text)
-                .kind(kind)
-                .venue_code(code.to_string())
-                .venue_message(message),
-        );
+        let error = VenueError::new(text)
+            .kind(kind)
+            .venue_code(code.to_string())
+            .venue_message(message);
+        cx.notice_error(Level::Error, code::AUTH_REJECTED, &error);
+        cx.startup_failed(error);
         if !read_key && code != 10010 {
             cx.deactivate();
         }
@@ -1414,7 +1651,7 @@ impl BybitLinear {
 
     fn try_load_markets(&mut self, cx: &mut Cx<'_, Pending>) {
         let startup = &mut self.startup;
-        let fees_ready = self.credentials.is_none() || startup.fees.is_some();
+        let fees_ready = self.credentials.is_none() || startup.fees.is_some() || cx.frame_fed();
         if startup.markets_loaded
             || startup.trading.is_none()
             || startup.prelaunch.is_none()
@@ -1451,7 +1688,7 @@ impl BybitLinear {
             format!("Loaded {} Bybit markets", markets.len()),
         );
         self.catalogs.insert(self.category, markets);
-        if self.category == Category::Option {
+        if self.category == Category::Option && !cx.frame_fed() {
             self.request_option_seeds(cx);
         }
         self.try_publish_catalogs(cx);
@@ -1489,6 +1726,9 @@ impl BybitLinear {
             cx.store.set_markets(markets);
             publish_product_metadata(cx.store, &self.classification, &self.derivatives);
             self.catalog_ready = true;
+            if cx.frame_fed() {
+                return;
+            }
             let category = self.category;
             for other in self.categories() {
                 self.select_category(other);
@@ -2001,9 +2241,10 @@ impl BybitLinear {
                 Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
             )
         {
-            let pause = discovery_rate_limit_pause_ms(response, cx.now);
-            if pause > 0.0 {
-                self.discovery_paused_until = self.discovery_paused_until.max(cx.now + pause);
+            let pause = venue_rate_limit_pause_ms(response, cx.now);
+            // One window per streak: a repeat refusal while it runs does not extend it.
+            if pause > 0.0 && cx.now >= self.discovery_paused_until {
+                self.discovery_paused_until = cx.now + pause;
                 let remaining = self.discovery_paused_until - cx.now;
                 // Categories share this limit. Extend already-armed retries;
                 // waiting entries retain their attempt count and longer waits.
@@ -2026,6 +2267,11 @@ impl BybitLinear {
                 let response =
                     response.map_err(|error| VenueError::new(error).kind(ErrorKind::Internal));
                 self.identity_response(cx, context, response)
+            }
+            Then::Leverage(read) => {
+                let response =
+                    response.map_err(|error| VenueError::new(error).kind(ErrorKind::Internal));
+                self.leverage_response(cx, read, response)
             }
             Then::Markets {
                 prelaunch,
@@ -2108,8 +2354,9 @@ impl BybitLinear {
             Then::Candles(_) => {}
             Then::Account(request) => self.on_account_response(cx, request, response),
             Then::Hyro(read) => self.on_hyro_response(cx, read, response),
-            // Ordinary responses and failures never reach the public path.
-            Then::Ordinary(_) => {}
+            // Ordinary responses and failures never reach the public path,
+            // nor does the auth clock read, settled wherever it is delivered.
+            Then::Ordinary(_) | Then::AuthClock => {}
             // Answers arrive with their page leg in on_response; only failures here.
             Then::History(request) => self.on_history_failed(cx, request, page_failure(response)),
             Then::Closed(request) => self.on_closed_failed(cx, *request, page_failure(response)),
@@ -2152,6 +2399,13 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerDelta<'_>, variant: Variant) {
         set(&mut t.volume, volume);
         set(&mut t.quote_volume, quote_volume);
     });
+    // A field this message carries is an observation even when unchanged; an
+    // omitted one (a delta) is not.
+    let observed = [(2, d.last_price), (3, d.mark_price), (4, d.index_price)]
+        .into_iter()
+        .filter(|(_, value)| value.is_some())
+        .fold(0u16, |mask, (bit, _)| mask | (1 << bit));
+    cx.store.observe_ticker_fields(&d.symbol, observed);
 }
 
 fn ticker_from_rest(t: &TickerRow<'_>, inverse: bool) -> Ticker {
@@ -2394,6 +2648,9 @@ impl BybitLinear {
 }
 
 impl Venue for BybitLinear {
+    fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
+        &[history::ORDER_HISTORY_PACING]
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -2441,6 +2698,7 @@ impl Venue for BybitLinear {
     ) {
         // Closed-position owners travel in their pending and drop with it.
         self.retire_history(owner);
+        self.fresh_positions.retired(owner);
     }
 
     fn reconcile_http(
@@ -2457,24 +2715,35 @@ impl Venue for BybitLinear {
             Then::Ordinary(request) => self.on_ordinary_leg_failed(cx, request, error),
             Then::Candles(read) => Self::candles_failed(cx, read, error),
             Then::Identity(context) => self.identity_response(cx, context, Err(error)),
+            Then::Leverage(read) => self.leverage_response(cx, read, Err(error)),
             Then::Options(request) => self.on_options_response(cx, request, Err(error)),
             Then::History(request) => self.on_history_failed(cx, request, error),
             Then::Closed(request) => self.on_closed_failed(cx, *request, error),
-            then => self.on_request_failed(
-                cx,
-                Pending {
-                    category: pending.category,
-                    rest: pending.rest,
-                    then,
-                    read: pending.read,
-                },
-                &error.message,
-            ),
+            then => {
+                self.select_category(pending.category);
+                if then.reads_account_snapshot() {
+                    self.keep_read_error(&then, &error);
+                }
+                self.on_request_failed(
+                    cx,
+                    Pending {
+                        category: pending.category,
+                        rest: pending.rest,
+                        then,
+                        read: pending.read,
+                    },
+                    &error.message,
+                );
+            }
         }
     }
 
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_ordinary(cx);
+    }
+
+    fn refreshes_orders(&self) -> bool {
+        !self.variant.is_hyro()
     }
 
     // reconcile_uncertain reads every product's orders at once; the engine
@@ -2483,7 +2752,42 @@ impl Venue for BybitLinear {
     fn fence_uncertain_placements(&self) -> bool {
         !self.variant.is_hyro()
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        !self.variant.is_spot()
+    }
 
+    fn judges_protective_amend(
+        &self,
+        _store: &safe_cex_engine::store::Store,
+        order: &safe_cex_engine::model::Order,
+    ) -> bool {
+        self.partial_stop(order)
+    }
+    // A Partial stop edit cancels, then replaces or puts back: no other edit or cancel
+    // of that stop, and no cancel-all (its row may already be gone), may overlap it.
+    fn guards_order_mutation(
+        &self,
+        store: &safe_cex_engine::store::Store,
+        command: &safe_cex_engine::Command,
+    ) -> bool {
+        use safe_cex_engine::Command;
+        let partial = |id: &str| {
+            store
+                .order(id)
+                .is_some_and(|order| self.partial_stop(order))
+        };
+        match command {
+            Command::AmendOrder { id, .. } | Command::AmendOrderWithSymbol { id, .. } => {
+                partial(id)
+            }
+            Command::CancelOrders { ids, .. } => ids.iter().any(|id| partial(id)),
+            Command::CancelOrdersWithSymbols { orders, .. } => {
+                orders.iter().any(|order| partial(&order.id))
+            }
+            Command::CancelSymbolOrders { .. } => true,
+            _ => false,
+        }
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -2516,6 +2820,18 @@ impl Venue for BybitLinear {
             closed_positions: !self.variant.is_spot(),
             balance_info: true,
             market_refresh: true,
+            fresh_positions: !self.variant.is_spot(),
+            // HyroTrader cancels the store's rows; its proxy has no by-symbol cancel here.
+            symbol_cancel_misses_unseen: self.variant.is_hyro(),
+            // Every orders read commits its covers and answers a refresh ask;
+            // HyroTrader's own snapshot path does neither yet.
+            order_read_covers: !self.variant.is_hyro(),
+            // Hyro's snapshot replaces every setting, so a flat read would not last.
+            leverage_query: if self.variant.is_spot() || self.variant.is_hyro() {
+                safe_cex_engine::LeverageQuery::Settings
+            } else {
+                safe_cex_engine::LeverageQuery::OnReadAndMetadata
+            },
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -2543,9 +2859,87 @@ impl Venue for BybitLinear {
             self.request_startup(cx);
         }
         self.select_category(self.primary_category);
-        if self.credentials.is_some() {
+        // A frame-fed engine loads public instrument metadata only.
+        if self.credentials.is_some() && !cx.frame_fed() {
             self.request_account_info(cx);
         }
+    }
+
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        let mut state = venue_state::VenueState::default();
+        let accounts = std::iter::once((self.category, &self.account)).chain(
+            self.products
+                .iter()
+                .map(|product| (product.category, &product.account)),
+        );
+        for (category, account) in accounts {
+            let category = venue_state::category_code(category);
+            for (symbol, hedged) in &account.position_modes {
+                state.modes.insert((category, symbol.clone()), *hedged);
+            }
+            state.bound.extend(account.position_bound.iter().cloned());
+            state
+                .trailing_profit
+                .extend(account.trailing_profit.iter().cloned());
+        }
+        Some(state.encode())
+    }
+
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
+        let Some(state) = venue_state::VenueState::decode(bytes) else {
+            cx.venue_state_unreadable("Unreadable Bybit venue state from the data source");
+            return;
+        };
+        let accounts = std::iter::once((self.category, &mut self.account)).chain(
+            self.products
+                .iter_mut()
+                .map(|product| (product.category, &mut product.account)),
+        );
+        let mut released = Vec::new();
+        for (category, account) in accounts {
+            let category = venue_state::category_code(category);
+            let key = mode_hold(category);
+            let held = account.held_mode.filter(|_| cx.setting_held(&key));
+            account.held_mode = held;
+            let (mut seen, mut agrees) = (false, true);
+            // The source's modes win, except over a switch this engine holds;
+            // a mode only this engine knows stays.
+            for ((code, symbol), hedged) in &state.modes {
+                if *code != category {
+                    continue;
+                }
+                let quote = cx.store.market(symbol).map(|market| market.quote.as_str());
+                if let Some(mine) = held
+                    && quote.is_some_and(|quote| switched_with_mode(category, quote))
+                {
+                    seen = true;
+                    if *hedged != mine {
+                        agrees = false;
+                        continue;
+                    }
+                }
+                account.position_modes.insert(symbol.clone(), *hedged);
+            }
+            if held.is_some() && seen && agrees {
+                account.held_mode = None;
+                released.push(key);
+            }
+            account.position_bound = state.bound.iter().cloned().collect();
+            account.trailing_profit = state.trailing_profit.iter().cloned().collect();
+        }
+        for key in released {
+            cx.release_setting(&key);
+        }
+    }
+
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        // A page engine changed this account's mode: re-learn it as after a
+        // switch of our own, so the next VENUE_STATE carries it.
+        if cx.frame_fed() || self.credentials.is_none() || self.variant.is_spot() {
+            return;
+        }
+        self.select_category(self.primary_category);
+        self.refresh_after_mode_change(cx);
     }
 
     fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
@@ -2633,6 +3027,14 @@ impl Venue for BybitLinear {
         Ok(())
     }
 
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
+    }
+
     fn encode_socket_interests(
         &self,
         _store: &safe_cex_engine::Store,
@@ -2674,6 +3076,11 @@ impl Venue for BybitLinear {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        // Every answer, the auth clock read's included, calibrates here.
+        Self::observe_answer_time(cx, response.body);
+        if let Then::AuthClock = pending.then {
+            return self.settle_auth_clock(cx);
+        }
         if matches!(&pending.then, Then::RefreshMarkets(_)) {
             self.select_category(pending.category);
             let Then::RefreshMarkets(page) = pending.then else {
@@ -2706,7 +3113,7 @@ impl Venue for BybitLinear {
             return;
         }
         if let Then::Candles(read) = pending.then {
-            Self::candles_response(cx, read, &response);
+            self.candles_response(cx, read, &response);
             return;
         }
         if let Then::Options(request) = pending.then {
@@ -2738,8 +3145,15 @@ impl Venue for BybitLinear {
         }
         if let Some(read) = pending.read.clone() {
             // Only a live Background read may publish; the engine never
-            // delivers an answer for a retired attempt.
+            // delivers an answer for a retired attempt. A discovery read still
+            // fails through, so its in-flight flag clears and it is retried.
             if cx.validate_http_context(&read).is_err() {
+                if matches!(
+                    pending.then,
+                    Then::Markets { .. } | Then::Tickers(_) | Then::OptionSeed { .. }
+                ) {
+                    self.on_public_response(cx, pending.then, Err("discovery read retired"));
+                }
                 return;
             }
             let mut pending = Some(pending);
@@ -2762,10 +3176,11 @@ impl Venue for BybitLinear {
         pending: Pending,
         response: Response<'_>,
     ) {
+        Self::observe_answer_time(cx, response.body);
         // A native kline refusal is typed; a success without its list proves nothing.
         if let Then::Candles(read) = pending.then {
             if venue_error(&response).is_some() {
-                Self::candles_response(cx, read, &response);
+                self.candles_response(cx, read, &response);
             } else {
                 let error =
                     VenueError::new("Bybit klines: response did not contain the expected list")
@@ -2794,6 +3209,23 @@ impl Venue for BybitLinear {
             };
             self.on_options_response(cx, request, response);
             return;
+        }
+        // A private snapshot with nothing in it can answer `list: null`.
+        if pending.then.reads_account_snapshot() && account::success_with_null_list(response.body) {
+            return self.on_response(cx, pending, response);
+        }
+        // A native refusal keeps its classification for the command this read answers.
+        if pending.then.reads_account_snapshot()
+            && let Some(error) = read_refusal(&response, "Bybit: ")
+        {
+            self.select_category(pending.category);
+            self.keep_read_error(&pending.then, &error);
+            if matches!(
+                error.kind,
+                Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+            ) {
+                return self.on_response(cx, pending, response);
+            }
         }
         // Fee, refresh and discovery-limit failures can carry `result: {}`.
         // Preserve typed limit evidence and headers; successful discovery still
@@ -2852,6 +3284,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Then::AuthClock = pending.then {
+            return self.settle_auth_clock(cx);
+        }
         // The engine seals an ordinary preflight or plan unless an
         // independent-order leg retires alone.
         if let Then::Ordinary(request) = pending.then {
@@ -2865,6 +3300,10 @@ impl Venue for BybitLinear {
         // A managed identity read (first or retried leg) keeps the engine's type.
         if let Then::Identity(context) = pending.then {
             self.identity_response(cx, context, Err(error));
+            return;
+        }
+        if let Then::Leverage(read) = pending.then {
+            self.leverage_response(cx, read, Err(error));
             return;
         }
         // A page or its re-read keeps the signer's typed error.
@@ -2893,6 +3332,9 @@ impl Venue for BybitLinear {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Then::AuthClock = pending.then {
+            return self.settle_auth_clock(cx);
+        }
         if let Then::Ordinary(request) = pending.then {
             // Transport loss arrives typed through on_http_failed; this is a
             // pre-transport (signing) failure.
@@ -2930,6 +3372,14 @@ impl Venue for BybitLinear {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.on_unlisted_timer(cx, timer) {
+            return;
+        }
+        if self.fresh_positions_timer == Some(timer) {
+            self.fresh_positions_timer = None;
+            self.retry_fresh_positions(cx);
+            return;
+        }
         for category in self.categories() {
             self.select_category(category);
             self.on_category_timer(cx, timer);
@@ -2950,6 +3400,7 @@ impl Venue for BybitLinear {
                 from_ms,
                 to_ms,
             } => self.start_closed_positions(cx, command, symbol, from_ms, to_ms),
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchBalanceInfo => {
                 // A cached answer still needs this command's own authority.
                 let Ok(context) = cx.admit_http_command(policy::read_policy()) else {
@@ -2976,6 +3427,7 @@ impl Venue for BybitLinear {
             | Command::FetchCandles { symbol, .. }
             | Command::CancelSymbolOrders { symbol, .. }
             | Command::SetLeverage { symbol, .. }
+            | Command::FetchLeverage { symbol, .. }
             | Command::SetMarginType { symbol, .. } => Some(symbol.as_str()),
             Command::AmendOrder { id, .. } => cx.store.order(id).map(|order| order.symbol.as_str()),
             Command::Query { query, .. } => match query {
@@ -2998,6 +3450,7 @@ impl Venue for BybitLinear {
                 Command::FetchCandles { command, .. }
                 | Command::CancelSymbolOrders { command, .. }
                 | Command::SetLeverage { command, .. }
+                | Command::FetchLeverage { command, .. }
                 | Command::SetMarginType { command, .. }
                 | Command::AmendOrder { command, .. }
                 | Command::Query { command, .. } => Some(*command),
@@ -3007,7 +3460,9 @@ impl Venue for BybitLinear {
                 // A refusal before any I/O still needs this command's authority.
                 let operation = if matches!(
                     command,
-                    Command::FetchCandles { .. } | Command::Query { .. }
+                    Command::FetchCandles { .. }
+                        | Command::FetchLeverage { .. }
+                        | Command::Query { .. }
                 ) {
                     safe_cex_engine::request_context::Operation::Read
                 } else {
@@ -3055,6 +3510,8 @@ impl Venue for BybitLinear {
                 from_ms,
                 to_ms,
             } => self.fetch_candles(cx, &symbol, interval, (limit, from_ms, to_ms)),
+            // The engine binds the command when the read is admitted.
+            Command::FetchLeverage { command: _, symbol } => self.fetch_leverage(cx, symbol),
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),
         }

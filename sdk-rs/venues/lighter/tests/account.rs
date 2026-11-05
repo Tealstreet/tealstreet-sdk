@@ -1417,3 +1417,319 @@ fn exhausted_backfill_is_account_scoped_without_a_query_owner() {
     )));
     assert_eq!(e.take_frame(NOW + 5200.0).map_or(0, fill_count), 0);
 }
+
+/// Legacy notifies from the stream only, for an event under 5s old and more
+/// than 5s after connecting, and never for the user's own cancel.
+#[test]
+fn a_rejected_order_reports_its_reason_once_from_the_stream() {
+    let (mut e, s) = ready();
+    let row = |id: &str, status: &str, extra: &str, time: f64| {
+        format!(
+            r#"{{"channel":"account_all_orders:718895","timestamp":{},"orders":{{"1":[{{"order_index":"{id}","market_id":1,"type":"limit","time_in_force":"post-only","status":"{status}","initial_base_amount":"1","price":"120"{extra}}}]}}}}"#,
+            time as u64
+        )
+    };
+    let notices = |e: &mut safe_cex_engine::Engine<safe_cex_venue_lighter::Lighter>| {
+        e.drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == "order.rejected" =>
+                {
+                    Some((event.level, event.message))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let cases = [
+        // Within 5s of connecting: not reported, as legacy.
+        ("60", "canceled-post-only", "", NOW + 1_000.0, None),
+        (
+            "61",
+            "canceled-post-only",
+            "",
+            NOW + 10_000.0,
+            Some("Post-only order would execute immediately as taker; not placed."),
+        ),
+        (
+            "62",
+            "canceled-reduce-only",
+            "",
+            NOW + 11_000.0,
+            Some("canceled-reduce-only"),
+        ),
+        (
+            "63",
+            "canceled",
+            r#","cancel_reason":"MARGIN""#,
+            NOW + 12_000.0,
+            Some("MARGIN"),
+        ),
+        (
+            "64",
+            "canceled",
+            r#","cancelReason":"USER_CANCELED""#,
+            NOW + 13_000.0,
+            None,
+        ),
+        ("65", "canceled", "", NOW + 14_000.0, None),
+        (
+            "66",
+            "filled",
+            r#","cancel_reason":"MARGIN""#,
+            NOW + 15_000.0,
+            None,
+        ),
+        ("67", "open", "", NOW + 16_000.0, None),
+        (
+            "69",
+            "canceled-post-only",
+            r#","cancel_reason":"USER_CANCELED""#,
+            NOW + 16_500.0,
+            None,
+        ),
+    ];
+    for (id, status, extra, now, expected) in cases {
+        notices(&mut e);
+        message(&mut e, s, now, &row(id, status, extra, now));
+        let seen = notices(&mut e);
+        assert_eq!(
+            seen,
+            expected
+                .map(|m| vec![(safe_cex_engine::Level::Error, m.to_string())])
+                .unwrap_or_default(),
+            "{id} {status}"
+        );
+    }
+    // The same terminal row again, and a stale event, report nothing.
+    let now = NOW + 17_000.0;
+    message(&mut e, s, now, &row("61", "canceled-post-only", "", now));
+    assert!(notices(&mut e).is_empty());
+    message(
+        &mut e,
+        s,
+        now,
+        &row("68", "canceled-post-only", "", now - 6_000.0),
+    );
+    assert!(notices(&mut e).is_empty());
+}
+
+const ADDRESS: &str = "0xb01cd2000000000000000000000000000000dba0";
+
+/// Starts to the first account lookup, answering the public reads.
+fn to_lookup(
+    options: support::Options,
+) -> (
+    safe_cex_engine::Engine<safe_cex_venue_lighter::Lighter>,
+    Vec<Action>,
+) {
+    let mut e = engine(options);
+    e.start(NOW);
+    for _ in 0..12 {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        let lookup = actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/account?")));
+        if lookup {
+            return (e, actions);
+        }
+        for action in actions {
+            if let Action::Http(r) = action {
+                let body = if r.url.contains("orderBook") {
+                    META
+                } else {
+                    r#"{"code":200,"order_book_stats":[]}"#
+                };
+                reply(&mut e, &r, 200, body);
+            }
+        }
+    }
+    panic!("no account lookup");
+}
+
+fn account_requests(actions: &[Action]) -> Vec<safe_cex_engine::HttpRequest> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.url.contains("/api/v1/account") || r.url.contains("L1") => {
+                Some(r.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_failed_address_lookup_never_adopts_the_api_key_index_and_retries() {
+    let mut options = options();
+    options.application_id = Some(ADDRESS.into());
+    options.api_key_index = Some("4".into());
+    let (mut e, mut actions) = to_lookup(options);
+    let mut seen = vec![];
+    let mut timer = None;
+    for _ in 0..6 {
+        for r in account_requests(&actions) {
+            seen.push(r.url.clone());
+            reply(&mut e, &r, 503, "unavailable");
+        }
+        actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        timer = timer.or(actions.iter().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if (*at_ms - NOW - 5_000.0).abs() < 1_000.0 => {
+                Some(*timer)
+            }
+            _ => None,
+        }));
+    }
+    assert!(seen.iter().all(|u| !u.contains("by=index")), "{seen:?}");
+    assert!(e.store().balance().total == 0.0);
+    e.handle(
+        NOW + 5_000.0,
+        Event::TimerFired {
+            timer: timer.expect("a retry"),
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 5_000.0);
+    assert!(!account_requests(&actions).is_empty());
+}
+
+#[test]
+fn a_real_account_row_with_both_index_names_resolves() {
+    let (mut e, actions) = to_lookup(options());
+    let r = account_requests(&actions).remove(0);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":200,"total":1,"accounts":[{"code":0,"account_type":0,"index":718895,"account_index":718895,"available_balance":"1","collateral":"1","positions":[]}]}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("accountActiveOrders"))),
+        "the lookup resolved and reads began"
+    );
+}
+
+#[test]
+fn a_real_rest_order_row_shows() {
+    let (mut e, s) = ready_unopened();
+    let row = r#"{"order_index":2533274198957701,"client_order_index":179354719285865,"order_id":"2533274198957701","client_order_id":"179354719285865","market_index":1,"market_symbol":"ETH","market_kind":"perps","initial_base_amount":"10","price":"1.125370","remaining_base_amount":"10","is_ask":false,"filled_base_amount":"0","side":"","type":"limit","time_in_force":"good-till-time","reduce_only":false,"trigger_price":"0.000000","status":"open","trigger_status":"na","timestamp":1793547192,"created_at":1793547192,"updated_at":1793547192,"transaction_time":1793547193162492,"order_version":0}"#;
+    e.handle(NOW + 1.0, Event::WsOpened { socket: s });
+    for r in requests(&mut e) {
+        if r.url.contains("/account?") {
+            reply_at(&mut e, NOW + 3.0, &r, 200, ACCOUNT);
+        } else {
+            let body = format!(r#"{{"code":200,"orders":[{row}]}}"#);
+            reply_at(&mut e, NOW + 3.0, &r, 200, &body);
+        }
+    }
+    let order = e
+        .store()
+        .order("2533274198957701")
+        .expect("the order shows");
+    assert_eq!(order.amount, 10.0);
+    assert_eq!(order.client_order_id.as_deref(), Some("179354719285865"));
+}
+
+// L1: a placement returns its client index; the store keys the row by the native one.
+#[test]
+fn an_amend_by_the_returned_client_index_finds_the_order() {
+    let (mut e, s) = ready_unopened();
+    let row = r#"{"order_index":2533274198957701,"client_order_index":179354719285865,"order_id":"2533274198957701","client_order_id":"179354719285865","market_index":1,"market_symbol":"ETH","market_kind":"perps","initial_base_amount":"10","price":"1.125370","remaining_base_amount":"10","is_ask":false,"filled_base_amount":"0","side":"","type":"limit","time_in_force":"good-till-time","reduce_only":false,"trigger_price":"0.000000","status":"open","trigger_status":"na","timestamp":1793547192,"created_at":1793547192,"updated_at":1793547192,"transaction_time":1793547193162492,"order_version":0}"#;
+    e.handle(NOW + 1.0, Event::WsOpened { socket: s });
+    for r in requests(&mut e) {
+        if r.url.contains("/account?") {
+            reply_at(&mut e, NOW + 3.0, &r, 200, ACCOUNT);
+        } else {
+            let body = format!(r#"{{"code":200,"orders":[{row}]}}"#);
+            reply_at(&mut e, NOW + 3.0, &r, 200, &body);
+        }
+    }
+    assert!(e.store().order("2533274198957701").is_some());
+    e.handle(
+        NOW + 4.0,
+        Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 91,
+            id: "179354719285865".into(),
+            price: Some(1.2),
+            amount: None,
+        }),
+    );
+    let failed = e.drain_actions().any(|a| {
+        matches!(a, Action::Notice(safe_cex_engine::Notice::CommandFailed { error, .. })
+            if error.message.contains("not found"))
+    });
+    assert!(!failed);
+}
+
+// Live: a verification page during start left the engine waiting past 150 s with no retry.
+#[test]
+fn a_405_page_on_the_account_lookup_retries() {
+    let mut options = options();
+    options.application_id = Some(ADDRESS.into());
+    options.api_key_index = Some("4".into());
+    let (mut e, mut actions) = to_lookup(options);
+    let mut retried = false;
+    for _ in 0..6 {
+        for r in account_requests(&actions) {
+            reply(&mut e, &r, 405, "<html>Human Verification</html>");
+        }
+        actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        retried |= actions.iter().any(
+            |a| matches!(a, Action::SetTimer { at_ms, .. } if (*at_ms - NOW - 5_000.0).abs() < 1_000.0),
+        );
+    }
+    assert!(retried);
+}
+
+#[test]
+fn post_only_crossing_has_a_plain_message_and_retains_rejection_classification() {
+    // Native account_all_orders status: CanceledOrder_PostOnly in Lighter's order schema.
+    for extra in [
+        "",
+        r#","cancel_reason":"canceled-post-only""#,
+        r#","cancelReason":"canceled-post-only""#,
+    ] {
+        let (mut e, socket) = ready();
+        e.drain_actions().for_each(drop);
+        let now = NOW + 10_000.0;
+        let payload = format!(
+            r#"{{"channel":"account_all_orders:718895","timestamp":{},"orders":{{"1":[{{"order_index":"61","market_id":1,"type":"limit","time_in_force":"post-only","status":"canceled-post-only","initial_base_amount":"1","remaining_base_amount":"1","price":"120"{extra}}}]}}}}"#,
+            now as u64
+        );
+        message(&mut e, socket, now, &payload);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let errors: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == "order.rejected" =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{actions:?}");
+        let error = errors[0];
+        assert_eq!(error.level, safe_cex_engine::Level::Error);
+        assert_eq!(
+            error.message,
+            "Post-only order would execute immediately as taker; not placed."
+        );
+        assert!(error.fields.contains(&("kind", "rejected".into())));
+        assert!(
+            error
+                .fields
+                .contains(&("venueMessage", "canceled-post-only".into()))
+        );
+        assert!(e.store().order("61").is_none());
+        assert!(e.store().order("42").is_some());
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        message(&mut e, socket, now, &payload);
+        assert!(!e.drain_actions().any(|action| matches!(action,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "order.rejected")));
+    }
+}

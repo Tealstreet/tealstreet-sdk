@@ -34,6 +34,19 @@ fn ready(variant: Variant) -> Harness {
     ready_orders(variant, None)
 }
 fn ready_orders(variant: Variant, full_close: Option<bool>) -> Harness {
+    ready_reads(
+        variant,
+        full_close,
+        (200, "[]"),
+        (200, r#"{"dualSidePosition":false}"#),
+    )
+}
+fn ready_reads(
+    variant: Variant,
+    full_close: Option<bool>,
+    brackets: (u16, &str),
+    position_mode: (u16, &str),
+) -> Harness {
     let mut h = Harness::started(Options {
         variant,
         key: Some("api-key".into()),
@@ -42,7 +55,7 @@ fn ready_orders(variant: Variant, full_close: Option<bool>) -> Harness {
     });
     let root = root(variant);
     h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
-    h.respond(&format!("{root}/leverageBracket"), 200, "[]");
+    h.respond(&format!("{root}/leverageBracket"), brackets.0, brackets.1);
     h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
     h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
     h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
@@ -57,8 +70,8 @@ fn ready_orders(variant: Variant, full_close: Option<bool>) -> Harness {
     );
     h.respond(
         &format!("{root}/positionSide/dual"),
-        200,
-        r#"{"dualSidePosition":false}"#,
+        position_mode.0,
+        position_mode.1,
     );
     h.respond(
         if variant == Variant::PortfolioMargin {
@@ -94,6 +107,7 @@ fn ready_orders(variant: Variant, full_close: Option<bool>) -> Harness {
     );
     let private = h.socket(socket(variant)).unwrap();
     h.event(Event::WsOpened { socket: private });
+    h.answer_open_position_read();
     h
 }
 fn amend(h: &mut Harness, variant: Variant, command: u32, amount: Option<f64>) {
@@ -740,10 +754,11 @@ fn usdm_stale_open_orders_snapshot_cannot_reopen_an_acked_cancel() {
 
 #[test]
 fn stop_limit_orders_from_the_binance_ui_refuse_amend_instead_of_becoming_stop_market() {
-    for (native, stop) in [
-        ("STOP", "96"),
-        ("TAKE_PROFIT", "104"),
-        ("STOP_MARKET", "96"),
+    // Each new trigger stays on its own side of the price, so only the venue rule decides.
+    for (native, stop, moved) in [
+        ("STOP", "96", 95.0),
+        ("TAKE_PROFIT", "104", 105.0),
+        ("STOP_MARKET", "96", 95.0),
     ] {
         let mut h = ready(Variant::UsdM);
         h.message(socket(Variant::UsdM), &format!(r#"{{"e":"ORDER_TRADE_UPDATE","T":1000,"E":1000,"o":{{"s":"BTCUSDT","c":"ui","i":77,"S":"SELL","o":"{native}","ot":"{native}","f":"GTC","q":"1","p":"95","sp":"{stop}","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","t":0}}}}"#));
@@ -752,7 +767,7 @@ fn stop_limit_orders_from_the_binance_ui_refuse_amend_instead_of_becoming_stop_m
         h.event(Event::Command(Command::AmendOrder {
             command: 31,
             id: "77".into(),
-            price: Some(94.0),
+            price: Some(moved),
             amount: None,
         }));
         let refused = h.failures.iter().any(|(command, error)| {
@@ -765,4 +780,228 @@ fn stop_limit_orders_from_the_binance_ui_refuse_amend_instead_of_becoming_stop_m
             assert_eq!(h.requests.len(), before, "no write for {native}");
         }
     }
+}
+
+const OPEN_ORDER: &str = r#"{"symbol":"BTCUSDT","orderId":12,"clientOrderId":"maker","price":"100","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","status":"PARTIALLY_FILLED","timeInForce":"GTC"}"#;
+const NEW_ORDER: &str = r#"{"symbol":"BTCUSDT","orderId":13,"clientOrderId":"other","price":"100","origQty":"1","executedQty":"0","type":"LIMIT","side":"BUY","status":"NEW","timeInForce":"GTC"}"#;
+
+fn cancel_answered_unknown(h: &mut Harness) {
+    h.event(Event::Command(Command::CancelOrders {
+        command: 91,
+        ids: vec!["12".into()],
+    }));
+    let cancel = h.take("/fapi/v1/order");
+    h.reply(
+        cancel.id,
+        400,
+        "",
+        r#"{"code":-2011,"msg":"Unknown order sent."}"#,
+    );
+    assert_eq!(
+        h.engine.store().order("12").unwrap().status,
+        OrderStatus::Canceled
+    );
+}
+
+fn snapshot_after_debounce(h: &mut Harness, rows: &str) {
+    h.advance(10_000.0);
+    h.respond("/fapi/v1/openOrders", 200, &format!("[{rows}]"));
+    h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
+}
+
+// (6) -2011 is no proof: a row that stays listed is live, and must not block new orders.
+#[test]
+fn a_live_order_answered_unknown_stops_poisoning_snapshots() {
+    let mut h = ready(Variant::UsdM);
+    cancel_answered_unknown(&mut h);
+    let rows = format!("{OPEN_ORDER},{NEW_ORDER}");
+    snapshot_after_debounce(&mut h, &rows);
+    assert!(h.engine.store().order("13").is_none(), "one read may lag");
+    snapshot_after_debounce(&mut h, &rows);
+    assert_eq!(
+        h.engine.store().order("12").unwrap().status,
+        OrderStatus::Open
+    );
+    assert!(h.engine.store().order("13").is_some());
+}
+
+#[test]
+fn an_order_really_gone_after_unknown_stays_gone() {
+    let mut h = ready(Variant::UsdM);
+    cancel_answered_unknown(&mut h);
+    snapshot_after_debounce(&mut h, NEW_ORDER);
+    assert_ne!(
+        h.engine.store().order("12").map(|o| o.status),
+        Some(OrderStatus::Open)
+    );
+    assert!(h.engine.store().order("13").is_some());
+}
+
+// (7) One failed read must not leave a hedge account sending positionSide=BOTH.
+#[test]
+fn a_failed_position_mode_read_is_read_again() {
+    let mut h = ready_reads(
+        Variant::UsdM,
+        None,
+        (200, "[]"),
+        (500, r#"{"code":-1000,"msg":"busy"}"#),
+    );
+    assert!(!h.engine.store().hedged());
+    for _ in 0..7 {
+        h.advance(3_000.0);
+    }
+    h.respond(
+        "/fapi/v1/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":true}"#,
+    );
+    assert!(h.engine.store().hedged());
+}
+
+// (9) Until the brackets read, the market's maximum is a placeholder 1x.
+#[test]
+fn leverage_waits_for_a_failed_bracket_read_rather_than_clamping_to_1x() {
+    let mut h = ready_reads(
+        Variant::UsdM,
+        None,
+        (500, r#"{"code":-1000,"msg":"busy"}"#),
+        (200, r#"{"dualSidePosition":false}"#),
+    );
+    let set = |h: &mut Harness, command| {
+        h.event(Event::Command(Command::SetLeverage {
+            command,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+            side: None,
+        }));
+    };
+    set(&mut h, 95);
+    assert!(!h.has_request("/fapi/v1/leverage?"), "{:?}", h.paths());
+    assert!(h.result(95).unwrap().is_err());
+    for _ in 0..7 {
+        h.advance(3_000.0);
+    }
+    h.respond(
+        "/fapi/v1/leverageBracket",
+        200,
+        r#"[{"symbol":"BTCUSDT","brackets":[{"bracket":1,"initialLeverage":125,"notionalCap":50000}]}]"#,
+    );
+    set(&mut h, 96);
+    let request = h.take("/fapi/v1/leverage");
+    assert!(request.url.contains("leverage=20"), "{}", request.url);
+}
+
+// (10) Binance may report R=false on a hedge close; the row's own side decides.
+#[test]
+fn amending_a_hedge_close_keeps_its_native_position_side() {
+    let mut h = ready(Variant::UsdM);
+    h.engine.store_mut().set_hedged(true);
+    h.message(
+        "/private/ws",
+        r#"{"e":"ORDER_TRADE_UPDATE","T":1000,"E":1000,"o":{"s":"BTCUSDT","c":"close","i":44,"S":"SELL","o":"LIMIT","f":"GTC","q":"7","p":"100","x":"NEW","X":"NEW","l":"0","z":"0","L":"0","R":false,"ps":"LONG"}}"#,
+    );
+    assert!(!h.engine.store().order("44").unwrap().reduce_only);
+    h.event(Event::Command(Command::AmendOrder {
+        command: 91,
+        id: "44".into(),
+        price: Some(101.0),
+        amount: None,
+    }));
+    let cancel = h.take("/fapi/v1/order");
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"symbol":"BTCUSDT","orderId":44,"clientOrderId":"close","origQty":"7","executedQty":"0","status":"CANCELED"}"#,
+    );
+    let replacement = h.take("/fapi/v1/order");
+    assert_eq!(replacement.method, Method::Post);
+    assert!(
+        replacement.url.contains("positionSide=LONG"),
+        "{}",
+        replacement.url
+    );
+}
+
+fn order_of(amount: f64) -> safe_cex_engine::model::PlaceOrderOpts {
+    serde_json::from_value(serde_json::json!({
+        "symbol": "BTCUSDT", "type": "market", "side": "buy", "amount": amount
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_quantity_rounding_to_zero_is_refused_and_a_split_sends_exactly_its_amount() {
+    let mut h = ready(Variant::UsdM);
+    let mut markets = h.engine.store().markets().to_vec();
+    let at = markets.iter().position(|m| m.symbol == "BTCUSDT").unwrap();
+    markets[at].precision.amount = 0.1;
+    markets[at].limits.amount.min = 0.1;
+    markets[at].limits.amount.max = 4.0;
+    h.engine.store_mut().set_markets(markets);
+    h.requests.clear();
+
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 70,
+        orders: vec![order_of(0.01)],
+    }));
+    assert!(
+        !h.requests.iter().any(|r| r.method == Method::Post),
+        "{:?}",
+        h.requests
+    );
+
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 71,
+        orders: vec![order_of(10.5)],
+    }));
+    let mut sizes = Vec::new();
+    for _ in 0..6 {
+        let Some(at) = h.requests.iter().position(|r| r.method == Method::Post) else {
+            break;
+        };
+        let r = h.requests.remove(at);
+        let text = format!("{} {}", r.url, r.body.clone().unwrap_or_default())
+            .replace("%22", "")
+            .replace("%3A", ":");
+        for rest in text.split("quantity").skip(1) {
+            let digits = rest.trim_start_matches(|c: char| !c.is_ascii_digit());
+            let end = digits
+                .find(|c: char| !c.is_ascii_digit() && c != '.')
+                .unwrap_or(digits.len());
+            sizes.push(digits[..end].to_owned());
+        }
+        h.reply(
+            r.id,
+            200,
+            "",
+            r#"[{"orderId":1},{"orderId":2},{"orderId":3}]"#,
+        );
+    }
+    assert_eq!(sizes, ["4", "4", "2.5"]);
+}
+
+#[test]
+fn an_amend_below_the_value_minimum_is_refused_before_the_cancel() {
+    let mut h = ready(Variant::UsdM);
+    let mut order = h.engine.store().order("12").unwrap().clone();
+    order.reduce_only = false;
+    h.engine.store_mut().upsert_order(order);
+    h.requests.clear();
+    h.event(Event::Command(Command::AmendOrder {
+        command: 80,
+        id: "12".into(),
+        price: Some(0.1),
+        amount: None,
+    }));
+    assert!(
+        !h.requests.iter().any(|r| r.method == Method::Delete),
+        "{:?}",
+        h.requests
+    );
+    assert!(
+        format!("{:?}", h.done).contains("the order is unchanged"),
+        "{:?}",
+        h.done
+    );
 }

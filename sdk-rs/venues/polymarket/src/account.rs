@@ -34,6 +34,12 @@ pub enum Request {
     Orders(OrderSnapshot),
     Positions(PositionSnapshot),
 }
+
+impl Request {
+    fn needs_derived_key(&self) -> bool {
+        matches!(self, Self::Balance | Self::Orders(..) | Self::Derive)
+    }
+}
 pub struct OrderSnapshot {
     revision: u64,
     cursor: String,
@@ -765,6 +771,13 @@ impl Polymarket {
                         .is_some_and(|e| !matches!(e.get(), "null" | "false" | "\"\""))
                 })
         {
+            // Time and positions are unsigned, so only the signed reads prove a refusal.
+            if matches!(response.status, 401 | 403) && request.needs_derived_key() {
+                cx.startup_read_refused(&crate::trading::http_failure(
+                    response.status,
+                    "Polymarket refused the API key".into(),
+                ));
+            }
             self.account_failed(cx, request);
             return;
         }

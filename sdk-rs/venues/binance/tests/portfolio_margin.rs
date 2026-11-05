@@ -46,6 +46,7 @@ fn ready_with(open_orders: &str) -> Harness {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
     }
+    h.answer_open_position_read();
     h
 }
 
@@ -416,4 +417,54 @@ fn unproven_pm_ids_require_the_native_client_identity_echo() {
     for (algo, echo, ids, expected) in observations {
         assert_eq!(ids, expected, "algo={algo} echo={echo}");
     }
+}
+
+fn pm_stop_setup() -> Harness {
+    ready_with(&OPEN_ORDERS.replace(r#""type":"LIMIT""#, r#""type":"STOP""#))
+}
+fn pm_amend_stays_refused(h: &mut Harness) {
+    // A buy stop above the price stands, so the venue's own stop-limit refusal decides.
+    h.engine.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 85_000.;
+        ticker.last = 85_000.;
+    });
+    h.event(Event::Command(Command::AmendOrder {
+        command: 990,
+        id: "x-s3vFFRQpresting".into(),
+        price: Some(91000.),
+        amount: None,
+    }));
+    assert!(
+        !h.requests.iter().any(|r| r.method != Method::Get),
+        "invalid row must not remove stop-limit protection: {:?}",
+        h.paths()
+    );
+    assert!(
+        h.failures
+            .iter()
+            .any(|(id, e)| *id == 990 && e.kind == Some(safe_cex_engine::ErrorKind::Unsupported)),
+        "{:?}",
+        h.failures
+    );
+}
+#[test]
+fn pm_native_limit_stop_refusal_control() {
+    let mut h = pm_stop_setup();
+    pm_amend_stays_refused(&mut h);
+}
+#[test]
+fn pm_rejected_numeric_row_cannot_change_retained_stop_metadata() {
+    let mut h = pm_stop_setup();
+    h.advance(10000.);
+    h.respond(
+        "/papi/v1/um/openOrders",
+        200,
+        &OPEN_ORDERS.replace(r#""origQty":"0.40""#, r#""origQty":"NaN""#),
+    );
+    h.respond("/papi/v1/um/conditional/openOrders", 200, OPEN_CONDITIONAL);
+    assert_eq!(
+        h.engine.store().order("x-s3vFFRQpresting").unwrap().kind,
+        OrderType::StopLoss
+    );
+    pm_amend_stays_refused(&mut h);
 }

@@ -63,6 +63,7 @@ impl H {
         let socket = h.socket();
         h.event(Event::WsOpened { socket });
         h.reply("/openOrders", open_orders);
+        h.reply("/positionRisk", POSITION);
         h
     }
     /// The latest private socket: a reconnect opens a new one.
@@ -88,6 +89,9 @@ impl H {
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
+                // The rig's public socket stays silent, so this notice is true here.
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
                 Action::Notice(Notice::Event(safe_cex_engine::LogEvent {
                     level, message, ..
                 })) => {
@@ -1189,6 +1193,26 @@ fn hedge_amend_keeps_the_order_rows_position_side() {
 }
 
 #[test]
+fn an_amend_whose_cancel_answer_is_unreadable_posts_no_replacement() {
+    for body in ["<html>ok</html>", "{}"] {
+        let mut h = H::new();
+        h.ws(order(10.0, "NEW", "0", 1));
+        h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 40,
+            id: "123".into(),
+            price: Some(105.0),
+            amount: None,
+        }));
+        let cancel = h.take("/order");
+        h.respond(cancel, body);
+        assert!(
+            result(&h, 40).as_ref().unwrap_err().contains("unreadable"),
+            "{body}"
+        );
+    }
+}
+
+#[test]
 fn rest_ahead_of_stream_does_not_consume_no_id_execution() {
     let mut h = H::new();
     // A genuine reconnect: the new epoch's open refreshes orders.
@@ -1543,4 +1567,66 @@ fn reporter_once_does_not_upgrade_a_remembered_warning_after_its_stored_copy_dis
         h.errors,
         ["Aster skipped malformed position row BTCUSDT:short"]
     );
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    for refused in [
+        r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#,
+        // daxx's start: the venue's own words, under a code the read did not recognise.
+        r#"{"code":-1000,"msg":"Ip not in whitelist"}"#,
+    ] {
+        a_refused_key_ends_the_start_with(refused);
+    }
+}
+
+fn a_refused_key_ends_the_start_with(refused: &str) {
+    let mut e = support::engine(Options {
+        key: Some("documented-key".into()),
+        secret: Some("synthetic-secret".into()),
+        ..Default::default()
+    });
+    let now = 1700000000000.0;
+    e.start(now);
+    let mut failures = vec![];
+    for _ in 0..16 {
+        let actions: Vec<_> = support::drain(&mut e, now).into_iter().collect();
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            match action {
+                Action::Http(r) => {
+                    let body = if r.url.contains("/time") {
+                        r#"{"serverTime":1700000000000}"#
+                    } else if r.url.contains("/exchangeInfo") {
+                        MARKETS
+                    } else if r.url.contains("/leverageBracket")
+                        || r.url.contains("/ticker/24hr")
+                        || r.url.contains("/openInterest")
+                    {
+                        "[]"
+                    } else {
+                        refused
+                    };
+                    e.handle(
+                        now,
+                        Event::HttpResponse {
+                            request: r.id,
+                            response: safe_cex_engine::Response {
+                                status: if body == refused { 401 } else { 200 },
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                Action::Notice(Notice::StartupFailed { error }) => failures.push(error),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    let words = serde_json::from_str::<serde_json::Value>(refused).unwrap();
+    assert!(failures[0].message.contains(words["msg"].as_str().unwrap()));
 }

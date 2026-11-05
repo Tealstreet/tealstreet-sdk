@@ -43,7 +43,7 @@ fn startup_authenticates_and_loads_account_atomically() {
     let b = h.e.store().balance();
     assert_eq!(
         (b.used, b.free, b.total, b.upnl),
-        (0.72, 1009.28, 1009.5, 0.5)
+        (0.72, 1009.78, 1010.0, 0.5)
     );
     let p = &h.e.store().positions()[0];
     assert_eq!(p.contracts, 0.004);
@@ -140,7 +140,7 @@ fn stale_balance_snapshot_cannot_overwrite_newer_account_push() {
     h.ws(r#"{"arg":{"channel":"account"},"data":{"totalEquity":"1234"}}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"10","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"10","available":"10","frozen":"0"}]}"#,
     );
     assert_eq!(h.e.store().balance().total, 1234.0);
 }
@@ -162,16 +162,17 @@ fn login_waits_for_valid_global_modes_before_initial_snapshot() {
     assert!(!h.e.store().loaded().positions);
     assert!(h.pending.is_empty());
 }
+// Live body with a position open: available has dropped by its initial margin.
 #[test]
-fn collateral_rounds_available_and_frozen_separately() {
+fn the_rest_total_is_the_wallet_balance_not_available_plus_frozen() {
     let mut h = Harness::new();
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"0.005","frozen":"0.005"}]}"#,
+        r#"{"code":"0","msg":"success","data":[{"currency":"USDT","balance":"68.312724595757791826","available":"67.897153550202236228","frozen":"0.000000000000000065","bonus":"0"}]}"#,
     );
-    assert_eq!(h.e.store().balance().total, 0.02);
+    assert_eq!(h.e.store().balance().total, 68.31);
 }
 #[test]
 fn inline_protection_fallback_only_covers_remaining_limit_quantity() {
@@ -380,8 +381,7 @@ fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
 // BAD-USDT is skipped as malformed (zero leverage cap); ETH-USD is deliberately
 // filtered (inverse); MISSING-USDT is not listed at all.
 const PARTIAL_INSTRUMENTS: &str = r#"{"code":"0","data":[{"instId":"BTC-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BTC","quoteCurrency":"USDT","state":"live","contractValue":"0.001","minSize":"0.1","lotSize":"0.1","tickSize":"0.1","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"150"},{"instId":"BAD-USDT","instType":"SWAP","contractType":"linear","baseCurrency":"BAD","quoteCurrency":"USDT","state":"live","contractValue":"1","minSize":"1","lotSize":"1","tickSize":"0.01","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"0"},{"instId":"ETH-USD","instType":"SWAP","contractType":"inverse","baseCurrency":"ETH","quoteCurrency":"USD","state":"live","contractValue":"1","minSize":"1","lotSize":"1","tickSize":"0.01","maxLimitSize":"1000","maxMarketSize":"500","maxLeverage":"50"}]}"#;
-const BALANCES: &str =
-    r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#;
+const BALANCES: &str = r#"{"code":"0","data":[{"currency":"USDT","balance":"1010","available":"1000","frozen":"10"}]}"#;
 const WORKING: &str = r#"{"instId":"BTC-USDT","instType":"SWAP","orderCategory":"normal","orderId":"working","orderType":"limit","side":"buy","size":"1","price":"60000","state":"live"}"#;
 
 #[test]
@@ -668,7 +668,7 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
         }
         for r in reads {
             let body = if r.url.contains("balances") {
-                r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#
+                r#"{"code":"0","data":[{"currency":"USDT","balance":"1010","available":"1000","frozen":"10"}]}"#
             } else {
                 r#"{"code":"0","data":[]}"#
             };
@@ -812,7 +812,7 @@ fn startup_rest_partial_seeds_history_but_later_rest_cannot_consume_stream_fills
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"currency":"USDT","balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     let snapshot = |qty, average| {
         format!(
@@ -1974,7 +1974,7 @@ fn poll_lists(h: &mut Harness, at: f64, positions: &str, orders: &str, tpsl: &st
     if h.pending.iter().any(|r| r.url.contains("balances")) {
         h.reply(
             "balances",
-            r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"10"}]}"#,
+            r#"{"code":"0","data":[{"currency":"USDT","balance":"1010","available":"1000","frozen":"10"}]}"#,
         );
     }
     h.reply(
@@ -2034,7 +2034,7 @@ fn one_malformed_rest_row_keeps_its_stored_copy_while_valid_peers_commit() {
 
     let btc = POSITION.replace("\"positions\":\"4\"", "\"positions\":\"5\"");
     let bad_eth = eth.replace("\"positions\":\"4\"", "\"positions\":null");
-    let bad_order = order("b", "61000").replace("\"size\":\"1\"", "\"size\":null");
+    let bad_order = order("b", "61000").replace("\"size\":\"1\"", "\"filledSize\":null");
     for round in 0..2 {
         let logs = poll(
             &mut h,
@@ -2089,7 +2089,7 @@ fn kept_attached_tpsl_leg_is_not_duplicated_by_its_parent() {
     };
     poll_lists(&mut h, 10_000.0, POSITION, parent, tpsl);
     assert_eq!(legs(&h), ["T1__take_profit"]);
-    let bad = tpsl.replace("\"size\":\"1\"", "\"size\":null");
+    let bad = tpsl.replace("\"size\":\"1\"", "\"filledSize\":null");
     let logs = poll_lists(&mut h, 20_000.0, POSITION, parent, &bad);
     assert!(
         logs.iter()
@@ -2106,7 +2106,7 @@ fn row_report_order_aliases_rearm_on_decode_even_when_the_read_cannot_commit() {
     let mut h = Harness::new();
     h.seed();
     let bad = ["order-alias", "tpsl-alias", "algo-alias"]
-        .map(|id| format!(r#"{{"instId":"BTC-USDT","orderId":"{id}","size":null}}"#))
+        .map(|id| format!(r#"{{"instId":"BTC-USDT","orderId":"{id}","filledSize":null}}"#))
         .join(",");
     let skips = |logs: Vec<String>| {
         logs.into_iter()
@@ -2125,7 +2125,7 @@ fn row_report_order_aliases_rearm_on_decode_even_when_the_read_cannot_commit() {
         &mut h,
         30_000.0,
         POSITION,
-        &format!("{decoded},{{\"size\":null}}"),
+        &format!("{decoded},{{\"filledSize\":null}}"),
     );
     assert_eq!(skips(poll(&mut h, 40_000.0, POSITION, &bad)), expected);
     assert!(h.e.store().orders().is_empty());
@@ -2257,5 +2257,69 @@ fn incremental_price_overflow_keeps_the_same_quantity_correction_eligible() {
         fills,
         [(298.0, 0.0005)],
         "corrected suffix uses the last proven q1/value1 exactly once"
+    );
+}
+
+#[test]
+fn a_pre_tp_sl_order_shows_like_a_normal_one() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderCategory":"pre_tp_sl","orderId":"123","orderType":"limit","side":"buy","size":"1","price":"60000","filledSize":"0","state":"live"}]}"#);
+    assert!(h.e.store().order("123").is_some());
+}
+
+#[test]
+fn refused_startup_read_seeds_only_real_execution_suffixes() {
+    const START: f64 = 1_700_000_000_000.;
+    let mut h = Harness::new_at(START);
+    h.open_private();
+    h.modes();
+    for (qty, avg, time) in [(6, 120, START + 1.), (8, 130, START + 2.)] {
+        let text = startup_execution("123", qty, avg, START - 100., time, "partially_filled");
+        h.handle(
+            time,
+            Event::WsMessage {
+                socket: h.private,
+                text: &text,
+            },
+        );
+        h.collect();
+    }
+    assert!(executions(h.e.take_frame(START + 2.).unwrap()).is_empty());
+    startup_reply_at(
+        &mut h,
+        "orders-pending",
+        &startup_orders(4, 100),
+        START + 3.,
+    );
+    finish_startup_orders(&mut h, START + 4.);
+    assert_eq!(
+        executions(h.e.take_frame(START + 4.).unwrap()),
+        [(160., 0.002), (160., 0.002)]
+    );
+    assert_eq!(h.e.store().order("123").unwrap().filled, 0.008);
+    let frame = h.e.snapshot_frame(START + 4.).to_vec();
+    let cover = safe_cex_engine::wire::sections(&frame)
+        .find(|(k, _)| *k == safe_cex_engine::wire::section::ORDERS_READ)
+        .map(|(_, p)| f64::from_le_bytes(p[8..16].try_into().unwrap()));
+    assert!(
+        cover.is_none_or(|v| v.is_nan()),
+        "refused startup rows prove no cover: {cover:?}"
+    );
+    let text = startup_execution("123", 8, 130, START - 100., START + 2., "partially_filled");
+    h.handle(
+        START + 5.,
+        Event::WsMessage {
+            socket: h.private,
+            text: &text,
+        },
+    );
+    h.collect();
+    assert!(
+        h.e.take_frame(START + 5.)
+            .map(executions)
+            .unwrap_or_default()
+            .is_empty()
     );
 }

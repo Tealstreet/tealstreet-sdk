@@ -8,6 +8,8 @@ pub enum SignatureEncoding {
     #[default]
     Hex,
     Base64,
+    /// BloFin: base64 of the MAC's lowercase hex text.
+    Base64Hex,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

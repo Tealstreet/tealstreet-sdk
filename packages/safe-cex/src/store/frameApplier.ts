@@ -30,7 +30,12 @@ export type FrameCandle = { symbol: string; interval: string; candle: Candle };
 
 export class FrameApplyError extends Error {}
 
-const finite = (value: number) => (Number.isNaN(value) ? undefined : value);
+const finite = (value: number) => (Number.isFinite(value) ? value : undefined);
+/**
+ * Display-only position numbers read a non-finite engine value as the venue's 0 (none/unknown).
+ * Sizing inputs (`contracts`, `notional`) stay raw: a NaN there makes nuke refuse the close.
+ */
+const displayNumber = (value: number) => (Number.isFinite(value) ? value : 0);
 
 /** The sizing rules each `QuantityUnits` convention implies for order and position extras. */
 type UnitProfile = {
@@ -479,8 +484,8 @@ export class FrameApplier {
             }),
             entryPrice: positions.entryPrice[i],
             notional: positions.notional[i],
-            leverage: positions.leverage[i],
-            unrealizedPnl: positions.unrealizedPnl[i],
+            leverage: displayNumber(positions.leverage[i]),
+            unrealizedPnl: displayNumber(positions.unrealizedPnl[i]),
             contracts: positions.contracts[i],
             ...(market &&
               (nativePlacementAmounts ||
@@ -505,11 +510,13 @@ export class FrameApplier {
                             ? contractSizes[positions.market[i]]
                             : 1,
                         ),
-                        ...(!nativePlacementAmounts && { unrealizedPnlNative: positions.unrealizedPnl[i] }),
+                        ...(!nativePlacementAmounts && {
+                          unrealizedPnlNative: displayNumber(positions.unrealizedPnl[i]),
+                        }),
                       }),
                 },
               }),
-            liquidationPrice: positions.liquidationPrice[i],
+            liquidationPrice: displayNumber(positions.liquidationPrice[i]),
             ...(mode !== undefined && { positionMode: mode }),
             ...(enums.marginType !== undefined && { marginType: enums.marginType as MarginType }),
             ...(finite(positions.realizedPnl[i]) !== undefined && { realizedPnl: positions.realizedPnl[i] }),
@@ -552,10 +559,14 @@ export class FrameApplier {
         const hedged = (update.options ?? this.store.options).isHedged;
         const leverage: Record<string, FetchedLeverage> = {};
         for (let i = 0; i < settings.count; i++) {
-          const value = settings.leverage[i];
+          const value = finite(settings.leverage[i]);
+          const buyLeverage = finite(settings.buyLeverage?.[i] ?? NaN) ?? value;
+          const sellLeverage = finite(settings.sellLeverage?.[i] ?? NaN) ?? value;
+          // An unknown side omits the symbol: UiStateHandler copies these onto positions.
+          if (buyLeverage === undefined || sellLeverage === undefined) continue;
           leverage[resolveSymbol(settings.market[i], settings.symbol?.(i))] = {
-            buyLeverage: finite(settings.buyLeverage?.[i] ?? NaN) ?? value,
-            sellLeverage: finite(settings.sellLeverage?.[i] ?? NaN) ?? value,
+            buyLeverage,
+            sellLeverage,
             marginType: settings.marginType(i) as MarginType | undefined,
             positionMode: hedged ? PositionMode.Hedged : PositionMode.OneWay,
           };

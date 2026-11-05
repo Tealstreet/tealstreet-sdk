@@ -7,7 +7,8 @@ use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::time;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    SubscriptionTopic, TimerId,
 };
 use std::collections::{BTreeMap, HashMap};
 const INTX: &str = "https://api.international.coinbase.com/api/v1/instruments/";
@@ -45,6 +46,15 @@ pub enum Request {
         invalid: bool,
     },
 }
+struct CandleRange {
+    symbol: String,
+    granularity: &'static str,
+    seconds: f64,
+    cursor: f64,
+    end: f64,
+    page_end: f64,
+    rows: BTreeMap<u64, Candle>,
+}
 #[derive(Default)]
 pub(crate) struct Depth {
     pub book: Book,
@@ -76,6 +86,7 @@ pub(crate) struct Public {
     candles: HashMap<(String, Interval), (u32, Option<Candle>)>,
     products: HashMap<String, (f64, f64)>,
     daily: HashMap<String, Daily>,
+    candle_ranges: HashMap<CommandId, Box<CandleRange>>,
     daily_generation: u64,
     generation: u64,
     seeding: bool,
@@ -367,6 +378,56 @@ impl Coinbase {
             .unwrap(),
         );
     }
+    /// The level2 frame every book subscribe, unsubscribe and repair sends.
+    fn book_subscription(&self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>, add: bool) {
+        self.subscription(cx, "level2", symbols, add);
+    }
+    /// Every candle interval streams from both channels: candles, and trades below five minutes.
+    fn candle_subscription(&self, cx: &mut Cx<'_, Pending>, symbols: Vec<String>, add: bool) {
+        self.subscription(cx, "candles", symbols.clone(), add);
+        self.subscription(cx, "market_trades", symbols, add);
+    }
+    /// Level2 resubscribes answer with a fresh snapshot, which replaces the book;
+    /// the socket-wide sequence continues across the resubscribe.
+    pub(crate) fn public_repair(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        type Resubscribe = fn(&Coinbase, &mut Cx<'_, Pending>, Vec<String>, bool);
+        let (symbol, live, channel, resubscribe): (_, _, _, Resubscribe) = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => (
+                symbol,
+                self.public
+                    .candles
+                    .keys()
+                    .any(|(s, i)| i == interval && ws_symbol(s) == ws_symbol(symbol)),
+                "candles",
+                Self::candle_subscription,
+            ),
+            SubscriptionTopic::OrderBook { symbol } => (
+                symbol,
+                self.public
+                    .books
+                    .keys()
+                    .any(|s| ws_symbol(s) == ws_symbol(symbol)),
+                "level2",
+                Self::book_subscription,
+            ),
+        };
+        if !live {
+            return Err(format!("{topic} is not subscribed"));
+        }
+        let product = ws_symbol(symbol);
+        if !self.public.open || self.public.socket.is_none() {
+            return Err(format!(
+                "the public socket carrying {channel} {product} is not open"
+            ));
+        }
+        resubscribe(self, cx, vec![product.clone()], false);
+        resubscribe(self, cx, vec![product], true);
+        Ok(())
+    }
     pub(crate) fn public_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.public.socket != Some(socket) {
             return false;
@@ -389,7 +450,7 @@ impl Coinbase {
         );
         let symbols: Vec<_> = self.public.books.keys().map(|s| ws_symbol(s)).collect();
         if !symbols.is_empty() {
-            self.subscription(cx, "level2", symbols, true);
+            self.book_subscription(cx, symbols, true);
         }
         let mut symbols: Vec<_> = self
             .public
@@ -400,8 +461,7 @@ impl Coinbase {
         symbols.sort();
         symbols.dedup();
         if !symbols.is_empty() {
-            self.subscription(cx, "candles", symbols.clone(), true);
-            self.subscription(cx, "market_trades", symbols, true);
+            self.candle_subscription(cx, symbols, true);
         }
         let refresh: Vec<_> = self
             .public
@@ -1066,16 +1126,30 @@ impl Coinbase {
             }
             Request::Candles {
                 command,
-                mut rows,
+                rows,
                 invalid,
             } => {
+                let Some(mut walk) = self.public.candle_ranges.remove(&command) else {
+                    return;
+                };
                 if invalid {
                     cx.fail(command, "Malformed Coinbase candles");
                 } else {
-                    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
-                    match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
-                        Ok(data) => cx.done(command, data),
-                        Err(error) => cx.fail(command, error),
+                    for row in rows {
+                        if row.timestamp >= walk.cursor && row.timestamp < walk.page_end {
+                            walk.rows.insert(row.timestamp as u64, row);
+                        }
+                    }
+                    walk.cursor = walk.page_end;
+                    if walk.cursor < walk.end {
+                        self.public.candle_ranges.insert(command, walk);
+                        self.candle_page(cx, command);
+                    } else {
+                        let rows = walk.rows.into_values().collect::<Vec<_>>();
+                        match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
+                            Ok(data) => cx.done(command, data),
+                            Err(error) => cx.fail(command, error),
+                        };
                     };
                 }
             }
@@ -1095,6 +1169,7 @@ impl Coinbase {
         let mut failures = vec![];
         match pending {
             Request::Candles { command, .. } => {
+                self.public.candle_ranges.remove(&command);
                 failures.push((command, safe_cex_engine::VenueError::new(error)));
             }
             Request::Daily {
@@ -1486,7 +1561,7 @@ impl Coinbase {
                 state.subscribers += 1;
                 state.waiting_since = cx.now;
                 if first {
-                    self.subscription(cx, "level2", vec![ws_symbol(&symbol)], true);
+                    self.book_subscription(cx, vec![ws_symbol(&symbol)], true);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1500,7 +1575,7 @@ impl Coinbase {
                             .keys()
                             .any(|s| ws_symbol(s) == ws_symbol(&symbol))
                         {
-                            self.subscription(cx, "level2", vec![ws_symbol(&symbol)], false);
+                            self.book_subscription(cx, vec![ws_symbol(&symbol)], false);
                         }
                     }
                 }
@@ -1535,8 +1610,7 @@ impl Coinbase {
                     }
                 }
                 if first {
-                    self.subscription(cx, "candles", vec![ws_symbol(&symbol)], true);
-                    self.subscription(cx, "market_trades", vec![ws_symbol(&symbol)], true);
+                    self.candle_subscription(cx, vec![ws_symbol(&symbol)], true);
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
@@ -1562,8 +1636,7 @@ impl Coinbase {
                     .keys()
                     .any(|(s, _)| ws_symbol(s) == ws_symbol(&symbol))
                 {
-                    self.subscription(cx, "candles", vec![ws_symbol(&symbol)], false);
-                    self.subscription(cx, "market_trades", vec![ws_symbol(&symbol)], false);
+                    self.candle_subscription(cx, vec![ws_symbol(&symbol)], false);
                 }
             }
             Command::FetchCandles {
@@ -1582,40 +1655,83 @@ impl Coinbase {
                     cx.fail(command, "Unknown Coinbase market");
                     return None;
                 }
-                let end = to_ms.unwrap_or(cx.now) / 1000.;
+                let end = (to_ms.unwrap_or(cx.now).min(cx.now) / 1000.)
+                    .round()
+                    .max(0.);
                 let start = from_ms
-                    .map(|n| n / 1000.)
-                    .unwrap_or(end - seconds * f64::from(limit.unwrap_or(300).clamp(1, 300)));
-                if !start.is_finite() || !end.is_finite() || start < 0. || end <= start {
+                    .map(|n| (n / 1000.).round())
+                    .unwrap_or(end - seconds * f64::from(limit.unwrap_or(300).max(1)))
+                    .max(0.);
+                if !start.is_finite() || !end.is_finite() {
                     cx.fail(command, "Invalid Coinbase candle range");
                     return None;
                 }
-                let path = format!(
-                    "/api/v3/brokerage/market/products/{}/candles?granularity={granularity}&start={:.0}&end={:.0}&limit={}",
-                    ws_symbol(&symbol),
-                    start,
-                    end,
-                    limit.unwrap_or(300).clamp(1, 300)
-                );
-                if let Err(error) = self.request(
-                    cx,
-                    Method::Get,
-                    path,
-                    None,
-                    Some(ArrayAt::Field("candles")),
-                    Pending::Public(Request::Candles {
-                        command,
-                        rows: vec![],
-                        invalid: false,
-                    }),
-                ) {
-                    cx.fail(command, error);
+                if end <= start {
+                    crate::local_context::complete(
+                        cx,
+                        safe_cex_engine::request_context::Operation::Read,
+                        Ok("[]".into()),
+                    );
+                    return None;
                 }
+                self.public.candle_ranges.insert(
+                    command,
+                    Box::new(CandleRange {
+                        symbol: ws_symbol(&symbol),
+                        granularity,
+                        seconds,
+                        cursor: start,
+                        end,
+                        page_end: start,
+                        rows: BTreeMap::new(),
+                    }),
+                );
+                self.candle_page(cx, command);
             }
             Command::SetTickerSymbols { .. } => {}
             other => return Some(other),
         }
         None
+    }
+}
+
+impl Coinbase {
+    fn candle_page(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {
+        let Some(walk) = self.public.candle_ranges.get_mut(&command) else {
+            return;
+        };
+        walk.page_end = (walk.cursor + walk.seconds * 300.).min(walk.end);
+        let limit = ((walk.page_end - walk.cursor) / walk.seconds)
+            .ceil()
+            .clamp(1., 300.) as u32;
+        // Treat each page as half-open, even if Coinbase includes its end second.
+        let path = format!(
+            "/api/v3/brokerage/market/products/{}/candles?granularity={}&start={:.0}&end={:.0}&limit={limit}",
+            walk.symbol,
+            walk.granularity,
+            walk.cursor,
+            (walk.page_end - 1.).max(walk.cursor + 1.)
+        );
+        let result = if walk.page_end <= walk.cursor {
+            Err("Coinbase candle range cannot advance".into())
+        } else {
+            self.request(
+                cx,
+                Method::Get,
+                path,
+                None,
+                Some(ArrayAt::Field("candles")),
+                Pending::Public(Request::Candles {
+                    command,
+                    rows: vec![],
+                    invalid: false,
+                }),
+            )
+        };
+        if let Err(error) = result {
+            self.public.candle_ranges.remove(&command);
+            cx.fail(command, error);
+        }
     }
 }
 // Live candles are built from the ticker, so every interval is served.

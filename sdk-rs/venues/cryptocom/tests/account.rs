@@ -187,6 +187,34 @@ fn signature_rejections_retry_once_even_with_http_error_status() {
 }
 
 #[test]
+fn a_key_refusal_that_may_be_the_ip_whitelist_says_what_to_check() {
+    let mut h = Harness::new();
+    for _ in 0..2 {
+        let r = h.http("get-positions");
+        h.event(Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 401,
+                headers: "",
+                // The body the legacy runtime recorded for Crypto.com 40101.
+                body: r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist."}"#,
+            },
+        });
+    }
+    assert!(
+        h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.level == safe_cex_engine::Level::Error
+                    && event.message.contains("incorrect IP whitelist")
+                    && event.message.ends_with(safe_cex_engine::error::IP_WHITELIST_MAYBE_HINT)
+        )),
+        "{:?}",
+        h.actions
+    );
+}
+
+#[test]
 fn closed_exposure_stays_closed_against_cached_rest_and_equal_time_frames() {
     let mut h = Harness::new();
     h.load();
@@ -1209,5 +1237,75 @@ fn snapshot_token_invalid_order_ack_does_not_invalidate_valid_identity_does() {
             !accepted,
             "{body}"
         );
+    }
+}
+
+#[test]
+fn a_refused_key_ends_the_start_after_its_one_retry() {
+    let mut h = Harness::new();
+    let mut failures = 0;
+    for _ in 0..2 {
+        let r = h.http("get-positions");
+        h.actions.clear();
+        h.event(Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 401,
+                headers: "",
+                body: r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist."}"#,
+            },
+        });
+        failures += h
+            .actions
+            .iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                )
+            })
+            .count();
+    }
+    assert_eq!(failures, 1);
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            401,
+            r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist"}"#,
+        ),
+        (
+            200,
+            r#"{"code":40101,"message":"Bad API key, API secret or incorrect IP whitelist"}"#,
+        ),
+    ] {
+        let mut h = Harness::new();
+        let mut failures = 0;
+        // Its 40101 is re-signed once before it counts.
+        for _ in 0..2 {
+            let r = h.http("get-positions");
+            h.actions.clear();
+            h.event(Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            });
+            failures += h
+                .actions
+                .iter()
+                .filter(|a| {
+                    matches!(
+                        a,
+                        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                    )
+                })
+                .count();
+        }
+        assert_eq!(failures, 1, "{status} {body}");
     }
 }

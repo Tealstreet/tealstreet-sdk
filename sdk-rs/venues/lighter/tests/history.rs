@@ -149,9 +149,10 @@ fn owned_partial(actions: &[Action], count: usize) -> Value {
     assert_eq!(markers.len(), 1, "exactly one completeness marker");
     assert_eq!(markers[0].1.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        markers[0].1.fields,
-        vec![("command", safe_cex_engine::Value::Num(91.0))]
+        markers[0].1.fields[..1],
+        [("command", safe_cex_engine::Value::Num(91.0))]
     );
+    assert_eq!(markers[0].1.fields[1].0, "reason");
     let completed: Vec<_> = actions
         .iter()
         .enumerate()
@@ -840,4 +841,28 @@ fn paged_income_request_sequence_is_pinned() {
             "/api/v1/positionFunding?limit=100&account_index=718895&cursor=f1",
         ]
     );
+}
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let (mut e, _) = ready();
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("ETH".into()),
+            order_id: None,
+            from_ms: Some(NOW - 10_000.0),
+            to_ms: Some(NOW),
+            limit: None,
+        },
+    );
+    let rows = (0..100)
+        .map(|i| trade(&format!("t{i}"), NOW as u64 - 500))
+        .collect();
+    answer(&mut e, &r, rows, Some("next-page"));
+    let next = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.contains("/trades?"))
+        .expect("a second page beyond the default");
+    assert!(next.url.contains("cursor=next-page"));
 }

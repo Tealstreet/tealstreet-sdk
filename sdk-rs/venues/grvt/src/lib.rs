@@ -18,7 +18,8 @@ use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision, Ticker
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, SubscriptionTopic,
+    TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -113,6 +114,17 @@ struct Depth {
     subscribers: u32,
     sequence: Option<u64>,
     ready: bool,
+}
+impl Depth {
+    /// A new stream restarts its sequence; its first snapshot readies the book.
+    fn restart(&mut self) {
+        self.ready = false;
+        self.sequence = None;
+    }
+}
+/// The `v1.book.s` selector every book subscribe, unsubscribe and repair names.
+fn book_selector(id: &str) -> String {
+    format!("{id}@500-50")
 }
 #[derive(Clone, Copy, Default)]
 struct TickerState {
@@ -477,8 +489,7 @@ impl Grvt {
             state.first_sequence = None;
         }
         for depth in self.books.values_mut() {
-            depth.ready = false;
-            depth.sequence = None;
+            depth.restart();
         }
         self.public.supervisor.retry(cx);
     }
@@ -518,6 +529,51 @@ impl Grvt {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             c.supervisor.connecting(cx);
         }
+    }
+    fn repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        let not_subscribed = || format!("{topic} is not subscribed");
+        match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                if !self
+                    .candles
+                    .get(&(symbol.clone(), *interval))
+                    .is_some_and(|n| *n > 0)
+                {
+                    return Err(not_subscribed());
+                }
+                if !self
+                    .candle_sockets
+                    .get(interval)
+                    .is_some_and(|c| c.open && c.socket.is_some())
+                {
+                    return Err(format!("the candle socket carrying {topic} is not open"));
+                }
+                self.candle_subscription(cx, symbol, *interval, true);
+                self.candle_subscription(cx, symbol, *interval, false);
+            }
+            SubscriptionTopic::OrderBook { symbol } => {
+                let market = cx.store.market(symbol).ok_or_else(not_subscribed)?;
+                let selector = book_selector(&market.id);
+                let depth = self
+                    .books
+                    .get_mut(&market.symbol)
+                    .filter(|d| d.subscribers > 0)
+                    .ok_or_else(not_subscribed)?;
+                if !self.public.open {
+                    return Err(format!(
+                        "the public socket carrying v1.book.s {selector} is not open"
+                    ));
+                }
+                depth.restart();
+                self.subscribe(cx, "v1.book.s", &selector, true);
+                self.subscribe(cx, "v1.book.s", &selector, false);
+            }
+        }
+        Ok(())
     }
     fn candle_subscription(
         &mut self,
@@ -743,6 +799,13 @@ impl Venue for Grvt {
     }
 
     type Pending = Pending;
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             order_book_query: true,
@@ -821,7 +884,7 @@ impl Venue for Grvt {
             .collect();
         for s in books {
             if let Some(m) = cx.store.market(&s) {
-                self.subscribe(cx, "v1.book.s", &format!("{}@500-50", m.id), false);
+                self.subscribe(cx, "v1.book.s", &book_selector(&m.id), false);
             }
         }
     }
@@ -1319,7 +1382,8 @@ impl Venue for Grvt {
             return;
         }
         match command {
-            Command::SetTickerSymbols { .. } => {}
+            // The engine repairs subscriptions itself; it never forwards this.
+            Command::SetTickerSymbols { .. } | Command::RepairSubscription(_) => {}
             Command::Venue { command, .. } => {
                 safe_cex_engine::unsupported_venue_action(cx, command)
             }
@@ -1331,13 +1395,12 @@ impl Venue for Grvt {
                 let depth = self.books.entry(key.clone()).or_default();
                 depth.subscribers += 1;
                 if depth.subscribers == 1 {
-                    depth.ready = false;
-                    depth.sequence = None;
+                    depth.restart();
                 }
                 if depth.subscribers == 1
                     && let Some(m) = cx.store.market(&key)
                 {
-                    self.subscribe(cx, "v1.book.s", &format!("{}@500-50", m.id), false);
+                    self.subscribe(cx, "v1.book.s", &book_selector(&m.id), false);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1346,7 +1409,7 @@ impl Venue for Grvt {
                     if depth.subscribers == 0
                         && let Some(m) = cx.store.market(&symbol)
                     {
-                        self.subscribe(cx, "v1.book.s", &format!("{}@500-50", m.id), true);
+                        self.subscribe(cx, "v1.book.s", &book_selector(&m.id), true);
                     }
                 }
             }

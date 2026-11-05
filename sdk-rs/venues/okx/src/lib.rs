@@ -685,8 +685,7 @@ impl Okx {
             if gap {
                 let id = message.arg.inst_id;
                 if let Some(feed) = self.connections[PUBLIC].feed {
-                    let key =
-                        serde_json::to_string(&Topic::instrument("books", id)).expect("topic");
+                    let key = socket_codec::interest_key(&socket_codec::book_topic(id));
                     if let Err(error) = cx.repair_socket_interests(feed, vec![key]) {
                         cx.notice(
                             Level::Error,
@@ -816,6 +815,8 @@ impl Okx {
 
     fn request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Account(request) = pending {
+            let error =
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network);
             self.account_failed(cx, request, error);
         } else if let Pending::Trade(request) = pending {
             self.trade_lost(cx, request, error);
@@ -874,6 +875,14 @@ impl Venue for Okx {
         Ok(())
     }
 
+    fn subscription_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(store, topic)
+    }
+
     fn encode_socket_interests(
         &self,
         store: &safe_cex_engine::Store,
@@ -892,6 +901,9 @@ impl Venue for Okx {
     }
     // reconcile_uncertain reads the uncertain symbols' orders at once.
     fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         true
     }
 
@@ -921,6 +933,39 @@ impl Venue for Okx {
         self.account_after_uncertain_write(cx);
     }
 
+    /// VENUE_STATE v1: `[1, acctLv]`, 0 while unread. The page needs the level to
+    /// refuse a hedge switch a spot-mode account cannot take.
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(vec![1, self.account.account_level])
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        match state {
+            [1, 0, ..] => {}
+            [1, level, ..] => self.account.account_level = *level,
+            _ => cx.venue_state_unreadable("Unreadable OKX venue state from the data source"),
+        }
+    }
+
+    // Frame-fed: the data source reads the config before its orders and
+    // positions, so once both have arrived the hedged flag is the account's.
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        self.account_refresh_settings(cx, symbol);
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        let loaded = cx.store.loaded();
+        self.account.ready = loaded.orders && loaded.positions;
+        // An acknowledged placement the store now holds cancels through the store.
+        let stored: std::collections::HashSet<&str> = cx
+            .store
+            .orders()
+            .iter()
+            .map(|order| order.id.as_str())
+            .collect();
+        self.trading
+            .acknowledged
+            .retain(|id, _| !stored.contains(id.as_str()));
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
@@ -935,8 +980,15 @@ impl Venue for Okx {
             client_order_lookup: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             closed_positions: true,
+            fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    // Every census commits its cover (`commit_orders_read_from`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account_prices(cx);
@@ -1278,6 +1330,13 @@ impl Venue for Okx {
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
         }
+        if let Pending::Account(account::Request::LeverageRefresh { context, .. }) = &pending {
+            let delivered = cx.validate_background_read_http_delivery(context).is_ok();
+            let _ = cx.finish_http_context(context);
+            if !delivered {
+                return;
+            }
+        }
         // An account-cycle page passes custody and generation before any codec,
         // publishes, then retires; a stale or unauthorized one only retires.
         let page = match &pending {
@@ -1329,6 +1388,20 @@ impl Venue for Okx {
             if let Some(context) = &discovery {
                 let _ = cx.finish_http_context(context);
             }
+            // EEA's keyed catalogue is signed: a refused key is refused, not a retry.
+            if matches!(pending, Pending::Markets { .. })
+                && self.options.eea
+                && self.credentials.is_some()
+                && let Some((code, msg)) = serde_json::from_str::<wire::Envelope<'_>>(response.body)
+                    .ok()
+                    .map(|e| (e.code.to_owned(), e.msg.to_owned()))
+                && code != "50113"
+                && let Some(kind) = account::rest_key_rejection(&code)
+            {
+                let refused = account::rejection("API key", &code, &msg, kind);
+                self.reject_startup(cx, refused, kind == safe_cex_engine::ErrorKind::AuthInvalid);
+                return;
+            }
             if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
                 self.public_failed(
                     cx,
@@ -1337,7 +1410,14 @@ impl Venue for Okx {
                 );
                 return;
             }
-            self.request_failed(cx, pending, &error);
+            // Account reads take the table's kind from the reply itself.
+            match pending {
+                Pending::Account(request) => {
+                    let error = account::read_error(&response, error);
+                    self.account_failed(cx, request, error);
+                }
+                pending => self.request_failed(cx, pending, &error),
+            }
             return;
         }
         match pending {
@@ -1345,6 +1425,7 @@ impl Venue for Okx {
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
                 account::retire(cx, page.as_ref());
+                self.account_read_again(cx);
             }
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, *request, response),
@@ -1422,7 +1503,9 @@ impl Venue for Okx {
                             .push(market.id.clone());
                     }
                 }
-                if !was_loaded {
+                // A frame-fed engine loads public instrument metadata only.
+                if cx.frame_fed() {
+                } else if !was_loaded {
                     self.ticker_seed(cx, false);
                     self.account_start(cx);
                 } else if added {
@@ -1610,6 +1693,7 @@ impl Venue for Okx {
     ) {
         self.retire_history(owner);
         self.retire_closed(owner);
+        self.account.fresh_positions.retired(owner);
     }
 
     /// The managed leverage read keeps the engine's typed failure, e.g. Timeout.
@@ -1638,6 +1722,9 @@ impl Venue for Okx {
             let _ = cx.finish_http_context(context);
             self.config_unanswered();
         }
+        if let Pending::Account(account::Request::LeverageRefresh { context, .. }) = &pending {
+            let _ = cx.finish_http_context(context);
+        }
         self.request_failed(cx, pending, error);
     }
 
@@ -1647,7 +1734,7 @@ impl Venue for Okx {
                 self.load_catalogue(cx);
             } else if read == DiscoveryRead::Markets {
                 self.start(cx);
-            } else {
+            } else if !cx.frame_fed() {
                 self.ticker_seed(cx, false);
             }
             return;
@@ -1665,6 +1752,7 @@ impl Venue for Okx {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,

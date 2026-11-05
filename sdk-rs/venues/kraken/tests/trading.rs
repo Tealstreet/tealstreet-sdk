@@ -286,95 +286,6 @@ fn trailing_rejects_missing_last_or_zero_distance() {
     }
 }
 #[test]
-fn protective_amend_prevalidates_and_waits_for_cancellation_ack() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.1),
-            amount: None,
-        },
-    );
-    let cancel = http(&mut e, "cancelorder");
-    assert_eq!(param(&cancel, "order_id").unwrap(), "old");
-    assert_eq!(e.store().order("old").unwrap().price, 90.0);
-    cancel_ack(&mut e, &cancel, "old");
-    let replacement = http(&mut e, "sendorder");
-    assert_eq!(param(&replacement, "stopPrice").unwrap(), "91");
-    assert_eq!(param(&replacement, "triggerSignal").unwrap(), "mark");
-    assert_ne!(param(&replacement, "cliOrdId").unwrap(), "old-client");
-    ack(&mut e, &replacement, "new", "placed");
-    assert_eq!(done(&mut e).unwrap(), r#"["new"]"#);
-}
-#[test]
-fn protective_amend_without_provenance_trailing_or_invalid_price_never_cancels() {
-    for (kind, trigger, price) in [
-        (OrderType::StopLoss, None, 91.0),
-        (
-            OrderType::TrailingStopLoss,
-            Some(StopTriggerType::MarkPrice),
-            91.0,
-        ),
-        (
-            OrderType::TakeProfit,
-            Some(StopTriggerType::LastPrice),
-            -1.0,
-        ),
-    ] {
-        let (mut e, _) = ready();
-        inject(&mut e, "old", kind, trigger);
-        command(
-            &mut e,
-            Command::AmendOrder {
-                command: 8,
-                id: "old".into(),
-                price: Some(price),
-                amount: None,
-            },
-        );
-        assert!(done(&mut e).is_err());
-        assert!(requests(&mut e).is_empty());
-        assert!(e.store().order("old").is_some());
-    }
-}
-#[test]
-fn rejected_cancel_keeps_old_protection_and_never_replaces() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.0),
-            amount: None,
-        },
-    );
-    let r = http(&mut e, "cancelorder");
-    reply(
-        &mut e,
-        &r,
-        200,
-        r#"{"result":"success","cancelStatus":{"status":"notFound","order_id":"old"}}"#,
-    );
-    assert!(done(&mut e).is_err());
-    assert!(e.store().order("old").is_some());
-    assert!(requests(&mut e).is_empty());
-}
-#[test]
 fn ambiguous_write_is_not_retried_and_next_command_is_independent() {
     let (mut e, _) = ready();
     place(&mut e, vec![limit()]);
@@ -411,7 +322,7 @@ fn batch_cancellation_json_strict_count_status_and_identity() {
     for body in [
         json!({"result":"success","batchStatus":[]}),
         json!({"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"cancelled","order_id":"a"}]}),
-        json!({"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"notFound","order_id":"b"}]}),
+        json!({"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"marketSuspended","order_id":"b"}]}),
     ] {
         let (mut e, _) = ready();
         inject(&mut e, "a", OrderType::Limit, None);
@@ -607,43 +518,6 @@ fn index_trigger_uses_documented_futures_enum() {
     assert_eq!(param(&r, "triggerSignal").unwrap(), "index");
 }
 #[test]
-fn execution_or_full_fill_racing_cancel_suppresses_protective_replacement() {
-    for fill in [
-        r#"{"feed":"fills","fills":[{"fill_id":"exec","order_id":"old","instrument":"PF_XBTUSD","buy":false,"qty":0.01,"price":90}]}"#,
-        r#"{"feed":"open_orders","order_id":"old","is_cancel":true,"reason":"full_fill"}"#,
-        r#"{"feed":"open_orders","order_id":"old","is_cancel":true,"reason":"stop_order_triggered"}"#,
-    ] {
-        let (mut e, socket) = ready();
-        inject(
-            &mut e,
-            "old",
-            OrderType::StopLoss,
-            Some(StopTriggerType::MarkPrice),
-        );
-        command(
-            &mut e,
-            Command::AmendOrder {
-                command: 8,
-                id: "old".into(),
-                price: Some(91.0),
-                amount: None,
-            },
-        );
-        let r = http(&mut e, "cancelorder");
-        message(&mut e, socket, NOW, fill);
-        cancel_ack(&mut e, &r, "old");
-        let all = e.drain_plain().collect::<Vec<_>>();
-        assert!(
-            !all.iter()
-                .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
-        );
-        assert!(
-            all.iter()
-                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
-        );
-    }
-}
-#[test]
 fn late_placement_ack_cannot_resurrect_a_ws_terminal_order() {
     let (mut e, socket) = ready();
     place(&mut e, vec![limit()]);
@@ -657,35 +531,6 @@ fn late_placement_ack_cannot_resurrect_a_ws_terminal_order() {
     ack(&mut e, &r, "new", "placed");
     assert!(done(&mut e).is_ok());
     assert!(e.store().order("new").is_none());
-}
-#[test]
-fn queued_protective_amend_rejects_changed_order_before_cancelling() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    place(&mut e, vec![limit()]);
-    let r = http(&mut e, "sendorder");
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.0),
-            amount: None,
-        },
-    );
-    e.store_mut().update_order("old", |o| o.filled = 0.01);
-    ack(&mut e, &r, "entry", "placed");
-    let all = e.drain_plain().collect::<Vec<_>>();
-    assert!(!all.iter().any(|a| matches!(a, Action::Http(_))));
-    assert!(
-        all.iter()
-            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })))
-    );
 }
 #[test]
 fn fetch_leverage_missing_preferences_is_a_failure() {
@@ -738,58 +583,6 @@ fn filled_ack_closes_order_without_inventing_fills() {
     assert!(e.store().order("old").is_none());
 }
 #[test]
-fn protective_replacement_error_reports_canceled_original() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.0),
-            amount: None,
-        },
-    );
-    let r = http(&mut e, "cancelorder");
-    cancel_ack(&mut e, &r, "old");
-    let r = http(&mut e, "sendorder");
-    ack(&mut e, &r, "bad", "invalidSize");
-    assert!(done(&mut e).unwrap_err().contains("canceled the original"));
-    assert!(e.store().order("old").is_none());
-}
-#[test]
-fn protective_amend_replaces_only_remaining_quantity() {
-    let (mut e, _) = ready();
-    inject(
-        &mut e,
-        "old",
-        OrderType::StopLoss,
-        Some(StopTriggerType::MarkPrice),
-    );
-    e.store_mut().update_order("old", |o| {
-        o.filled = 0.023;
-        o.remaining = 0.1;
-    });
-    command(
-        &mut e,
-        Command::AmendOrder {
-            command: 8,
-            id: "old".into(),
-            price: Some(91.0),
-            amount: None,
-        },
-    );
-    let r = http(&mut e, "cancelorder");
-    cancel_ack(&mut e, &r, "old");
-    let r = http(&mut e, "sendorder");
-    assert_eq!(param(&r, "size").unwrap(), "0.1");
-}
-#[test]
 fn queued_margin_change_uses_latest_accepted_leverage() {
     let (mut e, _) = ready();
     command(
@@ -823,7 +616,7 @@ fn placed_ack_preserves_preceding_ws_order_attributes() {
         &mut e,
         socket,
         NOW,
-        r#"{"feed":"open_orders","order":{"order_id":"new","symbol":"PF_XBTUSD","type":"lmt","direction":0,"qty":0.2,"filled":0.05,"limit_price":102}}"#,
+        r#"{"feed":"open_orders","order":{"order_id":"new","symbol":"PF_XBTUSD","type":"lmt","direction":0,"qty":0.15,"filled":0.05,"limit_price":102}}"#,
     );
     ack(&mut e, &r, "new", "placed");
     assert!(done(&mut e).is_ok());
@@ -849,7 +642,7 @@ fn edit_ack_preserves_newer_ws_order_attributes_and_merges_fills() {
         );
         let r = http(&mut e, "editorder");
         let price = if changed { 102.0 } else { 90.0 };
-        let amount = if changed { 0.3 } else { 0.123 };
+        let amount = if changed { 0.25 } else { 0.073 };
         message(&mut e,socket,NOW,&json!({"feed":"open_orders","order":{"order_id":"old","symbol":"PF_XBTUSD","type":"lmt","direction":1,"qty":amount,"filled":0.05,"limit_price":price}}).to_string());
         reply(
             &mut e,
@@ -1234,13 +1027,13 @@ fn edit_and_cancel_statuses_never_claim_a_refusal_after_an_effect() {
         &mut e,
         &r,
         200,
-        r#"{"result":"success","batchStatus":[{"status":"cancelled"},{"status":"notFound","order_id":"b"}]}"#,
+        r#"{"result":"success","batchStatus":[{"status":"cancelled"},{"status":"marketSuspended","order_id":"b"}]}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(
         error.legacy_text(),
-        "Kraken cancellation rejected or identity mismatch: notFound"
+        "Kraken cancellation rejected or identity mismatch: marketSuspended"
     );
 }
 
@@ -1371,9 +1164,46 @@ fn beta_an_old_inflight_read_cannot_clear_a_new_uncertain_write() {
             symbol: "PF_XBTUSD".into(),
         },
     );
+    let cancel = http(&mut e, "cancelallorders");
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"result":"success","cancelStatus":{"status":"noOrdersToCancel"}}"#,
+    );
     assert!(
         e.drain_plain()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 82, .. })))
+    );
+}
+
+#[test]
+fn symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
+    let (mut e, _) = ready();
+    command(
+        &mut e,
+        Command::CancelSymbolOrders {
+            command: 83,
+            symbol: "PF_XBTUSD".into(),
+        },
+    );
+    let cancel = http(&mut e, "cancelallorders");
+    assert!(
+        cancel
+            .body
+            .as_deref()
+            .unwrap_or_default()
+            .contains("symbol=PF_XBTUSD")
+    );
+    reply(
+        &mut e,
+        &cancel,
+        200,
+        r#"{"result":"success","cancelStatus":{"status":"cancelled","cancelledOrders":[]}}"#,
+    );
+    assert!(
+        e.drain_plain()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 83, .. })))
     );
 }
 
@@ -1394,7 +1224,7 @@ fn beta_mixed_cancel_keeps_confirmed_ids_and_unknown() {
         &mut e,
         &request,
         200,
-        r#"{"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"notFound","order_id":"b"}]}"#,
+        r#"{"result":"success","batchStatus":[{"status":"cancelled","order_id":"a"},{"status":"marketSuspended","order_id":"b"}]}"#,
     );
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(error.partial.as_ref().unwrap().order_ids, ["a"]);
@@ -1474,6 +1304,29 @@ fn beta_unknown_placement_fences_retry_and_amend_until_a_fresh_read() {
         83,
     );
     reply(&mut e, &fresh, 200, OPEN);
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 84,
+            orders: vec![limit()],
+        },
+    );
+    http(&mut e, "sendorder");
+}
+
+#[test]
+fn beta_a_rejected_row_on_another_market_releases_the_fence() {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let unknown = http(&mut e, "sendorder");
+    reply(&mut e, &unknown, 503, "<html>");
+    let fresh = http(&mut e, "openorders");
+    reply(
+        &mut e,
+        &fresh,
+        200,
+        r#"{"result":"success","openOrders":[{"order_id":"77","symbol":"PF_ETHUSD"}]}"#,
+    );
     command(
         &mut e,
         Command::PlaceOrders {
@@ -1624,4 +1477,319 @@ fn slow_reconcile(held_completes_cleanly: bool) {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("sendorder")))
     );
+}
+
+// deaws2's live bodies follow.
+#[test]
+fn a_stop_amend_edits_in_place_with_its_stop_price() {
+    let (mut e, _) = ready();
+    inject(
+        &mut e,
+        "old",
+        OrderType::StopLoss,
+        Some(StopTriggerType::LastPrice),
+    );
+    command(
+        &mut e,
+        Command::AmendOrder {
+            command: 8,
+            id: "old".into(),
+            price: Some(85.0),
+            amount: None,
+        },
+    );
+    let r = http(&mut e, "editorder");
+    assert_eq!(param(&r, "stopPrice").unwrap(), "85");
+    assert_eq!(param(&r, "limitPrice"), None);
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"result":"success","editStatus":{"status":"edited","orderId":"old"}}"#,
+    );
+    assert!(done(&mut e).is_ok());
+    assert_eq!(e.store().order("old").unwrap().price, 85.0);
+}
+
+#[test]
+fn a_trailing_stop_amend_still_refuses() {
+    let (mut e, _) = ready();
+    inject(&mut e, "old", OrderType::TrailingStopLoss, None);
+    command(
+        &mut e,
+        Command::AmendOrder {
+            command: 8,
+            id: "old".into(),
+            price: Some(85.0),
+            amount: None,
+        },
+    );
+    assert!(done(&mut e).is_err());
+}
+
+#[test]
+fn an_amend_sends_the_total_under_absolute_quantity_mode() {
+    let (mut e, socket) = ready();
+    inject(&mut e, "old", OrderType::Limit, None);
+    message(&mut e, socket, NOW, &json!({"feed":"open_orders","order":{"order_id":"old","symbol":"PF_XBTUSD","type":"lmt","direction":1,"qty":8.0,"filled":5.0,"limit_price":90}}).to_string());
+    assert_eq!(e.store().order("old").unwrap().amount, 13.0);
+    command(
+        &mut e,
+        Command::AmendOrder {
+            command: 8,
+            id: "old".into(),
+            price: None,
+            amount: Some(13.0),
+        },
+    );
+    let r = http(&mut e, "editorder");
+    assert_eq!(param(&r, "qtyMode").unwrap(), "ABSOLUTE");
+    assert_eq!(param(&r, "size").unwrap(), "13");
+}
+
+#[test]
+fn live_refusal_codes_with_detail_are_refusals_and_leave_no_fence() {
+    for body in [
+        r#"{"result":"error","error":"nonceBelowThreshold: TOO_SMALL"}"#,
+        r#"{"result":"error","error":"invalidArgument: 0"}"#,
+        r#"{"result":"error","error":"invalidSide"}"#,
+        r#"{"status":"BAD_REQUEST","result":"error","errors":[{"code":98,"message":"MAX_LEVERAGE_OUT_OF_BOUNDS"}]}"#,
+    ] {
+        let (mut e, _) = ready();
+        place(&mut e, vec![limit()]);
+        let r = http(&mut e, "sendorder");
+        reply(&mut e, &r, 200, body);
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{body}"
+        );
+        place(&mut e, vec![limit()]);
+        http(&mut e, "sendorder");
+    }
+}
+
+#[test]
+fn a_market_order_placed_with_executions_does_not_rest() {
+    let (mut e, _) = ready();
+    let mut order = limit();
+    order.kind = OrderType::Market;
+    order.price = None;
+    place(&mut e, vec![order]);
+    let r = http(&mut e, "sendorder");
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"result":"success","sendStatus":{"status":"placed","order_id":"m1","orderEvents":[{"type":"EXECUTION","amount":2}]}}"#,
+    );
+    assert!(done(&mut e).is_ok());
+    assert!(e.store().order("m1").is_none());
+}
+
+#[test]
+fn cancelling_a_gone_order_is_done() {
+    let (mut e, _) = ready();
+    inject(&mut e, "a", OrderType::Limit, None);
+    command(
+        &mut e,
+        Command::CancelOrders {
+            command: 8,
+            ids: vec!["a".into()],
+        },
+    );
+    let r = http(&mut e, "cancelorder");
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"result":"success","cancelStatus":{"status":"notFound","order_id":"a"}}"#,
+    );
+    assert!(done(&mut e).is_ok());
+    assert!(e.store().order("a").is_none());
+}
+
+#[test]
+fn order_events_of_any_shape_never_make_a_placed_order_invalid() {
+    for events in [
+        r#"null"#,
+        r#"[{"type":"PLACE","order":{"orderId":"o"},"reducedQuantity":null}]"#,
+        r#"[{"type":"EXECUTION","amount":null},{"type":null}]"#,
+    ] {
+        let (mut e, _) = ready();
+        place(&mut e, vec![limit()]);
+        let r = http(&mut e, "sendorder");
+        let body = format!(
+            r#"{{"result":"success","sendStatus":{{"status":"placed","order_id":"n","orderEvents":{events}}}}}"#
+        );
+        reply(&mut e, &r, 200, &body);
+        assert!(done(&mut e).is_ok(), "{events}");
+    }
+}
+
+fn answer(status: &str) -> (Engine<Kraken>, HttpRequest) {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let write = http(&mut e, "sendorder");
+    let body = format!(r#"{{"result":"success","sendStatus":{{"status":"{status}"}}}}"#);
+    reply(&mut e, &write, 200, &body);
+    (e, write)
+}
+fn outcome_of(actions: &[Action]) -> Option<safe_cex_engine::Outcome> {
+    actions.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { error, .. }) => error.outcome,
+        _ => None,
+    })
+}
+
+#[test]
+fn documented_send_statuses_refuse_and_leave_no_fence() {
+    for status in [
+        "invalidOrderType",
+        "invalidSide",
+        "clientOrderIdTooLong",
+        "invalidDomainConfiguration",
+    ] {
+        let (mut e, _) = answer(status);
+        let settled = e.drain_plain().collect::<Vec<_>>();
+        assert_eq!(
+            outcome_of(&settled),
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{status}"
+        );
+        place(&mut e, vec![limit()]);
+        http(&mut e, "sendorder");
+    }
+}
+
+#[test]
+fn a_duplicate_client_id_stays_unknown() {
+    let (mut e, _) = answer("clientOrderIdAlreadyExist");
+    let settled = e.drain_plain().collect::<Vec<_>>();
+    assert_eq!(
+        outcome_of(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+}
+
+#[test]
+fn a_json_parse_error_in_a_200_refuses_and_leaves_no_fence() {
+    let (mut e, _) = ready();
+    place(&mut e, vec![limit()]);
+    let write = http(&mut e, "sendorder");
+    reply(
+        &mut e,
+        &write,
+        200,
+        r#"{"result":"error","error":"Json Parse Error"}"#,
+    );
+    let settled = e.drain_plain().collect::<Vec<_>>();
+    assert_eq!(
+        outcome_of(&settled),
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
+    place(&mut e, vec![limit()]);
+    http(&mut e, "sendorder");
+}
+
+#[test]
+fn an_unlisted_send_status_stays_unknown_and_clears_on_the_next_read() {
+    let (mut e, _) = answer("wouldProcessAfterSpecifiedTime");
+    let settled = e.drain_plain().collect::<Vec<_>>();
+    assert_eq!(
+        outcome_of(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    let read = settled
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("openorders") => Some(r.clone()),
+            _ => None,
+        })
+        .expect("the read starts with the answer");
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 8,
+            orders: vec![limit()],
+        },
+    );
+    let fenced = e.drain_plain().collect::<Vec<_>>();
+    assert!(
+        !fenced
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("sendorder")))
+    );
+    reply(&mut e, &read, 200, OPEN);
+    command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 9,
+            orders: vec![limit()],
+        },
+    );
+    http(&mut e, "sendorder");
+}
+
+/// Kraken's sendStatus enum lists partiallyFilled: the entry is live, so its brackets follow.
+#[test]
+fn a_partially_filled_entry_still_gets_its_stop() {
+    let (mut e, _) = ready();
+    let mut o = limit();
+    o.stop_loss = Some(90.0);
+    place(&mut e, vec![o]);
+    let entry = http(&mut e, "sendorder");
+    ack(&mut e, &entry, "entry", "partiallyFilled");
+    let sl = http(&mut e, "sendorder");
+    assert_eq!(param(&sl, "orderType").unwrap(), "stp");
+    assert_eq!(param(&sl, "reduceOnly").unwrap(), "true");
+    ack(&mut e, &sl, "stop", "placed");
+    assert_eq!(done(&mut e).unwrap(), r#"["entry","stop"]"#);
+}
+
+#[test]
+fn an_amended_size_is_rounded_to_the_step() {
+    let (mut e, _) = ready();
+    inject(&mut e, "old", OrderType::Limit, None);
+    let mut order = e.store().order("old").unwrap().clone();
+    order.amount = 0.3;
+    order.filled = 0.1;
+    order.remaining = 0.2;
+    e.store_mut().upsert_order(order);
+    command(
+        &mut e,
+        Command::AmendOrder {
+            command: 8,
+            id: "old".into(),
+            price: None,
+            amount: Some(0.3),
+        },
+    );
+    let r = http(&mut e, "editorder");
+    // Kraken's qtyMode ABSOLUTE: the total, fills included, so a fill not yet seen cannot grow it.
+    assert_eq!(param(&r, "qtyMode").unwrap(), "ABSOLUTE");
+    assert_eq!(param(&r, "size").unwrap(), "0.3");
+}
+
+/// An order already filled or gone cannot be cancelled, and that is not a failure.
+#[test]
+fn a_cancel_of_an_order_already_gone_is_done() {
+    for body in [
+        json!({"result":"success","cancelStatus":{"status":"notFound"}}),
+        json!({"result":"success","cancelStatus":{"status":"filled","order_id":"a"}}),
+    ] {
+        let (mut e, _) = ready();
+        inject(&mut e, "a", OrderType::Limit, None);
+        command(
+            &mut e,
+            Command::CancelOrders {
+                command: 8,
+                ids: vec!["a".into()],
+            },
+        );
+        let r = http(&mut e, "cancelorder");
+        reply(&mut e, &r, 200, &body.to_string());
+        assert!(done(&mut e).is_ok(), "{body}");
+    }
 }

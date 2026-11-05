@@ -261,7 +261,7 @@ pub(super) struct ContextRegistry {
     /// Order-read epoch at each live owner's first released Read: one logical
     /// read (pages, coins, products as legs) is only as fresh as its oldest leg.
     #[cfg(feature = "order-locks")]
-    read_marks: Vec<(Owner, u64)>,
+    read_marks: Vec<(Owner, u64, crate::order_read_cover::OrderReadMark)>,
 }
 
 /// Plan-backed executions' physical owners. Few live at once, so a vector
@@ -314,12 +314,18 @@ impl ContextRegistry {
     /// The order-read token for a Read released now under `owner`: the epoch of
     /// its earliest released Read. A mark only ever keeps a fence longer.
     #[cfg(feature = "order-locks")]
-    pub(super) fn read_mark(&mut self, owner: Owner, epoch: u64) -> u64 {
-        if let Some((_, mark)) = self.read_marks.iter().find(|(held, _)| *held == owner) {
-            return *mark;
+    /// The order-lock epoch and release of `owner`'s earliest released leg.
+    pub(super) fn read_mark(
+        &mut self,
+        owner: Owner,
+        epoch: u64,
+        read: crate::order_read_cover::OrderReadMark,
+    ) -> (u64, crate::order_read_cover::OrderReadMark) {
+        if let Some((_, mark, first)) = self.read_marks.iter().find(|(held, ..)| *held == owner) {
+            return (*mark, *first);
         }
-        self.read_marks.push((owner, epoch));
-        epoch
+        self.read_marks.push((owner, epoch, read));
+        (epoch, read)
     }
     #[cfg(all(test, feature = "order-locks"))]
     pub(super) fn read_mark_count(&self) -> usize {
@@ -333,7 +339,7 @@ impl ContextRegistry {
             return;
         }
         let (contexts, commands) = (&self.contexts, &self.commands);
-        self.read_marks.retain(|(owner, _)| {
+        self.read_marks.retain(|(owner, ..)| {
             matches!(owner, Owner::Command { id, generation }
                 if commands.get(id).is_some_and(|live| live.generation == *generation))
                 || contexts.values().any(|context| context.owner() == *owner)
@@ -341,7 +347,7 @@ impl ContextRegistry {
     }
     fn forget_read_mark(&mut self, _owner: Owner) {
         #[cfg(feature = "order-locks")]
-        self.read_marks.retain(|(held, _)| *held != _owner);
+        self.read_marks.retain(|(held, ..)| *held != _owner);
     }
     pub(super) fn prune(&mut self, now: f64) {
         self.contexts.retain(|_, old| old.deadline() > now);
@@ -425,6 +431,11 @@ impl ContextRegistry {
         self.commands
             .get(&command)
             .is_none_or(|owner| owner.credentialed)
+    }
+
+    #[cfg(feature = "order-locks")]
+    pub(super) fn owner_intent(&self, command: CommandId) -> Option<crate::classify::Intent> {
+        self.commands.get(&command).and_then(|owner| owner.intent)
     }
 
     #[cfg(test)]
@@ -1682,6 +1693,7 @@ impl<P> Cx<'_, P> {
         parent: Option<&Context>,
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
+        let policy = discovery_bound(scope, policy, self.store.loaded());
         self.core().make_http_context(scope, policy, parent, egress)
     }
 
@@ -2231,6 +2243,34 @@ impl<P> Cx<'_, P> {
     }
 }
 
+/// Startup discovery's bound. The catalogue and first tickers can be most of a
+/// megabyte through a slow browser relay, and the open is inside the bound too.
+pub const DISCOVERY_TIMEOUT_MS: u32 = 60_000;
+/// Discovery's extra transport-readiness allowance; the host caps readiness
+/// separately without resetting the original request deadline.
+pub const DISCOVERY_READINESS_MS: u32 = 30_000;
+
+/// The standard read bound venues give their reads.
+const READ_TIMEOUT_MS: u32 = 20_000;
+
+/// A public background read on the standard bound, issued before markets and tickers
+/// have loaded, is startup discovery: it gets DISCOVERY_TIMEOUT_MS plus
+/// DISCOVERY_READINESS_MS. Explicit venue bounds and other requests are kept.
+fn discovery_bound(scope: Scope, policy: Policy, loaded: crate::model::Loaded) -> Policy {
+    let discovery = scope == Scope::Background
+        && policy.operation == Operation::Read
+        && policy.credential.is_none()
+        && !(loaded.markets && loaded.tickers);
+    if discovery && policy.timeout_ms == READ_TIMEOUT_MS {
+        Policy {
+            timeout_ms: DISCOVERY_TIMEOUT_MS + DISCOVERY_READINESS_MS,
+            ..policy
+        }
+    } else {
+        policy
+    }
+}
+
 impl crate::engine::CoreCx<'_> {
     fn make_http_context(
         &mut self,
@@ -2427,6 +2467,67 @@ mod tests {
     use super::*;
     use crate::request_context::{Operation, RetryPolicy};
     use crate::{Notice, Store};
+
+    #[test]
+    fn only_standard_public_background_discovery_gets_the_readiness_allowance() {
+        let read = Policy {
+            timeout_ms: 20_000,
+            ..policy()
+        };
+        for (markets, tickers) in [(false, false), (true, false), (false, true)] {
+            let loaded = crate::model::Loaded {
+                markets,
+                tickers,
+                ..Default::default()
+            };
+            assert_eq!(
+                discovery_bound(Scope::Background, read.clone(), loaded).timeout_ms,
+                90_000,
+                "60 s read plus 30 s readiness, before both datasets load"
+            );
+        }
+        let loaded = crate::model::Loaded {
+            markets: true,
+            tickers: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            discovery_bound(Scope::Background, read.clone(), loaded).timeout_ms,
+            20_000
+        );
+        assert_eq!(
+            discovery_bound(Scope::Command(7), read.clone(), Default::default()).timeout_ms,
+            20_000
+        );
+        let private = Policy {
+            credential: Some(crate::request_context::Credential {
+                slot: crate::CredentialSlot::Primary,
+                reference: crate::signing::KeyRef("primary.credential".into()),
+            }),
+            ..read.clone()
+        };
+        let mutation = Policy {
+            operation: Operation::Mutation,
+            ..read.clone()
+        };
+        for other in [private, mutation] {
+            assert_eq!(
+                discovery_bound(Scope::Background, other, Default::default()).timeout_ms,
+                20_000
+            );
+        }
+        for timeout_ms in [1_000, 60_000, 100_000] {
+            let custom = Policy {
+                timeout_ms,
+                ..read.clone()
+            };
+            assert_eq!(
+                discovery_bound(Scope::Background, custom, Default::default()).timeout_ms,
+                timeout_ms,
+                "explicit venue bounds are preserved"
+            );
+        }
+    }
 
     #[test]
     fn native_unproven_public_capture_refuses_invalid_authority_before_callback() {
@@ -2869,9 +2970,23 @@ mod tests {
         let mut registry = ContextRegistry::default();
         let first = registry.issue(1, Scope::Command(7), policy(), 0.).unwrap();
         let other = registry.issue(2, Scope::Background, policy(), 0.).unwrap();
-        assert_eq!(registry.read_mark(first.owner(), 5), 5);
-        assert_eq!(registry.read_mark(first.owner(), 9), 5);
-        assert_eq!(registry.read_mark(other.owner(), 9), 9);
+        let at = |seq, sent| crate::order_read_cover::OrderReadMark {
+            seq,
+            sent,
+            epoch: 0,
+        };
+        assert_eq!(
+            registry.read_mark(first.owner(), 5, at(1, 1.)),
+            (5, at(1, 1.))
+        );
+        assert_eq!(
+            registry.read_mark(first.owner(), 9, at(2, 2.)),
+            (5, at(1, 1.))
+        );
+        assert_eq!(
+            registry.read_mark(other.owner(), 9, at(2, 2.)),
+            (9, at(2, 2.))
+        );
         assert_eq!(registry.read_mark_count(), 2);
     }
 
@@ -2886,27 +3001,34 @@ mod tests {
         let Owner::Command { id, generation } = command.owner() else {
             panic!("a command scope has a command owner");
         };
-        registry.read_mark(command.owner(), 1);
-        registry.read_mark(background.owner(), 1);
+        let at = crate::order_read_cover::OrderReadMark {
+            seq: 0,
+            sent: 0.,
+            epoch: 0,
+        };
+        registry.read_mark(command.owner(), 1, at);
+        registry.read_mark(background.owner(), 1, at);
         registry.read_mark(
             Owner::Command {
                 id,
                 generation: generation + 1,
             },
             1,
+            at,
         );
         registry.read_mark(
             Owner::Background {
                 generation: u64::MAX,
             },
             1,
+            at,
         );
         registry.forget_dead_read_marks();
         assert_eq!(registry.read_mark_count(), 2, "dead and regenerated swept");
         registry.forget_read_mark(background.owner());
         assert_eq!(registry.read_mark_count(), 1);
         assert_eq!(
-            registry.read_mark(command.owner(), 9),
+            registry.read_mark(command.owner(), 9, at).0,
             1,
             "the live mark stays"
         );

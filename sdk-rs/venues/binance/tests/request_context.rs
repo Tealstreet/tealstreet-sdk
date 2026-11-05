@@ -3,6 +3,9 @@ mod support;
 use safe_cex_engine::{Command, Event, Outcome};
 use support::{Harness, Options};
 
+/// Startup discovery's bound (the engine's discovery timeout plus readiness allowance).
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
+
 fn ready() -> Harness {
     let mut h = Harness::started(Options {
         key: Some("api-key".into()),
@@ -545,7 +548,7 @@ fn background_catalogue_reply_at_its_deadline_cannot_publish_markets() {
         ..Options::default()
     });
     let request = h.take("exchangeInfo");
-    h.now += 20_000.;
+    h.now += DISCOVERY_DEADLINE_MS;
     h.reply(request.id, 200, "", support::EXCHANGE_INFO);
     assert!(!h.engine.store().loaded().markets);
     assert!(h.engine.store().markets().is_empty());
@@ -656,14 +659,37 @@ fn mixed_native_cancel_batch_with_proven_effects_is_known_partial_not_rejected()
         h.engine.store().order("12").unwrap().status,
         OrderStatus::Canceled
     );
+    // -2011 reads as it does on a single cancel: gone until a snapshot says otherwise.
     assert_eq!(
         h.engine.store().order("13").unwrap().status,
-        OrderStatus::Open
+        OrderStatus::Canceled
     );
-    let error = &h.failures.iter().find(|(id, _)| *id == 715).unwrap().1;
-    assert_eq!(
-        error.outcome, None,
-        "proven cancellation effects forbid whole-command rejection"
+    assert!(h.failures.iter().all(|(id, _)| *id != 715));
+}
+
+// (8) A row -2011 must not leave the later batches' orders live.
+#[test]
+fn an_unknown_row_in_a_cancel_batch_does_not_stop_the_later_batches() {
+    let mut h = ready();
+    put_order(&mut h);
+    let template = h.engine.store().order("12").unwrap().clone();
+    let ids: Vec<String> = (12..=22).map(|id| id.to_string()).collect();
+    for id in &ids {
+        let mut order = template.clone();
+        order.id = id.clone();
+        h.engine.store_mut().upsert_order(order);
+    }
+    h.event(Event::Command(Command::CancelOrders { command: 716, ids }));
+    let request = h.take("/fapi/v1/batchOrders");
+    let rows: Vec<String> = (12..=20)
+        .map(|id| format!(r#"{{"symbol":"BTCUSDT","orderId":{id},"status":"CANCELED","origQty":"1","executedQty":"0"}}"#))
+        .chain([r#"{"code":-2011,"msg":"unknown order"}"#.to_owned()])
+        .collect();
+    h.reply(request.id, 200, "", &format!("[{}]", rows.join(",")));
+    assert!(
+        h.paths().iter().any(|p| p.starts_with("DELETE")),
+        "{:?}",
+        h.paths()
     );
 }
 

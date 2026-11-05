@@ -501,11 +501,28 @@ describe('Rust frame recovery callers', () => {
     expect(fills.map((fill) => fill.orderId)).toEqual(['order-1', 'order-1']);
     expect(accountAtFill).toEqual(Array(2).fill({ total: 42, orderId: 'order-1' }));
     expect(store.positions[0].contracts).toBe(0.5);
-    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes);
+    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes, false);
     expect(bytes.byteLength).toBe(0);
     expect(new Frame(forwarded!).balance()?.total).toBe(42);
     expect(snapshot).not.toHaveBeenCalled();
     expect(exchange.isDisposed).toBe(false);
+    exchange.dispose();
+  });
+
+  it('keeps book listeners fed when the frame consumer is a frame-fed page engine', () => {
+    const store = new DefaultStore();
+    const exchange = new RustEngineExchange('binance', { key: '', secret: '' }, store);
+    installHost(exchange, vi.fn());
+    const ordinary = vi.fn();
+    const internal = exchange as unknown as { bookListeners: Map<string, Map<number, () => void>> };
+    internal.bookListeners.set('BTCUSDT', new Map([[1, ordinary]]));
+    // forwardFrames: the page engine ingests account sections only.
+    exchange.framesCarryMarketData = false;
+    const forward = vi.fn();
+    exchange.onFrame = forward;
+    receive(exchange, fixture());
+    expect(ordinary).toHaveBeenCalledTimes(1);
+    expect(forward).toHaveBeenCalledTimes(1);
     exchange.dispose();
   });
 
@@ -521,7 +538,7 @@ describe('Rust frame recovery callers', () => {
     receive(exchange, bytes);
     expect(shared.validateMarkets).not.toHaveBeenCalled();
     expect(shared.send).not.toHaveBeenCalled();
-    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes);
+    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes, false);
     expect(exchange.isDisposed).toBe(false);
     exchange.dispose();
   });
@@ -567,7 +584,7 @@ describe('Rust frame recovery callers', () => {
     expect(() => receive(exchange, bytes)).not.toThrow();
     expect(fills.map((fill) => fill.orderId)).toEqual(['order-1', 'order-1']);
     expect(accountAtFill).toEqual(Array(2).fill({ disposed: false, total: 42, orderId: 'order-1', contracts: 0.5 }));
-    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes);
+    expect(exchange.onFrame).toHaveBeenCalledExactlyOnceWith(bytes, false);
     expect(shared.validateMarkets).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ symbol: 'BTCUSDT' })]);
     expect(error).toHaveBeenCalledTimes(1);
     expect(errors).toEqual([{ message: failure.message, disposed: false }]);
@@ -782,7 +799,7 @@ describe('Rust frame recovery callers', () => {
 
   it('publishes KuCoin Spot leverage acknowledgements from engine SETTINGS and keeps them authoritative', async () => {
     const store = new DefaultStore();
-    const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret' }, store);
+    const exchange = new RustEngineExchange('kucoinspot', { key: 'key', secret: 'secret', passphrase: 'fixture-passphrase' }, store);
     receive(exchange, fixture({ fills: 0 }));
     const command = vi.fn().mockResolvedValue(undefined);
     (exchange as unknown as { command: unknown }).command = command;
@@ -868,7 +885,8 @@ describe('Rust frame recovery callers', () => {
       const store = new DefaultStore();
       const exchange = new RustEngineExchange(venue, { key: 'key', secret: 'secret' }, store);
       adoptEngineCapabilities(exchange);
-      receive(exchange, fixture({ fills: 0 }));
+      // The metadata refresh waits for the engine's own markets, which only a frame's status can say.
+      receive(exchange, fixture({ fills: 0, loaded: LOADED_FLAG.MARKETS }));
       const rails = { buyLeverage: 7, sellLeverage: 9 };
       const command = vi.fn().mockResolvedValue(rails);
       (exchange as unknown as { command: unknown }).command = command;

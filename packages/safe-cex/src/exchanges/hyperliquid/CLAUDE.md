@@ -30,6 +30,44 @@ are ignored. Shared ticker input updates native state without replacing local
 market metadata or account settings. Shared quote changes invoke native account
 revaluation so UPNL and available margin follow provider prices.
 
+## Rust startup reads
+
+Open-order snapshot failures retry per DEX scope with jittered backoff, including
+when another scope already loaded orders. A successful scope clears its own retry;
+429 responses retain the header-proven Retry-After delay. An unusable metadata
+join preserves orders and retries instead of silently ending the read.
+
+The SDK transport admits all `/info` reads through one weighted token bucket per
+API origin, including metadata, candles and history. Its initial 1,000-weight
+capacity permits cold discovery immediately, then refills at 1,000 weight/minute.
+A 429 empties the bucket and pauses refill until Retry-After ends. Immediately
+before dispatch, an atomic shared-state check refuses prepared reads whose grant
+generation changed or whose origin is paused. Managed claim and send execute
+synchronously within that check, before the transaction releases its lock.
+Atomic IndexedDB transactions share admission and 429 pauses across account
+workers/tabs; runtimes without
+IndexedDB share a budget within their JS realm. Storage operations have a 1.5-second
+timeout and retry once on timeout before degrading. Hard errors or repeated
+timeouts use a shared local budget, retaining known pacing state. Local admission
+keeps normal speed until IndexedDB has opened successfully in this realm; later
+storage failures use one-quarter speed because shared and local budgets may split.
+After a 30-second cooldown, reads retry IndexedDB and max-merge local
+reservations and 429 pauses back into shared state, invalidating prior grants.
+While storage is unavailable, independent realms cannot share their 429 pauses.
+If IDB never opens, each realm has its own full 1,000-weight initial bucket.
+Only pacing timestamps and retry counters are stored, never account or request
+data. Persisted pauses/reservations are
+bounded relative to the current clock, and Retry-After pauses cap at five minutes.
+Admission and pauses spend the existing HTTP deadline and abort signal before
+managed send claim. Response bookkeeping never rejects a received answer; a
+successful response does not wait for it. Storage degradation logs once per realm.
+
+The nonterminal `startup.incomplete` notice exposes a closed stage name, elapsed
+startup time, the original 60-second warning threshold, the 20-second read timeout
+and this engine's observed `/info` 429 count. The SDK forwards only these stage
+and numeric facts as Sentry tags; wallet identities and request data are excluded.
+Nonfinite transport clocks omit timing fields rather than publishing invalid numbers.
+
 ## Rust margin settings and standalone spot orders
 
 HIP-3 assets get no `activeAssetData` subscription (channel limit), so the Rust
@@ -250,6 +288,16 @@ with no way out.
 
 `HyperliquidExchange.getBuilderInfo()` is the only order-path builder-info gate. Keep it tied to the live `maxBuilderFee` approval state; do not reintroduce environment-based signing helpers.
 
+**Open feature: sub-builders.** Hyperliquid order actions now allow
+`builder.s`, an optional list of up to five sub-builders that receive part of the
+same builder fee. Each entry is `{ b, s }`, where `b` is an existing user address
+and `s` is the share of the builder fee in 0.001% units; shares must be positive
+and sum to at most 100%, with the primary builder receiving the remainder. This
+could support direct partner/affiliate revenue sharing later, but it is NOT wired
+today: `getBuilderInfo()` still returns only `{ b, f }`. Before implementing,
+verify approval semantics, partner wallet eligibility, revenue ingestion, and
+fallback behavior for accounts whose builder approval predates any split.
+
 ### EIP-712 Domain Details
 
 | Domain                         | Name                         | Version | ChainId                     | Usage                                                                |
@@ -378,6 +426,30 @@ fill would make the replacement overfill the target.
 | `vaultTransfer`        | Transfer to/from vault                                             |
 | `approveAgent`         | Approve agent wallet                                               |
 | `approveBuilderFee`    | Approve builder fee                                                |
+
+### Future API announcements
+
+As of 2026-10-30 these upstream changes have been announced but should not be
+implemented during the code freeze:
+
+- Hyperliquid announced that, on a future network upgrade, native TWAP orders
+  with a stop price will be paused instead of canceled when the stop price is
+  breached, and can resume if the stop price is no longer breached within the
+  TWAP duration. The TS reference adapter does not currently place
+  venue-native TWAP actions; Tealstreet TWAP is a worker/Rust algo that slices
+  ordinary orders. If native Hyperliquid TWAP support or TWAP history/status
+  handling is added later, do not model a stop-price breach as a terminal
+  cancellation without checking for the new paused/resumable state.
+- Hyperliquid also reminded integrators that batched actions are treated with
+  less weight than equivalent unbatched actions during congestion. The current
+  public docs still say `/exchange` IP-based request weight is
+  `1 + floor(batch_length / 40)`, while batched requests count as `n` requests
+  for address-based limits. `hyperliquid.rateLimiter.ts` already models the
+  documented batch-length weight for `order`, `cancel`, `cancelByCloid`, and
+  `batchModify`. After the freeze, prefer batching bursty order/cancel/modify
+  flows where semantics allow it, but preserve per-order response mapping,
+  cancel suppression, optimistic/reconciliation behavior, and the no-retry rule
+  for writes whose accepted/failed state may be unknown.
 
 ### Dead man's switch (`scheduleCancel`)
 

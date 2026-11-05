@@ -2,13 +2,60 @@
 use crate::{Hyperliquid, Pending, wire::*};
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
+use safe_cex_engine::fresh_positions;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, FillFinancials, Method, Response, TimerId, json};
+use safe_cex_engine::{
+    Cx, ErrorKind, Fill, FillFinancials, Method, Response, TimerId, VenueError, json,
+};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+/// How soon `readPositions` tries again after a read a newer stream frame held.
+const UNREADABLE_ORDER: &str = "Hyperliquid returned an open order this account cannot read, so a fresh read cannot clear this. Cancel that order on Hyperliquid to resume";
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
+// Four engines expose at most twelve ordinary 20-weight reads: 14.4 s of
+// refill, leaving margin inside an issued read's unchanged 20 s deadline.
+const MAX_BACKGROUND_READS: u8 = 3;
+
+/// What a state read did to the store, for the `readPositions` waiting on it.
+enum StateApplied {
+    /// The symbols of owned rows on coins hidden by design.
+    Committed(Vec<String>),
+    /// A newer stream frame overrode this read.
+    Held,
+    Unusable(&'static str),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BootstrapRead {
+    State,
+    Spot,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrivateReadKind {
+    State,
+    Spot,
+    Orders,
+    Role,
+    Mode,
+    Discovery,
+}
+impl PrivateReadKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::Spot => "spot",
+            Self::Orders => "orders",
+            Self::Role => "role",
+            Self::Mode => "mode",
+            Self::Discovery => "discovery",
+        }
+    }
+}
 
 pub enum Request {
     Role,
@@ -17,6 +64,7 @@ pub enum Request {
         dex: String,
         revision: u64,
         settings_revision: u64,
+        read: u32,
     },
     Orders {
         epoch: u64,
@@ -36,6 +84,13 @@ pub enum Request {
     },
     Builder,
     Fees,
+    AmendSource {
+        id: String,
+    },
+    /// The frame-fed page never ran the startup role read; its amend reads need the account.
+    AmendRole {
+        id: String,
+    },
 }
 impl Request {
     pub(crate) fn is_builder(&self) -> bool {
@@ -54,11 +109,27 @@ impl ReadContinuation {
         }
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ReadPriority {
+    Foreground,
+    Core,
+    Background,
+}
 struct QueuedRead {
     body: String,
-    request: ReadContinuation,
+    continuation: ReadContinuation,
     streamed: bool,
     weight: u32,
+    priority: ReadPriority,
+}
+impl QueuedRead {
+    fn occupies_account_slot(&self) -> bool {
+        self.priority != ReadPriority::Foreground
+            || matches!(
+                &self.continuation,
+                ReadContinuation::Account(Request::Orders { .. })
+            )
+    }
 }
 struct SettingBarrier {
     at: f64,
@@ -72,20 +143,33 @@ struct PendingSpotCollateral {
     ws: bool,
 }
 
+/// Account lookups at start: tries before the failure is shown, and the wait before each retry.
+const LOOKUP_TRIES: u32 = 4;
+fn backoff_ms(tries: u32) -> f64 {
+    2_000.0 * f64::from(1u32 << tries.min(4).saturating_sub(1))
+}
+
 #[derive(Default)]
 pub struct Account {
     pub started: bool,
     mode: Mode,
     mode_resolved: bool,
     pub(crate) mode_refresh_due: bool,
-    mode_timer: Option<TimerId>,
-    role_timer: Option<TimerId>,
+    // Managed read completion/deadline owns retries, including host quota waits.
+    mode_pending: bool,
+    role_pending: bool,
+    // A failed lookup is retried with backoff; its timer and the tries so far.
+    role_retry: Option<TimerId>,
+    role_attempts: u32,
+    mode_retry: Option<TimerId>,
+    mode_attempts: u32,
     sync_timer: Option<TimerId>,
     last_order_refresh: f64,
     read_timer: Option<TimerId>,
     read_window: f64,
     read_weight: u32,
     reads: VecDeque<QueuedRead>,
+    background_reads: u8,
     pub refresh_timer: Option<TimerId>,
     spot_at: f64,
     spot_forced_at: Option<f64>,
@@ -99,10 +183,22 @@ pub struct Account {
     pending_spot: Option<PendingSpotCollateral>,
     authoritative: Option<(f64, f64, f64)>,
     state_revision: HashMap<String, u64>,
+    /// Numbers each dex's state reads, so `readPositions` can name one it may trust.
+    state_reads: HashMap<String, u32>,
+    pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     settings_revision: u64,
     settings_barriers: HashMap<String, SettingBarrier>,
     asset_retry: HashSet<String>,
     asset_retry_timer: Option<TimerId>,
+    /// The next queued read is a fence reconcile.
+    fence_read: bool,
+    orders_retry: safe_cex_engine::startup::Backoff<String>,
+    bootstrap_retry: safe_cex_engine::startup::Backoff<BootstrapRead>,
+    pub(crate) last_failed_private_read_kind: Option<PrivateReadKind>,
+    pub(crate) builder_read_at: f64,
     state_time: HashMap<String, f64>,
     position_time: HashMap<String, f64>,
     snapshot_time: HashMap<String, f64>,
@@ -113,6 +209,8 @@ pub struct Account {
     inflight: HashSet<String>,
     orders_refresh_due: HashSet<String>,
     pub suppressed: HashMap<String, f64>,
+    /// The read epoch of each dex's last clean order census, "" the main one.
+    pub clean_dexes: HashMap<String, u64>,
     seen_fills: HashSet<u64>,
     fill_queue: VecDeque<u64>,
     spot_filled: HashMap<String, (String, f64)>,
@@ -182,6 +280,19 @@ impl Hyperliquid {
             self.account.spot_filled.remove(&id);
         }
     }
+    fn apply_role(&mut self, raw: &str) {
+        if let Ok(role) = serde_json::from_str::<Role>(raw) {
+            match role.role.as_ref() {
+                "user" => self.options.application_id = self.options.key.clone(),
+                "agent" => self.options.application_id = role.data.user.map(|v| v.into_owned()),
+                "subAccount" => {
+                    self.options.application_id = role.data.master.map(|v| v.into_owned())
+                }
+                "vault" => self.options.vault = self.options.key.clone(),
+                _ => {}
+            }
+        }
+    }
     pub(crate) fn user(&self) -> Option<&str> {
         self.options
             .vault
@@ -223,20 +334,51 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         body: String,
-        request: Request,
+        account_request: Request,
         streamed: bool,
     ) {
-        let weight = match &request {
+        // Frame-fed: account state arrives as frames; only an unknown builder
+        // approval is read, once, before the first placement.
+        if cx.frame_fed() {
+            match &account_request {
+                Request::Builder | Request::AmendSource { .. } | Request::AmendRole { .. } => {}
+                _ => return,
+            }
+        }
+        let weight = match &account_request {
             Request::Role => 60,
             Request::State { .. } | Request::Spot { .. } => 2,
             _ => 20,
         };
-        self.account.reads.push_back(QueuedRead {
+        let urgent = std::mem::take(&mut self.account.fence_read)
+            || matches!(
+                &account_request,
+                Request::AmendSource { .. } | Request::AmendRole { .. } | Request::Asset { .. }
+            );
+        let core = match &account_request {
+            Request::Role | Request::Mode | Request::Spot { .. } => true,
+            Request::State { dex, .. } | Request::Orders { dex, .. } => dex.is_empty(),
+            _ => false,
+        };
+        let read = QueuedRead {
             body,
-            request: ReadContinuation::Account(request),
+            continuation: ReadContinuation::Account(account_request),
             streamed,
             weight,
-        });
+            priority: if urgent {
+                ReadPriority::Foreground
+            } else if core {
+                ReadPriority::Core
+            } else {
+                ReadPriority::Background
+            },
+        };
+        // Foreground reconciliation takes priority without bypassing the Orders fan-out cap.
+        if urgent {
+            self.account.reads.push_front(read);
+        } else {
+            self.account.reads.push_back(read);
+        }
         self.pump_reads(cx);
     }
     pub(crate) fn history_read(
@@ -249,9 +391,10 @@ impl Hyperliquid {
         let weight = if streamed { 120 } else { 2 };
         self.account.reads.push_back(QueuedRead {
             body,
-            request: ReadContinuation::History(Box::new(request)),
+            continuation: ReadContinuation::History(Box::new(request)),
             streamed,
             weight,
+            priority: ReadPriority::Foreground,
         });
         self.pump_reads(cx);
     }
@@ -271,7 +414,19 @@ impl Hyperliquid {
             self.account.read_window = cx.now;
             self.account.read_weight = 0;
         }
-        while let Some(read) = self.account.reads.front() {
+        while let Some(index) = self
+            .account
+            .reads
+            .iter()
+            .enumerate()
+            .filter(|(_, read)| {
+                self.account.background_reads < MAX_BACKGROUND_READS
+                    || !read.occupies_account_slot()
+            })
+            .min_by_key(|(_, read)| read.priority)
+            .map(|(index, _)| index)
+        {
+            let read = &self.account.reads[index];
             // Leave headroom for chart reads and trading in the shared IP budget.
             if self.account.read_weight + read.weight > 1000 {
                 if self.account.read_timer.is_none() {
@@ -281,13 +436,14 @@ impl Hyperliquid {
                 }
                 return;
             }
-            let read = self.account.reads.pop_front().unwrap();
+            let read = self.account.reads.remove(index).unwrap();
             let read = match read {
                 QueuedRead {
                     body,
-                    request: ReadContinuation::History(mut history),
+                    continuation: ReadContinuation::History(mut history),
                     streamed,
                     weight,
+                    ..
                 } => {
                     let leg = match cx.http_leg_context(
                         history.root(),
@@ -330,24 +486,39 @@ impl Hyperliquid {
                 }
                 read => read,
             };
+            let background = read.occupies_account_slot();
             let QueuedRead {
                 body,
-                request,
+                continuation,
                 streamed,
                 weight,
+                ..
             } = read;
             self.account.read_weight += weight;
-            if streamed {
-                self.info(cx, body, ArrayAt::Root, request.pending());
-            } else {
-                self.info_read(cx, body, request.pending(), None);
+            if background {
+                self.account.background_reads += 1;
             }
+            // Only issued reads acquire a managed deadline; queued intents own no grant.
+            self.info_read(
+                cx,
+                body,
+                continuation.pending(),
+                streamed.then_some(ArrayAt::Root),
+                background,
+            );
+        }
+    }
+    pub(crate) fn finish_background_read(&mut self, cx: &mut Cx<'_, Pending>, background: bool) {
+        if background {
+            debug_assert!(self.account.background_reads > 0);
+            self.account.background_reads -= 1;
+            self.pump_reads(cx);
         }
     }
     pub(crate) fn discard_history_owner(&mut self, owner: safe_cex_engine::request_context::Owner) {
         self.account.reads.retain(|read| match read {
             QueuedRead {
-                request: ReadContinuation::History(history),
+                continuation: ReadContinuation::History(history),
                 ..
             } => history.root().owner() != owner,
             _ => true,
@@ -376,6 +547,20 @@ impl Hyperliquid {
             }),
         }
     }
+    pub(crate) fn startup_private_stage(&self) -> &'static str {
+        if self.spot {
+            "spotClearinghouseState"
+        } else if !self.account.mode_resolved {
+            "userAbstraction"
+        } else if self.account.core_loaded
+            && self.account.mode != Mode::Standard
+            && self.account.spot.is_none()
+        {
+            "spotClearinghouseState"
+        } else {
+            "clearinghouseState"
+        }
+    }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started {
             return;
@@ -384,8 +569,9 @@ impl Hyperliquid {
         if !self.options.public_data_only
             && let Some(actual) = self.sealed_agent()
         {
-            let expected = self.options.key.as_deref().or(self.user());
-            if let Some(expected) = expected
+            // Only the API wallet field names the signer. The trading account is
+            // another wallet by design, and a Hosted server holds no such field.
+            if let Some(expected) = self.options.key.as_deref()
                 && !actual.eq_ignore_ascii_case(expected)
             {
                 cx.notice(
@@ -395,9 +581,25 @@ impl Hyperliquid {
                 );
             }
         }
+        if cx.frame_fed() {
+            // The data source owns the account rows, settings and polls.
+            if self.spot {
+                self.account.mode_resolved = true;
+                self.account.builder_approved = Some(false);
+            }
+            return;
+        }
         // Partial discovery may start real account reads, not an empty snapshot.
-        if self.spot || !self.core_discovery_incomplete || self.options.public_data_only {
+        // A keyed account's own reads load it: empty here would read as no open orders.
+        // A key whose account is still being looked up has rows we have not read: not empty ones.
+        let resolving =
+            self.user().is_none() && self.options.key.is_some() && !self.options.public_data_only;
+        if self.options.public_data_only || (self.user().is_none() && !resolving) {
             cx.store.set_orders(Vec::new());
+        }
+        if !resolving
+            && (self.spot || !self.core_discovery_incomplete || self.options.public_data_only)
+        {
             cx.store.set_positions(Vec::new());
         }
         if self.options.public_data_only {
@@ -435,33 +637,74 @@ impl Hyperliquid {
             return;
         }
         if self.user().is_none() {
-            if let Some(key) = self.options.key.as_deref() {
-                #[derive(Serialize)]
-                struct Read<'a> {
-                    r#type: &'static str,
-                    user: &'a str,
-                }
-                self.read_body(
-                    cx,
-                    serde_json::to_string(&Read {
-                        r#type: "userRole",
-                        user: key,
-                    })
-                    .unwrap(),
-                    Request::Role,
-                );
-                self.account.role_timer = Some(cx.set_timer(6000.0));
-            }
+            self.send_role(cx);
             return;
         }
         self.private_bootstrap(cx);
     }
-    fn private_bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account_read(cx, "userFees", None, Request::Fees, false);
+    fn send_role(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.role_pending {
+            return;
+        }
+        let Some(key) = self.options.key.as_deref() else {
+            return;
+        };
+        #[derive(Serialize)]
+        struct Read<'a> {
+            r#type: &'static str,
+            user: &'a str,
+        }
+        let body = serde_json::to_string(&Read {
+            r#type: "userRole",
+            user: key,
+        })
+        .unwrap();
+        self.account.role_attempts += 1;
+        self.account.role_pending = true;
+        self.read_body(cx, body, Request::Role);
+    }
+    /// Retries with backoff; once spent, the user is told the rows are not shown.
+    fn role_failed(&mut self, cx: &mut Cx<'_, Pending>, why: &str) {
+        self.account.role_pending = false;
+        if self.user().is_some() || self.account.role_retry.is_some() {
+            return;
+        }
+        let tries = self.account.role_attempts;
+        if tries < LOOKUP_TRIES {
+            self.account.role_retry = Some(cx.set_timer(backoff_ms(tries)));
+            return;
+        }
+        cx.notice(
+            Level::Error,
+            code::REQUEST_FAILED,
+            format!(
+                "Hyperliquid account identity could not be resolved after {tries} tries ({why}): positions and orders are not shown. Reconnect the account to try again."
+            ),
+        );
+    }
+    fn mode_failed(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.mode_pending = false;
+        if !self.account.mode_resolved {
+            self.mode_ready(cx);
+        }
+        if self.account.mode_retry.is_none() && self.account.mode_attempts < LOOKUP_TRIES {
+            self.account.mode_retry =
+                Some(cx.set_timer(backoff_ms(self.account.mode_attempts.max(1))));
+        }
+    }
+    fn send_mode(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.mode_pending {
+            return;
+        }
+        self.account.mode_pending = true;
+        self.account.mode_attempts += 1;
         self.account_read(cx, "userAbstraction", None, Request::Mode, false);
-        self.account.mode_timer = Some(cx.set_timer(6000.0));
-        self.check_builder(cx);
+    }
+    fn private_bootstrap(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.send_mode(cx);
         self.refresh_account(cx);
+        self.account_read(cx, "userFees", None, Request::Fees, false);
+        self.check_builder(cx);
         if !self.dex_names.is_empty() {
             self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
                 120_000.0,
@@ -483,6 +726,7 @@ impl Hyperliquid {
             user: &'a str,
             builder: &'a str,
         }
+        self.account.builder_read_at = cx.now;
         let b = self.builder();
         self.read_body(
             cx,
@@ -494,6 +738,47 @@ impl Hyperliquid {
             .unwrap(),
             Request::Builder,
         );
+    }
+    pub(crate) fn read_amend_source(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        #[derive(Serialize)]
+        struct Read<'a> {
+            r#type: &'static str,
+            user: &'a str,
+            oid: u64,
+        }
+        let Ok(oid) = id.parse::<u64>() else {
+            self.amend_source_read(cx, id, Err("the order ID is not numeric".to_owned()));
+            return;
+        };
+        let Some(user) = self.user() else {
+            let Some(key) = self.options.key.as_deref() else {
+                self.amend_source_read(cx, id, Err("the account is not resolved".to_owned()));
+                return;
+            };
+            #[derive(Serialize)]
+            struct Role<'a> {
+                r#type: &'static str,
+                user: &'a str,
+            }
+            let body = serde_json::to_string(&Role {
+                r#type: "userRole",
+                user: key,
+            })
+            .unwrap();
+            self.account.fence_read = true;
+            self.read_body(cx, body, Request::AmendRole { id: id.to_owned() });
+            self.account.fence_read = false;
+            return;
+        };
+        let body = serde_json::to_string(&Read {
+            r#type: "orderStatus",
+            user,
+            oid,
+        })
+        .unwrap();
+        self.account.fence_read = true;
+        self.read_body(cx, body, Request::AmendSource { id: id.to_owned() });
+        self.account.fence_read = false;
     }
     pub(crate) fn builder(&self) -> crate::Builder {
         let mut builder = self
@@ -530,6 +815,10 @@ impl Hyperliquid {
             return;
         }
         let revision = *self.account.state_revision.get(dex).unwrap_or(&0);
+        let read = self.account.state_reads.entry(dex.into()).or_default();
+        *read += 1;
+        let read = *read;
+        self.account.fence_read |= self.account.fresh_positions.owed(self.dex_key(dex));
         self.account_read(
             cx,
             "clearinghouseState",
@@ -538,6 +827,7 @@ impl Hyperliquid {
                 dex: dex.into(),
                 revision,
                 settings_revision: self.account.settings_revision,
+                read,
             },
             false,
         );
@@ -557,35 +847,36 @@ impl Hyperliquid {
     pub(crate) fn reconcile_order_scopes(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        symbols: Option<&[String]>,
+        _symbols: Option<&[String]>,
     ) {
-        let mut dexes = if let Some(symbols) =
-            symbols.filter(|symbols| symbols.iter().all(|s| cx.store.market(s).is_some()))
-        {
-            symbols
-                .iter()
-                .map(|symbol| self.dex_of(cx, symbol).to_owned())
-                .collect::<Vec<_>>()
-        } else {
-            std::iter::once(String::new())
-                .chain(self.dex_names.iter().cloned())
-                .collect()
-        };
-        dexes.sort();
-        dexes.dedup();
+        // Core and every dex, whatever the symbols: the account cover joins
+        // them all (H9), so a symbol's dex alone could never answer a refresh ask.
+        let dexes: Vec<String> = std::iter::once(String::new())
+            .chain(self.dex_names.iter().cloned())
+            .collect();
         for dex in dexes {
             if self.account.inflight.contains(&format!("orders:{dex}")) {
                 if !cx.reconcile_reask() {
-                    self.account.orders_refresh_due.insert(dex);
+                    self.account.orders_refresh_due.insert(dex.clone());
+                    if let Some(read) = self.account.reads.iter_mut().find(|read| matches!(&read.continuation,
+                        ReadContinuation::Account(Request::Orders { dex: queued, .. }) if queued == &dex)) {
+                        // Promotion preserves the census epoch captured before the uncertain write.
+                        read.priority = ReadPriority::Foreground;
+                    }
+                    self.pump_reads(cx);
                 }
             } else {
+                self.account.fence_read = true;
                 self.refresh_orders_scope(cx, &dex);
+                self.account.fence_read = false;
             }
         }
     }
     fn refresh_owed_orders(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
         if self.account.orders_refresh_due.remove(dex) {
+            self.account.fence_read = true;
             self.refresh_orders_scope(cx, dex);
+            self.account.fence_read = false;
         }
     }
     fn refresh_orders_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
@@ -661,9 +952,6 @@ impl Hyperliquid {
     }
     fn mode_ready(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.mode_resolved = true;
-        if let Some(t) = self.account.mode_timer.take() {
-            cx.clear_timer(t);
-        }
         self.account.mode_refresh_due = true;
         self.schedule_socket_refresh(cx, true);
     }
@@ -786,25 +1074,15 @@ impl Hyperliquid {
         let raw = response.body;
         match request {
             Request::Role => {
-                if self.account.role_timer.is_none() {
+                // A late answer still counts while the account is unresolved.
+                if self.user().is_some() {
                     return;
                 }
-                if let Some(t) = self.account.role_timer.take() {
+                self.account.role_pending = false;
+                if let Some(t) = self.account.role_retry.take() {
                     cx.clear_timer(t);
                 }
-                if let Ok(role) = serde_json::from_str::<Role>(raw) {
-                    match role.role.as_ref() {
-                        "user" => self.options.application_id = self.options.key.clone(),
-                        "agent" => {
-                            self.options.application_id = role.data.user.map(|v| v.into_owned())
-                        }
-                        "subAccount" => {
-                            self.options.application_id = role.data.master.map(|v| v.into_owned())
-                        }
-                        "vault" => self.options.vault = self.options.key.clone(),
-                        _ => {}
-                    }
-                }
+                self.apply_role(raw);
                 if self.user().is_some() {
                     self.private_bootstrap(cx);
                 } else {
@@ -816,20 +1094,60 @@ impl Hyperliquid {
                 }
             }
             Request::Mode => {
-                if self.account.mode_resolved {
-                    return;
-                }
-                self.account.mode = match serde_json::from_str::<&str>(raw).unwrap_or("") {
+                self.account.mode_pending = false;
+                let mode = match serde_json::from_str::<&str>(raw).unwrap_or("") {
                     "unifiedAccount" => Mode::Unified,
                     "portfolioMargin" => Mode::Portfolio,
                     _ => Mode::Standard,
                 };
+                if let Some(t) = self.account.mode_retry.take() {
+                    cx.clear_timer(t);
+                }
+                // A retried read corrects the fallback, which refreshes spot holdings and sockets.
+                if self.account.mode_resolved && mode == self.account.mode {
+                    return;
+                }
+                self.account.mode = mode;
                 self.mode_ready(cx);
             }
             Request::Builder => {
                 self.account.builder_approved = serde_json::from_str::<Num>(raw)
                     .ok()
                     .map(|n| n.0 >= f64::from(self.builder().f));
+                // Frame-fed: this engine's own read outlasts a source that has not re-read.
+                if self.account.builder_approved.is_some() {
+                    cx.hold_setting(crate::BUILDER_HOLD.clone());
+                }
+            }
+            Request::AmendRole { id } => {
+                self.apply_role(raw);
+                if self.user().is_some() {
+                    self.read_amend_source(cx, &id);
+                } else {
+                    self.amend_source_read(cx, &id, Err("the account is not resolved".to_owned()));
+                }
+            }
+            Request::AmendSource { id } => {
+                #[derive(serde::Deserialize)]
+                struct Lookup<'a> {
+                    #[serde(borrow)]
+                    status: &'a str,
+                    #[serde(default, borrow)]
+                    order: Option<crate::wire::OrderUpdate<'a>>,
+                }
+                let read = serde_json::from_str::<Lookup>(raw)
+                    .ok()
+                    .filter(|lookup| lookup.status == "order")
+                    .and_then(|lookup| lookup.order)
+                    .ok_or_else(|| "the order read was unreadable".to_owned());
+                match read {
+                    Ok(row) => self.amend_source_read(
+                        cx,
+                        &id,
+                        Ok((row.status.as_ref(), row.order.orig_sz, row.order.sz)),
+                    ),
+                    Err(error) => self.amend_source_read(cx, &id, Err(error)),
+                }
             }
             Request::Fees => {
                 #[derive(serde::Deserialize)]
@@ -851,8 +1169,10 @@ impl Hyperliquid {
                 dex,
                 revision,
                 settings_revision,
+                read,
             } => {
                 self.account.inflight.remove(&format!("state:{dex}"));
+                let mut applied = StateApplied::Held;
                 if let Ok(state) = serde_json::from_str::<Clearinghouse>(raw) {
                     let changed =
                         self.account.state_revision.get(&dex).copied().unwrap_or(0) != revision;
@@ -860,7 +1180,14 @@ impl Hyperliquid {
                         || (state.server_time.or(state.time).is_some()
                             && self.account.state_time.contains_key(&dex))
                     {
-                        self.apply_state(cx, &dex, &state, true, Some(settings_revision));
+                        applied = self.apply_state(
+                            cx,
+                            &dex,
+                            &state,
+                            true,
+                            false,
+                            Some(settings_revision),
+                        );
                     }
                 } else {
                     cx.notice(
@@ -868,6 +1195,14 @@ impl Hyperliquid {
                         code::SNAPSHOT_DISCARDED,
                         "Malformed Hyperliquid account state; preserving last snapshot",
                     );
+                    applied = StateApplied::Unusable("Malformed Hyperliquid account state");
+                }
+                if let StateApplied::Unusable(message) = &applied {
+                    self.private_read_failed(cx, PrivateReadKind::State, message);
+                }
+                self.settle_fresh_positions(cx, &dex, read, applied);
+                if dex.is_empty() {
+                    self.retry_bootstrap_read(cx, BootstrapRead::State);
                 }
             }
             Request::Orders {
@@ -881,9 +1216,13 @@ impl Hyperliquid {
             } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
                 if !valid {
+                    self.account
+                        .orders_retry
+                        .failed_after(cx, dex.clone(), 5000.0);
                     self.refresh_owed_orders(cx, &dex);
                     return;
                 }
+                self.account.orders_retry.succeeded(cx, &dex);
                 if self.account.orders_revision.get(&dex).copied().unwrap_or(0) != revision {
                     self.schedule_orders(cx);
                     self.refresh_owed_orders(cx, &dex);
@@ -917,7 +1256,46 @@ impl Hyperliquid {
                         merged.push(order);
                     }
                 }
-                cx.store.set_orders(merged);
+                // This dex's rows and the cover its read proves, together. The
+                // account is every dex, and no account cover is proved before
+                // discovery has named them all.
+                let market_dex: HashMap<String, String> = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .map(|market| {
+                        (
+                            market.symbol.clone(),
+                            self.dex_of(cx, &market.symbol).to_owned(),
+                        )
+                    })
+                    .collect();
+                let in_dex =
+                    |symbol: &str| market_dex.get(symbol).map_or("", String::as_str) == dex;
+                let mut account: Vec<&str> = std::iter::once("")
+                    .chain(self.dex_names.iter().map(String::as_str))
+                    .collect();
+                if !self.discovery_settled() {
+                    account.push(DEXES_UNSETTLED);
+                }
+                let unproven = if coverage.rejected() == 0 {
+                    Vec::new()
+                } else {
+                    vec![String::new()]
+                };
+                cx.commit_orders_read(
+                    safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                        key: &dex,
+                        account: &account,
+                    },
+                    in_dex,
+                    merged
+                        .into_iter()
+                        .filter(|order| in_dex(&order.symbol))
+                        .collect(),
+                    &unproven,
+                );
+                cx.store.set_orders_loaded();
                 if coverage.rejected() == 0 {
                     let symbols: Vec<_> = cx
                         .store
@@ -929,9 +1307,17 @@ impl Hyperliquid {
                     for symbol in symbols {
                         cx.orders_reconciled_since(Some(&symbol), epoch);
                     }
-                    if dex.is_empty() && self.dex_names.is_empty() && self.discovery_settled() {
+                    self.account.clean_dexes.insert(dex.clone(), epoch);
+                    if self.discovery_settled()
+                        && let Some(epoch) =
+                            every_dex_clean(&self.dex_names, &self.account.clean_dexes)
+                    {
                         cx.orders_reconciled_since(None, epoch);
+                        cx.orders_fence_held(None);
                     }
+                } else {
+                    cx.orders_fence_held(Some(UNREADABLE_ORDER));
+                    self.account.clean_dexes.remove(&dex);
                 }
                 self.account
                     .suppressed
@@ -941,12 +1327,17 @@ impl Hyperliquid {
             }
             Request::Spot { revision } => {
                 self.account.spot_inflight = false;
-                if revision != self.account.spot_revision {
-                    return;
+                if revision == self.account.spot_revision {
+                    match serde_json::from_str::<SpotState>(raw) {
+                        Ok(state) => self.apply_spot(cx, &state, false),
+                        Err(_) => self.private_read_failed(
+                            cx,
+                            PrivateReadKind::Spot,
+                            "Malformed Hyperliquid collateral state",
+                        ),
+                    }
                 }
-                if let Ok(state) = serde_json::from_str::<SpotState>(raw) {
-                    self.apply_spot(cx, &state, false);
-                }
+                self.retry_bootstrap_read(cx, BootstrapRead::Spot);
             }
             Request::Asset { symbol, revision } => {
                 self.account.inflight.remove(&format!("asset:{symbol}"));
@@ -1054,31 +1445,96 @@ impl Hyperliquid {
             }
         }
     }
+    pub(crate) fn private_read_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        kind: PrivateReadKind,
+        error: &str,
+    ) {
+        self.account.last_failed_private_read_kind = Some(kind);
+        cx.event(
+            Level::Warn,
+            code::REQUEST_FAILED,
+            error,
+            vec![("lastFailedPrivateReadKind", kind.as_str().into())],
+        );
+    }
+    fn bootstrap_read_needed(&self, kind: BootstrapRead) -> bool {
+        if self.spot
+            || self.options.public_data_only
+            || !self.account.started
+            || self.user().is_none()
+        {
+            return false;
+        }
+        match kind {
+            BootstrapRead::State => !self.account.core_loaded,
+            BootstrapRead::Spot => {
+                self.account.mode_resolved
+                    && self.account.mode != Mode::Standard
+                    && self.account.spot.is_none()
+                    && self.account.pending_spot.is_none()
+            }
+        }
+    }
+    fn retry_bootstrap_read(&mut self, cx: &mut Cx<'_, Pending>, kind: BootstrapRead) {
+        if self.bootstrap_read_needed(kind) {
+            let pause = self
+                .account
+                .read_error
+                .as_ref()
+                .and_then(|e| e.retry_after_ms)
+                .unwrap_or(0.0);
+            self.account.bootstrap_retry.failed_after(cx, kind, pause);
+        }
+    }
     pub(crate) fn account_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: &str,
     ) {
+        let kind = match &request {
+            Request::State { .. } => Some(PrivateReadKind::State),
+            Request::Spot { .. } => Some(PrivateReadKind::Spot),
+            Request::Orders { .. } => Some(PrivateReadKind::Orders),
+            Request::Role => Some(PrivateReadKind::Role),
+            Request::Mode => Some(PrivateReadKind::Mode),
+            _ => None,
+        };
         match request {
-            Request::Mode => {
-                if !self.account.mode_resolved {
-                    self.mode_ready(cx);
-                }
-            }
-            Request::Role => {
-                if let Some(t) = self.account.role_timer.take() {
-                    cx.clear_timer(t);
-                }
-            }
-            Request::State { dex, .. } => {
+            Request::Mode => self.mode_failed(cx),
+            Request::Role => self.role_failed(cx, error),
+            Request::State { dex, read, .. } => {
                 self.account.inflight.remove(&format!("state:{dex}"));
+                if dex.is_empty() {
+                    self.retry_bootstrap_read(cx, BootstrapRead::State);
+                }
+                let fresh = self
+                    .account
+                    .read_error
+                    .take()
+                    .unwrap_or_else(|| VenueError::new(error));
+                let key = self.dex_key(&dex);
+                self.account.fresh_positions.failed(cx, key, read, &fresh);
+                self.read_fresh_positions_again(cx, &dex, read);
             }
             Request::Orders { dex, .. } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
                 self.refresh_owed_orders(cx, &dex);
+                let pause = self
+                    .account
+                    .read_error
+                    .as_ref()
+                    .and_then(|error| error.retry_after_ms)
+                    .unwrap_or(5000.0)
+                    .max(5000.0);
+                self.account.orders_retry.failed_after(cx, dex, pause);
             }
-            Request::Spot { .. } => self.account.spot_inflight = false,
+            Request::Spot { .. } => {
+                self.account.spot_inflight = false;
+                self.retry_bootstrap_read(cx, BootstrapRead::Spot);
+            }
             Request::Asset { symbol, .. } => {
                 self.account.inflight.remove(&format!("asset:{symbol}"));
                 if self.settings_uncertain(&symbol) {
@@ -1089,11 +1545,116 @@ impl Hyperliquid {
                 }
             }
             Request::Builder => self.account.builder_approved = None,
+            Request::AmendSource { id } | Request::AmendRole { id } => {
+                self.amend_source_read(cx, &id, Err(error.to_owned()));
+            }
             Request::Fees => {}
         }
-        cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        if let Some(kind) = kind {
+            self.private_read_failed(cx, kind, error);
+        } else {
+            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+        }
+    }
+    /// `readPositions`: wait on each dex's next read. One already out may predate
+    /// the close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started
+            || self.options.public_data_only
+            || self.user().is_none()
+            || !self.discovery_settled()
+        {
+            let error =
+                VenueError::new("Hyperliquid account is not loaded").kind(ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        let mut dexes = vec![String::new()];
+        dexes.extend(self.dex_names.iter().cloned());
+        let legs = dexes
+            .iter()
+            .map(|dex| {
+                let last = self.account.state_reads.get(dex).copied().unwrap_or(0);
+                (self.dex_key(dex), last + 1)
+            })
+            .collect();
+        if self.account.fresh_positions.admit(cx, legs) {
+            for dex in dexes {
+                // An undispatched routine intent predates this caller and owns no context.
+                // Replace it with a fresh foreground read instead of waiting for a slot.
+                if let Some(index) = self.account.reads.iter().position(|read| {
+                    read.priority != ReadPriority::Foreground && matches!(&read.continuation,
+                        ReadContinuation::Account(Request::State { dex: queued, .. }) if queued == &dex)
+                }) {
+                    self.account.reads.remove(index);
+                    self.account.inflight.remove(&format!("state:{dex}"));
+                }
+                self.refresh_state(cx, &dex);
+            }
+        }
+    }
+    fn dex_key(&self, dex: &str) -> u8 {
+        self.dex_names
+            .iter()
+            .position(|name| name == dex)
+            .map_or(0, |index| index as u8 + 1)
+    }
+    fn settle_fresh_positions(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        dex: &str,
+        read: u32,
+        applied: StateApplied,
+    ) {
+        let key = self.dex_key(dex);
+        match applied {
+            StateApplied::Committed(unlisted) => {
+                self.account
+                    .fresh_positions
+                    .committed(cx, key, read, &unlisted);
+            }
+            StateApplied::Held => {}
+            StateApplied::Unusable(message) => {
+                let error = VenueError::new(message);
+                self.account.fresh_positions.failed(cx, key, read, &error);
+            }
+        }
+        self.read_fresh_positions_again(cx, dex, read);
+    }
+    /// At once for a waiter the read predates, else once a newer stream frame
+    /// that held the read can have been overtaken.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, dex: &str, read: u32) {
+        let key = self.dex_key(dex);
+        if self.account.fresh_positions.predates(key, read) {
+            self.refresh_state(cx, dex);
+        } else if self.account.fresh_positions.owed(key)
+            && self.account.fresh_positions_timer.is_none()
+        {
+            self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(kind) = self.account.bootstrap_retry.on_timer(timer)
+            && self.bootstrap_read_needed(kind)
+        {
+            match kind {
+                BootstrapRead::State => self.refresh_state(cx, ""),
+                BootstrapRead::Spot => self.refresh_spot(cx, true),
+            }
+        }
+        if self.account.fresh_positions_timer == Some(timer) {
+            self.account.fresh_positions_timer = None;
+            let mut dexes = vec![String::new()];
+            dexes.extend(self.dex_names.iter().cloned());
+            for dex in dexes {
+                if self.account.fresh_positions.owed(self.dex_key(&dex)) {
+                    self.refresh_state(cx, &dex);
+                }
+            }
+        }
+        if let Some(dex) = self.account.orders_retry.on_timer(timer) {
+            self.refresh_orders_scope(cx, &dex);
+        }
         if self.account.asset_retry_timer == Some(timer) {
             self.account.asset_retry_timer = None;
             for symbol in std::mem::take(&mut self.account.asset_retry) {
@@ -1120,17 +1681,13 @@ impl Hyperliquid {
             self.account.read_timer = None;
             self.pump_reads(cx);
         }
-        if self.account.mode_timer == Some(timer) {
-            self.account.mode_timer = None;
-            self.mode_ready(cx);
+        if self.account.mode_retry == Some(timer) {
+            self.account.mode_retry = None;
+            self.send_mode(cx);
         }
-        if self.account.role_timer == Some(timer) {
-            self.account.role_timer = None;
-            cx.notice(
-                Level::Warn,
-                code::REQUEST_FAILED,
-                "Hyperliquid identity resolution timed out",
-            );
+        if self.account.role_retry == Some(timer) {
+            self.account.role_retry = None;
+            self.send_role(cx);
         }
         if self.account.refresh_timer == Some(timer) {
             self.account.refresh_timer = None;
@@ -1255,8 +1812,10 @@ impl Hyperliquid {
         dex: &str,
         state: &Clearinghouse<'_>,
         authoritative: bool,
+        // The feed's own frame lists every open coin of its dex; one it omits is closed.
+        complete: bool,
         settings_revision: Option<u64>,
-    ) {
+    ) -> StateApplied {
         // While discovery retries, unknown nonzero ownership holds the snapshot; once
         // settled the row is skipped and its stored copy kept. Rows TS hides by
         // design (delisted, unquoted) are skipped, as in TS.
@@ -1302,7 +1861,7 @@ impl Hyperliquid {
             if !settled {
                 cx.notice(Level::Error, code::SNAPSHOT_DISCARDED,
                     "Hyperliquid owned position has unavailable market metadata; preserving previous account snapshot");
-                return;
+                return StateApplied::Unusable("Hyperliquid positions: a row could not be mapped");
             }
             let coin = coin.to_ascii_lowercase();
             if self
@@ -1319,7 +1878,7 @@ impl Hyperliquid {
             coverage.reject(Some(coin));
         }
         let source_time = state.server_time.or(state.time);
-        if (authoritative || !dex.is_empty())
+        if (authoritative || complete || !dex.is_empty())
             && let Some(time) = source_time
             && self
                 .account
@@ -1327,7 +1886,7 @@ impl Hyperliquid {
                 .iter()
                 .any(|(symbol, last)| self.dex_of(cx, symbol) == dex && *last > time)
         {
-            return;
+            return StateApplied::Held;
         }
         if let Some(time) = source_time {
             if self
@@ -1336,7 +1895,7 @@ impl Hyperliquid {
                 .get(dex)
                 .is_some_and(|last| time < *last)
             {
-                return;
+                return StateApplied::Held;
             }
             self.account.state_time.insert(dex.into(), time);
         }
@@ -1353,7 +1912,7 @@ impl Hyperliquid {
                 }
             }
         }
-        let mut positions = if authoritative || !dex.is_empty() {
+        let mut positions = if authoritative || complete || !dex.is_empty() {
             cx.store
                 .positions()
                 .iter()
@@ -1467,11 +2026,23 @@ impl Hyperliquid {
                     .map(|p| p.unrealized_pnl)
                     .sum::<f64>();
                 self.account.core_loaded = true;
+                self.account
+                    .bootstrap_retry
+                    .succeeded(cx, &BootstrapRead::State);
                 self.account.core_value = summary.account_value - native - other_dexes;
             }
             self.account.core_used = summary.total_margin_used;
         }
         self.live_balance(cx);
+        if coverage.rejected() != 0 {
+            return StateApplied::Unusable("Hyperliquid positions: a row could not be mapped");
+        }
+        let unlisted = rows
+            .iter()
+            .filter(|row| row.position.szi != 0.0 && self.excluded_coin(&row.position.coin))
+            .map(|row| row.position.coin.to_string())
+            .collect();
+        StateApplied::Committed(unlisted)
     }
     pub(crate) fn account_prices(&mut self, cx: &mut Cx<'_, Pending>) {
         if cx.store.loaded().balance || self.account.pending_spot.is_some() {
@@ -1550,13 +2121,16 @@ impl Hyperliquid {
     }
     fn commit_collateral(
         &mut self,
-        cx: &Cx<'_, Pending>,
+        cx: &mut Cx<'_, Pending>,
         equity: f64,
         hold: f64,
         available: Option<f64>,
         ws: bool,
     ) {
         self.account.spot = Some((equity, hold));
+        self.account
+            .bootstrap_retry
+            .succeeded(cx, &BootstrapRead::Spot);
         if let Some(free) = available {
             self.account.authoritative =
                 Some((equity - self.current_upnl(cx), equity - free, free));
@@ -1808,6 +2382,9 @@ impl Hyperliquid {
                     "Hyperliquid collateral valuation unavailable; retaining previous USD balance",
                 );
             }
+            self.account
+                .bootstrap_retry
+                .succeeded(cx, &BootstrapRead::Spot);
             self.account.pending_spot = Some(PendingSpotCollateral {
                 balances: state
                     .balances
@@ -1904,9 +2481,9 @@ impl Hyperliquid {
                     && let Some(mut state) = env.clearinghouse_state
                 {
                     state.time = env.server_time.or(env.time).or(state.time);
-                    self.apply_state(cx, &env.dex, &state, false, None);
+                    self.apply_state(cx, &env.dex, &state, false, true, None);
                 } else if let Ok(state) = serde_json::from_str::<Clearinghouse>(raw) {
-                    self.apply_state(cx, "", &state, false, None);
+                    self.apply_state(cx, "", &state, false, false, None);
                 }
             }
             "spotState" | "spotClearinghouseState" => {
@@ -2246,6 +2823,8 @@ impl Hyperliquid {
                     self.refresh_spot(cx, false);
                 } else {
                     self.optimistic_fill(cx, &symbol, &fill);
+                    // Partial fills send no orderUpdates: only a read shows what is left.
+                    self.schedule_orders(cx);
                 }
             }
         }
@@ -2393,11 +2972,19 @@ pub(crate) fn infer(row: &OrderRow<'_>) -> (OrderType, f64) {
     if row.order_type == "Limit" {
         return (OrderType::Limit, row.limit_px);
     }
-    if row.order_type == "Take Profit Market" || (row.trigger_px.is_some() && row.tpsl == "tp") {
-        return (OrderType::TakeProfit, row.trigger_px.unwrap_or(0.0));
+    // A triggered stop reports triggerPx 0.0; its limit price is what it works at.
+    let trigger = row.trigger_px.filter(|px| *px > 0.0);
+    let price = trigger.unwrap_or(row.limit_px);
+    // Live rows carry no tpsl, so "Take Profit Limit" is known only by its name.
+    if matches!(
+        row.order_type.as_ref(),
+        "Take Profit Market" | "Take Profit Limit"
+    ) || (trigger.is_some() && row.tpsl == "tp")
+    {
+        return (OrderType::TakeProfit, price);
     }
-    if row.order_type == "Stop Market" || row.trigger_px.is_some() {
-        return (OrderType::StopLoss, row.trigger_px.unwrap_or(0.0));
+    if row.order_type == "Stop Market" || trigger.is_some() {
+        return (OrderType::StopLoss, price);
     }
     if row.limit_px != 0.0 {
         (OrderType::Limit, row.limit_px)
@@ -2409,6 +2996,7 @@ pub(crate) fn terminal(status: &str) -> bool {
     status == "filled"
         || status == "canceled"
         || status == "rejected"
+        || status == "scheduledCancel"
         || status.ends_with("Canceled")
         || status.ends_with("Rejected")
 }
@@ -2442,4 +3030,34 @@ fn failed_protective_status(status: &str) -> bool {
             | "delistedCanceled"
             | "liquidatedCanceled"
     )
+}
+
+/// The oldest epoch once every dex has a clean census: an all-symbol fence needs them all.
+/// A read-cover scope no read commits: the account waits while dexes are
+/// still being discovered.
+const DEXES_UNSETTLED: &str = "\u{0}dexes-unsettled";
+
+fn every_dex_clean(names: &[String], clean: &HashMap<String, u64>) -> Option<u64> {
+    let main = clean.get("")?;
+    names.iter().try_fold(*main, |oldest, name| {
+        clean.get(name).map(|epoch| oldest.min(*epoch))
+    })
+}
+
+#[cfg(test)]
+mod every_dex_clean_tests {
+    use super::*;
+
+    #[test]
+    fn an_all_symbol_fence_waits_for_every_dex_then_takes_the_oldest_read() {
+        let names = vec!["xyz".to_string(), "flx".to_string()];
+        let mut clean = HashMap::new();
+        clean.insert(String::new(), 5);
+        assert_eq!(every_dex_clean(&names, &clean), None);
+        clean.insert("xyz".to_string(), 3);
+        assert_eq!(every_dex_clean(&names, &clean), None);
+        clean.insert("flx".to_string(), 9);
+        assert_eq!(every_dex_clean(&names, &clean), Some(3));
+        assert_eq!(every_dex_clean(&[], &clean), Some(5));
+    }
 }

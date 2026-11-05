@@ -656,7 +656,7 @@ fn actual_root_and_leg_timer_orders_discard_rows_and_leave_late_data_inert() {
 }
 
 #[test]
-fn exact_owner_expiry_preserves_account_and_live_history_fifo_in_both_orders() {
+fn exact_owner_expiry_preserves_live_history_and_account_in_both_enqueue_orders() {
     for account_first in [true, false] {
         let (mut e, socket) = support::ready("disabled");
         e.drain_actions().for_each(drop);
@@ -722,10 +722,9 @@ fn exact_owner_expiry_preserves_account_and_live_history_fifo_in_both_orders() {
             .iter()
             .position(|r| support::kind(r) == "clearinghouseState")
             .expect("queued Account continuation survived cleanup");
-        assert_eq!(
-            account < history,
-            account_first,
-            "shared FIFO retains the actual enqueue order"
+        assert!(
+            history < account,
+            "caller-owned history precedes routine account reads in either enqueue order"
         );
         for request in requests {
             let body = if support::kind(request) == "clearinghouseState" {

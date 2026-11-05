@@ -505,7 +505,10 @@ fn capacity(case: Case) {
         results(&retired, 1000)[0].as_ref().unwrap_err().message,
         "original peer retired"
     );
-    let recovered = command(&mut e, NOW, case.command());
+    let mut recovered = command(&mut e, NOW, case.command());
+    if matches!(case, Case::Amend) {
+        recovered = unchanged_amend_read(&mut e, &recovered);
+    }
     if matches!(case, Case::EmptyCancel) {
         assert_eq!(results(&recovered, OWNER), vec![Ok("[]".into())]);
     } else {
@@ -899,6 +902,7 @@ fn malformed_cancel_ack_cannot_release_a_replacement() {
     let (mut e, socket) = boot();
     seed_order(&mut e, socket);
     let a = command(&mut e, NOW, Case::Amend.command());
+    let a = unchanged_amend_read(&mut e, &a);
     let r = native_release(&mut e, &a);
     respond(
         &mut e,
@@ -1231,12 +1235,29 @@ fn a_deferred_attachment_never_hides_another_child_failure() {
     }
 }
 
+// deaws2's live reply: a marketable limit with a stop loss fills at once.
+#[test]
+fn a_filled_or_resting_parent_returns_its_id_with_either_child_state() {
+    for parent in [
+        json!({"filled":{"oid":3001,"totalSz":"1","avgPx":"100"}}),
+        json!({"resting":{"oid":3001}}),
+    ] {
+        for child in ["waitingForTrigger", "waitingForFill"] {
+            let body = json!({"status":"ok","response":{"type":"order","data":{
+                "statuses":[parent, child]
+            }}})
+            .to_string();
+            let (_, actions) = native_two_row_reply(&body);
+            assert_eq!(results(&actions, OWNER), vec![Ok(r#"["3001"]"#.into())]);
+        }
+    }
+}
+
 #[test]
 fn a_deferred_attachment_requires_its_accepted_parent_in_the_parent_row() {
     for statuses in [
         json!(["waitingForFill", {"resting":{"oid":3001}}]),
         json!([{"error":"Insufficient margin to place order."}, "waitingForFill"]),
-        json!([{"resting":{"oid":3001}}, "waitingForTrigger"]),
     ] {
         let body = json!({"status":"ok","response":{"type":"order","data":{
             "statuses":statuses
@@ -1310,7 +1331,12 @@ fn deferred_full_position_trigger_succeeds_without_an_order_id() {
         r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
     );
     let actions: Vec<_> = e.drain_actions().collect();
-    assert_eq!(results(&actions, OWNER), vec![Ok("[]".into())]);
+    // A rested full-position trigger has no oid; its cloid is the pending id (#2860).
+    let cloid = wire["action"]["orders"][0]["c"].as_str().unwrap();
+    assert_eq!(
+        results(&actions, OWNER),
+        vec![Ok(serde_json::json!([cloid]).to_string())]
+    );
     assert!(e.store().orders().is_empty());
     no_trade(&actions);
 }
@@ -1800,7 +1826,10 @@ fn native_terminal_cancel_diagnostic_is_not_amendment_proof() {
             } else {
                 Case::Cancel.command()
             };
-            let a = command(&mut e, NOW, c);
+            let mut a = command(&mut e, NOW, c);
+            if amend {
+                a = unchanged_amend_read(&mut e, &a);
+            }
             let cancel = native_release(&mut e, &a);
             respond(&mut e, NOW + 1., &cancel, 200, reply);
             let a: Vec<_> = e.drain_actions().collect();
@@ -1829,6 +1858,7 @@ fn native_late_source_fill_keeps_the_confirmed_replacement_identity() {
     let (mut e, socket) = boot();
     seed_order(&mut e, socket);
     let a = command(&mut e, NOW, Case::Amend.command());
+    let a = unchanged_amend_read(&mut e, &a);
     let cancel = native_release(&mut e, &a);
     respond(
         &mut e,
@@ -1888,4 +1918,400 @@ fn cited_margin_refusal_with_an_accepted_row_is_known_partial() {
     assert_eq!(error.partial.as_ref().unwrap().order_ids, ["900"]);
     assert!(e.store().order("900").is_some());
     no_trade(&actions);
+}
+
+#[test]
+fn a_price_only_amend_of_a_partly_filled_order_sends_what_is_left() {
+    let (mut e, socket) = boot();
+    e.handle(1500., Event::WsMessage { socket, text: r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"# });
+    e.drain_actions().for_each(drop);
+    let amended = command(
+        &mut e,
+        NOW,
+        Command::AmendOrder {
+            command: OWNER,
+            id: "9".into(),
+            price: Some(85.),
+            amount: None,
+        },
+    );
+    let amended = answer_amend_read(&mut e, &amended, &status_body("10", "6", "open"));
+    let cancel = native_release(&mut e, &amended);
+    respond(
+        &mut e,
+        NOW + 1.,
+        &cancel,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let settled: Vec<_> = e.drain_actions().collect();
+    let paced = prepare_for_pacing(&mut e, NOW + 1., &settled);
+    let (timer, at) = paced
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > NOW + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("same-owner replacement pacing");
+    e.handle(at, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let replacement = native_release_at(&mut e, at, &actions);
+    let wire: Value = serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(wire["action"]["orders"][0]["s"], "6");
+}
+
+#[test]
+fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
+    let (mut e, socket) = boot();
+    e.handle(1500., Event::WsMessage { socket, text: r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"# });
+    e.drain_actions().for_each(drop);
+    e.store_mut().update_order("9", |row| {
+        row.kind = safe_cex_engine::model::OrderType::StopLoss;
+    });
+    let symbol = e.store().order("9").unwrap().symbol.clone();
+    let amended = command(
+        &mut e,
+        NOW,
+        Command::AmendOrder {
+            command: OWNER,
+            id: "9".into(),
+            price: Some(85.),
+            amount: None,
+        },
+    );
+    let amended = answer_amend_read(&mut e, &amended, &status_body("10", "6", "open"));
+    let cancel = native_release(&mut e, &amended);
+    respond(
+        &mut e,
+        NOW + 1.,
+        &cancel,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let settled: Vec<_> = e.drain_actions().collect();
+    let paced = prepare_for_pacing(&mut e, NOW + 1., &settled);
+    let (timer, at) = paced
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > NOW + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("same-owner replacement pacing");
+    e.handle(at, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let replacement = native_release_at(&mut e, at, &actions);
+    respond(
+        &mut e,
+        at + 1.,
+        &replacement,
+        200,
+        &statuses_reply("Order would trigger immediately"),
+    );
+    let settled: Vec<_> = e.drain_actions().collect();
+    let result = results(&settled, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert!(
+        error.message.contains(&symbol) && error.message.contains("no stop"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, socket) = boot();
+    e.handle(1500., Event::WsMessage { socket, text: r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"# });
+    e.drain_actions().for_each(drop);
+    let symbol = e.store().order("9").unwrap().symbol.clone();
+    let amended = command(
+        &mut e,
+        NOW,
+        Command::AmendOrder {
+            command: OWNER,
+            id: "9".into(),
+            price: Some(85.),
+            amount: None,
+        },
+    );
+    let amended = answer_amend_read(&mut e, &amended, &status_body("10", "6", "open"));
+    let cancel = native_release(&mut e, &amended);
+    respond(
+        &mut e,
+        NOW + 1.,
+        &cancel,
+        200,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let settled: Vec<_> = e.drain_actions().collect();
+    let paced = prepare_for_pacing(&mut e, NOW + 1., &settled);
+    let (timer, at) = paced
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > NOW + 1. => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("same-owner replacement pacing");
+    e.handle(at, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let replacement = native_release_at(&mut e, at, &actions);
+    respond(
+        &mut e,
+        at + 1.,
+        &replacement,
+        200,
+        &statuses_reply("Order has invalid price"),
+    );
+    let settled: Vec<_> = e.drain_actions().collect();
+    let result = results(&settled, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert!(
+        error
+            .message
+            .contains(&format!("Your {symbol} order is gone")),
+        "{}",
+        error.message
+    );
+}
+
+// deaws2's live bodies.
+fn statuses_reply(row: &str) -> String {
+    format!(
+        r#"{{"status":"ok","response":{{"type":"order","data":{{"statuses":[{{"error":"{row}"}}]}}}}}}"#
+    )
+}
+
+#[test]
+fn a_refused_parent_answering_one_row_for_a_bracket_is_a_refusal() {
+    let (_, actions) = native_two_row_reply(&statuses_reply(
+        "Order must have minimum value of $10. asset=1",
+    ));
+    let result = results(&actions, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert_ne!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+    assert!(error.message.contains("minimum value"));
+}
+
+#[test]
+fn live_row_refusals_with_a_suffix_are_refusals() {
+    for row in [
+        "Insufficient margin to place order. asset=1",
+        "Post only order would have immediately matched, bbo was 2270.4@2270.5. asset=1",
+        "Reduce only order would increase position. asset=1",
+    ] {
+        let (mut e, _) = boot();
+        let actions = command(&mut e, NOW, place(OWNER));
+        let request = native_release(&mut e, &actions);
+        respond(&mut e, NOW + 1., &request, 200, &statuses_reply(row));
+        let actions: Vec<_> = e.drain_actions().collect();
+        let result = results(&actions, OWNER);
+        let error = result[0].as_ref().unwrap_err();
+        assert_ne!(error.outcome, Some(Outcome::Unknown), "{row}: {error:?}");
+    }
+}
+
+#[test]
+fn live_top_level_refusals_are_refusals() {
+    for row in [
+        "User or API Wallet 0x2dd8000000000000000000000000000000000000 does not exist.",
+        "Cannot switch leverage type with open position.",
+    ] {
+        let (mut e, _) = boot();
+        let actions = command(&mut e, NOW, place(OWNER));
+        let request = native_release(&mut e, &actions);
+        let body = format!(r#"{{"status":"err","response":"{row}"}}"#);
+        respond(&mut e, NOW + 1., &request, 200, &body);
+        let actions: Vec<_> = e.drain_actions().collect();
+        let result = results(&actions, OWNER);
+        let error = result[0].as_ref().unwrap_err();
+        assert_ne!(error.outcome, Some(Outcome::Unknown), "{row}: {error:?}");
+        assert_ne!(error.kind, Some(ErrorKind::Internal), "{row}: {error:?}");
+    }
+}
+
+fn answer_amend_read(e: &mut Engine<Probe>, actions: &[Action], body: &str) -> Vec<Action> {
+    let preparation = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::ManagedHttp(action) => match &**action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } if support::kind(request) == "orderStatus" => Some(*preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("a fresh read before any cancel");
+    e.http_prepared(
+        NOW,
+        preparation,
+        Prepared {
+            id: preparation.attempt().request.0,
+            expires_at: None,
+        },
+    );
+    let (permit, read) = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Bind {
+                    permit, request, ..
+                } if support::kind(&request) == "orderStatus" => Some((permit, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("the read binds its route");
+    assert!(matches!(e.claim_http(NOW, permit), Ok(Claim::Released(_))));
+    let (status, reply) = if body.is_empty() {
+        (500, "down")
+    } else if body == "429" {
+        (429, "null")
+    } else {
+        (200, body)
+    };
+    respond(e, NOW, &read, status, reply);
+    e.drain_actions().collect()
+}
+fn unchanged_amend_read(e: &mut Engine<Probe>, actions: &[Action]) -> Vec<Action> {
+    answer_amend_read(e, actions, &status_body("1", "1", "open"))
+}
+
+fn status_body(orig: &str, sz: &str, status: &str) -> String {
+    format!(
+        r#"{{"status":"order","order":{{"order":{{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"{orig}","sz":"{sz}","orderType":"Limit","tif":"Gtc"}},"status":"{status}"}}}}"#
+    )
+}
+
+// deaws2's run: the row said filled 0 while the venue had 153.1 of 547.8 left.
+#[test]
+fn an_amend_sizes_itself_from_a_fresh_read_not_the_stale_row() {
+    for (amount, expected) in [(None, "153.1"), (Some(547.8 - 394.7 + 100.0), "-")] {
+        let (mut e, socket) = boot();
+        e.handle(1500., Event::WsMessage { socket, text: r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"547.8","sz":"547.8","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"# });
+        e.drain_actions().for_each(drop);
+        let actions = command(
+            &mut e,
+            NOW,
+            Command::AmendOrder {
+                command: OWNER,
+                id: "9".into(),
+                price: Some(85.),
+                amount,
+            },
+        );
+        assert!(
+            exchange(&actions).is_empty(),
+            "nothing canceled before the read"
+        );
+        let actions = answer_amend_read(&mut e, &actions, &status_body("547.8", "153.1", "open"));
+        if expected == "-" {
+            // A total at or below what has filled is refused, not sent.
+            let result = results(&actions, OWNER);
+            assert_eq!(
+                result[0].as_ref().unwrap_err().outcome,
+                Some(Outcome::NotSent)
+            );
+            continue;
+        }
+        let cancel = native_release(&mut e, &actions);
+        respond(
+            &mut e,
+            NOW + 2.,
+            &cancel,
+            200,
+            r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+        );
+        let settled: Vec<_> = e.drain_actions().collect();
+        let paced = prepare_for_pacing(&mut e, NOW + 2., &settled);
+        let (timer, at) = paced
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms > NOW + 2. => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .expect("pacing");
+        e.handle(at, Event::TimerFired { timer });
+        let actions: Vec<_> = e.drain_actions().collect();
+        let replacement = native_release_at(&mut e, at, &actions);
+        let wire: Value = serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+        assert_eq!(wire["action"]["orders"][0]["s"], expected);
+    }
+}
+
+#[test]
+fn a_remainder_under_ten_dollars_is_refused_before_the_cancel() {
+    let (mut e, socket) = boot();
+    seed_order(&mut e, socket);
+    let actions = command(
+        &mut e,
+        NOW,
+        Command::AmendOrder {
+            command: OWNER,
+            id: "9".into(),
+            price: Some(85.),
+            amount: None,
+        },
+    );
+    let actions = answer_amend_read(&mut e, &actions, &status_body("1", "0.05", "open"));
+    assert!(exchange(&actions).is_empty());
+    let result = results(&actions, OWNER);
+    let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert!(error.message.contains("$10"), "{error:?}");
+    assert!(e.store().order("9").is_some());
+}
+
+#[test]
+fn a_failed_read_refuses_the_amend_and_cancels_nothing() {
+    let (mut e, socket) = boot();
+    seed_order(&mut e, socket);
+    let actions = command(
+        &mut e,
+        NOW,
+        Command::AmendOrder {
+            command: OWNER,
+            id: "9".into(),
+            price: Some(85.),
+            amount: None,
+        },
+    );
+    let actions = answer_amend_read(&mut e, &actions, "");
+    assert!(exchange(&actions).is_empty());
+    let result = results(&actions, OWNER);
+    assert_eq!(
+        result[0].as_ref().unwrap_err().outcome,
+        Some(Outcome::NotSent)
+    );
+}
+
+// Live: the read refused on 429 when the budget had room again a moment later.
+#[test]
+fn a_rate_limited_read_waits_and_retries_within_its_bound() {
+    let (mut e, socket) = boot();
+    seed_order(&mut e, socket);
+    let actions = command(
+        &mut e,
+        NOW,
+        Command::AmendOrder {
+            command: OWNER,
+            id: "9".into(),
+            price: Some(85.),
+            amount: None,
+        },
+    );
+    let actions = answer_amend_read(&mut e, &actions, "429");
+    assert!(results(&actions, OWNER).is_empty(), "still waiting");
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 1_000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("a retry within the bound");
+    e.handle(NOW + 1_000.0, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    let actions = unchanged_amend_read(&mut e, &actions);
+    native_release(&mut e, &actions);
 }

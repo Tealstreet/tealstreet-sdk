@@ -14,6 +14,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
 };
 
+const UNREADABLE_ORDER: &str = "Kraken returned an open order this account cannot read, so a fresh read cannot clear this. Cancel that order on Kraken to resume";
 const STALE_SNAPSHOT_LIMIT: u8 = 2;
 
 #[derive(Clone)]
@@ -670,7 +671,10 @@ impl KrakenSpot {
             rows.retain(|o| !self.account.terminal.contains(&o.id));
             cx.store.set_orders(rows);
             if clean {
+                cx.orders_fence_held(None);
                 cx.orders_reconciled(None);
+            } else {
+                cx.orders_fence_held(Some(UNREADABLE_ORDER));
             }
         }
         Ok(())
@@ -706,8 +710,19 @@ impl KrakenSpot {
                         || (signature_refused && request.signature_retries == 1));
                 if credential_refused {
                     self.reject_auth(cx, &e);
+                    cx.startup_read_refused(
+                        &safe_cex_engine::VenueError::new(e.clone())
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                    );
                 }
                 let error = super::trading::write_failure(response.status, response.body, e);
+                // A documented code in a 200 proves nothing rested; other refusals still read.
+                if response.status < 300
+                    && error.outcome == Some(safe_cex_engine::Outcome::Rejected)
+                    && let Kind::Trade(_) = &request.kind
+                {
+                    self.trade_refused(cx);
+                }
                 self.private_failed(cx, request, error);
                 return;
             }

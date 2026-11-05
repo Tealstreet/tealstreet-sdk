@@ -73,9 +73,17 @@ export interface EngineCapabilities {
   isolatedBookSubscriptions: boolean;
   inverseClosedPositions: boolean;
   scheduleCancel: boolean;
+  orderHistoryNeedsSymbol: boolean;
+  freshPositions: boolean;
+  /** The `cancelAccountOrders` op, which only a nuke sends. */
+  nukeAccountCancel: boolean;
+  /** A symbol cancel can miss an order the store has not seen yet. */
+  symbolCancelMissesUnseen: boolean;
+  /** The source writes read covers; a frame-fed page lifts fences on them (Rust ingest only). */
+  orderReadCovers: boolean;
 }
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
-export const STATUS_FLAG: { HEDGED: 1 };
+export const STATUS_FLAG: { HEDGED: 1; LATENCY_MEASURED: 2 };
 export const ORDER_COLUMNS: readonly ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
 export type OrderColumn = (typeof ORDER_COLUMNS)[number];
 export const POSITION_COLUMNS: readonly [
@@ -226,7 +234,7 @@ export interface Balance extends CurrencyBalance {
 export interface Status {
   loaded: number;
   hedged: boolean;
-  latency: number;
+  latency: number | null;
 }
 export interface SettingTable {
   count: number;

@@ -55,6 +55,32 @@ struct Skipped {
     ids: Vec<String>,
     unidentified: bool,
 }
+/// WEEX's documented key refusals, on a read answer.
+pub(crate) fn key_refusal(body: &str) -> Option<safe_cex_engine::VenueError> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Code {
+        Number(i64),
+        Text(String),
+    }
+    #[derive(Deserialize)]
+    struct Evidence {
+        #[serde(default)]
+        code: Option<Code>,
+        #[serde(default)]
+        msg: String,
+    }
+    let evidence: Evidence = serde_json::from_str(body).ok()?;
+    let code = match evidence.code.as_ref()? {
+        Code::Number(code) => *code,
+        Code::Text(text) => text.parse().ok()?,
+    };
+    matches!(code, 40006 | 40009 | 40012 | 40014 | 40018).then(|| {
+        safe_cex_engine::VenueError::new(format!("WEEX refused the API key: {}", evidence.msg))
+            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+            .venue_code(code.to_string())
+    })
+}
 impl Skipped {
     fn covers(&self, id: &str) -> bool {
         self.unidentified || self.ids.iter().any(|skipped| skipped == id)
@@ -605,7 +631,11 @@ impl WeexFutures {
             return;
         }
         if response.status >= 400 {
-            self.account_failed(cx, request, &format!("HTTP {}", response.status));
+            let detail = refusal_text(response.body).map_or_else(
+                || format!("HTTP {}", response.status),
+                |text| format!("HTTP {}: {text}", response.status),
+            );
+            self.account_failed(cx, request, &detail);
             return;
         }
         if matches!(request.kind, Kind::Normal | Kind::Algo) && request.page_rows == 100 {
@@ -1176,6 +1206,25 @@ impl WeexFutures {
             _ => safe_cex_engine::AuthOutcome::accepted_list(response, ArrayAt::Root),
         }
     }
+}
+
+/// The venue's code and words from a refused read, never the rest of the body.
+fn refusal_text(body: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Refusal<'a> {
+        #[serde(borrow)]
+        code: Option<&'a serde_json::value::RawValue>,
+        #[serde(default)]
+        msg: String,
+    }
+    let refusal = serde_json::from_str::<Refusal<'_>>(body).ok()?;
+    if refusal.msg.is_empty() {
+        return None;
+    }
+    Some(match refusal.code {
+        Some(code) => format!("{} ({})", refusal.msg, code.get().trim_matches('"')),
+        None => refusal.msg,
+    })
 }
 
 #[cfg(test)]

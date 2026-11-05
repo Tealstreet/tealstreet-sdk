@@ -2,7 +2,9 @@
 //! Switch Position Mode; safe-cex native-lot and client-ID contracts.
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
-use safe_cex_venue_kucoin::{Kucoin, Options};
+mod support;
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 
 struct Harness {
     engine: Engine<Kucoin>,
@@ -26,16 +28,16 @@ impl Harness {
         Self::with_source(17)
     }
     fn with_source(seed: u64) -> Self {
-        let mut engine = Engine::new(
-            Kucoin::new(Options {
+        let mut engine = support::credentials::with_seed(
+            Options {
                 key: Some("documented-test-key".into()),
                 secret: Some("documented-test-secret".into()),
                 passphrase: Some("documented-test-passphrase".into()),
                 ..Default::default()
-            }),
-            Some(safe_cex_engine::test_support::seeded_entropy(seed)),
-        )
-        .unwrap();
+            },
+            Kucoin::new,
+            seed,
+        );
         engine.store_mut().set_markets(vec![Market {
             id: "XBTUSDTM".into(),
             symbol: "BTCUSDT".into(),
@@ -77,7 +79,9 @@ impl Harness {
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
         let mut receipts = Vec::new();
-        for action in self.engine.drain_actions() {
+        for action in
+            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now).into_iter()
+        {
             if let Action::Notice(Notice::CommandProgress {
                 receipts: actual, ..
             }) = &action
@@ -234,6 +238,31 @@ fn order() -> PlaceOrderOpts {
 }
 fn place(h: &mut Harness, orders: Vec<PlaceOrderOpts>) {
     h.command(Command::PlaceOrders { command: 1, orders });
+}
+
+#[test]
+fn provider_refusal_is_not_sent_and_releases_the_native_write_job() {
+    let mut h = Harness::new();
+    let provider = h.engine.signer().unwrap();
+    h.engine
+        .set_signer(Some(std::sync::Arc::new(
+            support::credentials::RefuseWrites(provider.clone()),
+        )))
+        .unwrap();
+    place(&mut h, vec![order()]);
+    h.metadata(true, "CROSS");
+    h.pace();
+    assert!(!h.has("/api/v1/orders"));
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    h.engine.set_signer(Some(provider)).unwrap();
+    h.command(Command::PlaceOrders {
+        command: 2,
+        orders: vec![order()],
+    });
+    assert_eq!(h.take("/api/v1/orders").method, Method::Post);
 }
 
 #[test]
@@ -471,6 +500,39 @@ fn explicit_signature_rejection_retries_only_once() {
     assert!(!h.has("/api/v1/orders"));
     assert!(h.done(1).is_err());
 }
+
+#[test]
+fn timestamp_refusal_does_not_resend_a_placement_or_cancel() {
+    let mut h = Harness::new();
+    place(&mut h, vec![order()]);
+    h.metadata(false, "CROSS");
+    let request = h.take("/api/v1/orders");
+    assert_eq!(request.method, Method::Post);
+    h.response(
+        &request,
+        400,
+        r#"{"code":"400002","msg":"Invalid KC-API-TIMESTAMP"}"#,
+    );
+    h.pace();
+    assert!(h.done(1).is_err());
+    assert!(!h.has("/timestamp") && !h.has("/api/v1/orders"));
+
+    let mut h = Harness::new();
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["unknown".into()],
+    });
+    let request = h.take("/api/v1/orders/unknown");
+    assert_eq!(request.method, Method::Delete);
+    h.response(
+        &request,
+        400,
+        r#"{"code":"400002","msg":"Invalid KC-API-TIMESTAMP"}"#,
+    );
+    h.pace();
+    assert!(h.done(1).is_err());
+    assert!(!h.has("/timestamp") && !h.has("/api/v1/orders"));
+}
 #[test]
 fn cancel_replace_uses_remaining_native_once_and_a_new_client_id() {
     let mut h = Harness::new();
@@ -497,6 +559,81 @@ fn cancel_replace_uses_remaining_native_once_and_a_new_client_id() {
     assert!(body.contains(r#""size":"6""#));
     assert!(body.contains(r#""price":"101""#));
     assert!(!body.contains("original-caller"));
+}
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    let cancel = h.take("/api/v1/orders/old");
+    h.response(
+        &cancel,
+        200,
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    h.confirm_cancel("old", 10.0, 4.0);
+    let create = h.take("/api/v1/orders");
+    h.response(
+        &create,
+        200,
+        r#"{"code":"300003","msg":"Balance insufficient"}"#,
+    );
+    h.pace();
+    let error = h.done(1).unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}
+#[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    for (id, cancelled, expected) in [
+        ("old", "old", "Your BTCUSDT short position has no stop"),
+        (
+            "parent__stop_loss",
+            "parent",
+            "Your BTCUSDT long position has no stop",
+        ),
+    ] {
+        let mut h = Harness::new();
+        if id == "old" {
+            h.set_order("old", OrderType::StopLoss, 6.0);
+        } else {
+            h.set_order("parent", OrderType::Limit, 6.0);
+            h.set_order(id, OrderType::StopLoss, 6.0);
+            h.engine
+                .store_mut()
+                .update_order(id, |o| o.side = OrderSide::Sell);
+        }
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: id.into(),
+            price: Some(90.0),
+            amount: None,
+        });
+        h.metadata(false, "CROSS");
+        let cancel = h.take(&format!("/api/v1/orders/{cancelled}"));
+        h.response(
+            &cancel,
+            200,
+            &format!(r#"{{"code":"200000","data":{{"cancelledOrderIds":["{cancelled}"]}}}}"#),
+        );
+        h.pace();
+        h.confirm_cancel(cancelled, 10.0, 4.0);
+        let create = h.take("/api/v1/");
+        h.response(
+            &create,
+            200,
+            r#"{"code":"300003","msg":"Balance insufficient"}"#,
+        );
+        h.pace();
+        let error = h.done(1).unwrap_err();
+        assert!(error.contains(expected), "{error}");
+    }
 }
 #[test]
 fn ambiguous_cancel_prevents_replacement() {
@@ -580,7 +717,11 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
     assert_eq!(request.method, Method::Delete);
     h.response(&request, 200, r#"{"code":"200000","data":[]}"#);
     h.pace();
-    assert!(!h.has("/api/v1/stopOrders"));
+    h.reply(
+        "/api/v1/stopOrders?symbol=XBTUSDTM",
+        r#"{"code":"200000","data":[]}"#,
+    );
+    h.pace();
     assert_eq!(h.done(1), Ok("[]".into()));
     h.command(Command::CancelSymbolOrders {
         command: 2,
@@ -826,7 +967,7 @@ fn isolated_hedged_placement_uses_the_target_sides_leverage() {
 
 #[test]
 fn cancel_replace_waits_for_terminal_proof_and_subtracts_intervening_fills() {
-    for (amount, expected) in [(None, "2"), (Some(9.0), "5")] {
+    for (amount, expected) in [(None, "2"), (Some(9.0), "1")] {
         let mut h = Harness::new();
         h.set_order("old", OrderType::Limit, 6.0);
         h.command(Command::AmendOrder {
@@ -1099,6 +1240,13 @@ fn write_failures_are_classified_without_changing_their_text() {
             rejected(ErrorKind::AuthPermission),
             "KuCoin API Error 400007: Access denied (HTTP 200)",
         ),
+        // An IP the key's whitelist excludes, at any 4xx: what to do, as an auth refusal.
+        (
+            400,
+            r#"{"code":"400006","msg":"The requested IP address is not in the API whitelist"}"#,
+            rejected(ErrorKind::AuthPermission),
+            "KuCoin API Error 400006: The requested IP address is not in the API whitelist (HTTP 400). The API key's IP whitelist does not include this server: add the new Tealstreet IPs to the key on the exchange",
+        ),
         (
             200,
             r#"{"code":"999999","msg":"new"}"#,
@@ -1221,3 +1369,97 @@ fn cancel_legs_combine_outcomes_without_overclaiming() {
 #[cfg(feature = "private-adoption-originals")]
 #[path = "support/trading_context.rs"]
 mod trading_context;
+
+fn leverage_result(h: &Harness, command: u32) -> serde_json::Value {
+    serde_json::from_str(&h.done(command).expect("the read must succeed")).unwrap()
+}
+
+#[test]
+fn a_flat_cross_symbol_reads_margin_then_leverage() {
+    let mut h = Harness::new();
+    assert_eq!(
+        h.engine.capabilities().leverage_query,
+        safe_cex_engine::LeverageQuery::OnReadAndMetadata
+    );
+    h.command(Command::FetchLeverage {
+        command: 70,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(
+        &margin,
+        200,
+        r#"{"code":"200000","data":{"symbol":"XBTUSDTM","marginMode":"CROSS"}}"#,
+    );
+    let leverage = h.take("/api/v2/getCrossUserLeverage");
+    h.response(
+        &leverage,
+        200,
+        r#"{"code":"200000","data":{"symbol":"XBTUSDTM","leverage":"7"}}"#,
+    );
+    let value = leverage_result(&h, 70);
+    assert_eq!(value["buyLeverage"], 7.0);
+    assert_eq!(value["sellLeverage"], 7.0);
+    assert_eq!(value["marginType"], "cross");
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 7.0);
+}
+
+#[test]
+fn a_flat_isolated_symbol_is_one_as_in_ts_with_no_cross_read() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 71,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(
+        &margin,
+        200,
+        r#"{"code":"200000","data":{"symbol":"XBTUSDTM","marginMode":"ISOLATED"}}"#,
+    );
+    assert!(!h.has("getCrossUserLeverage"));
+    let value = leverage_result(&h, 71);
+    assert_eq!(value["buyLeverage"], 1.0);
+    assert_eq!(value["marginType"], "isolated");
+}
+
+#[test]
+fn a_failed_or_invalid_leverage_read_fails_its_command() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 72,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(&margin, 200, r#"{"code":"400100","msg":"denied"}"#);
+    assert!(h.done(72).unwrap_err().contains("denied"));
+
+    h.command(Command::FetchLeverage {
+        command: 73,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(
+        &margin,
+        200,
+        r#"{"code":"200000","data":{"marginMode":"CROSS"}}"#,
+    );
+    let leverage = h.take("/api/v2/getCrossUserLeverage");
+    h.response(
+        &leverage,
+        200,
+        r#"{"code":"200000","data":{"leverage":"0"}}"#,
+    );
+    assert!(h.done(73).unwrap_err().contains("invalid leverage"));
+}
+
+#[test]
+fn an_unknown_symbol_leverage_read_sends_nothing() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 74,
+        symbol: "NOPEUSDT".into(),
+    });
+    assert!(h.done(74).unwrap_err().contains("unknown market"));
+    assert!(!h.has("getMarginMode"));
+}

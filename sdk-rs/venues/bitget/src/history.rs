@@ -8,7 +8,8 @@ use safe_cex_engine::request_context::{
 };
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::{
-    CommandId, Cx, ErrorKind, Method, Query, Response, TimerId, VenueError, json::ArrayAt, num,
+    CommandId, Cx, ErrorKind, HistoryDecodeReason, HistorySchema, Method, Query, Response, TimerId,
+    VenueError, json::ArrayAt, num,
 };
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashSet, VecDeque};
@@ -46,7 +47,7 @@ pub struct Request {
     rows: ReadHistoryRows<Row>,
     page: Vec<Row>,
     page_count: usize,
-    invalid: bool,
+    invalid: Option<HistoryDecodeReason>,
 }
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -56,6 +57,18 @@ enum Row {
     Income(Income),
     Trade(Trade),
 }
+fn oldest_kept(now: f64) -> f64 {
+    now - 90.0 * DAY + 60_000.0
+}
+fn query_from(query: &Query) -> Option<f64> {
+    match query {
+        Query::Fills { from_ms, .. }
+        | Query::OrderHistory { from_ms, .. }
+        | Query::Income { from_ms, .. } => *from_ms,
+        _ => None,
+    }
+}
+
 impl Row {
     fn identity(&self) -> String {
         match self {
@@ -281,15 +294,24 @@ impl BitgetFutures {
         if matches!((from,to),(Some(a),Some(b)) if a>b) {
             return Err("invalid Bitget history range");
         }
+        // Older than 90 days the venue refuses the whole read (40934); its data ends there.
+        let from = from.map(|a| if public { a } else { a.max(oldest_kept(now)) });
         if let (Some(a), Some(b)) = (from, to) {
-            paging::windows(a, b, 30.0 * DAY - 1.0, WindowOrder::OldestFirst, 1000)
-                .map(|windows| {
-                    windows
-                        .into_iter()
-                        .map(|(a, b)| (Some(a), Some(b)))
-                        .collect()
-                })
-                .ok_or("Bitget history range exceeds 1000 windows")
+            paging::windows(
+                a,
+                b.max(a + 1.0),
+                30.0 * DAY - 1.0,
+                WindowOrder::OldestFirst,
+                1000,
+            )
+            .map(|windows| {
+                // The venue refuses a start equal to its end (20001).
+                windows
+                    .into_iter()
+                    .map(|(a, b)| (Some(a), Some(if a == b { b + 1.0 } else { b })))
+                    .collect()
+            })
+            .ok_or("Bitget history range exceeds 1000 windows")
         } else {
             Ok(VecDeque::from([(from, to)]))
         }
@@ -323,13 +345,19 @@ impl BitgetFutures {
                 return;
             }
         };
-        let completion = match ReadCompletion::from_context(cx, command, root.clone()) {
+        let mut completion = match ReadCompletion::from_context(cx, command, root.clone()) {
             Ok(completion) => completion,
             Err(error) => {
                 let _ = cx.fail_context(&root, error.read_venue_error());
                 return;
             }
         };
+        if !public && query_from(&query).is_some_and(|from| from < oldest_kept(cx.now)) {
+            completion.incomplete(
+                safe_cex_engine::history::IncompleteReason::RetentionLimit,
+                "Bitget keeps 90 days; the older part of this range was not read",
+            );
+        }
         let window = windows.pop_front().expect("one window");
         let request = Request {
             leg: None,
@@ -347,7 +375,7 @@ impl BitgetFutures {
             rows: ReadHistoryRows::new(completion, encode_rows),
             page: vec![],
             page_count: 0,
-            invalid: false,
+            invalid: None,
         };
         if !public && !self.account.detected {
             self.history.waiting.push((cx.set_timer(100.0), request));
@@ -469,7 +497,7 @@ impl BitgetFutures {
         }
     }
     pub(crate) fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
-        if !r.delivered(cx) {
+        if !r.delivered(cx) || r.invalid.is_some() {
             return;
         }
         if r.uta && matches!(r.query, Query::Income { .. }) {
@@ -477,13 +505,13 @@ impl BitgetFutures {
             return;
         }
         let Ok(n) = serde_json::from_str::<Native<'_>>(item) else {
-            r.invalid = true;
+            r.invalid = Some(HistoryDecodeReason::RowShape);
             return;
         };
         r.page_count += 1;
         let symbol = n.symbol.to_ascii_uppercase();
         if symbol.is_empty() && !matches!(r.query, Query::Income { .. }) {
-            r.invalid = true;
+            r.invalid = Some(HistoryDecodeReason::Symbol);
             return;
         }
         if !n.category.is_empty() && !n.category.eq_ignore_ascii_case(self.product()) {
@@ -491,7 +519,7 @@ impl BitgetFutures {
         }
         let requested = match &r.query {
             Query::OrderByClientId { .. } => {
-                r.invalid = true;
+                r.invalid = Some(HistoryDecodeReason::RowShape);
                 return;
             }
             Query::Fills { symbol, .. }
@@ -504,7 +532,7 @@ impl BitgetFutures {
         }
         match &r.query {
             Query::OrderByClientId { .. } => {
-                r.invalid = true;
+                r.invalid = Some(HistoryDecodeReason::RowShape);
             }
             Query::Fills { order_id, .. } => {
                 if order_id
@@ -514,7 +542,7 @@ impl BitgetFutures {
                     return;
                 }
                 if !r.uta && n.profit.is_some_and(|profit| profit.0.is_none()) {
-                    r.invalid = true;
+                    r.invalid = Some(HistoryDecodeReason::Economics);
                     return;
                 }
                 let id = if r.uta {
@@ -542,11 +570,22 @@ impl BitgetFutures {
                     n.c_time.get()
                 };
                 let Some((position_side, side)) = fill_direction(&n, r.uta) else {
-                    r.invalid = true;
+                    r.invalid = Some(HistoryDecodeReason::Side);
                     return;
                 };
-                if id.is_empty() || symbol.is_empty() || time <= 0.0 || price <= 0.0 || qty <= 0.0 {
-                    r.invalid = true;
+                let invalid = if id.is_empty() {
+                    Some(HistoryDecodeReason::Identity)
+                } else if time <= 0.0 {
+                    Some(HistoryDecodeReason::Timestamp)
+                } else if price <= 0.0 {
+                    Some(HistoryDecodeReason::Economics)
+                } else if qty <= 0.0 {
+                    Some(HistoryDecodeReason::Quantity)
+                } else {
+                    None
+                };
+                if let Some(reason) = invalid {
+                    r.invalid = Some(reason);
                     return;
                 }
                 if n.fee_detail.iter().any(|f| {
@@ -556,7 +595,7 @@ impl BitgetFutures {
                         f.total_fee.0.is_none()
                     }
                 }) {
-                    r.invalid = true;
+                    r.invalid = Some(HistoryDecodeReason::Fee);
                     return;
                 }
                 let fee = n
@@ -579,7 +618,7 @@ impl BitgetFutures {
                     asset
                 } else if self.inverse() {
                     let Some(market) = cx.store.market(&symbol) else {
-                        r.invalid = true;
+                        r.invalid = Some(HistoryDecodeReason::Market);
                         return;
                     };
                     market.base.as_str()
@@ -616,10 +655,12 @@ impl BitgetFutures {
                 } else {
                     n.base_volume.0
                 };
-                if !amount.is_some_and(|v| v > 0.0)
-                    || !filled.is_some_and(|v| v >= 0.0 && v <= amount.unwrap_or(0.0) + 1e-10)
-                {
-                    r.invalid = true;
+                if !amount.is_some_and(|v| v > 0.0) {
+                    r.invalid = Some(HistoryDecodeReason::Quantity);
+                    return;
+                }
+                if !filled.is_some_and(|v| v >= 0.0 && v <= amount.unwrap_or(0.0) + 1e-10) {
+                    r.invalid = Some(HistoryDecodeReason::FilledQuantity);
                     return;
                 }
                 let state = if r.uta {
@@ -630,15 +671,15 @@ impl BitgetFutures {
                     n.state
                 };
                 let Some(status) = crate::account::order_status(state) else {
-                    r.invalid = true;
+                    r.invalid = Some(HistoryDecodeReason::OrderStatus);
                     return;
                 };
                 let Some(kind) = crate::account::order_type(n.order_type) else {
-                    r.invalid = true;
+                    r.invalid = Some(HistoryDecodeReason::OrderType);
                     return;
                 };
                 let Some((position_side, side)) = order_direction(&n, r.uta) else {
-                    r.invalid = true;
+                    r.invalid = Some(HistoryDecodeReason::Side);
                     return;
                 };
                 let time = if r.uta {
@@ -646,8 +687,12 @@ impl BitgetFutures {
                 } else {
                     n.c_time.get()
                 };
-                if n.order_id.text().is_empty() || symbol.is_empty() || time <= 0.0 {
-                    r.invalid = true;
+                if n.order_id.text().is_empty() || time <= 0.0 {
+                    r.invalid = Some(if n.order_id.text().is_empty() {
+                        HistoryDecodeReason::Identity
+                    } else {
+                        HistoryDecodeReason::Timestamp
+                    });
                     return;
                 }
                 r.page.push(Row::Order(HistoricalOrder {
@@ -676,11 +721,21 @@ impl BitgetFutures {
                 let time = n.c_time.get();
                 let id = n.bill_id.text();
                 if n.amount.0.is_none() || n.fee.is_some_and(|fee| fee.0.is_none()) {
-                    r.invalid = true;
+                    r.invalid = Some(if n.amount.0.is_none() {
+                        HistoryDecodeReason::Economics
+                    } else {
+                        HistoryDecodeReason::Fee
+                    });
                     return;
                 }
                 if id.is_empty() || n.business_type.is_empty() || time <= 0.0 {
-                    r.invalid = true;
+                    r.invalid = Some(if id.is_empty() {
+                        HistoryDecodeReason::Identity
+                    } else if n.business_type.is_empty() {
+                        HistoryDecodeReason::RowShape
+                    } else {
+                        HistoryDecodeReason::Timestamp
+                    });
                     return;
                 }
                 let trade = matches!(
@@ -740,7 +795,7 @@ impl BitgetFutures {
             }
             Query::PublicTrades { symbol, .. } => {
                 let Some(side) = side(n.side) else {
-                    r.invalid = true;
+                    r.invalid = Some(HistoryDecodeReason::Side);
                     return;
                 };
                 if n.trade_id.text().is_empty()
@@ -748,7 +803,15 @@ impl BitgetFutures {
                     || n.size.get() <= 0.0
                     || n.ts.get() <= 0.0
                 {
-                    r.invalid = true;
+                    r.invalid = Some(if n.trade_id.text().is_empty() {
+                        HistoryDecodeReason::Identity
+                    } else if n.price.get() <= 0.0 {
+                        HistoryDecodeReason::Economics
+                    } else if n.size.get() <= 0.0 {
+                        HistoryDecodeReason::Quantity
+                    } else {
+                        HistoryDecodeReason::Timestamp
+                    });
                     return;
                 }
                 r.page.push(Row::Trade(Trade {
@@ -765,7 +828,7 @@ impl BitgetFutures {
     }
     fn query_uta_bill(&self, r: &mut Request, item: &str) {
         let Ok(n) = serde_json::from_str::<UtaBill<'_>>(item) else {
-            r.invalid = true;
+            r.invalid = Some(HistoryDecodeReason::RowShape);
             return;
         };
         r.page_count += 1;
@@ -790,7 +853,17 @@ impl BitgetFutures {
             || n.amount.0.is_none()
             || n.fee.is_some_and(|fee| fee.0.is_none())
         {
-            r.invalid = true;
+            r.invalid = Some(if id.is_empty() {
+                HistoryDecodeReason::Identity
+            } else if n.kind.is_empty() || n.coin.is_empty() {
+                HistoryDecodeReason::RowShape
+            } else if n.ts.get() <= 0.0 {
+                HistoryDecodeReason::Timestamp
+            } else if n.amount.0.is_none() {
+                HistoryDecodeReason::Economics
+            } else {
+                HistoryDecodeReason::Fee
+            });
             return;
         }
         // Amount is the venue's signed ledger change. Keep its fee as metadata;
@@ -819,7 +892,7 @@ impl BitgetFutures {
         if envelope.as_ref().is_ok_and(|e| e.code.0 == Some(40085.0)) && self.promote_uta(cx) {
             r.page.clear();
             r.page_count = 0;
-            r.invalid = false;
+            r.invalid = None;
             r.detect_deadline = cx.now + 10_000.0;
             if let Err(error) = r.retire_leg(cx) {
                 self.query_strict_failed(cx, r, error.read_venue_error());
@@ -830,8 +903,37 @@ impl BitgetFutures {
         }
         let valid = envelope
             .map_err(|e| e.to_string())
-            .and_then(Envelope::checked);
-        if response.status != 200 || valid.is_err() || r.invalid {
+            .and_then(Envelope::checked)
+            .map(drop)
+            .or_else(|error| {
+                if crate::wire::null_history(response.body) {
+                    Ok(())
+                } else {
+                    Err(error)
+                }
+            });
+        if response.status == 200
+            && valid.is_ok()
+            && let Some(reason) = r.invalid
+        {
+            let schema = match (&r.query, r.uta) {
+                (Query::Fills { .. }, false) => HistorySchema::BitgetClassicFills,
+                (Query::Fills { .. }, true) => HistorySchema::BitgetUtaFills,
+                (Query::OrderHistory { .. }, false) => HistorySchema::BitgetClassicOrders,
+                (Query::OrderHistory { .. }, true) => HistorySchema::BitgetUtaOrders,
+                (Query::Income { .. }, false) => HistorySchema::BitgetClassicIncome,
+                (Query::Income { .. }, true) => HistorySchema::BitgetUtaIncome,
+                _ => HistorySchema::BitgetPublicTrades,
+            };
+            self.query_strict_failed(
+                cx,
+                r,
+                VenueError::new("Bitget history row validation failed")
+                    .history_decode(schema, reason),
+            );
+            return;
+        }
+        if response.status != 200 || valid.is_err() || r.invalid.is_some() {
             let error = valid
                 .err()
                 .unwrap_or_else(|| format!("Bitget malformed history or HTTP {}", response.status));
@@ -851,6 +953,7 @@ impl BitgetFutures {
                     .or(c.end_id)
                     .map(|id| id.text().into_owned())
                     .filter(|s| !s.is_empty()),
+                None if crate::wire::null_history(response.body) => None,
                 None => {
                     self.query_failed(cx, r, "Bitget invalid history cursor");
                     return;
@@ -927,7 +1030,7 @@ impl BitgetFutures {
         r.retries += 1;
         r.page.clear();
         r.page_count = 0;
-        r.invalid = false;
+        r.invalid = None;
         self.history
             .waiting
             .push((cx.set_timer(250.0 * f64::from(r.retries)), r));

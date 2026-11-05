@@ -1,5 +1,6 @@
 // Same-workflow physical evidence only. No lifetime history scan or retry API.
 import { createHash } from 'node:crypto';
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 export const CPU_COHORT_STEPS = Object.freeze({ first: 'Retain CPU runtime capsule', second: 'Retain CPU remeasurement results', plan: 'Retain CPU remeasurement plan', final: 'Retain CPU certificate', strict: 'Retain strict gate reports and artifact budgets', runtime: 'Retain the eligible original runtime bytes' });
 const CPU_WORKFLOW_ID = 386369161;
 const WORKFLOW_PATH = '.github/workflows/rust.yml';
@@ -52,7 +53,7 @@ function caseIdentity(value) {
   check(value && !Array.isArray(value) && typeof value === 'object', 'invalid public case');
   const keys = ['venue', 'tape', 'tapeSha256', 'books', 'private', 'correctnessRuns', 'runs'];
   check(Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)), 'incomplete/extra case fields');
-  check(typeof value.venue === 'string' && /^[a-z0-9-]+$/.test(value.venue) && safePath(value.tape) && hash(value.tapeSha256) && typeof value.books === 'string' && value.private === false && value.correctnessRuns === 1 && value.runs === 9, 'invalid public case identity');
+  check(typeof value.venue === 'string' && /^[a-z0-9-]+$/.test(value.venue) && safePath(value.tape) && hash(value.tapeSha256) && typeof value.books === 'string' && value.private === false && value.correctnessRuns === 1 && value.runs === PUBLIC_REPLAY_PAIRS, 'invalid public case identity');
   return Object.fromEntries(keys.map((key) => [key, value[key]]));
 }
 
@@ -211,7 +212,9 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
   // Also reject extra markers for this key with a substituted payload clock.
   check(lines.filter((line) => line.text.startsWith(`CPU_CASE_BEGIN ${key} `) || line.text.startsWith(`CPU_CASE_END ${key} `)).length === 2, 'substituted/duplicate case marker payload');
   const begin = markers[0][0], finish = markers[1][0];
-  check(begin.index < finish.index && begin.at !== null && finish.at !== null && start <= begin.at && begin.at <= end && end <= finish.at, 'public case marker ordering/time differs');
+  // Actions may buffer BEGIN until after execution ends; receipt clocks bound
+  // delivery, while the exact payload timestamps above order the execution.
+  check(begin.index < finish.index && begin.at !== null && finish.at !== null && start <= begin.at && begin.at <= finish.at && end <= finish.at, 'public case marker ordering/time differs');
   const candidates = (job.steps ?? []).filter((step) => /public/i.test(step.name ?? '') && step.status === 'completed' && step.conclusion === 'success').filter((step) => {
     const window = successfulStep(job, step.name);
     return [start, end, begin.at, finish.at].every((at) => at >= window.start && at < window.end);

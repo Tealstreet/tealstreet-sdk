@@ -83,6 +83,8 @@ pub struct Job {
     failed_index: Option<usize>,
     /// A step took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// The symbol of an order this job cancels before placing its replacement.
+    replaces: Option<String>,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -131,6 +133,30 @@ struct ResultRow<'a> {
     error_code: f64,
     #[serde(borrow, default, alias = "message", alias = "msg")]
     error_msg: Str<'a>,
+}
+/// A placement row carrying `errorCode` (stop orders) was refused: it placed nothing,
+/// and its `id`/`orderId` of 0 is not an order.
+fn row_refusal(payload: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Rows<'a> {
+        One(#[serde(borrow)] ResultRow<'a>),
+        Many(#[serde(borrow)] Vec<ResultRow<'a>>),
+    }
+    let rows = match serde_json::from_str::<Rows<'_>>(payload).ok()? {
+        Rows::One(row) => vec![row],
+        Rows::Many(rows) => rows,
+    };
+    rows.iter().find(|row| row.error_code != 0.0).map(|row| {
+        format!(
+            "MEXC refused the order [{}]: {}",
+            row.error_code,
+            match row.error_msg.trim() {
+                "" => "no reason given",
+                text => text,
+            }
+        )
+    })
 }
 fn result_id(payload: &str) -> Result<String, String> {
     #[derive(Deserialize)]
@@ -183,6 +209,17 @@ fn native_side(side: OrderSide, reduce: bool) -> u8 {
         (OrderSide::Sell, true) => 4,
     }
 }
+/// An amount below one volume step was rounded up to a whole contract before: it now refuses,
+/// naming the minimum in contracts and in base so a base-sized entry is recognisable.
+fn below_minimum(step: f64, m: &safe_cex_engine::model::Market) -> String {
+    let contracts = num::format(step);
+    let base = num::format(step * m.contract_size.unwrap_or(1.0));
+    let unit = if step == 1.0 { "contract" } else { "contracts" };
+    format!(
+        "MEXC order size is below the {contracts} {unit} minimum ({base} {})",
+        m.base
+    )
+}
 fn json<T: Serialize>(value: &T) -> Result<String, String> {
     serde_json::to_string(value).map_err(|e| e.to_string())
 }
@@ -214,7 +251,10 @@ impl MexcFutures {
             .market(&opts.symbol)
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
         let step = self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0);
-        let vol = num::adjust(opts.amount, step).max(step);
+        let vol = num::adjust(opts.amount, step);
+        if vol < step {
+            return Err(below_minimum(step, m));
+        }
         let kind = if opts.kind == OrderType::Market {
             5
         } else {
@@ -292,6 +332,57 @@ impl MexcFutures {
             );
         }
         let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        // Only an explicit close with no amount means the whole position, in native contracts,
+        // as a full-position stop does below. A reduce-only order is never widened: a size the
+        // page sized down to 0 stays refused rather than closing more than the user asked.
+        if !stop && opts.amount == 0.0 && opts.close == Some(true) {
+            let target = if opts.side == OrderSide::Sell {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            };
+            let p = cx
+                .store
+                .positions()
+                .iter()
+                .find(|p| p.symbol == opts.symbol && p.side == target && p.contracts > 0.0)
+                .ok_or_else(|| "MEXC close requires an open position".to_owned())?;
+            opts.amount = num::adjust(
+                p.contracts / m.contract_size.unwrap_or(1.0),
+                self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0),
+            );
+            opts.reduce_only = Some(true);
+        }
+        // A reduce-only order can only close the leg on its far side (a buy closes a short);
+        // MEXC's close sides would otherwise rest against nothing, so it is refused here.
+        if !stop && opts.reduce_only == Some(true) {
+            let target = if opts.side == OrderSide::Sell {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            };
+            if !cx
+                .store
+                .positions()
+                .iter()
+                .any(|p| p.symbol == opts.symbol && p.side == target && p.contracts > 0.0)
+            {
+                return Err(format!(
+                    "MEXC reduce-only {} needs an open {} position on {} to reduce",
+                    if opts.side == OrderSide::Sell {
+                        "sell"
+                    } else {
+                        "buy"
+                    },
+                    if target == PositionSide::Long {
+                        "long"
+                    } else {
+                        "short"
+                    },
+                    opts.symbol
+                ));
+            }
+        }
         if !opts.amount.is_finite() || opts.amount < 0.0 || (!stop && opts.amount == 0.0) {
             return Err("MEXC order requires a positive native amount".into());
         }
@@ -407,7 +498,11 @@ impl MexcFutures {
             opts.amount,
             self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0),
         );
-        if vol <= 0.0 || vol * m.contract_size.unwrap_or(1.0) > m.limits.amount.max {
+        let step = self.volume_units.get(&opts.symbol).copied().unwrap_or(1.0);
+        if vol < step {
+            return Err(below_minimum(step, m));
+        }
+        if vol * m.contract_size.unwrap_or(1.0) > m.limits.amount.max {
             return Err("MEXC stop amount exceeds native volume limits".into());
         }
         #[derive(Serialize)]
@@ -667,6 +762,7 @@ impl MexcFutures {
         Ok(steps)
     }
     pub fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let mut refusal_kind = None;
         let total_orders = match &command {
             Command::PlaceOrders { orders, .. } => orders.len(),
             Command::AmendOrder { .. } => 1,
@@ -723,6 +819,41 @@ impl MexcFutures {
                         bybit_slippage_tolerance_ticks: None,
                         implied_volatility: None,
                     };
+                    // Checked before the cancel: a replacement below the minimum would lose the order.
+                    let contract = cx
+                        .store
+                        .market(&o.symbol)
+                        .and_then(|m| m.contract_size)
+                        .unwrap_or(1.0);
+                    let left = match amount {
+                        Some(total) => {
+                            safe_cex_engine::num::left_of_total(total, o.filled / contract)?
+                        }
+                        None => opts.amount,
+                    };
+                    // Native full-position stops use zero as a sentinel; placement resolves
+                    // and validates the live position quantity before any cancellation.
+                    let full_position_stop =
+                        opts.amount == 0.0 && self.account.stop_ids.contains(&id);
+                    if full_position_stop {
+                        let target = if o.side == OrderSide::Sell {
+                            PositionSide::Long
+                        } else {
+                            PositionSide::Short
+                        };
+                        if !cx
+                            .store
+                            .positions()
+                            .iter()
+                            .any(|p| p.symbol == o.symbol && p.side == target && p.contracts > 0.0)
+                        {
+                            refusal_kind = Some(ErrorKind::VenueUnavailable);
+                            return Err("MEXC position not loaded yet; try again in a moment. The order is unchanged".into());
+                        }
+                    } else {
+                        replacement_fits(cx, &o.symbol, left)
+                            .map_err(|error| format!("{error}; the order is unchanged"))?;
+                    }
                     let mut replacement = self.placement(cx, opts)?;
                     if let Call::Place { amend, .. } = &mut replacement.call {
                         *amend = Some(AmendIntent {
@@ -854,7 +985,11 @@ impl MexcFutures {
                 return;
             };
             let _ = cx.command_error_context(&context, error);
-            let _ = cx.fail_context(&context, not_sent(error.as_str()));
+            let mut error = not_sent(error.as_str());
+            if let Some(kind) = refusal_kind {
+                error = error.kind(kind);
+            }
+            let _ = cx.fail_context(&context, error);
             return;
         }
         if self.credentials.is_none() {
@@ -868,6 +1003,14 @@ impl MexcFutures {
             return;
         }
         if let Ok(steps) = steps {
+            let replaces = steps.iter().find_map(|step| match &step.call {
+                Call::Place {
+                    opts,
+                    amend: Some(_),
+                    ..
+                } => Some(opts.symbol.clone()),
+                _ => None,
+            });
             self.trading.queue.push_back(Job {
                 command,
                 steps,
@@ -876,6 +1019,7 @@ impl MexcFutures {
                 total_orders,
                 failed_index: None,
                 effective: false,
+                replaces,
             });
             self.advance_trade(cx);
         }
@@ -949,7 +1093,7 @@ impl MexcFutures {
         let refreshed=match step.call.clone() {
             Call::Place {mut opts,amend,..}=>{
                 let amount=if let Some(amend)=amend {match cx.store.order(&amend.id) {
-                    Some(o) if o.status!=OrderStatus::Closed => {opts.amount=amend.amount.unwrap_or_else(||o.extra.as_ref().and_then(|e|e.remaining_native).unwrap_or(o.remaining/cx.store.market(&o.symbol).and_then(|m|m.contract_size).unwrap_or(1.0)));Ok(())},
+                    Some(o) if o.status!=OrderStatus::Closed => {let contract=cx.store.market(&o.symbol).and_then(|m|m.contract_size).unwrap_or(1.0);amend.amount.map(|total|safe_cex_engine::num::left_of_total(total,o.filled/contract)).transpose().map(|left|{opts.amount=left.unwrap_or_else(||o.extra.as_ref().and_then(|e|e.remaining_native).unwrap_or(o.remaining/contract));})},
                     _=>Err("MEXC original order filled or disappeared during amend".to_owned()),
                 }}else{Ok(())};
                 amount.and_then(|_|self.placement(cx,opts))
@@ -1008,6 +1152,16 @@ impl MexcFutures {
     ) {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
+            if job.effective
+                && job.ids.is_empty()
+                && let Some(symbol) = &job.replaces
+            {
+                let gone = safe_cex_engine::error::order_gone_text(
+                    symbol,
+                    error.outcome == Some(Outcome::Unknown),
+                );
+                error.message = format!("{}; {gone}", error.message);
+            }
             if (job.effective || !job.ids.is_empty())
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             {
@@ -1132,7 +1286,16 @@ impl MexcFutures {
                 opts.tp_trigger_type = extra.tp_trigger_type.or(opts.tp_trigger_type);
                 opts.sl_trigger_type = extra.sl_trigger_type.or(opts.sl_trigger_type);
             }
-            opts.amount = intent.amount.unwrap_or_else(|| {
+            let contract = cx
+                .store
+                .market(&order.symbol)
+                .and_then(|m| m.contract_size)
+                .unwrap_or(1.0);
+            let left = intent
+                .amount
+                .map(|total| safe_cex_engine::num::left_of_total(total, order.filled / contract))
+                .transpose()?;
+            opts.amount = left.unwrap_or_else(|| {
                 order
                     .extra
                     .as_ref()
@@ -1141,6 +1304,7 @@ impl MexcFutures {
             });
             self.account.revision += 1;
             self.apply_order(cx, order, Scope::Regular, self.account.revision);
+            replacement_fits(cx, &opts.symbol, opts.amount)?;
             self.placement(cx, opts).map(Some)
         })();
         match result {
@@ -1308,7 +1472,10 @@ impl MexcFutures {
             return;
         }
         if let Ok(e) = &envelope
-            && e.code == 510.0
+            && (e.code == 510.0
+                || e.message
+                    .to_ascii_lowercase()
+                    .contains("requests are too frequent"))
         {
             self.trading.next_submit = self.trading.next_submit.max(cx.now + 1500.0);
         }
@@ -1321,6 +1488,10 @@ impl MexcFutures {
             let e = Envelope::checked(response.body)?;
             match request.call {
                 Call::Place { opts, scope, .. } => {
+                    if let Some(refusal) = row_refusal(e.payload()?) {
+                        refused = true;
+                        return Err(refusal);
+                    }
                     let id = result_id(e.payload()?)?;
                     self.optimistic(cx, opts, id.clone(), scope);
                     self.trading.active.as_mut().unwrap().ids.push(id);
@@ -1567,4 +1738,18 @@ fn write_failure(status: u16, body: &str, message: String, refused: bool) -> Ven
         500 | 501 | 9999 => error.outcome(Outcome::Unknown),
         _ => error,
     }
+}
+
+/// A replacement below the contract minimum would be refused or sized up by placement.
+fn replacement_fits(cx: &Cx<'_, Pending>, symbol: &str, native: f64) -> Result<(), String> {
+    let Some(market) = cx.store.market(symbol) else {
+        return Ok(());
+    };
+    let minimum = market.limits.amount.min / market.contract_size.unwrap_or(1.0);
+    if native < minimum {
+        return Err(format!(
+            "MEXC replacement of {native} is below the {minimum} contract minimum"
+        ));
+    }
+    Ok(())
 }

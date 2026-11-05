@@ -37,7 +37,7 @@ test('repeated equal rows do not hide genuine permutations or grant command reor
   assert.ok(auditFixerChanges('kucoin', before, after).errors.some((error) => error.includes('commands@order')));
 });
 
-const orderlyVenues = ['orderly', 'tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'];
+const orderlyVenues = ['orderly', 'kodiakfi', 'mode', 'what', 'woofi'];
 const leverageRecords = () => [
   { type: 'meta', private: true },
   { type: 'command', op: 'fetchLeverage', symbol: 'BTCUSDC' },

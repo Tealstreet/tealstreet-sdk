@@ -45,7 +45,7 @@ box. The full grammar works — `;` / `&` chaining, aliases, `@vars`,
 `simulation on` in the REPL first (a webhook cannot change it):
 
 ```text
-buy $250 SOLUSDT at -0.5%
+buy $250 SOLUSDT at 150
 close longs; buy $500 BTCUSDT
 my-entry-alias
 ```
@@ -137,7 +137,7 @@ Quoting rule for the command body: use `"…"` or `'…'`. There is no escape
 syntax inside the quotes — pick whichever quote your body doesn't contain.
 
 ```text
-hook create alert-long "buy $250 SOLUSDT at -0.5%"
+hook create alert-long "buy $250 SOLUSDT at 150"
 hook create flatten "nuke positions" --account mybybit
 hook revoke 4f3a1c8e
 hook rotate 4f3a1c8e
@@ -202,7 +202,7 @@ were a `cmd:exec`.
 ```text
 $ curl -X POST http://127.0.0.1:53219/hook/4f3a1c8e... \
        -H "X-Hook-Token: 8b9d2e4a..."
-{"ok":true,"runId":"r_01HK…","command":"buy $250 SOLUSDT at -0.5%"}
+{"ok":true,"runId":"r_01HK…","command":"buy $250 SOLUSDT at 150"}
 ```
 
 ---

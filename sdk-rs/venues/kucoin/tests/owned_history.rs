@@ -1,11 +1,13 @@
 //! Shared-owner contracts: original failures discard already validated pages.
+mod support;
 use safe_cex_engine::log::code;
 use safe_cex_engine::{
     Action, Command, Engine, ErrorKind, Event, HttpRequest, Level, Notice, Query, Value, Venue,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
 use serde_json::{Value as Json, json};
 use std::collections::HashSet;
+use support::credentials::Options;
 
 struct H<V: Venue> {
     engine: Engine<V>,
@@ -14,9 +16,9 @@ struct H<V: Venue> {
     commands: HashSet<u32>,
 }
 impl<V: Venue> H<V> {
-    fn new(venue: V) -> Self {
+    fn new(engine: Engine<V>) -> Self {
         Self {
-            engine: safe_cex_engine::test_support::seeded_engine(venue),
+            engine,
             actions: vec![],
             now: 2000.0,
             commands: HashSet::new(),
@@ -24,7 +26,11 @@ impl<V: Venue> H<V> {
     }
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
-        self.actions.extend(self.engine.drain_actions());
+        self.actions
+            .extend(safe_cex_engine::test_support::prepared_actions(
+                &mut self.engine,
+                self.now,
+            ));
     }
     fn query(&mut self, command: u32, query: Query) {
         self.commands.insert(command);
@@ -171,7 +177,8 @@ impl<V: Venue> H<V> {
             let done_at = self.actions.iter().position(|a| matches!(a, Action::Notice(Notice::CommandDone {command,..}) if *command == id)).expect("marker needs successful completion");
             assert!(mark_at < done_at, "marker must precede completion");
             assert_eq!(marker.level, Level::Warn);
-            assert_eq!(marker.fields, vec![("command", Value::Num(f64::from(id)))]);
+            assert_eq!(marker.fields[..1], [("command", Value::Num(f64::from(id)))]);
+            assert_eq!(marker.fields[1].0, "reason");
         }
     }
 }
@@ -184,7 +191,7 @@ fn options() -> Options {
     }
 }
 fn futures() -> H<Kucoin> {
-    H::new(Kucoin::new(options()))
+    H::new(support::credentials::engine(options(), Kucoin::new))
 }
 fn income(funding: bool, symbol: Option<String>) -> Query {
     Query::Income {
@@ -370,7 +377,10 @@ fn owned_history_spot_fills_initial_failures_are_typed_without_partial_output() 
         r#"{"code":"400100","msg":"refused","data":{"dataList":[]}}"#,
         r#"{"code":"200000","data":{"items":[{"symbol":"BTC-USDT","orderId":"o","side":"buy","price":"100","size":"1","createdAt":1500},{}]}}"#,
     ] {
-        let mut h = H::new(safe_cex_venue_kucoin::spot::KucoinSpot::new(options()));
+        let mut h = H::new(support::credentials::engine(
+            options(),
+            safe_cex_venue_kucoin::spot::KucoinSpot::new,
+        ));
         h.query(
             10,
             Query::Fills {
@@ -538,10 +548,11 @@ fn owned_history_retry_exhaustion_recovers_the_prior_page_without_dispatching_ag
             let next = h
                 .actions
                 .iter()
-                .find_map(|a| match a {
-                    Action::SetTimer { at_ms, .. } => Some(*at_ms),
+                .filter_map(|a| match a {
+                    Action::SetTimer { at_ms, .. } if *at_ms > before => Some(*at_ms),
                     _ => None,
                 })
+                .min_by(f64::total_cmp)
                 .unwrap();
             assert_eq!(next - before, 1000.0 * f64::from(attempt + 1));
         }
@@ -571,7 +582,7 @@ fn owned_history_funding_failed_page_retry_keeps_raw_cursor_and_reused_identity(
 #[test]
 fn owned_history_public_trades_failure_is_typed_without_private_credentials() {
     let mut h = funding();
-    h.engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options::default()));
+    h.engine = support::credentials::engine(Options::default(), Kucoin::new);
     let market = funding().engine.store().markets().to_vec();
     h.engine.store_mut().set_markets(market);
     h.query(
@@ -589,7 +600,10 @@ fn owned_history_public_trades_failure_is_typed_without_private_credentials() {
 #[cfg(feature = "spot")]
 #[test]
 fn owned_history_spot_transport_failure_is_typed_with_the_existing_diagnostic() {
-    let mut h = H::new(safe_cex_venue_kucoin::spot::KucoinSpot::new(options()));
+    let mut h = H::new(support::credentials::engine(
+        options(),
+        safe_cex_venue_kucoin::spot::KucoinSpot::new,
+    ));
     h.query(
         10,
         Query::Fills {
@@ -610,5 +624,35 @@ fn owned_history_spot_transport_failure_is_typed_with_the_existing_diagnostic() 
         h.actions
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandError { command: 10, .. })))
+    );
+}
+
+#[test]
+fn window_orders_with_no_limit_walk_past_the_default() {
+    let mut h = funding();
+    h.query(
+        12,
+        Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(1000.0),
+            to_ms: Some(2000.0),
+            limit: None,
+        },
+    );
+    let r = h.take();
+    let rows = (0..1000)
+        .map(|n| json!({"id":format!("o{n}"),"symbol":"XBTUSDTM","side":"buy","type":"limit","price":"100","size":"1","dealSize":"1","createdAt":1500}))
+        .collect::<Vec<_>>();
+    h.reply(
+        &r,
+        200,
+        &json!({"code":"200000","data":{"currentPage":1,"totalPage":2,"totalNum":1001,"items":rows}})
+            .to_string(),
+    );
+    let next = h.take();
+    assert!(
+        next.url.contains("currentPage=2") || next.url.contains("pageNumber=2"),
+        "{}",
+        next.url
     );
 }

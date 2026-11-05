@@ -4,11 +4,11 @@ import type { Exchange } from '../exchanges/base';
 import type { PackedTickerDelta, Store } from '../store/store.interface';
 import type { ExchangeName, ExchangeOptions, OrderFillEvent, StoreData, Ticker } from '../types';
 import type { StoreWorkerCommandProgress, StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerPayload';
-import type { TwapInstance } from './twap/TwapInstance';
 
 import throttle from 'lodash/throttle';
 
-import { classifiedError, exchangeErrorTags } from '../commandOutcome';
+import { onTunnelLaneFallback, tunnelLanePort } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
+import { classifiedError, exchangeErrorTags, isErrorReported } from '../commandOutcome';
 import { WORKER_WRITE_METHODS, workerCallClientOrderIds } from '../exchanges/base';
 import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
@@ -16,7 +16,6 @@ import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
-import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
 import { mainAcceptsFrames } from './frameForwarding';
 import { BaseHandler } from './handlers/BaseHandler';
@@ -30,7 +29,10 @@ import { TwapHandler } from './handlers/TwapHandler';
 import { UiStateHandler } from './handlers/UiStateHandler';
 import { UpdatePositionsHandler } from './handlers/UpdatePositionsHandler';
 import { exchangeDependentPostprocessors, independentPostprocessors } from './postProcessors/registry';
-import { twapManager } from './twap/TwapManager';
+
+// The tunnel lane is per realm, so one live ExchangeWorker reports this realm's fallback.
+const liveExchangeWorkers = new Set<ExchangeWorker>();
+onTunnelLaneFallback((failures) => liveExchangeWorkers.values().next().value?.reportTunnelLaneFallback(failures));
 
 type WorkerSentryControl = {
   reportKey?: string;
@@ -86,6 +88,15 @@ const splitWorkerLogExtra = (extra: Record<string, any> | undefined) => {
   return { extra: plainExtra, sentryTags, sentryExtra, suppressConsoleLog };
 };
 
+/** A slow link is not a failed start: the Rust engine gets this long, other venues keep their 30 s. */
+const RUST_START_TIMEOUT_MS = 120_000;
+const START_TIMEOUT_MS = 30_000;
+/** A Rust start that still ran out of time starts over after each of these, then gives up visibly. */
+const START_RETRY_DELAYS_MS = [10_000, 20_000, 40_000, 60_000];
+
+/** A request held for an exchange that does not exist yet, matching the engine's write refusal. */
+const BUFFERED_REQUEST_WAIT_MS = 30_000;
+
 const USER_STARTED_ALGORITHMS = new Set<StoreWorkerPayload['op']>(['chaser:start', 'twap:start', 'twap:resume']);
 
 export class ExchangeWorker {
@@ -115,8 +126,12 @@ export class ExchangeWorker {
   private _recoveryAttempted = false;
   private _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private _recoveryUpdateIds: StoreData['updateIds'] | undefined;
+  private _startTimedOut = false;
+  private _startAnswer: string | undefined;
+  private _startRetries = 0;
+  /** Runs once, when a retried start finally brings the account up. */
+  onStartRetrySucceeded: (() => void) | undefined;
   private _unsubscribeStore: (() => void) | null = null;
-  private readonly _ownedTwaps = new Set<TwapInstance>();
   private readonly _publicDemand = new Map<string, StoreWorkerPayload>();
   private readonly _pendingRequests = new Map<string, { payload: StoreWorkerPayload; generation: number }>();
   private _pendingFailureTimer: ReturnType<typeof setTimeout> | null = null;
@@ -135,7 +150,7 @@ export class ExchangeWorker {
     UiStateHandler,
   ];
 
-  private _postprocessors: { process(store: any): void }[] = [];
+  private _postprocessors: { process(store: any): void; readsAccountData?: boolean }[] = [];
   private _exchangeDependentPostprocessors: { process(store: any): void }[] = [];
   private _handlers: BaseHandler[] = [];
   private _lastSentMarketsVersion: number | null = null;
@@ -146,6 +161,8 @@ export class ExchangeWorker {
   private _lastPayloadHadActiveChasers = false;
   /** Venue data reaches main as engine frames, not in store payloads. */
   private _forwardsFrames = false;
+  /** Main decodes books, candles and fills from the frames itself, so their ops go quiet. */
+  private _mainDecodesFrames = false;
   private _sentryReportCooldowns = new Map<string, { lastReportedAt: number; suppressedCount: number }>();
 
   constructor(
@@ -160,12 +177,15 @@ export class ExchangeWorker {
   ) {
     this._exchangeName = exchangeName;
     this._accountName = accountName;
-    this._options = options;
+    // The worker owns the account's engine; a forwarded mirror flag would stop it from running one.
+    const { workerMirror: _workerMirror, ...ownedOptions } = options;
+    this._options = ownedOptions;
     this._ctx = ctx;
     this._settings = settings;
     this._metadata = metadata;
     this._sessionKey = sessionKey;
     this.instanceId = instanceId;
+    liveExchangeWorkers.add(this);
 
     const throttleMs = 250 * (this._options?.tuning?.dataUpdateThrottleMultiplier || 1);
     this._throttledStoreUpdate = throttle((data: StoreData) => this._storeUpdate(data), throttleMs, {
@@ -255,6 +275,7 @@ export class ExchangeWorker {
                 account: this._accountName,
                 // Typed engine errors carry kind/outcome/venueCode; tag them so Sentry need not match text.
                 ...exchangeErrorTags(error),
+                tunnel_port: tunnelLanePort(),
                 ...splitExtra.sentryTags,
                 ...workerSentryControl.tags,
               },
@@ -303,6 +324,12 @@ export class ExchangeWorker {
     });
   }
 
+  private _flushBufferedCalls() {
+    const calls = this._messageBuffer.filter((payload) => payload.op === 'callMethod');
+    this._messageBuffer = this._messageBuffer.filter((payload) => payload.op !== 'callMethod');
+    calls.forEach((payload) => this.handlePayload(payload));
+  }
+
   /**
    * Bootstraps the exchange inside the worker.
    *
@@ -318,6 +345,7 @@ export class ExchangeWorker {
   async start(): Promise<boolean> {
     const startupToken = this._startupToken;
     const generation = ++this._generation;
+    this._startTimedOut = false;
     let startupTimeout: ReturnType<typeof setTimeout> | undefined;
     const cancelledPromise = new Promise<'cancelled'>((resolve) => {
       this._cancelStartup = () => {
@@ -349,15 +377,9 @@ export class ExchangeWorker {
       }
       this._exchange = new Exchange(this._exchangeName, this._options, this._store);
       if (this._recoveryAttempted) this._exchange.setActiveTickerSymbols(this._activeTickerSymbols);
-      if (this._exchange instanceof RustEngineExchange && mainAcceptsFrames()) {
-        // Main reads venue data straight from the frames; store payloads carry the rest.
-        this._forwardsFrames = true;
-        this._exchange.onFrame = (frame) => {
-          if (generation === this._generation && !this._stopped) {
-            this._ctx.postMessage({ op: 'frame', data: frame }, [frame]);
-          }
-        };
-      }
+      if (mainAcceptsFrames()) this._mainDecodesFrames = this.forwardFrames(generation, true);
+      // A recovered exchange keeps forwarding where main asked for this account's frames.
+      else if (this._forwardsFrames) this.forwardFrames(generation, false);
 
       // When privateOnly, disable public websocket connections before start().
       // Public data (tickers, orderbook, OHLCV) is provided by a shared public exchange.
@@ -370,13 +392,29 @@ export class ExchangeWorker {
 
       this.log('info', `Starting exchange in webworker: ${this._exchangeName}`);
 
-      const START_TIMEOUT_MS = 30_000;
+      const isRust = this._exchange instanceof RustEngineExchange;
+      const startTimeoutMs = isRust ? RUST_START_TIMEOUT_MS : START_TIMEOUT_MS;
+      const startedAt = Date.now();
       const startPromise = this._exchange.start().then(() => 'started' as const);
+      // Its calls queue under the engine's own bounds; held here they would wait out the whole start.
+      if (isRust) this._flushBufferedCalls();
       const timeoutPromise = new Promise<never>((_, reject) => {
-        startupTimeout = setTimeout(
-          () => reject(new Error(`Exchange start timed out after ${START_TIMEOUT_MS / 1000}s`)),
-          START_TIMEOUT_MS,
-        );
+        startupTimeout = setTimeout(() => {
+          this._startTimedOut = isRust;
+          const answered = (this._exchange as { lastReadFailure?: string } | undefined)?.lastReadFailure;
+          this._startAnswer = answered;
+          const error = new Error(
+            `Exchange start timed out after ${startTimeoutMs / 1000}s${answered ? `; ${answered}` : ''}`,
+          );
+          Object.assign(error, {
+            safeCexSentryTags: {
+              ...(this._exchange instanceof RustEngineExchange ? this._exchange.startupDiagnostics : {}),
+              startup_elapsed_ms: String(Math.max(0, Date.now() - startedAt)),
+              startup_deadline_ms: String(startTimeoutMs),
+            },
+          });
+          reject(error);
+        }, startTimeoutMs);
       });
 
       const result = await Promise.race([startPromise, timeoutPromise, cancelledPromise]);
@@ -384,6 +422,9 @@ export class ExchangeWorker {
         return false;
       }
 
+      // The engine's Rust algos run this account's chasers, TWAPs and CLI;
+      // start them before the buffered ops that drive them.
+      if (this._exchange instanceof RustEngineExchange) this._exchange.startAlgos(this._accountName);
       this._flushBufferedMessages();
       if (startupToken !== this._startupToken || this._exchange?.isDisposed) {
         return false;
@@ -396,8 +437,14 @@ export class ExchangeWorker {
       return true;
     } catch (e) {
       if (
+        // Only the worker's own stop is quiet. An exchange that disposed itself because its
+        // start failed (a refused key) must report it, or nothing downstream can react.
         startupToken !== this._startupToken ||
-        (this._exchange?.isDisposed && !(this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead))
+        this._disposed ||
+        // The exchange told the user itself, then stopped (a lost shared feed).
+        (this._exchange?.isDisposed &&
+          isErrorReported(e) &&
+          !(this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead))
       ) {
         console.warn(`Error starting exchange (disposed, suppressing): ${this._exchangeName}`, e);
         return false;
@@ -703,6 +750,8 @@ export class ExchangeWorker {
       this._exchangeDependentPostprocessors[i].process(processedData);
     }
     for (let i = 0; i < this._postprocessors.length; i++) {
+      // A public-only engine reports account data loaded without reading any.
+      if (this._options.publicDataOnly && this._postprocessors[i].readsAccountData) continue;
       this._postprocessors[i].process(processedData);
     }
 
@@ -772,13 +821,40 @@ export class ExchangeWorker {
     }
     if (this._forwardsFrames && this._exchange instanceof RustEngineExchange) {
       const frame = this._exchange.snapshotFrame();
-      if (frame) this._ctx.postMessage({ op: 'frame', data: frame }, [frame]);
+      if (frame) this._ctx.postMessage({ op: 'frame', data: frame, snapshot: true }, [frame]);
     }
     this._storeUpdate(this._store.serialize(), { forceFullStore: true });
   }
 
+  /**
+   * Main reads venue data straight from this account's frames; store payloads
+   * carry the rest. Per account: a main-thread engine that is frame-fed asks for
+   * it (`forwardFrames`), and one that is not keeps full store payloads.
+   */
+  private forwardFrames(generation: number, mainDecodesMarketData: boolean) {
+    const exchange = this._exchange;
+    if (!(exchange instanceof RustEngineExchange)) return false;
+    this._forwardsFrames = true;
+    // A frame-fed page engine takes account sections only; books and candles
+    // still go out as this worker's own listenOrderBook/listenOHLCV ops.
+    exchange.framesCarryMarketData = mainDecodesMarketData;
+    exchange.onFrame = (frame, snapshot) => {
+      if (generation === this._generation && !this._stopped) {
+        this._ctx.postMessage({ op: 'frame', data: frame, snapshot: snapshot === true }, [frame]);
+      }
+    };
+    return true;
+  }
+
+  /** This realm's tunnel sockets left the 8443 lane for 443 after repeated failed handshakes. */
+  reportTunnelLaneFallback(failures: number) {
+    const message = 'Tunnel lane fell back to 443';
+    this.logError(message, new Error(message), { sentryTags: { tunnel_lane_failures: String(failures) } });
+  }
+
   dispose() {
     if (this._disposed) return;
+    liveExchangeWorkers.delete(this);
     this._disposed = true;
     this._stopped = true;
     this._started = false;
@@ -801,16 +877,11 @@ export class ExchangeWorker {
     this._cancelStartup?.();
     this._cancelStartup = null;
     try {
-      this._stopOwnedTwaps();
-      if (this._exchange) chaserOrderManagerInstance.cleanupExchange(this._exchange);
+      // Native pending-command rejections (or acknowledgements already
+      // queued) reach their original caller before the task fallback.
+      this._exchange?.dispose();
     } finally {
-      try {
-        // Native pending-command rejections (or acknowledgements already
-        // queued) reach their original caller before the task fallback.
-        this._exchange?.dispose();
-      } finally {
-        this._clearRuntimePipeline();
-      }
+      this._clearRuntimePipeline();
     }
   }
 
@@ -834,7 +905,7 @@ export class ExchangeWorker {
       return;
     }
     if (this._stopped) {
-      this._rejectUnavailablePayload(payload);
+      this._rejectUndispatched(payload);
       return;
     }
     const isDemand = this._recordPublicDemand(payload);
@@ -842,7 +913,7 @@ export class ExchangeWorker {
     if (isUiState) this._latestUiState = { ...payload, data: { ...payload.data } };
     if (this._recovering || (this._exchange instanceof RustEngineExchange && this._exchange.isEngineDead)) {
       // Subscription state is safe to retain; trading/query requests are never replayed.
-      if (!isDemand && !isUiState) this._rejectUnavailablePayload(payload);
+      if (!isDemand && !isUiState) this._rejectUndispatched(payload);
       return;
     }
     if (!this._exchange) {
@@ -850,6 +921,14 @@ export class ExchangeWorker {
       const MAX_BUFFER_SIZE = 1000;
       if (this._messageBuffer.length < MAX_BUFFER_SIZE) {
         this._messageBuffer.push(payload);
+        if (this._requestKey(payload)) {
+          setTimeout(() => {
+            const at = this._messageBuffer.indexOf(payload);
+            if (at < 0) return;
+            this._messageBuffer.splice(at, 1);
+            this._rejectNeverSent(payload, 'The account did not load in time; nothing was sent. Retry once it loads.');
+          }, BUFFERED_REQUEST_WAIT_MS);
+        }
       } else {
         this._rejectNeverSent(payload, 'Worker startup queue is full; nothing was sent.');
         // Send warning through proper logging infrastructure
@@ -895,30 +974,14 @@ export class ExchangeWorker {
         break;
       case 'sayHi':
         break;
+      case 'forwardFrames':
+        // Started engines get a baseline at once; one still starting sends its own first.
+        if (this.forwardFrames(this._generation, false) && (this._exchange as RustEngineExchange).hasStarted)
+          this.sendSnapshot();
+        break;
       default:
-        // TWAP construction is synchronous. Track the actual instances made by
-        // this dispatch rather than using account names in the global manager.
-        const dispatchGeneration = this._generation;
-        const previousTwaps =
-          typeof payload.op === 'string' && payload.op.startsWith('twap:')
-            ? new Set(twapManager.runningTwaps.values())
-            : null;
         for (let i = 0; i < this._handlers.length; i++) {
           this._handlers[i].handle(payload);
-        }
-        if (previousTwaps) {
-          for (const twap of this._ownedTwaps) {
-            if (twapManager.getById(twap.id) !== twap) this._ownedTwaps.delete(twap);
-          }
-          for (const twap of twapManager.runningTwaps.values()) {
-            if (!previousTwaps.has(twap)) {
-              if (dispatchGeneration !== this._generation || this._recovering || this._stopped) {
-                void twap
-                  .terminate()
-                  .catch((error: unknown) => this.logError('Unable to stop interrupted TWAP.', error));
-              } else this._ownedTwaps.add(twap);
-            }
-          }
         }
     }
   };
@@ -1014,10 +1077,18 @@ export class ExchangeWorker {
     });
   }
 
+  /** Never reached the exchange, so a request is `notSent`; a started algorithm says so too. */
+  private _rejectUndispatched(payload: StoreWorkerPayload, message?: string) {
+    if (this._requestKey(payload)) this._rejectNeverSent(payload, message);
+    else this._rejectUnavailablePayload(payload, message);
+  }
+
   private _dropMessageBuffer() {
     const dropped = this._messageBuffer;
     this._messageBuffer = [];
-    for (const payload of dropped) this._rejectNeverSent(payload);
+    for (const payload of dropped) {
+      this._rejectUndispatched(payload, 'Exchange stopped before this operation was sent; nothing was sent.');
+    }
   }
 
   private _rejectUnavailablePayload(
@@ -1064,11 +1135,9 @@ export class ExchangeWorker {
     // error per routine message would toast on every symbol switch.
   }
 
-  private _stopOwnedTwaps() {
-    for (const twap of this._ownedTwaps) {
-      void twap.terminate().catch((error: unknown) => this.logError('Unable to stop interrupted TWAP.', error));
-    }
-    this._ownedTwaps.clear();
+  /** TWAPs in the engine's Rust algos died with it: post their final state. */
+  private _finishRustTwaps() {
+    for (const handler of this._handlers) if (handler instanceof TwapHandler) handler.finishRustTwaps();
   }
 
   private _invalidateReadiness() {
@@ -1091,6 +1160,8 @@ export class ExchangeWorker {
     // counters before releasing it, so the replacement cannot rewind them.
     this._recoveryUpdateIds = { ...this._store.updateIds };
     if (!this._started || this._recovering) {
+      // An op that beat startup can have started a Rust TWAP already.
+      this._finishRustTwaps();
       this._invalidateReadiness();
       return;
     }
@@ -1105,15 +1176,12 @@ export class ExchangeWorker {
       code: 'ENGINE_DEAD',
       kind: 'internal',
     });
-    // Stop TWAPs while their handler context is still current, so the final
-    // completed state reaches the main thread that persists and resumes them.
-    this._stopOwnedTwaps();
+    // Post the dead engine's TWAP state while the handler context is current,
+    // so the main thread that persists and resumes TWAPs does not restore them.
+    this._finishRustTwaps();
     this._generation++;
     this._clearRuntimePipeline();
-    if (this._exchange) {
-      chaserOrderManagerInstance.cleanupExchange(this._exchange);
-      this._exchange.dispose();
-    }
+    this._exchange?.dispose();
     this._dropMessageBuffer();
     this._invalidateReadiness();
     this.log('warn', 'Rust engine stopped; interrupted writes may have an unknown outcome and will not be replayed.', {
@@ -1141,6 +1209,57 @@ export class ExchangeWorker {
     }, 500);
   }
 
+  /**
+   * A Rust start that ran out of time starts over on this worker, keeping its
+   * public demand, and answers what it held. False leaves the failure final.
+   */
+  retryTimedOutStart(): boolean {
+    const delay = START_RETRY_DELAYS_MS[this._startRetries];
+    // A shared port needs a fresh provider attachment, as after an engine failure.
+    if (!this._startTimedOut || this._stopped || delay === undefined || this._options.publicFeed?.mode === 'shared') {
+      if (this._startTimedOut && !this._stopped) {
+        const message = `${this._exchangeName} did not finish loading after ${this._startRetries + 1} attempts. Check your connection and reload the account.`;
+        // Forced: a start that never connected would otherwise fail the page's connected gate.
+        this._ctx.postMessage({ op: 'error', data: [message, { forceToast: true }] });
+      }
+      return false;
+    }
+    this._startTimedOut = false;
+    this._startRetries++;
+    this._recoveryUpdateIds = { ...this._store.updateIds };
+    this._recovering = true;
+    this._deferInterruptedRequests({
+      message: 'Exchange start timed out; interrupted operation outcomes are unknown and were not replayed.',
+      name: 'EngineDisposedError',
+      code: 'ENGINE_DISPOSED',
+    });
+    this._finishRustTwaps();
+    this._generation++;
+    this._clearRuntimePipeline();
+    this._exchange?.dispose();
+    this._dropMessageBuffer();
+    this._invalidateReadiness();
+    this._ctx.postMessage({
+      op: 'warning',
+      data: [
+        this._startAnswer
+          ? `${this._exchangeName} did not load this account; retrying in ${delay / 1000}s. ${this._startAnswer}`
+          : `${this._exchangeName} is still loading on a slow connection; retrying in ${delay / 1000}s.`,
+        { forceToast: true },
+      ],
+    });
+    const token = this._startupToken;
+    this._recoveryTimer = setTimeout(() => {
+      this._recoveryTimer = null;
+      void this._recoverEngine(token).catch((failure: unknown) => {
+        if (token !== this._startupToken || this._stopped) return;
+        this.dispose();
+        this.logError('Exchange start retry failed; reinitialize the account.', failure);
+      });
+    }, delay);
+    return true;
+  }
+
   private async _recoverEngine(token: number) {
     if (token !== this._startupToken || this._stopped) return;
     const previousUpdateIds = this._recoveryUpdateIds ?? this._store.serialize().updateIds;
@@ -1162,6 +1281,7 @@ export class ExchangeWorker {
     this._ctx.postMessage({ op: 'store', data: this._sanitizeForPostMessage(this._store.serialize()) });
     const started = await this.start();
     if (token !== this._startupToken || this._stopped) return;
+    if (!started && this.retryTimedOutStart()) return;
     if (!started || this._exchange?.isDisposed) {
       this.dispose();
       this._ctx.postMessage({ op: 'warning', data: ['Rust engine recovery failed; reinitialize the account.'] });
@@ -1172,7 +1292,11 @@ export class ExchangeWorker {
     for (const demand of this._publicDemand.values()) this.handlePayload(demand);
     if (this._stopped || this._exchange?.isDisposed) return;
     this.sendSnapshot();
-    if (!this._stopped && !this._exchange?.isDisposed) this._ctx.postMessage({ op: 'ws-reconnected' });
+    if (this._stopped || this._exchange?.isDisposed) return;
+    this._ctx.postMessage({ op: 'ws-reconnected' });
+    const succeeded = this.onStartRetrySucceeded;
+    this.onStartRetrySucceeded = undefined;
+    succeeded?.();
   }
 
   private _initializeProcessorsAndHandlers() {
@@ -1238,7 +1362,7 @@ export class ExchangeWorker {
     }
 
     this._exchange!.on('fill', (event: OrderFillEvent) => {
-      if (isCurrent() && !this._forwardsFrames) this._ctx.postMessage({ op: 'fill', data: event });
+      if (isCurrent() && !this._mainDecodesFrames) this._ctx.postMessage({ op: 'fill', data: event });
     });
 
     const logEvents = [
@@ -1279,7 +1403,7 @@ export class ExchangeWorker {
       if (isCurrent()) this._ctx.postMessage({ op: 'ws-reconnected' });
     });
 
-    this._exchange!.on('deactivate', () => {
+    this._exchange!.on('deactivate', (refusal?: string) => {
       if (!isCurrent()) return;
       this.log('info', `Exchange emitted deactivate event: ${this._exchangeName}`);
       // Dispose through the worker so any in-flight start() gets cancelled.
@@ -1287,7 +1411,11 @@ export class ExchangeWorker {
       this._exchange = null;
       this._clearRuntimePipeline();
       // Notify main thread of deactivation
-      this._ctx.postMessage({ op: 'deactivate-status', data: true });
+      this._ctx.postMessage({
+        op: 'deactivate-status',
+        data: true,
+        refusal: refusal ?? 'The exchange refused this key.',
+      });
     });
   }
 }

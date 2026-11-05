@@ -19,6 +19,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::request_context::{
     Context, Operation, Owner, Policy, RejectionReports, RetryPolicy, UnprovenEvidence,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -31,6 +32,23 @@ const BROKER_PREFIX: &str = "x-s3vFFRQp";
 /// Errors callers handle themselves; they are not shown to the user.
 const SILENT_CODES: [i64; 4] = [-2011, -2013, -4059, -5022];
 const UNKNOWN_ORDER: i64 = -2011;
+
+fn stop_name(kind: OrderType) -> &'static str {
+    if kind == OrderType::TakeProfit {
+        "take profit"
+    } else {
+        "stop"
+    }
+}
+
+fn is_stop_kind(kind: OrderType) -> bool {
+    matches!(
+        kind,
+        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+    )
+}
+
+const MARGIN_TYPE_ALREADY_SET: i64 = -4046;
 const POSITION_MODE_ALREADY_SET: i64 = -4059;
 const POST_ONLY_REJECTED: i64 = -5022;
 
@@ -141,12 +159,39 @@ struct Job {
     stop: bool,
     planning_error: Option<VenueError>,
     amendment: Option<Amendment>,
+    /// An amend's cancel landed and this stop's replacement is next: any refusal
+    /// now leaves the position without it.
+    replacing_stop: Option<(String, OrderSide, OrderType)>,
+    /// The same for any other order: a refusal now leaves it gone.
+    replacing_order: Option<String>,
+    /// The replaced stop exactly as it stood, to put back if its replacement is refused.
+    restore: Option<(PlaceOrderOpts, Option<&'static str>)>,
+    /// Putting it back is under way; the replacement's refusal.
+    restoring: Option<String>,
+}
+
+impl Job {
+    /// What a failed replacement cost, once its cancel has landed.
+    fn gone_text(&self, unknown: bool) -> Option<String> {
+        if let Some((symbol, side, kind)) = &self.replacing_stop {
+            return Some(safe_cex_engine::error::stop_gone_text(
+                symbol, *side, *kind, unknown,
+            ));
+        }
+        self.replacing_order
+            .as_deref()
+            .filter(|_| self.ids.is_empty())
+            .map(|symbol| safe_cex_engine::error::order_gone_text(symbol, unknown))
+    }
 }
 
 struct Amendment {
     id: String,
     target_total: f64,
     replacement: PlaceOrderOpts,
+    /// The order as it stands, with its own trigger and size.
+    original: PlaceOrderOpts,
+    position_side: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -175,7 +220,11 @@ enum CancelProof {
 
 #[derive(Default)]
 pub struct TradingState {
+    /// MIN_NOTIONAL by symbol. Market limits carry no value minimum.
+    pub(crate) min_notional: HashMap<String, f64>,
     jobs: HashMap<CommandId, Job>,
+    /// While an amendment plans its replacement: the original row's hedge side.
+    amended_position_side: Option<&'static str>,
     #[cfg(test)]
     id_generator: Option<fn() -> Result<String, String>>,
 }
@@ -231,6 +280,7 @@ fn type_text(kind: OrderType) -> &'static str {
         OrderType::StopLoss => "STOP_MARKET",
         OrderType::TakeProfit => "TAKE_PROFIT_MARKET",
         OrderType::TrailingStopLoss => "TRAILING_STOP_MARKET",
+        // Sent only by format_conditional, which chooses the native type.
         OrderType::Conditional => "STOP_MARKET",
     }
 }
@@ -247,7 +297,10 @@ fn tif_text(tif: TimeInForce) -> &'static str {
 fn is_algo(kind: OrderType) -> bool {
     matches!(
         kind,
-        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+        OrderType::StopLoss
+            | OrderType::TakeProfit
+            | OrderType::TrailingStopLoss
+            | OrderType::Conditional
     )
 }
 
@@ -315,7 +368,7 @@ impl BinanceFutures {
             );
             return;
         }
-        if self.is_spot()
+        if (self.is_spot() || self.is_options())
             && matches!(
                 command,
                 Command::SetLeverage { .. }
@@ -403,7 +456,7 @@ impl BinanceFutures {
                         },
                     },
                 ];
-                if self.is_spot() || self.is_inverse() {
+                if self.is_spot() || self.is_inverse() || self.is_options() {
                     step.truncate(1);
                     if let Call::Cancel { ids, proof } = &mut step[0].call {
                         *proof = Some(if self.is_spot() {
@@ -560,16 +613,44 @@ impl BinanceFutures {
                 self.advance(cx, command);
                 return;
             }
+            if let Some(job) = self.trading.jobs.get_mut(&command) {
+                let replacement = &amendment.replacement;
+                job.replacing_stop = is_stop_kind(replacement.kind).then(|| {
+                    (
+                        replacement.symbol.clone(),
+                        replacement.side,
+                        replacement.kind,
+                    )
+                });
+                job.replacing_order =
+                    (!is_stop_kind(replacement.kind)).then(|| replacement.symbol.clone());
+                if is_stop_kind(replacement.kind) {
+                    let mut original = amendment.original.clone();
+                    original.amount = if full_close {
+                        0.0
+                    } else {
+                        (original.amount - filled).max(0.0)
+                    };
+                    job.restore = Some((original, amendment.position_side));
+                }
+            }
             amendment.replacement.amount = if full_close {
                 0.0
             } else {
                 amendment.target_total - filled
             };
+            self.trading.amended_position_side = amendment.position_side;
             let plan = self.plan_place(cx, std::slice::from_ref(&amendment.replacement));
+            self.trading.amended_position_side = None;
             if let Some(job) = self.trading.jobs.get_mut(&command) {
                 match plan {
                     Ok(plan) => job.steps.extend(plan.steps),
-                    Err(error) => job.planning_error = Some(error.into()),
+                    Err(error) => {
+                        job.planning_error = Some(match job.gone_text(false) {
+                            Some(gone) => VenueError::new(format!("{gone}: {error}")),
+                            None => error.into(),
+                        });
+                    }
                 }
             }
             self.advance(cx, command);
@@ -707,6 +788,14 @@ impl BinanceFutures {
         body: &str,
         evidence: &mut UnprovenEvidence,
     ) {
+        if self.is_options() {
+            if matches!(request.call, Call::PlaceOne { .. })
+                && let Some(id) = crate::options::placed_id(body)
+            {
+                evidence.order_id(&id.to_string());
+            }
+            return;
+        }
         let Some(row) = UnprovenOrder::parse(body) else {
             return;
         };
@@ -815,7 +904,19 @@ impl BinanceFutures {
         // never feed them into accepted placement planning or caller bindings.
         let mut evidence_ids = Vec::new();
         let mut known_cancel_effects = false;
+        let mut restore_planned = false;
         let error = match (call, outcome) {
+            (Call::PlaceOne { .. }, Ok(body)) if self.is_options() => {
+                if let Some(id) = crate::options::placed_id(body) {
+                    ids.push(id.to_string());
+                    None
+                } else {
+                    Some((
+                        0,
+                        "Binance Options placement response has no valid native order ID".into(),
+                    ))
+                }
+            }
             (
                 Call::PlaceOne {
                     client_id: Some(id),
@@ -945,6 +1046,9 @@ impl BinanceFutures {
                         format!("Cancellation was not confirmed: {message}"),
                     ))
                 } else {
+                    if let Some(proof) = &proof {
+                        self.note_unknown_cancel_proof(cx, proof);
+                    }
                     match proof {
                         Some(CancelProof::One(target)) => {
                             self.mark_captured_canceled(cx, &[target], false);
@@ -971,9 +1075,11 @@ impl BinanceFutures {
                         p.leverage = leverage;
                     }
                 });
+                cx.hold_setting(SettingKey::Leverage(symbol));
                 None
             }
-            (Call::MarginType { symbol, isolated }, Ok(_)) => {
+            (Call::MarginType { symbol, isolated }, Ok(_))
+            | (Call::MarginType { symbol, isolated }, Err((MARGIN_TYPE_ALREADY_SET, _))) => {
                 let margin = if isolated {
                     safe_cex_engine::model::MarginType::Isolated
                 } else {
@@ -981,14 +1087,18 @@ impl BinanceFutures {
                 };
                 cx.store
                     .update_setting(&symbol, |s| s.margin_type = Some(margin));
+                cx.hold_setting(SettingKey::MarginType(symbol));
                 None
             }
+            // Binance's dualSidePosition is account-wide: the store's hedge flag.
             (Call::PositionMode { hedged }, Ok(_)) => {
                 cx.store.set_hedged(hedged);
+                cx.hold_setting(SettingKey::Hedged);
                 None
             }
             (Call::PositionMode { hedged }, Err((POSITION_MODE_ALREADY_SET, _))) if !unproven => {
                 cx.store.set_hedged(hedged);
+                cx.hold_setting(SettingKey::Hedged);
                 None
             }
             (_, Err(error)) => Some(error),
@@ -1005,14 +1115,67 @@ impl BinanceFutures {
                     code: NativeCode::Int(code),
                     message: &message,
                 });
-                let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &message)
+                // The classifier decides first: only a proven refusal left nothing on the venue.
+                let Ok(verdict) = cx
+                    .classify_write(&context, &BINANCE, native.as_ref(), &message)
+                    .map(|fact| fact.verdict())
                 else {
+                    return;
+                };
+                // A signature refusal is as proven as any; once the cancel landed it is not resent.
+                let refused =
+                    !unproven && matches!(verdict, Verdict::Refused(_) | Verdict::RefusedResend(_));
+                // The cancel landed, so the leg's words lead with what the user lost.
+                let gone = self
+                    .trading
+                    .jobs
+                    .get(&command)
+                    .filter(|_| ids.is_empty())
+                    .and_then(|job| job.gone_text(!refused));
+                known_cancel_effects |= gone.is_some();
+                let restoring = self
+                    .trading
+                    .jobs
+                    .get(&command)
+                    .and_then(|job| job.restoring.clone());
+                let told = match (&gone, &restoring) {
+                    (Some(gone), Some(refusal)) if refused => {
+                        format!("{gone}: {refusal}; putting it back failed too: {message}")
+                    }
+                    // The put-back itself may have landed: no claim either way.
+                    (Some(gone), Some(refusal)) => {
+                        format!(
+                            "{gone}: {refusal}; putting it back has an unknown outcome: {message}"
+                        )
+                    }
+                    (Some(gone), None) => format!("{gone}: {message}"),
+                    _ => message.clone(),
+                };
+                // Only a proven refusal of a stop's replacement puts the old stop back, once;
+                // an unknown one may have landed, and a second protective order is never added.
+                if gone.is_some() && refused {
+                    match restoring {
+                        Some(_) => self.fail_unprotected(command, &told),
+                        None => restore_planned = self.plan_restore(cx, command, &gone, &message),
+                    }
+                } else if gone.is_some()
+                    && restoring.is_some()
+                    && let Some(job) = self.trading.jobs.get_mut(&command)
+                {
+                    // The put-back may have landed: these words, and no protection claim.
+                    job.planning_error = Some(VenueError {
+                        presents: true,
+                        ..VenueError::new(told.clone())
+                    });
+                }
+                let Ok(fact) = cx.classify_write(&context, &BINANCE, native.as_ref(), &told) else {
                     return;
                 };
                 native_fact = Some(if unproven { fact.unproven() } else { fact });
             }
             if let Some(job) = self.trading.jobs.get_mut(&command)
                 && !continue_after_item_refusal
+                && !restore_planned
             {
                 job.stop = true;
             }
@@ -1065,10 +1228,79 @@ impl BinanceFutures {
         let Some(job) = self.trading.jobs.get_mut(&command) else {
             return;
         };
+        if !ids.is_empty()
+            && let Some(refusal) = job.restoring.take()
+        {
+            let what = job
+                .replacing_stop
+                .as_ref()
+                .map_or("order", |(_, _, kind)| stop_name(*kind));
+            let symbol = job
+                .replacing_stop
+                .as_ref()
+                .map_or("", |(symbol, _, _)| symbol.as_str());
+            job.planning_error = Some(VenueError {
+                kind: Some(safe_cex_engine::error::ErrorKind::Rejected),
+                outcome: Some(safe_cex_engine::error::Outcome::Rejected),
+                protection: Some(safe_cex_engine::error::Protection::Restored),
+                ..VenueError::new(format!(
+                    "Your {symbol} {what} is unchanged: its replacement was refused, so the old {what} was put back as a new order: {refusal}"
+                ))
+            });
+        }
         job.ids.extend(ids);
         job.outstanding = job.outstanding.saturating_sub(1);
         if job.outstanding == 0 {
             self.advance(cx, command);
+        }
+    }
+
+    /// Plan putting a refused replacement's original back; true when it will be sent.
+    fn plan_restore(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        gone: &Option<String>,
+        refusal: &str,
+    ) -> bool {
+        let Some((original, position_side)) = self
+            .trading
+            .jobs
+            .get_mut(&command)
+            .and_then(|job| job.restore.take())
+        else {
+            return false;
+        };
+        self.trading.amended_position_side = position_side;
+        let plan = self.plan_place(cx, std::slice::from_ref(&original));
+        self.trading.amended_position_side = None;
+        let Some(job) = self.trading.jobs.get_mut(&command) else {
+            return false;
+        };
+        match plan {
+            Ok(plan) => {
+                job.steps = plan.steps;
+                job.restoring = Some(refusal.to_owned());
+                true
+            }
+            Err(error) => {
+                let told = format!(
+                    "{}: {refusal}; putting it back failed too: {error}",
+                    gone.as_deref().unwrap_or_default()
+                );
+                self.fail_unprotected(command, &told);
+                false
+            }
+        }
+    }
+
+    /// The replacement and the old stop were both refused: say so as loudly as before.
+    fn fail_unprotected(&mut self, command: CommandId, told: &str) {
+        if let Some(job) = self.trading.jobs.get_mut(&command) {
+            job.planning_error = Some(VenueError {
+                protection: Some(safe_cex_engine::error::Protection::Unprotected),
+                ..VenueError::new(told)
+            });
         }
     }
 
@@ -1143,7 +1375,7 @@ impl BinanceFutures {
         // Binance allows one closePosition order per direction per symbol.
         let mut replaced: Vec<Order> = Vec::new();
         let pm = self.options.portfolio_margin;
-        let replaces_close_orders = !pm && !self.is_spot();
+        let replaces_close_orders = !pm && !self.is_spot() && !self.is_options();
         for opts in orders {
             if replaces_close_orders {
                 for existing in self.conflicting_close_orders(cx, opts) {
@@ -1152,7 +1384,9 @@ impl BinanceFutures {
                     }
                 }
             }
-            let (r, a) = if self.is_spot() {
+            let (r, a) = if self.is_options() {
+                (self.format_option(cx, opts)?, Vec::new())
+            } else if self.is_spot() {
                 (self.format_spot(cx, opts)?, Vec::new())
             } else if self.is_inverse() {
                 (self.format_inverse(cx, opts)?, Vec::new())
@@ -1266,6 +1500,23 @@ impl BinanceFutures {
 
     fn plan_cancel(&self, orders: &[Order]) -> Job {
         let mut job = Job::default();
+        if self.is_options() {
+            for order in orders {
+                job.steps.push_back(vec![Planned {
+                    receipts: Vec::new(),
+                    method: Method::Delete,
+                    path: self.paths.order,
+                    query: Query::new()
+                        .str("symbol", &order.symbol)
+                        .str("orderId", &order.id),
+                    call: Call::Cancel {
+                        ids: vec![order.id.clone()],
+                        proof: Some(CancelProof::One(self.cancel_target(order))),
+                    },
+                }]);
+            }
+            return job;
+        }
         if self.options.portfolio_margin || self.is_spot() {
             // One at a time, by the client ids the orders were placed with.
             for order in orders {
@@ -1371,6 +1622,64 @@ impl BinanceFutures {
             }]);
         }
         job
+    }
+
+    fn format_option(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Vec<Params>, String> {
+        if opts.kind != OrderType::Limit
+            || opts.implied_volatility.is_some()
+            || opts.trigger_price.is_some()
+            || opts.stop_loss.is_some()
+            || opts.take_profit.is_some()
+        {
+            return Err("Binance Options requires a limit price and supports no trigger or implied-volatility order".into());
+        }
+        if let Some(id) = &opts.client_order_id
+            && !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        {
+            return Err("Invalid Binance Options client order ID".into());
+        }
+        let market = cx
+            .store
+            .market(&opts.symbol)
+            .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        let amount = num::adjust(opts.amount, market.precision.amount);
+        if !amount.is_finite()
+            || amount < market.limits.amount.min
+            || amount <= 0.
+            || amount > market.limits.amount.max
+        {
+            return Err("Binance Options quantity is outside its native lot bounds".into());
+        }
+        let price = positive_price(opts.price, market.precision.price)?;
+        let post_only = opts.time_in_force == Some(TimeInForce::PostOnly);
+        let mut params = Params::default();
+        params.set("symbol", opts.symbol.clone());
+        params.set("side", side_text(opts.side));
+        params.set("type", "LIMIT");
+        params.set("quantity", number(amount));
+        params.set("price", number(price));
+        params.set(
+            "timeInForce",
+            if post_only {
+                "GTC"
+            } else {
+                tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel))
+            },
+        );
+        if post_only {
+            params.set("postOnly", "true");
+        }
+        if opts.reduce_only == Some(true) {
+            params.set("reduceOnly", "true");
+        }
+        params.set("clientOrderId", self.client_id(cx, &opts.client_order_id)?);
+        Ok(vec![params])
     }
 
     fn format_spot(
@@ -1678,6 +1987,20 @@ impl BinanceFutures {
             close: Some(order.close.unwrap_or(false)),
             stp_mode: None,
         };
+        // A replacement below the value minimum would be refused after the old order is gone.
+        let left = (replacement.amount - order.filled).max(0.0);
+        let value = left * replacement.price.unwrap_or(0.0);
+        let minimum = self
+            .trading
+            .min_notional
+            .get(&order.symbol)
+            .copied()
+            .unwrap_or(0.0);
+        if !order.reduce_only && value > 0.0 && value < minimum {
+            return Err(format!(
+                "Replacement worth {value} is below the {minimum} minimum; the order is unchanged"
+            ));
+        }
         // Validate before canceling; build the final payload after its cumulative fill is known.
         self.plan_place(cx, std::slice::from_ref(&replacement))?;
         let mut job = self.plan_cancel(std::slice::from_ref(&order));
@@ -1686,10 +2009,17 @@ impl BinanceFutures {
             .market(&order.symbol)
             .map_or(1.0, |market| market.precision.amount);
         let target_total = num::adjust(replacement.amount, step);
+        let original = PlaceOrderOpts {
+            amount: order.amount,
+            price: Some(order.price),
+            ..replacement.clone()
+        };
         job.amendment = Some(Amendment {
             id: id.to_owned(),
             target_total,
             replacement,
+            original,
+            position_side: self.order_position_side(id),
         });
         Ok(job)
     }
@@ -1704,6 +2034,9 @@ impl BinanceFutures {
             .store
             .market(&symbol)
             .ok_or_else(|| format!("Market {symbol} not found"))?;
+        if self.account.leverage_brackets_unread {
+            return Err("Binance leverage limits have not loaded yet; try again shortly".into());
+        }
         let leverage = input
             .max(market.limits.leverage.min)
             .min(market.limits.leverage.max);
@@ -1733,7 +2066,11 @@ impl BinanceFutures {
         if !cx.store.hedged() {
             return "BOTH";
         }
-        let closes = is_algo(kind) || reduce;
+        if let Some(position_side) = self.trading.amended_position_side {
+            return position_side;
+        }
+        // A conditional may open; only its reduce flag closes.
+        let closes = (is_algo(kind) && kind != OrderType::Conditional) || reduce;
         match (side, closes) {
             (OrderSide::Buy, false) | (OrderSide::Sell, true) => "LONG",
             (OrderSide::Sell, false) | (OrderSide::Buy, true) => "SHORT",
@@ -1742,6 +2079,75 @@ impl BinanceFutures {
 
     /// Payloads for one order: regular orders (split above the market's max
     /// size) and algo orders (the order itself if a stop, plus attached TP/SL).
+    /// USD-M refuses conditionals on the order endpoint (-4120). STOP fires as the price
+    /// moves toward the trigger on the order's side, TAKE_PROFIT the other way.
+    fn format_conditional(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Params, String> {
+        let market = cx
+            .store
+            .market(&opts.symbol)
+            .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+        let trigger = opts
+            .trigger_price
+            .filter(|trigger| *trigger > 0.0)
+            .map(|trigger| num::adjust(trigger, market.precision.price))
+            .ok_or_else(|| format!("Trigger price is required for {} conditionals", opts.symbol))?;
+        let ticker = cx
+            .store
+            .ticker(&opts.symbol)
+            .ok_or_else(|| format!("Ticker {} not found", opts.symbol))?;
+        let reference = if working_type(opts) == "MARK_PRICE" {
+            ticker.mark
+        } else {
+            ticker.last
+        };
+        let stop = match opts.side {
+            OrderSide::Buy => trigger >= reference,
+            OrderSide::Sell => trigger <= reference,
+        };
+        let limit = opts
+            .price
+            .filter(|price| *price > 0.0)
+            .map(|price| num::adjust(price, market.precision.price));
+        let amount = num::adjust(opts.amount, market.precision.amount);
+        if amount <= 0.0 {
+            return Err("Binance conditional orders require a positive quantity".into());
+        }
+        let mut params = Params::default();
+        params.set("algoType", "CONDITIONAL");
+        params.set("symbol", opts.symbol.clone());
+        params.set(
+            "positionSide",
+            self.position_side(cx, opts.side, opts.kind, opts.reduce_only == Some(true)),
+        );
+        params.set("side", side_text(opts.side));
+        params.set(
+            "type",
+            match (stop, limit.is_some()) {
+                (true, false) => "STOP_MARKET",
+                (true, true) => "STOP",
+                (false, false) => "TAKE_PROFIT_MARKET",
+                (false, true) => "TAKE_PROFIT",
+            },
+        );
+        params.set("quantity", number(amount));
+        params.set("triggerPrice", number(trigger));
+        if let Some(limit) = limit {
+            params.set("price", number(limit));
+            let tif = opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel);
+            params.set("timeInForce", tif_text(tif));
+        }
+        if !cx.store.hedged() && opts.reduce_only == Some(true) {
+            params.set("reduceOnly", "true");
+        }
+        params.set("workingType", working_type(opts));
+        params.set("clientAlgoId", self.generated_id(cx)?);
+        Ok(params)
+    }
+
     fn format_order(
         &self,
         cx: &Cx<'_, Pending>,
@@ -1753,6 +2159,9 @@ impl BinanceFutures {
             .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
         if opts.kind == OrderType::TrailingStopLoss {
             return Ok((Vec::new(), vec![self.format_trailing(cx, opts)?]));
+        }
+        if opts.kind == OrderType::Conditional {
+            return Ok((Vec::new(), vec![self.format_conditional(cx, opts)?]));
         }
         let mut regular = Vec::new();
         let mut algo = Vec::new();
@@ -1828,22 +2237,19 @@ impl BinanceFutures {
             if reduce_only {
                 params.set("reduceOnly", "true");
             }
-            let max = market.limits.amount.max;
-            let (lots, rest) = if amount > max && max > 0.0 {
-                (
-                    (amount / max).ceil() as usize,
-                    num::adjust(amount % max, p_amount),
-                )
-            } else {
-                (1, 0.0)
-            };
-            let lot_size = num::adjust((amount - rest) / lots as f64, p_amount);
-            let mut payloads: Vec<Params> = (0..lots)
-                .map(|_| with_quantity(&params, quantity_at, lot_size))
-                .collect();
-            if rest != 0.0 {
-                payloads.push(with_quantity(&params, quantity_at, rest));
+            if amount <= 0.0 {
+                return Err("Binance order quantity rounds to zero".into());
             }
+            if opts.kind == OrderType::Limit && price.is_none_or(|p| p <= 0.0) {
+                return Err("Binance order price rounds to zero".into());
+            }
+            let payloads = sized_payloads_at(
+                &params,
+                quantity_at,
+                amount,
+                market.limits.amount.max,
+                p_amount,
+            )?;
             if opts.client_order_id.is_some() && payloads.len() > 1 {
                 return Err(format!(
                     "Client order ID needs a single order; {} exceeds the maximum size",
@@ -1946,7 +2352,7 @@ impl BinanceFutures {
 
 /// Binance native codes and documented statuses
 /// (developers.binance.com/docs/derivatives/usds-margined-futures/error-code).
-const BINANCE: CodeTable = CodeTable {
+pub(crate) const BINANCE: CodeTable = CodeTable {
     rows: &[
         Row {
             key: Key::Int(-1000),
@@ -2007,6 +2413,36 @@ const BINANCE: CodeTable = CodeTable {
         Row {
             key: Key::Int(-1002),
             verdict: Verdict::Refused(ErrorKind::AuthPermission),
+            only: None,
+        },
+        // BALANCE_NOT_SUFFICIENT, MARGIN_NOT_SUFFICIEN, and MIN_LEVERAGE_RATIO
+        // ("Leverage is smaller than permitted: insufficient margin balance.").
+        Row {
+            key: Key::Int(-2018),
+            verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2019),
+            verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2028),
+            verdict: Verdict::Refused(ErrorKind::InsufficientBalance),
+            only: None,
+        },
+        // Order rules the order itself broke: UNABLE_TO_FILL,
+        // ORDER_WOULD_IMMEDIATELY_TRIGGER, REDUCE_ONLY_REJECT, FOK_ORDER_REJECT
+        // and GTX_ORDER_REJECT (post-only).
+        Row {
+            key: Key::Range(-2022, -2020),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-5022, -5021),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
         Row {
@@ -2132,6 +2568,17 @@ fn positive_price(value: Option<f64>, precision: f64) -> Result<f64, String> {
 }
 
 fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Vec<Params>, String> {
+    let at = params.0.len();
+    sized_payloads_at(&params, at, amount, max, step)
+}
+
+fn sized_payloads_at(
+    params: &Params,
+    at: usize,
+    amount: f64,
+    max: f64,
+    step: f64,
+) -> Result<Vec<Params>, String> {
     let max = if max.is_finite() && max > 0.0 {
         num::adjust(max, step)
     } else {
@@ -2145,13 +2592,12 @@ fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Ve
         return Err("Binance order requires too many native lots".into());
     }
     let mut out = Vec::new();
-    let at = params.0.len();
     for _ in 0..count as usize {
-        out.push(with_quantity(&params, at, max));
+        out.push(with_quantity(params, at, max));
     }
     let rest = num::adjust(amount - count * max, step);
     if rest > 0.0 {
-        out.push(with_quantity(&params, at, rest));
+        out.push(with_quantity(params, at, rest));
     }
     Ok(out)
 }
@@ -2159,9 +2605,11 @@ fn sized_payloads(params: Params, amount: f64, max: f64, step: f64) -> Result<Ve
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CancelAck {
+    #[serde(deserialize_with = "crate::options::native_id")]
     order_id: u64,
     symbol: String,
     status: String,
+    #[serde(alias = "quantity")]
     orig_qty: String,
     executed_qty: String,
     #[serde(default)]
@@ -2377,6 +2825,37 @@ impl BinanceFutures {
         }
     }
 
+    fn note_unknown_cancel_proof(&mut self, cx: &mut Cx<'_, Pending>, proof: &CancelProof) {
+        let (targets, strategy) = match proof {
+            CancelProof::One(target) => (std::slice::from_ref(target), false),
+            CancelProof::Algo(target) | CancelProof::Strategy(target) => {
+                (std::slice::from_ref(target), true)
+            }
+            CancelProof::Batch(targets)
+            | CancelProof::CoinAll(targets)
+            | CancelProof::SpotAll { targets, .. } => (targets.as_slice(), false),
+            CancelProof::SymbolAll { targets, strategy } => (targets.as_slice(), *strategy),
+        };
+        self.note_unknown_cancel_targets(cx, targets, strategy);
+    }
+
+    fn note_unknown_cancel_targets(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        targets: &[CancelTarget],
+        strategy: bool,
+    ) {
+        let rows: Vec<_> = targets
+            .iter()
+            .filter_map(|target| {
+                target
+                    .native
+                    .map(|native| (target.id.clone(), target.symbol.clone(), native, strategy))
+            })
+            .collect();
+        self.note_unknown_cancels(cx, rows);
+    }
+
     fn mark_captured_canceled(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -2549,6 +3028,7 @@ impl BinanceFutures {
                     )
                 });
                 let mut seen = std::collections::HashSet::new();
+                let mut unknown_rows = 0;
                 for row in rows {
                     match row {
                         CancelRow::Order(ack) => {
@@ -2572,14 +3052,27 @@ impl BinanceFutures {
                                 error.get_or_insert_with(|| invalid().unwrap());
                             }
                         }
+                        // As for a single cancel: the order looks gone, and it must
+                        // not stop the batches and algo cancels still to send.
+                        CancelRow::Error { code, .. } if code == UNKNOWN_ORDER && !mismatched => {
+                            unknown_rows += 1;
+                        }
                         CancelRow::Error { code, msg } => {
                             *unproven |= item_unknown(code);
                             error.get_or_insert((code, msg));
                         }
                     }
                 }
-                if seen.len() != targets.len() && error.is_none() {
+                if seen.len() + unknown_rows != targets.len() && error.is_none() {
                     return invalid();
+                }
+                if error.is_none() && unknown_rows > 0 {
+                    let gone: Vec<_> = targets
+                        .into_iter()
+                        .filter(|target| target.native.is_none_or(|native| !seen.contains(&native)))
+                        .collect();
+                    self.note_unknown_cancel_targets(cx, &gone, false);
+                    self.mark_captured_canceled(cx, &gone, false);
                 }
                 return error;
             }
@@ -2642,7 +3135,7 @@ impl BinanceFutures {
                 }
                 if !matches!(
                     serde_json::from_str::<Success>(body),
-                    Ok(Success { code: 200 })
+                    Ok(Success { code }) if code == 200 || (self.is_options() && code == 0)
                 ) {
                     return invalid();
                 }
@@ -2657,16 +3150,21 @@ fn identities(params: &Params) -> Vec<OrderIdentityReceipt> {
     let Some(symbol) = params.get("symbol") else {
         return Vec::new();
     };
-    ["newClientOrderId", "clientAlgoId", "newClientStrategyId"]
-        .into_iter()
-        .filter_map(|key| {
-            params.get(key).map(|identity| OrderIdentityReceipt {
-                symbol: symbol.clone(),
-                kind: OrderIdentityKind::ClientOrderId,
-                identity,
-            })
+    [
+        "newClientOrderId",
+        "clientAlgoId",
+        "newClientStrategyId",
+        "clientOrderId",
+    ]
+    .into_iter()
+    .filter_map(|key| {
+        params.get(key).map(|identity| OrderIdentityReceipt {
+            symbol: symbol.clone(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity,
         })
-        .collect()
+    })
+    .collect()
 }
 
 #[cfg(test)]

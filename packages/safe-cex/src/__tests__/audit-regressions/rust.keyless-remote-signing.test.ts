@@ -35,7 +35,7 @@ describe('Rust-only hosted account selection', () => {
     vi.spyOn(virtualClock, 'start').mockResolvedValue(undefined as never);
     for (const name of RUST_VENUES) {
       const options = hosted({ passphrase: 'hosted-passphrase' });
-      if (deriveRemoteSigningPolicy(name)?.enabled === true && name !== 'paradex') {
+      if (deriveRemoteSigningPolicy(name)?.enabled === true) {
         const exchange = await createExchange(name, options);
         expect(exchange).toBeInstanceOf(RustEngineExchange);
         exchange.dispose();

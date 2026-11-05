@@ -2196,3 +2196,51 @@ fn a_late_settings_failure_cannot_clear_a_reused_commands_write_fence() {
     );
     assert!(!e.store().metadata_write_pending("BTCUSDT"));
 }
+
+#[test]
+fn a_size_amend_of_a_partly_filled_order_treats_the_size_as_the_new_total() {
+    let mut e = engine();
+    let mut partial = order("1", OrderType::Limit);
+    partial.amount = 0.5;
+    partial.filled = 0.2;
+    partial.remaining = 0.3;
+    e.store_mut().upsert_order(partial);
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "1".into(),
+            price: None,
+            amount: Some(0.4),
+        },
+    );
+    let r = writes(&actions).pop().unwrap();
+    let actions = response(&mut e, &r, json!([{"orderId":"1","success":true}]));
+    let r = writes(&actions).pop().unwrap();
+    assert!(r.body.as_deref().unwrap().contains(r#""quantity":"0.2""#));
+}
+
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut e = engine();
+    e.store_mut().upsert_order(order("1", OrderType::Limit));
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "1".into(),
+            price: Some(60000.0),
+            amount: None,
+        },
+    );
+    let cancel = writes(&actions).pop().unwrap();
+    let actions = response(&mut e, &cancel, json!([{"orderId":"1","success":true}]));
+    let replacement = writes(&actions).pop().unwrap();
+    let actions = response(
+        &mut e,
+        &replacement,
+        json!({"code":"40006","msg":"invalid signature"}),
+    );
+    let error = done(&actions).unwrap_err();
+    assert!(error.contains("Your BTCUSDT order is gone"), "{error}");
+}

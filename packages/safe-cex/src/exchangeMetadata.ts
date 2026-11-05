@@ -1,10 +1,9 @@
+import type { AnyTimeframe } from './types';
+
+import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
 import {
-  privateProxyIpsSingapore,
-  privateProxyIpsTokyo,
-  privateProxyIpsTokyoSmallPP,
-  tokyoK8sNatGatewayIp,
-} from '@tealstreet/proxy-ips-lists/src';
-import { ExchangeName, MarginType, OrderStopTriggerType, PositionMode } from '@tealstreet/safe-cex/src/types';
+  ExchangeName, MarginType, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode,
+} from '@tealstreet/safe-cex/src/types';
 
 /** Features supported by an exchange - used to skip health checks for unsupported features */
 export type ExchangeFeatures = {
@@ -104,6 +103,8 @@ export type ExchangeMetadata = {
   tvMaxGetBarFetches: number;
   /** Maximum number of candles that can be fetched in a single API call */
   candleApiCountLimit: number;
+  /** Native candle intervals when the venue accepts only a declared subset. */
+  supportedCandleIntervals?: readonly AnyTimeframe[];
   /** Default quote currency for the exchange (e.g., 'USDT', 'USD', 'USDC') */
   defaultQuote: string;
   /** Supported position modes (OneWay, Hedged) */
@@ -136,7 +137,11 @@ export type ExchangeMetadata = {
   supportsOpeningTriggerOrders: boolean;
   /** Supported trigger types for take profit/stop loss orders */
   supportedTPSLTriggerTypes: OrderStopTriggerType[];
-  /** List of proxy IP addresses for this exchange */
+  /**
+   * IPs a user whitelists for Tealstreet routing. Every venue's private paths egress
+   * from the Vultr Tokyo fleet since docs/plans/AWS_EXIT.md step 3e, so a non-empty
+   * list is always `privateProxyIpsVultrTokyo`; legacy-master keeps the AWS pools.
+   */
   privateProxyIps: string[];
   /** Default trigger type for take profit orders */
   defaultTPTriggerType: OrderStopTriggerType | undefined;
@@ -171,7 +176,11 @@ export type ExchangeMetadata = {
   supportsFeeRates: boolean;
   /** Delay in seconds after placing a market order before allowing another */
   marketOrderDelayInSeconds: number;
-  /** Mapping of region codes to proxy IP addresses */
+  /**
+   * Region codes the account form offers, each to its whitelist. The keys still pick
+   * the default region (`defaultProxyRegion`), but every region is the one Vultr
+   * Tokyo list since AWS_EXIT.md step 3e.
+   */
   privateProxyRegions: { [key: string]: string[] };
   /** Whether to automatically reduce order size if it exceeds position size */
   autoDownSizeReduceOrders: boolean;
@@ -205,6 +214,13 @@ export type ExchangeMetadata = {
   unifiedMargin?: boolean;
   /** Whether the exchange supports second-resolution kline/candle data */
   supportsKlineSeconds?: boolean;
+  /** Public order-shape restrictions; the engine still validates native reconciliation. */
+  orderAmendment?: {
+    limitTimeInForce: readonly OrderTimeInForce[];
+    triggerPriceTypes: readonly OrderType[];
+    unfilledOnly: boolean;
+    preserveAttachedLimitProtection: boolean;
+  };
   /** Default trading symbol to display when first loading the exchange */
   defaultSymbol?: string;
   /** Default symbol to use specifically for TradingView chart widget (overrides global BTCUSDT default) */
@@ -278,7 +294,7 @@ const defaultMetaData: Omit<ExchangeMetadata, 'exchangeName' | 'features'> = {
   hasIndependentHedgedLeverageInCrossMargin: false,
   supportsTrailingStopLoss: false,
   supportsOpeningTriggerOrders: false,
-  privateProxyIps: privateProxyIpsSingapore,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportedTPSLTriggerTypes: [],
   defaultTPTriggerType: undefined,
   defaultSLTriggerType: undefined,
@@ -358,10 +374,10 @@ const BybitMetadata: ExchangeMetadata = {
   marginTypeIsGlobal: true,
   tickInterval: 500,
   supportsFeeRates: true,
-  privateProxyIps: privateProxyIpsSingapore,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   privateProxyRegions: {
-    SG: privateProxyIpsSingapore,
-    JA: privateProxyIpsTokyo,
+    SG: privateProxyIpsVultrTokyo,
+    JA: privateProxyIpsVultrTokyo,
   },
   supportsChaser: true,
   supportsPositionMargin: true,
@@ -488,7 +504,7 @@ const BinanceMetadata: ExchangeMetadata = {
   supportsTestnet: true,
   orderbookTickDelay: 60,
   prettyName: 'Binance',
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsTrailingStopLoss: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
@@ -523,7 +539,7 @@ const BinanceInverseMetadata: ExchangeMetadata = {
   latencyDomain: 'dapi.binance.com',
   requiresCors: true,
   privateProxyRegions: {
-    JA: privateProxyIpsTokyo,
+    JA: privateProxyIpsVultrTokyo,
   },
   supportsTestnet: false,
   requiresTickersForMarketsLoaded: true,
@@ -547,7 +563,7 @@ const BinancePMMetadata: ExchangeMetadata = {
   // No fetchHistoricalFills/fetchHistoricalTrades implementation in the PM adapter.
   orderbookTickDelay: 60,
   prettyName: 'Binance Portfolio Margin',
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsTrailingStopLoss: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
@@ -629,7 +645,7 @@ const BitunixMetadata: ExchangeMetadata = {
   supportsTestnet: false,
   orderbookTickDelay: 60,
   prettyName: 'Bitunix',
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsTrailingStopLoss: false,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
@@ -672,7 +688,7 @@ const WeexMetadata: ExchangeMetadata = {
   supportsTestnet: false,
   orderbookTickDelay: 60,
   prettyName: 'WEEX',
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsTrailingStopLoss: false,
   supportsOpeningTriggerOrders: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
@@ -723,9 +739,9 @@ const MexcMetadata: ExchangeMetadata = {
   orderbookTickDelay: 60,
   prettyName: 'MEXC',
   requiresCors: true,
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   privateProxyRegions: {
-    JA: privateProxyIpsTokyo,
+    JA: privateProxyIpsVultrTokyo,
   },
   supportsTrailingStopLoss: false,
   supportsPartialStops: true,
@@ -776,7 +792,7 @@ const BinanceSpotMetadata: ExchangeMetadata = {
   supportsTestnet: true,
   // No fetchHistoricalFills/fetchHistoricalTrades implementation in the Spot adapter.
   orderbookTickDelay: 60,
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsChaser: true,
   supportsPositionMargin: false,
   supportsInfinityStops: false,
@@ -821,7 +837,7 @@ const BackpackMetadata: ExchangeMetadata = {
   tvIntraDayMultipliers: ['1', '5', '15', '30', '60'],
   tvMaxGetBarFetches: 10,
   candleApiCountLimit: 500,
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   tickInterval: 2000,
   orderPendingUpdateDelay: 1000,
   stopOrderPendingUpdateDelay: 1000,
@@ -876,7 +892,7 @@ const BitgetMetadata: ExchangeMetadata = {
   orderbookTickDelay: 60,
   prettyName: 'Bitget',
   requiresCors: true,
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   hasEmptyPositions: false,
   marginTypeIsGlobal: false,
   tickInterval: 2_000,
@@ -963,10 +979,10 @@ const CryptocomMetadata: ExchangeMetadata = {
   tvIntraDayMultipliers: ['1', '5', '15', '30', '60', '240'],
   tvMaxGetBarFetches: 10,
   candleApiCountLimit: 500,
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   privateProxyRegions: {
-    JA: privateProxyIpsTokyo,
-    SG: privateProxyIpsSingapore,
+    JA: privateProxyIpsVultrTokyo,
+    SG: privateProxyIpsVultrTokyo,
   },
   tickInterval: 2000,
   orderPendingUpdateDelay: 1000,
@@ -1009,6 +1025,12 @@ const CryptocomMetadata: ExchangeMetadata = {
 
 const BingxMetadata: ExchangeMetadata = {
   ...defaultMetaData,
+  orderAmendment: {
+    limitTimeInForce: [OrderTimeInForce.GoodTillCancel, OrderTimeInForce.PostOnly],
+    triggerPriceTypes: [OrderType.StopLoss, OrderType.TakeProfit],
+    unfilledOnly: true,
+    preserveAttachedLimitProtection: true,
+  },
   supportsPublicOnly: true,
   exchangeName: 'bingx' as ExchangeName,
   logo: '/static/exchanges/logos/BINGX/logo.svg',
@@ -1024,7 +1046,7 @@ const BingxMetadata: ExchangeMetadata = {
   supportsTestnet: false,
   orderbookTickDelay: 60,
   prettyName: 'BingX',
-  privateProxyIps: privateProxyIpsSingapore,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   requiresCors: true,
   orderPendingUpdateDelay: 2_000,
   stopOrderPendingUpdateDelay: 4_000,
@@ -1070,14 +1092,14 @@ const BitrueMetadata: ExchangeMetadata = {
   requiresApplicationId: false,
   // Removed from supported exchanges (hidden from add-account everywhere). Code
   // is kept in place; flip these back to re-enable. Same soft-disable pattern as
-  // dydx/arkham/salsadex — gated by isExchangeAvailableInCurrentEnv.
+  // dydx/arkham — gated by isExchangeAvailableInCurrentEnv.
   enabled: false,
   enabledInDev: false,
   enableInPreview: false,
   supportsTestnet: false,
   orderbookTickDelay: 60,
   prettyName: 'Bitrue',
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   requiresCors: true,
   orderPendingUpdateDelay: 2_000,
   stopOrderPendingUpdateDelay: 4_000,
@@ -1129,7 +1151,7 @@ const BreakoutpropMetadata: ExchangeMetadata = {
   supportsTestnet: false,
   orderbookTickDelay: 100,
   prettyName: 'Breakout',
-  privateProxyIps: privateProxyIpsSingapore,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   orderPendingUpdateDelay: 2_000,
   stopOrderPendingUpdateDelay: 4_000,
   tickInterval: 2_000,
@@ -1178,7 +1200,7 @@ const BlofinMetadata: ExchangeMetadata = {
   supportsTestnet: false,
   orderbookTickDelay: 250,
   prettyName: 'BloFin',
-  privateProxyIps: privateProxyIpsSingapore,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   requiresCors: true,
   tickInterval: 10_000,
   hasEmptyPositions: false,
@@ -1225,7 +1247,7 @@ const OkxMetadata: ExchangeMetadata = {
   prettyName: 'OKX',
   tvMaxGetBarFetches: 5,
   tickInterval: 2_000,
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsChaser: true,
   supportsPositionMargin: false,
   supportsTrailingStopLoss: false,
@@ -1447,48 +1469,6 @@ const MODEMetadata: ExchangeMetadata = {
   },
 };
 
-const SalsaDEXMetadata: ExchangeMetadata = {
-  ...defaultMetaData,
-  exchangeName: 'salsadex' as ExchangeName,
-  logo: '/static/exchanges/logos/SALSADEX/logo.webp',
-  lightLogo: '/static/exchanges/logos/SALSADEX/logo-big.webp',
-  darkLogo: '/static/exchanges/logos/SALSADEX/logo-big.webp',
-  refLink: 'https://teal.link/salsadex',
-  refImage: '/static/exchanges/reflinks/salsadex/ref.png',
-  requiresPassphrase: false,
-  requiresApplicationId: true,
-  // Removed from supported exchanges (hidden from add-account everywhere). Code
-  // is kept in place; flip these back to re-enable. Same soft-disable pattern as
-  // dydx/arkham — gated by isExchangeAvailableInCurrentEnv.
-  enabled: false,
-  enabledInDev: false,
-  enableInPreview: false,
-  supportsTestnet: false,
-  leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
-  orderbookTickDelay: 60,
-  prettyName: 'SalsaDEX',
-  defaultQuote: 'USDC',
-  marginTypes: [MarginType.Cross, MarginType.Isolated],
-  orderPendingUpdateDelay: 3_000,
-  supportsTrailingStopLoss: false,
-  supportsTunnel: true,
-  tickInterval: 2_000,
-  supportsChaser: true,
-  supportsPositionMargin: false,
-  forbidCors: true,
-  supportsFetchSymbolMaxLeverage: true,
-  hideMarginTypeSelector: false,
-  hidePositionModeSelector: true,
-  latencyDomain: 'api-evm.orderly.org',
-  features: {
-    kline: true,
-    orderbook: true,
-    orders: true,
-    positions: true,
-    balance: true,
-  },
-};
-
 const WhatMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   exchangeName: 'what' as ExchangeName,
@@ -1527,49 +1507,14 @@ const WhatMetadata: ExchangeMetadata = {
   },
 };
 
-const TealstreetDEXMetadata: ExchangeMetadata = {
-  ...defaultMetaData,
-  exchangeName: 'tealstreet-dex' as ExchangeName,
-  // No longer offered for new connections. Hidden rather than disabled: the
-  // availability flags also gate whether a *saved* account may register at
-  // startup, so `enabled: false` would stop any existing TSDEX account from
-  // loading — including the owner's ability to open it and export or delete it.
-  hiddenFromNewAccountPicker: true,
-  logo: '/static/exchanges/logos/TSDEX/logo.svg',
-  lightLogo: '/static/exchanges/logos/TSDEX/light.png',
-  darkLogo: '/static/exchanges/logos/TSDEX/dark.png',
-  refLink: 'https://teal.link/tsdex',
-  refImage: '/static/exchanges/reflinks/tsdex/ref.png',
-  requiresPassphrase: false,
-  requiresApplicationId: true,
-  enabled: true,
-  enabledInDev: true,
-  supportsTestnet: false,
-  leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50, 100],
-  orderbookTickDelay: 60,
-  prettyName: 'TSDEX',
-  defaultQuote: 'USDC',
-  marginTypes: [MarginType.Cross, MarginType.Isolated],
-  orderPendingUpdateDelay: 3_000,
-  supportsTrailingStopLoss: false,
-  supportsTunnel: true,
-  tickInterval: 2_000,
-  supportsChaser: true,
-  supportsPositionMargin: false,
-  forbidCors: true,
-  supportsFetchSymbolMaxLeverage: true,
-  latencyDomain: 'api-evm.orderly.org',
-  features: {
-    kline: true,
-    orderbook: true,
-    orders: true,
-    positions: true,
-    balance: true,
-  },
-};
+const hyperliquidCandleIntervals: readonly AnyTimeframe[] = [
+  '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M',
+];
 
 const HyperliquidMetadata: ExchangeMetadata = {
   ...defaultMetaData,
+  supportsKlineSeconds: false,
+  supportedCandleIntervals: hyperliquidCandleIntervals,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquid' as ExchangeName,
   // One connection serves perps + spot; spot is opt-in per account.
@@ -1621,6 +1566,8 @@ const HyperliquidMetadata: ExchangeMetadata = {
 
 const HyperliquidSpotMetadata: ExchangeMetadata = {
   ...defaultMetaData,
+  supportsKlineSeconds: false,
+  supportedCandleIntervals: hyperliquidCandleIntervals,
   supportsPublicOnly: true,
   exchangeName: 'hyperliquidspot' as ExchangeName,
   // Superseded by the `hyperliquid` connection's spot toggle. Kept enabled so
@@ -1723,7 +1670,7 @@ const GrvtMetadata: ExchangeMetadata = {
   // the relaxed idle reconnect window in grvt.ws-private.ts (90s).
   disconnectWarningThreshold: 60 * 1000,
   latencyDomain: 'trades.grvt.io',
-  privateProxyIps: [...privateProxyIpsTokyoSmallPP, tokyoK8sNatGatewayIp],
+  privateProxyIps: privateProxyIpsVultrTokyo, // was the AWS small pool + Tokyo EKS NAT (AWS_EXIT.md 3e)
   fetchLeverageOnMarginSymbolChange: true,
   features: {
     kline: true,
@@ -1917,7 +1864,7 @@ const KucoinMetadata: ExchangeMetadata = {
   supportsTestnet: false,
   orderbookTickDelay: 60,
   prettyName: 'Kucoin',
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsTrailingStopLoss: false,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
@@ -1982,7 +1929,7 @@ const KrakenMetadata: ExchangeMetadata = {
   supportsTestnet: false,
   orderbookTickDelay: 60,
   prettyName: 'Kraken Futures',
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsTrailingStopLoss: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice, OrderStopTriggerType.MarkPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
@@ -2025,7 +1972,7 @@ const KrakenSpotMetadata: ExchangeMetadata = {
   supportsTestnet: false,
   orderbookTickDelay: 60,
   prettyName: 'Kraken Spot',
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsTrailingStopLoss: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.LastPrice],
   defaultTPTriggerType: OrderStopTriggerType.LastPrice,
@@ -2072,7 +2019,7 @@ const ParadexMetadata: ExchangeMetadata = {
   supportsTestnet: true,
   orderbookTickDelay: 100,
   prettyName: 'Paradex',
-  privateProxyIps: privateProxyIpsSingapore,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   supportsTrailingStopLoss: false,
   supportsOpeningTriggerOrders: true,
   supportedTPSLTriggerTypes: [OrderStopTriggerType.MarkPrice, OrderStopTriggerType.LastPrice],
@@ -2116,6 +2063,8 @@ const ParadexMetadata: ExchangeMetadata = {
   forbidCors: false,
   orderPendingUpdateDelay: 1000,
   stopOrderPendingUpdateDelay: 1000,
+  // Local Paradex REST already installs HOW, including unsigned discovery.
+  supportsTunnel: true,
   enforceWsTunnel: true,
   latencyDomain: 'api.prod.paradex.trade',
   features: {
@@ -2148,7 +2097,7 @@ const AsterDEXMetadata: ExchangeMetadata = {
   orderbookTickDelay: 60,
   prettyName: 'Aster',
   requiresNoSecret: false,
-  privateProxyIps: privateProxyIpsTokyo,
+  privateProxyIps: privateProxyIpsVultrTokyo,
   defaultQuote: 'USDT',
   orderPendingUpdateDelay: 250,
   stopOrderPendingUpdateDelay: 250,
@@ -2360,8 +2309,6 @@ export const exchangeMetadata: {
   coinbasespot: CoinbaseSpotMetadata,
   kodiakfi: KodiakFIMetadata,
   mode: MODEMetadata,
-  salsadex: SalsaDEXMetadata,
-  'tealstreet-dex': TealstreetDEXMetadata,
   what: WhatMetadata,
   hyperliquid: HyperliquidMetadata,
   hyperliquidspot: HyperliquidSpotMetadata,

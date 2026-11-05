@@ -48,7 +48,7 @@ describe('createPublicExchange', () => {
       key: '',
       secret: '',
       publicDataOnly: true,
-      overrideProxyUrl: 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+      overrideProxyUrl: 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy', // fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e
     });
   });
 
@@ -57,7 +57,7 @@ describe('createPublicExchange', () => {
       key: '',
       secret: '',
       publicDataOnly: true,
-      overrideProxyUrl: 'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+      overrideProxyUrl: 'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy', // fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e
     });
   });
 

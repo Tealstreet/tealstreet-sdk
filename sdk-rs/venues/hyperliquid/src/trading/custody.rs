@@ -225,7 +225,8 @@ impl Hyperliquid {
             identity,
             claim,
             action,
-            self.options.vault.clone(),
+            // As legacy, an empty saved vault is no vault.
+            self.options.vault.clone().filter(|vault| !vault.is_empty()),
             self.options.testnet,
         )
         .map_err(|e| e.venue_error())?;
@@ -346,7 +347,10 @@ impl Hyperliquid {
         if let Some(plan) = &custody.plan {
             match result {
                 Err(error) => {
-                    let _ = cx.fail_plan(plan, error);
+                    let _ = match &job.stop_note {
+                        Some(note) => cx.fail_plan_noted(plan, error, note),
+                        None => cx.fail_plan(plan, error),
+                    };
                 }
                 Ok(data) => {
                     if let (Some(slot), Some(context)) = (&custody.slot, &custody.context)
@@ -384,6 +388,7 @@ impl Hyperliquid {
             self.trading.active = None;
             self.trading.inflight = false;
             self.trading.builder_wait = None;
+            self.trading.amend_wait = None;
         }
         if self.trading.active.is_none() {
             self.trading.active = self.trading.queue.pop_front();
@@ -398,19 +403,65 @@ impl Hyperliquid {
 }
 
 const NATIVE_ERROR: safe_cex_engine::classify::CodeTable = safe_cex_engine::classify::CodeTable {
-    rows: &[],
+    rows: &[
+        refusal(WALLET_MISSING, ErrorKind::AuthInvalid),
+        refusal(
+            "Cannot switch leverage type with open position.",
+            ErrorKind::Rejected,
+        ),
+        refusal(SCHEDULE_VOLUME, ErrorKind::Rejected),
+    ],
     success: &[],
     unlisted: safe_cex_engine::classify::Verdict::Unknown(None),
     status: &[],
 };
+const WALLET_MISSING: &str = "User or API Wallet does not exist.";
+const SCHEDULE_VOLUME: &str = "Cannot set scheduled cancel time until enough volume traded";
+const POST_ONLY: &str = "Post only order would have immediately matched";
+const fn refusal(message: &'static str, kind: ErrorKind) -> safe_cex_engine::classify::Row {
+    safe_cex_engine::classify::Row {
+        key: safe_cex_engine::classify::Key::Message(message),
+        verdict: safe_cex_engine::classify::Verdict::Refused(kind),
+        only: None,
+    }
+}
+const fn place_refusal(message: &'static str) -> safe_cex_engine::classify::Row {
+    safe_cex_engine::classify::Row {
+        key: safe_cex_engine::classify::Key::Message(message),
+        verdict: safe_cex_engine::classify::Verdict::Refused(ErrorKind::Rejected),
+        only: Some(safe_cex_engine::classify::Intent::Place),
+    }
+}
+/// The fixed text of a venue message: it appends " asset=N" and embeds live values.
+fn table_message(message: &str) -> &str {
+    let message = message
+        .split_once(" asset=")
+        .map_or(message, |(text, _)| text);
+    for fixed in [POST_ONLY, SCHEDULE_VOLUME] {
+        if message.starts_with(fixed) {
+            return fixed;
+        }
+    }
+    if message.starts_with("User or API Wallet ") && message.ends_with(" does not exist.") {
+        return WALLET_MISSING;
+    }
+    message
+}
 // Official Error responses / PerpMargin is a definite per-row rejection.
 // https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses
 const BATCH: safe_cex_engine::classify::CodeTable = safe_cex_engine::classify::CodeTable {
-    rows: &[safe_cex_engine::classify::Row {
-        key: safe_cex_engine::classify::Key::Message("Insufficient margin to place order."),
-        verdict: safe_cex_engine::classify::Verdict::Refused(ErrorKind::Rejected),
-        only: Some(safe_cex_engine::classify::Intent::Place),
-    }],
+    rows: &[
+        place_refusal("Insufficient margin to place order."),
+        place_refusal("Post only order would have immediately matched"),
+        place_refusal("Reduce only order would increase position."),
+        place_refusal("Order must have minimum value of $10."),
+        place_refusal("Order could not immediately match against any resting orders."),
+        place_refusal("Order has invalid price."),
+        place_refusal("Order has invalid size."),
+        place_refusal("Order has zero size."),
+        place_refusal("Builder fee has not been approved."),
+        place_refusal("Reduce-only is invalid for spot trading."),
+    ],
     success: &[],
     unlisted: safe_cex_engine::classify::Verdict::Unknown(Some(ErrorKind::Rejected)),
     status: &[],
@@ -492,7 +543,7 @@ impl Hyperliquid {
     ) -> Result<(), safe_cex_engine::request_context::Error> {
         let native = safe_cex_engine::classify::Native {
             code: safe_cex_engine::classify::NativeCode::None,
-            message: native_message.unwrap_or(&error.message),
+            message: table_message(native_message.unwrap_or(&error.message)),
         };
         cx.http_write_failure(
             &request.context,
@@ -540,7 +591,7 @@ impl Hyperliquid {
             && statuses
                 .iter()
                 .skip(1)
-                .any(|status| matches!(status, Status::Text(text) if text == "waitingForFill"))
+                .any(|status| matches!(status, Status::Text(text) if deferred_child(text)))
         {
             return self.report_attached_order(cx, request, statuses, message);
         }
@@ -563,7 +614,7 @@ impl Hyperliquid {
                 Status::Error { error } if !(idempotent_cancel && only_terminal_cancel(error)) => {
                     BatchItem::Native(Native {
                         code: NativeCode::None,
-                        message: error,
+                        message: table_message(error),
                     })
                 }
                 Status::Text(text) => match &request.effect {
@@ -615,13 +666,13 @@ impl Hyperliquid {
         for (index, status) in statuses.iter().enumerate() {
             let error = match status {
                 Status::Error { error } => error.as_str(),
-                Status::Text(text) if index > 0 && text == "waitingForFill" => continue,
+                Status::Text(text) if index > 0 && deferred_child(text) => continue,
                 Status::Text(_) => "Unknown Hyperliquid order status",
                 _ => continue,
             };
             let native = Native {
                 code: NativeCode::None,
-                message: error,
+                message: table_message(error),
             };
             let fact = cx.classify_write(
                 &request.context,
@@ -646,4 +697,10 @@ impl Hyperliquid {
         };
         cx.http_write_fact(&request.context, fact, None).map(drop)
     }
+}
+
+/// A child still waiting on its parent: an unfilled parent's child says
+/// waitingForFill, a filled parent's says waitingForTrigger.
+fn deferred_child(text: &str) -> bool {
+    text == "waitingForFill" || text == "waitingForTrigger"
 }

@@ -4,12 +4,12 @@ use crate::{Host, Transport};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::command::HostInput;
 use safe_cex_engine::model::Interval;
-use safe_cex_engine::{Command, Event, Level, Notice, Value, Venue, VenueError};
+use safe_cex_engine::{Command, Event, Level, Notice, SubscriptionTopic, Value, Venue, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -18,6 +18,27 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+
+/// How often one notice code of one account reaches stderr while clients are attached.
+const MIRROR_EVERY: Duration = Duration::from_secs(60);
+const START_FAILED_CODE: &str = "hosted.start_failed";
+
+/// Notices the journal gets at any level, unthrottled: each subscription repair's outcome.
+fn always_journaled(code: Option<&str>) -> bool {
+    code == Some(safe_cex_engine::log::code::SUBSCRIPTION_REPAIRED)
+}
+
+/// `safe-cex warn hosted.start_failed [user account venue]: kind=… venue_code=… signing_mode=… message="…"`:
+/// fields an alert can match on. The message is the venue's refusal, cut to 200 characters.
+fn start_failure_line(label: &str, signing_mode: Option<&str>, error: &VenueError) -> String {
+    let message: String = error.message.chars().take(200).collect();
+    format!(
+        "safe-cex warn {START_FAILED_CODE} [{label}]: kind={} venue_code={} signing_mode={} message={message:?}",
+        error.kind.map_or("unknown", |kind| kind.as_str()),
+        error.venue_code.as_deref().unwrap_or("none"),
+        signing_mode.unwrap_or("unknown"),
+    )
+}
 
 /// Limits apply independently to every account except `max_connections`.
 #[derive(Clone, Debug)]
@@ -33,6 +54,12 @@ pub struct ServerConfig {
     pub max_message_bytes: usize,
     pub max_frame_bytes: usize,
     pub io_timeout: Duration,
+    /// Names the account in log lines this actor writes (a user tag, account and
+    /// venue, never credentials); None for listener and test accounts.
+    pub log_label: Option<String>,
+    /// Who signs this account (`hosted_cosign`, or `public` with no key), named on
+    /// its start-failure line; None outside the Hosted server.
+    pub signing_mode: Option<&'static str>,
 }
 
 impl Default for ServerConfig {
@@ -49,6 +76,8 @@ impl Default for ServerConfig {
             max_message_bytes: 64 * 1024,
             max_frame_bytes: 16 * 1024 * 1024,
             io_timeout: Duration::from_secs(5),
+            log_label: None,
+            signing_mode: None,
         }
     }
 }
@@ -287,8 +316,275 @@ impl Drop for FrameServer {
     }
 }
 
+/// One account actor reached in-process, for hosts that own their client wire.
+/// Spawn it inside a tokio `LocalSet`; the handle is `Send` and may cross threads.
 #[derive(Clone)]
-enum Outgoing {
+pub struct AccountHandle {
+    commands: mpsc::Sender<Control>,
+    stop: Arc<watch::Sender<bool>>,
+    disposal: Arc<OnceLock<DisposalCause>>,
+    config: ServerConfig,
+    capabilities: safe_cex_engine::Capabilities,
+    events: crate::Events,
+    sockets: Arc<std::sync::Mutex<crate::SocketHealth>>,
+}
+
+/// The first disposal request or unrequested actor termination owns this cause.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisposalCause {
+    Stopped,
+    Moving,
+}
+
+/// One book's levels, best first, as `(symbol, bids, asks)`.
+pub type BookLevels = (String, Vec<(f64, f64)>, Vec<(f64, f64)>);
+
+/// A joined client's stream: a full snapshot frame first, then ordered flush
+/// frames and JSON notices exactly as the frame-server wire sends them.
+pub struct ClientLink {
+    pub outgoing: mpsc::Receiver<Outgoing>,
+    /// Becomes true when the account drops this client (slow peer, oversized frame, dispose).
+    pub canceled: watch::Receiver<bool>,
+}
+
+/// Starts an account actor without a frame-server listener. The task ends after
+/// `dispose` or when every handle is dropped; await it to observe teardown.
+pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
+    host: Host<V, T>,
+    config: ServerConfig,
+) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
+    config.validate()?;
+    if host.engine.has_received_commands() {
+        return Err(invalid(
+            "account engine must not receive commands before server registration",
+        ));
+    }
+    let capabilities = host.engine.capabilities();
+    let events = host.event_sender();
+    let sockets = host.socket_health.cell();
+    let (commands, inbox) = mpsc::channel(256);
+    let (stop, stopped) = watch::channel(false);
+    let actor = Account::new(host, config.clone());
+    let disposal = actor.disposal.clone();
+    let task = tokio::task::spawn_local(async move {
+        #[cfg(not(feature = "address-nonce"))]
+        {
+            actor.run(inbox, stopped).await;
+            Ok(())
+        }
+        #[cfg(feature = "address-nonce")]
+        actor.run(inbox, stopped).await
+    });
+    let handle = AccountHandle {
+        commands,
+        stop: Arc::new(stop),
+        disposal,
+        config,
+        capabilities,
+        events,
+        sockets,
+    };
+    Ok((handle, task))
+}
+
+/// `spawn_account` for a venue named as in `FrameServer::add_venue`, with an
+/// optional deployment-owned signer.
+#[cfg(feature = "venues")]
+pub fn spawn_venue_account<T: Transport + 'static>(
+    venue: &str,
+    options_json: &str,
+    transport: T,
+    signer: Option<safe_cex_engine::signing::Provider>,
+    config: ServerConfig,
+) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
+    struct Spawn<T> {
+        transport: T,
+        config: ServerConfig,
+    }
+    impl<T: Transport + 'static> safe_cex_venues::Visit for Spawn<T> {
+        type Output = io::Result<(AccountHandle, JoinHandle<io::Result<()>>)>;
+        fn visit<V: Venue + 'static>(self, engine: safe_cex_engine::Engine<V>) -> Self::Output {
+            spawn_account(Host::new(engine, self.transport), self.config)
+        }
+    }
+    let options = serde_json::from_str(options_json)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let spawn = Spawn { transport, config };
+    let entropy = Some(crate::production_entropy());
+    let result = match signer {
+        Some(signer) => {
+            safe_cex_venues::build_with_signer(venue, options, entropy, Some(signer), spawn)
+        }
+        None => safe_cex_venues::build(venue, options, entropy, spawn),
+    };
+    result.map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.message))?
+}
+
+/// Why `AccountHandle::input` refused a client message; `notice` is the
+/// frame-server error notice to send back.
+#[derive(Debug)]
+pub struct InputRefused {
+    pub notice: Arc<str>,
+}
+
+impl AccountHandle {
+    /// The venue's engine capabilities, fixed at construction.
+    pub fn capabilities(&self) -> &safe_cex_engine::Capabilities {
+        &self.capabilities
+    }
+
+    /// Per-channel socket state the host has observed, for `store.socketHealth`.
+    pub fn socket_health(&self) -> crate::SocketHealth {
+        *self
+            .sockets
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// `client` must be unique among this account's live clients.
+    pub async fn join(&self, client: u64, account_auth: bool) -> Result<ClientLink, &'static str> {
+        self.join_with_capacity(client, account_auth, self.config.client_queue_capacity)
+            .await
+    }
+
+    /// `join` with its own outbound queue depth, for trusted in-process clients
+    /// (algos) that must not be dropped as slow peers under a burst.
+    pub async fn join_with_capacity(
+        &self,
+        client: u64,
+        account_auth: bool,
+        capacity: usize,
+    ) -> Result<ClientLink, &'static str> {
+        let (outgoing, frames) = mpsc::channel(capacity.max(1));
+        let (cancel, canceled) = watch::channel(false);
+        let (ready, joined) = oneshot::channel();
+        let join = Control::Join {
+            client,
+            outgoing,
+            cancel,
+            account_auth,
+            ready,
+        };
+        self.commands
+            .send(join)
+            .await
+            .map_err(|_| "account stopped")?;
+        joined.await.map_err(|_| "account stopped")??;
+        Ok(ClientLink {
+            outgoing: frames,
+            canceled,
+        })
+    }
+
+    /// Decodes one JSON command exactly as the frame-server wire does.
+    /// `Err` carries the notice to return; `Ok(false)` means the account's
+    /// queue is full or it stopped, which the frame server treats as a disconnect.
+    pub fn input(&self, client: u64, text: &str) -> Result<bool, InputRefused> {
+        let control = match safe_cex_engine::command::decode_host_input(text) {
+            Ok(HostInput::PublicFeedUpdate(_)) => {
+                return Err(InputRefused {
+                    notice: encode_notice(ServerNotice::Error {
+                        command: None,
+                        error: "public feed updates require a trusted host provider",
+                    }),
+                });
+            }
+            Ok(HostInput::Command { command, .. }) => Control::Command { client, command },
+            Ok(HostInput::PollScaleChanged { scale, ceiling_ms }) => Control::PollScaleChanged {
+                client,
+                scale,
+                ceiling_ms,
+            },
+            Ok(HostInput::NetworkRestored) => Control::NetworkRestored,
+            Err(_) => {
+                return Err(InputRefused {
+                    notice: encode_notice(ServerNotice::Error {
+                        command: None,
+                        error: "invalid command",
+                    }),
+                });
+            }
+        };
+        Ok(self.commands.try_send(control).is_ok())
+    }
+
+    /// Runs `read` against the engine store on the account's thread, between turns.
+    pub async fn read<R: Send + 'static>(
+        &self,
+        read: impl FnOnce(&safe_cex_engine::Store) -> R + Send + 'static,
+    ) -> Option<R> {
+        let (reply, result) = oneshot::channel();
+        let read = Box::new(move |store: &safe_cex_engine::Store| {
+            let _ = reply.send(read(store));
+        });
+        self.commands.send(Control::Read(read)).await.ok()?;
+        result.await.ok()
+    }
+
+    /// The account's whole current state as one SCXF snapshot frame, for a
+    /// consumer that decodes rows with the same applier as the stream.
+    pub async fn snapshot_frame(&self) -> Option<Vec<u8>> {
+        let (reply, result) = oneshot::channel();
+        self.commands.send(Control::Snapshot(reply)).await.ok()?;
+        result.await.ok()
+    }
+
+    /// A typed engine command from an in-process client (algos). `false` when
+    /// the account's queue is full or it stopped: the command was not sent.
+    pub fn command(&self, client: u64, command: Command) -> bool {
+        self.commands
+            .try_send(Control::Command { client, command })
+            .is_ok()
+    }
+
+    /// The current levels of `symbols`' books; unknown symbols are omitted.
+    pub async fn books(&self, symbols: Vec<String>) -> Option<Vec<BookLevels>> {
+        let (reply, result) = oneshot::channel();
+        self.commands
+            .send(Control::Books(symbols, reply))
+            .await
+            .ok()?;
+        result.await.ok()
+    }
+
+    /// Delivers host-owned public data to an account built with
+    /// `PublicFeedPolicy::Shared` (trusted provider ingress, never client input).
+    pub fn public_feed(&self, update: safe_cex_engine::PublicFeedUpdate) -> bool {
+        self.events
+            .send(crate::HostEvent::PublicFeedUpdate(update))
+            .is_ok()
+    }
+
+    pub fn leave(&self, client: u64) {
+        let _ = self.commands.try_send(Control::Leave(client));
+    }
+
+    /// Bind the first disposal before host-owned algo cleanup; this does not stop I/O.
+    /// Actor termination or an earlier disposal cannot be relabeled by a later request.
+    pub fn begin_disposal(&self, cause: DisposalCause) {
+        self.disposal.get_or_init(|| {
+            if self.commands.is_closed() || *self.stop.borrow() {
+                DisposalCause::Stopped
+            } else {
+                cause
+            }
+        });
+    }
+
+    pub fn disposal_cause(&self) -> Option<DisposalCause> {
+        self.disposal.get().copied()
+    }
+
+    /// Stops the actor: clients are canceled, venue sockets close, timers end.
+    pub fn dispose(&self) {
+        self.begin_disposal(DisposalCause::Stopped);
+        self.stop.send_replace(true);
+    }
+}
+
+/// What an account sends a client: SCXF frames, or JSON notices (`type: done | error | event | ...`).
+#[derive(Clone, Debug)]
+pub enum Outgoing {
     Frame(Arc<[u8]>),
     Text(Arc<str>),
 }
@@ -313,12 +609,16 @@ enum Control {
         client: u64,
         command: Command,
     },
+    NetworkRestored,
     PollScaleChanged {
         client: u64,
         scale: f64,
         ceiling_ms: Option<f64>,
     },
     Leave(u64),
+    Read(Box<dyn FnOnce(&safe_cex_engine::Store) + Send>),
+    Snapshot(oneshot::Sender<Vec<u8>>),
+    Books(Vec<String>, oneshot::Sender<Vec<BookLevels>>),
 }
 
 /// Subprotocol a client offers beside `safe-cex-frame.v1` to receive
@@ -351,6 +651,10 @@ struct Account<V: Venue, T: Transport> {
     next_command: u32,
     /// Replayed to clients that join after startup failed, so none waits on it.
     startup_failure: Option<Arc<str>>,
+    /// Warn+ notices mirrored to stderr while clients are attached: per code, the
+    /// last line written and how many were held back since.
+    mirrored: HashMap<String, (std::time::Instant, u32)>,
+    disposal: Arc<OnceLock<DisposalCause>>,
 }
 
 impl<V: Venue, T: Transport> Account<V, T> {
@@ -371,6 +675,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
             pending: HashMap::new(),
             next_command: 0,
             startup_failure: None,
+            mirrored: HashMap::new(),
+            disposal: Arc::default(),
         }
     }
 
@@ -387,6 +693,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             let result = std::panic::AssertUnwindSafe(self.drive(&mut inbox, &mut shutdown))
                 .catch_unwind()
                 .await;
+            self.disposal.get_or_init(|| DisposalCause::Stopped);
             self.host.stop();
             let cleanup = self
                 .host
@@ -410,28 +717,48 @@ impl<V: Venue, T: Transport> Account<V, T> {
         inbox: &mut mpsc::Receiver<Control>,
         shutdown: &mut watch::Receiver<bool>,
     ) {
+        #[cfg(feature = "address-nonce")]
         self.host.turn(|host| {
-            let now = (host.clock)();
-            #[cfg(feature = "address-nonce")]
             if !host.engine.has_started()
-                && let Err(error) = host.engine.initialize_address_nonce(now)
+                && let Err(error) = host.engine.initialize_address_nonce((host.clock)())
             {
                 host.terminal = Some(error);
-                return;
             }
-            host.engine.start(now);
         });
+        // A remote signer answers its address over the socket that is still joining:
+        // start once it has, or the engine seals an unbound identity for good. The
+        // loop keeps running meanwhile, holding commands until then.
+        let mut unstarted = true;
+        let mut held_commands = Vec::new();
         self.execute();
         let mut flush = tokio::time::interval(self.config.flush_every);
         flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
+            // Polled on every wake, the flush tick at the least.
+            if unstarted && self.host.address_setup_settled() {
+                unstarted = false;
+                self.host.turn(|host| host.engine.start((host.clock)()));
+                for (client, command) in held_commands.drain(..) {
+                    self.command(client, command);
+                }
+                self.execute();
+            }
             tokio::select! {
                 _ = shutdown.changed() => break,
                 control = inbox.recv() => match control {
                     Some(Control::Join { client, outgoing, cancel, account_auth, ready }) => {
                         let _ = ready.send(self.join(client, outgoing, cancel, account_auth));
                     }
+                    Some(Control::Command { client, command }) if unstarted => {
+                        held_commands.push((client, command));
+                    }
                     Some(Control::Command { client, command }) => self.command(client, command),
+                    Some(Control::NetworkRestored) => {
+                        self.host.turn(|host| {
+                            let now = (host.clock)();
+                            host.engine.handle(now, Event::NetworkRestored);
+                        });
+                    }
                     Some(Control::PollScaleChanged { client, scale, ceiling_ms }) => {
                         if self.peers.contains_key(&client) {
                             self.host.turn(|host| {
@@ -442,6 +769,26 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         }
                     }
                     Some(Control::Leave(client)) => self.leave(client),
+                    Some(Control::Read(read)) => read(self.host.engine.store()),
+                    Some(Control::Snapshot(reply)) => {
+                        // Absolute values only: a one-off read leaves every stream baseline alone.
+                        let frame = self
+                            .host
+                            .turn(|host| host.engine.snapshot_frame((host.clock)()).to_vec());
+                        if let Some(frame) = frame {
+                            let _ = reply.send(frame);
+                        }
+                    }
+                    Some(Control::Books(symbols, reply)) => {
+                        let books = symbols
+                            .into_iter()
+                            .filter_map(|symbol| {
+                                let book = self.host.engine.book(&symbol)?;
+                                Some((symbol, book.bids().to_vec(), book.asks().to_vec()))
+                            })
+                            .collect();
+                        let _ = reply.send(books);
+                    }
                     None => break,
                 },
                 Some(event) = self.host.inbox.recv() => self.host.dispatch(event),
@@ -453,6 +800,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             }
             self.execute();
         }
+        self.disposal.get_or_init(|| DisposalCause::Stopped);
         for (_, peer) in self.peers.drain() {
             peer.cancel.send_replace(true);
         }
@@ -466,6 +814,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
         cancel: watch::Sender<bool>,
         account_auth: bool,
     ) -> Result<(), &'static str> {
+        if self.peers.contains_key(&client) {
+            return Err("duplicate client ID");
+        }
         if self.peers.len() >= self.config.max_clients_per_account {
             return Err("account client limit reached");
         }
@@ -559,6 +910,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     |peer| peer.account_auth,
                 ),
                 Notice::StartupFailed { error } => {
+                    self.note_start_failure(&error);
                     let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     if text.len() > self.config.max_frame_bytes {
                         // Late peers replay this notice, so keep a deliverable failure.
@@ -669,6 +1021,27 @@ impl<V: Venue, T: Transport> Account<V, T> {
         }
     }
 
+    /// A Hosted account's start failure, one line per account per MIRROR_EVERY. The
+    /// server has no Sentry client, so the journal is where these are alerted on.
+    fn note_start_failure(&mut self, error: &VenueError) {
+        let Some(label) = self.config.log_label.as_deref() else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        if self
+            .mirrored
+            .get(START_FAILED_CODE)
+            .is_some_and(|(at, _)| now.duration_since(*at) < MIRROR_EVERY)
+        {
+            return;
+        }
+        self.mirrored.insert(START_FAILED_CODE.to_owned(), (now, 0));
+        eprintln!(
+            "{}",
+            start_failure_line(label, self.config.signing_mode, error)
+        );
+    }
+
     /// Log notices never disconnect peers: an oversized one is cut to fit, and
     /// with no client attached Warn+ goes to stderr instead of being dropped.
     fn route_log(
@@ -680,11 +1053,42 @@ impl<V: Venue, T: Transport> Account<V, T> {
         message: &str,
         code: Option<&str>,
     ) {
+        let label = self.config.log_label.as_deref().unwrap_or("-");
+        // Each repair says whether it resubscribed or reconnected; the server rate-limits
+        // repairs per account and topic already, so every one reaches the journal.
+        if always_journaled(code) {
+            eprintln!(
+                "safe-cex {level} {} [{label}]: {message}",
+                code.unwrap_or("log")
+            );
+        }
         if self.peers.is_empty() {
             if warn {
-                eprintln!("safe-cex {level} {}: {message}", code.unwrap_or("log"));
+                eprintln!(
+                    "safe-cex {level} {} [{label}]: {message}",
+                    code.unwrap_or("log")
+                );
             }
             return;
+        }
+        // The browser gets every notice, but the journal needs warnings too: a venue
+        // retrying forever logged nowhere the server could alert on.
+        if warn {
+            let code = code.unwrap_or("log");
+            let now = std::time::Instant::now();
+            match self.mirrored.get_mut(code) {
+                Some((at, held)) if now.duration_since(*at) < MIRROR_EVERY => *held += 1,
+                entry => {
+                    let held = entry.map_or(0, |(_, held)| *held);
+                    let more = if held > 0 {
+                        format!(" (+{held} more since)")
+                    } else {
+                        String::new()
+                    };
+                    eprintln!("safe-cex {level} {code} [{label}]: {message}{more}");
+                    self.mirrored.insert(code.to_owned(), (now, 0));
+                }
+            }
         }
         let limit = self.config.max_frame_bytes;
         let mut text = encode(message);
@@ -960,6 +1364,11 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 self.tickers();
                 return;
             }
+            // Shared and intent-neutral: the engine warns when nothing is live.
+            Command::RepairSubscription(_) => {
+                self.handle(command);
+                return;
+            }
             _ => {}
         }
         let id = command_id(&mut command).expect("all non-subscription commands have an ID");
@@ -1057,6 +1466,9 @@ impl<V: Venue, T: Transport> Account<V, T> {
                 per_account += usize::from(!self.candles.contains_key(&key));
             }
             Command::SetTickerSymbols { .. } => {}
+            Command::RepairSubscription(
+                SubscriptionTopic::Candles { symbol, .. } | SubscriptionTopic::OrderBook { symbol },
+            ) => return valid_symbol(symbol),
             _ => return true,
         }
         per_client <= self.config.max_subscriptions_per_client
@@ -1082,6 +1494,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
 
 impl<V: Venue, T: Transport> Drop for Account<V, T> {
     fn drop(&mut self) {
+        self.disposal.get_or_init(|| DisposalCause::Stopped);
         self.host.stop();
     }
 }
@@ -1126,7 +1539,8 @@ fn command_id(command: &mut Command) -> Option<&mut u32> {
         | Command::SubscribeOrderBook { .. }
         | Command::UnsubscribeOrderBook { .. }
         | Command::SubscribeCandles { .. }
-        | Command::UnsubscribeCandles { .. } => None,
+        | Command::UnsubscribeCandles { .. }
+        | Command::RepairSubscription(_) => None,
     }
 }
 
@@ -1206,6 +1620,8 @@ fn section_parent(kind: u16) -> Option<u16> {
         | section::INSTRUMENT_CLASSIFICATIONS
         | section::DERIVATIVE_PRODUCTS => Some(section::MARKETS),
         section::POSITION_GREEKS | section::PREDICTION_HOLDINGS => Some(section::POSITIONS),
+        // A segment of ORDERS never arrives without how fresh its rows are.
+        section::ORDERS_READ => Some(section::ORDERS),
         _ => None,
     }
 }
@@ -1402,6 +1818,7 @@ async fn connection(
                                 HostInput::PollScaleChanged { scale, ceiling_ms } => {
                                     Control::PollScaleChanged { client, scale, ceiling_ms }
                                 }
+                                HostInput::NetworkRestored => Control::NetworkRestored,
                             };
                             if account.commands.try_send(control).is_err() { break; }
                             continue;
@@ -1464,6 +1881,32 @@ fn valid_symbol(symbol: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{Events, HostEvent};
+
+    #[test]
+    fn every_subscription_repair_outcome_reaches_the_journal() {
+        assert!(always_journaled(Some("subscription.repaired")));
+        assert!(!always_journaled(Some("subscription.rejected")));
+        assert!(!always_journaled(None));
+    }
+
+    #[test]
+    fn a_hosted_start_failure_line_names_its_kind_code_and_signing_mode() {
+        let error = VenueError::new("OKX 50105: Passphrase error".to_owned())
+            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+            .venue_code("50105".to_owned());
+        assert_eq!(
+            start_failure_line("u:ab12 Main okx", Some("hosted_cosign"), &error),
+            "safe-cex warn hosted.start_failed [u:ab12 Main okx]: kind=authInvalid venue_code=50105 \
+             signing_mode=hosted_cosign message=\"OKX 50105: Passphrase error\""
+        );
+        let bare = VenueError::new("x".repeat(300));
+        let line = start_failure_line("-", None, &bare);
+        assert!(
+            line.contains("kind=unknown venue_code=none signing_mode=unknown"),
+            "{line}"
+        );
+        assert!(line.len() < 300, "the message is cut: {line}");
+    }
     use safe_cex_engine::book::Book;
     use safe_cex_engine::{Cx, HttpRequest, Response, SocketId, TimerId};
     use std::cell::RefCell;
@@ -2301,6 +2744,34 @@ mod tests {
         assert!(segment_frame(&orphan, 900).is_none());
     }
 
+    /// H6 (codex-hcmq3f): a segment carrying ORDERS without ORDERS_READ would
+    /// reach a page before the cover that says how fresh its rows are.
+    #[test]
+    fn orders_never_segment_apart_from_their_read_cover() {
+        use safe_cex_engine::wire::section::*;
+        let frame = kinded_frame(&[(TICKERS, 400), (ORDERS, 400), (ORDERS_READ, 8), (BOOK, 400)]);
+        // Every limit that splits the frame, including those whose boundary
+        // would fall between ORDERS and its cover.
+        let mut split = 0;
+        for max in (400..frame.len()).step_by(8) {
+            let Some(segments) = segment_frame(&frame, max) else {
+                continue;
+            };
+            split += usize::from(segments.len() > 1);
+            for segment in &segments {
+                let kinds: Vec<u16> = safe_cex_engine::wire::sections(segment)
+                    .map(|(kind, _)| kind)
+                    .collect();
+                assert_eq!(
+                    kinds.contains(&ORDERS),
+                    kinds.contains(&ORDERS_READ),
+                    "ORDERS travels with its cover at {max}: {kinds:?}"
+                );
+            }
+        }
+        assert!(split > 0);
+    }
+
     fn peer(
         actor: &mut Account<Stub, NoTransport>,
         client: u64,
@@ -2430,6 +2901,72 @@ mod tests {
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn first_disposal_cause_survives_cloned_handles_cleanup_and_actor_abort() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for mode in ["moving", "stopped", "aborted"] {
+                    let (handle, task) = spawn_account(
+                        Host::new(
+                            safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                            NoTransport,
+                        ),
+                        ServerConfig::default(),
+                    )
+                    .unwrap();
+                    let later = handle.clone();
+                    let expected = if mode == "moving" {
+                        handle.begin_disposal(DisposalCause::Moving);
+                        assert!(
+                            handle.snapshot_frame().await.is_some(),
+                            "algo cleanup can still use the live actor"
+                        );
+                        handle.dispose();
+                        task.await.unwrap().unwrap();
+                        DisposalCause::Moving
+                    } else if mode == "stopped" {
+                        handle.dispose();
+                        later.begin_disposal(DisposalCause::Moving);
+                        task.await.unwrap().unwrap();
+                        DisposalCause::Stopped
+                    } else {
+                        task.abort();
+                        assert!(task.await.unwrap_err().is_cancelled());
+                        later.begin_disposal(DisposalCause::Moving);
+                        DisposalCause::Stopped
+                    };
+                    later.begin_disposal(DisposalCause::Moving);
+                    later.begin_disposal(DisposalCause::Stopped);
+                    assert_eq!(handle.disposal_cause(), Some(expected), "{mode}");
+                    assert_eq!(later.disposal_cause(), Some(expected), "{mode}");
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_snapshot_read_returns_one_whole_scxf_frame() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let (handle, _task) = spawn_account(
+                    Host::new(
+                        safe_cex_engine::test_support::seeded_engine(Stub(Rc::default())),
+                        NoTransport,
+                    ),
+                    ServerConfig::default(),
+                )
+                .unwrap();
+                let frame = handle
+                    .snapshot_frame()
+                    .await
+                    .expect("a live account answers");
+                assert_eq!(frame[..4], 0x4658_4353_u32.to_le_bytes());
+                handle.dispose();
+            })
+            .await;
     }
 
     #[tokio::test]

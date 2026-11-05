@@ -23,6 +23,12 @@ const APEX: CodeTable = CodeTable {
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
+        // "Requires Login: Your API key is wrong": api-docs.pro.apex.exchange, Errors.
+        Row {
+            key: Key::Int(10002),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
         Row {
             key: Key::Int(401),
             verdict: Verdict::Refused(ErrorKind::AuthInvalid),
@@ -67,6 +73,8 @@ struct Job {
     preflight: Preflight,
     plan: Option<Plan>,
     amending: bool,
+    /// The amended order: its replacement's refusal leaves it gone.
+    replaces: Option<Replaced>,
 }
 pub struct Request {
     command: CommandId,
@@ -84,8 +92,18 @@ struct LateTrade {
     cancel_ids: Vec<String>,
     clients: Vec<String>,
 }
+/// The order an amend asked for: a virtual leg's own kind and closing side, not its parent's.
+type Replaced = (String, OrderSide, OrderType);
+fn gone_text((symbol, side, kind): &Replaced, unknown: bool) -> String {
+    if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+        safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown)
+    } else {
+        safe_cex_engine::error::order_gone_text(symbol, unknown)
+    }
+}
 struct Amendment {
     id: String,
+    replaced: Replaced,
     order: PlaceOrderOpts,
     total_amount: f64,
     baseline_filled: f64,
@@ -96,7 +114,6 @@ struct Amendment {
     reported_at: f64,
     overflow: bool,
     terminal: bool,
-    default_amount: bool,
     started: f64,
 }
 impl Amendment {
@@ -301,7 +318,10 @@ fn replacement(
         symbol: parent.symbol.clone(),
         kind: parent.kind,
         side: parent.side,
-        amount: amount.unwrap_or(parent.remaining),
+        amount: amount
+            .map(|total| safe_cex_engine::num::left_of_total(total, parent.filled))
+            .transpose()?
+            .unwrap_or(parent.remaining),
         price: Some(parent.price),
         trigger_price: None,
         max_slippage_pct: None,
@@ -784,6 +804,7 @@ impl ApexOmni {
                 preflight,
                 plan: None,
                 amending: false,
+                replaces: None,
             });
         } else {
             self.trading.active = Some(Job {
@@ -794,6 +815,7 @@ impl ApexOmni {
                 preflight,
                 plan: None,
                 amending: false,
+                replaces: None,
             });
             self.drive_trading(cx);
         }
@@ -840,6 +862,9 @@ impl ApexOmni {
                         .store
                         .order(parent_id(&id))
                         .expect("replacement validated parent");
+                    let amended = cx.store.order(&id).expect("replacement validated target");
+                    let replaced = (amended.symbol.clone(), amended.side, amended.kind);
+                    job.replaces = Some(replaced.clone());
                     prepared.push_back(Step::Write(
                         sign::Request::form(
                             "/v3/delete-order",
@@ -852,6 +877,7 @@ impl ApexOmni {
                     prepared.extend(replacement);
                     self.trading.amendment = Some(Amendment {
                         id: parent.id.clone(),
+                        replaced,
                         order,
                         total_amount: parent.amount,
                         baseline_filled: parent.filled,
@@ -862,7 +888,6 @@ impl ApexOmni {
                         reported_at: cx.now,
                         overflow: false,
                         terminal: false,
-                        default_amount: amount.is_none(),
                         started: cx.now,
                     });
                 }
@@ -1080,7 +1105,29 @@ impl ApexOmni {
         delivery: Request,
         error: VenueError,
     ) {
-        let _ = cx.fail_plan(&delivery.plan, error);
+        let unknown = error.outcome == Some(Outcome::Unknown);
+        let _ = self.fail_delivery(cx, &delivery, error, unknown);
+    }
+
+    /// Fails a call's Plan, saying so when it was an amend's replacement.
+    fn fail_delivery(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        delivery: &Request,
+        error: impl Into<VenueError>,
+        unknown: bool,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        let gone = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|job| matches!(delivery.accepted, Accepted::Place) && job.ids.is_empty())
+            .and_then(|job| job.replaces.as_ref())
+            .map(|replaced| gone_text(replaced, unknown));
+        match gone {
+            Some(gone) => cx.fail_plan_noted(&delivery.plan, error, &gone),
+            None => cx.fail_plan(&delivery.plan, error),
+        }
     }
 
     pub(crate) fn trading_retired(&mut self, owner: &HttpOwnerRetirement) -> Option<Preflight> {
@@ -1189,7 +1236,13 @@ impl ApexOmni {
             .as_ref()
             .and_then(|e| e.code.as_ref())
             .and_then(strict_code);
-        if code != Some(0) || !(200..300).contains(&response.status) {
+        // ApeX answers success with no `code`: `{data, timeCost}`, a bare `{timeCost}`
+        // (cancel-all, leverage) or an empty body (a TP/SL cancel). A `code` must be 0.
+        let succeeded = response.body.trim().is_empty()
+            || envelope
+                .as_ref()
+                .is_some_and(|e| e.code.is_none() || code == Some(0));
+        if !succeeded || !(200..300).contains(&response.status) {
             let native = envelope.as_ref().map(|e| Native {
                 code: code.map_or(NativeCode::None, NativeCode::Int),
                 message: e.msg.as_ref(),
@@ -1197,11 +1250,7 @@ impl ApexOmni {
             let message = envelope
                 .as_ref()
                 .map_or("ApeX Omni malformed write response", |e| e.msg.as_ref());
-            let message = format!(
-                "ApeX Omni request failed [{}]: {}",
-                code.unwrap_or(i64::from(response.status)),
-                message
-            );
+            let message = crate::failure_text(code.unwrap_or(i64::from(response.status)), message);
             let Ok(fact) = cx.classify_write(&delivery.context, &APEX, native.as_ref(), message)
             else {
                 return;
@@ -1229,11 +1278,12 @@ impl ApexOmni {
                         self.send_trading(cx, delivery);
                     }
                     Err(_) => {
-                        let _ = cx.fail_plan(&delivery.plan, error);
+                        let _ = self.fail_delivery(cx, &delivery, error, false);
                     }
                 }
             } else {
-                let _ = cx.fail_plan(&delivery.plan, error);
+                let unknown = error.outcome == Some(Outcome::Unknown);
+                let _ = self.fail_delivery(cx, &delivery, error, unknown);
             }
             return;
         }
@@ -1257,10 +1307,8 @@ impl ApexOmni {
         if matches!(delivery.accepted, Accepted::Place) && placed.is_none() {
             let message = "ApeX Omni placement response has no order ID";
             let _ = cx.http_write_unproven(&delivery.context, message);
-            let _ = cx.fail_plan(
-                &delivery.plan,
-                VenueError::new(message).kind(ErrorKind::Internal),
-            );
+            let error = VenueError::new(message).kind(ErrorKind::Internal);
+            let _ = self.fail_delivery(cx, &delivery, error, true);
             return;
         }
         if cx
@@ -1307,20 +1355,16 @@ impl ApexOmni {
                     let _ = cx.fail_plan(&delivery.plan, error);
                     return;
                 }
-                if amendment.default_amount {
-                    let additional =
-                        crate::account::subtract(amendment.filled, amendment.baseline_filled)
-                            .max(0.0);
-                    amendment.order.amount =
-                        crate::account::subtract(amendment.order.amount, additional);
-                }
+                // The amended total less fills: those since planning come off too.
+                let additional =
+                    crate::account::subtract(amendment.filled, amendment.baseline_filled).max(0.0);
+                amendment.order.amount =
+                    crate::account::subtract(amendment.order.amount, additional);
                 if !amendment.terminal
                     && amendment.filled < amendment.total_amount
                     && amendment.order.amount > 0.0
                 {
-                    let prepared = if amendment.default_amount
-                        && amendment.filled > amendment.baseline_filled
-                    {
+                    let prepared = if amendment.filled > amendment.baseline_filled {
                         validate(std::slice::from_ref(&amendment.order), cx).and_then(|()| {
                             let mut issued = cx
                                 .store
@@ -1347,7 +1391,9 @@ impl ApexOmni {
                             }
                         }
                         Err(error) => {
-                            let _ = cx.fail_plan(&delivery.plan, error);
+                            // The cancel landed: a replacement that cannot be built is refused.
+                            let gone = gone_text(&amendment.replaced, false);
+                            let _ = cx.fail_plan_noted(&delivery.plan, error, &gone);
                             return;
                         }
                     }
@@ -1459,15 +1505,20 @@ fn strict_code(code: &crate::Code) -> Option<i64> {
 
 /// A failed ApeX Omni delivery: transport, a gateway status or a coded reply.
 /// No ApeX code table is documented, so other codes stay unclassified.
+const INVALID_CREDENTIAL: i64 = 10002;
 pub(crate) fn failure(code: Option<i64>, status: u16, message: String) -> VenueError {
     let error = VenueError::new(message);
     let error = match (code, status) {
         (_, 408 | 500..) | (None, 200..=299) => error.outcome(Outcome::Unknown),
-        (Some(401), _) | (None, 401) => error
+        (Some(401), _) | (_, 401) => error
             .kind(ErrorKind::AuthInvalid)
             .outcome(Outcome::Rejected),
-        (None, 403) => error
+        (Some(403), _) | (_, 403) => error
             .kind(ErrorKind::AuthPermission)
+            .outcome(Outcome::Rejected),
+        // "Api credential is invalid": the key will not start working on a retry.
+        (Some(INVALID_CREDENTIAL), _) => error
+            .kind(ErrorKind::AuthInvalid)
             .outcome(Outcome::Rejected),
         (Some(429), _) | (None, 429) => error
             .kind(ErrorKind::RateLimited)

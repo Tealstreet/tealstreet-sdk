@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
 import type { CLISession, PromptConfig } from '../../../packages/cli-core/src/index';
+import { accountsToStart } from './accountsToStart';
+import { watchOneShotChases } from './chaseAbandoned';
 import type { CommandContext } from '../../../packages/cli-core/src/commands/Command';
 import {
   executeCommand as cliExecuteCommand,
@@ -119,7 +121,7 @@ import {
   type FooterState,
 } from './footer-segments';
 import { enableStatusLine } from './status-line';
-import { classifyForCLI, criticalErrorKey } from './error-classifier';
+import { classifyForCLI, criticalErrorKey, errorEventClassification } from './error-classifier';
 import { startListener, stopListener } from './listener';
 import { webhookBodyRefusal, webhookChainRefusal, webhookRefusal } from '@tealstreet/cli-core';
 import { restartWebhookRelay, startWebhookRelay, stopWebhookRelay } from './listener/webhook-relay';
@@ -960,7 +962,7 @@ function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): v
     const error = args[0] as string;
     const acctName = accountName || session.currentAccountName || 'unknown';
     const monitor = exchangeManager.getHealthMonitor(acctName);
-    const category = monitor ? monitor.processMessage(error, true) : null;
+    const category = monitor ? monitor.processMessage(error, true, errorEventClassification(args[1])) : null;
     const action = classifyForCLI(category, 'error', error);
 
     switch (action.action) {
@@ -2445,21 +2447,13 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
 
     // Start all accounts (including primary) in the background without blocking the CLI prompt
     const activeAccounts = adapter.getActiveAccounts();
-    // Build list of accounts to enable - include primary account even if not in active list
     const primaryAccount = session.currentAccountName ? getAccount(session.currentAccountName) : null;
-    const accountsToEnable: ExchangeAccountConfig[] = [];
-
-    // Add primary account first if it exists and is active
-    if (primaryAccount && primaryAccount.active && !exchangeManager.isConnected(primaryAccount.name)) {
-      accountsToEnable.push(primaryAccount);
-    }
-
-    // Add other active accounts (skip primary since it's already added)
-    for (const acc of activeAccounts) {
-      if (acc.name === session.currentAccountName) continue;
-      if (exchangeManager.isConnected(acc.name)) continue;
-      accountsToEnable.push(acc);
-    }
+    const accountsToEnable = accountsToStart(
+      primaryAccount,
+      Boolean(accountName),
+      activeAccounts,
+      (name) => exchangeManager.isConnected(name),
+    );
 
     if (accountsToEnable.length > 0) {
       // Fire off all enables in parallel, don't block
@@ -2827,9 +2821,12 @@ export async function runSingleCommand(
   }
 
   const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
+  const settleChases = watchOneShotChases(session.currentExchange);
   await processCommand(commandString, { drainFinalInFlight: true });
   await waitForTwapsStartedByCommand(twapsBeforeCommand);
-  await teardownOneShot(session.currentExchange);
+  const chaseProblem = await settleChases();
+  if (chaseProblem) adapter.printError(chaseProblem.error);
+  await teardownOneShot(session.currentExchange, chaseProblem ? 1 : 0);
 }
 
 /**
@@ -2902,17 +2899,22 @@ async function runSingleCommandJson(commandString: string, accountName?: string,
         const commandStart = output.length;
         const exchangeStart = exchangeLines.length;
         const twapsBeforeCommand = new Set(twapManager.runningTwaps.keys());
+        const settleChases = watchOneShotChases(session.currentExchange);
+        let chaseProblem: Awaited<ReturnType<typeof settleChases>>;
         try {
           await processCommand(commandString, { drainFinalInFlight: true });
           await waitForTwapsStartedByCommand(twapsBeforeCommand);
+          chaseProblem = await settleChases();
         } catch (error) {
           threw = error;
         }
         const exchangeDuring = exchangeLines.slice(exchangeStart);
         const lateRejection = needsKey ? findKeyRejection(exchangeDuring.map((line) => line.text)) : undefined;
-        const summary = lateRejection
-          ? { ok: false, code: 'KEY_REJECTED' as const, error: lateRejection }
-          : summarizeOneShot(output.slice(commandStart), threw, exchangeDuring);
+        const summary = chaseProblem
+          ? { ok: false, ...chaseProblem }
+          : lateRejection
+            ? { ok: false, code: 'KEY_REJECTED' as const, error: lateRejection }
+            : summarizeOneShot(output.slice(commandStart), threw, exchangeDuring);
         output.push(...exchangeDuring);
         await emitJson(result(summary.ok, summary.code, summary.error));
         await teardownOneShot(session.currentExchange, summary.ok ? 0 : 1);

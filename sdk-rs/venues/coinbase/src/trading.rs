@@ -44,6 +44,8 @@ struct Job {
     collect: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// An INTX amend's symbol: its replacement's refusal leaves the order gone.
+    replaces: Option<String>,
 }
 #[derive(Default)]
 pub(crate) struct Trading {
@@ -523,6 +525,7 @@ impl Coinbase {
             ids: vec![],
             collect: false,
             effective: false,
+            replaces: None,
         };
         match command {
             Command::PlaceOrders { orders, .. } => {
@@ -609,6 +612,7 @@ impl Coinbase {
                     });
                     job.steps.push_back(replacement);
                     job.collect = true;
+                    job.replaces = Some(order.symbol.clone());
                 } else {
                     job.steps
                         .push_back(self.prepare_edit(cx, &id, price, amount)?);
@@ -1403,7 +1407,20 @@ impl Coinbase {
         {
             let job = self.trading.active.take().expect("active job");
             self.trading.waiting = false;
-            let mut error = error.into();
+            let mut error: VenueError = error.into();
+            // The replacement was the last step, so an empty queue means it was sent.
+            if job.effective
+                && job.ids.is_empty()
+                && job.steps.is_empty()
+                && let Some(symbol) = &job.replaces
+            {
+                let unknown = error.outcome == Some(Outcome::Unknown);
+                error.message = format!(
+                    "{}: {}",
+                    safe_cex_engine::error::order_gone_text(symbol, unknown),
+                    error.message
+                );
+            }
             if (job.effective || !job.ids.is_empty())
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
             {

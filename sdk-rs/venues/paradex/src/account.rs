@@ -1,4 +1,6 @@
 //! JWT singleflight, private socket recovery and fenced account snapshots.
+#[path = "account_state.rs"]
+mod state;
 use crate::{
     Options, Pending,
     sign::{Credentials, SystemConfig},
@@ -7,6 +9,7 @@ use crate::{
 use alloy_primitives::U256;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotCoverage;
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderSide, OrderStatus, OrderType, Position, PositionMode,
@@ -16,11 +19,11 @@ use safe_cex_engine::request_context::{
     Context, Operation, Owner, Policy, RetryPolicy, Scope, Session, SessionBearer, SessionHeaders,
     SessionPolicy,
 };
-use safe_cex_engine::signing::Algorithm;
+use safe_cex_engine::signing::{Algorithm, SignError};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    CredentialSlot, Cx, Fill, Method, Response, SignStep, SocketChannel, SocketId, TimerId,
-    VenueError, json::ArrayAt,
+    CredentialSlot, Cx, ErrorKind, Fill, Method, Response, SignStep, SocketChannel, SocketId,
+    TimerId, VenueError, json::ArrayAt,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -28,7 +31,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const MAX_QUEUED: usize = 256;
 const RETAINED: usize = 20_000;
 const POLL_MS: f64 = 10_000.;
+/// The open-order census's read-cover scope: one census reads the whole account.
+const ORDERS_SCOPE: &str = "orders";
+/// A census the stream outran is read again no sooner than this after it began.
+const CENSUS_FOLLOW_UP_MS: f64 = 2_000.;
 const AUTH_REFRESH_MS: f64 = 180_000.;
+/// Frame-fed: how long before `refresh_at` a held JWT is renewed.
+const JWT_RENEW_EARLY_MS: f64 = 15_000.;
 /// The Session bundle (`Authorization: Bearer`) goes first, as native requests sent it.
 const READ_HEADERS: &[(&str, &str)] = &[
     ("Content-Type", "application/json"),
@@ -53,6 +62,9 @@ pub enum Request {
         rows: Vec<Position>,
         coverage: SnapshotCoverage<String>,
         cycle: bool,
+        read: u32,
+        /// Owned rows outside this perpetual adapter's catalogue.
+        unlisted: Vec<String>,
     },
     Balance {
         context: Context,
@@ -67,6 +79,7 @@ pub enum Request {
         coverage: SnapshotCoverage<String>,
         invalid: bool,
         cycle: bool,
+        started: f64,
     },
 }
 
@@ -158,6 +171,23 @@ enum OrderEvidence {
     Unresolved,
     Coherent,
 }
+/// What a row moves its amend fence to: a new floor, and a new target for an
+/// external edit.
+type FenceChange = (f64, Option<AmendTarget>);
+
+/// A census's rows and the per-order state they would set, built before the
+/// read is admitted and applied only for the symbols it may replace.
+#[derive(Default)]
+struct OrdersPlan {
+    rows: Vec<Order>,
+    native: HashMap<String, NativeOrder>,
+    versions: Vec<(String, OrderVersion)>,
+    fences: Vec<(String, FenceChange)>,
+    terminals: Vec<String>,
+    /// Each census row's own symbol, terminal and unpublished rows included:
+    /// its state is gated on that symbol's admission.
+    symbols: HashMap<String, String>,
+}
 
 struct Queued {
     method: Method,
@@ -191,6 +221,8 @@ pub struct Account {
     subscriptions_started: f64,
     supervisor: Supervisor,
     retry: Option<TimerId>,
+    /// Frame-fed: renews the held JWT before it expires.
+    renew: Option<TimerId>,
     poll: Option<TimerId>,
     repair_orders: Option<TimerId>,
     repair_positions: Option<TimerId>,
@@ -203,8 +235,15 @@ pub struct Account {
     /// An uncertain placement asked for a read dispatched after its write.
     orders_owed: bool,
     positions_busy: bool,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
+    /// The typed cause of the positions read failure being delivered.
+    pub(crate) positions_error: Option<VenueError>,
     balance_busy: bool,
     margins_busy: bool,
+    /// The stream became live while a read ran: repeat the reads once all settle.
+    read_again: bool,
     native: HashMap<String, NativeOrder>,
     amend_fences: HashMap<String, AmendFence>,
     order_versions: HashMap<String, OrderVersion>,
@@ -250,6 +289,7 @@ impl Account {
                 ..Config::default()
             }),
             retry: None,
+            renew: None,
             poll: None,
             repair_orders: None,
             repair_positions: None,
@@ -261,8 +301,12 @@ impl Account {
             orders_busy: false,
             orders_owed: false,
             positions_busy: false,
+            positions_read: 0,
+            fresh_positions: FreshPositions::default(),
+            positions_error: None,
             balance_busy: false,
             margins_busy: false,
+            read_again: false,
             native: HashMap::new(),
             amend_fences: HashMap::new(),
             order_versions: HashMap::new(),
@@ -379,6 +423,7 @@ impl Account {
             self.poll,
             self.repair_orders,
             self.repair_positions,
+            self.renew,
         ]
         .contains(&Some(timer))
             || self.supervisor.owns_timer(timer)
@@ -579,8 +624,14 @@ impl Account {
     pub(crate) fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
         (self.token.is_some() && self.serves(generation)).then_some(self.bearer_revision)
     }
-    pub(crate) fn is_auth_rejected(&self) -> bool {
-        self.auth_rejected
+    /// An unsent read after a refused `/auth` failed because its Session was
+    /// retired: that is the account's terminal credential refusal.
+    pub(crate) fn read_error(&self, error: VenueError) -> VenueError {
+        if self.auth_rejected && error.outcome == Some(safe_cex_engine::Outcome::NotSent) {
+            auth_rejected_error()
+        } else {
+            error
+        }
     }
     fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, mut request: Queued) {
         if let Pending::Trade(trade) = &request.pending {
@@ -669,6 +720,8 @@ impl Account {
         self.auth_rejected = true;
         self.token = None;
         self.refresh_at = 0.;
+        self.fresh_positions
+            .failed(cx, 0, u32::MAX, &auth_rejected_error());
         if let Some(session) = self.session.take() {
             // Fails every unreleased read bound to it NotSent. If the engine
             // refuses, those reads still end at their own 20 s windows.
@@ -683,11 +736,13 @@ impl Account {
         for queued in self.queue.drain(..) {
             self.failed.push((queued.pending, auth_rejected_error()));
         }
-        cx.notice(
-            Level::Error,
-            code::AUTH_REJECTED,
-            "Paradex rejected the account credentials",
-        );
+        if !cx.startup_read_refused(&auth_rejected_error()) {
+            cx.notice(
+                Level::Error,
+                code::AUTH_REJECTED,
+                "Paradex rejected the account credentials",
+            );
+        }
     }
     fn connect(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.socket.is_none() && !self.supervisor.is_waiting() {
@@ -776,6 +831,48 @@ impl Account {
         self.supervisor.opened(cx);
         // Hosts answer RFC6455 pings; the server's SBE heartbeat proves idle liveness.
         self.send_auth(cx);
+    }
+    /// Events before the last subscribe ack were never delivered, the first open
+    /// included. A read still running may predate the stream: repeat it afterwards.
+    fn private_ready(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.read_again = true;
+        self.account_read_again(cx);
+    }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.token.is_none() {
+            let error =
+                VenueError::new("Paradex account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.positions_read + 1;
+        if self.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.positions(cx, false);
+        }
+    }
+    /// At once for a waiter the last read predates; one a newer stream frame held
+    /// waits on the repair read. Runs with the delivered read's context retired.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.positions_busy || !self.fresh_positions.owed(0) {
+            return;
+        }
+        if self.fresh_positions.predates(0, self.positions_read) {
+            self.positions(cx, false);
+        } else if self.repair_positions.is_none() {
+            self.repair_positions = Some(cx.set_timer(500.));
+        }
+    }
+    fn account_read_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.read_fresh_positions_again(cx);
+        if self.read_again
+            && !(self.margins_busy || self.positions_busy || self.balance_busy || self.orders_busy)
+        {
+            self.read_again = false;
+            self.positions(cx, false);
+            self.orders(cx, false);
+        }
     }
     fn disconnect(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(socket) = self.socket.take() {
@@ -872,6 +969,9 @@ impl Account {
                 if channel == Some(expected.as_str()) {
                     self.subscriptions.remove(&id);
                     self.supervisor.received(cx.now);
+                    if self.subscriptions.is_empty() {
+                        self.private_ready(cx);
+                    }
                 }
             }
             return;
@@ -1123,6 +1223,9 @@ impl Account {
                 }
                 _ => {}
             }
+        } else if self.renew == Some(timer) {
+            self.renew = None;
+            self.refresh(cx);
         } else if self.retry == Some(timer) {
             self.retry = None;
             if self.credentials.is_none() {
@@ -1142,7 +1245,16 @@ impl Account {
             self.positions(cx, false);
         }
     }
+    /// `Venue::refresh_settings`: re-read the margin configs (leverage); never a write.
+    pub fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.margins(cx, false);
+    }
+
     fn margins(&mut self, cx: &mut Cx<'_, Pending>, boot: bool) {
+        // Frame-fed: the data source's frames carry the account; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.margins_busy {
             return;
         }
@@ -1165,6 +1277,10 @@ impl Account {
         );
     }
     fn positions(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
+        // Frame-fed: the data source's frames carry the account; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.positions_busy {
             if cycle && self.poll.is_none() {
                 self.poll = Some(cx.set_poll_timer(POLL_MS));
@@ -1172,7 +1288,11 @@ impl Account {
             return;
         }
         self.positions_busy = true;
+        self.positions_read += 1;
+        let read = self.positions_read;
         let Some(context) = self.background_context(cx) else {
+            let error = VenueError::new("Paradex account read lifecycle is unavailable");
+            self.fresh_positions.failed(cx, 0, read, &error);
             self.positions_ended(cx, cycle);
             return;
         };
@@ -1188,10 +1308,16 @@ impl Account {
                 rows: vec![],
                 coverage: SnapshotCoverage::default(),
                 cycle,
+                read,
+                unlisted: Vec::new(),
             }),
         );
     }
     fn balance(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
+        // Frame-fed: the data source's frames carry the account; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.balance_busy {
             return;
         }
@@ -1227,7 +1353,15 @@ impl Account {
         }
     }
     fn orders(&mut self, cx: &mut Cx<'_, Pending>, cycle: bool) {
+        // Frame-fed: the data source's frames carry the account; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.orders_busy {
+            // A cycle dropped here would never arm its next poll.
+            if cycle && self.poll.is_none() {
+                self.poll = Some(cx.set_poll_timer(POLL_MS));
+            }
             return;
         }
         let Some(token) = cx.store.begin_orders_snapshot() else {
@@ -1259,6 +1393,7 @@ impl Account {
                 coverage: SnapshotCoverage::default(),
                 invalid: false,
                 cycle,
+                started: cx.now,
             }),
         );
     }
@@ -1300,10 +1435,18 @@ impl Account {
                     ),
                 }
             }
-            Request::Positions { rows, coverage, .. } => {
+            Request::Positions {
+                rows,
+                coverage,
+                unlisted,
+                ..
+            } => {
                 match registered {
                     // Other products, excluded perpetuals and flat unknown rows.
-                    Ok(false) => return,
+                    Ok(false) => {
+                        unlisted.extend(owned_market(item));
+                        return;
+                    }
                     Ok(true) => {
                         if let Ok(Ok(position)) = serde_json::from_str::<PositionRow<'_>>(item)
                             .map(|row| map_position(&row, cx))
@@ -1374,7 +1517,8 @@ impl Account {
                         (None, _) => "Paradex skipped unmappable order without an id".into(),
                     },
                 );
-                coverage.reject(id);
+                let symbol = safe_cex_engine::coverage::fence_symbol(cx.store, row_market(item));
+                coverage.reject_in(id, &symbol);
             }
             _ => {}
         }
@@ -1400,6 +1544,7 @@ impl Account {
             // Already retired when the response failed through `on_failed`.
             let _ = cx.finish_http_context(&context);
         }
+        self.account_read_again(cx);
     }
     fn apply_response(
         &mut self,
@@ -1418,7 +1563,13 @@ impl Account {
             return;
         }
         if let Err(error) = crate::success(response) {
+            self.positions_error = match response.status {
+                401 | 403 => Some(VenueError::new(&error).kind(ErrorKind::AuthInvalid)),
+                429 => Some(VenueError::new(&error).kind(ErrorKind::RateLimited)),
+                _ => None,
+            };
             self.on_failed(cx, request, &error);
+            self.positions_error = None;
             return;
         }
         match request {
@@ -1435,12 +1586,18 @@ impl Account {
                             .and_then(|identity| identity.signing_ref().ok())
                             .ok_or("Paradex signing key is not installed")?
                             .clone();
+                        // A local provider's seal, else the key a host-answered
+                        // provider bound at setup; every signature verifies under it.
                         let public = cx
                             .verified_public_key(CredentialSlot::Primary, Algorithm::StarkDigest)
-                            .map_err(|_| {
-                                "Paradex signing key is not installed by trusted local setup"
-                                    .to_owned()
-                            })?;
+                            .or_else(|_| {
+                                cx.setup_public_key(CredentialSlot::Primary, Algorithm::StarkDigest)
+                                    .and_then(|key| {
+                                        <[u8; 32]>::try_from(key)
+                                            .map_err(|_| SignError::InvalidResult)
+                                    })
+                            })
+                            .map_err(|_| "Paradex signing key is not installed".to_owned())?;
                         Credentials::new(
                             signing,
                             public,
@@ -1465,6 +1622,12 @@ impl Account {
                 match credentials {
                     Ok(credentials) => {
                         self.credentials = Some(credentials);
+                        if cx.frame_fed() {
+                            // Writes ride the JWT Session: hold one ready so a first write is one leg.
+                            self.refresh(cx);
+                            let _ = cx.finish_http_context(&context);
+                            return;
+                        }
                         self.connect(cx);
                         let symbols: Vec<String> = cx
                             .store
@@ -1512,6 +1675,12 @@ impl Account {
                 while let Some(request) = self.queue.pop_front() {
                     self.dispatch(cx, request);
                 }
+                if cx.frame_fed() {
+                    // Renewed before it expires, so no write waits on `/auth`.
+                    let due = (self.refresh_at - cx.now - JWT_RENEW_EARLY_MS).max(0.);
+                    self.renew = Some(cx.set_timer(due));
+                    return;
+                }
                 self.send_auth(cx);
             }
             Request::Margins {
@@ -1541,10 +1710,13 @@ impl Account {
                 rows,
                 coverage,
                 cycle,
+                read,
+                unlisted,
                 ..
             } => {
                 self.positions_busy = false;
-                if revision == self.positions_revision {
+                let mut held = revision != self.positions_revision;
+                if !held {
                     let mut snapshot = Vec::new();
                     for row in rows {
                         let updated = row.last_update.unwrap_or(started);
@@ -1555,6 +1727,7 @@ impl Account {
                                     *old > updated || (*old == updated && *closed)
                                 });
                         if stale {
+                            held = true;
                             if let Some(current) = cx.store.position(&row.id) {
                                 snapshot.push(current.clone());
                             }
@@ -1580,6 +1753,12 @@ impl Account {
                     }
                     cx.store.set_positions(snapshot);
                     self.update_upnl(cx);
+                    if coverage.rejected() != 0 {
+                        let error = VenueError::new("Paradex positions: a row could not be mapped");
+                        self.fresh_positions.failed(cx, 0, read, &error);
+                    } else if !held {
+                        self.fresh_positions.committed(cx, 0, read, &unlisted);
+                    }
                 }
                 if cycle {
                     self.balance(cx, true);
@@ -1608,11 +1787,11 @@ impl Account {
                 coverage,
                 invalid,
                 cycle,
+                started,
                 ..
             } => {
                 self.orders_busy = false;
                 if !invalid {
-                    let clean = coverage.rejected() == 0;
                     // Decode all fallible mapping before entering native publication.
                     let prepared = rows
                         .into_iter()
@@ -1622,11 +1801,26 @@ impl Account {
                             Some((row, order, version))
                         })
                         .collect();
-                    let committed = cx.store.commit_orders_snapshot([token], |current| {
-                        self.publish_orders_snapshot(prepared, coverage, current)
+                    let current = cx.store.orders().to_vec();
+                    let plan = self.plan_orders_snapshot(prepared, &coverage, &current);
+                    // What this census may replace, decided before any per-order state
+                    // moves (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+                    let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                        key: ORDERS_SCOPE,
+                        account: &[ORDERS_SCOPE],
+                    };
+                    let refused = if cx.store.orders_snapshot_current(&token) {
+                        cx.orders_read_refusals(scope, |_| true, &plan.rows)
+                    } else {
+                        None
+                    };
+                    let committed = refused.is_some_and(|refused| {
+                        self.commit_orders_plan(cx, plan, &current, &coverage, refused, started)
                     });
-                    if committed && clean {
-                        cx.orders_reconciled(None);
+                    if !committed {
+                        // Refused whole, or unprovable: newer rows already stand, and
+                        // another census follows to prove what they cannot (absences).
+                        self.census_follow_up(cx, started);
                     }
                 } else {
                     cx.notice(
@@ -1642,23 +1836,23 @@ impl Account {
             }
         }
     }
-    /// Runs only after Store has validated the read's complete authority.
-    fn publish_orders_snapshot(
-        &mut self,
+    /// The census's rows and per-order state, changing nothing yet.
+    fn plan_orders_snapshot(
+        &self,
         rows: Vec<(NativeOrder, Order, OrderVersion)>,
-        coverage: SnapshotCoverage<String>,
+        coverage: &SnapshotCoverage<String>,
         current_rows: &[Order],
-    ) -> Vec<Order> {
-        let mut mapped = vec![];
-        let mut native = HashMap::new();
+    ) -> OrdersPlan {
+        let mut plan = OrdersPlan::default();
         for (row, order, version) in rows {
             if self.terminals.contains(&row.id) {
                 continue;
             }
-            let evidence = if self.stale_order(&row.id, version) {
-                OrderEvidence::Ignore
+            plan.symbols.insert(row.id.clone(), order.symbol.clone());
+            let (evidence, fence) = if self.stale_order(&row.id, version) {
+                (OrderEvidence::Ignore, None)
             } else {
-                self.order_evidence(&row, version, order.status != OrderStatus::Open)
+                self.order_evidence_change(&row, version, order.status != OrderStatus::Open)
             };
             if evidence == OrderEvidence::Ignore {
                 // A read started after a live event can still hit an
@@ -1667,37 +1861,125 @@ impl Account {
                 if let Some(current) = current_rows.iter().find(|current| current.id == row.id)
                     && current.status == OrderStatus::Open
                 {
-                    mapped.push(current.clone());
+                    plan.rows.push(current.clone());
                     if let Some(current) = self.native.get(&row.id) {
-                        native.insert(row.id.clone(), current.clone());
+                        plan.native.insert(row.id.clone(), current.clone());
                     }
                 }
                 continue;
             }
-            self.remember_order(&row.id, version);
+            if let Some(fence) = fence {
+                plan.fences.push((row.id.clone(), fence));
+            }
+            plan.versions.push((row.id.clone(), version));
             if order.status == OrderStatus::Open {
-                mapped.push(order);
+                plan.rows.push(order);
                 if evidence == OrderEvidence::Coherent {
-                    native.insert(row.id.clone(), row);
+                    plan.native.insert(row.id.clone(), row);
                 }
             } else {
-                self.terminal_order(&row.id);
+                plan.terminals.push(row.id);
             }
         }
         for current in current_rows {
             if !coverage.allows_absence(&current.id)
                 && current.status == OrderStatus::Open
                 && !self.terminals.contains(&current.id)
-                && !mapped.iter().any(|o: &Order| o.id == current.id)
+                && !plan.rows.iter().any(|o: &Order| o.id == current.id)
             {
-                mapped.push(current.clone());
+                plan.rows.push(current.clone());
                 if let Some(row) = self.native.get(&current.id) {
-                    native.insert(current.id.clone(), row.clone());
+                    plan.native.insert(current.id.clone(), row.clone());
                 }
             }
         }
+        plan
+    }
+    /// Commits an admitted census; its per-order state moves only for the
+    /// symbols it replaced. False when the store refused it after all.
+    fn commit_orders_plan(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: OrdersPlan,
+        current: &[Order],
+        coverage: &SnapshotCoverage<String>,
+        refused: Vec<String>,
+        started: f64,
+    ) -> bool {
+        let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+            key: ORDERS_SCOPE,
+            account: &[ORDERS_SCOPE],
+        };
+        let symbols = &plan.symbols;
+        let symbol_of = |id: &str| {
+            symbols.get(id).cloned().or_else(|| {
+                current
+                    .iter()
+                    .find(|order| order.id == id)
+                    .map(|order| order.symbol.clone())
+            })
+        };
+        let held = |id: &str| symbol_of(id).is_none_or(|symbol| refused.contains(&symbol));
+        // A refused symbol keeps the signing evidence its kept rows already had.
+        let mut native: HashMap<String, NativeOrder> = plan
+            .native
+            .into_iter()
+            .filter(|(id, _)| !held(id))
+            .collect();
+        for (id, row) in &self.native {
+            if held(id) && !native.contains_key(id) {
+                native.insert(id.clone(), row.clone());
+            }
+        }
+        let versions: Vec<_> = plan
+            .versions
+            .into_iter()
+            .filter(|(id, _)| !held(id))
+            .collect();
+        let fences: Vec<_> = plan
+            .fences
+            .into_iter()
+            .filter(|(id, _)| !held(id))
+            .collect();
+        let terminals: Vec<_> = plan.terminals.into_iter().filter(|id| !held(id)).collect();
+        // Any rejected row proves the account nothing.
+        let mut cover_unproven = coverage.unproven().to_vec();
+        if coverage.rejected() != 0 {
+            cover_unproven.push(String::new());
+        }
+        if cx
+            .commit_orders_read(scope, |_| true, plan.rows, &cover_unproven)
+            .is_none()
+        {
+            return false;
+        }
+        cx.store.set_orders_loaded();
+        for (id, change) in fences {
+            self.apply_fence_change(&id, change);
+        }
+        for (id, version) in versions {
+            self.remember_order(&id, version);
+        }
+        for id in terminals {
+            self.terminal_order(&id);
+        }
         self.native = native;
-        mapped
+        if !refused.is_empty() {
+            self.census_follow_up(cx, started);
+        }
+        let mut unproven = coverage.unproven().to_vec();
+        unproven.extend(refused);
+        cx.orders_reconciled_except(&unproven, u64::MAX);
+        true
+    }
+    /// Owe a census after one the stream outran, `CENSUS_FOLLOW_UP_MS` after
+    /// that one started at the earliest; it replaces any repair already owed.
+    fn census_follow_up(&mut self, cx: &mut Cx<'_, Pending>, started: f64) {
+        if let Some(timer) = self.repair_orders.take() {
+            cx.clear_timer(timer);
+        }
+        let wait = (started + CENSUS_FOLLOW_UP_MS - cx.now).max(0.);
+        self.repair_orders = Some(cx.set_timer(wait));
     }
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         if let Some(context) = request.read_context() {
@@ -1710,10 +1992,18 @@ impl Account {
             }
             Request::Auth { .. } => self.auth_failed(cx, error),
             Request::Margins { boot, .. } => self.margins_ended(cx, boot),
-            Request::Positions { cycle, .. } => self.positions_ended(cx, cycle),
+            Request::Positions { cycle, read, .. } => {
+                let fresh = self
+                    .positions_error
+                    .take()
+                    .unwrap_or_else(|| VenueError::new(error));
+                self.fresh_positions.failed(cx, 0, read, &fresh);
+                self.positions_ended(cx, cycle);
+            }
             Request::Balance { cycle, .. } => self.balance_ended(cx, cycle),
             Request::Orders { cycle, .. } => self.orders_ended(cx, cycle),
         }
+        self.account_read_again(cx);
     }
     fn margins_ended(&mut self, cx: &mut Cx<'_, Pending>, boot: bool) {
         self.margins_busy = false;
@@ -1775,39 +2065,60 @@ impl Account {
         version: OrderVersion,
         terminal: bool,
     ) -> OrderEvidence {
-        if self.terminals.contains(&row.id) {
-            return OrderEvidence::Ignore;
+        let (evidence, change) = self.order_evidence_change(row, version, terminal);
+        if let Some(change) = change {
+            self.apply_fence_change(&row.id, change);
         }
-        let Some(fence) = self.amend_fences.get_mut(&row.id) else {
-            return OrderEvidence::Coherent;
+        evidence
+    }
+    /// What `row` proves, and how it would move its amend fence.
+    fn order_evidence_change(
+        &self,
+        row: &NativeOrder,
+        version: OrderVersion,
+        terminal: bool,
+    ) -> (OrderEvidence, Option<FenceChange>) {
+        if self.terminals.contains(&row.id) {
+            return (OrderEvidence::Ignore, None);
+        }
+        let Some(fence) = self.amend_fences.get(&row.id) else {
+            return (OrderEvidence::Coherent, None);
         };
         if !fence.target.same_identity(row) {
-            return OrderEvidence::Ignore;
+            return (OrderEvidence::Ignore, None);
         }
         if terminal {
-            return OrderEvidence::Coherent;
+            return (OrderEvidence::Coherent, None);
         }
+        let floor = fence.floor.max(version.updated);
         if fence.target.matches(row) {
-            fence.floor = fence.floor.max(version.updated);
-            return OrderEvidence::Coherent;
+            return (OrderEvidence::Coherent, Some((floor, None)));
         }
         if fence.pending {
             // Executions can advance while the write is in flight. They remain
             // visible, but old mutable attributes are never signing evidence.
-            fence.floor = fence.floor.max(version.updated);
-            return OrderEvidence::Unresolved;
+            return (OrderEvidence::Unresolved, Some((floor, None)));
         }
         if version.updated > fence.floor {
             // A strictly newer coherent venue version may be an external edit.
             if let Ok(target) =
                 AmendTarget::new(row, &row.size, &row.price, Some(&row.trigger_price))
             {
-                fence.target = target;
-                fence.floor = version.updated;
-                return OrderEvidence::Coherent;
+                return (
+                    OrderEvidence::Coherent,
+                    Some((version.updated, Some(target))),
+                );
             }
         }
-        OrderEvidence::Ignore
+        (OrderEvidence::Ignore, None)
+    }
+    fn apply_fence_change(&mut self, id: &str, (floor, target): FenceChange) {
+        if let Some(fence) = self.amend_fences.get_mut(id) {
+            fence.floor = floor;
+            if let Some(target) = target {
+                fence.target = target;
+            }
+        }
     }
     fn stale_order(&self, id: &str, version: OrderVersion) -> bool {
         let old = self.order_versions.get(id).copied().or_else(|| {
@@ -1856,7 +2167,8 @@ impl Account {
             return false;
         }
         self.remember_order(&row.id, version);
-        self.bump_orders(cx);
+        // A census released before this row refuses its symbol through the read
+        // cover; the other symbols it read still commit.
         order.last_update = cx.now;
         if order.status != OrderStatus::Open {
             self.native.remove(&row.id);
@@ -1866,7 +2178,8 @@ impl Account {
         } else {
             self.native.remove(&row.id);
         }
-        if !row.cancel_reason.is_empty() {
+        // The user's own cancel is not a rejection.
+        if !row.cancel_reason.is_empty() && row.cancel_reason != "USER_CANCELED" {
             cx.notice(
                 Level::Error,
                 code::ORDER_REJECTED,
@@ -2382,6 +2695,29 @@ fn row_market(raw: &str) -> Option<&str> {
         .map(|row| row.market)
         .filter(|market| !market.is_empty())
 }
+/// The market of a position row that is open: not closed, and not a readable zero.
+fn owned_market(raw: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        market: &'a str,
+        #[serde(default, borrow)]
+        size: Option<&'a serde_json::value::RawValue>,
+        #[serde(default, borrow)]
+        status: Option<&'a serde_json::value::RawValue>,
+    }
+    let row: Row<'_> = serde_json::from_str(raw).ok()?;
+    let closed = row
+        .status
+        .and_then(|status| serde_json::from_str::<&str>(status.get()).ok())
+        == Some("CLOSED");
+    let flat = row
+        .size
+        .and_then(|size| serde_json::from_str::<Number>(size.get()).ok())
+        .is_some_and(|size| size.0 == 0.0);
+    (!closed && !flat).then(|| row.market.to_owned())
+}
+
 fn registered_market(
     cx: &Cx<'_, Pending>,
     excluded_perps: &HashSet<String>,

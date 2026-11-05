@@ -33,10 +33,10 @@ adopting this host version. tealstreet-next remains read-only in this lane.
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **48**.
-The two registries currently default **9 names** to `RustEngineExchange`:
-`coinbase`, `coinbasespot`, and Orderly's `tealstreet-dex`, `kodiakfi`, `mode`,
-`salsadex`, `what`, `woofi`, plus testnet-only `txflow`. They default the other **40 names** to TypeScript,
+The SDK exposes **47 registered exchange names**. `RUST_VENUES` includes **46**.
+The two registries currently default **7 names** to `RustEngineExchange`:
+`coinbase`, `coinbasespot`, and Orderly's `kodiakfi`, `mode`,
+`what`, `woofi`, plus testnet-only `txflow`. They default the other **40 names** to TypeScript,
 including **39 names with an available Rust adapter**. Registration in
 `RUST_VENUES` proves the adapter exists; it does not prove every optional product,
 credential mode, consumer, or live deployment is ready to delete.
@@ -53,7 +53,7 @@ of saved accounts.
 | Family / exact registered names | Rust adapter | Default registry / deletion condition |
 | --- | --- | --- |
 | Coinbase: `coinbase`, `coinbasespot` | Both | Rust default; active CFM/spot and saved spot-only. Legacy INTX fixtures remain compatibility coverage for retired Advanced Trade routes. Frozen TS reference remains a harness dependency. Inert Starbase code is not an enabled product. |
-| Orderly: `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | All six | Rust default; all are broker options of one Orderly crate. `woo` is WOO X, a separate family. Frozen TS reference remains a harness dependency. |
+| Orderly: `kodiakfi`, `mode`, `what`, `woofi` | All four | Rust default; all are broker options of one Orderly crate. `woo` is WOO X, a separate family. Frozen TS reference remains a harness dependency. |
 | `txflow` | Yes | Rust default, testnet USDC perpetuals only; mainnet rejects before I/O and production/preview availability stays disabled. Retain `__tests__/reference/txflow` for independent public/private replay and audits, plus the production `exchanges/txflow/txflow.client-id.ts` helper used by the Rust wrapper. The former Phase-0 scaffold has been replaced; preserve [exact signing, account, order/query scope and measurement gates](TXFLOW_RUST_PORT.md). |
 | Binance: `binance`, `binancepm` | Both | TS default; preserve USD-M and PM protocol/account/query scope and regression gates while switching both registries after consumer/routing/key-mode evidence. All four Binance Rust profiles now exist; shared TS implementation/reference files still have callers until each profile defaults/migrates. |
 | Binance Spot: `binancespot` | Yes | TS default; signed WebSocket API user-data subscription with ACK/subscription-ID/liveness checks, native per-asset currency balances and USD totals; no derivative positions/settings. Native client-order-ID identity and supported regular/protective/order-list paths retain whole-batch preflight and final-fill-aware cancel/replace; unsupported derivative flags/STP/trailing or conditional parameters reject. Private history/fills/income retain the existing TS empty-result contract; public-trades/client-lookup queries unsupported. Preserve exact scope, live public versus documented private evidence and USD-M/PM controls in [BINANCE_VARIANTS_PORT.md](BINANCE_VARIANTS_PORT.md). |
@@ -397,7 +397,7 @@ and renderer can keep stale book levels visible after disconnect.
 
 | Set | Names | Selection |
 | --- | --- | --- |
-| Rust by default (TS classes deleted) | `coinbase`, `coinbasespot`, `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi`, `txflow` (testnet only) | `registry.ts`, `registry.native.ts`; no opt-in, every factory/worker/server/CLI/MCP path |
+| Rust by default (TS classes deleted) | `coinbase`, `coinbasespot`, `kodiakfi`, `mode`, `what`, `woofi`, `txflow` (testnet only) | `registry.ts`, `registry.native.ts`; no opt-in, every factory/worker/server/CLI/MCP path |
 | Rust adapter, TS default | `apexomni`, `asterdex`, `backpack`, `binance`, `binancepm`, `binancespot`, `binanceinverse`, `bingx`, `bitget`, `bitgetusdc`, `bitgetinverse`, `bitrue`, `blofin`, `breakoutprop`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader`, `cryptocom`, `grvt`, `hyperliquid`, `hyperliquidspot`, `kraken`, `krakenspot`, `kucoin`, `kucoinspot`, `lighter`, `lighter-robinhood`, `mexc`, `okx`, `okxeu`, `okxdemo`, `okxeudemo`, `paradex`, `phemex`, `polymarket`, `weex`, `woo`, `bitunix` | `ExchangeOptions.engine: 'rust'` in `createExchange`, `createExchangeFromAccount` overrides, `ExchangeWorker`; MCP `EXCHANGE_ENGINE=rust`. No tealstreet-next caller sets it today. No `'typescript'` value (Owner decision 4) |
 | TS only | `binanceoptions` (master-only, survives the merge) | |
 
@@ -1676,8 +1676,8 @@ updated) or retained deliberately when deleting the venue implementation:
 
 The worker's postprocessor registry also retains `DisplayedPositionsPostprocessor`,
 `DisplayedMarginPostprocessor`, `ChaserOrderEnrichmentPostprocessor`,
-`OrdersRiskProfilePostprocessor`, `ChaserOrderPostprocessor`, `TwapPostprocessor`
-and `MessageHandlerStatsPostprocessor`. None is replaced by deleting a venue:
+`OrdersRiskProfilePostprocessor` and `MessageHandlerStatsPostprocessor`
+(`activeChasers`/`activeTWAPs` now come from the engine's Rust algos). None is replaced by deleting a venue:
 keep derived display/store fields and sequencing while inputs become Rust frames.
 
 ## NX deep-import and method reachability recheck
@@ -2071,8 +2071,6 @@ These are all direct base/concrete-class/registry callers in test source at the 
 | `packages/safe-cex/src/__tests__/reference/coinbase/coinbasespot.exchange.ts` | `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/kodiakfi/kodiakfi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/mode/mode.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges/salsadex/salsadex.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/what/what.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/woofi/woofi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/orderly.ws-private.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
@@ -2339,9 +2337,7 @@ These are all direct base/concrete-class/registry callers in test source at the 
 | `packages/safe-cex/src/webworker/handlers/TwapHandler.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/handlers/UiStateHandler.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/handlers/UpdatePositionsHandler.test.ts` | `base` |
-| `packages/safe-cex/src/webworker/postProcessors/ChaserOrderPostprocessor.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/postProcessors/MessageHandlerStatsPostprocessor.test.ts` | `base` |
-| `packages/safe-cex/src/webworker/postProcessors/TwapPostprocessor.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/twap/TwapInstance.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/twap/TwapInstance.timeout.test.ts` | `base` |
 
@@ -2402,8 +2398,6 @@ Coinbase reference, and socket type imports depend on that same class.
 | `packages/safe-cex/src/__tests__/reference/coinbase/coinbasespot.exchange.ts` | `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts`, `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.types.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/kodiakfi/kodiakfi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/mode/mode.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges/salsadex/salsadex.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/what/what.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/woofi/woofi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/orderly.api.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.encryption.ts`, `packages/safe-cex/src/__tests__/reference/orderly/orderly.types.ts` |
@@ -10309,3 +10303,128 @@ finish bootstrap before installing their cache; the long streamed-cancel test
 keeps its non-resurrection assertion and additionally forbids expired new rows.
 Bootstrap fixtures also fire the genuine socket-handoff wake before expecting
 portfolio collateral reads; their balance and holdings assertions stay intact.
+### Startup visibility: Bitget inverse and unconfigured HyroTrader
+
+Bitget inverse discovery with no contracts still terminates startup with
+`venueUnavailable`, and now emits the same cause through the standard classified
+error event. Contract/API selection and the terminal policy are unchanged.
+
+HyroTrader URLs remain SDK build-time configuration in `bybit.types.ts`, through
+`NEXT_PUBLIC_HYROTRADER_{PROD,SIMULATOR}_{REST,PUBLIC_WS,PRIVATE_WS}_URL`.
+Socket defaults remain derived from the configured REST origin. A missing URL
+for the selected mode/network, checked through the declared endpoint setup policy,
+now emits an `invalidInput/notSent` error and
+rejects before loading WASM or starting transport. Demo selection and the existing
+production-to-simulator fallback are unchanged; no destination is invented.
+
+### Phemex history symbol input
+
+Fills, order history and recent public trades resolve a unique listed market's
+symbol, normalized market ID or native symbol (ASCII case-insensitive aliases)
+before dispatch. Settlement products are never inferred: an inverse or delisted
+contract cannot silently become a USDT/USDC perpetual. Missing, unknown or
+ambiguous symbols fail locally with `invalidInput` and `venueCode: unknown-symbol`,
+with no HTTP or retry timer. The message asks the caller to select a listed
+USDT/USDC perpetual market. Client-order lookup retains its non-definitive
+not-found result for an unknown market. Private credential precedence and the
+original Read receipt bounds are unchanged.
+
+Phemex's income ledger has no symbol column, so it cannot prove an account-wide
+traded-symbol census. Callers must leave such fills/orders coverage incomplete;
+empty-symbol income rows are not evidence of an account with no trades. NX's
+companion stops non-retryable windows until the account/market inputs change.
+
+### Bybit batch cancel acknowledgements: identity matching and safe diagnostics
+
+`/v5/order/cancel-batch` (including one-order linear/demo batches) matches named
+response rows to the requested native `orderId`, rather than requiring the
+original request order. Each `retExtInfo.list` status remains paired with its
+response row, and the result is restored to request order before classification.
+A single unnamed remaining target is unambiguous; a sole-target empty result
+list follows the existing partial-stop cancel codec. Multiple ambiguous unnamed
+successes, foreign/duplicate IDs, missing/short/invalid statuses and malformed
+rows remain Unknown, keep live Store rows and never replay a cancel. A nonzero
+status still goes through the existing per-item refusal/absence classifier.
+
+The wire requests use native order IDs only. IDs remain opaque and case-sensitive;
+empty `orderLinkId` is harmless, and no client-ID alias or case folding is invented.
+Stock-token symbols use the same linear cancellation path. Cancel-all, single-cancel
+and partial-stop handling retain their own existing proof rules. Bybit's
+[batch cancel documentation](https://bybit-exchange.github.io/docs/v5/order/batch-cancel)
+describes separate identity and per-item status lists; it does not promise request-order echoes.
+An accepted acknowledgement retains the existing request-acceptance semantics,
+not a new guarantee of final asynchronous exchange execution.
+
+An unproven batch now asks the user to check open orders on Bybit before retrying.
+Its bounded diagnostic reports list presence/counts, order-ID/client-ID field
+presence and nonempty counts, target-match count, and success/refusal/invalid
+status counts. It never includes ID values, native messages or raw responses.
+The reported production events had no response body; the covered false-Unknown
+shapes are reproduced, while the specific live shape remains unconfirmed.
+
+
+### Binance and Bybit already-set margin acknowledgements
+
+Binance USD-M and COIN-M `SetMarginType` treat documented `-4046` as an
+already-applied setting, updating the requested stored margin type and completing
+once without an error or resend. The existing `-4059` position-mode success stays
+operation-specific. Ordinary leverage acknowledgements and the local already-at-
+requested-leverage shortcut remain successful. Binance `-4028` stays rejected:
+its documented meanings include invalid leverage as well as an already-existing
+value, so the numeric code alone does not prove the requested leverage.
+
+Bybit `110026` is admitted only by the margin-mode call's code table, selected
+before classification and fact recording. The general Bybit table rejects it:
+leverage, position mode and protective-order legs also use `Intent::Setting`,
+which alone is not proof of a margin change. Existing `110043` leverage and
+`110025` position-mode facts remain unchanged. Margin-mode no-ops use the same
+effects as normal success, including immediate account-wide settings/position
+updates and source frame holds. A contradictory `reasons` result remains unproven. HTTP gateway
+failures keep precedence over these codes, and non-setting writes cannot acquire
+setting-success authority.
+
+References: [Binance USD-M error codes](https://developers.binance.com/docs/derivatives/usds-margined-futures/error-code),
+[Binance COIN-M error codes](https://developers.binance.com/docs/derivatives/coin-margined-futures/error-code),
+[Bybit V5 error codes](https://bybit-exchange.github.io/docs/v5/error).
+
+
+### Bybit terminal-history lookup coverage (November 12, 2026)
+
+HyroTrader's Background reconciliation and caller Preflight lookup both read
+realtime, default history, then explicit Cancelled, Rejected and Deactivated
+history only while earlier axes are empty. A failed or unfinished axis never
+proves absence. Empty status results also prove nothing once the earliest
+possible send is 24 hours old, including a walk crossing that boundary; a later
+send never renews coverage. Expired coverage gives explicit Unknown guidance
+to check broker order/fill history. Positive terminal evidence may still resolve.
+The Background walk shares the original two 20 s windows;
+caller reads capture the genuine command_wait receipt at entry and cap every
+Read and final Plan admission to that lookup deadline. Expiry seals typed
+Timeout/Unknown. Shared execution/observer deadlines after admission stay native.
+Cancelled and Deactivated recover the original order ID without another create.
+A proven Rejected row retains the existing new-identity remint contract.
+
+Bybit's [announcement](https://t.me/Bybit_API_Announcements/464) does not exempt
+orderLinkId or orderId. The [endpoint documentation](https://bybit-exchange.github.io/docs/v5/order/order-list)
+limits these three terminal statuses to 24 hours; older missing orders cannot
+be recovered from this API. The historical-orders collection is a separate change.
+
+
+### Bybit historical-order terminal statuses (November 12, 2026)
+
+Historical orders read default history plus explicit Cancelled, Rejected and
+Deactivated axes for each enabled product category. Every axis retains the
+requested windows and independent cursor/page guards on the same caller Read
+root and signer. A dedicated engine Claim pacing group allows at most four
+physical order-history requests per second across all categories, cursors,
+statuses and concurrent commands; account reads do not share that clock.
+Limits apply to each axis before the combined
+result is sorted, deduplicated by symbol/order ID and truncated. A terminal-axis
+failure is typed with no collected rows, or explicitly incomplete with accepted
+rows retained; it cannot become an apparently complete default-only result.
+
+The [Bybit announcement](https://t.me/Bybit_API_Announcements/464) removes these
+statuses from default history. Explicit status calls retain the documented
+[24-hour availability](https://bybit-exchange.github.io/docs/v5/order/order-list);
+this change does not restore already expired terminal orders or claim longer
+retention. Hyro placement recovery is handled independently.

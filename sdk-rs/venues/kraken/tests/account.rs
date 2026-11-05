@@ -5,7 +5,7 @@ use support::*;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 5_000.0;
 
-const ORDER: &str = r#"{"instrument":"PF_XBTUSD","order_id":"order-1","qty":2,"filled":0.5,"type":"stop","direction":1,"stop_price":90,"reduce_only":true,"triggerSignal":"last","last_update_time":1700000000000}"#;
+const ORDER: &str = r#"{"instrument":"PF_XBTUSD","order_id":"order-1","qty":1.5,"filled":0.5,"type":"stop","direction":1,"stop_price":90,"reduce_only":true,"triggerSignal":"last","last_update_time":1700000000000}"#;
 fn snapshot(e: &mut Engine<Kraken>, socket: SocketId) {
     message(
         e,
@@ -283,8 +283,9 @@ fn authenticated_reconnect_requests_fresh_challenge_and_ignores_old_socket() {
             }
         })
         .collect::<Vec<_>>();
-    assert_eq!(sent.len(), 3);
-    for msg in sent {
+    assert_eq!(sent.len(), 4);
+    assert!(sent[3].contains(r#""feed":"heartbeat""#));
+    for msg in &sent[..3] {
         assert!(msg.contains("fresh"));
         assert!(msg.contains("signed_challenge"));
         assert!(!msg.contains("account_balances"));
@@ -661,7 +662,7 @@ fn execution_remaining_updates_orders_without_counting_cumulative_progress_twice
         &format!(
             r#"{{"feed":"open_orders","order":{}}}"#,
             ORDER
-                .replace("\"filled\":0.5", "\"filled\":1")
+                .replace("\"qty\":1.5,\"filled\":0.5", "\"qty\":1,\"filled\":1")
                 .replace("1700000000000", "1700000000002")
         ),
     );
@@ -685,7 +686,7 @@ fn cumulative_order_before_execution_does_not_double_count_and_final_remaining_c
         &format!(
             r#"{{"feed":"open_orders","order":{}}}"#,
             ORDER
-                .replace("\"filled\":0.5", "\"filled\":1")
+                .replace("\"qty\":1.5,\"filled\":0.5", "\"qty\":1,\"filled\":1")
                 .replace("1700000000000", "1700000000001")
         ),
     );
@@ -1670,4 +1671,46 @@ fn row_report_stale_ws_snapshot_does_not_rearm_but_a_current_clean_update_does()
         1,
         "the current clean read still rearms"
     );
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    refused_with(200, r#"{"result":"error","error":"authenticationError"}"#);
+    refused_with(401, r#"{"result":"error","error":"authenticationError"}"#);
+}
+
+fn refused_with(status: u16, refusal: &str) {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Kraken::new(support::options()));
+    e.start(support::NOW);
+    let mut failures = vec![];
+    for _ in 0..12 {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, support::NOW);
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            match action {
+                Action::Http(r) => {
+                    let body = if r.url.contains("/instruments") {
+                        support::META
+                    } else if r.url.contains("/tickers") {
+                        support::TICKERS
+                    } else {
+                        refusal
+                    };
+                    let status = if body == refusal { status } else { 200 };
+                    support::reply(&mut e, &r, status, body);
+                }
+                Action::WsConnect { socket, .. } => {
+                    e.handle(support::NOW, Event::WsOpened { socket })
+                }
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { error }) => {
+                    failures.push(error)
+                }
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].message.contains("authenticationError"));
 }

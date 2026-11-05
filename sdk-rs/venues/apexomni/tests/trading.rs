@@ -421,12 +421,152 @@ fn signature_rejection_retries_once_with_same_l2_body_and_fresh_legacy_auth() {
     assert!(requests(&mut e).is_empty());
 }
 
+/// Real ApeX bodies (a user's key, 2026-11-02): no `code`; a cancel's `data` is the bare id.
+const REAL_PLACE: &str = r#"{"data":{"id":"904952998325649712","clientId":"c1","orderId":"904952998325649712","status":"PENDING"},"timeCost":21}"#;
+const REAL_CANCEL: &str = r#"{"data":"904952998325649712","timeCost":5897}"#;
+
+fn command_failures(out: &[Action]) -> Vec<String> {
+    out.iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ApeX's documented success has no `code`: `{"data":{...},"timeCost":3}`.
+#[test]
+fn a_success_with_no_code_is_a_placed_order_not_a_failure() {
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(&mut e, &first, NOW + 11.0, REAL_PLACE);
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+}
+
+#[test]
+fn a_cancel_answered_with_no_code_succeeds() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["abc".into()],
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    response(&mut e, &cancel, NOW + 11.0, REAL_CANCEL);
+    assert_eq!(command_failures(&actions(&mut e)), Vec::<String>::new());
+}
+
+#[test]
+fn an_amend_whose_cancel_has_no_code_still_places_the_replacement() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    response(
+        &mut e,
+        &cancel,
+        NOW + 15.0,
+        r#"{"data":"parent","timeCost":3}"#,
+    );
+    let replacement = requests(&mut e).remove(0);
+    assert_eq!(form(&replacement)["size"], "4");
+}
+
+fn done(out: &[Action], command: safe_cex_engine::CommandId) -> bool {
+    out.iter().any(|action| {
+        matches!(action, Action::Notice(Notice::CommandDone { command: c, .. }) if *c == command)
+    })
+}
+
+/// Live replies on a user's key (2026-11-02): these writes answer only `timeCost`, or nothing.
+#[test]
+fn a_cancel_all_answered_with_only_time_cost_is_done() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 5,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let request = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/delete-open-orders"))
+        .expect("cancel-all write");
+    response(&mut e, &request, NOW + 11.0, r#"{"timeCost":6476}"#);
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+    assert!(done(&out, 5), "{out:?}");
+}
+
+#[test]
+fn a_leverage_change_answered_with_only_time_cost_is_done() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::SetLeverage {
+            command: 9,
+            symbol: "BTCUSDT".into(),
+            leverage: 10.0,
+            side: None,
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    response(&mut e, &request, NOW + 11.0, r#"{"timeCost":5694}"#);
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+    assert!(done(&out, 9), "{out:?}");
+}
+
+/// Legacy cancels an attached TP/SL by its parent's id; the venue answers an empty body.
+#[test]
+fn a_tpsl_cancel_answered_with_an_empty_body_is_done() {
+    let mut e = ready();
+    e.handle(
+        NOW + 10.0,
+        Event::Command(Command::CancelOrders {
+            command: 7,
+            ids: vec!["abc__stop_loss".into()],
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    assert_eq!(form(&request)["id"], "abc");
+    response(&mut e, &request, NOW + 11.0, "");
+    let out = actions(&mut e);
+    assert_eq!(command_failures(&out), Vec::<String>::new());
+    assert!(done(&out, 7), "{out:?}");
+}
+
+#[test]
+fn a_failure_never_shows_empty_text() {
+    for body in [
+        r#"{"timeCost":3}"#,
+        r#"{"code":10003,"msg":""}"#,
+        r#"{"data":null}"#,
+    ] {
+        let mut e = ready();
+        let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+        response(&mut e, &first, NOW + 11.0, body);
+        let failures = command_failures(&actions(&mut e));
+        assert_eq!(failures.len(), 1, "{body}");
+        assert!(!failures[0].trim_end().ends_with(':'), "{}", failures[0]);
+        if body.contains("10003") {
+            assert!(failures[0].contains("no reason given"), "{}", failures[0]);
+        }
+    }
+}
+
 #[test]
 fn http_and_business_rejections_never_cancel_replace_or_retry_writes() {
     for (status, body) in [
         (500, r#"{"msg":"server error"}"#),
         (200, r#"{"code":10003,"msg":"insufficient funds"}"#),
         (200, r#"{"code":0,"data":{}}"#),
+        (200, r#"{"data":{}}"#),
+        (200, r#"{"timeCost":3}"#),
         (200, r#"{"code":"broken","data":{"id":"must-not-accept"}}"#),
         (200, r#"{"code":{},"data":{"id":"must-not-accept"}}"#),
         (200, r#"{"code":0.5,"data":{"id":"must-not-accept"}}"#),
@@ -548,7 +688,7 @@ fn partial_parent_and_virtual_amendments_replace_only_remaining_and_keep_sibling
         parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
         e.drain_actions().for_each(drop);
         let cancel = amend(&mut e, id, None).remove(0);
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         let replacement = requests(&mut e).remove(0);
         let fields = form(&replacement);
         assert_eq!(fields["size"], "4");
@@ -578,7 +718,7 @@ fn amend_rechecks_remaining_when_its_fifo_turn_starts() {
         },
     );
     let cancel = without_reconcile_read(requests(&mut e)).remove(0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(
         form(&without_reconcile_read(requests(&mut e)).remove(0))["size"],
         "2"
@@ -599,7 +739,7 @@ fn in_flight_amend_counts_same_execution_once_in_both_topic_orders() {
         if !fill_first {
             amend_fill(&mut e, socket, NOW + 11.0, 1.0);
         }
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         assert_eq!(form(&requests(&mut e).remove(0))["size"], "3");
     }
 }
@@ -611,7 +751,7 @@ fn delayed_pre_amend_fill_does_not_reduce_the_captured_remaining_again() {
     e.drain_actions().for_each(drop);
     let cancel = amend(&mut e, "parent", None).remove(0);
     amend_fill(&mut e, socket, NOW + 4.0, 6.0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "4");
 }
 
@@ -623,7 +763,7 @@ fn new_genuine_amend_fill_counts_despite_outstanding_old_synthetic_coverage() {
     e.drain_actions().for_each(drop);
     let cancel = amend(&mut e, "parent", None).remove(0);
     amend_fill(&mut e, socket, NOW + 11.0, 1.0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
 }
 
@@ -635,7 +775,7 @@ fn distinct_execution_after_a_cumulative_report_reduces_remaining_again() {
     let cancel = amend(&mut e, "parent", None).remove(0);
     parent_update(&mut e, socket, NOW + 11.0, 7.0, "OPEN", false);
     amend_fill(&mut e, socket, NOW + 12.0, 1.0);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "2");
 }
 
@@ -644,10 +784,10 @@ fn genuine_full_fill_during_cancel_suppresses_explicit_replacement_quantity() {
     let (mut e, socket) = ready_with_socket();
     parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
     e.drain_actions().for_each(drop);
-    let cancel = amend(&mut e, "parent", Some(2.5)).remove(0);
+    let cancel = amend(&mut e, "parent", Some(8.5)).remove(0);
     amend_fill(&mut e, socket, NOW + 11.0, 4.0);
     e.drain_actions().for_each(drop);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     let actions = actions(&mut e);
     assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
     assert!(http(actions).is_empty());
@@ -710,7 +850,7 @@ fn own_cancel_event_keeps_replacement_but_full_fill_suppresses_it() {
         let cancel = amend(&mut e, "parent", None).remove(0);
         parent_update(&mut e, socket, NOW + 12.0, filled, status, false);
         e.drain_actions().for_each(drop);
-        response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         let actions = actions(&mut e);
         if status == "FILLED" {
             assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandDone { command: 99, result: ids }) if ids == "[]")));
@@ -722,14 +862,14 @@ fn own_cancel_event_keeps_replacement_but_full_fill_suppresses_it() {
 }
 
 #[test]
-fn explicit_amend_quantity_remains_verbatim_after_an_additional_fill() {
+fn an_explicit_total_comes_down_by_an_additional_fill() {
     let (mut e, socket) = ready_with_socket();
     parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
     e.drain_actions().for_each(drop);
-    let cancel = amend(&mut e, "parent", Some(2.5)).remove(0);
+    let cancel = amend(&mut e, "parent", Some(8.5)).remove(0);
     parent_update(&mut e, socket, NOW + 12.0, 7.0, "OPEN", false);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
-    assert_eq!(form(&requests(&mut e).remove(0))["size"], "2.5");
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    assert_eq!(form(&requests(&mut e).remove(0))["size"], "1.5");
 }
 
 #[test]
@@ -840,7 +980,7 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
     // An additional fill discards the prebuilt replacement and selects new signed IDs.
     amend_fill(&mut e, socket, NOW + 11.0, 1.0);
     e.drain_actions().for_each(drop);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     let out: Vec<_> = actions(&mut e);
     let write = out
         .iter()
@@ -870,6 +1010,69 @@ fn amendment_receipts_are_published_only_for_final_selected_replacement() {
             p["slClientOrderId"].as_str()
         ]
     );
+}
+
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, socket) = ready_with_socket();
+    parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+    e.drain_actions().for_each(drop);
+    let cancel = amend(&mut e, "parent", None).remove(0);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+    let replacement = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &replacement,
+        NOW + 16.0,
+        r#"{"code":429,"msg":"too many requests"}"#,
+    );
+    let error = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 99, error }) => Some(error),
+            _ => None,
+        })
+        .expect("a failure");
+    assert!(
+        error.message.contains("Your BTCUSDT order is gone"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    for (id, expected) in [
+        (
+            "parent__stop_loss",
+            "Your BTCUSDT long position has no stop",
+        ),
+        (
+            "parent__take_profit",
+            "Your BTCUSDT long position has no take profit",
+        ),
+    ] {
+        let (mut e, socket) = ready_with_socket();
+        parent_update(&mut e, socket, NOW + 5.0, 6.0, "OPEN", true);
+        e.drain_actions().for_each(drop);
+        let cancel = amend(&mut e, id, None).remove(0);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+        let replacement = requests(&mut e).remove(0);
+        response(
+            &mut e,
+            &replacement,
+            NOW + 16.0,
+            r#"{"code":429,"msg":"too many requests"}"#,
+        );
+        let error = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 99, error }) => Some(error),
+                _ => None,
+            })
+            .expect("a failure");
+        assert!(error.message.contains(expected), "{}", error.message);
+    }
 }
 
 #[test]
@@ -965,7 +1168,7 @@ fn default_decimal_amendment_subtracts_late_fill_without_float_noise() {
     let cancel = amend(&mut e, "parent", None).remove(0);
     ws(&mut e, socket, NOW + 12.0, &decimal_parent("0.2"));
     e.drain_actions().for_each(drop);
-    response(&mut e, &cancel, NOW + 15.0, r#"{"code":0,"data":null}"#);
+    response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     assert_eq!(form(&requests(&mut e).remove(0))["size"], "0.1");
 }
 
@@ -1180,6 +1383,7 @@ fn write_provider(hmac_only: bool) -> (Arc<dyn Signer>, Identities) {
                     key: ExtraKey::ZklinkSeed,
                     field: ExtraFieldPolicy::RequiredForPrivate,
                     encoding: Some(KeyEncoding::Hex),
+                    trim: false,
                 }),
                 ..Default::default()
             }),
@@ -1864,6 +2068,45 @@ fn engine_re_asks_join_the_fresh_read_in_flight_and_its_clean_answer_releases() 
 /// Cancel-all on a symbol with an Unknown placement is refused NotSent until the
 /// fresh order read releases the fence (default `fence_uncertain_cancel_all`).
 #[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let (mut e, _socket) = ready_with_socket();
+    let place = |e: &mut TestEngine, now, command, client: &str| {
+        e.handle(
+            now,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![order(serde_json::json!({ "clientOrderId": client }))],
+            }),
+        );
+        actions(e)
+    };
+    let write = http(place(&mut e, NOW + 10.0, 42, "first"))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/order"))
+        .expect("the placement write");
+    e.handle(
+        NOW + 20.0,
+        Event::HttpFailed {
+            request: write.id,
+            error: "connection reset after write",
+        },
+    );
+    let fresh = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the reconcile read");
+    response(
+        &mut e,
+        &fresh,
+        NOW + 30.0,
+        r#"{"code":0,"data":[{"id":"77","symbol":"SOL-USDT"}]}"#,
+    );
+    actions(&mut e);
+    let retry = http(place(&mut e, NOW + 40.0, 43, "retry"));
+    assert!(retry.iter().any(|r| r.url.ends_with("/v3/order")));
+}
+
+#[test]
 fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() {
     const EMPTY: &str = r#"{"code":0,"data":[]}"#;
     let cancel_all = |e: &mut TestEngine, now: f64, command: safe_cex_engine::CommandId| {
@@ -1927,4 +2170,62 @@ fn an_unknown_placement_fences_cancel_all_until_the_fresh_order_read_releases() 
         "a fresh clean read releases cancel-all"
     );
     assert_eq!(cancels(&released), 1, "cancel-all is sent once released");
+}
+
+/// A coded 200: the listed code refuses and leaves no fence.
+#[test]
+fn documented_coded_refusal_leaves_no_fence() {
+    use safe_cex_engine::Outcome;
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(
+        &mut e,
+        &first,
+        NOW + 11.0,
+        r#"{"code":10002,"msg":"Your API key is wrong"}"#,
+    );
+    let settled = actions(&mut e);
+    assert!(
+        settled.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 42, error })
+            if error.outcome == Some(Outcome::Rejected))),
+        "{settled:?}"
+    );
+    let next = place_with_id(&mut e, 43, vec![order(serde_json::json!({}))]);
+    assert!(
+        next.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/order")))
+    );
+}
+
+/// An unlisted code stays Unknown, reads at once, and that read lifts the fence.
+#[test]
+fn unlisted_coded_placement_fence_clears_on_the_next_read() {
+    let mut e = ready();
+    let first = http(place(&mut e, vec![order(serde_json::json!({}))])).remove(0);
+    response(
+        &mut e,
+        &first,
+        NOW + 11.0,
+        r#"{"code":987654,"msg":"unlisted native failure"}"#,
+    );
+    let read = http(actions(&mut e))
+        .into_iter()
+        .find(|r| r.url.ends_with("/v3/open-orders"))
+        .expect("the read starts with the answer");
+    let fenced = place_with_id(&mut e, 43, vec![order(serde_json::json!({}))]);
+    assert!(
+        fenced.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 43, error })
+            if error.message.contains("uncertain"))),
+        "{fenced:?}"
+    );
+    response(&mut e, &read, NOW + 12.0, r#"{"code":0,"data":[]}"#);
+    let _ = actions(&mut e);
+    let next = place_with_id(&mut e, 44, vec![order(serde_json::json!({}))]);
+    assert!(
+        next.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/v3/order"))),
+        "{next:?}"
+    );
 }

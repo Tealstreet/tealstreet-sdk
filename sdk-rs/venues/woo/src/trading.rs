@@ -1142,6 +1142,7 @@ impl Woo {
                     error.message,
                     json(&job.ids).unwrap()
                 );
+                error = error.partial_ids(&job.ids);
             }
             if (job.effective || !job.ids.is_empty())
                 && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
@@ -1435,7 +1436,7 @@ impl Woo {
                     #[derive(Deserialize)]
                     struct Leverage {
                         symbol: String,
-                        margin_mode: String,
+                        margin_mode: Option<String>,
                         position_mode: String,
                         details: Vec<Detail>,
                     }
@@ -1449,7 +1450,10 @@ impl Woo {
                         serde_json::from_str(envelope.payload()?).map_err(|e| e.to_string())?;
                     let m = cx.store.market(symbol).unwrap();
                     if data.symbol != native(m)
-                        || data.margin_mode != "CROSS"
+                        || data
+                            .margin_mode
+                            .as_deref()
+                            .is_some_and(|mode| mode != "CROSS")
                         || data.position_mode != "ONE_WAY"
                         || data.details.len() != 1
                         || data.details[0].position_side != "BOTH"
@@ -1461,7 +1465,13 @@ impl Woo {
                             "WOO leverage readback did not match the requested scope/value".into(),
                         );
                     }
-                    self.account_leverage_applied(cx, symbol, data.details[0].leverage, *revision);
+                    self.account_leverage_applied(
+                        cx,
+                        symbol,
+                        data.details[0].leverage,
+                        data.margin_mode.as_ref().map(|_| MarginType::Cross),
+                        *revision,
+                    );
                 }
                 Step::Mode {
                     hedged, revision, ..
@@ -1554,7 +1564,7 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 
 /// A refused write answer, classified by HTTP status and WOO's documented
 /// error codes. 408/5xx and malformed answers do not prove a refusal.
-fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
+pub(crate) fn answer_failure(response: &Response<'_>, message: String) -> VenueError {
     #[derive(Deserialize)]
     struct Code {
         code: Option<i64>,

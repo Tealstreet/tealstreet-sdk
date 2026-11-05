@@ -1366,6 +1366,8 @@ impl Venue for Polymarket {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            // The engine repairs subscriptions itself; it never forwards this.
+            Command::RepairSubscription(_) => {}
             Command::FetchOptionChain { .. }
             | Command::FetchOptionExpiries { .. }
             | Command::FetchAccountGreeks { .. } => {

@@ -12,6 +12,14 @@ on:
         type: choice
         options: [family, combined]
         default: family
+      cpu_budget_diagnostic:
+        description: Run only the fixed non-certifying TxFlow A/A budget experiment
+        type: boolean
+        default: false
+      cpu_budget_profile:
+        description: Add separate GC and optimization traces after the A/A experiment
+        type: boolean
+        default: false
       mutation_barrier_size:
         description: Compare standalone Bybit barrier capability off/on on this exact checkout
         type: boolean
@@ -33,6 +41,7 @@ on:
       - '.github/actions/prefetch-cargo/**'
       - '.github/actions/install-yarn/**'
       - '.github/actions/install-binaryen/**'
+      - '.github/actions/fetch-rust-history/**'
   # Unfiltered so "Rust / required coverage" always reports for branch protection;
   # the scope job applies the push path list and skips coverage outside it.
   pull_request:
@@ -43,10 +52,11 @@ permissions:
   actions: read
   pull-requests: read
 
-# Pushes to a branch finish their run (the newest push waits behind it), so
-# landing gets completed results during a merge rush; PR pushes cancel stale runs.
+# Every master push gets its own complete run: one group per sha. A shared
+# group keeps only one pending run, so a merge rush cancelled every commit
+# between the running and the newest one. PR pushes cancel stale runs.
 concurrency:
-  group: rust-${{ github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('rust-pr-{0}', github.ref) || format('rust-{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # No global RUSTFLAGS: it would replace sdk-rs/.cargo/config.toml's flags,
@@ -67,7 +77,7 @@ jobs:
   scope:
     name: Rust / scope
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       relevant: ${{ steps.scope.outputs.relevant }}
     defaults:
@@ -76,7 +86,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -85,14 +98,64 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node sdk-rs/harness/ci-scope.mjs
+        run: |
+          if [ '${{ github.event_name }}' = workflow_dispatch ] && [ '${{ inputs.cpu_budget_diagnostic }}' = true ]; then
+            echo 'relevant=false' >> "$GITHUB_OUTPUT"
+          else
+            node sdk-rs/harness/ci-scope.mjs
+          fi
+
+  cpu-budget-diagnostic:
+    name: Rust / diagnostic A-A budget (${{ matrix.slot }})
+    if: github.event_name == 'workflow_dispatch' && inputs.cpu_budget_diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - name: Download the immutable original TxFlow module
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh run download 41853782572 --repo Tealstreet/tealstreet-sdk
+          --name ci-wasm-txflow --dir '${{ runner.temp }}/txflow-module'
+      - name: Fixed diagnostic experiment (never CPU certification evidence)
+        run: |
+          module=$(find '${{ runner.temp }}/txflow-module' -name safe_cex_wasm.js -print -quit)
+          test -n "$module"
+          args=()
+          if [ '${{ inputs.cpu_budget_profile }}' = true ]; then args+=(--profile); fi
+          node sdk-rs/harness/cpu-budget-diagnostic.mjs --module "$module" --out '${{ runner.temp }}/cpu-budget' "${args[@]}"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cpu-budget-diagnostic-${{ matrix.slot }}
+          path: ${{ runner.temp }}/cpu-budget/
+          if-no-files-found: error
+          retention-days: 14
 
   selection:
     needs: scope
     if: needs.scope.outputs.relevant == 'true'
     name: Rust / affected coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.select.outputs.full }}
       checkoutSha: ${{ steps.select.outputs.checkoutSha }}
@@ -110,7 +173,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -132,7 +198,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -150,13 +219,14 @@ jobs:
     needs: selection
     name: Rust / banned patterns
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
-          # The shrink-only request provenance ratchet verifies immutable base
-          # and parent manifests, never a caller-supplied enlarged inventory.
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - name: Reject JavaScript emulation and deleted-port dependencies
         run: ./scripts/check-bans.sh
 
@@ -182,6 +252,11 @@ jobs:
           - check: engine-feature-modes
             timeout: 90
             command: python3 scripts/test-http-plan-feature-modes.py
+          - check: metadata
+            command: |
+              node --test safe-cex-types/tests/metadata-freshness.test.cjs
+              cargo clippy --locked -p safe-cex-types --test exchange_metadata -- -D warnings
+              cargo test --locked -p safe-cex-types --test exchange_metadata
           # The restored master candle-cache crates (mono candle-server image) build
           # alone, with master's serde_json features, never unified into the port.
           - check: candle-cache
@@ -219,9 +294,18 @@ jobs:
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
       - uses: actions/setup-node@v4
-        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers'
+        if: matrix.check == 'engine-feature-modes' || matrix.check == 'mutation-barriers' || matrix.check == 'metadata'
         with:
           node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        if: matrix.check == 'metadata'
+        id: yarn
+      - uses: ./.github/actions/install-yarn
+        if: matrix.check == 'metadata'
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
       - name: Run ${{ matrix.check }}
         run: ${{ matrix.command }}
 
@@ -246,9 +330,9 @@ jobs:
         run: rustup show
       - uses: ./.github/actions/prefetch-cargo
       - name: Build every crate for wasm32
-        run: cargo build --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --target wasm32-unknown-unknown
+        run: cargo build --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --exclude safe-cex-candle-server --exclude safe-cex-exchange-server --exclude safe-cex-remote-signer --target wasm32-unknown-unknown
       - name: Lint every crate for wasm32
-        run: cargo clippy --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy --locked --workspace --exclude safe-cex-candle-cache --exclude safe-cex-num --exclude safe-cex-types --exclude safe-cex-candle-server --exclude safe-cex-exchange-server --exclude safe-cex-remote-signer --target wasm32-unknown-unknown -- -D warnings
       - name: Lint explicit WASM Mutation-barrier host support
         run: cargo clippy --locked -p safe-cex-wasm --no-default-features --features bitunix,http-mutation-barriers --target wasm32-unknown-unknown -- -D warnings
 
@@ -670,6 +754,13 @@ jobs:
           corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT
           corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP
           corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT
+      - name: Binance European Options retained-reference REST parity
+        if: matrix.venue == 'binance'
+        run: |
+          corepack yarn rust:private-tape-binanceoptions --public
+          corepack yarn rust:private-tape-binanceoptions
+          corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions.jsonl --books ''
+          corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions-private.jsonl --books ''
       - name: Binance Spot, COIN-M and portfolio margin private variants
         if: matrix.venue == 'binance'
         run: |
@@ -733,7 +824,7 @@ jobs:
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
         run: |
-          for venue in orderly tealstreet-dex kodiakfi woofi mode salsadex what; do
+          for venue in orderly kodiakfi woofi mode what; do
             for network in mainnet testnet; do
               extra=()
               suffix=''
@@ -886,6 +977,11 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -985,6 +1081,9 @@ jobs:
       - name: Scripted lifecycle financial parity (fixed sanitized capture)
         if: matrix.venue == 'binance'
         run: corepack yarn -s rust:gate:record --venue binance --tape sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl --books BTCUSDT --runs "$PRIVATE_REPLAY_RUNS"
+      - name: Generate Binance Options public CPU input before sealing
+        if: matrix.venue == 'binance'
+        run: corepack yarn rust:private-tape-binanceoptions --public
       - name: Seal approved CPU measurement inputs
         id: cpu_prepare
         env:
@@ -993,13 +1092,13 @@ jobs:
           node sdk-rs/harness/cpu-ci.mjs --command prepare --suite '${{ matrix.venue }}'
           --out '${{ runner.temp }}/cpu-runtime-first' --mode '${{ inputs.replay_artifact == 'combined' && 'combined' || 'family' }}'
       - name: Public data (correctness, CPU and memory)
-        run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}' --runs 9
+        run: corepack yarn -s rust:gate:record --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}' --runs 16
       - name: OKX inverse public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okx --tape sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 9
+        run: corepack yarn -s rust:gate:record --venue okx --tape sdk-rs/harness/fixtures/okx-inverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 16
       - name: OKX EEA X-Perps public books (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 9
+        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-xperp-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 16
       - name: Account and trading (correctness)
         if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |
@@ -1018,9 +1117,18 @@ jobs:
       - name: Binance Spot, COIN-M and portfolio margin public variants
         if: matrix.venue == 'binance'
         run: |
-          corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
-          corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP --runs 9
-          corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT --runs 9
+          corepack yarn -s rust:gate:record --venue binancespot --tape sdk-rs/harness/fixtures/binancespot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 16
+          corepack yarn -s rust:gate:record --venue binanceinverse --tape sdk-rs/harness/fixtures/binanceinverse-public.jsonl.gz --books BTCUSD_PERP,ETHUSD_PERP --runs 16
+          corepack yarn -s rust:gate:record --venue binancepm --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz --books BTCUSDT,ETHUSDT,SOLUSDT --runs 16
+      # CPU cohort authentication binds each public case to one step named "public".
+      - name: Binance European Options public data (correctness, CPU and memory)
+        if: matrix.venue == 'binance'
+        run: corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions.jsonl --books '' --runs 16
+      - name: Binance European Options account and trading (correctness)
+        if: matrix.venue == 'binance'
+        run: |
+          corepack yarn rust:private-tape-binanceoptions
+          corepack yarn -s rust:gate:record --venue binanceoptions --tape sdk-rs/harness/tapes/binanceoptions-private.jsonl --books '' --runs "$PRIVATE_REPLAY_RUNS"
       - name: Binance Spot, COIN-M and portfolio margin private variants
         if: matrix.venue == 'binance'
         run: |
@@ -1059,7 +1167,7 @@ jobs:
         run: corepack yarn rust:test-bitget-parity
       - name: OKX EU X-Perp public products (correctness, CPU and memory)
         if: matrix.venue == 'okx'
-        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 9
+        run: corepack yarn -s rust:gate:record --venue okxeu --tape sdk-rs/harness/fixtures/okxeu-public.jsonl.gz --books BTCUSD_UM_XPERP310404,ETHUSD_UM_XPERP310404 --runs 16
       - name: OKX account and trading variants (correctness)
         if: matrix.venue == 'okx'
         run: |
@@ -1071,12 +1179,12 @@ jobs:
       - name: Bybit inverse/spot/demo public data (correctness, CPU and memory)
         if: matrix.venue == 'bybit'
         run: |
-          corepack yarn -s rust:gate:record --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 9
-          corepack yarn -s rust:gate:record --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
-          corepack yarn -s rust:gate:record --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
+          corepack yarn -s rust:gate:record --venue bybitinverse --tape sdk-rs/harness/fixtures/bybitinverse-public.jsonl.gz --books BTCUSD,ETHUSD --runs 16
+          corepack yarn -s rust:gate:record --venue bybitspot --tape sdk-rs/harness/fixtures/bybitspot-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 16
+          corepack yarn -s rust:gate:record --venue bybitdemo --tape sdk-rs/harness/fixtures/bybitdemo-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 16
       - name: Hyro documented public contract (live endpoints not configured)
         if: matrix.venue == 'bybit'
-        run: corepack yarn -s rust:gate:record --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 9
+        run: corepack yarn -s rust:gate:record --venue hyrotrader --tape sdk-rs/harness/fixtures/hyrotrader-public.jsonl.gz --books BTCUSDT,ETHUSDT --runs 16
       - name: Bybit variants account and trading (documented correctness)
         if: matrix.venue == 'bybit'
         run: |
@@ -1087,7 +1195,7 @@ jobs:
       - name: Orderly broker and testnet variants (correctness)
         if: matrix.venue == 'orderly'
         run: |
-          for venue in orderly tealstreet-dex kodiakfi woofi mode salsadex what; do
+          for venue in orderly kodiakfi woofi mode what; do
             for network in mainnet testnet; do
               extra=()
               suffix=''
@@ -1183,7 +1291,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1239,7 +1350,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1250,6 +1364,9 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      # Offline revalidation re-reads every public tape, including this generated one.
+      - name: Generate Binance Options public CPU input
+        run: corepack yarn rust:private-tape-binanceoptions --public
       - name: Authenticate complete first evidence and select eligible cases
         id: plan
         env:
@@ -1280,7 +1397,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1313,7 +1433,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+      - uses: ./.github/actions/fetch-rust-history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -1324,6 +1447,9 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      # Offline revalidation re-reads every public tape, including this generated one.
+      - name: Generate Binance Options public CPU input
+        run: corepack yarn rust:private-tape-binanceoptions --public
       - name: Verify strict first results or complete two-run means
         id: certify
         env:

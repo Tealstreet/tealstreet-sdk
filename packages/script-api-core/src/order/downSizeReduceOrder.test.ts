@@ -550,3 +550,28 @@ describe('downSizeReduceOrder', () => {
     });
   });
 });
+
+describe('a remainder that rounds to zero', () => {
+  // MEXC-style fractional lots: native contracts of 0.0001 BTC, base-step precision.
+  const mexcMarket: Market = { ...mockMarket, contractSize: 0.0001, precision: { amount: 0.0001, price: 0.1 } };
+
+  it('keeps the placed order instead of returning amount 0 when orders ahead cover the position', () => {
+    const order = createOrder({ type: OrderType.Market, side: OrderSide.Buy, amount: 200, price: undefined });
+    // 0.05 - 0.02 - 0.03 is 3.5e-18 in floating point, not 0.
+    const position = createPosition({ side: PositionSide.Short, contracts: 0.05 });
+    const ahead = [
+      createOpenOrder({ id: 'a', side: OrderSide.Buy, price: 60000, amount: 0.02 }),
+      createOpenOrder({ id: 'b', side: OrderSide.Buy, price: 60000, amount: 0.03 }),
+    ];
+    const result = downSizeReduceOrder(mexcMarket, order, [position], ahead, 50000);
+    expect(result.amount).toBe(200);
+  });
+
+  it('keeps the placed order when the reducible remainder is below half a lot', () => {
+    const order = createOrder({ type: OrderType.Market, side: OrderSide.Buy, amount: 200, price: undefined });
+    const position = createPosition({ side: PositionSide.Short, contracts: 0.00004 });
+    const result = downSizeReduceOrder(mexcMarket, order, [position], [], 50000);
+    expect(result.amount).toBe(200);
+  });
+});
+

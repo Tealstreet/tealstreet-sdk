@@ -40,6 +40,7 @@ impl Request {
         let data = match &self.call {
             Call::Place { symbol, .. } => format!("place:{symbol}"),
             Call::Cancel { id, .. } => format!("cancel:{id}"),
+            Call::CancelSymbol(symbol) => format!("cancel-all:{symbol}"),
             _ => "setting".to_owned(),
         };
         safe_cex_engine::request_context::ReconciliationData::new(data)
@@ -61,16 +62,40 @@ impl Request {
                 filled_at_amend: Some(_),
                 ..
             } => Intent::Amend,
-            Call::Cancel { .. } => Intent::Cancel,
+            Call::Cancel { .. } | Call::CancelSymbol(_) => Intent::Cancel,
             _ => Intent::Setting,
         }
     }
 }
 
+const NO_AGENT: &str = "No agent found";
+const BAD_SIGNATURE: &str = "Signature check failed";
+const DEVICE_TIME: &str = "Your device time must match the actual time";
+/// Aster's -1000 refusals: the fixed text of one, whatever follows it.
+fn refusal_1000(message: &str) -> Option<&'static str> {
+    [NO_AGENT, BAD_SIGNATURE, DEVICE_TIME]
+        .into_iter()
+        .find(|fixed| message.starts_with(fixed))
+}
 /// The native `failure` table: definitive refusals and codes that leave a
 /// write unknown.
 pub(crate) const ASTER: CodeTable = CodeTable {
     rows: &[
+        Row {
+            key: Key::IntMessage(-1000, NO_AGENT),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::IntMessage(-1000, BAD_SIGNATURE),
+            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::IntMessage(-1000, DEVICE_TIME),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
         Row {
             key: Key::Int(-1000),
             verdict: Verdict::Unknown(None),
@@ -185,6 +210,8 @@ enum Call {
         id: String,
         filled_at_amend: Option<f64>,
     },
+    /// Reaches orders the store has not seen; their rows follow from the stream.
+    CancelSymbol(String),
     Leverage(String, f64),
     Margin(String, bool),
     Mode(bool),
@@ -218,7 +245,29 @@ struct Job {
     successes: usize,
     error: Option<VenueError>,
     continue_on_error: bool,
+    /// Every order was asked for: one refused fails the command, naming what was placed.
+    fails_on_refusal: bool,
+    /// The cancel-all sweep was refused: orders may rest whatever the row cancels did.
+    sweep_failed: bool,
     result: Option<String>,
+    /// A refused replacement here leaves the position without its stop.
+    replacing_stop: Option<(String, OrderSide, OrderType)>,
+    /// A refused replacement here leaves nothing resting of this symbol's order.
+    replacing_order: Option<String>,
+}
+impl Job {
+    /// What a failed replacement cost, once its cancel has landed.
+    fn gone_text(&self, unknown: bool) -> Option<String> {
+        if let Some((symbol, side, kind)) = &self.replacing_stop {
+            return Some(safe_cex_engine::error::stop_gone_text(
+                symbol, *side, *kind, unknown,
+            ));
+        }
+        self.replacing_order
+            .as_deref()
+            .filter(|_| self.ids.is_empty())
+            .map(|symbol| safe_cex_engine::error::order_gone_text(symbol, unknown))
+    }
 }
 // Above the venue open-order limit; never evict cancellation routing for a live ACK.
 const MAX_ACKNOWLEDGED_ORDERS: usize = 10_000;
@@ -340,6 +389,12 @@ struct CancelAck {
     executed_qty: Option<String>,
     status: Option<String>,
 }
+/// Aster documents the sweep's success as
+/// `{"code": "200", "msg": "The operation of cancel all open order is done."}`.
+#[derive(Deserialize)]
+struct SweepAck {
+    code: Id,
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StpResponse {
@@ -418,7 +473,18 @@ impl AsterDex {
                             symbol: symbol.clone(),
                         }),
                 );
-                (command, self.plan_cancel_refs(&orders))
+                let mut job = self.plan_cancel_refs(&orders);
+                if let Ok(job) = &mut job
+                    && !symbol.is_empty()
+                {
+                    job.steps.push_back(Planned {
+                        method: Method::Delete,
+                        endpoint: "allOpenOrders",
+                        query: Query::new().str("symbol", &symbol),
+                        call: Call::CancelSymbol(symbol.clone()),
+                    });
+                }
+                (command, job)
             }
             Command::AmendOrder {
                 command,
@@ -747,7 +813,12 @@ impl AsterDex {
         }
         let job = self.trading.jobs.remove(&id).expect("present");
         let _ = match job.error {
-            Some(mut error) if !job.continue_on_error || job.successes == 0 => {
+            Some(mut error)
+                if !job.continue_on_error
+                    || job.fails_on_refusal
+                    || job.sweep_failed
+                    || job.successes == 0 =>
+            {
                 // A later rejection after a step took effect cannot mean nothing happened.
                 if job.successes > 0 && error.outcome == Some(Outcome::Rejected) {
                     error.outcome = None;
@@ -776,6 +847,7 @@ impl AsterDex {
         let plan = request.plan.clone();
         let call = &request.call;
         let was_place = matches!(call, Call::Place { .. });
+        let was_sweep = matches!(call, Call::CancelSymbol(_));
         let cancelled = match &request.call {
             Call::Cancel { id, .. } => vec![id.clone()],
             _ => vec![],
@@ -836,6 +908,20 @@ impl AsterDex {
                     self.account.order_revision = self.account.order_revision.wrapping_add(1);
                     self.request_refresh_orders(cx);
                 })
+            }
+            // An amend's cancel leg must prove the order ended: a reply that says nothing
+            // readable leaves it maybe live, and a replacement could double it.
+            (
+                Call::Cancel {
+                    filled_at_amend: Some(_),
+                    ..
+                },
+                Ok(body),
+            ) if !serde_json::from_str::<CancelAck>(body).is_ok_and(|ack| ack.status.is_some()) => {
+                Err((
+                    0,
+                    "Aster cancel answer was unreadable; replacement was not submitted".into(),
+                ))
             }
             (
                 Call::Cancel {
@@ -924,6 +1010,14 @@ impl AsterDex {
                     result = serde_json::to_string(&row.stp_mode).ok();
                 }),
             (Call::StpWrite, Ok(_)) => Ok(()),
+            (Call::CancelSymbol(_), Ok(body)) => {
+                self.account.order_revision = self.account.order_revision.wrapping_add(1);
+                self.request_refresh_orders(cx);
+                match serde_json::from_str::<SweepAck>(body).map(|ack| ack.code.text()) {
+                    Ok(code) if code == "200" => Ok(()),
+                    _ => Err((0, format!("Aster cancel-all was not confirmed: {body}"))),
+                }
+            }
             (_, Err(error)) => Err(error),
         };
         if let Some(root) = root {
@@ -942,20 +1036,37 @@ impl AsterDex {
         let mut status_error = None;
         if let Some(leg) = leg.filter(|_| !reported) {
             let _ = match &outcome {
-                _ if replied && !(was_place && placed.is_none()) => cx.http_write_fact(
-                    leg,
-                    WriteFact::Accepted {
-                        order_ids: placed.iter().cloned().chain(cancelled).collect(),
-                    },
-                    None,
-                ),
+                _ if replied
+                    && !(was_place && placed.is_none())
+                    && !(was_sweep && outcome.is_err()) =>
+                {
+                    cx.http_write_fact(
+                        leg,
+                        WriteFact::Accepted {
+                            order_ids: placed.iter().cloned().chain(cancelled).collect(),
+                        },
+                        None,
+                    )
+                }
                 Err((code, message)) if !transport && !unproven && !replied => {
                     let native = Native {
                         code: NativeCode::Int(*code),
-                        message,
+                        message: refusal_1000(message)
+                            .filter(|_| *code == -1000)
+                            .unwrap_or(message),
                     };
                     let native = (*code != 0).then_some(&native);
-                    match cx.classify_write(leg, &ASTER, native, message.clone()) {
+                    let told = match self
+                        .trading
+                        .jobs
+                        .get(&command)
+                        .filter(|_| was_place)
+                        .and_then(|job| job.gone_text(false))
+                    {
+                        Some(gone) => format!("{gone}: {message}"),
+                        None => message.clone(),
+                    };
+                    match cx.classify_write(leg, &ASTER, native, told) {
                         Ok(fact) => {
                             if native.is_none() {
                                 status_error = Some(fact.error().clone());
@@ -1023,6 +1134,11 @@ impl AsterDex {
                             .is_some_and(|e| e.outcome == Some(Outcome::Unknown))
                     {
                         error.outcome = Some(Outcome::Unknown);
+                    }
+                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    job.sweep_failed |= was_sweep;
+                    if was_place && let Some(gone) = job.gone_text(unknown) {
+                        error.message = format!("{gone}: {}", error.message);
                     }
                     job.error = Some(error);
                 }
@@ -1107,11 +1223,55 @@ impl AsterDex {
         } else {
             None
         };
+        // Size is what is left to fill: the venue treats a replacement's size as new.
+        let size = match amount {
+            Some(total) if total <= order.filled => {
+                return Err(format!(
+                    "Aster amendment size must exceed the {} already filled",
+                    order.filled
+                ));
+            }
+            Some(total) => total - order.filled,
+            None => order.remaining,
+        };
+        // A replacement below the value minimum would be refused after the old order is gone.
+        let value = size * price.unwrap_or(order.price);
+        let minimum = self
+            .market_rules
+            .get(&order.symbol)
+            .map_or(0.0, |r| r.min_notional);
+        if !conditional && !order.reduce_only && value > 0.0 && value < minimum {
+            return Err(format!(
+                "Aster replacement worth {value} is below the {minimum} minimum; the order is unchanged"
+            ));
+        }
+        // A stop that would trigger at once is refused after the old one is gone.
+        if conditional
+            && let Some(trigger) = price
+            && let Some(reference) = cx
+                .store
+                .ticker(&order.symbol)
+                .map(|t| {
+                    if order.trigger_type == Some(StopTriggerType::LastPrice) {
+                        t.last
+                    } else {
+                        t.mark
+                    }
+                })
+                .filter(|p| p.is_finite() && *p > 0.0)
+        {
+            let below = (order.kind == OrderType::StopLoss) == (order.side == OrderSide::Sell);
+            if (below && trigger >= reference) || (!below && trigger <= reference) {
+                return Err(format!(
+                    "Aster would trigger this stop immediately: {trigger} is past {reference}; the order was not changed"
+                ));
+            }
+        }
         let replacement = PlaceOrderOpts {
             symbol: order.symbol.clone(),
             kind: order.kind,
             side: order.side,
-            amount: amount.unwrap_or(order.amount),
+            amount: size,
             price: (!conditional).then_some(price.unwrap_or(order.price)),
             trigger_price: conditional.then_some(price.unwrap_or(order.price)),
             reduce_only: Some(order.reduce_only),
@@ -1126,6 +1286,8 @@ impl AsterDex {
         }
         let mut job = self.plan_cancel(std::slice::from_ref(order), false);
         job.steps.extend(place.steps);
+        job.replacing_stop = conditional.then(|| (order.symbol.clone(), order.side, order.kind));
+        job.replacing_order = (!conditional).then(|| order.symbol.clone());
         Ok(job)
     }
     fn plan_place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
@@ -1156,6 +1318,7 @@ impl AsterDex {
         };
         let mut job = Job {
             continue_on_error: true,
+            fails_on_refusal: true,
             ..Job::default()
         };
         for opts in orders {
@@ -1307,12 +1470,24 @@ impl AsterDex {
             };
             base = base.str("positionSide", side);
         }
-        let amount = num::adjust(opts.amount, market.precision.amount);
+        // A MARKET order answers to MARKET_LOT_SIZE; every other order to LOT_SIZE.
+        let market_lot = self
+            .market_rules
+            .get(&opts.symbol)
+            .map(|rule| &rule.market_lot)
+            .filter(|_| opts.kind == OrderType::Market);
+        let step = market_lot.map_or(market.precision.amount, |lot| lot.step);
+        let amount = num::adjust(opts.amount, step);
         if opts.amount > 0.0 && amount <= 0.0 {
             return Err("Aster order amount rounds to zero".into());
         }
         let close = conditional && opts.amount == 0.0;
-        let max = num::adjust(market.limits.amount.max, market.precision.amount);
+        let max = market_lot
+            .map(|lot| lot.max)
+            .filter(|max| *max > 0.0)
+            .unwrap_or(market.limits.amount.max);
+        let max = num::adjust(max, step);
+        let min = market_lot.map_or(0.0, |lot| lot.min);
         let mut quantities = Vec::new();
         let mut remaining = amount;
         if !conditional && max > 0.0 && remaining > max {
@@ -1322,7 +1497,15 @@ impl AsterDex {
             }
             while remaining > max {
                 quantities.push(max);
-                remaining = num::adjust(remaining - max, market.precision.amount);
+                remaining = num::adjust(remaining - max, step);
+            }
+            // A remainder under the minimum borrows it from the chunk before.
+            if remaining < min
+                && let Some(last) = quantities.last_mut()
+            {
+                let short = num::adjust(min - remaining, step);
+                *last = num::adjust(*last - short, step);
+                remaining = num::adjust(remaining + short, step);
             }
         }
         quantities.push(remaining);
@@ -1470,6 +1653,12 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
 /// failure, a non-JSON HTTP error or an unproven acknowledgement.
 fn failure(code: i64, message: String) -> VenueError {
     let (kind, outcome) = match code {
+        -1000 if refusal_1000(&message) == Some(DEVICE_TIME) => {
+            (Some(ErrorKind::Rejected), Outcome::Rejected)
+        }
+        -1000 if refusal_1000(&message).is_some() => {
+            (Some(ErrorKind::AuthInvalid), Outcome::Rejected)
+        }
         0 | -1000 => (None, Outcome::Unknown),
         -1007 => (Some(ErrorKind::Timeout), Outcome::Unknown),
         -1001 | -1006 => (Some(ErrorKind::VenueUnavailable), Outcome::Unknown),

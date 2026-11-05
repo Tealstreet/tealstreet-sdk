@@ -161,16 +161,6 @@ impl<P> Cx<'_, P> {
         self.core_ref().validate_preflight_activation(handle)
     }
 
-    // Only some feature combinations call this.
-    #[cfg_attr(feature = "condition-waits", allow(dead_code))]
-    #[inline]
-    pub(in crate::engine) fn validate_preflight_failure_custody(
-        &self,
-        handle: &Preflight,
-    ) -> Result<(), Error> {
-        self.core_ref().validate_preflight_failure_custody(handle)
-    }
-
     /// Relinquish this genuine initial callback without creating I/O or time.
     pub fn park_preflight(&mut self, handle: &Preflight) -> Result<(), Error> {
         self.validate_preflight_activation(handle)?;
@@ -255,16 +245,6 @@ impl<P> Cx<'_, P> {
         bound_ms: Option<u32>,
     ) -> Result<(), Error> {
         self.core().park_preflight_condition(handle, bound_ms)
-    }
-
-    #[cfg(feature = "condition-waits")]
-    #[inline]
-    pub(in crate::engine) fn seal_condition_preflight(
-        &mut self,
-        preflight: &Preflight,
-        error: VenueError,
-    ) -> Result<Seal, Error> {
-        self.core().seal_condition_preflight(preflight, error)
     }
 
     #[cfg(feature = "condition-waits")]

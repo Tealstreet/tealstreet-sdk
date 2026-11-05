@@ -147,8 +147,8 @@ fn margin_mode_change_signs_current_five_x_from_percent_position() {
 }
 
 #[test]
-fn price_amend_recreates_only_unfilled_quantity_and_explicit_size_stays_requested() {
-    for (amount, expected) in [(None, 1250), (Some(0.5), 500)] {
+fn an_amend_recreates_only_what_is_left_of_the_total() {
+    for (amount, expected) in [(None, 1250), (Some(1.25), 500)] {
         let (mut e, _) = ready_unattributed();
         e.store_mut().update_order("42", |order| {
             order.amount = 2.0;
@@ -230,5 +230,264 @@ fn invalid_leverage_bounds_reject_setting_write_and_preserve_account_state() {
         ));
         assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::CommandFailed { command: 8, error }) if error.message.contains("leverage limits"))));
         assert_eq!(e.store().positions(), before_positions);
+    }
+}
+
+/// lighter-robinhood's shape: every market's default fraction (2x) sits far
+/// below its maximum (min 500 = 20x). ETH has an account row at 10x; BTC none.
+const DEFAULTS_META: &str = r#"{"code":200,"order_book_details":[{"market_id":1,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":3,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"1","min_initial_margin_fraction":500,"default_initial_margin_fraction":666,"maintenance_margin_fraction":250},{"market_id":2,"symbol":"BTC","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"1","min_initial_margin_fraction":500,"default_initial_margin_fraction":5000,"maintenance_margin_fraction":250}]}"#;
+
+fn ready_with_defaults() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
+    let mut options = options();
+    options.testnet = true;
+    ready_with_meta(options, DEFAULTS_META)
+}
+/// The private socket's first open is the test's own resync.
+fn unopened_with_defaults() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
+    let mut options = options();
+    options.testnet = true;
+    ready_unopened_meta(options, DEFAULTS_META)
+}
+
+/// daxx on preview-next: lighter-robinhood showed 20x for a market the account
+/// never set, where the venue applies its default fraction, 2x.
+#[test]
+fn a_market_with_no_account_row_shows_the_venue_default_leverage() {
+    let (e, _) = ready_with_defaults();
+    let btc = e.store().market("BTC").unwrap();
+    assert_eq!(
+        btc.limits.leverage.max, 20.0,
+        "the maximum is still the minimum fraction's"
+    );
+    assert_eq!(
+        e.store().setting("BTC").unwrap().leverage,
+        2.0,
+        "the venue's default, not its maximum"
+    );
+    assert_eq!(
+        e.store().setting("ETH").unwrap().leverage,
+        10.0,
+        "an account row's fraction wins"
+    );
+}
+
+/// A margin-mode change sends the leverage the account holds; on an
+/// unconfigured market that is the venue default, never the maximum.
+#[test]
+fn a_margin_mode_change_on_an_unconfigured_market_keeps_its_default_leverage() {
+    let (mut e, _) = ready_with_defaults();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW,
+        Event::Command(Command::SetMarginType {
+            command: 9,
+            symbol: "BTC".into(),
+            isolated: true,
+        }),
+    );
+    let write = nonce(&mut e);
+    assert_eq!(
+        wire(&write)["InitialMarginFraction"],
+        5000,
+        "2x, not 500 (20x)"
+    );
+}
+
+/// A market whose metadata names no default keeps the maximum, as before.
+#[test]
+fn a_market_without_a_default_fraction_falls_back_to_its_minimum() {
+    let (e, _) = ready_unattributed();
+    assert_eq!(e.store().setting("BTC").unwrap().leverage, 20.0);
+}
+
+#[test]
+fn defaults_clamp_to_limits_and_absent_or_nonpositive_defaults_keep_maximum() {
+    for (value, expected) in [
+        (json!(100), 20.0),
+        (json!(20000), 1.0),
+        (json!(5000), 2.0),
+        (json!(0), 20.0),
+        (json!(-1), 20.0),
+        (Value::Null, 20.0),
+    ] {
+        let mut meta: Value = serde_json::from_str(DEFAULTS_META).unwrap();
+        meta["order_book_details"][1]["default_initial_margin_fraction"] = value;
+        let (e, _) = ready_with_meta(options(), &meta.to_string());
+        assert_eq!(e.store().setting("BTC").unwrap().leverage, expected);
+        assert_eq!(e.store().market("BTC").unwrap().limits.leverage.max, 20.0);
+    }
+}
+
+#[test]
+fn explicit_account_imf_overrides_nonmax_default_on_rest_and_stream() {
+    for streamed in [false, true] {
+        let (mut e, socket) = if streamed {
+            ready_with_defaults()
+        } else {
+            unopened_with_defaults()
+        };
+        if streamed {
+            message(
+                &mut e,
+                socket,
+                NOW,
+                r#"{"channel":"account_all:718895","positions":{"2":{"market_id":2,"position":"0","initial_margin_fraction":2000,"margin_mode":0}}}"#,
+            );
+        } else {
+            e.handle(NOW, Event::WsOpened { socket });
+            let reads = requests(&mut e);
+            let account = reads.iter().find(|r| r.url.contains("/account?")).unwrap();
+            let mut body: Value = serde_json::from_str(ACCOUNT).unwrap();
+            body["accounts"][0]["positions"] = json!([{"market_id":2,"position":"0","initial_margin_fraction":2000,"margin_mode":0}]);
+            reply(&mut e, account, 200, &body.to_string());
+        }
+        assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            NOW,
+            Event::Command(Command::SetMarginType {
+                command: 101,
+                symbol: "BTC".into(),
+                isolated: true,
+            }),
+        );
+        let write = nonce(&mut e);
+        assert_eq!(
+            wire(&write)["InitialMarginFraction"],
+            2000,
+            "streamed={streamed}"
+        );
+    }
+}
+
+#[test]
+fn queued_margin_change_keeps_accepted_user_leverage_over_catalogue_default() {
+    let (mut e, _) = ready_with_defaults();
+    e.handle(
+        NOW,
+        Event::Command(Command::SetLeverage {
+            command: 100,
+            symbol: "BTC".into(),
+            leverage: 5.0,
+            side: None,
+        }),
+    );
+    let request = http(&mut e, "nextNonce");
+    e.handle(
+        NOW,
+        Event::Command(Command::SetMarginType {
+            command: 101,
+            symbol: "BTC".into(),
+            isolated: true,
+        }),
+    );
+    reply(&mut e, &request, 200, r#"{"code":200,"nonce":10}"#);
+    let leverage = http(&mut e, "sendTx");
+    assert_eq!(wire(&leverage)["InitialMarginFraction"], 2000);
+    ack(&mut e, &leverage);
+    let margin = http(&mut e, "sendTx");
+    assert_eq!(wire(&margin)["InitialMarginFraction"], 2000);
+    assert_eq!(wire(&margin)["MarginMode"], 1);
+    ack(&mut e, &margin);
+    assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
+}
+
+#[test]
+fn position_without_fraction_uses_default_and_no_row_refresh_keeps_explicit_setting() {
+    let (mut e, socket) = ready_with_defaults();
+    message(
+        &mut e,
+        socket,
+        NOW,
+        r#"{"channel":"account_all:718895","positions":{"2":{"market_id":2,"position":"1","avg_entry_price":"200","margin_mode":0}}}"#,
+    );
+    assert_eq!(
+        e.store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == "BTC")
+            .unwrap()
+            .leverage,
+        2.0
+    );
+    message(
+        &mut e,
+        socket,
+        NOW,
+        r#"{"channel":"account_all:718895","positions":{"2":{"market_id":2,"position":"0","initial_margin_fraction":2000,"margin_mode":0}}}"#,
+    );
+    assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
+    let (_, opened) = reopen(&mut e, socket, NOW);
+    let reads = requests_at(&mut e, opened);
+    let account = reads.iter().find(|r| r.url.contains("/account?")).unwrap();
+    reply_at(&mut e, opened, account, 200, ACCOUNT);
+    assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
+}
+
+#[test]
+fn invalid_catalogue_bounds_do_not_panic_when_a_default_is_present() {
+    for has_default in [false, true] {
+        let mut meta: Value = serde_json::from_str(DEFAULTS_META).unwrap();
+        meta["order_book_details"][1]["min_initial_margin_fraction"] = json!(20000);
+        if !has_default {
+            meta["order_book_details"][1]
+                .as_object_mut()
+                .unwrap()
+                .remove("default_initial_margin_fraction");
+        }
+        let result = std::panic::catch_unwind(|| ready_with_meta(options(), &meta.to_string()));
+        assert!(
+            result.is_ok(),
+            "invalid venue leverage bounds must be refused without panicking; default={has_default}"
+        );
+    }
+}
+
+/// deaws2's live lighter-robinhood GET /api/v1/account on a flat account: a
+/// market the account set keeps a zero-size row whose IMF is a PERCENT string
+/// ("5.00" = 20x, "50.00" = 2x), unlike the catalogue's basis points.
+#[test]
+fn live_flat_rows_read_their_percent_fraction_on_rest_and_ws() {
+    let rows = json!([
+        {"market_id":1,"symbol":"ETH","position":"0.00000","initial_margin_fraction":"50.00","margin_mode":0},
+        {"market_id":2,"symbol":"BTC","position":"0.00","initial_margin_fraction":"5.00","margin_mode":0}
+    ]);
+    for websocket in [false, true] {
+        let (mut e, socket) = if websocket {
+            ready_with_defaults()
+        } else {
+            unopened_with_defaults()
+        };
+        if websocket {
+            let positions: serde_json::Map<String, Value> = rows
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| (row["market_id"].to_string(), row.clone()))
+                .collect();
+            let text = json!({"channel":"account_all:718895","positions":positions}).to_string();
+            message(&mut e, socket, NOW + 1.0, &text);
+        } else {
+            e.handle(NOW + 1.0, Event::WsOpened { socket });
+            let reads = requests(&mut e);
+            let account = reads.iter().find(|r| r.url.contains("/account?")).unwrap();
+            let mut value: Value = serde_json::from_str(ACCOUNT).unwrap();
+            value["accounts"][0]["positions"] = rows.clone();
+            reply_at(&mut e, NOW + 2.0, account, 200, &value.to_string());
+        }
+        assert_eq!(
+            e.store().setting("ETH").unwrap().leverage,
+            2.0,
+            "'50.00' is 2x, WS={websocket}"
+        );
+        assert_eq!(
+            e.store().setting("BTC").unwrap().leverage,
+            20.0,
+            "'5.00' is 20x, WS={websocket}"
+        );
+        assert!(
+            e.store().positions().is_empty(),
+            "flat rows open no position"
+        );
     }
 }

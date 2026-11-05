@@ -53,6 +53,8 @@ pub enum Pending {
         generation: u64,
     },
     SocketBookSeeds(Vec<(String, u64)>),
+    /// The private subscriptions are handed off: the stream now covers the account.
+    SocketAccountReady,
     Candles {
         command: CommandId,
         rows: Vec<Candle>,
@@ -599,6 +601,10 @@ impl Venue for Woo {
         epoch: safe_cex_engine::socket_lifecycle::Epoch,
         pending: Pending,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
+        if matches!(pending, Pending::SocketAccountReady) {
+            self.socket_account_ready(cx);
+            return Ok(());
+        }
         if self.public.feed != Some(epoch.feed())
             || !self.public.open
             || cx.socket_epoch(epoch.feed()) != Some(epoch)
@@ -617,6 +623,13 @@ impl Venue for Woo {
             }
         }
         Ok(())
+    }
+    fn subscription_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(store, topic)
     }
     fn encode_socket_interests(
         &self,
@@ -705,7 +718,7 @@ impl Venue for Woo {
                     *bad = true;
                 }
             }
-            Pending::Depth { .. } | Pending::SocketBookSeeds(_) => (),
+            Pending::Depth { .. } | Pending::SocketBookSeeds(_) | Pending::SocketAccountReady => (),
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -726,6 +739,7 @@ impl Venue for Woo {
         };
         if let Pending::Account(request) = pending {
             self.account_response(cx, request, response);
+            self.account_read_again(cx);
             return;
         }
         if let Pending::Seed(read) = pending {
@@ -737,7 +751,7 @@ impl Venue for Woo {
             return;
         }
         match pending {
-            Pending::SocketBookSeeds(_) => (),
+            Pending::SocketBookSeeds(_) | Pending::SocketAccountReady => (),
             Pending::Identity(_) | Pending::History(_) | Pending::Trade(_) => unreachable!(),
             Pending::Account(_) => unreachable!(),
             Pending::Seed(_) => unreachable!(),
@@ -817,6 +831,79 @@ impl Venue for Woo {
             }
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if let Pending::Account(request) = pending {
+            self.account_http_failed(cx, request, &response);
+            self.account_read_again(cx);
+        } else {
+            self.on_request_failed(
+                cx,
+                pending,
+                "WOO response did not contain the expected list",
+            );
+        }
+    }
+    fn on_stream_malformed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        status: u16,
+        headers: &str,
+        _error: &str,
+    ) {
+        if let Pending::Account(request) = pending {
+            self.account_http_failed(
+                cx,
+                request,
+                &Response {
+                    status,
+                    headers,
+                    body: "",
+                },
+            );
+            self.account_read_again(cx);
+        } else {
+            self.on_http_failed(
+                cx,
+                pending,
+                safe_cex_engine::VenueError::new("WOO response body is malformed")
+                    .kind(safe_cex_engine::ErrorKind::Internal),
+            );
+        }
+    }
+    fn on_http_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Pending::Account(request) = pending {
+            let kind = error.kind.unwrap_or(safe_cex_engine::ErrorKind::Network);
+            let message = match kind {
+                safe_cex_engine::ErrorKind::Timeout => {
+                    "WOO account request timed out (no HTTP response)"
+                }
+                safe_cex_engine::ErrorKind::Internal => "WOO account response invalid",
+                safe_cex_engine::ErrorKind::Network => {
+                    "WOO account network request failed (no HTTP response)"
+                }
+                _ => "WOO account request failed (no HTTP response)",
+            };
+            self.account_failed(
+                cx,
+                request,
+                safe_cex_engine::VenueError::new(message).kind(kind),
+            );
+            self.account_read_again(cx);
+        } else {
+            self.on_request_failed(cx, pending, &error.message);
+        }
+    }
     fn on_http_preparation_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -831,11 +918,14 @@ impl Venue for Woo {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::SocketBookSeeds(_) => (),
+            Pending::SocketBookSeeds(_) | Pending::SocketAccountReady => (),
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
-            Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Account(request) => {
+                self.account_failed(cx, request, error);
+                self.account_read_again(cx);
+            }
             Pending::Seed(read) => self.seed_failed(cx, *read, error, true),
             #[cfg(test)]
             Pending::SigningProbe => (),

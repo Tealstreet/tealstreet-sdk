@@ -217,3 +217,54 @@ test('run 40518541502: the paired producer is re-listed until GitHub lists it wi
   await assert.rejects(duplicate.result, /missing\/duplicate paired physical producer/);
   assert.equal(duplicate.sleeps.length, 0);
 });
+
+test('replay checkout preserves real merge parents after a branch update from master', async t => {
+  const fs = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { tmpdir } = await import('node:os');
+  const { resolve } = await import('node:path');
+  const { pathToFileURL } = await import('node:url');
+  const workflow = fs.readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  const gate = /^  gate:\n([\s\S]*?)(?=^  [a-z][a-z0-9-]*:\n)/m.exec(workflow)?.[1];
+  assert(gate, 'missing replay measurement job');
+  assert.match(gate, /uses: actions\/checkout@v7\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          fetch-depth: 1\n          fetch-tags: false\n      - uses: \.\/\.github\/actions\/fetch-rust-history\n(?=      - )/);
+  const historyHelper = resolve('.github/actions/fetch-rust-history/fetch-history.py');
+  const root = fs.realpathSync(fs.mkdtempSync(resolve(tmpdir(), 'cpu-checkout-history-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const origin = resolve(root, 'origin'); fs.mkdirSync(origin);
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(origin, 'init', '-q', '-b', 'master'); git(origin, 'config', 'user.name', 'Fixture'); git(origin, 'config', 'user.email', 'fixture@example.invalid');
+  fs.writeFileSync(resolve(origin, 'base'), 'base'); git(origin, 'add', '.'); git(origin, 'commit', '-qm', 'base');
+  git(origin, 'switch', '-qc', 'fix'); fs.writeFileSync(resolve(origin, 'own'), 'own'); git(origin, 'add', '.'); git(origin, 'commit', '-qm', 'own');
+  git(origin, 'switch', '-q', 'master'); fs.writeFileSync(resolve(origin, 'incoming'), 'incoming'); git(origin, 'add', '.'); git(origin, 'commit', '-qm', 'incoming');
+  const base = git(origin, 'rev-parse', 'HEAD');
+  git(origin, 'switch', '-q', 'fix'); git(origin, 'merge', '--no-ff', '-qm', 'update branch', 'master');
+  const head = git(origin, 'rev-parse', 'HEAD');
+  git(origin, 'switch', '-qc', 'merge-checkout', base); git(origin, 'merge', '--no-ff', '-qm', 'PR checkout', 'fix');
+  const checkout = git(origin, 'rev-parse', 'HEAD'), tree = git(origin, 'rev-parse', 'HEAD^{tree}');
+  const url = pathToFileURL(origin).href;
+  const clone = (name, depth) => {
+    const directory = resolve(root, name);
+    git(root, 'clone', '-q', '--no-checkout', '--branch', 'merge-checkout', ...(depth ? ['--depth', String(depth)] : []), url, directory);
+    return directory;
+  };
+  const shallow = clone('working-control-shallow', 1);
+  assert.equal(git(shallow, 'show', '-s', '--format=%P', 'HEAD'), '', 'depth-one Git hides both parents');
+  assert.deepEqual(git(shallow, 'cat-file', '-p', 'HEAD').split('\n').filter(line => line.startsWith('parent ')).map(line => line.slice(7)), [base, head]);
+  const actual = resolve(root, 'configured-checkout'); fs.mkdirSync(actual);
+  git(actual, 'init', '-q', '-b', 'master'); git(actual, 'remote', 'add', 'origin', url);
+  git(actual, 'fetch', '--no-tags', '--depth=1', 'origin', checkout);
+  git(actual, 'checkout', '-q', '--detach', checkout);
+  assert.equal(git(actual, 'show', '-s', '--format=%P', 'HEAD'), '', 'exact-SHA checkout begins shallow');
+  const eventPath = resolve(root, 'event.json');
+  fs.writeFileSync(eventPath, JSON.stringify({ pull_request: {
+    base: { sha: base, ref: 'master' }, head: { sha: head },
+  } }));
+  execFileSync('python3', [historyHelper], { cwd: actual, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, GITHUB_SHA: checkout, GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: eventPath } });
+  assert.equal(git(actual, 'rev-parse', '--is-shallow-repository'), 'false');
+  assert.equal(git(actual, 'rev-parse', 'HEAD'), checkout);
+  assert.equal(git(actual, 'rev-parse', 'HEAD^{tree}'), tree);
+  assert.deepEqual(git(actual, 'show', '-s', '--format=%P', 'HEAD').split(' '), [base, head],
+    'workflow checkout must expose both authenticated PR parents to the shared selector');
+});

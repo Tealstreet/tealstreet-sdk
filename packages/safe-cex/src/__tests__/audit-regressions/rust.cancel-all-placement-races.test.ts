@@ -27,7 +27,7 @@ const setup = (name: ExchangeName) => {
   store.update({ markets: [market] });
   const exchange = new RustEngineExchange(name, { key: 'fixture', secret: 'fixture', passphrase: 'fixture-presentation' }, store);
   const command = vi.fn<(command: Record<string, unknown>) => Promise<unknown>>().mockResolvedValue(['native-order']);
-  Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  Object.assign(exchange, { host: { command: (input: Record<string, unknown>) => command(input), dispose: vi.fn() } });
   adoptEngineCapabilities(exchange);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   running.push(exchange);
@@ -143,13 +143,14 @@ describe('Rust cancel-all placement scopes', () => {
     expect(submitted.clientOrderId).toBe('caller123');
   });
 
-  it('keeps the generic open-orders cancel-all behavior on unaffected venues', async () => {
+  it('cancels an open-order venue by its native read plus symbols this session placed', async () => {
     const { exchange, command, store } = setup('backpack');
-    // Generic venues select scopes from the authoritative native order read.
+    // Native open orders can lag a placement ack; the placed symbol is cancelled anyway.
     Object.defineProperty(exchange, 'fetchOrders', { value: async () => store.orders });
     await exchange.placeOrder(order());
     await exchange.cancelAllOrders();
-    expect(command).toHaveBeenCalledTimes(1);
+    expect(command).toHaveBeenCalledTimes(2);
+    expect(command.mock.calls[1][0]).toMatchObject({ op: 'cancelSymbolOrders', symbol: order().symbol });
   });
 
   it.each(['woo', 'grvt', 'polymarket', 'breakoutprop'] as const)('preserves %s global cancel-all override', async (name) => {
@@ -158,7 +159,7 @@ describe('Rust cancel-all placement scopes', () => {
     expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'cancelSymbolOrders', symbol: '' });
   });
 
-  it.each(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'] as const)(
+  it.each(['kodiakfi', 'mode', 'what', 'woofi'] as const)(
     '%s cancels every product through its native global endpoint even with an empty store', async (name) => {
       const { exchange, command, store } = setup(name);
       await exchange.cancelAllOrders();

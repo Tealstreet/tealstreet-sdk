@@ -500,6 +500,34 @@ pub struct CancelOrderRef {
     pub symbol: String,
 }
 
+impl CancelOrderRef {
+    /// A row to plan this cancel from when the store has none: an algo's own
+    /// resting limit order, known only by its id and symbol.
+    pub fn limit_stand_in(&self) -> Order {
+        Order {
+            id: self.id.clone(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: self.symbol.clone(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 0.0,
+            amount: 0.0,
+            filled: 0.0,
+            remaining: 0.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {

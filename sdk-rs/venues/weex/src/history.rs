@@ -36,6 +36,8 @@ enum Read {
         owner: Box<ReadCursorHistory<ListRow>>,
         kind: Kind,
         missing_fill_id: bool,
+        /// A window with no limit: a full fills or orders page cannot prove coverage.
+        open_window: bool,
         order_id: Option<String>,
         symbol: Option<String>,
         delay: Option<TimerId>,
@@ -627,6 +629,18 @@ impl WeexFutures {
             let _ = cx.done_context(&context, "[]".into());
             return;
         }
+        let open_window = matches!(
+            read,
+            Query::Fills {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | Query::OrderHistory {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            }
+        );
         let mut requests = VecDeque::new();
         let (kind, order_id, symbol) = match read {
             Query::OrderByClientId { .. } => {
@@ -817,6 +831,7 @@ impl WeexFutures {
                 )),
                 kind,
                 missing_fill_id: false,
+                open_window,
                 order_id,
                 symbol,
                 delay: None,
@@ -1219,7 +1234,16 @@ impl WeexFutures {
             return;
         };
         match read {
-            Read::List { owner, pending, .. } => {
+            Read::List {
+                owner,
+                pending,
+                open_window,
+                ..
+            } => {
+                let kind = request.kind;
+                let full_page = *open_window
+                    && matches!(kind, Kind::Fills | Kind::Normal)
+                    && request.raw_rows >= 100;
                 let Some(leg) = request.leg.as_ref() else {
                     return;
                 };
@@ -1257,6 +1281,11 @@ impl WeexFutures {
                 let advanced = owner.admit(cx, &context).map(|mut admission| {
                     let gap = if request.missing_fill_id {
                         Some("WEEX fill history is INCOMPLETE: row missing native fill id".into())
+                    } else if full_page {
+                        Some(
+                            "WEEX history is INCOMPLETE: a window read one page and it was full"
+                                .into(),
+                        )
                     } else if has_more {
                         Some(
                         "WEEX order history is INCOMPLETE: venue advertises additional algo orders"

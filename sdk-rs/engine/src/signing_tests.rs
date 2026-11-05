@@ -170,6 +170,63 @@ fn result() -> Result<SignResult, SignError> {
     Ok(SignResult::new(vec![vec![0; 32]], Default::default()))
 }
 #[test]
+fn completion_preserves_timer_retirement_before_outbound_and_retry_actions() {
+    for stale in [false, true] {
+        let mut engine = engine();
+        let (attempt, timer) = staged(&mut engine);
+        engine.sign_completed(if stale { 6000. } else { 1001. }, attempt, result());
+        let actions = engine.io.core.actions.as_slice();
+        assert_eq!(actions.len(), 2);
+        assert!(matches!(actions[0], Action::ClearTimer { timer: id } if id == timer));
+        if stale {
+            let Action::Sign {
+                attempt: next,
+                work,
+                timeout_ms,
+            } = &actions[1]
+            else {
+                panic!("a stale completion queues exactly one reprepare");
+            };
+            assert_ne!(*next, attempt);
+            assert_eq!(*timeout_ms, 0);
+            assert!(work.operations.is_empty());
+            assert_eq!(work.receipt, Default::default());
+        } else {
+            let Action::SignedOutbound {
+                attempt: current,
+                outbound,
+            } = &actions[1]
+            else {
+                panic!("a current completion queues exactly one sealed outbound");
+            };
+            assert_eq!(*current, attempt);
+            let Action::Http(request) = outbound.as_ref() else {
+                panic!("the original HTTP target is retained");
+            };
+            assert_eq!(request.id, RequestId(1));
+            assert_eq!(request.url, "https://venue.test/private?timestamp=1000");
+            assert_eq!(request.headers, [("signature", "completed".into())]);
+            assert_eq!(request.route, Some(RequestRoute::Primary));
+        }
+        assert_eq!(engine.venue.failed, 0);
+    }
+}
+
+#[test]
+fn refused_completion_clears_its_timer_and_delivers_one_failure_without_outbound() {
+    let mut engine = engine();
+    let (attempt, timer) = staged(&mut engine);
+    engine.sign_completed(1001., attempt, Err(SignError::Refused));
+    assert!(
+        matches!(engine.io.core.actions.as_slice(), [Action::ClearTimer { timer: id }] if *id == timer)
+    );
+    assert_eq!(engine.venue.failed, 1);
+    engine.sign_completed(1002., attempt, result());
+    assert_eq!(engine.venue.failed, 1);
+    assert_eq!(engine.io.core.actions.len(), 1);
+}
+
+#[test]
 fn delayed_dispatch_stamps_current_time_and_preserves_route() {
     let mut engine = engine();
     engine.prepare_dispatch(4000.);
@@ -1303,6 +1360,7 @@ fn signing_context_uses_only_signing_stream_and_redraws_after_clock_revision() {
                 channel,
                 context,
                 binary,
+                ..
             } => Some((id, url, headers, channel, context, binary)),
             _ => None,
         })
@@ -2048,6 +2106,7 @@ fn l1_wallet_role_is_primary_only_for_injected_refs_and_policies() {
             key: ExtraKey::L1Wallet,
             field: ExtraFieldPolicy::RequiredForPrivate,
             encoding: None,
+            trim: false,
         }),
         ..Default::default()
     });

@@ -393,10 +393,32 @@ fn open_sockets_ping_every_ten_seconds_and_answered_pings_keep_them_alive() {
         assert_eq!(h.pings(socket), 1, "{path}");
         h.advance_answering(opened + 10_000.0, &[socket]);
         assert_eq!(h.pings(socket), 2, "{path}");
-        h.advance_answering(opened + 120_000.0, &[socket]);
+        // Data keeps flowing too: a public feed with only pongs is reconnected for silence.
+        for step in 1..=4 {
+            h.advance_answering(opened + f64::from(step) * 30_000.0, &[socket]);
+            h.message(socket, r#"{"arg":{"channel":"tickers"},"data":[]}"#);
+        }
         assert_eq!(h.pings(socket), 13, "{path}");
         assert!(!h.closed.contains(&socket), "{path}");
     }
+}
+
+#[test]
+fn a_public_socket_answering_pings_but_carrying_no_data_is_reconnected() {
+    let mut h = harness("/public");
+    let socket = h.open("/public");
+    let opened = h.now;
+    h.message(socket, r#"{"arg":{"channel":"tickers"},"data":[]}"#);
+    h.advance_answering(opened + 59_000.0, &[socket]);
+    assert!(
+        !h.closed.contains(&socket),
+        "still inside the silence window"
+    );
+    h.advance_answering(opened + 61_000.0, &[socket]);
+    assert!(
+        h.closed.contains(&socket),
+        "pongs alone do not keep a ticker feed"
+    );
 }
 
 #[test]
@@ -661,7 +683,7 @@ fn expired_login_signature_never_sends_its_stale_stamp() {
     let parked = Arc::new(AtomicBool::new(false));
     let mut h = Harness::private_gated(parked.clone());
     let (socket, attempt, result) = parked_login(&mut h, &parked);
-    let stale = format!(r#""timestamp":"{}""#, (h.now / 1000.0).floor());
+    let stale = format!(r#""timestamp":{}"#, (h.now / 1000.0).floor());
     h.now += 6_000.0;
     h.sent.clear();
     h.signs.clear();
@@ -682,7 +704,7 @@ fn prompt_login_signature_is_released_on_the_live_socket() {
     let parked = Arc::new(AtomicBool::new(false));
     let mut h = Harness::private_gated(parked.clone());
     let (socket, attempt, result) = parked_login(&mut h, &parked);
-    let stamp = format!(r#""timestamp":"{}""#, (h.now / 1000.0).floor());
+    let stamp = format!(r#""timestamp":{}"#, (h.now / 1000.0).floor());
     h.sent.clear();
     h.event(Event::Signed {
         attempt,

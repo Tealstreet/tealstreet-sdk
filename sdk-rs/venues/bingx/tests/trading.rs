@@ -34,7 +34,16 @@ struct TestVenue {
 }
 impl Venue for TestVenue {
     type Pending = Pending;
+    // As `Bingx`: its native trigger kind decides and it checks the trigger itself.
+    fn judges_protective_amend(
+        &self,
+        _store: &safe_cex_engine::store::Store,
+        _order: &Order,
+    ) -> bool {
+        true
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.trading.set_min_order_value("BTC-USDT", 2.0);
         cx.store.set_markets(vec![market()]);
         cx.store.set_tickers(vec![Ticker {
             id: "BTC-USDT".into(),
@@ -465,7 +474,7 @@ fn full_position_stop_has_reconciled_quantity_and_close_flag_without_reduce_only
     }]);
     assert!(h.body().contains("\"closePosition\":\"true\""));
     assert!(h.body().contains("\"type\":\"STOP_MARKET\""));
-    assert!(h.body().contains("\"quantity\":2.0"));
+    assert!(h.body().contains("\"quantity\":2"));
     assert!(!h.body().contains("reduceOnly"));
 }
 #[test]
@@ -480,7 +489,7 @@ fn trailing_uses_position_size_and_fractional_callback() {
     }]);
     assert!(h.body().contains("\"symbol\":\"BTC-USDT\""));
     assert!(h.body().contains("\"priceRate\":0.05"));
-    assert!(h.body().contains("\"quantity\":2.0"));
+    assert!(h.body().contains("\"quantity\":2"));
     assert!(!h.body().contains("clientOrderId"));
 }
 #[test]
@@ -597,18 +606,139 @@ fn trigger_replacement_stops_when_cancel_fails() {
     assert!(h.requests.is_empty());
     assert!(h.done[0].is_err());
 }
-#[test]
-fn hedged_leverage_requires_side_without_sending_a_write() {
+fn shared_hedged_leverage() -> Harness {
     let mut h = Harness::new(None);
     h.engine.store_mut().set_hedged(true);
+    h.engine.store_mut().update_setting("BTCUSDT", |s| {
+        s.leverage = 5.0;
+        s.buy_leverage = Some(5.0);
+        s.sell_leverage = Some(7.0);
+    });
     h.command(Command::SetLeverage {
         command: 1,
         symbol: "BTCUSDT".into(),
         leverage: 20.0,
         side: None,
     });
+    h
+}
+
+#[test]
+fn shared_hedged_leverage_updates_long_then_short_without_an_open_position() {
+    // The shared slider intentionally supplies no side, unlike the legacy refusal.
+    let mut h = shared_hedged_leverage();
+    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(h.requests.len(), 1);
+    assert!(
+        h.requests[0]
+            .url
+            .contains("/openApi/swap/v2/trade/leverage")
+    );
+    assert!(h.body().contains(r#""side":"LONG""#));
+    assert!(h.body().contains(r#""leverage":20"#));
+    assert!(h.done.is_empty());
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(5.0)
+    );
+    h.reply(r#"{"code":0,"data":{}}"#);
+    assert_eq!(h.requests.len(), 1);
+    assert!(h.body().contains(r#""side":"SHORT""#));
+    assert!(h.body().contains(r#""leverage":20"#));
+    assert!(
+        h.done.is_empty(),
+        "LONG success alone cannot complete the command"
+    );
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(20.0));
+    assert_eq!(setting.sell_leverage, Some(7.0));
+    assert!(h.engine.store().metadata_write_pending("BTCUSDT"));
+    h.reply(r#"{"code":0,"data":{}}"#);
     assert!(h.requests.is_empty());
-    assert!(h.done[0].as_ref().unwrap_err().contains("Side is required"));
+    assert_eq!(h.done.len(), 1);
+    assert!(h.done[0].is_ok());
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(20.0));
+    assert_eq!(setting.sell_leverage, Some(20.0));
+    assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+}
+
+#[test]
+fn shared_hedged_leverage_long_refusal_never_sends_short() {
+    let mut h = shared_hedged_leverage();
+    assert_eq!(h.requests.len(), 1);
+    h.reply(r#"{"code":80014,"msg":"leverage refused"}"#);
+    assert!(h.requests.is_empty());
+    assert_eq!(h.done.len(), 1);
+    assert!(h.done[0].is_err());
+    let setting = h.engine.store().setting("BTCUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(5.0));
+    assert_eq!(setting.sell_leverage, Some(7.0));
+    assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+}
+
+#[test]
+fn shared_hedged_leverage_short_failure_reports_long_success_without_rollback() {
+    for failure in [
+        Some(r#"{"code":80014,"msg":"SHORT refused"}"#),
+        Some("malformed"),
+        None,
+    ] {
+        let mut h = shared_hedged_leverage();
+        assert_eq!(h.requests.len(), 1);
+        h.reply(r#"{"code":0,"data":{}}"#);
+        assert_eq!(h.requests.len(), 1);
+        match failure {
+            Some(body) => h.reply(body),
+            None => h.failed(),
+        }
+        assert!(h.requests.is_empty(), "no rollback or extra settings write");
+        assert_eq!(h.done.len(), 1);
+        let message = h.done[0].as_ref().unwrap_err();
+        assert!(message.contains("LONG leverage was updated"), "{message}");
+        assert!(
+            message.contains("SHORT leverage update was not confirmed"),
+            "{message}"
+        );
+        assert_eq!(h.failures.len(), 1);
+        let error = &h.failures[0];
+        assert!(error.message.contains("LONG leverage was updated"));
+        assert!(
+            error
+                .message
+                .contains("SHORT leverage update was not confirmed")
+        );
+        match failure {
+            Some(body) if body != "malformed" => assert!(message.contains("SHORT refused")),
+            Some(_) => assert!(message.contains("Invalid BingX trading response")),
+            None => {
+                assert!(message.contains("connection lost"));
+                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Network));
+            }
+        }
+        let setting = h.engine.store().setting("BTCUSDT").unwrap();
+        assert_eq!(setting.buy_leverage, Some(20.0));
+        assert_eq!(setting.sell_leverage, Some(7.0));
+        assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+    }
+}
+
+#[test]
+fn shared_hedged_leverage_rejects_invalid_input_before_either_write() {
+    for leverage in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut h = Harness::new(None);
+        h.engine.store_mut().set_hedged(true);
+        h.command(Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage,
+            side: None,
+        });
+        assert!(h.requests.is_empty());
+        assert_eq!(h.done.len(), 1);
+        assert!(h.done[0].is_err());
+        assert!(!h.engine.store().metadata_write_pending("BTCUSDT"));
+    }
 }
 
 #[test]
@@ -880,8 +1010,8 @@ fn full_stop_quantity_comes_from_the_position_for_both_stop_families() {
             price: Some(90.0),
             ..opts()
         }]);
-        assert!(h.body().contains("\"quantity\":2.0"));
-        assert!(h.body().contains("\"stopPrice\":90.0"));
+        assert!(h.body().contains("\"quantity\":2"));
+        assert!(h.body().contains("\"stopPrice\":90"));
         assert!(h.body().contains("\"closePosition\":\"true\""));
         assert!(!h.body().contains("reduceOnly"));
     }
@@ -1114,7 +1244,11 @@ fn last_price_trigger_amendment_rejects_a_crossed_last_even_when_mark_is_safe() 
         h.requests.is_empty(),
         "must not cancel the existing protective stop"
     );
-    assert!(h.done[0].as_ref().unwrap_err().contains("immediately"));
+    assert!(
+        h.done[0].as_ref().unwrap_err().contains("immediately"),
+        "{:?}",
+        h.done
+    );
     assert_eq!(
         h.engine.store().order(&order().id).unwrap().status,
         OrderStatus::Open
@@ -1350,7 +1484,7 @@ fn a_failed_bracket_replacement_says_the_original_was_cancelled() {
     h.reply(r#"{"code":101204,"msg":"insufficient margin"}"#);
     let error = h.done[0].as_ref().unwrap_err();
     assert!(
-        error.starts_with("original bracket cancelled; replacement failed: BingX 101204"),
+        error.contains("position has no") && error.contains("BingX 101204"),
         "{error}"
     );
     assert_eq!(
@@ -1618,7 +1752,7 @@ fn native_maximum_split_streams_every_lot_and_returns_every_accepted_id() {
             h.failures
         );
         let body: serde_json::Value = serde_json::from_str(h.body()).unwrap();
-        assert_eq!(body["quantity"], 10.0, "lot {lot}");
+        assert_eq!(body["quantity"].as_f64(), Some(10.0), "lot {lot}");
         assert!(
             h.done.is_empty(),
             "lot {lot}: the command is still streaming"
@@ -1706,5 +1840,203 @@ fn signature_refused_cancel_replace_has_no_outcome_and_no_resend() {
     assert_refused_replace_has_no_outcome(
         r#"{"code":100001,"msg":"Signature verification failed"}"#,
         Some(safe_cex_engine::ErrorKind::AuthInvalid),
+    );
+}
+
+fn cheap_limit(reduce_only: bool) -> PlaceOrderOpts {
+    serde_json::from_value(serde_json::json!({
+        "symbol": "BTCUSDT", "type": "limit", "side": "sell", "amount": 1.0, "price": 1.0, "reduceOnly": reduce_only
+    }))
+    .unwrap()
+}
+
+#[test]
+fn an_order_below_the_venue_minimum_value_is_refused_here_but_a_close_is_not() {
+    let mut h = Harness::new(None);
+    h.place(vec![cheap_limit(false)]);
+    assert!(h.requests.is_empty());
+    assert!(
+        format!("{:?}", (&h.failures, &h.done)).contains("below the BingX minimum of 2 USDT"),
+        "{:?}",
+        (&h.failures, &h.done)
+    );
+
+    let mut h = Harness::new(None);
+    h.place(vec![cheap_limit(true)]);
+    assert_eq!(h.requests.len(), 1, "{:?}", h.failures);
+}
+
+#[test]
+fn a_limit_replace_that_cancels_and_refuses_says_the_order_is_gone() {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"FAILED"}}"#);
+    let error = h.done[0].as_ref().unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}
+
+fn moved_stop() -> Harness {
+    let mut stop = order();
+    stop.kind = OrderType::StopLoss;
+    stop.side = OrderSide::Sell;
+    stop.price = 90.0;
+    stop.reduce_only = true;
+    stop.client_order_id = None;
+    stop.trigger_type = Some(StopTriggerType::MarkPrice);
+    let mut h = Harness::new(Some((stop, "TRIGGER_MARKET")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(91.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":0,"data":{}}"#);
+    h
+}
+
+#[test]
+fn a_moved_stop_whose_replacement_is_lost_says_the_position_may_have_no_stop() {
+    let mut h = moved_stop();
+    h.failed();
+    let error = h.done[0].as_ref().unwrap_err();
+    assert!(error.contains("may have no stop"), "{error}");
+}
+
+#[test]
+fn a_moved_stop_whose_replacement_answer_is_unclear_does_not_claim_no_stop() {
+    for body in [r#"{"code":110500,"msg":"busy"}"#, "not json"] {
+        let mut h = moved_stop();
+        h.reply(body);
+        let error = h.done[0].as_ref().unwrap_err();
+        assert!(error.contains("may have no stop"), "{body}: {error}");
+    }
+}
+
+#[test]
+fn a_refused_bracket_says_the_entry_was_placed() {
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        stop_loss: Some(90.0),
+        ..opts()
+    }]);
+    h.reply(r#"{"code":0,"data":{"order":{"orderId":9223372036854775806}}}"#);
+    h.reply(r#"{"code":110411,"msg":"stop price on the wrong side"}"#);
+    let error = format!("{:?}", (&h.failures, &h.done));
+    assert!(error.contains("entry was placed"), "{error}");
+    assert!(error.contains("BingX 110411"), "{error}");
+}
+
+#[test]
+fn a_close_below_the_market_minimum_is_sent_but_an_open_is_not() {
+    let dust = |reduce_only: bool| -> PlaceOrderOpts {
+        serde_json::from_value(serde_json::json!({
+            "symbol": "BTCUSDT", "type": "limit", "side": "sell", "amount": 0.005,
+            "price": 100000.0, "reduceOnly": reduce_only,
+        }))
+        .unwrap()
+    };
+    let harness = || {
+        let mut h = Harness::new(None);
+        let mut market = market();
+        market.limits.amount.min = 0.01;
+        h.engine.store_mut().set_markets(vec![market]);
+        h
+    };
+    let mut h = harness();
+    h.place(vec![dust(false)]);
+    assert!(h.requests.is_empty(), "{:?}", h.requests.len());
+    let mut h = harness();
+    h.place(vec![dust(true)]);
+    assert_eq!(h.requests.len(), 1, "{:?}", (&h.failures, &h.done));
+}
+
+#[test]
+fn a_price_move_on_a_working_order_sends_no_status_restriction() {
+    for status in ["WORKING", "OPEN"] {
+        let mut h = Harness::with_status(Some((order(), "LIMIT")), status);
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price: Some(96.0),
+            amount: None,
+        });
+        assert!(
+            !h.body().contains("cancelRestrictions"),
+            "{status}: {}",
+            h.body()
+        );
+    }
+}
+
+#[test]
+fn a_duplicate_client_order_id_is_unknown_not_refused() {
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        client_order_id: Some("again".into()),
+        ..opts()
+    }]);
+    h.reply(r#"{"code":101400,"msg":"duplicate clientOrderID"}"#);
+    assert_ne!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected),
+        "{:?}",
+        h.failures
+    );
+    let mut h = Harness::new(None);
+    h.place(vec![opts()]);
+    h.reply(r#"{"code":101400,"msg":"quantity is invalid"}"#);
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected),
+        "{:?}",
+        h.failures
+    );
+}
+
+fn protected_limit() -> Order {
+    let mut o = order();
+    o.stop_loss = Some(90.0);
+    o.take_profit = Some(110.0);
+    o
+}
+
+/// As legacy: a size change on a limit with TP/SL is a native amend, which keeps them.
+#[test]
+fn a_size_change_on_a_limit_with_tp_sl_is_amended() {
+    let mut h = Harness::new(Some((protected_limit(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: None,
+        amount: Some(order().amount * 2.0),
+    });
+    assert_eq!(h.requests.len(), 1, "{:?}", (&h.failures, &h.done));
+    assert!(
+        h.requests[0].url.contains("/trade/amend"),
+        "{}",
+        h.requests[0].url
+    );
+}
+
+/// As legacy: a price move would drop the TP/SL, so it is refused with what to do instead.
+#[test]
+fn a_price_move_on_a_limit_with_tp_sl_says_what_to_do() {
+    let mut h = Harness::new(Some((protected_limit(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    assert!(h.requests.is_empty());
+    let error = h.done[0].as_ref().unwrap_err();
+    assert!(
+        error.contains("without dropping its TP/SL") && error.contains("Cancel it"),
+        "{error}"
     );
 }

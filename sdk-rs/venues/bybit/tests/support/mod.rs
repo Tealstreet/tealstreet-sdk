@@ -39,6 +39,8 @@ pub struct Harness {
     pub progress_at_request: Vec<(RequestId, usize)>,
     pub startup_failures: Vec<VenueError>,
     pub deactivated: bool,
+    pub prepared_routes:
+        std::collections::HashMap<RequestId, (safe_cex_engine::request_context::Preparation, u64)>,
 }
 
 impl Harness {
@@ -77,6 +79,7 @@ impl Harness {
             progress_at_request: Vec::new(),
             startup_failures: Vec::new(),
             deactivated: false,
+            prepared_routes: std::collections::HashMap::new(),
         };
         harness.engine.start(harness.now);
         harness.collect();
@@ -84,9 +87,18 @@ impl Harness {
     }
 
     pub fn load_public(&mut self) {
-        self.respond("status=PreLaunch", 200, PRELAUNCH);
-        self.respond("/v5/market/instruments-info", 200, INSTRUMENTS);
-        self.respond("/v5/market/tickers", 200, TICKERS);
+        self.load_public_mapped(str::to_owned);
+    }
+
+    /// Public startup on the host's own clock: no envelope `time` calibrates it.
+    pub fn load_public_untimed(&mut self) {
+        self.load_public_mapped(untimed);
+    }
+
+    fn load_public_mapped(&mut self, answer: fn(&str) -> String) {
+        self.respond("status=PreLaunch", 200, &answer(PRELAUNCH));
+        self.respond("/v5/market/instruments-info", 200, &answer(INSTRUMENTS));
+        self.respond("/v5/market/tickers", 200, &answer(TICKERS));
         let socket = self.socket("/v5/public/linear").expect("public socket");
         self.event(Event::WsOpened { socket });
         self.flush_subscriptions();
@@ -98,7 +110,7 @@ impl Harness {
     }
 
     pub fn collect(&mut self) {
-        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
+        for action in prepared_actions(&mut self.engine, self.now, &mut self.prepared_routes) {
             if let Action::Notice(notice) = &action {
                 self.notices.push(notice.clone());
             }
@@ -204,6 +216,15 @@ impl Harness {
     }
 
     pub fn take(&mut self, path: &str) -> HttpRequest {
+        // Existing response fixtures await the real pacing timer before taking a page.
+        if path.contains("order/history") || path.contains("orderStatus=") {
+            for _ in 0..4 {
+                if self.has_request(path) {
+                    break;
+                }
+                self.advance(250.0);
+            }
+        }
         let index = self
             .requests
             .iter()
@@ -314,6 +335,22 @@ impl Harness {
     }
 }
 
+/// The fixture without its trailing envelope `time`, which would calibrate
+/// the protocol clock to the documented example's date.
+pub fn untimed(body: &str) -> String {
+    match body.rfind(r#","time":"#) {
+        Some(at)
+            if body[at + 8..]
+                .trim_end_matches('}')
+                .bytes()
+                .all(|b| b.is_ascii_digit()) =>
+        {
+            format!("{}}}", &body[..at])
+        }
+        _ => body.to_owned(),
+    }
+}
+
 pub fn order() -> safe_cex_engine::model::PlaceOrderOpts {
     safe_cex_engine::model::PlaceOrderOpts {
         symbol: "BTCUSDT".into(),
@@ -353,4 +390,80 @@ pub fn park_owners(h: &mut Harness) -> Vec<HttpRequest> {
         }
     }
     reads
+}
+
+/// Retain real prepared routes across engine-owned pacing waits, then Bind/Claim.
+fn prepared_actions(
+    engine: &mut Engine<BybitLinear>,
+    now: f64,
+    routes: &mut std::collections::HashMap<
+        RequestId,
+        (safe_cex_engine::request_context::Preparation, u64),
+    >,
+) -> Vec<Action> {
+    use safe_cex_engine::request_context::{Claim, HttpAction, Prepared};
+    engine.prepare_dispatch(now);
+    let mut queue = std::collections::VecDeque::from(engine.drain_actions().collect::<Vec<_>>());
+    let mut output = Vec::new();
+    let mut visits = 0;
+    while let Some(action) = queue.pop_front() {
+        visits += 1;
+        assert!(visits <= 65_536, "prepared fixture did not settle");
+        match action {
+            Action::ManagedHttp(action) => match *action {
+                HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => {
+                    if engine.http_preparation_pending(preparation) {
+                        assert_eq!(preparation.attempt().request, request.id);
+                        assert!(
+                            routes
+                                .insert(request.id, (preparation, request.id.0))
+                                .is_none()
+                        );
+                        engine.http_prepared(
+                            now,
+                            preparation,
+                            Prepared {
+                                id: request.id.0,
+                                expires_at: None,
+                            },
+                        );
+                    }
+                }
+                HttpAction::Bind {
+                    preparation,
+                    permit,
+                    request,
+                } => {
+                    assert_eq!(
+                        routes.remove(&request.id),
+                        Some((preparation, permit.prepared_id()))
+                    );
+                    match engine.claim_http(now, permit) {
+                        Ok(Claim::Released(_)) => output.push(Action::Http(request)),
+                        Ok(Claim::WaitUntil(_)) => panic!("fixture does not hold a transport Bind"),
+                        Err(_) => {}
+                    }
+                }
+                HttpAction::Cancel { preparation, .. } => {
+                    let request = preparation.attempt().request;
+                    if routes
+                        .get(&request)
+                        .is_some_and(|(token, _)| *token == preparation)
+                    {
+                        routes.remove(&request);
+                    }
+                }
+                HttpAction::BindGroup { .. } => panic!("Bybit has no atomic HTTP group"),
+            },
+            action => output.push(action),
+        }
+        for action in engine.drain_actions().collect::<Vec<_>>().into_iter().rev() {
+            queue.push_front(action);
+        }
+    }
+    output
 }

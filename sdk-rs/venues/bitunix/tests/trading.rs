@@ -525,7 +525,8 @@ fn native_amend_accepts_limit_protection_and_targeted_standalone_leg() {
     let b = r.body.as_deref().unwrap();
     assert!(b.contains(r#""orderId":"second""#));
     assert!(b.contains(r#""tpPrice":"86000""#));
-    assert!(b.contains(r#""slPrice":"100000""#));
+    // Live: a separate SL on the position was copied here and a second SL appeared.
+    assert!(!b.contains("slPrice"), "{b}");
 }
 #[test]
 fn split_order_rejection_cannot_resend_already_accepted_chunks() {
@@ -888,4 +889,159 @@ fn app_stop_payload_with_trigger_equal_to_price_places_protection() {
         done(&mut e, 941).is_err(),
         "a distinct trigger stays rejected"
     );
+}
+#[test]
+fn a_stale_tpsl_does_not_abort_cancel_all() {
+    let (mut e, _) = startup();
+    e.handle(
+        1.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 8,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let mut sent = requests(&mut e);
+    let mut failed = false;
+    let mut stale_answered = false;
+    let mut swept = false;
+    while let Some(r) = sent.pop() {
+        let body = if r.url.contains("tpsl/cancel_order") {
+            stale_answered = true;
+            r#"{"code":20007,"msg":"Order not found. It may have been filled or canceled"}"#
+                .to_owned()
+        } else if r.url.contains("cancel_all_orders") {
+            swept = true;
+            r#"{"code":0,"data":null}"#.to_owned()
+        } else {
+            // Every remaining regular order is acknowledged by its ID.
+            let sent: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+            let rows: Vec<_> = sent["orderList"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|o| serde_json::json!({"orderId": o["orderId"]}))
+                .collect();
+            serde_json::json!({"code":0,"data":{"successList":rows,"failureList":[]}}).to_string()
+        };
+        reply(&mut e, r.id, &body);
+        let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+            .into_iter()
+            .collect();
+        failed |= actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 8, .. })));
+        sent.extend(actions.into_iter().filter_map(|a| match a {
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get => Some(r),
+            _ => None,
+        }));
+    }
+    assert!(stale_answered);
+    assert!(swept, "the by-symbol cancel follows the row cancels");
+    assert!(!failed);
+}
+
+#[test]
+fn symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
+    for answer in [r#"{"code":0}"#, r#"{"code":0,"data":{"successList":[]}}"#] {
+        let (mut e, _) = startup();
+        e.store_mut().set_orders(Vec::new());
+        e.handle(
+            1.0,
+            Event::Command(Command::CancelSymbolOrders {
+                command: 8,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let sent = requests(&mut e);
+        let sweep = sent
+            .iter()
+            .find(|r| r.url.contains("cancel_all_orders"))
+            .expect("swept");
+        assert_eq!(sweep.body.as_deref(), Some(r#"{"symbol":"BTCUSDT"}"#));
+        reply(&mut e, sweep.id, answer);
+        assert!(
+            safe_cex_engine::test_support::prepared_now(&mut e)
+                .into_iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 8, .. })))
+        );
+    }
+}
+
+// Live: this body came back while two of the batch's orders rested on the venue.
+#[test]
+fn a_refused_batch_stays_unknown_because_its_orders_may_rest() {
+    let (mut e, _) = startup();
+    let order = |client: &str| {
+        let mut o: safe_cex_engine::model::PlaceOrderOpts =
+            serde_json::from_value(serde_json::json!({
+                "symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":90000.0
+            }))
+            .unwrap();
+        o.client_order_id = Some(client.into());
+        o
+    };
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 77,
+            orders: vec![order("a"), order("b")],
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.ends_with("batch_order"));
+    e.handle(
+        2.0,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":20003,"data":null,"msg":"Insufficient balance"}"#,
+            },
+        },
+    );
+    let outcome = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.outcome),
+            _ => None,
+        });
+    assert_eq!(outcome, Some(Some(safe_cex_engine::Outcome::Unknown)));
+}
+
+#[test]
+fn a_duplicate_client_id_stays_unknown() {
+    let (mut e, _) = startup();
+    let mut order: safe_cex_engine::model::PlaceOrderOpts =
+        serde_json::from_value(serde_json::json!({
+            "symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.001,"price":9000
+        }))
+        .unwrap();
+    order.client_order_id = Some("a".into());
+    e.handle(
+        1.0,
+        Event::Command(Command::PlaceOrders {
+            command: 78,
+            orders: vec![order],
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    e.handle(
+        2.0,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"code":30042,"data":null,"msg":"Client ID duplicate"}"#,
+            },
+        },
+    );
+    let outcome = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.outcome),
+            _ => None,
+        });
+    assert_eq!(outcome, Some(Some(safe_cex_engine::Outcome::Unknown)));
 }

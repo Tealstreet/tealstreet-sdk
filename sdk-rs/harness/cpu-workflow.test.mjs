@@ -54,8 +54,9 @@ function verifyWorkflow(text) {
     assert.match(coordinator, /cache-key: \$\{\{ steps\.yarn\.outputs\.cache-key \}\}/);
     assert.match(coordinator, /cache-hit: \$\{\{ steps\.yarn\.outputs\.cache-hit \}\}/);
   }
-  for (const authorityConsumer of [plan, second, certify])
-    assert.match(authorityConsumer, /uses: actions\/checkout@v7\n        with:\n          fetch-depth: 0/, 'independent composition proof needs complete Git history');
+  for (const authorityConsumer of [first, job(text, 'bitget-paired'), plan, second, certify])
+    assert.match(authorityConsumer, /uses: actions\/checkout@v7\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          fetch-depth: 1\n          fetch-tags: false\n      - uses: \.\/\.github\/actions\/fetch-rust-history\n(?=      - )/,
+      'independent composition proof needs exact source and unconditional complete targeted history');
   for (const installFree of [second, final])
     assert.doesNotMatch(installFree, /uses: \.\/\.github\/actions\/(?:prepare-yarn|install-yarn)/);
   assert.doesNotMatch(first, /continue-on-error/);
@@ -66,7 +67,7 @@ test('all required suite names certify unconditionally, with an eligible-only se
 test('Bitget paired producer is mandatory, bounded, source-selected and independently certified', () => {
   const paired = job(source, 'bitget-paired');
   assert.match(paired, /name: Rust \/ Bitget counterbalanced steady CPU/);
-  assert.match(paired, /fetch-depth: 0/);
+  verifyWorkflow(source);
   assert.match(paired, /CARGO_BUILD_JOBS: 4/);
   assert.match(paired, /node-version: 22/);
   assert.match(paired, /Public counterbalanced Bitget steady CPU/);
@@ -80,8 +81,14 @@ test('Bitget paired producer is mandatory, bounded, source-selected and independ
 
 test('workflow controls reject skipped final checks, unconditional second jobs and suite/local bypasses', () => {
   const changes = [
-    ...['cpu-plan', 'cpu-second', 'cpu-certify'].map(name => text =>
-      text.replace(job(text, name), job(text, name).replace('fetch-depth: 0', 'fetch-depth: 1'))),
+    ...['gate', 'bitget-paired', 'cpu-plan', 'cpu-second', 'cpu-certify'].flatMap(name => [
+      ['fetch-depth: 1', 'fetch-depth: 0'],
+      ['ref: ${{ github.sha }}', 'ref: master'],
+      ['fetch-tags: false', 'fetch-tags: true'],
+      ['      - uses: ./.github/actions/fetch-rust-history\n', ''],
+      ['      - uses: ./.github/actions/fetch-rust-history\n',
+        '      - uses: ./.github/actions/fetch-rust-history\n        if: false\n'],
+    ].map(([before, after]) => text => text.replace(job(text, name), job(text, name).replace(before, after)))),
     text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('uses: ./.github/actions/install-yarn', 'uses: actions/checkout@v7')),
     text => text.replace(job(text, 'cpu-certify'), job(text, 'cpu-certify').replace('uses: ./.github/actions/prepare-yarn', 'uses: actions/checkout@v7')),
     text => text.replace(job(text, 'cpu-plan'), job(text, 'cpu-plan').replace('cache-key: ${{ steps.yarn.outputs.cache-key }}', 'cache-key: unbound')),
@@ -98,4 +105,18 @@ test('workflow controls reject skipped final checks, unconditional second jobs a
     text => text.replace('      # No install, compilation, module build, or measurement fallback here.', '      - run: cargo build\n      # No install, compilation, module build, or measurement fallback here.'),
   ];
   for (const change of changes) { const changed = change(source); assert.notEqual(changed, source); assert.throws(() => verifyWorkflow(changed)); }
+});
+
+
+test('A/A diagnostics are explicit dispatch-only and cannot supply certification evidence', () => {
+  const diagnostic = job(source, 'cpu-budget-diagnostic');
+  assert.match(diagnostic, /if: github.event_name == 'workflow_dispatch' && inputs.cpu_budget_diagnostic/);
+  assert.match(diagnostic, /fail-fast: false/);
+  assert.match(diagnostic, /slot: \[1, 2, 3, 4\]/);
+  assert.match(diagnostic, /cpu-budget-diagnostic\.mjs --module/);
+  assert.doesNotMatch(diagnostic, /--command (?:collect|certify|second)|rust:gate:record|gh run rerun|continue-on-error/);
+  assert.match(diagnostic, /name: cpu-budget-diagnostic-\$\{\{ matrix\.slot \}\}/);
+  const scope = job(source, 'scope');
+  assert.match(scope, /if \[ '\$\{\{ github\.event_name \}\}' = workflow_dispatch \] && \[ '\$\{\{ inputs\.cpu_budget_diagnostic \}\}' = true \]/);
+  assert.match(scope, /else\n\s+node sdk-rs\/harness\/ci-scope\.mjs/);
 });

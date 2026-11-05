@@ -611,6 +611,8 @@ async fn prepared_how_binds_after_auth_and_dropping_a_bound_packet_sends_no_http
             let _request_task = bound.dispatch(events);
             assert_eq!(http_body(&mut inbox).await, b"{}");
         }
+        // The pooled socket lives as long as the account's transport.
+        drop(transport);
         tokio::time::timeout(Duration::from_secs(3), server)
             .await
             .unwrap()
@@ -759,12 +761,13 @@ async fn how_accepts_binary_gzip_base64_raw_and_legacy_responses() {
     let expected = br#"{"id":18446744073709551615}"#.to_vec();
     let body = expected.clone();
     let server = tokio::spawn(async move {
+        // One pooled socket carries all four requests.
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        ws.send(Message::text(r#"{"type":"rpc.auth","status":"success"}"#))
+            .await
+            .unwrap();
         for encoding in 0..4 {
-            let (stream, _) = listener.accept().await.unwrap();
-            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
-            ws.send(Message::text(r#"{"type":"rpc.auth","status":"success"}"#))
-                .await
-                .unwrap();
             let request = rpc(&mut ws).await;
             let nonce = request.nonce.unwrap();
             let mut encoder =
@@ -798,7 +801,6 @@ async fn how_accepts_binary_gzip_base64_raw_and_legacy_responses() {
             } else {
                 ws.send(Message::text(header)).await.unwrap();
             }
-            let _ = ws.next().await;
         }
     });
     let mut plan = RoutingPlan::default();
@@ -1928,8 +1930,10 @@ async fn proxy_token_provider_failures_cannot_leak_through_direct_authorization_
 async fn proxy_token_provider_failures_cannot_leak_through_how_authentication_notices() {
     let (listener, origin) = listener().await;
     let server = tokio::spawn(async move {
-        for _ in 0..2 {
-            let (stream, _) = listener.accept().await.unwrap();
+        // Requests waiting on one pooled open share its failure: one socket or more.
+        while let Ok(Ok((stream, _))) =
+            tokio::time::timeout(Duration::from_millis(1_500), listener.accept()).await
+        {
             let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
             socket
                 .send(Message::text(r#"{"type":"serverTime"}"#))
@@ -1956,8 +1960,8 @@ async fn proxy_token_provider_failures_cannot_leak_through_how_authentication_no
     let transport = NetworkTransport::with_routing(plan, rejected_proxy_token(calls.clone()));
     let notices = routed_signed_network_notices(&origin, transport, true).await;
     assert_proxy_authorization_notices(&notices);
-    assert!(calls.load(Ordering::SeqCst) >= 2);
-    tokio::time::timeout(Duration::from_secs(3), server)
+    assert!(calls.load(Ordering::SeqCst) >= 1);
+    tokio::time::timeout(Duration::from_secs(5), server)
         .await
         .unwrap()
         .unwrap();

@@ -34,10 +34,11 @@ family_args() {
     hyperliquidspot) family=hyperliquid ;;
     krakenspot) family=kraken ;;
     coinbasespot) family=coinbase ;;
-    tealstreet-dex|kodiakfi|mode|salsadex|what|woofi) family=orderly ;;
+    kodiakfi|mode|what|woofi) family=orderly ;;
     *) echo "Unsupported venue: $1 (expected $venues)" >&2; exit 2 ;;
   esac
-  build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features "$family")
+  # Every family links the Rust algos (chaser, TWAP, exec) for the LOCAL worker.
+  build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown --no-default-features --features "$family,algos-exec")
   if [[ $mutation_barriers == true ]]; then
     build_args+=(--features http-mutation-barriers)
   fi

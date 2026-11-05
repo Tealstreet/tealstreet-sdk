@@ -7,6 +7,7 @@ mod trading;
 mod wire;
 
 use base64::Engine as _;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::log::code;
@@ -121,17 +122,22 @@ pub struct ManagedCandleRead {
 pub struct ManagedInfoRead {
     context: Context,
     pending: Pending,
+    background: bool,
 }
 struct InfoSuccessor {
     body: String,
     pending: Pending,
     streamed: Option<ArrayAt>,
+    background: bool,
 }
 #[derive(Default)]
 struct Connection {
     feed: Option<FeedId>,
     // Native topic eligibility, updated only by accepted shared lifecycle events.
     open: bool,
+    private_bootstrap: socket_codec::PrivateBootstrap,
+    // Transport liveness and epoch retirement cannot forgive a missing private bootstrap.
+    private_bootstrap_misses: u8,
 }
 #[derive(Default)]
 struct Ladder {
@@ -171,6 +177,7 @@ pub struct Hyperliquid {
     dex_names: Vec<String>,
     advanced_scopes: HashSet<String>,
     core_discovery_incomplete: bool,
+    http_429_count: u32,
     /// Lowercase coins of catalogue rows excluded by design: never published,
     /// and owned exposure on them is hidden rather than freezing the account.
     excluded: HashSet<String>,
@@ -208,6 +215,7 @@ impl Hyperliquid {
             dex_names: Vec::new(),
             advanced_scopes: HashSet::new(),
             core_discovery_incomplete: true,
+            http_429_count: 0,
             excluded: HashSet::new(),
             startup: Default::default(),
             info_completing: false,
@@ -370,7 +378,7 @@ impl Hyperliquid {
         }
     }
     fn info(&mut self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
-        self.info_read(cx, body, pending, Some(at));
+        self.info_read(cx, body, pending, Some(at), false);
     }
     fn info_read(
         &mut self,
@@ -378,12 +386,14 @@ impl Hyperliquid {
         body: String,
         pending: Pending,
         streamed: Option<ArrayAt>,
+        background: bool,
     ) {
         if self.info_completing {
             self.info_successors.push_back(InfoSuccessor {
                 body,
                 pending,
                 streamed,
+                background,
             });
             return;
         }
@@ -400,12 +410,14 @@ impl Hyperliquid {
             Ok(context) => context,
             Err(error) => {
                 self.on_request_failed(cx, pending, &error.read_venue_error().message);
+                self.finish_background_read(cx, background);
                 return;
             }
         };
         let pending = Pending::ManagedInfo(Box::new(ManagedInfoRead {
             context: context.clone(),
             pending,
+            background,
         }));
         match cx.request_managed_with_headers(
             context,
@@ -470,6 +482,10 @@ impl Hyperliquid {
         }
     }
     fn start_socket(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Frame-fed engines stream nothing; their data source does.
+        if cx.frame_fed() {
+            return;
+        }
         if let Err(error) = self.managed_connect(cx) {
             Self::socket_refused(cx, error);
         }
@@ -605,6 +621,8 @@ impl Hyperliquid {
                                 t.last = mid;
                                 t.mid_price = Some(mid);
                             });
+                            // A repeated mid is still an observation of last.
+                            cx.store.observe_ticker_fields(symbol, 1 << 2);
                         }
                     }
                 }
@@ -618,6 +636,11 @@ impl Hyperliquid {
                 {
                     for (coin, context) in contexts {
                         if let Some(symbol) = self.symbol(coin) {
+                            let usable =
+                                |v: Option<f64>| v.is_some_and(|v| v.is_finite() && v > 0.0);
+                            // The references this context carries, changed or not (bits: last, mark).
+                            let observed = (u16::from(usable(context.mid_px)) << 2)
+                                | (u16::from(usable(context.mark_px)) << 3);
                             cx.store.update_ticker(symbol, |t| {
                                 if let Some(mark) =
                                     context.mark_px.filter(|v| v.is_finite() && *v > 0.0)
@@ -631,6 +654,7 @@ impl Hyperliquid {
                                     t.mid_price = Some(mid);
                                 }
                             });
+                            cx.store.observe_ticker_fields(symbol, observed);
                         }
                     }
                 }
@@ -644,20 +668,8 @@ impl Hyperliquid {
                         let Some(market) = cx.store.market(&symbol) else {
                             return;
                         };
-                        let Some((a, b)) = depth.levels[0].first().zip(depth.levels[0].get(1))
-                        else {
-                            return;
-                        };
-                        let gap = safe_cex_engine::num::adjust(
-                            (a.px - b.px).abs(),
-                            market.precision.price,
-                        );
-                        let multiple = (gap / market.precision.price).floor();
-                        let group = multiple.log10().round();
-                        if !group.is_finite() || !(0.0..=6.0).contains(&group) {
-                            return;
-                        }
-                        ladder.spot_depth[group as usize] = Some(depth.levels);
+                        let group = spot_depth_tier(&depth.levels, market.precision.price);
+                        ladder.spot_depth[group] = Some(depth.levels);
                         ladder.depth_time = Some(depth.time);
                         for (side, index) in [(BookSide::Bids, 0), (BookSide::Asks, 1)] {
                             let mut levels = Vec::new();
@@ -767,6 +779,22 @@ impl Hyperliquid {
             self.propose_socket_interests(cx);
         }
     }
+}
+/// Spot frames do not say which nSigFigs subscription sent them. A tier's
+/// prices are all multiples of its bucket, so the coarsest power-of-ten tick
+/// multiple dividing every price names the tier; the native tier is 0.
+fn spot_depth_tier(levels: &[Vec<Level>; 2], tick: f64) -> usize {
+    let prices = || levels.iter().flatten().map(|l| l.px);
+    (1..=6)
+        .rev()
+        .find(|&decade| {
+            let step = tick * 10f64.powi(decade);
+            prices().all(|px| {
+                let steps = px / step;
+                (steps - steps.round()).abs() < 1e-6
+            })
+        })
+        .unwrap_or(0) as usize
 }
 fn price_decimals(price: f64, size: i32) -> i32 {
     let significant = if price == 0.0 {
@@ -1034,12 +1062,28 @@ fn spot_rows(
     true
 }
 
+/// Frame-fed hold on this engine's own builder-approval read.
+pub(crate) const BUILDER_HOLD: safe_cex_engine::setting_holds::SettingKey =
+    safe_cex_engine::setting_holds::SettingKey::Venue("builder", String::new());
+
 impl Venue for Hyperliquid {
     fn managed_sockets() -> bool {
         true
     }
     fn on_open(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId) {}
     fn on_close(&mut self, _cx: &mut Cx<'_, Pending>, _socket: SocketId, _code: u16) {}
+    /// A take profit amended through the price is replaced as a stop (`trading.rs`),
+    /// but only where mark, last and index agree enough for that projection to run.
+    fn judges_protective_amend(
+        &self,
+        store: &safe_cex_engine::store::Store,
+        order: &safe_cex_engine::model::Order,
+    ) -> bool {
+        order.kind == safe_cex_engine::model::OrderType::TakeProfit
+            && store
+                .ticker(&order.symbol)
+                .is_some_and(|ticker| trading::tp_projection_reference(ticker).is_some())
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -1051,22 +1095,37 @@ impl Venue for Hyperliquid {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, store: &safe_cex_engine::Store, symbol: &str) -> bool {
+        !self.spot && store.market(symbol).is_none_or(|m| m.is_spot != Some(true))
+    }
 
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.reconcile_order_scopes(cx, symbols);
         self.reconcile_settings(cx);
     }
+    // Every read reads every scope the account cover joins (H9).
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        // Every cancel names an order id; there is no immediate cancel-all.
         if self.spot {
-            safe_cex_engine::Capabilities::NO_HISTORY
+            safe_cex_engine::Capabilities {
+                symbol_cancel_misses_unseen: true,
+                order_read_covers: true,
+                ..safe_cex_engine::Capabilities::NO_HISTORY
+            }
         } else {
             safe_cex_engine::Capabilities {
                 position_history: safe_cex_engine::PositionHistory::FillsSymbol,
                 fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
                 client_order_lookup: true,
                 schedule_cancel: true,
+                fresh_positions: true,
+                symbol_cancel_misses_unseen: true,
+                order_read_covers: true,
                 ..safe_cex_engine::Capabilities::BASE
             }
         }
@@ -1138,6 +1197,38 @@ impl Venue for Hyperliquid {
     ) {
         self.trade_plan_ready(cx, owner);
     }
+    fn startup_diagnostics(
+        &self,
+        store: &safe_cex_engine::Store,
+    ) -> Vec<(&'static str, safe_cex_engine::log::Value)> {
+        let loaded = store.loaded();
+        let stage = if !loaded.markets {
+            if self.spot {
+                "spotMetaAndAssetCtxs"
+            } else {
+                "metaAndAssetCtxs"
+            }
+        } else if self.options.public_data_only {
+            "tickers"
+        } else if self.user().is_none() {
+            "userRole"
+        } else if !loaded.orders {
+            "frontendOpenOrders"
+        } else if !loaded.balance || !loaded.positions {
+            self.startup_private_stage()
+        } else {
+            "tickers"
+        };
+        let mut fields = vec![
+            ("stage", stage.into()),
+            ("readTimeoutMs", 20_000.0.into()),
+            ("http429Count", f64::from(self.http_429_count).into()),
+        ];
+        if let Some(kind) = self.account.last_failed_private_read_kind {
+            fields.push(("lastFailedPrivateReadKind", kind.as_str().into()));
+        }
+        fields
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.credentials = safe_cex_engine::credential_selection::Slots::new(
             cx.address_nonce_identities().primary.clone(),
@@ -1168,6 +1259,49 @@ impl Venue for Hyperliquid {
             }
         }
     }
+    /// VENUE_STATE v1: `[1, builder]`, builder 0 unknown, 1 refused, 2 approved.
+    /// The one write-path fact the store lacks: whether placements carry the builder.
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        let builder = match self.account.builder_approved {
+            None => 0,
+            Some(false) => 1,
+            Some(true) => 2,
+        };
+        Some(vec![1, builder])
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        let source = match state {
+            [1, 1, ..] => Some(false),
+            [1, 2, ..] => Some(true),
+            // The source has not read the approval yet.
+            [1, 0, ..] => return,
+            _ => {
+                cx.venue_state_unreadable(
+                    "Unreadable Hyperliquid venue state from the data source",
+                );
+                return;
+            }
+        };
+        // A held approval (this engine's own read) wins until the source agrees.
+        if cx.setting_held(&BUILDER_HOLD) {
+            if source != self.account.builder_approved {
+                return;
+            }
+            cx.release_setting(&BUILDER_HOLD);
+        }
+        self.account.builder_approved = source;
+    }
+    /// Source side: the venue's existing setting re-reads, never a write.
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        if self.options.public_data_only || self.user().is_none() {
+            return;
+        }
+        match symbol {
+            Some(symbol) => self.refresh_uncertain_settings(cx, symbol),
+            None => self.refresh_account(cx),
+        }
+        self.check_builder(cx);
+    }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         // Public prices cannot establish a private snapshot or mark it loaded.
         self.account_prices(cx);
@@ -1182,10 +1316,11 @@ impl Venue for Hyperliquid {
     fn on_socket_interests_released(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        _epoch: safe_cex_engine::socket_lifecycle::Epoch,
+        epoch: safe_cex_engine::socket_lifecycle::Epoch,
         pending: Pending,
     ) -> Result<(), SocketError> {
         if let Pending::SocketRefresh { mode_ready } = pending {
+            self.watch_private_snapshots(cx, epoch);
             self.finish_socket_refresh(cx, mode_ready);
         }
         Ok(())
@@ -1202,6 +1337,13 @@ impl Venue for Hyperliquid {
     ) -> Result<(), SocketError> {
         self.managed_socket_encode(store, feed, subscribe, interests, emit)
     }
+    fn subscription_interests(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Vec<(FeedId, String)> {
+        self.topic_interests(store, topic)
+    }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self
             .connection
@@ -1209,6 +1351,9 @@ impl Venue for Hyperliquid {
             .and_then(|feed| cx.socket_epoch(feed))
             .is_none_or(|epoch| epoch.socket() != socket)
         {
+            return;
+        }
+        if !self.observe_private_snapshot(cx, text) {
             return;
         }
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
@@ -1232,11 +1377,18 @@ impl Venue for Hyperliquid {
         }
         // Trade answers keep their status so a refusal can be told from a lost write.
         if !(200..300).contains(&response.status) && !matches!(pending, Pending::Trade(_)) {
-            self.on_request_failed(
-                cx,
-                pending,
-                &format!("Hyperliquid HTTP {}: {}", response.status, response.body),
-            );
+            let message = format!("Hyperliquid HTTP {}: {}", response.status, response.body);
+            if response.status == 429 {
+                self.http_429_count = self.http_429_count.saturating_add(1);
+                let error = safe_cex_engine::VenueError::new(message.clone())
+                    .kind(safe_cex_engine::ErrorKind::RateLimited)
+                    .retry_after_ms(
+                        safe_cex_engine::classify::retry_after_ms(&response).unwrap_or(5000.0),
+                    );
+                self.account.read_error = Some(error);
+            }
+            self.on_request_failed(cx, pending, &message);
+            self.account.read_error = None;
             return;
         }
         match pending {
@@ -1250,9 +1402,10 @@ impl Venue for Hyperliquid {
                     let _ = cx.finish_http_context(&read.context);
                     self.info_completing = false;
                     while let Some(next) = self.info_successors.pop_front() {
-                        self.info_read(cx, next.body, next.pending, next.streamed);
+                        self.info_read(cx, next.body, next.pending, next.streamed, next.background);
                     }
                 }
+                self.finish_background_read(cx, read.background);
             }
             Pending::SocketRefresh { .. } => {}
             Pending::SpotMeta {
@@ -1534,10 +1687,17 @@ impl Venue for Hyperliquid {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if matches!(
+            pending,
+            Pending::Meta { .. } | Pending::SpotMeta { .. } | Pending::Dexs { .. }
+        ) {
+            self.private_read_failed(cx, account::PrivateReadKind::Discovery, error);
+        }
         match pending {
             Pending::ManagedInfo(read) => {
                 let _ = cx.finish_http_context(&read.context);
                 self.on_request_failed(cx, read.pending, error);
+                self.finish_background_read(cx, read.background);
             }
             Pending::SocketRefresh { .. } => {}
             Pending::ManagedCandles(read) => {
@@ -1572,6 +1732,7 @@ impl Venue for Hyperliquid {
         _pending: Vec<Pending>,
     ) {
         self.discard_history_owner(owner);
+        self.account.fresh_positions.retired(owner);
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
@@ -1590,10 +1751,15 @@ impl Venue for Hyperliquid {
             Pending::ManagedCandles(read) => {
                 let _ = cx.fail_context(&read.context, error);
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.private_snapshot_timer(cx, timer);
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
         if let Some((dex, offset)) = self.startup.on_timer(timer) {
@@ -1611,6 +1777,7 @@ impl Venue for Hyperliquid {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::ScheduleCancel { time_ms } => {
                 self.schedule_cancel(cx, command, time_ms)
             }

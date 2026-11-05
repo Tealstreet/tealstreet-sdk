@@ -6,6 +6,7 @@ mod trading;
 mod wire;
 use crate::{Options, sign};
 use safe_cex_engine::Level;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::log::code;
 use safe_cex_engine::request_context::{
     Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
@@ -422,7 +423,11 @@ impl Venue for KrakenSpot {
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        safe_cex_engine::Capabilities::NO_HISTORY
+        safe_cex_engine::Capabilities {
+            nuke_account_cancel: true,
+            symbol_cancel_misses_unseen: true,
+            ..safe_cex_engine::Capabilities::NO_HISTORY
+        }
     }
     fn socket_control(
         &self,
@@ -451,6 +456,13 @@ impl Venue for KrakenSpot {
         ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.managed_encode(feed, subscribe, items, emit)
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.options.public_data_only && self.signer.is_none() {
@@ -588,6 +600,7 @@ impl Venue for KrakenSpot {
                 });
             }
             "ohlc" => {
+                let mut candles: Vec<(String, Interval, Candle)> = Vec::new();
                 let _ = safe_cex_engine::json::each::<Ohlc<'_>>(data.get(), |o| {
                     let Some(timestamp) = crate::history::timestamp(&o.interval_begin) else {
                         return;
@@ -608,10 +621,24 @@ impl Venue for KrakenSpot {
                                 .map_or(&*o.symbol, String::as_str)
                             && interval(*tf) == Some(o.interval)
                         {
-                            cx.candle(symbol, *tf, candle);
+                            candles.push((symbol.clone(), *tf, candle));
                         }
                     }
                 });
+                candles.sort_by(|a, b| a.2.timestamp.total_cmp(&b.2.timestamp));
+                // A subscribe answers with recent candles as a snapshot: only the newest is live.
+                if msg.kind == "snapshot" {
+                    let mut newest: Vec<(String, Interval, Candle)> = Vec::new();
+                    for row in candles.into_iter().rev() {
+                        if !newest.iter().any(|(s, i, _)| *s == row.0 && *i == row.1) {
+                            newest.push(row);
+                        }
+                    }
+                    candles = newest;
+                }
+                for (symbol, tf, candle) in candles {
+                    cx.candle(&symbol, tf, candle);
+                }
             }
             _ => {}
         }
@@ -793,6 +820,19 @@ impl Venue for KrakenSpot {
         if self.poll == Some(timer) {
             self.poll = None;
             self.poll = Some(cx.set_timer(5_000.));
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::CancelAccountOrders => {
+                self.cancel_account_orders(cx, command)
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {

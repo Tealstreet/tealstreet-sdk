@@ -391,3 +391,17 @@ fn uncached_valid_identity_retains_private_perps_rest_and_spot_local_miss() {
         Local::Anonymous,
     );
 }
+#[test]
+fn a_creating_row_is_never_found_from_the_cache() {
+    for spot in [false, true] {
+        let mut engine = engine(spot, false, true, false);
+        let mut creating = order();
+        creating.status = OrderStatus::Creating;
+        engine.store_mut().set_orders(vec![creating]);
+        native(
+            &local(&mut engine, NOW, 500, Local::Cached),
+            500,
+            Local::Invalid,
+        );
+    }
+}

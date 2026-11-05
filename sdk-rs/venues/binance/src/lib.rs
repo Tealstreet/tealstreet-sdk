@@ -3,6 +3,8 @@ mod account;
 mod candles;
 mod history;
 mod identity;
+mod options;
+mod options_products;
 mod paths;
 mod reads;
 mod session;
@@ -25,7 +27,9 @@ use safe_cex_engine::socket_lifecycle::{
     Invalidation, LifecycleEvent, MAX_FRAME_BYTES, RetireReason, SocketCapabilities, SocketError,
     TrafficPolicy,
 };
-use safe_cex_engine::{Command, Cx, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num};
+use safe_cex_engine::{
+    Command, Cx, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue, num,
+};
 use sign::{Credentials, Query};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -59,6 +63,7 @@ pub enum Variant {
     PortfolioMargin,
     CoinM,
     Spot,
+    Options,
 }
 
 #[derive(Clone, Default)]
@@ -112,6 +117,8 @@ impl Urls {
 pub enum Pending {
     Background(Context, Box<Pending>),
     Identity(Context),
+    Options(Box<options::Request>),
+    OptionsProduct(Box<options_products::Request>),
     ExchangeInfo {
         rows: Vec<Market>,
         rejected: bool,
@@ -239,6 +246,7 @@ mod source {
 }
 
 pub struct BinanceFutures {
+    option_state: options::State,
     options: Options,
     urls: Urls,
     paths: &'static paths::Paths,
@@ -280,11 +288,15 @@ impl BinanceFutures {
             options.variant = Variant::PortfolioMargin;
         }
         options.portfolio_margin = options.variant == Variant::PortfolioMargin;
+        if options.variant == Variant::Options && options.recv_window.is_none() {
+            options.recv_window = Some(5_000.);
+        }
         let paths = match options.variant {
             Variant::UsdM => &paths::USD_M,
             Variant::PortfolioMargin => &paths::PORTFOLIO_MARGIN,
             Variant::CoinM => &paths::COIN_M,
             Variant::Spot => &paths::SPOT,
+            Variant::Options => &paths::OPTIONS,
         };
         let urls = Urls::for_options(&options, paths);
         let spot = options.variant == Variant::Spot;
@@ -297,6 +309,7 @@ impl BinanceFutures {
             SlotPolicy::default(),
         );
         Self {
+            option_state: options::State::default(),
             options,
             urls,
             paths,
@@ -456,6 +469,7 @@ impl BinanceFutures {
             invalidation: Invalidation::Required,
             subscription_interval_ms: if paced { SPOT_SUBSCRIBE_PACE_MS } else { 0.0 },
             close_floors: &[],
+            data_silence: None,
         }
     }
 
@@ -584,6 +598,9 @@ impl BinanceFutures {
             (RetireReason::Closed, None) => "Binance socket closed; reconnecting".into(),
             (RetireReason::Stopped, _) => "Binance socket stopped".into(),
             (RetireReason::RouteExhausted, _) => "Binance socket refused on every route".into(),
+            (RetireReason::RouteRefused, _) => {
+                "Binance socket route refused; trying the next route".into()
+            }
         };
         cx.notice(Level::Warn, code::WS_DISCONNECTED, message);
     }
@@ -597,9 +614,9 @@ impl BinanceFutures {
                 if self.is_spot() {
                     topics.extend(self.kline_topics());
                 } else {
-                    if !self.options.public_data_only {
-                        topics.push("!bookTicker".to_owned());
-                    }
+                    // Bid and ask are public: a guest account without this
+                    // stream would keep the startup REST quote forever.
+                    topics.push("!bookTicker".to_owned());
                     if self.shared_public_socket() {
                         topics.push("!ticker@arr".to_owned());
                         topics.push("!markPrice@arr@1s".to_owned());
@@ -639,15 +656,31 @@ impl BinanceFutures {
     fn depth_topics(&self) -> Vec<String> {
         self.books
             .keys()
-            .map(|symbol| format!("{}@depth", symbol.to_lowercase()))
+            .map(|symbol| depth_topic(symbol))
             .collect()
     }
 
     fn kline_topics(&self) -> Vec<String> {
         self.candles
             .keys()
-            .map(|(symbol, interval)| format!("{}@kline_{interval}", symbol.to_lowercase()))
+            .map(|(symbol, interval)| kline_topic(symbol, *interval))
             .collect()
+    }
+
+    /// The feed and interest key `topic` streams on; Options has no streams.
+    fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        if self.is_options() {
+            return None;
+        }
+        let (channel, key) = match topic {
+            SubscriptionTopic::OrderBook { symbol } => (Channel::Public, depth_topic(symbol)),
+            SubscriptionTopic::Candles { symbol, interval } => (
+                self.candle_channel(),
+                self.supports(*interval)
+                    .then(|| kline_topic(symbol, *interval))?,
+            ),
+        };
+        Some((self.connection_ref(channel).feed?, key))
     }
 
     fn on_markets(
@@ -700,6 +733,11 @@ impl BinanceFutures {
                 .failed_after(cx, 0, self.background_paused_until - cx.now);
         } else {
             self.discovery.succeeded(cx, &0);
+        }
+        // A frame-fed engine loads public instrument metadata only: its data
+        // source supplies the account, leverage brackets and tickers in frames.
+        if cx.frame_fed() {
+            return;
         }
         if self.credentials.has_primary() {
             self.start_account(cx);
@@ -926,6 +964,7 @@ impl BinanceFutures {
                 mask |= 2;
             }
         }
+        cx.store.observe_ticker_fields(&event.s, mask);
         self.live_tickers.record(cx.store, &event.s, mask);
     }
 
@@ -954,11 +993,9 @@ impl BinanceFutures {
                             t.funding_rate = funding_rate;
                             t.funding_time = event.funding_time;
                         });
-                        self.live_tickers.record(
-                            cx.store,
-                            &event.s,
-                            (1 << 3) | (1 << 4) | (1 << 7) | (1 << 8),
-                        );
+                        let observed = (1 << 3) | (1 << 4) | (1 << 7) | (1 << 8);
+                        cx.store.observe_ticker_fields(&event.s, observed);
+                        self.live_tickers.record(cx.store, &event.s, observed);
                     }
                 }
             }
@@ -1185,9 +1222,11 @@ impl BinanceFutures {
         candles: Vec<Candle>,
         response: Response<'_>,
     ) {
-        let Response { status, body, .. } = response;
-        if status != 200 {
-            let _ = cx.fail_context(&context, format!("Binance klines HTTP {status}: {body}"));
+        if response.status != 200 {
+            // The table gives the kind and native code; the text stays as it was.
+            let mut error = account::read_error(&response);
+            error.message = format!("Binance klines HTTP {}: {}", response.status, response.body);
+            let _ = cx.fail_context(&context, error);
             return;
         }
         let _ = cx.done_context(
@@ -1275,6 +1314,14 @@ fn market_from_wire(m: &SymbolInfo<'_>, variant: Variant) -> Market {
     }
 }
 
+fn depth_topic(symbol: &str) -> String {
+    format!("{}@depth", symbol.to_lowercase())
+}
+
+fn kline_topic(symbol: &str, interval: Interval) -> String {
+    format!("{}@kline_{interval}", symbol.to_lowercase())
+}
+
 fn kline_candle(open_time_ms: f64, o: &str, h: &str, l: &str, c: &str, v: &str) -> Candle {
     Candle {
         timestamp: open_time_ms / 1000.0,
@@ -1307,11 +1354,34 @@ impl Venue for BinanceFutures {
     }
     // An Unknown placement fences its symbol until a fresh, clean open-orders
     // snapshot (`reconcile_orders`) proves what landed.
+    fn export_venue_state_for(&self, store: &safe_cex_engine::Store) -> Option<Vec<u8>> {
+        Some(self.export_venue_state(store))
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.prune_venue_state(cx.store);
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        if !BinanceFutures::apply_venue_state(self, state) {
+            cx.venue_state_unreadable("Unreadable Binance venue state from the data source");
+        }
+    }
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        !self.is_spot()
+    }
+    // Every open-orders census commits its cover (`settle_orders`); options
+    // reads commit none yet.
+    fn refreshes_orders(&self) -> bool {
+        !self.is_options()
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
-        self.reconcile_orders(cx);
+        if self.is_options() {
+            self.options_reconcile(cx);
+        } else {
+            self.reconcile_orders(cx);
+        }
     }
     fn unproven_http_evidence(
         &self,
@@ -1349,7 +1419,7 @@ impl Venue for BinanceFutures {
 
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
-        match self.options.variant {
+        let capabilities = match self.options.variant {
             Variant::UsdM | Variant::PortfolioMargin => safe_cex_engine::Capabilities {
                 position_history: if self.options.variant == Variant::UsdM {
                     safe_cex_engine::PositionHistory::FillsSymbol
@@ -1358,14 +1428,29 @@ impl Venue for BinanceFutures {
                 },
                 client_order_lookup: true,
                 account: safe_cex_engine::AccountLookup::Query,
+                order_history_needs_symbol: true,
+                fresh_positions: true,
                 ..safe_cex_engine::Capabilities::BASE
             },
             Variant::Spot => safe_cex_engine::Capabilities::NO_HISTORY,
+            Variant::Options => safe_cex_engine::Capabilities {
+                options: true,
+                fill_history: true,
+                order_history: true,
+                income_history: false,
+                fills_by_order_id: true,
+                ..safe_cex_engine::Capabilities::NO_HISTORY
+            },
             Variant::CoinM => safe_cex_engine::Capabilities {
                 quantity_units: safe_cex_engine::QuantityUnits::InverseContractSized,
                 balance_info: true,
+                fresh_positions: true,
                 ..safe_cex_engine::Capabilities::NO_HISTORY
             },
+        };
+        safe_cex_engine::Capabilities {
+            order_read_covers: self.refreshes_orders(),
+            ..capabilities
         }
     }
 
@@ -1376,6 +1461,7 @@ impl Venue for BinanceFutures {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             // TS marks a COIN-M balance coin-margined, so an inverse market whose
             // margin coin has no row reads zero instead of the USD total.
             safe_cex_engine::VenueAction::FetchBalanceInfo
@@ -1390,7 +1476,15 @@ impl Venue for BinanceFutures {
         }
     }
 
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        self.reread_settings(cx, symbol);
+    }
+
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.start_options(cx);
+            return;
+        }
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate()
         {
@@ -1409,6 +1503,9 @@ impl Venue for BinanceFutures {
     }
 
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.options_observed(cx);
+        }
         self.revalue_pending_wallet(cx);
     }
 
@@ -1527,6 +1624,14 @@ impl Venue for BinanceFutures {
         Ok(())
     }
 
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
+    }
+
     /// `{"method","params","id"}` frames: Spot's within its native control
     /// frame bound, the others within the engine's.
     fn encode_socket_interests(
@@ -1596,6 +1701,14 @@ impl Venue for BinanceFutures {
             self.on_response(cx, *pending, response);
             return;
         }
+        if let Pending::Options(request) = pending {
+            self.options_response(cx, *request, response);
+            return;
+        }
+        if let Pending::OptionsProduct(request) = pending {
+            self.options_product_response(cx, *request, response);
+            return;
+        }
         self.observe_weight(cx, &response);
         if let Pending::Identity(context) = pending {
             self.identity_response(cx, context, response);
@@ -1604,7 +1717,9 @@ impl Venue for BinanceFutures {
         let Response { status, body, .. } = response;
         match pending {
             Pending::Background(..) => unreachable!(),
-            Pending::Identity(_) => unreachable!(),
+            Pending::Identity(_) | Pending::Options(_) | Pending::OptionsProduct(_) => {
+                unreachable!()
+            }
             Pending::ExchangeInfo { rows, rejected } => {
                 self.on_markets(cx, rows, response, rejected)
             }
@@ -1642,6 +1757,16 @@ impl Venue for BinanceFutures {
                     }
                 {
                     let market = market_from_wire(&m, self.options.variant);
+                    if let Some(notional) = m
+                        .filters
+                        .iter()
+                        .find(|f| f.filter_type == "MIN_NOTIONAL")
+                        .and_then(|f| f.notional.as_deref())
+                    {
+                        self.trading
+                            .min_notional
+                            .insert(market.symbol.clone(), num::parse(notional));
+                    }
                     if !market.precision.is_tradable() {
                         *rejected = true;
                         safe_cex_engine::startup::skipped_row(cx);
@@ -1752,6 +1877,7 @@ impl Venue for BinanceFutures {
         _pending: Vec<Pending>,
     ) {
         self.retire_history(owner);
+        self.account.fresh_positions.retired(owner);
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1765,6 +1891,10 @@ impl Venue for BinanceFutures {
             return;
         }
         match pending {
+            Pending::Options(request) => self.options_failed(cx, *request, error),
+            Pending::OptionsProduct(request) => {
+                self.options_product_failed(cx, *request, error.into())
+            }
             Pending::Background(..) => unreachable!(),
             Pending::Klines { context, .. } => {
                 let _ = cx.fail_context(&context, error.to_owned());
@@ -1796,6 +1926,9 @@ impl Venue for BinanceFutures {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.is_options() {
+            self.options_timer(cx, timer);
+        }
         if let Some(source) = self.discovery.on_timer(timer) {
             match source {
                 0 => self.get_streamed(
@@ -1837,7 +1970,44 @@ impl Venue for BinanceFutures {
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if self.is_options() {
+            self.options_observed(cx);
+        }
+        let command = if self.is_options() {
+            match self.options_product_command(cx, command) {
+                Ok(()) => return,
+                Err(command) => command,
+            }
+        } else {
+            command
+        };
+        if self.is_options()
+            && matches!(
+                command,
+                Command::SubscribeOrderBook { .. }
+                    | Command::SubscribeCandles { .. }
+                    | Command::UnsubscribeOrderBook { .. }
+                    | Command::UnsubscribeCandles { .. }
+            )
+        {
+            cx.notice(
+                Level::Error,
+                code::COMMAND_UNSUPPORTED,
+                "Binance Options streaming is not supported; use REST queries",
+            );
+            return;
+        }
         if let Command::FetchAccount { .. } = command {
+            if self.is_options() {
+                cx.refuse_command(
+                    Operation::Read,
+                    safe_cex_engine::VenueError::new(
+                        "Binance Options account identity lookup is unsupported",
+                    )
+                    .kind(safe_cex_engine::ErrorKind::Unsupported),
+                );
+                return;
+            }
             self.fetch_identity(cx);
             return;
         }
@@ -1923,6 +2093,9 @@ impl Venue for BinanceFutures {
                         candles: Vec::new(),
                     },
                 );
+            }
+            Command::Query { command: _, query } if self.is_options() => {
+                self.options_query(cx, query)
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),

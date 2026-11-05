@@ -534,3 +534,19 @@ fn inverse_position_zero_row_mark_falls_through_to_the_row_market_price() {
         .unwrap();
     assert_eq!(p.contracts, 0.02);
 }
+
+#[test]
+fn an_empty_coin_futures_catalogue_ends_the_start_with_a_reason() {
+    let mut h = Harness::started(Options {
+        product: Product::Inverse,
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..Options::default()
+    });
+    h.expect_startup_failure = true;
+    h.respond("/contracts", 200, r#"{"code":"00000","data":[]}"#);
+    assert!(h.sockets.is_empty(), "{:?}", h.sockets);
+    assert!(h.requests.is_empty());
+    assert!(h.timers.is_empty(), "no retry forever");
+}

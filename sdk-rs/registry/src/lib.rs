@@ -37,6 +37,9 @@ compile_error!(
     "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
+#[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+mod kucoin_setup;
+
 #[cfg(feature = "kraken")]
 pub use safe_cex_venue_kraken::sign::dispatch::Selected as kraken_selected;
 #[cfg(feature = "kraken")]
@@ -46,6 +49,8 @@ mod asterdex_setup;
 mod construction;
 #[cfg(feature = "hosted-signing")]
 pub mod hosted_signing;
+#[cfg(feature = "hosted-wallet")]
+pub mod hosted_wallet;
 #[cfg(feature = "hyperliquid")]
 mod hyperliquid_setup;
 #[cfg(feature = "lighter")]
@@ -137,6 +142,9 @@ pub struct Construction {
     pub public_data_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asterdex_api_version: Option<&'static str>,
+    /// Requested frame-fed (`EngineOptions::frame_fed`); omitted when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub frame_fed: bool,
 }
 
 impl EngineOptions {
@@ -177,6 +185,7 @@ impl EngineOptions {
             asterdex_api_version,
             can_sign: mode.as_ref().map(|mode| mode.can_sign),
             public_data_only: mode.map(|mode| mode.public_data_only),
+            frame_fed: self.frame_fed,
         }
     }
 
@@ -219,6 +228,7 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
 #[derive(Clone, Copy)]
 struct Startup {
     account: bool,
+    frame_fed: bool,
     log_level: Level,
     private_feed: safe_cex_engine::signing_policy::PrivateFeedPolicy,
 }
@@ -232,6 +242,9 @@ fn finish<T: Visit, V: Venue + 'static>(
     engine.set_public_feed_policy(policy).map_err(invalid)?;
     engine.set_private_feed_policy(startup.private_feed)?;
     engine.set_account_startup(startup.account);
+    if startup.frame_fed {
+        engine.set_frame_fed().map_err(invalid)?;
+    }
     engine.set_log_level(startup.log_level);
     Ok(visitor.visit(engine))
 }
@@ -416,54 +429,6 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     })
 }
 
-/// BloFin's one provider setup from the configured strings. Every private
-/// request and the socket login sign through it; the venue holds only refs.
-/// Passphrase refs keep native inheritance exactly.
-#[cfg(feature = "blofin")]
-fn blofin_signer(
-    options: &EngineOptions,
-) -> Result<
-    (
-        Option<safe_cex_engine::signing::Provider>,
-        safe_cex_engine::signing::Identities,
-    ),
-    VenueError,
-> {
-    use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-    let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
-    if options.public_data_only || !present(&options.key) || !present(&options.secret) {
-        return Ok((None, Default::default()));
-    }
-    // Native: no Primary passphrase refuses any slot; an absent Secondary
-    // passphrase inherits Primary's; an empty effective one (including an
-    // explicit empty Secondary, which never falls back) is refused.
-    let passphrase = |read: Option<&String>| {
-        options
-            .passphrase
-            .as_ref()
-            .map(|primary| read.unwrap_or(primary).clone())
-            .filter(|value| !value.is_empty())
-            .map(Secret::new)
-    };
-    let setup = LocalSetup {
-        primary: Some(LocalIdentity {
-            key: Secret::new(options.key.clone().unwrap_or_default()),
-            secret: Secret::new(options.secret.clone().unwrap_or_default()),
-            passphrase: passphrase(None),
-            ..Default::default()
-        }),
-        secondary: options.read_credentials.as_ref().map(|read| LocalIdentity {
-            key: Secret::new(read.key.clone()),
-            secret: Secret::new(read.secret.clone()),
-            passphrase: passphrase(read.passphrase.as_ref()),
-            ..Default::default()
-        }),
-    };
-    let (signer, identities) =
-        LocalSigner::from_setup(setup).map_err(|_| invalid("Invalid BloFin signer setup"))?;
-    Ok((Some(std::sync::Arc::new(signer)), identities))
-}
-
 /// Orderly's one provider setup: the Ed25519 seed is installed as declared
 /// base58 and signs every private read and the socket auth. The presented key
 /// is native's `ed25519:`-prefixed public key; either string may carry the prefix.
@@ -535,7 +500,7 @@ pub fn supported(venue: &str) -> bool {
         #[cfg(feature = "asterdex")]
         "asterdex" => true,
         #[cfg(feature = "orderly")]
-        "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => true,
+        "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => true,
         #[cfg(feature = "lighter")]
         "lighter" | "lighter-robinhood" => true,
         #[cfg(feature = "bitrue")]
@@ -551,7 +516,7 @@ pub fn supported(venue: &str) -> bool {
         #[cfg(feature = "phemex")]
         "phemex" => true,
         #[cfg(feature = "binance")]
-        "binance" | "binancepm" | "binancespot" | "binanceinverse" => true,
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" | "binanceoptions" => true,
         #[cfg(feature = "kucoinspot")]
         "kucoinspot" => true,
         #[cfg(feature = "kucoin")]
@@ -908,7 +873,11 @@ fn prepare_local_signer_with_policy(
     VenueError,
 > {
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, Secret};
-    let primary =
+    #[cfg_attr(
+        not(any(feature = "kucoin", feature = "kucoinspot")),
+        allow(unused_mut)
+    )]
+    let mut primary =
         if options.key.is_some() || options.secret.is_some() || options.passphrase.is_some() {
             Some(LocalIdentity {
                 key: Secret::new(options.key.take().unwrap_or_default()),
@@ -919,6 +888,14 @@ fn prepare_local_signer_with_policy(
         } else {
             None
         };
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+    if policy
+        .primary
+        .and_then(|rule| rule.extra)
+        .is_some_and(|extra| extra.key == safe_cex_engine::signing::ExtraKey::KucoinBroker)
+    {
+        kucoin_setup::take_broker(options, primary.as_mut());
+    }
     use construction::ReadCredentialsPolicy;
     // A public-only PublicRead provider holds no primary, so only Read roles select.
     let primary = primary.filter(|_| !public_read_excludes_primary(read_policy, public_data_only));
@@ -1329,6 +1306,39 @@ fn read_key_options(
     Ok(())
 }
 
+/// Venues converted for frame-fed engines (`safe_cex_engine::frame_fed`): their
+/// startup honours `Cx::frame_fed` and their write paths read only the store
+/// and the VENUE_STATE they export. Others are refused at construction.
+pub const FRAME_FED_VENUES: &[&str] = &[
+    "binance",
+    "binanceinverse",
+    "binancepm",
+    "binancespot",
+    "bingx",
+    "bitget",
+    "bitgetinverse",
+    "bitgetusdc",
+    "blofin",
+    "bybit",
+    "bybitinverse",
+    "bybitspot",
+    "bybitdemo",
+    "hyperliquid",
+    "hyperliquidspot",
+    "lighter",
+    "lighter-robinhood",
+    "okx",
+    "okxeu",
+    "okxdemo",
+    "okxeudemo",
+    "paradex",
+    "phemex",
+];
+
+pub fn frame_fed_supported(venue: &str) -> bool {
+    FRAME_FED_VENUES.contains(&venue)
+}
+
 /// Generic options contain opaque references; provider owns all credentials.
 pub fn build_with_signer<T: Visit>(
     venue: &str,
@@ -1421,8 +1431,17 @@ pub fn build_with_signer<T: Visit>(
     if options.private_only && policy == PublicFeedPolicy::Direct {
         return Err(invalid("privateOnly cannot use direct public feeds"));
     }
+    if options.frame_fed {
+        if !frame_fed_supported(venue) {
+            return Err(invalid(format!("frameFed is not supported for {venue}")));
+        }
+        if options.public_data_only {
+            return Err(invalid("frameFed needs an account that can sign"));
+        }
+    }
     let startup = Startup {
-        account: options.account_startup,
+        account: options.account_startup && !options.frame_fed,
+        frame_fed: options.frame_fed,
         private_feed: remote_signing_policy(venue).private_feed(options.payload_signer),
         log_level: match options.log_level.as_deref() {
             None => Level::Info,
@@ -1686,7 +1705,7 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "orderly")]
-        "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+        "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => {
             orderly_rules(&options)?;
             let (provider, identities) = orderly_signer(&options)?;
             let mut engine = Engine::new(
@@ -1694,10 +1713,9 @@ pub fn build_with_signer<T: Visit>(
                     broker: match venue {
                         "kodiakfi" => OrderlyBroker::KodiakFi,
                         "mode" => OrderlyBroker::Mode,
-                        "salsadex" => OrderlyBroker::SalsaDex,
                         "what" => OrderlyBroker::What,
                         "woofi" => OrderlyBroker::WooFi,
-                        _ => OrderlyBroker::Tealstreet,
+                        _ => OrderlyBroker::Orderly,
                     },
                     public_data_only: options.public_data_only,
                     testnet: options.testnet,
@@ -1756,6 +1774,7 @@ pub fn build_with_signer<T: Visit>(
                     api_key_index: options.api_key_index.take(),
                     integrator_account_index: options.lighter_integrator_account_index.take(),
                     stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
+                    ws_routed: options.lighter_ws_route,
                 }),
                 entropy,
             )?;
@@ -1873,7 +1892,24 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "blofin")]
         "blofin" => {
-            let (provider, identities) = blofin_signer(&options)?;
+            if [&options.key, &options.secret]
+                .iter()
+                .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "BloFin credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
             let mut engine = Engine::new(
                 Blofin::new(BlofinOptions {
                     broker_attribution: options.broker_attribution,
@@ -1883,7 +1919,7 @@ pub fn build_with_signer<T: Visit>(
                 }),
                 entropy,
             )?;
-            engine.set_signer(provider)?;
+            engine.set_signer(signer)?;
             engine.set_identities(identities)?;
             finish(visitor, policy, startup, engine)
         }
@@ -1946,7 +1982,7 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "binance")]
-        "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" | "binanceoptions" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
                 || options.secret.as_ref().is_some_and(|s| !s.is_empty())
                 || options.read_credentials.is_some()
@@ -1977,6 +2013,7 @@ pub fn build_with_signer<T: Visit>(
                         "binancepm" => BinanceVariant::PortfolioMargin,
                         "binancespot" => BinanceVariant::Spot,
                         "binanceinverse" => BinanceVariant::CoinM,
+                        "binanceoptions" => BinanceVariant::Options,
                         _ => BinanceVariant::UsdM,
                     },
                 }),
@@ -1987,41 +2024,21 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "kucoinspot")]
-        "kucoinspot" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                KucoinSpot::new(KucoinOptions {
-                    read_credentials: options.read_credentials.take(),
-                    broker: options.extra.take().and_then(|e| e.kucoin_broker),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
-                }),
-                entropy,
-            )?,
-        ),
+        "kucoinspot" => {
+            let (venue, identities) = kucoin_setup::venue_options(&mut options, signer.is_some())?;
+            let mut engine = Engine::new(KucoinSpot::new(venue), entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "kucoin")]
-        "kucoin" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Kucoin::new(KucoinOptions {
-                    read_credentials: options.read_credentials.take(),
-                    broker: options.extra.take().and_then(|e| e.kucoin_broker),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
-                }),
-                entropy,
-            )?,
-        ),
+        "kucoin" => {
+            let (venue, identities) = kucoin_setup::venue_options(&mut options, signer.is_some())?;
+            let mut engine = Engine::new(Kucoin::new(venue), entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bingx")]
         "bingx" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -2308,7 +2325,7 @@ pub struct PublicFeedOptions {
 #[serde(rename_all = "camelCase")]
 pub struct KucoinExtra {
     #[serde(default)]
-    pub kucoin_broker: Option<safe_cex_venue_kucoin::sign::BrokerOptions>,
+    pub kucoin_broker: Option<kucoin_setup::BrokerInput>,
 }
 
 #[cfg(any(
@@ -2350,6 +2367,10 @@ pub struct EngineOptions {
     pub signing: Option<safe_cex_engine::signing::Identities>,
     #[serde(default)]
     pub private_only: bool,
+    /// The browser's main-thread engine, fed by a data source's frames
+    /// (`safe_cex_engine::frame_fed`), for the venues in [`FRAME_FED_VENUES`].
+    #[serde(default)]
+    pub frame_fed: bool,
     /// The SDK sets this when the account can sign (not public-data-only).
     #[serde(default)]
     pub account_startup: bool,
@@ -2393,6 +2414,9 @@ pub struct EngineOptions {
     #[cfg(feature = "lighter")]
     #[serde(default)]
     pub lighter_stop_slippage_pct: Option<f64>,
+    /// The account's sockets go through Tealstreet's WS route (`tealstreetWsRoute`).
+    #[serde(default)]
+    pub lighter_ws_route: bool,
     #[cfg(feature = "lighter")]
     #[serde(default)]
     pub lighter_remote_signer: bool,

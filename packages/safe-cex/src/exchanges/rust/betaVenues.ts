@@ -7,23 +7,28 @@ import { deriveRemoteSigningPolicy } from './construction';
 export const BETA_VENUES = Object.freeze([
   'binance',
   'binancepm',
+  'binanceoptions',
   'binancespot',
   'binanceinverse',
   'bybit',
   'bybitspot',
   'bybitinverse',
   'bybitdemo',
+  'hyrotrader',
   'okx',
   'okxdemo',
   'okxeu',
   'okxeudemo',
   'bitget',
   'bitgetusdc',
+  'bitgetinverse',
   'kraken',
   'krakenspot',
   'hyperliquid',
   'hyperliquidspot',
   'lighter',
+  // Robinhood shares Lighter's beta family and existing Hosted signing policy.
+  'lighter-robinhood',
   'paradex',
   'bitunix',
   'phemex',
@@ -32,6 +37,18 @@ export const BETA_VENUES = Object.freeze([
   'blofin',
   'cryptocom',
   'asterdex',
+  'mexc',
+  'woo',
+  'kucoin',
+  'kucoinspot',
+  'coinbase',
+  'coinbasespot',
+  'grvt',
+  'kodiakfi',
+  'mode',
+  'what',
+  'woofi',
+  'backpack',
 ] as const satisfies readonly ExchangeName[]);
 
 export const isBetaVenue = (name: string): name is (typeof BETA_VENUES)[number] =>
@@ -50,7 +67,7 @@ export const assertBetaAccount = (name: ExchangeName, options: Partial<ExchangeO
   if (
     options.publicDataOnly !== true &&
     (options.remoteSigner || options.payloadSigner) &&
-    (name === 'paradex' || deriveRemoteSigningPolicy(name)?.enabled !== true)
+    deriveRemoteSigningPolicy(name)?.enabled !== true
   ) {
     const message = `${name} delegated signing is unsupported in this build`;
     throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });

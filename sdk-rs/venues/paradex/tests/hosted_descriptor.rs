@@ -127,8 +127,16 @@ fn auth_create_and_modify_digests_equal_independent_starknet_js() {
         stop["stp"] = Value::Null;
         stop["clientId"] = Value::Null;
         assert_eq!(
-            single(&create("orders", stop), &case),
+            single(&create("orders", stop.clone()), &case),
             vector(&case, "stop-market")
+        );
+        // Native's attached stop-loss child: the same presence as STOP_MARKET.
+        stop["orderType"] = json!("STOP_LOSS_MARKET");
+        assert!(parse(&create("orders", stop.clone())).is_ok());
+        stop["triggerPrice"] = Value::Null;
+        assert_eq!(
+            parse(&create("orders", stop)),
+            Err(DescriptorError::Presence)
         );
         assert_eq!(
             single(&modify(case.now, "LIMIT", "12500.12345678", None), &case),

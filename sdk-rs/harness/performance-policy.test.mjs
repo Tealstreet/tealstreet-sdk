@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { median, performanceFailures, performanceMetricErrors, performanceOrder, replayRunCount, smallWindowRunCount, SMALL_WINDOW_RUNS } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, median, performanceFailures, performanceMetricErrors, performanceOrder, replayRunCount } from './performance-policy.mjs';
 
-test('public performance requires seven or more complete interleaved pairs', () => {
-  assert.equal(replayRunCount(undefined, false), 7);
-  for (const value of ['0', '1', '3', '6', '7.5', '-7', 'NaN', 'Infinity']) assert.throws(() => replayRunCount(value, false));
-  assert.equal(replayRunCount('8', false), 8);
+test('public performance requires a complete even interleaved budget', () => {
+  assert.equal(replayRunCount(undefined, false), PUBLIC_REPLAY_PAIRS);
+  for (const value of ['0', '1', '3', '6', '7.5', '9', '11', '12', '13', '14', '-7', 'NaN', 'Infinity']) assert.throws(() => replayRunCount(value, false));
+  assert.equal(replayRunCount('16', false), 16);
   assert.equal(replayRunCount(undefined, true), 1);
   assert.deepEqual(Array.from({ length: 7 }, (_, index) => performanceOrder(index).join(',')),
     ['ts,rust', 'rust,ts', 'ts,rust', 'rust,ts', 'ts,rust', 'rust,ts', 'ts,rust']);
@@ -26,8 +26,8 @@ test('ten percent margin is inclusive and process CPU is an independent gate', (
 });
 
 test('sub-100 ms main and steady CPU objectives allow max(1 ms, 5%); process CPU and memory stay strict', () => {
-  const ts = Array.from({ length: 9 }, () => ({ cpuMs: 4, steadyCpuMs: 60, processCpuMs: 4, retainedBytes: 100 }));
-  const rust = (values) => Array.from({ length: 9 }, () => ({ cpuMs: 5, steadyCpuMs: 63, processCpuMs: 3.6, retainedBytes: 90, ...values }));
+  const ts = Array.from({ length: PUBLIC_REPLAY_PAIRS }, () => ({ cpuMs: 4, steadyCpuMs: 60, processCpuMs: 4, retainedBytes: 100 }));
+  const rust = (values) => Array.from({ length: PUBLIC_REPLAY_PAIRS }, () => ({ cpuMs: 5, steadyCpuMs: 63, processCpuMs: 3.6, retainedBytes: 90, ...values }));
   assert.deepEqual(performanceFailures(ts, rust()), []);
   // 1 ms floor below 20 ms, 5% above it.
   assert.match(performanceFailures(ts, rust({ cpuMs: 5.001 })).join('\n'), /main-thread CPU: Rust must be within max\(1 ms, 5%\)/);
@@ -39,13 +39,6 @@ test('sub-100 ms main and steady CPU objectives allow max(1 ms, 5%); process CPU
   assert.deepEqual(performanceFailures(large, rust({ cpuMs: 90 })), []);
 });
 
-test('sub-100 ms main or steady TS windows get nine pairs; larger ones keep the requested count', () => {
-  const samples = (cpuMs, steadyCpuMs) => Array.from({ length: 7 }, () => ({ cpuMs, steadyCpuMs }));
-  assert.equal(smallWindowRunCount(7, samples(165, 18.6)), SMALL_WINDOW_RUNS);
-  assert.equal(smallWindowRunCount(7, samples(45, 150)), SMALL_WINDOW_RUNS);
-  assert.equal(smallWindowRunCount(7, samples(165, 100)), 7);
-  assert.equal(smallWindowRunCount(11, samples(5, 5)), 11);
-});
 
 test('every raw CPU sample and measurement contract is validated before aggregation', () => {
   const metrics = { baselineKind: 'idle-loaded', measuredMode: 'performance', cpuMs: 1, steadyCpuMs: 1, processCpuMs: 1 };
@@ -54,4 +47,14 @@ test('every raw CPU sample and measurement contract is validated before aggregat
     assert.ok(performanceMetricErrors({ ...metrics, [field]: value }, 'performance').length);
   assert.ok(performanceMetricErrors({ ...metrics, baselineKind: 'before-import' }, 'performance').length);
   assert.ok(performanceMetricErrors(metrics, 'correctness').length);
+});
+
+test('ordinary public measurements have a fixed even budget, independent of timing results', () => {
+  assert.equal(replayRunCount(undefined, false), 16);
+  for (const count of ['7', '9', '11', '12', '13', '14']) assert.throws(() => replayRunCount(count, false));
+  for (const count of [16, 18]) {
+    const first = Array.from({ length: count }, (_, i) => performanceOrder(i)[0]);
+    assert.equal(first.filter((impl) => impl === 'ts').length, count / 2);
+    assert.equal(replayRunCount(String(count), false), count);
+  }
 });

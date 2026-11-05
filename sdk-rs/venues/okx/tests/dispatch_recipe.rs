@@ -194,6 +194,6 @@ fn ws_uses_send_time_seconds_and_base64_without_moving_raw_time() {
         .unwrap();
     assert_eq!(
         text,
-        r#"{"op":"login","args":[{"apiKey":"test-key","passphrase":"test-passphrase","timestamp":"1234567890","sign":"qf8dggkdwH7IVTM6AIiNv9i1NS6Boqw3+pNUhrOWjWQ="}]}"#
+        r#"{"op":"login","args":[{"apiKey":"test-key","passphrase":"test-passphrase","timestamp":1234567890,"sign":"qf8dggkdwH7IVTM6AIiNv9i1NS6Boqw3+pNUhrOWjWQ="}]}"#
     );
 }

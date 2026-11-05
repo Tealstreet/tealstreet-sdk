@@ -29,7 +29,7 @@ export const PACKED_TICKER_FIELDS = [
 type PackedTickerField = (typeof PACKED_TICKER_FIELDS)[number];
 
 export const defaultStore: StoreData = {
-  latency: 0,
+  latency: null,
   balance: { used: 0, free: 0, total: 0, upnl: 0 },
   markets: [],
   tickers: [],

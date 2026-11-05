@@ -547,6 +547,13 @@ test('a terminal startup failure reaches the host with its structured detail', (
   assert.deepEqual(failures, [detail]);
 });
 
+test('an insufficient-balance refusal keeps its kind across the host bridge', () => {
+  const error = new ExchangeError('Margin is insufficient.', { kind: 'insufficientBalance', outcome: 'rejected', venueCode: '-2019' });
+  assert.equal(error.kind, 'insufficientBalance');
+  assert.equal(error.outcome, 'rejected');
+  assert.equal(new ExchangeError('x', { kind: 'insufficientFunds' }).kind, undefined);
+});
+
 test('socket feed identity and protocol recovery reach the account transport', () => {
   let received;
   const host = new EngineHost({}, {
@@ -862,6 +869,8 @@ test('socket health tracks open, first frame and every close path per channel wi
   assert.equal(changes, 2, 'open and first frame notify; later frames do not');
   assert.equal(host.socketHealth().private.open, 1);
   assert.equal(host.socketHealth().private.initialized, 1);
+  assert.equal(host.socketHealth().public.initialized, 0, 'a separate private socket does not initialize public');
+  assert.equal(host.socketHealth().public.open, 0);
   assert.ok(host.socketHealth().private.lastReceived > 0);
 
   // A connect still in flight is left alone, as in TS.
@@ -894,3 +903,37 @@ test('socket health tracks open, first frame and every close path per channel wi
   host.dispose();
   assert.equal(host.reconnectSockets(), 0);
 });
+
+for (const channel of ['private', 'public']) {
+  test(`multiplexed ${channel} socket carries public health without changing routing`, () => {
+    let callbacks;
+    let closes = 0;
+    let changes = 0;
+    const host = new EngineHost({
+      start: () => JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://shared', channel, publicTopics: true }]),
+      wsOpen: () => '', wsMessage: () => '', wsClose: () => { closes++; return ''; },
+    }, { now: () => 1, connect: (_url, handlers) => {
+      callbacks = handlers;
+      return { close() {} };
+    } }, { onSocketChange: () => changes++ });
+    host.start();
+    assert.equal(callbacks.channel, channel, 'routing/authentication role is unchanged');
+    assert.equal(callbacks.publicTopics, true);
+    assert.equal(host.socketHealth().public.initialized, 0);
+    callbacks.onOpen();
+    callbacks.onMessage('snapshot');
+    callbacks.onMessage('next');
+    assert.equal(host.socketHealth().public.open, 1);
+    assert.equal(host.socketHealth().public.initialized, 1);
+    assert.equal(host.socketHealth().private.initialized, channel === 'private' ? 1 : 0);
+    assert.equal(changes, 2, 'one notification per transition, not per declared channel');
+    assert.equal(host.reconnectSockets('public'), 1, 'public reconnect finds the shared physical socket');
+    callbacks.onClose(1000);
+    callbacks.onMessage('late');
+    assert.equal(closes, 1);
+    assert.equal(host.socketHealth().public.initialized, 0);
+    assert.equal(host.socketHealth().public.closes, 1);
+    assert.equal(host.socketHealth().private.closes, channel === 'private' ? 1 : 0);
+    host.dispose();
+  });
+}

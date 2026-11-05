@@ -1,6 +1,6 @@
 //! Classic futures queries: numbered pages for fills/orders, exact ledger offsets.
 use crate::{Kucoin, Pending};
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory as CursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, WindowOrder};
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
@@ -36,6 +36,7 @@ pub struct History {
     pub(crate) next_at: f64,
 }
 pub struct Request {
+    pub(crate) leg: Option<safe_cex_engine::request_context::Context>,
     owner: Box<CursorHistory<Row>>,
     kind: Kind,
     symbol: Option<String>,
@@ -56,10 +57,15 @@ pub struct Request {
     page_rows: Vec<Row>,
     minimum_offset: Option<u64>,
     invalid: bool,
-    retries: u8,
+    pub(crate) retries: u8,
     requests: u32,
     page_count: u64,
     window_count: u64,
+}
+impl Request {
+    pub(crate) fn root(&self) -> &safe_cex_engine::request_context::Context {
+        self.owner.root()
+    }
 }
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -300,6 +306,7 @@ impl Kucoin {
                 (Kind::Trades, Some(symbol), None, None, None, None, limit)
             }
         };
+        let open_window = from.is_some() && limit.is_none();
         if order.as_ref().is_some_and(|id| {
             id.is_empty()
                 || id.len() > 100
@@ -405,9 +412,20 @@ impl Kucoin {
             .map(|(a, b)| (a as u64, b as u64))
             .collect();
         let (first_start, first_end) = windows.pop_front().unwrap_or((start, end));
+        if limit == Some(0) {
+            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
+                return;
+            };
+            let _ = cx.done_context(&context, "[]".into());
+            return;
+        }
+        let Ok(root) = cx.admit_caller_read_root(None, None) else {
+            return;
+        };
         let request = Request {
+            leg: None,
             owner: Box::new(CursorHistory::new(
-                Completion::new(command),
+                ReadCompletion::from_context(cx, command, root).expect("fresh KuCoin read root"),
                 CursorWalk::new(MAX_REQUESTS),
                 |_| "KuCoin query exceeded page safety bound".into(),
                 |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
@@ -423,7 +441,11 @@ impl Kucoin {
             windows,
             page: 1,
             offset: None,
-            limit: limit.unwrap_or(if kind == Kind::Trades { 100 } else { 1000 }) as usize,
+            limit: match limit {
+                // A window with no limit walks to its start; no default may stop it.
+                None if open_window => usize::MAX,
+                limit => limit.unwrap_or(if kind == Kind::Trades { 100 } else { 1000 }) as usize,
+            },
             explicit_range,
             clipped,
             page_rows: Vec::new(),
@@ -434,13 +456,6 @@ impl Kucoin {
             page_count: 0,
             window_count: 0,
         };
-        if request.limit == 0 {
-            let Ok(context) = cx.admit_http_command(local_read_policy()) else {
-                return;
-            };
-            let _ = cx.done_context(&context, "[]".into());
-            return;
-        }
         self.history_schedule(cx, request);
     }
     fn history_schedule(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
@@ -463,7 +478,7 @@ impl Kucoin {
         r.invalid = false;
         r.requests += 1;
         if r.requests > MAX_REQUESTS {
-            r.owner.reject(
+            let _ = r.owner.reject(
                 cx,
                 VenueError::new("KuCoin query exceeded page safety bound"),
             );
@@ -681,7 +696,8 @@ impl Kucoin {
                 .is_ok_and(|e| e.code == "200000" && e.data.is_some());
         if !valid {
             let rejected = envelope.as_ref().is_ok_and(|e| e.code == "400005");
-            if (status == 0 || status == 429 || status >= 500 || rejected)
+            if !envelope.as_ref().is_ok_and(|e| e.code == "400002")
+                && (status == 0 || status == 429 || status >= 500 || rejected)
                 && r.retries < if rejected { 1 } else { 3 }
             {
                 r.retries += 1;
@@ -722,7 +738,8 @@ impl Kucoin {
                 || page.current_page >= page.total_page
                     && r.window_count + r.page_count < page.total_num
             {
-                r.owner
+                let _ = r
+                    .owner
                     .reject(cx, VenueError::new("Invalid KuCoin page census"));
                 return;
             }
@@ -731,8 +748,15 @@ impl Kucoin {
         r.window_count += r.page_count;
         let mut fresh = 0;
         for row in r.page_rows.drain(..) {
-            if r.owner.fresh(row.key()) {
-                r.owner.stage(row);
+            if r.owner
+                .admit(cx, r.leg.as_ref().unwrap())
+                .unwrap()
+                .fresh(row.key())
+            {
+                r.owner
+                    .admit(cx, r.leg.as_ref().unwrap())
+                    .unwrap()
+                    .stage(row);
                 fresh += 1;
             }
         }
@@ -745,7 +769,8 @@ impl Kucoin {
                     .minimum_offset
                     .filter(|n| r.offset.is_none_or(|old| *n < old))
                 else {
-                    r.owner
+                    let _ = r
+                        .owner
                         .reject(cx, VenueError::new("KuCoin ledger cursor did not advance"));
                     return;
                 };
@@ -765,25 +790,32 @@ impl Kucoin {
             r.offset = None;
             next = Some(format!("{start}:{end}:1:None"));
         } else if !capped && r.clipped {
-            r.owner
+            let _ = r
+                .owner
                 .reject(cx, VenueError::new("KuCoin history range is too large"));
             return;
         }
-        match r.owner.advance(CursorPage {
-            next,
-            rows: r.page_count as usize,
-            fresh,
-            want_more: true,
-        }) {
+        match r
+            .owner
+            .admit(cx, r.leg.as_ref().unwrap())
+            .unwrap()
+            .advance(CursorPage {
+                next,
+                rows: r.page_count as usize,
+                fresh,
+                want_more: true,
+            }) {
             CursorStep::More(_) => {
                 r.retries = 0;
                 self.history_schedule(cx, r);
             }
             CursorStep::Done => self.history_finish(cx, r, Ok(())),
-            CursorStep::Stalled(_) => r.owner.reject(
-                cx,
-                VenueError::new("KuCoin query exceeded page safety bound"),
-            ),
+            CursorStep::Stalled(_) => {
+                let _ = r.owner.reject(
+                    cx,
+                    VenueError::new("KuCoin query exceeded page safety bound"),
+                );
+            }
         }
     }
     fn history_finish(
@@ -794,7 +826,7 @@ impl Kucoin {
     ) {
         let limit = r.limit;
         let uncapped = r.kind == Kind::Income && r.explicit_range;
-        r.owner.finish_with(cx, result, |mut rows| {
+        let _ = r.owner.finish_with(cx, result, |mut rows| {
             rows.sort_by(|a, b| {
                 b.time()
                     .total_cmp(&a.time())
@@ -819,16 +851,19 @@ impl Kucoin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Options;
+    use crate::support::credentials::Options;
     use safe_cex_engine::model::{Limits, Market, MinMax, Precision};
     use safe_cex_engine::{Action, Engine, Event, Notice, Response};
     fn engine() -> Engine<Kucoin> {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-            key: Some("fixture-key".into()),
-            secret: Some("fixture-secret".into()),
-            passphrase: Some("fixture-passphrase".into()),
-            ..Default::default()
-        }));
+        let mut e = crate::support::credentials::engine(
+            Options {
+                key: Some("fixture-key".into()),
+                secret: Some("fixture-secret".into()),
+                passphrase: Some("fixture-passphrase".into()),
+                ..Default::default()
+            },
+            Kucoin::new,
+        );
         e.store_mut().set_markets(vec![Market {
             id: "XBTUSDTM".into(),
             symbol: "BTCUSDT".into(),
@@ -867,15 +902,19 @@ mod tests {
             2_000_000_000_000.0,
             Event::Command(safe_cex_engine::Command::Query { command: 77, query }),
         );
-        e.drain_actions()
-            .find_map(|a| {
-                if let Action::Http(r) = a {
-                    Some(r)
-                } else {
-                    None
-                }
-            })
-            .unwrap()
+        safe_cex_engine::test_support::prepared_actions(
+            e,
+            safe_cex_engine::test_support::dispatch_now(e),
+        )
+        .into_iter()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap()
     }
     fn reply(e: &mut Engine<Kucoin>, r: safe_cex_engine::HttpRequest, body: &str) -> Vec<Action> {
         e.handle(
@@ -889,7 +928,10 @@ mod tests {
                 },
             },
         );
-        e.drain_actions().collect()
+        safe_cex_engine::test_support::prepared_actions(
+            e,
+            safe_cex_engine::test_support::dispatch_now(e),
+        )
     }
     fn done(actions: &[Action]) -> &str {
         actions
@@ -905,7 +947,7 @@ mod tests {
     }
     #[test]
     fn client_id_lookup_fails_explicitly_without_network_io() {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options::default()));
+        let mut e = crate::support::credentials::engine(Options::default(), Kucoin::new);
         e.handle(
             1740640088002.5,
             Event::Command(safe_cex_engine::Command::Query {
@@ -916,7 +958,9 @@ mod tests {
                 },
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = crate::support::actions(&mut e)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert_eq!(actions.len(), 1);
         assert!(matches!(
             &actions[0],
@@ -1075,8 +1119,8 @@ mod tests {
                 })
                 .unwrap();
             e.handle(at, Event::TimerFired { timer });
-            r = e
-                .drain_actions()
+            r = crate::support::actions(&mut e)
+                .into_iter()
                 .find_map(|a| match a {
                     Action::Http(r) => Some(r),
                     _ => None,
@@ -1141,8 +1185,8 @@ mod tests {
                 })
                 .unwrap();
             e.handle(at, Event::TimerFired { timer });
-            let r = e
-                .drain_actions()
+            let r = crate::support::actions(&mut e)
+                .into_iter()
                 .find_map(|a| match a {
                     Action::Http(r) => Some(r),
                     _ => None,
@@ -1197,7 +1241,9 @@ mod tests {
                 1_740_640_088_002.5,
                 Event::Command(safe_cex_engine::Command::Query { command: 77, query }),
             );
-            let actions = e.drain_actions().collect::<Vec<_>>();
+            let actions = crate::support::actions(&mut e)
+                .into_iter()
+                .collect::<Vec<_>>();
             let request = actions
                 .iter()
                 .find_map(|a| {
@@ -1230,7 +1276,9 @@ mod tests {
                     },
                 }),
             );
-            let actions = e.drain_actions().collect::<Vec<_>>();
+            let actions = crate::support::actions(&mut e)
+                .into_iter()
+                .collect::<Vec<_>>();
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(
                 actions
@@ -1268,8 +1316,8 @@ mod tests {
             })
             .unwrap();
         e.handle(at, Event::TimerFired { timer });
-        let request = e
-            .drain_actions()
+        let request = crate::support::actions(&mut e)
+            .into_iter()
             .find_map(|a| {
                 if let Action::Http(r) = a {
                     Some(r)
@@ -1313,7 +1361,7 @@ mod tests {
     }
     #[test]
     fn public_trades_need_no_credentials() {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options::default()));
+        let mut e = crate::support::credentials::engine(Options::default(), Kucoin::new);
         e.store_mut()
             .set_markets(engine().store().markets().to_vec());
         let r = query(
@@ -1361,7 +1409,9 @@ mod tests {
                 },
             }),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = crate::support::actions(&mut e)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         assert!(
             actions

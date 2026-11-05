@@ -716,35 +716,128 @@ fn filled_order_is_neither_replaced_nor_changed_to_canceled_by_cancel_ack() {
     );
 }
 
+/// Below one contract is refused, naming the minimum, instead of silently becoming one.
 #[test]
-fn optimistic_quantity_matches_minimum_snapped_submission() {
-    let mut e = ready();
-    let mut opts = order();
-    opts.amount = 0.1;
+fn a_size_below_one_contract_is_refused_not_rounded_up() {
+    for (command, amount) in [(1, 0.1), (2, 0.02)] {
+        let mut e = ready();
+        let mut opts = order();
+        opts.amount = amount;
+        e.handle(
+            200.0,
+            Event::Command(Command::PlaceOrders {
+                command,
+                orders: vec![opts],
+            }),
+        );
+        let actions = prepared(&mut e, 200.0);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "{amount}"
+        );
+        assert!(
+            actions.iter().any(|a| format!("{a:?}")
+                .contains("MEXC order size is below the 1 contract minimum (0.0001 BTC)")),
+            "{actions:?}"
+        );
+    }
+}
+
+/// Whole contracts pass through, and half a contract or more rounds to the nearest one.
+#[test]
+fn contract_sizes_round_to_the_nearest_whole_contract() {
+    for (amount, vol) in [(200.0, "\"vol\":200.0"), (0.6, "\"vol\":1.0")] {
+        let mut e = ready();
+        let mut opts = order();
+        opts.amount = amount;
+        e.handle(
+            200.0,
+            Event::Command(Command::PlaceOrders {
+                command: 1,
+                orders: vec![opts],
+            }),
+        );
+        let r = requests(&mut e).remove(0);
+        assert!(r.body.as_ref().unwrap().contains(vol), "{:?}", r.body);
+        reply(
+            &mut e,
+            &r,
+            300.0,
+            r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+        );
+    }
+}
+
+/// A reduce-only order below one contract gets the same minimum refusal.
+#[test]
+fn a_reduce_only_order_below_one_contract_is_refused() {
+    let mut e = with_long_position();
+    let mut opts: PlaceOrderOpts = serde_json::from_str(
+        r#"{"symbol":"BTCUSDT","type":"market","side":"sell","amount":0.02,"reduceOnly":true}"#,
+    )
+    .unwrap();
+    opts.reduce_only = Some(true);
     e.handle(
-        200.0,
+        400.0,
         Event::Command(Command::PlaceOrders {
-            command: 1,
+            command: 9,
+            orders: vec![opts],
+        }),
+    );
+    let actions = prepared(&mut e, 400.0);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("below the 1 contract minimum")),
+        "{actions:?}"
+    );
+}
+
+/// MEXC's stop placement answers per row; a row with `errorCode` placed nothing.
+#[test]
+fn a_stop_row_with_an_error_code_is_a_failure_not_order_zero() {
+    let (mut e, _, reads, _) = private_started();
+    for r in reads {
+        let body = if r.url.contains("open_positions") {
+            r#"{"success":true,"code":0,"data":[{"positionId":739113577038255616,"symbol":"BTC_USDT","positionType":1,"positionMode":2,"holdVol":60,"holdAvgPrice":60000,"leverage":10,"openType":1}]}"#
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#
+        };
+        response(&mut e, &r, body);
+    }
+    e.drain_actions().for_each(drop);
+    let mut opts = order();
+    opts.kind = safe_cex_engine::model::OrderType::StopLoss;
+    opts.side = safe_cex_engine::model::OrderSide::Sell;
+    opts.amount = 0.0;
+    opts.price = Some(55000.0);
+    e.handle(
+        500.0,
+        Event::Command(Command::PlaceOrders {
+            command: 2,
             orders: vec![opts],
         }),
     );
     let r = requests(&mut e).remove(0);
-    assert!(r.body.as_ref().unwrap().contains("\"vol\":1.0"));
+    assert!(r.url.ends_with("/stoporder/place"));
     reply(
         &mut e,
         &r,
-        300.0,
-        r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+        600.0,
+        r#"{"success":true,"code":0,"message":"","data":[{"id":0,"symbol":"BTC_USDT","orderId":0,"errorCode":2009}]}"#,
     );
-    assert_eq!(
-        e.store()
-            .order("one")
-            .unwrap()
-            .extra
-            .as_ref()
-            .unwrap()
-            .remaining_native,
-        Some(1.0)
+    let out: Vec<_> = e.drain_actions().collect();
+    assert!(e.store().order("0").is_none());
+    assert!(
+        out.iter().any(|a| matches!(
+            a,
+            safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandFailed {
+                command: 2,
+                ..
+            })
+        )),
+        "{out:?}"
     );
 }
 
@@ -1268,8 +1361,7 @@ fn targeted_open_mexc_leg_uses_its_native_position_id_and_preserves_other_positi
     );
 }
 
-#[test]
-fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown() {
+fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown_with(refusal: &str) {
     let mut e = ready();
     for command in [1, 2] {
         e.handle(
@@ -1305,12 +1397,7 @@ fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown()
     e.handle(650.0, Event::TimerFired { timer });
     let second = requests(&mut e).remove(0);
     assert!(second.url.ends_with("/order/submit"));
-    reply(
-        &mut e,
-        &second,
-        700.0,
-        r#"{"success":false,"code":510,"message":"Requests are too frequent"}"#,
-    );
+    reply(&mut e, &second, 700.0, refusal);
     e.drain_actions().for_each(drop);
     e.handle(
         750.0,
@@ -1332,6 +1419,21 @@ fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown()
         .unwrap();
     e.handle(2200.0, Event::TimerFired { timer });
     assert!(requests(&mut e).remove(0).url.ends_with("/order/submit"));
+}
+
+#[test]
+fn singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown() {
+    singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown_with(
+        r#"{"success":false,"code":510,"message":"Requests are too frequent"}"#,
+    );
+}
+
+/// Legacy cooled down on the venue's too-frequent text as well as code 510.
+#[test]
+fn a_too_frequent_refusal_without_code_510_also_cools_submits_down() {
+    singleton_orders_use_regular_submit_with_450ms_pacing_and_throttle_cooldown_with(
+        r#"{"success":false,"code":1002,"message":"Requests are too frequent"}"#,
+    );
 }
 
 #[test]
@@ -1574,4 +1676,483 @@ fn failures_after_an_effective_step_are_never_rejected_or_not_sent() {
     );
     let [error] = failures(&mut e).try_into().unwrap();
     assert_eq!(error.outcome, None, "{error:?}");
+}
+
+fn amend_fixture() -> (TestEngine, safe_cex_engine::SocketId) {
+    let (mut e, socket, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.order","data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":10,"price":59000,"state":2}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    (e, socket)
+}
+
+fn amend_small_contract(amount: Option<f64>, expected_volume: f64) {
+    let markets = MARKETS
+        .replace("BTC_USDT", "XMR_USDT")
+        .replace("\"baseCoin\":\"BTC\"", "\"baseCoin\":\"XMR\"")
+        .replace("\"contractSize\":0.0001", "\"contractSize\":0.01");
+    let (mut e, socket, reads, _) = private_started_with_markets(&markets);
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.order","data":{"orderId":"small","symbol":"XMR_USDT","side":1,"orderType":1,"vol":20,"dealVol":5,"price":300,"state":2}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    let existing = e.store().order("small").unwrap();
+    assert_eq!(existing.amount, 0.2);
+    assert_eq!(
+        existing.extra.as_ref().unwrap().remaining_native,
+        Some(15.0)
+    );
+    e.handle(
+        300.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "small".into(),
+            price: Some(310.0),
+            amount,
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    assert!(cancel.url.ends_with("/order/cancel"));
+    reply(
+        &mut e,
+        &cancel,
+        400.0,
+        r#"{"success":true,"code":0,"data":[{"orderId":"small","errorCode":0}]}"#,
+    );
+    let read = requests(&mut e).remove(0);
+    assert!(read.url.ends_with("/order/get/small"));
+    reply(
+        &mut e,
+        &read,
+        450.0,
+        r#"{"success":true,"code":0,"data":{"orderId":"small","symbol":"XMR_USDT","side":1,"orderType":1,"vol":20,"dealVol":5,"price":300,"state":4}}"#,
+    );
+    let replacement = requests(&mut e).remove(0);
+    assert!(replacement.url.ends_with("/order/submit"));
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["symbol"], "XMR_USDT");
+    assert_eq!(body["vol"], expected_volume);
+    assert_eq!(body["price"], "310");
+}
+
+#[test]
+fn price_only_amend_keeps_native_quantity_for_a_subunit_contract() {
+    amend_small_contract(None, 15.0);
+}
+
+#[test]
+fn explicit_amend_amount_is_a_native_total_for_a_subunit_contract() {
+    amend_small_contract(Some(20.0), 15.0);
+    amend_small_contract(Some(30.0), 25.0);
+}
+
+fn amend_full_position_stop(amount: Option<f64>, updated_position: Option<f64>) {
+    for take_profit in [false, true] {
+        let (mut e, socket, reads, _) = private_started();
+        for r in reads {
+            let body = if r.url.contains("open_positions") {
+                r#"{"success":true,"code":0,"data":[{"positionId":"native","symbol":"BTC_USDT","positionType":1,"positionMode":1,"holdVol":60,"holdAvgPrice":60000,"leverage":7,"openType":1}]}"#
+            } else {
+                r#"{"success":true,"code":0,"data":[]}"#
+            };
+            response(&mut e, &r, body);
+        }
+        e.drain_actions().for_each(drop);
+        let row = if take_profit {
+            r#"{"id":"full","symbol":"BTC_USDT","positionType":1,"vol":60,"volType":2,"triggerSide":1,"takeProfitPrice":65000,"state":1}"#
+        } else {
+            r#"{"id":"full","symbol":"BTC_USDT","positionType":1,"vol":60,"volType":2,"triggerSide":2,"stopLossPrice":55000,"state":1}"#
+        };
+        ws(
+            &mut e,
+            socket,
+            &format!(r#"{{"channel":"push.personal.stop.order","data":{row}}}"#),
+        );
+        let original = e.store().order("full").expect("native full-position stop");
+        assert_eq!(original.amount, 0.0);
+        assert_eq!(original.extra.as_ref().unwrap().remaining_native, Some(0.0));
+        e.drain_actions().for_each(drop);
+        e.handle(
+            400.0,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "full".into(),
+                price: Some(if take_profit { 64000.0 } else { 54000.0 }),
+                amount,
+            }),
+        );
+        let actions = prepared(&mut e, 400.0);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. }))),
+            "a full-position stop must resolve its native quantity before checking the minimum: {actions:?}"
+        );
+        let cancel = actions
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .expect("native stop cancellation");
+        assert!(cancel.url.ends_with("/stoporder/cancel"));
+        if let Some(volume) = updated_position {
+            e.handle(
+                425.0,
+                Event::WsMessage {
+                    socket,
+                    text: &format!(r#"{{"channel":"push.personal.position","data":{{"positionId":"native","symbol":"BTC_USDT","positionType":1,"positionMode":1,"holdVol":{volume},"holdAvgPrice":60000,"leverage":7,"openType":1}}}}"#),
+                },
+            );
+            e.drain_actions().for_each(drop);
+        }
+        reply(&mut e, &cancel, 450.0, r#"{"success":true,"code":0}"#);
+        let replacement = requests(&mut e).remove(0);
+        let body: serde_json::Value =
+            serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+        if amount.unwrap_or(0.0) == 0.0 {
+            assert!(replacement.url.ends_with("/stoporder/place"));
+            assert_eq!(body["positionId"], "native");
+            assert_eq!(body["vol"], updated_position.unwrap_or(60.0));
+            assert_eq!(body["volType"], 2);
+            assert_eq!(
+                body[if take_profit {
+                    "takeProfitPrice"
+                } else {
+                    "stopLossPrice"
+                }],
+                if take_profit { "64000" } else { "54000" }
+            );
+        } else {
+            assert!(replacement.url.ends_with("/planorder/place/v2"));
+            assert_eq!(body["vol"], amount.unwrap());
+        }
+    }
+}
+
+#[test]
+fn price_only_full_position_stop_amend_resolves_current_contract_quantity() {
+    amend_full_position_stop(None, None);
+    amend_full_position_stop(None, Some(25.0));
+}
+
+#[test]
+fn explicit_full_position_stop_amend_keeps_zero_sentinel_and_positive_contract_amounts() {
+    amend_full_position_stop(Some(0.0), None);
+    amend_full_position_stop(Some(20.0), None);
+}
+
+#[test]
+fn reloaded_full_position_stop_amend_refuses_until_position_data_arrives() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let (mut e, socket, reads, _) = private_started();
+    let mut position_read = None;
+    for r in reads {
+        if r.url.contains("open_positions") {
+            position_read = Some(r);
+        } else {
+            response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+        }
+    }
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.stop.order","data":{"id":"full","symbol":"BTC_USDT","positionType":1,"vol":60,"volType":2,"triggerSide":2,"stopLossPrice":55000,"state":1}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    let original = e.store().order("full").unwrap().clone();
+    assert!(!e.store().loaded().positions);
+    e.handle(
+        300.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "full".into(),
+            price: Some(54000.0),
+            amount: None,
+        }),
+    );
+    let actions = prepared(&mut e, 300.0);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let errors: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].kind, Some(ErrorKind::VenueUnavailable));
+    assert_eq!(errors[0].outcome, Some(Outcome::NotSent));
+    assert!(errors[0].message.contains("position not loaded yet"));
+    assert!(!errors[0].message.contains("minimum"));
+    assert_eq!(e.store().order("full"), Some(&original));
+    reply(
+        &mut e,
+        &position_read.expect("genuine outstanding position read"),
+        350.0,
+        r#"{"success":true,"code":0,"data":[{"positionId":"native","symbol":"BTC_USDT","positionType":1,"positionMode":1,"holdVol":60,"holdAvgPrice":60000,"leverage":7,"openType":1}]}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        400.0,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "full".into(),
+            price: Some(54000.0),
+            amount: None,
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    assert!(cancel.url.ends_with("/stoporder/cancel"));
+    reply(&mut e, &cancel, 450.0, r#"{"success":true,"code":0}"#);
+    let replacement = requests(&mut e).remove(0);
+    assert!(replacement.url.ends_with("/stoporder/place"));
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["vol"], 60.0);
+    assert_eq!(body["volType"], 2);
+    assert_eq!(body["stopLossPrice"], "54000");
+}
+
+#[test]
+fn an_explicit_zero_regular_amend_does_not_become_a_full_position_order() {
+    let (mut e, _) = amend_fixture();
+    let original = e.store().order("one").unwrap().clone();
+    e.handle(
+        300.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "one".into(),
+            price: Some(58000.0),
+            amount: Some(0.0),
+        }),
+    );
+    let actions = prepared(&mut e, 300.0);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandFailed { command: 1, error })
+            if error.outcome == Some(safe_cex_engine::Outcome::NotSent)
+    )));
+    assert_eq!(e.store().order("one"), Some(&original));
+}
+
+#[test]
+fn an_amend_below_the_contract_minimum_is_refused_before_the_cancel() {
+    let (mut e, _) = amend_fixture();
+    e.handle(
+        300.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "one".into(),
+            price: None,
+            amount: Some(10.5),
+        }),
+    );
+    let actions = drained(&mut e);
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
+        "{actions:?}"
+    );
+    assert!(
+        format!("{actions:?}").contains("the order is unchanged"),
+        "{actions:?}"
+    );
+}
+
+#[test]
+fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
+    let (mut e, _) = amend_fixture();
+    e.handle(
+        300.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "one".into(),
+            price: Some(58000.0),
+            amount: None,
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &cancel,
+        400.0,
+        r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+    );
+    let read = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &read,
+        450.0,
+        r#"{"success":true,"code":0,"data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":59.5,"price":59000,"state":4}}"#,
+    );
+    let refused = failures(&mut e);
+    assert!(
+        refused
+            .iter()
+            .any(|f| f.message.contains("Your BTC_USDT order is gone")
+                || f.message.contains("Your BTCUSDT order is gone")),
+        "{refused:?}"
+    );
+}
+
+fn with_long_position() -> TestEngine {
+    let (mut e, socket, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.position","data":{"positionId":"native","symbol":"BTC_USDT","positionType":1,"positionMode":1,"holdVol":60,"holdAvgPrice":60000,"leverage":7,"openType":1}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e
+}
+
+fn market_close(e: &mut TestEngine, side: &str, close: Option<bool>, reduce: Option<bool>) {
+    let mut opts: PlaceOrderOpts = serde_json::from_str(&format!(
+        r#"{{"symbol":"BTCUSDT","type":"market","side":"{side}","amount":0}}"#
+    ))
+    .unwrap();
+    opts.close = close;
+    opts.reduce_only = reduce;
+    e.handle(
+        400.0,
+        Event::Command(Command::PlaceOrders {
+            command: 9,
+            orders: vec![opts],
+        }),
+    );
+}
+
+/// A position-panel market close sends no amount: it closes the whole position it reduces.
+#[test]
+fn a_market_close_without_an_amount_closes_the_whole_position() {
+    for (close, reduce) in [(Some(true), None), (Some(true), Some(true))] {
+        let mut e = with_long_position();
+        market_close(&mut e, "sell", close, reduce);
+        let sent = requests(&mut e);
+        assert_eq!(sent.len(), 1, "{close:?} {reduce:?}");
+        let body = sent[0].body.clone().unwrap();
+        assert!(body.contains("\"vol\":60"), "{body}");
+        assert!(body.contains("\"side\":4"), "{body}");
+        assert!(body.contains("\"reduceOnly\":true"), "{body}");
+    }
+    // Reduce-only alone is never widened to the whole position: amount 0 stays refused.
+    let mut e = with_long_position();
+    market_close(&mut e, "sell", None, Some(true));
+    let actions = prepared(&mut e, 400.0);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("MEXC order requires a positive native amount")),
+        "{actions:?}"
+    );
+    // Nothing to close on the short side: refused before any send.
+    let mut e = with_long_position();
+    market_close(&mut e, "buy", Some(true), None);
+    let actions = prepared(&mut e, 400.0);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("MEXC close requires an open position")),
+        "{actions:?}"
+    );
+}
+
+/// A reduce-only order closes the leg on its far side; with no such leg it is refused, not sent.
+#[test]
+fn a_reduce_only_order_with_nothing_to_reduce_is_refused_before_sending() {
+    for (side, sent) in [("sell", true), ("buy", false)] {
+        let mut e = with_long_position();
+        let opts: PlaceOrderOpts = serde_json::from_str(&format!(
+            r#"{{"symbol":"BTCUSDT","type":"limit","side":"{side}","amount":60,"price":60000,"reduceOnly":true}}"#
+        ))
+        .unwrap();
+        e.handle(
+            400.0,
+            Event::Command(Command::PlaceOrders {
+                command: 9,
+                orders: vec![opts],
+            }),
+        );
+        let actions = prepared(&mut e, 400.0);
+        let http: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => r.body.clone(),
+                _ => None,
+            })
+            .collect();
+        if sent {
+            assert_eq!(http.len(), 1);
+            assert!(
+                http[0].contains("\"side\":4") && http[0].contains("\"reduceOnly\":true"),
+                "{http:?}"
+            );
+        } else {
+            assert!(http.is_empty(), "{http:?}");
+            assert!(
+                actions.iter().any(|a| format!("{a:?}").contains(
+                    "MEXC reduce-only buy needs an open short position on BTCUSDT to reduce"
+                )),
+                "{actions:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn clock_and_signature_refusals_never_probe_time_or_resend_a_placement() {
+    for code in [513, 602] {
+        let mut e = ready();
+        e.handle(
+            200.,
+            Event::Command(Command::PlaceOrders {
+                command: 991,
+                orders: vec![order()],
+            }),
+        );
+        let request = support::public_requests(&mut e, 200.)
+            .into_iter()
+            .find(|r| r.method == safe_cex_engine::Method::Post)
+            .expect("real placement");
+        reply(
+            &mut e,
+            &request,
+            201.,
+            &format!(r#"{{"success":false,"code":{code},"message":"refused"}}"#),
+        );
+        let actions = support::prepared(&mut e, 201.);
+        assert!(!actions.iter().any(|a| matches!(a,Action::Http(r)
+            if r.method!=safe_cex_engine::Method::Get || r.url.contains("/contract/ping"))));
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|a| matches!(
+                    a,
+                    Action::Notice(Notice::CommandFailed { command: 991, .. })
+                ))
+                .count(),
+            1
+        );
+    }
 }

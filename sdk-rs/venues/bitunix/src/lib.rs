@@ -51,6 +51,7 @@ pub enum Pending {
     Markets {
         context: Context,
         rows: Vec<Market>,
+        market_maxima: HashMap<String, f64>,
         invalid: bool,
     },
     Tickers {
@@ -152,6 +153,8 @@ pub struct BitunixFutures {
     candles: HashSet<(String, Interval)>,
     discovery: PublicRetries,
     funding_times: HashMap<String, f64>,
+    /// `maxMarketOrderVolume` by symbol; absent or zero falls back to the limit maximum.
+    market_maxima: HashMap<String, f64>,
 }
 impl BitunixFutures {
     pub fn new(options: Options) -> Self {
@@ -175,6 +178,7 @@ impl BitunixFutures {
             candles: HashSet::new(),
             discovery: PublicRetries::default(),
             funding_times: HashMap::new(),
+            market_maxima: HashMap::new(),
         }
     }
     fn read_policy() -> Policy {
@@ -213,6 +217,7 @@ impl BitunixFutures {
                 Pending::Markets {
                     context: context.clone(),
                     rows: Vec::new(),
+                    market_maxima: HashMap::new(),
                     invalid: false,
                 },
             ),
@@ -313,7 +318,9 @@ impl BitunixFutures {
                 return;
             }
             other => {
+                self.account.read_error = Some(error.clone());
                 self.on_request_failed(cx, other, &error.message);
+                self.account.read_error = None;
                 return;
             }
         };
@@ -345,6 +352,13 @@ impl BitunixFutures {
                 45_000.0
             },
             ping_interval_ms: Some(15_000.0),
+            auth_timeout_ms: matches!(feed, Feed::Private).then_some(LOGIN_ANSWER_MS),
+            // The venue closes private sockets at 22-30 s; a socket that long is no fault to back off.
+            stable_ms: if matches!(feed, Feed::Private) {
+                10_000.0
+            } else {
+                Config::default().stable_ms
+            },
             ..Config::default()
         });
         supervisor.connecting(cx);
@@ -497,6 +511,12 @@ impl BitunixFutures {
         Ok(())
     }
 }
+const LOGIN_ANSWER_MS: f64 = 10_000.0;
+/// Bitunix ignores a bare op; only this form draws a reply.
+fn private_ping(now: f64) -> String {
+    let seconds = (now / 1_000.0) as u64;
+    format!(r#"{{"op":"ping","ping":{seconds}}}"#)
+}
 fn topic_frame(topic: &str, subscribe: bool) -> String {
     format!(
         r#"{{"event":"{}","params":{{"channel":"{topic}"}}}}"#,
@@ -540,6 +560,9 @@ impl Venue for BitunixFutures {
     }
     // reconcile_uncertain starts the regular and tpsl census reads at once.
     fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         true
     }
     /// One mutation per order for its whole job, continuations included.
@@ -591,6 +614,7 @@ impl Venue for BitunixFutures {
             closed_positions: true,
             position_history: safe_cex_engine::PositionHistory::Bitunix,
             closed_position_format: safe_cex_engine::ClosedPositionFormat::Bitunix,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -601,6 +625,7 @@ impl Venue for BitunixFutures {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,
@@ -676,16 +701,19 @@ impl Venue for BitunixFutures {
             }
         }
         if matches!(s.feed, Feed::Private) {
-            cx.send(socket, r#"{"op":"ping"}"#);
+            cx.send(socket, private_ping(cx.now));
+            self.account.login_answered = false;
+            self.account.private_live = false;
             self.login(cx, socket);
-            if cx.store.loaded().positions {
-                for axis in [
-                    account::Axis::Balance,
-                    account::Axis::Positions,
-                    account::Axis::Orders,
-                ] {
-                    self.read_axis(cx, axis);
-                }
+            // Events before this open were never delivered, the first open included. A read
+            // in flight may predate it: it is marked dirty and re-read once answered. A
+            // positions answer reads TP/SL.
+            for axis in [
+                account::Axis::Balance,
+                account::Axis::Positions,
+                account::Axis::Orders,
+            ] {
+                self.read_axis(cx, axis);
             }
         } else {
             cx.send(socket, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
@@ -704,7 +732,8 @@ impl Venue for BitunixFutures {
         match serde_json::from_str::<Message<'_>>(text) {
             Ok(m) => {
                 if matches!(s.feed, Feed::Private) {
-                    if m.op == "pong" {
+                    // Bitunix answers {"op":"ping","pong":<ts>,"ping":<ts>}.
+                    if m.op == "pong" || (m.op == "ping" && m.pong) {
                         s.pong_observed = true;
                     }
                     self.private_message(cx, socket, &m);
@@ -738,52 +767,58 @@ impl Venue for BitunixFutures {
         match pending {
             Pending::Private(read) => self.account_item(cx, read, item),
             Pending::History(read) => self.history_item(cx, read, item),
-            Pending::Markets { rows, invalid, .. } => {
-                match serde_json::from_str::<Pair<'_>>(item) {
-                    Ok(m) => {
-                        if m.symbol_status == "OPEN"
-                            && m.quote == "USDT"
-                            && m.is_api_supported.as_ref().is_none_or(Supported::allowed)
-                        {
-                            rows.push(Market {
-                                id: format!("{}/{}", m.base, m.quote),
-                                symbol: m.symbol.into_owned(),
-                                base: m.base.into_owned(),
-                                quote: m.quote.into_owned(),
-                                active: true,
-                                precision: Precision {
-                                    amount: 10f64.powi(m.base_precision.0 as i32).recip(),
-                                    price: 10f64.powi(m.quote_precision.0 as i32).recip(),
-                                },
-                                limits: Limits {
-                                    amount: MinMax {
-                                        min: 0.0,
-                                        max: m.max_limit_order_volume.0,
-                                    },
-                                    leverage: MinMax {
-                                        min: 1.0,
-                                        max: 100.0,
-                                    },
-                                    price: None,
-                                },
-                                pretty_symbol: None,
-                                contract_size: None,
-                                is_expiring: None,
-                                is_inverse: None,
-                                is_spot: None,
-                                is_perpetual: None,
-                                is_read_only: None,
-                                taker_fee: None,
-                                maker_fee: None,
-                            });
+            Pending::Markets {
+                rows,
+                market_maxima,
+                invalid,
+                ..
+            } => match serde_json::from_str::<Pair<'_>>(item) {
+                Ok(m) => {
+                    if m.symbol_status == "OPEN"
+                        && m.quote == "USDT"
+                        && m.is_api_supported.as_ref().is_none_or(Supported::allowed)
+                    {
+                        if let Some(max) = m.max_market_order_volume.filter(|max| max.0 > 0.0) {
+                            market_maxima.insert(m.symbol.to_string(), max.0);
                         }
-                    }
-                    Err(_) => {
-                        *invalid = true;
-                        safe_cex_engine::startup::skipped_row(cx);
+                        rows.push(Market {
+                            id: format!("{}/{}", m.base, m.quote),
+                            symbol: m.symbol.into_owned(),
+                            base: m.base.into_owned(),
+                            quote: m.quote.into_owned(),
+                            active: true,
+                            precision: Precision {
+                                amount: 10f64.powi(m.base_precision.0 as i32).recip(),
+                                price: 10f64.powi(m.quote_precision.0 as i32).recip(),
+                            },
+                            limits: Limits {
+                                amount: MinMax {
+                                    min: 0.0,
+                                    max: m.max_limit_order_volume.0,
+                                },
+                                leverage: MinMax {
+                                    min: 1.0,
+                                    max: 100.0,
+                                },
+                                price: None,
+                            },
+                            pretty_symbol: None,
+                            contract_size: None,
+                            is_expiring: None,
+                            is_inverse: None,
+                            is_spot: None,
+                            is_perpetual: None,
+                            is_read_only: None,
+                            taker_fee: None,
+                            maker_fee: None,
+                        });
                     }
                 }
-            }
+                Err(_) => {
+                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
+            },
             Pending::Tickers { rows, invalid, .. } => match serde_json::from_str::<Daily<'_>>(item)
             {
                 Ok(t) => {
@@ -897,10 +932,14 @@ impl Venue for BitunixFutures {
         }
         match pending {
             Pending::Markets {
-                context, mut rows, ..
+                context,
+                mut rows,
+                market_maxima,
+                ..
             } if !rows.is_empty() => {
                 rows.shrink_to_fit();
                 cx.store.set_markets(rows);
+                self.market_maxima = market_maxima;
                 if cx.finish_http_context(&context).is_err() {
                     return;
                 }
@@ -1054,6 +1093,13 @@ impl Venue for BitunixFutures {
             );
         }
     }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
+    }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         self.public_typed_failed(cx, pending, error);
     }
@@ -1140,12 +1186,20 @@ impl Venue for BitunixFutures {
                     s.pong_observed = false;
                 }
                 SocketTick::TimedOut(_) => {
+                    if matches!(s.feed, Feed::Private) && !self.account.login_answered {
+                        // Silence is no refusal: auth.rejected would move the key to the refused path.
+                        cx.notice(
+                            Level::Warn,
+                            code::STREAM_UNAVAILABLE,
+                            "Bitunix did not answer the private socket login; reconnecting",
+                        );
+                    }
                     cx.close(s.id);
                     self.retire(cx, i, true);
                 }
                 SocketTick::Ping if s.active && s.opened => {
                     if matches!(s.feed, Feed::Private) {
-                        cx.send(s.id, r#"{"op":"ping"}"#);
+                        cx.send(s.id, private_ping(cx.now));
                     } else {
                         cx.send(s.id, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
                     }

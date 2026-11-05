@@ -1,11 +1,23 @@
 # Native transport routing
 
 `NetworkTransport::new()` connects directly. Account-backed server callers must
-pass the same resolved routing plan as the JavaScript host. The TypeScript SDK
-owns the venue table, metadata defaults, proxy pools, region choice and feature
-flags; the native host applies a plan and never resolves venue names itself.
+pass the same resolved routing plan as the JavaScript host.
 
-Resolve once at the account boundary, after normalizing its `ExchangeOptions`:
+A native server resolves it with `resolve::account_transport` (the hosted
+account's proxy/tunnel/region defaults) and `resolve::resolve_routing_plan`, a
+port of the TS resolver for the Tealstreet and direct providers with the browser
+relay gate off. Its data is `src/routing/table.json`, generated from the TS tables
+by `packages/safe-cex/src/transport/engine.native-routing-port.test.ts`
+(`UPDATE_NATIVE_ROUTING_PORT=1`), which also writes the TS plans that
+`tests/routing_port.rs` holds it to. Secondary read keys are not routed natively yet.
+The deployment can replace the Tealstreet hosts: `PROXY_PRIVATE_URL` sets every
+whitelisted private pool and `PROXY_PUBLIC_URL` the public CORS proxy (https), and
+`PROXY_TUNNEL_URL` every tunnel egress and the table routes under it (wss). Each
+must name a `tealstreet.io` host, with no query; a trailing `/` is dropped. Unset
+keeps the table's hosts. The exchange server reads them once at startup
+(`resolve::route_bases`), refuses a malformed one, and logs the effective bases.
+
+A JavaScript launcher instead resolves once at the account boundary, after normalizing its `ExchangeOptions`:
 
 ```ts
 import { resolveEngineRoutingPlan } from '@tealstreet/safe-cex/src/transport/engine';
@@ -184,6 +196,12 @@ Orphan IDs remain reserved until the venue finishes: disconnect never cancels or
 replays a potentially submitted trading write. A permanently stuck venue job
 therefore continues to occupy a bounded slot. Exhausted internal IDs fail closed
 rather than wrapping. The server never retries client trading commands.
+
+`AccountHandle::begin_disposal` binds the first disposal cause before host-owned
+algo cleanup, without stopping the actor's I/O. `dispose`, normal termination
+and actor drop record an ordinary stop when no cause is bound. Cloned handles
+share that one-time record: late releases cannot relabel a stopped actor as a
+planned move. `disposal_cause` reads the original cause after cleanup as well.
 
 Diagnostic codes are stable; messages are display data. Engine and host-origin
 warnings use the same event envelope. Warn+ is written to stderr without a

@@ -39,8 +39,9 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 action,
                 Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                     level: safe_cex_engine::Level::Error,
+                    code,
                     ..
-                }))
+                })) if *code != "request.failed"
             )),
             "public retry must not invalidate account credentials: {actions:?}"
         );
@@ -215,5 +216,166 @@ fn all_rejected_catalogue_keeps_current_store_and_recovers_after_backoff() {
         );
         assert!(engine.store().loaded().markets);
         assert_eq!(engine.store().markets().len(), 2);
+    }
+}
+
+fn market_read_notices(failures: usize) -> Vec<safe_cex_engine::LogEvent> {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Paradex::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    engine.start(0.0);
+    let mut now = 0.0;
+    let mut events = Vec::new();
+    for _ in 0..failures {
+        let id = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r.id),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            now,
+            Event::HttpFailed {
+                request: id,
+                error: "timed out",
+            },
+        );
+        let mut timer = None;
+        for action in engine.drain_actions() {
+            match action {
+                Action::Notice(safe_cex_engine::Notice::Event(event)) => events.push(event),
+                Action::SetTimer { timer: t, at_ms } => timer = Some((t, at_ms)),
+                _ => {}
+            }
+        }
+        let (timer, at) = timer.expect("the read retries");
+        now = at;
+        engine.handle(now, Event::TimerFired { timer });
+    }
+    events
+}
+
+#[test]
+fn the_second_failed_market_read_says_so_once_and_keeps_retrying() {
+    let errors = |failures| {
+        market_read_notices(failures)
+            .into_iter()
+            .filter(|e| e.level == safe_cex_engine::Level::Error)
+            .map(|e| e.message)
+            .collect::<Vec<_>>()
+    };
+    assert!(errors(1).is_empty());
+    let errors = errors(4);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("market list") && errors[0].contains("retrying"));
+}
+
+fn failed_market_sequence(failures: &[(u16, &str)]) -> Vec<safe_cex_engine::LogEvent> {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Paradex::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    engine.start(0.0);
+    let mut now = 0.0;
+    let mut errors = Vec::new();
+    for &(status, body) in failures {
+        let request = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+            .into_iter()
+            .find_map(|action| match action {
+                Action::Http(request) => Some(request),
+                _ => None,
+            })
+            .expect("market request");
+        assert!(request.url.ends_with("/v1/markets"));
+        if status == 0 {
+            engine.handle(
+                now,
+                Event::HttpFailed {
+                    request: request.id,
+                    error: body,
+                },
+            );
+        } else {
+            engine.handle(
+                now,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+        }
+        let actions = engine.drain_actions().collect::<Vec<_>>();
+        errors.extend(actions.iter().filter_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.level == safe_cex_engine::Level::Error =>
+            {
+                Some(event.clone())
+            }
+            _ => None,
+        }));
+        assert!(!engine.store().loaded().markets);
+        let (timer, at) = actions
+            .iter()
+            .find_map(|action| match action {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .expect("retry timer");
+        now = at;
+        engine.handle(now, Event::TimerFired { timer });
+    }
+    errors
+}
+
+#[test]
+fn market_unavailable_error_retains_transport_and_http_causes_without_the_response_body() {
+    let errors = failed_market_sequence(&[
+        (0, "TradeTunnel connection lost, reconnecting"),
+        (503, "<html>response-body-must-not-escape</html>"),
+        (0, "another timeout"),
+    ]);
+    assert_eq!(errors.len(), 1, "one Error for a failed startup streak");
+    assert!(errors[0].message.contains("Paradex HTTP 503"));
+    assert!(
+        errors[0]
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "firstCause"
+                && *value == "TradeTunnel connection lost, reconnecting".into())
+    );
+    assert!(
+        errors[0]
+            .fields
+            .iter()
+            .any(|(key, value)| *key == "cause" && *value == "Paradex HTTP 503".into())
+    );
+    assert!(!format!("{:?}", errors[0]).contains("response-body-must-not-escape"));
+}
+
+#[test]
+fn market_unavailable_distinguishes_http_refusal_from_a_bad_list() {
+    for (status, body, expected) in [
+        (403, "<html>refused</html>", "Paradex HTTP 403"),
+        (
+            200,
+            r#"{"wrong_field":[]}"#,
+            "Malformed Paradex list (HTTP 200)",
+        ),
+        (200, r#"{"results":[]}"#, "No valid Paradex discovery rows"),
+        (
+            200,
+            r#"{"results":[{"symbol":"BAD-USD-PERP","order_size_increment":"bad"}]}"#,
+            "No valid Paradex discovery rows",
+        ),
+    ] {
+        let errors = failed_market_sequence(&[(status, body), (status, body)]);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains(expected), "{errors:?}");
     }
 }

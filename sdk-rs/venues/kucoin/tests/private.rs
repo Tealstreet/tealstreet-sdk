@@ -6,7 +6,8 @@ use safe_cex_engine::model::{MarginType, OrderSide, OrderType, PositionMode, Tim
 use safe_cex_engine::{
     Action, Command, Engine, Event, HttpRequest, Response, SocketChannel, SocketId,
 };
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 use support::jittered;
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 500.0;
@@ -40,13 +41,22 @@ impl Harness {
         Self::with_markets(MARKET)
     }
     fn with_markets(markets: &str) -> Self {
+        Self::with_engine(
+            markets,
+            support::credentials::engine(
+                Options {
+                    key: Some("key".into()),
+                    secret: Some("secret".into()),
+                    passphrase: Some("passphrase".into()),
+                    ..Default::default()
+                },
+                Kucoin::new,
+            ),
+        )
+    }
+    fn with_engine(markets: &str, engine: Engine<Kucoin>) -> Self {
         let mut h = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-                key: Some("key".into()),
-                secret: Some("secret".into()),
-                passphrase: Some("passphrase".into()),
-                ..Default::default()
-            })),
+            engine,
             actions: vec![],
             failures: vec![],
             now: 1610000000000.0,
@@ -63,6 +73,7 @@ impl Harness {
             .find_map(|a| match a {
                 Action::WsConnect {
                     binary,
+                    public_topics,
                     socket,
                     url,
                     headers,
@@ -70,6 +81,10 @@ impl Harness {
                     context,
                 } if url.contains("/private?") => {
                     assert!(!binary, "KuCoin sockets use the text protocol");
+                    assert!(
+                        !public_topics,
+                        "KuCoin private feeds do not carry public topics"
+                    );
                     assert!(
                         headers.is_empty(),
                         "KuCoin authenticates with a bullet token"
@@ -92,7 +107,9 @@ impl Harness {
         h
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in
+            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now).into_iter()
+        {
             let action = plain(action, &mut self.failures);
             self.actions.push(action);
         }
@@ -337,6 +354,30 @@ fn standalone_stop_direction_accounts_for_side_and_keeps_trigger_basis() {
         Some(safe_cex_engine::model::StopTriggerType::MarkPrice)
     );
 }
+#[test]
+fn an_account_read_the_ip_whitelist_refuses_is_a_named_auth_failure() {
+    let mut h = Harness::new();
+    h.ready();
+    h.poll();
+    let body = r#"{"code":"400006","msg":"The requested IP address is not in the API whitelist"}"#;
+    for _ in 0..3 {
+        let r = h.http("/positions");
+        h.respond(&r, 400, body);
+    }
+    assert!(
+        h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "auth.rejected"
+                    && event.level == safe_cex_engine::Level::Error
+                    && event.message.contains("not in the API whitelist")
+                    && event.message.ends_with(safe_cex_engine::error::IP_WHITELIST_HINT)
+        )),
+        "{:?}",
+        h.actions
+    );
+}
+
 #[test]
 fn failed_positions_snapshot_never_becomes_empty() {
     let mut h = Harness::new();
@@ -926,8 +967,8 @@ fn policy_poll_read<V: safe_cex_engine::Venue>(
             timer: resumed[0].0,
         },
     );
-    let reads: Vec<_> = engine
-        .drain_actions()
+    let reads: Vec<_> = support::actions(engine)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
             _ => None,
@@ -1213,12 +1254,15 @@ fn unknown_terminal_execution_never_guesses_fill_size_or_removes_another_symbol_
 #[test]
 fn account_reconciliation_starts_without_the_private_socket() {
     let mut h = Harness {
-        engine: safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-            key: Some("key".into()),
-            secret: Some("secret".into()),
-            passphrase: Some("passphrase".into()),
-            ..Default::default()
-        })),
+        engine: support::credentials::engine(
+            Options {
+                key: Some("key".into()),
+                secret: Some("secret".into()),
+                passphrase: Some("passphrase".into()),
+                ..Default::default()
+            },
+            Kucoin::new,
+        ),
         actions: vec![],
         failures: vec![],
         now: 1610000000000.0,
@@ -1423,4 +1467,174 @@ fn a_balance_row_missing_secondary_fields_still_updates_the_balance() {
     h.reply("/stopOrders?", EMPTY);
     assert!(h.engine.store().loaded().balance);
     assert_eq!(h.engine.store().balance().total, 2010.0);
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut h = Harness::new();
+    let body = r#"{"code":"400003","msg":"KC-API-KEY not exists"}"#;
+    let mut failed = 0;
+    for _ in 0..24 {
+        let requests: Vec<_> = std::mem::take(&mut h.actions)
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. }) => {
+                    failed += 1;
+                    None
+                }
+                _ => None,
+            })
+            .collect();
+        for r in &requests {
+            h.respond(r, 200, body);
+        }
+    }
+    assert_eq!(failed, 1);
+}
+
+fn private_read_notice(h: &Harness, path: &str) -> safe_cex_engine::LogEvent {
+    h.actions
+        .iter()
+        .rev()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if matches!(event.code, "request.failed" | "auth.rejected")
+                    && event.message.starts_with("KuCoin private read failed:")
+                    && event.message.contains(path) =>
+            {
+                Some(event.clone())
+            }
+            _ => None,
+        })
+        .expect("terminal private read diagnostic")
+}
+
+#[test]
+fn private_read_http_refusals_keep_status_code_message_and_source_without_data() {
+    for (path, status, native_code, attempts) in [
+        ("/orders?", 401, "400004", 3),
+        ("/stopOrders?", 401, "400004", 3),
+        ("/account-overview?", 401, "400004", 3),
+        ("/getPositionMode", 401, "400004", 3),
+        ("/account-overview?", 200, "400005", 2),
+    ] {
+        let mut h = Harness::new();
+        let body = format!(
+            r#"{{"code":"{native_code}","msg":"Invalid KC-API-PASSPHRASE","data":{{"secret":"response-data-must-not-escape"}}}}"#
+        );
+        for _ in 0..attempts {
+            let request = h.http(path);
+            assert!(
+                request
+                    .headers
+                    .contains(&("KC-API-KEY-VERSION", "2".into()))
+            );
+            h.respond(&request, status, &body);
+        }
+        let event = private_read_notice(&h, path);
+        assert!(
+            event
+                .message
+                .contains(&format!("source=http signError=false HTTP={status}")),
+            "{}",
+            event.message
+        );
+        assert!(event.message.contains(native_code));
+        assert!(event.message.contains("Invalid KC-API-PASSPHRASE"));
+        assert!(event.fields.contains(&("venueCode", native_code.into())));
+        assert!(
+            event
+                .fields
+                .contains(&("venueMessage", "Invalid KC-API-PASSPHRASE".into()))
+        );
+        assert!(!format!("{event:?}").contains("response-data-must-not-escape"));
+    }
+}
+
+#[test]
+fn malformed_http_and_transport_failure_diagnostics_are_distinct_and_do_not_dump_text() {
+    for transport in [false, true] {
+        let mut h = Harness::new();
+        for _ in 0..3 {
+            let request = h.http("/account-overview?");
+            if transport {
+                h.event(Event::HttpFailed {
+                    request: request.id,
+                    error: "transport-with-sensitive-sentinel",
+                });
+            } else {
+                h.respond(&request, 503, "<html>body-with-sensitive-sentinel</html>");
+            }
+        }
+        let event = private_read_notice(&h, "/account-overview?");
+        assert!(
+            event.message.contains(if transport {
+                "source=transport signError=false HTTP=none"
+            } else {
+                "source=http signError=false HTTP=503"
+            }),
+            "{}",
+            event.message
+        );
+        assert!(event.message.contains("code=none msg=none"));
+        assert!(!format!("{event:?}").contains("sensitive-sentinel"));
+    }
+}
+
+#[test]
+fn local_signing_refusal_reports_a_sign_error_and_sends_no_private_read() {
+    use safe_cex_engine::signing::{
+        Capability, KeyRef, SignError, SignFuture, SignRequest, SignResult, Signer,
+    };
+    struct RefuseRead(safe_cex_crypto::signer::LocalSigner);
+    impl Signer for RefuseRead {
+        fn sign(&self, request: SignRequest) -> SignFuture {
+            self.0.sign(request)
+        }
+        fn can_sign(
+            &self,
+            key: &KeyRef,
+            algorithm: safe_cex_engine::signing::Algorithm,
+        ) -> Capability {
+            self.0.can_sign(key, algorithm)
+        }
+        fn sign_ready(&self, request: &SignRequest) -> Option<Result<SignResult, SignError>> {
+            Some(if request.context.path.contains("account-overview") {
+                Err(SignError::Refused)
+            } else {
+                self.0.sign_now(request)
+            })
+        }
+    }
+    let (options, provider, identities) = Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("passphrase".into()),
+        ..Default::default()
+    }
+    .prepare();
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(options));
+    engine.set_identities(identities).unwrap();
+    engine
+        .set_signer(Some(std::sync::Arc::new(RefuseRead(provider))))
+        .unwrap();
+    let h = Harness::with_engine(MARKET, engine);
+    let event = private_read_notice(&h, "/account-overview?");
+    assert!(
+        event
+            .message
+            .contains("source=signing signError=true HTTP=none"),
+        "{}",
+        event.message
+    );
+    assert!(
+        event
+            .message
+            .contains("Signing provider refused the request")
+    );
+    assert!(event.message.contains("code=none msg=none"));
+    assert!(!h.actions.iter().any(
+        |action| matches!(action, Action::Http(request) if request.url.contains("account-overview"))
+    ));
 }

@@ -124,8 +124,9 @@ pub struct LogEvent {
 /// on a declared socket role, HTTP failures, and auth failures it sees
 /// (`deactivate`, and auth-kind startup or command failures); venues emit the
 /// rest through `Cx::event`. Venues tag every credential rejection
-/// `auth.rejected`: one engine event counts at most one auth failure, however
-/// many of these paths report it.
+/// `auth.rejected`, and `Cx::retried_failure_error` does the same for a private
+/// read the venue refused with an auth kind: one engine event counts at most one
+/// auth failure, however many of these paths report it.
 pub mod code {
     pub const WS_CLOSED: &str = "ws.closed";
     pub const WS_RECONNECT: &str = "ws.reconnect";
@@ -137,6 +138,17 @@ pub mod code {
     pub const SNAPSHOT_DISCARDED: &str = "snapshot.discarded";
     /// Counted once per report: one skipped row, or one summary of several.
     pub const ROW_SKIPPED: &str = "row.skipped";
+    /// Frame-fed: a confirmed settings write now outlasts the data source until it agrees.
+    pub const SETTINGS_HELD: &str = "settings.held";
+    /// Frame-fed: uncertain writes on `symbols` (comma-separated; empty: the
+    /// account) wait for the data source's orders read; ask for one
+    /// (`refreshAccountOrders`) once `liftAfterMs` has passed.
+    pub const ORDERS_HELD: &str = "orders.held";
+    /// Frame-fed: ask `refreshAccountOrders` once for an Unknown cancel;
+    /// `symbols` is comma-separated, empty for the account. This is no fence.
+    pub const ORDERS_REFRESH: &str = "orders.refresh";
+    /// Frame-fed: the data source never agreed with a held setting; its value now applies.
+    pub const SETTINGS_HOLD_EXPIRED: &str = "settings.hold_expired";
 
     /// A replyless command diagnostic; attributed commands use CommandError.
     pub const COMMAND_FAILED: &str = "command.failed";
@@ -154,12 +166,16 @@ pub mod code {
     // Not counted. Hosts and apps match these codes, never message text.
     /// A socket dropped and the venue is reconnecting it.
     pub const WS_DISCONNECTED: &str = "ws.disconnected";
+    /// A public socket has not opened in 20 s; a browser sees a refused upgrade only as this.
+    pub const PUBLIC_FEED_UNAVAILABLE: &str = "ws.public_unavailable";
     /// A private or user-data stream could not be established or kept alive.
     pub const STREAM_UNAVAILABLE: &str = "stream.unavailable";
     /// A frame or response could not be decoded and was ignored.
     pub const STREAM_MALFORMED: &str = "stream.malformed";
     /// The venue refused a subscription, or one would exceed its limits.
     pub const SUBSCRIPTION_REJECTED: &str = "subscription.rejected";
+    /// A repair ran: its topic, whether it resubscribed or reconnected, and the feed's last data.
+    pub const SUBSCRIPTION_REPAIRED: &str = "subscription.repaired";
     /// A REST read failed; the venue retries on its own schedule.
     pub const REQUEST_FAILED: &str = "request.failed";
     /// Reads are paused after the venue limited them.

@@ -35,7 +35,7 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | backpack                              | `{B}_{Q}_PERP`     | `BTC_USDC_PERP`  | USDC          | Underscore-sep, spot: `{B}_{Q}`                          |
 | cryptocom                             | `{B}{Q}-PERP`      | `BTCUSD-PERP`    | USD           | Concat base+quote then `-PERP`                           |
 | lighter                               | `{B}`              | `APT`            | USDT          | Just base, some have `{B}/USDC`                          |
-| orderly variants                      | `{B}{Q}`           | `BTCUSDC`        | USDC          | woofi, kodiakfi, mode, salsadex, what, tealstreet-dex    |
+| orderly variants                      | `{B}{Q}`           | `BTCUSDC`        | USDC          | woofi, kodiakfi, mode, what, |
 | polymarket                            | `{slug}-{outcome}` | `slug-Yes`       | USDC          | Non-standard, not convertible                            |
 
 ### Key Gotchas
@@ -196,7 +196,8 @@ it inflates the e2e load-gate's diagnostic counters.
 **The Tealstreet endpoints are not in this file.** `virtualClock` takes a host
 clock through `setServerTimeSource`; `transport/registerTealstreetTransport`
 registers `transport/tealstreet/tealstreetTimeSource` (same-origin `/api/time`,
-or `NEXT_PUBLIC_TIME_API_ORIGIN`, with half-RTT correction). Without a
+or a full endpoint URL in `NEXT_PUBLIC_TIME_API_ORIGIN` for the native app, with half-RTT correction, keeping the shortest of three
+round trips: one slow reply reads late by half its delay and could cross the 1 s threshold). Without a
 registered source — a plain OSS consumer — generic sync uses venue time (Bybit
 through the transport's public CORS proxy, which is `api.bybit.com` directly
 under the direct transport and can 403 in geo-blocked regions or fail CORS in a

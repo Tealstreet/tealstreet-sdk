@@ -1,6 +1,7 @@
 use crate::{
     Pending,
     account::{Account, AmendTarget},
+    hosted::{Item, ModifyStatement, OrderStatement},
     sign::Credentials,
     sign::dispatch::{Orders, Preimage, SignedBody},
     wire::StrictNumber as Number,
@@ -9,7 +10,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
-use safe_cex_engine::request_context::{Operation as HttpOperation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{Context, Operation as HttpOperation, Policy, RetryPolicy};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, OrderIdentityKind, OrderIdentityReceipt, Outcome,
@@ -49,6 +50,21 @@ impl SignedBody for Placement {
             price: self.price.as_deref(),
             id: None,
         }
+    }
+    fn item(&self, now_ms: u64) -> Item<'_> {
+        Item::Order(OrderStatement {
+            timestamp_ms: now_ms,
+            market: &self.market,
+            side: self.side,
+            order_type: self.kind,
+            size: &self.size,
+            price: self.price.as_deref(),
+            trigger_price: self.trigger_price.as_deref(),
+            instruction: self.instruction,
+            flags: self.flags,
+            stp: self.stp,
+            client_id: self.client_id.as_deref(),
+        })
     }
     fn sign(&mut self, signature: String, timestamp: u64) {
         self.signature = signature;
@@ -93,6 +109,8 @@ enum Kind {
         /// The bracket leg this request places, `None` for an entry.
         leg: Option<&'static str>,
         batch: bool,
+        /// The stop this placement replaces after its cancel: symbol, side and kind.
+        replaces: Option<Box<(String, OrderSide, OrderType)>>,
     },
     Amend {
         id: String,
@@ -100,7 +118,6 @@ enum Kind {
     },
     Cancel(Vec<String>),
     Empty,
-    Rails(String),
     Quotes(String),
     Leverage {
         symbol: String,
@@ -128,6 +145,7 @@ struct Job {
     placement: bool,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    leg_refused: bool,
 }
 impl Job {
     /// One failure keeps its classification; several join their text and share
@@ -411,6 +429,7 @@ fn place_operations(
                     expected,
                     leg: None,
                     batch: true,
+                    replaces: None,
                 },
             });
             Ok(())
@@ -465,6 +484,7 @@ fn place_operations(
                 expected,
                 leg: None,
                 batch: false,
+                replaces: None,
             },
         });
         for (kind, leg, price) in [
@@ -507,6 +527,7 @@ fn place_operations(
                         expected: vec![None],
                         leg: Some(leg),
                         batch: false,
+                        replaces: None,
                     },
                 });
             }
@@ -557,6 +578,10 @@ impl Trading {
             );
             return true;
         }
+        if let Command::FetchLeverage { symbol, .. } = &command {
+            self.fetch_leverage(cx, account, symbol);
+            return true;
+        }
         if let Command::PlaceOrders { command, orders } = &command
             && orders.iter().any(capped)
         {
@@ -587,6 +612,7 @@ impl Trading {
                     operations: VecDeque::new(),
                     results: vec![],
                     errors: vec![],
+                    leg_refused: false,
                     attempt_all: true,
                     placement: true,
                     effective: false,
@@ -643,29 +669,42 @@ impl Trading {
                     .market(&symbol)
                     .ok_or_else(|| "Paradex cancel-all requires a known nonempty market".to_owned())
                     .map(|market| {
-                        VecDeque::from([Operation {
+                        // The venue's cancel-all leaves untriggered stops, which can still
+                        // fire; only a delete by id clears them.
+                        let mut operations: VecDeque<_> = cx
+                            .store
+                            .orders()
+                            .iter()
+                            .filter(|order| {
+                                order.symbol == symbol
+                                    && matches!(
+                                        order.kind,
+                                        OrderType::StopLoss
+                                            | OrderType::TakeProfit
+                                            | OrderType::Conditional
+                                    )
+                            })
+                            .map(|order| Operation {
+                                receipts: Vec::new(),
+                                hash: None,
+                                method: Method::Delete,
+                                path: format!("/orders/{}", encode(&order.id)),
+                                body: None,
+                                kind: Kind::Cancel(vec![order.id.clone()]),
+                            })
+                            .collect();
+                        operations.push_back(Operation {
                             receipts: Vec::new(),
                             hash: None,
                             method: Method::Delete,
                             path: format!("/orders?market={}", encode(&market.id)),
                             body: None,
                             kind: Kind::Empty,
-                        }])
+                        });
+                        operations
                     }),
-                false,
-                false,
-            ),
-            Command::FetchLeverage { command, symbol } => (
-                command,
-                Ok(VecDeque::from([Operation {
-                    receipts: Vec::new(),
-                    hash: None,
-                    method: Method::Get,
-                    path: "/account/margin".into(),
-                    body: None,
-                    kind: Kind::Rails(symbol),
-                }])),
-                false,
+                // A failed stop delete must not skip the sweep of orders the store never saw.
+                true,
                 false,
             ),
             Command::SetLeverage {
@@ -774,6 +813,7 @@ impl Trading {
                         operations,
                         results: Vec::new(),
                         errors: Vec::new(),
+                        leg_refused: false,
                         attempt_all,
                         placement,
                         effective: false,
@@ -866,7 +906,8 @@ impl Trading {
                 .errors
                 .iter()
                 .any(|e| e.outcome == Some(Outcome::Unknown));
-            if state.errors.is_empty() || (state.placement && !state.results.is_empty() && !unknown)
+            if state.errors.is_empty()
+                || (state.placement && !state.results.is_empty() && !unknown && !state.leg_refused)
             {
                 let result = if state.placement {
                     serde_json::to_string(&state.results).map_err(|e| e.to_string())
@@ -939,10 +980,11 @@ impl Trading {
             self.complete(cx, account, request, result, false);
             return;
         }
-        let rails = match &request.kind {
-            Kind::Rails(symbol) => Some(symbol.clone()),
-            _ => None,
-        };
+        // A stop the venue already removed: what the cancel asked for is true.
+        let kind = &request.kind;
+        let already_gone = matches!(kind, Kind::Cancel(ids) if ids.len() == 1)
+            && response.status == 400
+            && response.body.contains("ORDER_ID_NOT_FOUND");
         let result = crate::success(response).and_then(|()| match &request.kind {
             Kind::Amend { id, .. } => {
                 let row: Identity = serde_json::from_str(response.body)
@@ -956,78 +998,31 @@ impl Trading {
             Kind::Cancel(ids) if ids.len() == 2 => {
                 decode_cancels(response.body, ids).map(|()| Vec::new())
             }
-            Kind::Rails(symbol) => {
-                #[derive(Deserialize)]
-                struct Row {
-                    market: String,
-                    leverage: f64,
-                }
-                #[derive(Deserialize)]
-                struct Margins {
-                    configs: Vec<Row>,
-                }
-                let margins: Margins = serde_json::from_str(response.body)
-                    .map_err(|_| "invalid Paradex margin settings")?;
-                let leverage = margins
-                    .configs
-                    .iter()
-                    .find(|m| m.market == *symbol)
-                    .map(|m| m.leverage)
-                    .filter(|v| positive(*v))
-                    .unwrap_or(10.);
-                account.set_leverage(cx, symbol, leverage);
-                Ok(Vec::new())
-            }
             Kind::Leverage { symbol, leverage } => {
                 account.set_leverage(cx, symbol, *leverage);
+                // Frame-fed: keep this write's leverage until the source's frames agree.
+                cx.hold_setting(safe_cex_engine::setting_holds::SettingKey::Leverage(
+                    symbol.clone(),
+                ));
                 Ok(Vec::new())
             }
             _ => Ok(Vec::new()),
         });
-        let result = result.map_err(|error| {
-            let error = match crate::success(response) {
+        let result = if already_gone {
+            Ok(Vec::new())
+        } else {
+            result.map_err(|error| match crate::success(response) {
                 Err(_) => answer_failure(response.status, error),
                 Ok(()) => unproven(error),
-            };
-            match request.kind {
-                // A read: no write outcome to classify.
-                Kind::Rails(_) => VenueError {
-                    outcome: None,
-                    ..error
-                },
-                _ => error,
-            }
-        });
+            })
+        };
         if result.is_ok() && matches!(request.kind, Kind::Amend { .. }) {
             account.amend_ack(cx, response.body);
         }
-        if let Some(symbol) = rails
-            && result.is_ok()
-        {
-            if let Some(job) = self.jobs.remove(&request.job) {
-                #[derive(Serialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Rails {
-                    buy_leverage: f64,
-                    sell_leverage: f64,
-                }
-                let leverage = cx.store.setting(&symbol).map_or(10., |s| s.leverage);
-                match serde_json::to_string(&Rails {
-                    buy_leverage: leverage,
-                    sell_leverage: leverage,
-                })
-                .map_err(|e| e.to_string())
-                {
-                    Ok(data) => cx.done(job.command, data),
-                    Err(error) => cx.fail(job.command, error),
-                };
-            }
-        } else {
-            let rejected = ((400..500).contains(&response.status)
-                && !matches!(response.status, 408 | 429))
-                || ((200..300).contains(&response.status) && crate::success(response).is_err());
-            self.complete(cx, account, request, result, rejected);
-        }
+        let rejected = ((400..500).contains(&response.status)
+            && !matches!(response.status, 408 | 429))
+            || ((200..300).contains(&response.status) && crate::success(response).is_err());
+        self.complete(cx, account, request, result, rejected && !already_gone);
     }
     pub fn on_failed(
         &mut self,
@@ -1040,7 +1035,6 @@ impl Trading {
         let error = match request.kind {
             // Reads: the quote read precedes the placement, which was never sent.
             Kind::Quotes(_) => error.outcome(Outcome::NotSent),
-            Kind::Rails(_) => error,
             _ => error.outcome(Outcome::Unknown),
         };
         self.complete(cx, account, request, Err(error), false);
@@ -1079,7 +1073,7 @@ impl Trading {
         result: Result<Vec<String>, VenueError>,
         rejected: bool,
     ) {
-        if !matches!(request.kind, Kind::Quotes(_) | Kind::Rails(_)) {
+        if !matches!(request.kind, Kind::Quotes(_)) {
             account.bump_orders(cx);
             account.bump_positions();
         }
@@ -1092,12 +1086,27 @@ impl Trading {
         };
         match result {
             Ok(ids) => {
-                if !matches!(request.kind, Kind::Quotes(_) | Kind::Rails(_)) {
+                if !matches!(request.kind, Kind::Quotes(_)) {
                     job.effective = true;
                 }
                 job.results.extend(ids);
             }
-            Err(error) => {
+            Err(mut error) => {
+                if let Kind::Place {
+                    replaces: Some(stop),
+                    ..
+                } = &request.kind
+                {
+                    let (symbol, side, kind) = &**stop;
+                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    let gone =
+                        safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown);
+                    error.message = if error.message.is_empty() {
+                        gone
+                    } else {
+                        format!("{gone}: {}", error.message)
+                    };
+                }
                 if let Kind::Place { leg, expected, .. } = &request.kind {
                     let next_leg = match job.operations.front().map(|op| &op.kind) {
                         Some(Kind::Place {
@@ -1121,7 +1130,6 @@ impl Trading {
                     } else {
                         code::ORDER_REJECTED
                     };
-                    cx.notice(Level::Error, code, message);
                     // A failed entry orphans its children; a failed child must not skip its
                     // sibling, or a rejected TP would leave the position without its SL.
                     if leg.is_none() {
@@ -1133,9 +1141,21 @@ impl Trading {
                             job.operations.pop_front();
                         }
                         job.errors.push(error);
-                    } else if error.outcome == Some(Outcome::Unknown) {
+                    } else {
+                        // A refused leg leaves the entry unprotected: the command says so.
+                        job.leg_refused = true;
                         job.errors.push(error);
                     }
+                    // Only when the command fails on this entry does its caller name it; a toast
+                    // would double that. Beside an accepted order, this line is the only report.
+                    let fails_command =
+                        leg.is_none() && job.results.is_empty() && job.operations.is_empty();
+                    let level = if fails_command {
+                        Level::Warn
+                    } else {
+                        Level::Error
+                    };
+                    cx.notice(level, code, message);
                 } else {
                     job.errors.push(error);
                     if !job.attempt_all || matches!(request.kind, Kind::Quotes(_)) {
@@ -1146,6 +1166,96 @@ impl Trading {
             }
         }
         self.advance(cx, account, request.job);
+    }
+    /// A command Read on the JWT Session; it never enters the write queue.
+    fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, account: &mut Account, symbol: &str) {
+        let Ok(context) = cx.admit_http_command(Policy {
+            operation: HttpOperation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        if account.credentials().is_none() {
+            let _ = cx.fail_context(
+                &context,
+                not_sent("Paradex private account is not initialized"),
+            );
+            return;
+        }
+        account.read(
+            cx,
+            context.clone(),
+            "/account/margin",
+            None,
+            Pending::Leverage(context, symbol.to_owned()),
+        );
+    }
+    pub fn leverage_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        account: &mut Account,
+        context: &Context,
+        symbol: &str,
+        response: Response<'_>,
+    ) {
+        #[derive(Deserialize)]
+        struct Row {
+            market: String,
+            leverage: f64,
+        }
+        #[derive(Deserialize)]
+        struct Margins {
+            configs: Vec<Row>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Rails {
+            buy_leverage: f64,
+            sell_leverage: f64,
+        }
+        let margins = crate::success(response)
+            .map_err(|error| answer_failure(response.status, error))
+            .and_then(|()| {
+                serde_json::from_str::<Margins>(response.body)
+                    .map_err(|_| VenueError::new("invalid Paradex margin settings"))
+            });
+        // A read: no write outcome to classify.
+        let margins = match margins {
+            Ok(margins) => margins,
+            Err(error) => {
+                let _ = cx.fail_context(
+                    context,
+                    VenueError {
+                        outcome: None,
+                        ..error
+                    },
+                );
+                return;
+            }
+        };
+        let leverage = margins
+            .configs
+            .iter()
+            .find(|m| m.market == symbol)
+            .map(|m| m.leverage)
+            .filter(|v| positive(*v))
+            .unwrap_or(10.);
+        account.set_leverage(cx, symbol, leverage);
+        let leverage = cx.store.setting(symbol).map_or(10., |s| s.leverage);
+        match serde_json::to_string(&Rails {
+            buy_leverage: leverage,
+            sell_leverage: leverage,
+        }) {
+            Ok(data) => {
+                let _ = cx.done_context(context, data);
+            }
+            Err(error) => {
+                let _ = cx.fail_context(context, VenueError::new(error.to_string()));
+            }
+        }
     }
     fn amend(
         &self,
@@ -1236,6 +1346,9 @@ impl Trading {
         let size = num::adjust(amount.unwrap_or(size), m.precision.amount);
         let price = if limit {
             num::adjust(price.unwrap_or(raw_price), m.precision.price)
+        } else if raw.kind.ends_with("_MARKET") {
+            // The venue refuses a price here, and a row can carry one.
+            0.
         } else {
             raw_price
         };
@@ -1249,6 +1362,9 @@ impl Trading {
             || trigger_price.is_some_and(|p| !positive(p))
         {
             return Err("Paradex amendment size or price invalid".into());
+        }
+        if trigger {
+            return replace_trigger(cx, account, order, id, size, price, trigger_price);
         }
         if id.is_empty() {
             return Err("Cannot sign a Paradex amendment without an order ID".into());
@@ -1293,6 +1409,67 @@ impl Trading {
         }]))
     }
 }
+/// The venue answers ORDER_IS_NOT_OPEN to editing an untriggered stop: cancel, then place anew.
+fn replace_trigger(
+    cx: &Cx<'_, Pending>,
+    account: &Account,
+    order: &safe_cex_engine::model::Order,
+    id: &str,
+    size: f64,
+    price: f64,
+    trigger_price: Option<f64>,
+) -> Result<VecDeque<Operation>, String> {
+    let opts = PlaceOrderOpts {
+        symbol: order.symbol.clone(),
+        kind: order.kind,
+        side: order.side,
+        amount: size,
+        price: if order.kind == OrderType::Conditional {
+            Some(price)
+        } else {
+            trigger_price
+        },
+        trigger_price,
+        reduce_only: Some(order.reduce_only),
+        trigger_type: order.trigger_type,
+        sl_trigger_type: order.trigger_type,
+        tp_trigger_type: order.trigger_type,
+        max_slippage_pct: None,
+        stop_loss: None,
+        take_profit: None,
+        time_in_force: None,
+        client_order_id: None,
+        close: None,
+        stp_mode: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
+        implied_volatility: None,
+    };
+    let mut operations = place_operations(
+        std::slice::from_ref(&opts),
+        cx,
+        account,
+        &HashMap::new(),
+        &HashMap::new(),
+        false,
+    )?;
+    for operation in &mut operations {
+        if let Kind::Place { leg, replaces, .. } = &mut operation.kind {
+            *leg = Some(STOP_REPLACEMENT);
+            *replaces = Some(Box::new((order.symbol.clone(), order.side, order.kind)));
+        }
+    }
+    operations.push_front(Operation {
+        receipts: Vec::new(),
+        hash: None,
+        method: Method::Delete,
+        path: format!("/orders/{}", encode(id)),
+        body: None,
+        kind: Kind::Cancel(vec![id.to_owned()]),
+    });
+    Ok(operations)
+}
+const STOP_REPLACEMENT: &str = "stop replacement";
 #[derive(Serialize)]
 struct Modify {
     id: String,
@@ -1301,11 +1478,16 @@ struct Modify {
     #[serde(rename = "type")]
     kind: String,
     size: String,
+    // The venue refuses a price on a market trigger; the signature still covers 0.
+    #[serde(skip_serializing_if = "unpriced")]
     price: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     trigger_price: Option<String>,
     signature: String,
     signature_timestamp: u64,
+}
+fn unpriced(price: &str) -> bool {
+    price == "0"
 }
 impl SignedBody for Modify {
     fn preimage(&self) -> Preimage<'_> {
@@ -1317,6 +1499,18 @@ impl SignedBody for Modify {
             price: Some(&self.price),
             id: Some(&self.id),
         }
+    }
+    fn item(&self, now_ms: u64) -> Item<'_> {
+        Item::Modify(ModifyStatement {
+            id: &self.id,
+            timestamp_ms: now_ms,
+            market: &self.market,
+            side: &self.side,
+            order_type: &self.kind,
+            size: &self.size,
+            price: &self.price,
+            trigger_price: self.trigger_price.as_deref(),
+        })
     }
     fn sign(&mut self, signature: String, timestamp: u64) {
         self.signature = signature;
@@ -1455,12 +1649,16 @@ fn decode_placement(
         #[serde(default)]
         orders: Vec<Identity>,
         #[serde(default)]
-        errors: Vec<Failure>,
+        // A success row answers null in its error slot.
+        errors: Vec<Option<Failure>>,
     }
     let (rows, errors) = if batch {
         let response: Batch =
             serde_json::from_str(body).map_err(|_| "invalid Paradex batch placement envelope")?;
-        (response.orders, response.errors)
+        (
+            response.orders,
+            response.errors.into_iter().flatten().collect(),
+        )
     } else {
         (
             vec![

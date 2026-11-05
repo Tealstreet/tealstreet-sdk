@@ -22,6 +22,8 @@ def modes():
     closures = {}
     grouped = {
         (): ['engine baseline'],
+        # history-row-diagnostics OFF control: unrelated families omit the field.
+        ('test-support',): ['history row diagnostics OFF control'],
         ('order-locks', 'test-support'): ['explicit CI control'],
         # metadata-freshness OFF control: standalone Bitget with test support.
         ('order-locks', 'polling-control', 'test-support'): ['metadata freshness OFF control'],
@@ -30,6 +32,7 @@ def modes():
         # adopts, workspace tests unify it on, so this row alone proves the off build.
         ('http-plans', 'order-locks', 'test-support'): ['dispatch nonce OFF control', 'serial plans OFF control'],
     }
+    grouped[('history-row-diagnostics', 'test-support')] = ['history row diagnostics ON control']
     grouped[('metadata-freshness', 'test-support')] = ['metadata-only CI control']
     grouped[('http-plans', 'metadata-freshness', 'order-locks', 'test-support')] = [
         'metadata Plan CI control']

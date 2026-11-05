@@ -976,3 +976,56 @@ fn an_order_read_epoch_cannot_clear_a_later_concurrent_unknown_write() {
     assert!(!fenced(&admitted, COMMAND + 3));
     assert!(cancel_all_sent(&admitted));
 }
+
+fn coded_placement(e: &mut Engine<Bingx>, code: i64) -> Vec<Action> {
+    place(e, 1);
+    let write = packet(&collect(e, START));
+    let body = format!(r#"{{"code":{code},"msg":"native"}}"#);
+    respond(e, &write, START + 1., 200, &body)
+}
+fn failed_outcome(actions: &[Action]) -> Option<Outcome> {
+    actions.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { error, .. }) => error.outcome,
+        _ => None,
+    })
+}
+
+#[test]
+fn documented_coded_refusals_leave_no_fence() {
+    for code in [
+        101201, 101206, 101415, 101485, 110287, 110413, 110424, 112414,
+    ] {
+        let mut e = engine();
+        let settled = coded_placement(&mut e, code);
+        assert_eq!(failed_outcome(&settled), Some(Outcome::Rejected), "{code}");
+        assert!(order_reads(&settled).is_empty(), "{code}");
+        place(&mut e, 1);
+        assert_eq!(writes(&collect(&mut e, START + 2.)).len(), 1, "{code}");
+    }
+}
+
+#[test]
+fn undocumented_duplicate_and_unlisted_codes_stay_unknown_until_the_next_read() {
+    for code in [987_654, 101_481, 109_201, 102_201, 110_500] {
+        let mut e = engine();
+        let settled = coded_placement(&mut e, code);
+        assert_eq!(failed_outcome(&settled), Some(Outcome::Unknown), "{code}");
+        let read = order_reads(&settled)
+            .pop()
+            .expect("the read starts with the answer");
+        place(&mut e, 1);
+        assert!(
+            writes(&collect(&mut e, START + 2.)).is_empty(),
+            "{code}: fenced"
+        );
+        respond(
+            &mut e,
+            &read,
+            START + 3.,
+            200,
+            r#"{"code":0,"data":{"orders":[]}}"#,
+        );
+        place(&mut e, 1);
+        assert_eq!(writes(&collect(&mut e, START + 4.)).len(), 1, "{code}");
+    }
+}

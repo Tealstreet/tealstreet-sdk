@@ -2,7 +2,7 @@
 //! non-retried writes, each call bounded on its own.
 use crate::{Okx, Pending, sign, wire};
 use safe_cex_engine::classify::{
-    BatchItem, CodeTable, Key, Native, NativeCode, Row, Verdict, WriteFact,
+    BatchItem, CodeTable, Intent, Key, Native, NativeCode, Row, SatisfiedIntent, Verdict, WriteFact,
 };
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
@@ -10,6 +10,7 @@ use safe_cex_engine::request_context::{
     Context, Credential, HttpOwnerRetirement, Operation, Plan, Policy, Preflight, PreflightPolicy,
     PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -32,8 +33,56 @@ const SERIAL: SerialCall = SerialCall {
 /// 50xxx are documented pre-processing refusals. Unavailable, timeout, busy and
 /// system errors prove nothing, and an unlisted code is not proof of refusal.
 pub(crate) const CODES: CodeTable = CodeTable {
+    // Rows match first to last, so the exact codes below win over the 51xxx range.
     rows: &[
+        // docs-v5: filled, canceled or absent. This proves Cancel only, not
+        // which terminal state a later order frame or census will publish.
+        Row {
+            key: Key::Int(51400),
+            verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+            only: Some(Intent::Cancel),
+        },
+        // Timed out or down, in the trading range: "does not mean that the request
+        // was successful or failed".
+        unknown(51149, ErrorKind::Timeout),
+        unknown(51054, ErrorKind::Timeout),
+        unknown(51412, ErrorKind::Timeout),
+        unknown(51767, ErrorKind::VenueUnavailable),
         refused(51000, ErrorKind::InvalidInput),
+        // Documented definite refusals (docs-v5 "Error Code"): nothing was placed.
+        refused(50002, ErrorKind::InvalidInput),
+        refused(50006, ErrorKind::InvalidInput),
+        refused(50009, ErrorKind::AuthPermission),
+        refused(50027, ErrorKind::AuthPermission),
+        refused(54000, ErrorKind::Rejected),
+        refused(59000, ErrorKind::Rejected),
+        // Balance and margin refusals (place, amend, and account-wide).
+        refused(51008, ErrorKind::InsufficientBalance),
+        refused(51119, ErrorKind::InsufficientBalance),
+        refused(51127, ErrorKind::InsufficientBalance),
+        refused(51131, ErrorKind::InsufficientBalance),
+        refused(51502, ErrorKind::InsufficientBalance),
+        refused(59103, ErrorKind::InsufficientBalance),
+        refused(59108, ErrorKind::InsufficientBalance),
+        refused(59200, ErrorKind::InsufficientBalance),
+        // Order rules the order itself broke: unknown instrument, price out of
+        // its limit, size below the minimum or off the lot size, market order
+        // value or amount over its cap.
+        refused(51001, ErrorKind::InvalidInput),
+        refused(51006, ErrorKind::InvalidInput),
+        refused(51007, ErrorKind::InvalidInput),
+        refused(51020, ErrorKind::InvalidInput),
+        refused(51100, ErrorKind::InvalidInput),
+        refused(51116, ErrorKind::InvalidInput),
+        refused(51118, ErrorKind::InvalidInput),
+        refused(51120, ErrorKind::InvalidInput),
+        refused(51121, ErrorKind::InvalidInput),
+        refused(51122, ErrorKind::InvalidInput),
+        refused(51137, ErrorKind::InvalidInput),
+        refused(51138, ErrorKind::InvalidInput),
+        refused(51201, ErrorKind::InvalidInput),
+        refused(51202, ErrorKind::InvalidInput),
+        refused(51203, ErrorKind::InvalidInput),
         Row {
             key: Key::Range(51000, 51999),
             verdict: Verdict::Refused(ErrorKind::Rejected),
@@ -70,6 +119,13 @@ pub(crate) const CODES: CodeTable = CodeTable {
         (429, Verdict::Refused(ErrorKind::RateLimited)),
     ],
 };
+const fn unknown(code: i64, kind: ErrorKind) -> Row {
+    Row {
+        key: Key::Int(code),
+        verdict: Verdict::Unknown(Some(kind)),
+        only: None,
+    }
+}
 const fn refused(code: i64, kind: ErrorKind) -> Row {
     Row {
         key: Key::Int(code),
@@ -77,7 +133,7 @@ const fn refused(code: i64, kind: ErrorKind) -> Row {
         only: None,
     }
 }
-fn native<'a>(code: &'a str, message: &'a str) -> Native<'a> {
+pub(crate) fn native<'a>(code: &'a str, message: &'a str) -> Native<'a> {
     Native {
         code: code.parse().map_or(NativeCode::Text(code), NativeCode::Int),
         message,
@@ -104,12 +160,14 @@ pub struct TradingState {
     pub acknowledged: HashMap<String, Acknowledged>,
 }
 pub struct Acknowledged {
-    symbol: String,
+    pub(crate) symbol: String,
     inst_id: String,
     algo: bool,
     pub version: u64,
 }
 struct Job {
+    /// An amend that cancels a stop before placing its replacement.
+    replacing_stop: Option<(String, OrderSide, OrderType)>,
     /// Set at genuine entry; the Plan follows its admission.
     preflight: Option<Preflight>,
     plan: Option<Plan>,
@@ -188,6 +246,26 @@ struct Cancel<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     algo_id: Option<&'a str>,
 }
+/// The id a cancel request named.
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct Requested {
+    ord_id: String,
+    algo_id: String,
+}
+impl Requested {
+    fn id(&self) -> &str {
+        if self.algo_id.is_empty() {
+            &self.ord_id
+        } else {
+            &self.algo_id
+        }
+    }
+}
+
+const SIMPLE_MODE_HEDGE: &str =
+    "OKX hedge mode needs a margin account mode; switch it in OKX Settings (Trading mode)";
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Ack<'a> {
@@ -297,7 +375,11 @@ impl Okx {
                 struct Mode {
                     pos_mode: &'static str,
                 }
-                let result = if cx.store.positions().iter().any(|p| p.contracts > 0.0) {
+                // OKX keeps a spot-mode (acctLv 1) account one-way: the write would
+                // not take, and the next config read would put one-way back.
+                let result = if hedged && self.account.account_level == 1 {
+                    Err(SIMPLE_MODE_HEDGE.into())
+                } else if cx.store.positions().iter().any(|p| p.contracts > 0.0) {
                     Err("Please close all positions before switching position mode".into())
                 } else {
                     step(
@@ -666,7 +748,11 @@ impl Okx {
                     m.precision.price,
                     false,
                 )?));
-                p.close_fraction = Some("1");
+                // OKX refuses closeFraction here with 50014 "sz can not be empty".
+                if size <= 0.0 {
+                    return Err("OKX trailing stop needs a size".into());
+                }
+                p.sz = Some(num::format(size));
             }
             _ => {}
         }
@@ -917,6 +1003,8 @@ impl Okx {
                 }],
             )?;
             result.steps.extend(replacement.steps);
+            result.replacing_stop = matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                .then(|| (o.symbol.clone(), o.side, o.kind));
             result.continue_cancel_errors = false;
             result.finish = Finish::Ids;
             result
@@ -1009,12 +1097,14 @@ impl Okx {
                     s.leverage = leverage;
                     s.margin_type = Some(MarginType::Cross);
                 });
+                cx.hold_setting(SettingKey::Leverage(symbol.clone()));
                 self.account_after_settings(cx);
                 Ok("[]".into())
             }
             Finish::Mode(hedged) => {
                 self.account.mode_version += 1;
                 cx.store.set_hedged(*hedged);
+                cx.hold_setting(SettingKey::Hedged);
                 self.account_after_settings(cx);
                 Ok("[]".into())
             }
@@ -1086,10 +1176,7 @@ impl Okx {
             return self.failure(cx, request, Some(envelope.code), message, response.status);
         };
         // A refused envelope with no failing rows is one whole native failure.
-        if !matches!(envelope.code, "0" | "2")
-            && acks
-                .iter()
-                .all(|a| matches!(a.s_code, "" | "0") && a.s_msg.is_empty())
+        if !matches!(envelope.code, "0" | "2") && acks.iter().all(|a| matches!(a.s_code, "" | "0"))
         {
             let message = format!("OKX {}: {}", envelope.code, envelope.msg);
             return self.failure(cx, request, Some(envelope.code), message, response.status);
@@ -1121,7 +1208,7 @@ impl Okx {
             };
             self.account.revision += 1;
             for (ack, identity) in acks.iter().zip(identities) {
-                if (!ack.s_code.is_empty() && ack.s_code != "0") || !ack.s_msg.is_empty() {
+                if !ack.s_code.is_empty() && ack.s_code != "0" {
                     continue;
                 }
                 let id = if ack.algo_id.is_empty() {
@@ -1151,9 +1238,14 @@ impl Okx {
         if acks.iter().any(|ack| ack.s_code == "50004") {
             return self.unproven(cx, request, "OKX 50004: write execution status is unknown");
         }
+        // Placement success needs its new native ID. Cancel identities are
+        // matched against the requested rows below, including native refusals.
         if step.expected > 0
             && acks.iter().any(|ack| {
-                matches!(ack.s_code, "" | "0") && ack.ord_id.is_empty() && ack.algo_id.is_empty()
+                matches!(ack.s_code, "" | "0")
+                    && ack.ord_id.is_empty()
+                    && ack.algo_id.is_empty()
+                    && (step.collect_ids || ack.s_code.is_empty())
             })
         {
             return self.unproven(
@@ -1165,11 +1257,26 @@ impl Okx {
         if step.expected > 0 && acks.len() != step.expected {
             return self.unproven(cx, request, "OKX write response row count mismatch");
         }
+        let requested: Vec<Requested> = serde_json::from_str(&step.body).unwrap_or_default();
+        if matches!(
+            step.path,
+            "/api/v5/trade/cancel-batch-orders" | "/api/v5/trade/cancel-algos"
+        ) && (requested.len() != step.expected
+            || acks.iter().enumerate().any(|(index, ack)| {
+                requested.get(index).is_none_or(|named| {
+                    named.id().is_empty()
+                        || ack.ord_id != named.ord_id
+                        || ack.algo_id != named.algo_id
+                })
+            }))
+        {
+            return self.unproven(cx, request, "OKX cancel row identity missing or mismatched");
+        }
         if step.collect_ids
             && acks.len() == step.expected
             && acks.iter().all(|ack| {
                 if ack.s_code.is_empty() || ack.s_code == "0" {
-                    (!ack.ord_id.is_empty() || !ack.algo_id.is_empty()) && ack.s_msg.is_empty()
+                    !ack.ord_id.is_empty() || !ack.algo_id.is_empty()
                 } else {
                     // 51xxx are explicit trading-rule rejections; transport/server
                     // timeout codes do not prove that the venue rejected a write.
@@ -1179,16 +1286,16 @@ impl Okx {
         {
             cx.placement_resolved(request.command);
         }
-        let failed = acks
-            .iter()
-            .filter(|a| (!a.s_code.is_empty() && a.s_code != "0") || !a.s_msg.is_empty());
+        let failed = acks.iter().filter(|a| {
+            !matches!(a.s_code, "" | "0") && !(job.continue_cancel_errors && a.s_code == "51400")
+        });
         let first_code = failed.clone().next().map(|a| a.s_code);
         // Only 51xxx proves a refused leg, and an accepted leg means something happened.
         let definitive = failed.clone().all(|a| a.s_code.starts_with("51"))
             && !acks.iter().any(|a| {
-                matches!(a.s_code, "" | "0")
-                    && a.s_msg.is_empty()
-                    && (!a.ord_id.is_empty() || !a.algo_id.is_empty())
+                (job.continue_cancel_errors && a.s_code == "51400")
+                    || (matches!(a.s_code, "" | "0")
+                        && (!a.ord_id.is_empty() || !a.algo_id.is_empty()))
             });
         let errors: Vec<_> = failed
             .map(|a| format!("{} (code {})", a.s_msg, a.s_code))
@@ -1200,14 +1307,18 @@ impl Okx {
         }
         // Record the call's fact before any continuation or terminal.
         let recorded = if expected > 0 {
+            // A cancel row may answer with no id: the request named it.
             let items: Vec<_> = acks
                 .iter()
-                .map(|ack| {
-                    if matches!(ack.s_code, "" | "0") && ack.s_msg.is_empty() {
-                        BatchItem::Accepted(if ack.algo_id.is_empty() {
+                .enumerate()
+                .map(|(index, ack)| {
+                    if matches!(ack.s_code, "" | "0") {
+                        BatchItem::Accepted(if !ack.algo_id.is_empty() {
+                            ack.algo_id
+                        } else if !ack.ord_id.is_empty() {
                             ack.ord_id
                         } else {
-                            ack.algo_id
+                            requested.get(index).map_or("", Requested::id)
                         })
                     } else {
                         BatchItem::Native(native(ack.s_code, ack.s_msg))
@@ -1247,8 +1358,18 @@ impl Okx {
             let error = VenueError::new(message).outcome(Outcome::Unknown);
             return self.end(cx, request.command, Some(&request), error, true);
         }
+        // An all-refused envelope (code 1) continues only when every row says its order
+        // is already gone: the sibling cancels still have live orders to reach.
+        let only_gone_rows = acks
+            .iter()
+            .filter(|a| !matches!(a.s_code, "" | "0"))
+            .all(|a| matches!(a.s_code, "51400" | "51401" | "51402"));
+        let read_after =
+            continue_cancel_errors && acks.iter().any(|a| !matches!(a.s_code, "" | "0"));
         if envelope.code != "0"
-            && !(continue_cancel_errors && envelope.code == "2" && !errors.is_empty())
+            && !(continue_cancel_errors
+                && (envelope.code == "2" || (envelope.code == "1" && only_gone_rows))
+                && acks.iter().any(|a| !matches!(a.s_code, "" | "0")))
         {
             let error = if errors.is_empty() {
                 let error = format!("OKX {}: {}", envelope.code, envelope.msg);
@@ -1256,7 +1377,11 @@ impl Okx {
             } else {
                 refused(rejection(errors.join("; "), first_code, response.status))
             };
-            return self.end(cx, request.command, Some(&request), error, false);
+            self.end(cx, request.command, Some(&request), error, false);
+            if continue_cancel_errors && acks.iter().any(|a| a.s_code == "51400") {
+                self.account_refresh(cx);
+            }
+            return;
         }
         if !errors.is_empty() {
             if !continue_cancel_errors {
@@ -1267,20 +1392,25 @@ impl Okx {
                 cx.command_error(request.command, error);
             }
         }
+        // A gone order's own frame may never come: only a read clears its row.
         let Some(job) = self.trading.jobs.get_mut(&request.command) else {
             return;
         };
         job.steps.pop_front();
         job.effective = true;
         if job.steps.is_empty() {
-            return self.finish(cx, request);
-        }
-        match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
-            Ok(slot) => self.issue(cx, request.command, slot),
-            Err(reason) => {
-                let error = VenueError::new(reason.venue_error().message);
-                self.end(cx, request.command, Some(&request), error, false);
+            self.finish(cx, request);
+        } else {
+            match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
+                Ok(slot) => self.issue(cx, request.command, slot),
+                Err(reason) => {
+                    let error = VenueError::new(reason.venue_error().message);
+                    self.end(cx, request.command, Some(&request), error, false);
+                }
             }
+        }
+        if read_after {
+            self.account_refresh(cx);
         }
     }
 
@@ -1390,13 +1520,33 @@ impl Okx {
         if job.effective && !uncertain {
             error.outcome = None;
         }
+        // The old stop's cancel landed and nothing replaced it: its row must not read Open.
+        let note = job
+            .replacing_stop
+            .as_ref()
+            .filter(|_| job.effective && job.ids.is_empty())
+            .map(|(symbol, side, kind)| {
+                safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
+            });
+        let stop_gone = note.is_some();
+        // A sibling rests: the caller must be told even though this call failed.
+        if !job.ids.is_empty() {
+            error = error.partial_ids(&job.ids);
+        }
         for (id, status) in job.optimistic {
             if !uncertain
                 && cx.store.order(&id).is_some_and(|o| {
                     matches!(o.status, OrderStatus::Updating | OrderStatus::Canceling)
                 })
             {
-                cx.store.set_order_status(&id, status);
+                cx.store.set_order_status(
+                    &id,
+                    if stop_gone {
+                        OrderStatus::Canceled
+                    } else {
+                        status
+                    },
+                );
             }
         }
         let _ = match (&job.plan, &job.preflight) {
@@ -1404,7 +1554,10 @@ impl Okx {
                 if let Some(request) = current {
                     let _ = cx.finish_plan_call(plan, &request.slot, &request.context);
                 }
-                cx.fail_plan(plan, error)
+                match &note {
+                    Some(note) => cx.fail_plan_noted(plan, error, note),
+                    None => cx.fail_plan(plan, error),
+                }
             }
             (None, Some(preflight)) => cx.fail_preflight(preflight, error),
             (None, None) => Ok(()),
@@ -1430,15 +1583,22 @@ pub(crate) fn trade_reconciliation(
     ReconciliationData::new(request.path.to_owned())
 }
 
-/// A definitive OKX refusal, classified by its code or HTTP status.
+/// A definitive OKX refusal. Its kind comes from the table (the native code,
+/// else a documented status row), `rejected` when neither names one.
 fn rejection(message: String, code: Option<&str>, status: u16) -> VenueError {
-    let kind = match (code, status) {
-        (Some("50011" | "50061"), _) | (_, 429) => ErrorKind::RateLimited,
-        (Some("50111" | "50113" | "50114" | "50119"), _) | (_, 401) => ErrorKind::AuthInvalid,
-        (Some("50110" | "50120"), _) | (_, 403) => ErrorKind::AuthPermission,
-        (Some("50014" | "51000"), _) => ErrorKind::InvalidInput,
-        _ => ErrorKind::Rejected,
+    let by_code = code.filter(|code| !code.is_empty()).and_then(|code| {
+        CODES
+            .verdict(&native(code, ""), safe_cex_engine::classify::Intent::Place)
+            .kind()
+    });
+    let by_status = || {
+        CODES
+            .status
+            .iter()
+            .find(|(documented, _)| *documented == status)
+            .and_then(|(_, verdict)| verdict.kind())
     };
+    let kind = by_code.or_else(by_status).unwrap_or(ErrorKind::Rejected);
     // System errors and busy replies do not prove the venue refused the write.
     let outcome = if matches!(code, Some("50001" | "50013" | "50026")) {
         Outcome::Unknown
@@ -1510,6 +1670,7 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         optimistic: Vec::new(),
         continue_cancel_errors: false,
         effective: false,
+        replacing_stop: None,
     }
 }
 fn is_algo(kind: OrderType) -> bool {
@@ -1601,11 +1762,69 @@ mod code_table_tests {
     use super::*;
     use safe_cex_engine::classify::Intent;
 
+    /// assert_table covers the status rows (never Satisfied or RefusedResend) and
+    /// shadowing (an exact row after its range panics); OKX adds two of its own.
+    #[test]
+    fn the_okx_table_satisfies_the_engine_invariants() {
+        safe_cex_engine::classify::assert_table(&CODES);
+        for row in CODES.rows {
+            if matches!(row.verdict, Verdict::Satisfied(_)) {
+                assert_eq!(row.key, Key::Int(51400), "{row:?}");
+                assert_eq!(row.only, Some(Intent::Cancel), "{row:?}");
+            } else {
+                assert_eq!(row.only, None, "{row:?}");
+            }
+            // 50113 (signature) is the one documented re-sign.
+            if matches!(row.verdict, Verdict::RefusedResend(_)) {
+                assert_eq!(row.key, Key::Int(50113), "{row:?}");
+            }
+            // No auth or permission code ever proves a write landed.
+            if matches!(row.key, Key::Int(code) if (50100..=50199).contains(&code) || code == 50030)
+            {
+                assert!(!matches!(row.verdict, Verdict::Satisfied(_)), "{row:?}");
+            }
+        }
+        // Every exact 51xxx row sits before the range it refines.
+        let range = CODES
+            .rows
+            .iter()
+            .position(|row| row.key == Key::Range(51000, 51999))
+            .unwrap();
+        for (index, row) in CODES.rows.iter().enumerate() {
+            if let Key::Int(code) = row.key
+                && (51000..=51999).contains(&code)
+            {
+                assert!(index < range, "{code} is shadowed by the 51xxx range");
+            }
+        }
+    }
+
     #[test]
     fn exact_rows_win_over_their_range_and_unlisted_codes_prove_nothing() {
         let verdict = |code| CODES.verdict(&native(code, "native"), Intent::Place);
         assert_eq!(verdict("51000"), Verdict::Refused(ErrorKind::InvalidInput));
-        assert_eq!(verdict("51008"), Verdict::Refused(ErrorKind::Rejected));
+        assert_eq!(
+            verdict("51008"),
+            Verdict::Refused(ErrorKind::InsufficientBalance)
+        );
+        for code in ["51119", "51127", "51131", "51502", "59200"] {
+            assert_eq!(
+                verdict(code),
+                Verdict::Refused(ErrorKind::InsufficientBalance),
+                "{code}"
+            );
+        }
+        for code in [
+            "51001", "51006", "51020", "51121", "51122", "51137", "51203",
+        ] {
+            assert_eq!(
+                verdict(code),
+                Verdict::Refused(ErrorKind::InvalidInput),
+                "{code}"
+            );
+        }
+        // State and risk refusals in the range stay plain rejections.
+        assert_eq!(verdict("51004"), Verdict::Refused(ErrorKind::Rejected));
         assert_eq!(verdict("51999"), Verdict::Refused(ErrorKind::Rejected));
         assert_eq!(verdict("50011"), Verdict::Refused(ErrorKind::RateLimited));
         assert_eq!(
@@ -1615,5 +1834,28 @@ mod code_table_tests {
         for unproven in ["50001", "50004", "50013", "50026", "52000", "59999"] {
             assert_eq!(verdict(unproven), Verdict::Unknown(None), "{unproven}");
         }
+    }
+}
+
+#[cfg(test)]
+mod code_tests {
+    use super::*;
+    use safe_cex_engine::classify::Intent;
+
+    #[test]
+    fn a_timeout_in_the_trading_range_is_not_a_refusal() {
+        for code in ["51149", "51054", "51412", "51767"] {
+            assert!(
+                matches!(
+                    CODES.verdict(&native(code, ""), Intent::Place),
+                    Verdict::Unknown(_)
+                ),
+                "{code}"
+            );
+        }
+        assert!(matches!(
+            CODES.verdict(&native("51999", ""), Intent::Place),
+            Verdict::Refused(_)
+        ));
     }
 }

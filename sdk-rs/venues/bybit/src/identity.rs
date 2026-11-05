@@ -113,24 +113,32 @@ impl BybitLinear {
         let Ok(context) = cx.admit_http_command(policy) else {
             return;
         };
-        if let Some(error) = self.config_error.clone() {
-            return refuse(cx, &context, error, ErrorKind::InvalidInput);
-        }
-        if let Some(read) = &self.read_credentials
-            && let Err(error) = read.validate()
-        {
-            return refuse(cx, &context, error.into(), ErrorKind::InvalidInput);
-        }
-        if self
-            .credentials
-            .as_ref()
-            .is_none_or(|c| c.validate().is_err())
-        {
-            let message = "Bybit account identity requires credentials".to_owned();
-            return refuse(cx, &context, message, ErrorKind::AuthInvalid);
+        if let Some((message, kind)) = self.signed_read_refusal("account identity") {
+            return refuse(cx, &context, message, kind);
         }
         let rest = Rest::get("/v5/user/query-api", Query::new()).signed();
         self.queue_read(cx, context.clone(), rest, Then::Identity(context));
+    }
+
+    /// Why a signed command read cannot be sent with this account's configuration.
+    pub(crate) fn signed_read_refusal(&self, read: &str) -> Option<(String, ErrorKind)> {
+        if let Some(error) = self.config_error.clone() {
+            return Some((error, ErrorKind::InvalidInput));
+        }
+        if let Some(credentials) = &self.read_credentials
+            && let Err(error) = credentials.validate()
+        {
+            return Some((error.into(), ErrorKind::InvalidInput));
+        }
+        self.credentials
+            .as_ref()
+            .is_none_or(|c| c.validate().is_err())
+            .then(|| {
+                (
+                    format!("Bybit {read} requires credentials"),
+                    ErrorKind::AuthInvalid,
+                )
+            })
     }
 
     pub(crate) fn identity_response(

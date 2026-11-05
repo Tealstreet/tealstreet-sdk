@@ -3,9 +3,11 @@ mod account;
 mod book;
 mod history;
 mod identity;
+mod leverage;
 mod paths;
 mod sign;
 mod trading;
+mod venue_state;
 mod wire;
 
 use book::BookState;
@@ -18,7 +20,8 @@ use safe_cex_engine::request_context::{Context, Credential, Operation, Policy, R
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::startup::{DiscoveryRead, PublicRetries};
 use safe_cex_engine::{
-    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue,
+    num,
 };
 use serde::{Serialize, de::IgnoredAny};
 use std::collections::HashMap;
@@ -43,6 +46,7 @@ pub struct Options {
 
 pub enum Pending {
     Identity(Context),
+    Leverage(leverage::Read),
     History(Box<history::Request>),
     Trade(Box<trading::Request>),
     Account {
@@ -60,6 +64,18 @@ pub enum Pending {
         rows: Vec<Candle>,
         invalid: bool,
     },
+}
+
+impl Pending {
+    fn reads_account_list(&self) -> bool {
+        matches!(
+            self,
+            Self::Account {
+                request: account::Request::Orders(_) | account::Request::Positions { .. },
+                ..
+            }
+        )
+    }
 }
 
 pub enum Discovered {
@@ -124,7 +140,15 @@ pub struct BitgetFutures {
     live_tickers: safe_cex_engine::startup::LiveTickers,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, Interval), usize>,
+    /// Topics Bitget answered with event:error, by (channel, instId): retries made, pending timer.
+    refused_topics: HashMap<(String, String), (u32, Option<TimerId>)>,
+    /// When an unreadable public message was last logged; at most one per minute.
+    public_parse_logged_at: Option<f64>,
 }
+
+/// A refused subscription is sent again after 1 s, 2 s and 4 s, then left refused.
+const SUBSCRIBE_RETRIES: u32 = 3;
+const PUBLIC_PARSE_LOG_MS: f64 = 60_000.0;
 
 fn discovery_error(response: &Response<'_>) -> safe_cex_engine::VenueError {
     let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body).ok();
@@ -190,6 +214,8 @@ impl BitgetFutures {
             live_tickers: Default::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
+            refused_topics: HashMap::new(),
+            public_parse_logged_at: None,
         }
     }
 
@@ -244,7 +270,7 @@ impl BitgetFutures {
         }
     }
 
-    fn coin(&self) -> &'static str {
+    pub(crate) fn coin(&self) -> &'static str {
         match (self.options.product, self.options.testnet) {
             (Product::Usdt, false) => "USDT",
             (Product::Usdt, true) => "SUSDT",
@@ -254,7 +280,7 @@ impl BitgetFutures {
         }
     }
 
-    fn inverse(&self) -> bool {
+    pub(crate) fn inverse(&self) -> bool {
         self.options.product == Product::Inverse
     }
 
@@ -328,6 +354,10 @@ impl BitgetFutures {
         }
     }
 
+    fn open_feed(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
+        self.connect(cx, index);
+    }
+
     fn channel(&self, socket: SocketId) -> Option<usize> {
         self.sockets.iter().position(|c| c.socket == Some(socket))
     }
@@ -338,6 +368,36 @@ impl BitgetFutures {
         {
             self.send_topics(cx, socket, op, topics);
         }
+    }
+
+    /// Re-sends one live book or candle channel on the public socket; counts,
+    /// refused-topic retries and reconnect resubscription are left untouched.
+    fn repair(&self, cx: &mut Cx<'_, Pending>, topic: &SubscriptionTopic) -> Result<(), String> {
+        let live = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => self
+                .candles
+                .contains_key(&(symbol.clone(), *interval))
+                .then(|| candle_topic(symbol.clone(), *interval))
+                .flatten(),
+            SubscriptionTopic::OrderBook { symbol } => self
+                .books
+                .contains_key(symbol)
+                .then(|| book_topic(symbol.clone())),
+        };
+        let Some(native) = live else {
+            return Err(format!("{topic} is not subscribed"));
+        };
+        let connection = &self.sockets[0];
+        let Some(socket) = connection.socket.filter(|_| connection.open) else {
+            return Err(format!(
+                "the public socket carrying {} {} is not open",
+                native.0, native.1
+            ));
+        };
+        let topics = [native];
+        self.send_topics(cx, socket, "unsubscribe", &topics);
+        self.send_topics(cx, socket, "subscribe", &topics);
+        Ok(())
     }
 
     fn send_topics(
@@ -397,14 +457,26 @@ impl BitgetFutures {
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         let message = match serde_json::from_str::<PublicMessage<'_>>(text) {
             Ok(message) => message,
-            Err(_) => {
+            Err(error) => {
+                if self
+                    .public_parse_logged_at
+                    .is_none_or(|at| cx.now - at >= PUBLIC_PARSE_LOG_MS)
+                {
+                    self.public_parse_logged_at = Some(cx.now);
+                    let head: String = text.chars().take(200).collect();
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        format!("Bitget public message unreadable ({error}): {head}"),
+                    );
+                }
                 if let Ok(header) = serde_json::from_str::<PublicHeader<'_>>(text)
                     && header.arg.channel == "books"
                 {
                     let symbol = header.arg.inst_id.as_ref();
                     if let Some(state) = self.books.get_mut(symbol) {
                         state.reset();
-                        let topics = [("books".into(), symbol.to_owned())];
+                        let topics = [book_topic(symbol.to_owned())];
                         self.subscribe(cx, "unsubscribe", &topics);
                         self.subscribe(cx, "subscribe", &topics);
                     }
@@ -413,12 +485,48 @@ impl BitgetFutures {
             }
         };
         if message.event == "error" {
+            let topic = (
+                message.arg.channel.to_string(),
+                message.arg.inst_id.to_string(),
+            );
+            let retry = (!topic.0.is_empty() && !topic.1.is_empty())
+                .then(|| {
+                    self.refused_topics
+                        .entry(topic.clone())
+                        .or_insert((0, None))
+                })
+                .filter(|(made, timer)| *made < SUBSCRIBE_RETRIES && timer.is_none());
+            let detail = match retry {
+                Some((made, timer)) => {
+                    *timer = Some(cx.set_timer(1_000.0 * f64::from(1u32 << *made)));
+                    *made += 1;
+                    format!(
+                        "{} {}: retry {made} of {SUBSCRIBE_RETRIES}",
+                        topic.0, topic.1
+                    )
+                }
+                None if !topic.0.is_empty() => format!("{} {}: not retried", topic.0, topic.1),
+                None => String::new(),
+            };
             cx.notice(
                 Level::Error,
                 code::SUBSCRIPTION_REJECTED,
-                format!("Bitget WS: {}", message.msg),
+                if detail.is_empty() {
+                    format!("Bitget WS: {}", message.msg)
+                } else {
+                    format!("Bitget WS: {} ({detail})", message.msg)
+                },
             );
             return;
+        }
+        if !self.refused_topics.is_empty()
+            && let Some((_, timer)) = self.refused_topics.remove(&(
+                message.arg.channel.to_string(),
+                message.arg.inst_id.to_string(),
+            ))
+            && let Some(timer) = timer
+        {
+            cx.clear_timer(timer);
         }
         match message.data {
             PublicData::Tickers(rows) => {
@@ -463,7 +571,7 @@ impl BitgetFutures {
                         Err(error) => {
                             state.reset();
                             cx.notice(Level::Warn, code::STREAM_MALFORMED, error);
-                            let topics = [("books".into(), symbol.to_owned())];
+                            let topics = [book_topic(symbol.to_owned())];
                             self.subscribe(cx, "unsubscribe", &topics);
                             self.subscribe(cx, "subscribe", &topics);
                             break;
@@ -600,6 +708,16 @@ fn interval(value: Interval) -> Option<&'static str> {
     })
 }
 
+/// The (channel, instId) every book subscribe, unsubscribe and repair names.
+fn book_topic(symbol: String) -> (String, String) {
+    ("books".to_owned(), symbol)
+}
+
+/// The (channel, instId) every candle subscribe, unsubscribe and repair names.
+fn candle_topic(symbol: String, value: Interval) -> Option<(String, String)> {
+    Some((format!("candle{}", interval(value)?), symbol))
+}
+
 fn candle(row: &CandleRow) -> Candle {
     Candle {
         timestamp: row[0].get() / 1000.0,
@@ -622,11 +740,68 @@ impl Venue for BitgetFutures {
                 safe_cex_engine::QuantityUnits::Base
             },
             account: safe_cex_engine::AccountLookup::Query,
+            leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
+            fresh_positions: true,
+            nuke_account_cancel: true,
+            symbol_cancel_misses_unseen: true,
+            // Every census commits its covers and answers a refresh ask.
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
     fn guard_pending_placements(&self) -> bool {
         true
+    }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        self.refresh_settings(cx, symbol);
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            safe_cex_engine::VenueAction::RegisterCancelChecks { orders } => {
+                let root = match cx.admit_caller_read_root(None, None) {
+                    Ok(root) => root,
+                    Err(safe_cex_engine::request_context::CommandEntryError::Revoked) => {
+                        let _ = cx.reject_expired_command(
+                            safe_cex_engine::request_context::Operation::Read,
+                        );
+                        return;
+                    }
+                    Err(safe_cex_engine::request_context::CommandEntryError::Rejected(_)) => return,
+                };
+                self.register_cancel_checks(cx, &orders);
+                let _ = cx.done_context(&root, "null".into());
+            }
+            action @ safe_cex_engine::VenueAction::CancelAccountOrders => {
+                self.trade_command(cx, safe_cex_engine::Command::Venue { command, action })
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(venue_state::encode(
+            self.account.detected,
+            self.account.uta,
+            &self.account.plans,
+            &self.account.trailing,
+        ))
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        let Some(state) = venue_state::decode(state) else {
+            cx.venue_state_unreadable("Unreadable Bitget venue state from the data source");
+            return;
+        };
+        self.account.detected = state.detected;
+        self.account.uta = state.uta;
+        self.account.plans = state.plans;
+        self.account.trailing = state.trailing;
+        // Writes waiting on detection may now plan.
+        self.wake_trading(cx);
     }
     fn guard_order_mutations(&self) -> bool {
         true
@@ -636,8 +811,17 @@ impl Venue for BitgetFutures {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_orders(cx);
+    }
+    fn take_source_cancel_checks(&mut self) -> Vec<safe_cex_engine::model::CancelOrderRef> {
+        self.take_retired_cancel_targets()
+    }
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn capture_http_reconciliation(
         &self,
@@ -681,6 +865,13 @@ impl Venue for BitgetFutures {
     }
 
     type Pending = Pending;
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
             && let Err(error) = read.validate().and_then(|_| {
@@ -727,12 +918,12 @@ impl Venue for BitgetFutures {
         if index == 0 {
             for (symbol, state) in &mut self.books {
                 state.reset();
-                topics.push(("books".to_owned(), symbol.clone()));
+                topics.push(book_topic(symbol.clone()));
             }
             topics.extend(
                 self.candles
                     .keys()
-                    .filter_map(|(s, i)| Some((format!("candle{}", interval(*i)?), s.clone()))),
+                    .filter_map(|(s, i)| candle_topic(s.clone(), *i)),
             );
         }
         self.send_topics(cx, socket, "subscribe", &topics);
@@ -776,7 +967,7 @@ impl Venue for BitgetFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Identity(_) => {}
+            Pending::Identity(_) | Pending::Leverage(_) => {}
             Pending::History(request) => self.query_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::Account {
@@ -807,6 +998,9 @@ impl Venue for BitgetFutures {
                             {
                                 safe_cex_engine::startup::skipped_row(cx);
                             } else {
+                                self.trading
+                                    .min_order_value
+                                    .insert(row.symbol.to_string(), row.min_trade_usdt.get());
                                 let mut mapped = market(&row);
                                 if self.inverse() {
                                     if row.min_lever.get() == 0.0 {
@@ -871,6 +1065,10 @@ impl Venue for BitgetFutures {
             self.identity_response(cx, &root, response);
             return;
         }
+        if let Pending::Leverage(read) = pending {
+            self.leverage_response(cx, read, response);
+            return;
+        }
         if let Pending::History(request) = pending {
             self.query_response(cx, *request, response);
             return;
@@ -911,6 +1109,11 @@ impl Venue for BitgetFutures {
                 Err(error) => error,
                 Ok(_) => format!("Bitget HTTP {}: {}", response.status, response.body),
             };
+            // A candles read takes the table's kind and native code from the reply.
+            if let Pending::Candles { root, .. } = pending {
+                let _ = cx.fail_context(&root, account::read_error(&response, error));
+                return;
+            }
             self.on_request_failed(cx, pending, &error);
             return;
         }
@@ -921,6 +1124,16 @@ impl Venue for BitgetFutures {
                     Discovered::Markets(rows) => rows.is_empty(),
                     Discovered::Tickers(rows) => rows.is_empty(),
                 };
+                // A product with no contracts cannot appear by retrying.
+                if empty && !tickers && self.inverse() {
+                    let _ = cx.finish_http_context(&context);
+                    let error =
+                        safe_cex_engine::VenueError::new("Bitget lists no inverse contracts")
+                            .kind(safe_cex_engine::ErrorKind::VenueUnavailable);
+                    cx.notice_error(Level::Error, code::for_startup_error(&error), &error);
+                    cx.startup_failed(error);
+                    return;
+                }
                 if empty {
                     let _ = cx.finish_http_context(&context);
                     let message = if tickers {
@@ -943,8 +1156,11 @@ impl Venue for BitgetFutures {
                 let _ = cx.finish_http_context(&context);
                 if tickers {
                     self.discovery.succeeded(cx, DiscoveryRead::Tickers);
-                    self.connect(cx, 1);
-                    self.connect(cx, 2);
+                    self.open_feed(cx, 1);
+                    self.open_feed(cx, 2);
+                } else if cx.frame_fed() {
+                    // The page engine loads instruments only; its data source streams.
+                    self.discovery.succeeded(cx, DiscoveryRead::Markets);
                 } else {
                     self.connect(cx, 0);
                     self.discovery.succeeded(cx, DiscoveryRead::Markets);
@@ -993,17 +1209,34 @@ impl Venue for BitgetFutures {
             }
             return;
         }
-        if serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
+        let refused = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
             .ok()
-            .is_some_and(|e| e.code.0.is_some_and(|code| code != 0.0))
-        {
+            .is_some_and(|e| e.code.0.is_some_and(|code| code != 0.0));
+        let empty_account_list = pending.reads_account_list() && wire::null_list(response.body);
+        let empty_history =
+            matches!(&pending, Pending::History(_)) && wire::null_history(response.body);
+        if refused || empty_account_list || empty_history {
             self.on_response(cx, pending, response);
         } else {
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("Bitget response has no expected list: {}", response.body),
+            );
             self.on_request_failed(
                 cx,
                 pending,
                 "Bitget successful response has no expected list",
             );
+        }
+    }
+    fn on_signing_release(
+        &mut self,
+        target: safe_cex_engine::SigningTarget<'_, Pending>,
+        release: safe_cex_engine::SigningRelease,
+    ) {
+        if let safe_cex_engine::SigningTarget::Http { pending, .. } = target {
+            self.position_read_released(pending, release);
         }
     }
     fn on_sign_error(
@@ -1016,6 +1249,7 @@ impl Venue for BitgetFutures {
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
+            Pending::Leverage(read) => self.leverage_failed(cx, read, error),
             Pending::History(request) => self.query_strict_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, false),
             pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
@@ -1047,6 +1281,7 @@ impl Venue for BitgetFutures {
                 let _ = cx.fail_context(&root, error);
             }
             Pending::Identity(root) if deadline => self.identity_failed(cx, &root, error),
+            Pending::Leverage(read) => self.leverage_failed(cx, read, error),
             Pending::History(request) => self.query_http_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, true),
             pending @ Pending::Discovery { .. } => self.discovery_failed(cx, &pending, error),
@@ -1057,6 +1292,10 @@ impl Venue for BitgetFutures {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Identity(root) = pending {
             self.identity_failed(cx, &root, safe_cex_engine::VenueError::new(error));
+            return;
+        }
+        if let Pending::Leverage(read) = pending {
+            self.leverage_failed(cx, read, safe_cex_engine::VenueError::new(error));
             return;
         }
         match pending {
@@ -1091,7 +1330,7 @@ impl Venue for BitgetFutures {
                     .kind(safe_cex_engine::ErrorKind::Network);
                 self.discovery_failed(cx, &pending, error);
             }
-            Pending::Identity(_) => unreachable!(),
+            Pending::Identity(_) | Pending::Leverage(_) => unreachable!(),
         }
     }
     fn read_root_retired(
@@ -1100,10 +1339,23 @@ impl Venue for BitgetFutures {
         _pending: Vec<Pending>,
     ) {
         self.history_retired(owner);
+        self.account.fresh_positions.retired(owner);
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_write(cx);
+        if let Some(topic) = self
+            .refused_topics
+            .iter_mut()
+            .find(|(_, (_, pending))| *pending == Some(timer))
+            .map(|(topic, (_, pending))| {
+                *pending = None;
+                topic.clone()
+            })
+        {
+            self.subscribe(cx, "subscribe", &[topic]);
+            return;
+        }
         if let Some(read) = self.discovery.on_timer(timer) {
             self.discovery_read(cx, read == DiscoveryRead::Tickers);
             return;
@@ -1118,7 +1370,7 @@ impl Venue for BitgetFutures {
             };
             match tick {
                 Tick::Unhandled => continue,
-                Tick::Reconnect => self.connect(cx, index),
+                Tick::Reconnect => self.open_feed(cx, index),
                 Tick::Ping => {
                     if let Some(socket) = self.sockets[index].socket {
                         cx.send(socket, "ping");
@@ -1142,12 +1394,16 @@ impl Venue for BitgetFutures {
             self.fetch_identity(cx);
             return;
         }
+        if let Command::FetchLeverage { symbol, .. } = command {
+            self.fetch_leverage(cx, symbol);
+            return;
+        }
         match command {
             Command::SubscribeOrderBook { symbol } => {
                 let state = self.books.entry(symbol.clone()).or_default();
                 state.subscribers += 1;
                 if state.subscribers == 1 {
-                    self.subscribe(cx, "subscribe", &[("books".to_owned(), symbol)]);
+                    self.subscribe(cx, "subscribe", &[book_topic(symbol)]);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1155,7 +1411,7 @@ impl Venue for BitgetFutures {
                     state.subscribers -= 1;
                     if state.subscribers == 0 {
                         self.books.remove(&symbol);
-                        self.subscribe(cx, "unsubscribe", &[("books".to_owned(), symbol)]);
+                        self.subscribe(cx, "unsubscribe", &[book_topic(symbol)]);
                     }
                 }
             }
@@ -1163,7 +1419,7 @@ impl Venue for BitgetFutures {
                 symbol,
                 interval: value,
             } => {
-                let Some(native) = interval(value) else {
+                let Some(topic) = candle_topic(symbol.clone(), value) else {
                     cx.notice(
                         Level::Error,
                         code::COMMAND_UNSUPPORTED,
@@ -1171,10 +1427,10 @@ impl Venue for BitgetFutures {
                     );
                     return;
                 };
-                let count = self.candles.entry((symbol.clone(), value)).or_default();
+                let count = self.candles.entry((symbol, value)).or_default();
                 *count += 1;
                 if *count == 1 {
-                    self.subscribe(cx, "subscribe", &[(format!("candle{native}"), symbol)]);
+                    self.subscribe(cx, "subscribe", &[topic]);
                 }
             }
             Command::UnsubscribeCandles {
@@ -1186,12 +1442,8 @@ impl Venue for BitgetFutures {
                     *count -= 1;
                     if *count == 0 {
                         self.candles.remove(&key);
-                        if let Some(native) = interval(key.1) {
-                            self.subscribe(
-                                cx,
-                                "unsubscribe",
-                                &[(format!("candle{native}"), key.0)],
-                            );
+                        if let Some(topic) = candle_topic(key.0, key.1) {
+                            self.subscribe(cx, "unsubscribe", &[topic]);
                         }
                     }
                 }

@@ -83,6 +83,10 @@ import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLev
 import { getBybitResponseMeta } from './bybit.response';
 import { BYBIT_BRAZIL_SITE_ID } from '../../../exchanges/bybit/bybit.site';
 import {
+  normalizeBybitExecutionTimestampMs,
+  normalizeBybitExecutionTimestampSeconds,
+} from './bybit.execution-time';
+import {
   BASE_URL,
   BASE_WS_URL,
   BybitApiKeyInfo,
@@ -2045,12 +2049,6 @@ export class BybitExchange extends BaseExchange {
     from?: number,
     to?: number,
   ): Execution[] => {
-    const parseTimestampMs = (raw: any): number | undefined => {
-      const value = Number(raw);
-      if (!Number.isFinite(value) || value <= 0) return undefined;
-      return value > 100_000_000_000 ? value : value * 1000;
-    };
-
     const parseFeeFromDetail = (detail: any): number | undefined => {
       if (!detail) return undefined;
       let parsed = detail;
@@ -2108,7 +2106,9 @@ export class BybitExchange extends BaseExchange {
         continue;
       }
 
-      const timestampMs = parseTimestampMs(row.updatedTime ?? row.createdTime ?? row.execTime ?? row.transactionTime);
+      const timestampMs = normalizeBybitExecutionTimestampMs(
+        row.updatedTime ?? row.createdTime ?? row.execTime ?? row.transactionTime,
+      );
       if (!timestampMs) {
         continue;
       }
@@ -2291,11 +2291,12 @@ export class BybitExchange extends BaseExchange {
             continue;
           }
 
-          const rawExecTime = Number(exec.execTime ?? exec.tradeTime ?? exec.updatedTime ?? exec.createdTime);
-          if (!Number.isFinite(rawExecTime) || rawExecTime <= 0) {
+          const timestamp = normalizeBybitExecutionTimestampSeconds(
+            exec.execTime ?? exec.tradeTime ?? exec.updatedTime ?? exec.createdTime,
+          );
+          if (timestamp === undefined) {
             continue;
           }
-          const timestamp = rawExecTime > 100_000_000_000 ? Math.floor(rawExecTime / 1000) : Math.floor(rawExecTime);
 
           executions.push({
             id: exec.execId,

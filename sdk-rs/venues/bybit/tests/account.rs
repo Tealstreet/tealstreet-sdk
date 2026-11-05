@@ -234,8 +234,11 @@ fn the_private_socket_authenticates_before_it_subscribes() {
     h.event(Event::WsOpened { socket });
     let auth = h.sent_on("/v5/private");
     assert_eq!(auth.len(), 1);
-    // "Authentication": expires is ten seconds past now.
-    let expires = h.now + 10_000.0;
+    // "Authentication": expires is ten seconds past Bybit's clock, which
+    // the answers' own `time` calibrated, not the host's.
+    let (bybit_now, _) = h.engine.signing_clock(h.now);
+    assert_ne!(bybit_now, h.now);
+    let expires = bybit_now.floor() + 10_000.0;
     let signature = hmac_sha256(
         b"secret",
         format!("GET/realtime{expires}").as_bytes(),
@@ -345,6 +348,20 @@ fn fills_in(h: &mut Harness) -> u32 {
         .map_or(0, |(_, payload)| {
             u32::from_le_bytes(payload[..4].try_into().unwrap())
         })
+}
+
+#[test]
+fn a_malformed_execution_row_costs_only_itself() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    h.engine.take_frame(h.now);
+    let frame = execution_frame("0.001", "97000");
+    let frame = frame.replacen(r#""data":["#, r#""data":[{"category":7},"#, 1);
+    h.message("/v5/private", &frame);
+    assert_eq!(fills_in(&mut h), 1);
 }
 
 #[test]
@@ -801,6 +818,73 @@ fn cancels_in_batches_and_treats_an_order_already_gone_as_canceled() {
 }
 
 #[test]
+fn a_batch_cancel_that_also_cancelled_an_unnamed_order_confirms_its_target_and_reads_orders() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    h.command(Command::CancelOrders {
+        command: 16,
+        ids: vec![
+            ORDER_ID.into(),
+            "5cf98598-39a7-459e-97bf-76ca765ee020".into(),
+        ],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    assert!(!h.has_request("/v5/order/realtime"));
+    // Prod e14185004edf: Bybit also echoed a success for an order it cancelled with ours.
+    h.reply(
+        cancel.id,
+        200,
+        &format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{{"category":"linear","symbol":"ETHUSDT","orderId":"{ORDER_ID}","orderLinkId":""}},{{"category":"linear","symbol":"ETHUSDT","orderId":"attached-child","orderLinkId":""}},{{"category":"linear","symbol":"BTCUSDT","orderId":"5cf98598-39a7-459e-97bf-76ca765ee020","orderLinkId":""}}]}},"retExtInfo":{{"list":[{{"code":0,"msg":"OK"}},{{"code":0,"msg":"OK"}},{{"code":0,"msg":"OK"}}]}},"time":1}}"#
+        ),
+    );
+    assert_eq!(
+        h.engine.store().order(ORDER_ID).unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(h.result(16), Some(&Ok("[]".to_owned())));
+    assert!(
+        h.has_request("/v5/order/realtime"),
+        "the unnamed cancellation is learned from a fresh order read"
+    );
+}
+
+#[test]
+fn a_one_target_batch_cancel_with_one_unnamed_success_echo_is_confirmed() {
+    // Live 06b73631 (release 7dd55432): targets=1; result.list=2; orderId
+    // nonempty/matched=2/1; orderLinkId nonempty=0; statuses success 2/0/0.
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    let target = "5cf98598-39a7-459e-97bf-76ca765ee020";
+    h.command(Command::CancelOrders {
+        command: 17,
+        ids: vec![target.into()],
+    });
+    let cancel = h.take("/v5/order/cancel-batch");
+    assert!(!h.has_request("/v5/order/realtime"));
+    h.reply(
+        cancel.id,
+        200,
+        &format!(
+            r#"{{"retCode":0,"retMsg":"OK","result":{{"list":[{{"category":"linear","symbol":"BTCUSDT","orderId":"{target}","orderLinkId":""}},{{"category":"linear","symbol":"BTCUSDT","orderId":"cascaded-child","orderLinkId":""}}]}},"retExtInfo":{{"list":[{{"code":0,"msg":"OK"}},{{"code":0,"msg":"OK"}}]}},"time":1}}"#
+        ),
+    );
+    assert_eq!(
+        h.engine.store().order(target).unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(h.result(17), Some(&Ok("[]".to_owned())));
+    assert!(!h.logs.iter().any(|m| m.contains("could not be confirmed")));
+    assert!(h.has_request("/v5/order/realtime"));
+}
+
+#[test]
 fn cancel_all_for_a_symbol() {
     let mut h = ready();
     h.command(Command::CancelSymbolOrders {
@@ -1027,6 +1111,17 @@ fn a_split_preserves_quantity_and_only_the_first_lot_has_brackets() {
 fn partial_stops_cancel_recreate_and_full_stops_keep_the_position_update_path() {
     for mode in ["Partial", "Full"] {
         let mut h = ready();
+        // Partial: 87000 crosses the price and becomes a take profit (owner-decided drag);
+        // Full: the stop stays a stop, below the price.
+        price_at(
+            &mut h,
+            "BTCUSDT",
+            if mode == "Partial" {
+                80_000.0
+            } else {
+                90_000.0
+            },
+        );
         let stop = format!(
             r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"{mode}","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}}]}}"#
         );
@@ -1482,6 +1577,23 @@ fn recurring_account_poll_obeys_live_policy_and_completion() {
     assert!(reads.is_empty(), "account cycle must complete");
     policy_poll_after_completion(engine, now);
 }
+// Existing fixtures supply their default-axis rows; the added terminal axes are empty.
+fn finish_empty_terminal_histories(h: &mut Harness) {
+    h.advance(250.0);
+    while let Some(url) = h
+        .requests
+        .iter()
+        .find(|request| {
+            request.url.contains("/v5/order/history") && request.url.contains("orderStatus=")
+        })
+        .map(|request| request.url.clone())
+    {
+        assert!(!url.contains("cursor="));
+        h.respond(&url, 200, EMPTY_LIST);
+        h.advance(250.0);
+    }
+}
+
 fn query_result(
     h: &mut Harness,
     command: u32,
@@ -1494,6 +1606,7 @@ fn query_result(
         let request = h.take(path);
         h.reply(request.id, 200, body);
     }
+    finish_empty_terminal_histories(h);
     h.result(command).unwrap().clone().unwrap()
 }
 
@@ -1623,6 +1736,7 @@ fn omitted_order_history_limit_reads_every_page_instead_of_fifty() {
     let request = h.take("/v5/order/history");
     assert!(request.url.contains("cursor=next"));
     h.reply(request.id, 200, &second);
+    finish_empty_terminal_histories(&mut h);
     let rows =
         serde_json::from_str::<Vec<serde_json::Value>>(h.result(33).unwrap().as_ref().unwrap())
             .unwrap();
@@ -1842,7 +1956,7 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
             limit: None,
         },
     });
-    for page in 0..20 {
+    for page in 0..200 {
         let rows: Vec<String> = (page * 50..page * 50 + 50)
             .map(|i| format!(r#"{{"orderId":"o{i}","symbol":"BTCUSDT","side":"Buy","orderType":"Limit","orderStatus":"Cancelled","qty":"1","cumExecQty":"0","price":"100","createdTime":"{}"}}"#, 1672000000000u64 + i as u64))
             .collect();
@@ -1854,11 +1968,12 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
         let request = h.take("/v5/order/history");
         h.reply(request.id, 200, &body);
     }
+    finish_empty_terminal_histories(&mut h);
     assert!(!h.has_request("/v5/order/history"));
     let rows =
         serde_json::from_str::<Vec<serde_json::Value>>(h.result(35).unwrap().as_ref().unwrap())
             .unwrap();
-    assert_eq!(rows.len(), 1000);
+    assert_eq!(rows.len(), 10_000);
     assert!(h.logs.iter().any(|m| m.contains("page limit")));
     let (index, event) = h
         .notices
@@ -1875,9 +1990,10 @@ fn unbounded_order_history_keeps_rows_at_the_page_limit_like_ts() {
         .expect("owned semantic order-history warning");
     assert_eq!(event.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(35.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(35.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     let done = h
         .notices
         .iter()
@@ -1924,10 +2040,10 @@ fn windowed_fill_request_sequence_is_pinned() {
     assert_eq!(
         sent,
         [
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=50",
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=50&cursor=c1",
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670790400001&endTime=1671395200000&limit=50",
-            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670704000000&endTime=1670790400000&limit=50",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=100",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1671395200001&endTime=1672000000000&limit=100&cursor=c1",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670790400001&endTime=1671395200000&limit=100",
+            "execution/list?category=linear&symbol=BTCUSDT&startTime=1670704000000&endTime=1670790400000&limit=100",
         ]
     );
 }
@@ -2005,7 +2121,9 @@ fn balance_info_is_the_last_rest_wallet_account_verbatim_like_ts() {
     assert_eq!(info["coin"][0]["marginCollateral"], true);
     assert_eq!(info["coin"][0]["collateralSwitch"], true);
 
-    // Stream pushes move the balance but not `info`, as TS reads it from REST only.
+    // While the private topics are live, REST re-reads the wallet only as the 60 s
+    // safety reconcile. Pushes stream the typed wallet; `info` is not merged from
+    // them (the bybit wasm budget), so it stays the last REST account until then.
     let socket = h.socket("/v5/private").unwrap();
     h.event(Event::WsOpened { socket });
     h.message(
@@ -2630,9 +2748,10 @@ fn owned_history_markers(h: &Harness, command: u32) -> Vec<usize> {
             {
                 assert_eq!(event.level, safe_cex_engine::Level::Warn);
                 assert_eq!(
-                    event.fields,
+                    event.fields[..1],
                     [("command", safe_cex_engine::Value::Num(f64::from(command)))]
                 );
+                assert_eq!(event.fields[1].0, "reason");
                 Some(index)
             }
             _ => None,
@@ -2799,7 +2918,7 @@ fn owned_history_cursor_and_bounded_budget_refusals_stay_strict_after_rows() {
                 command: 804,
                 query,
             });
-            let budget = if kind == 1 { 20 } else { 10 };
+            let budget = if kind == 1 { 200 } else { 100 };
             let cursors: Vec<String> = match mode {
                 0 => vec!["same".into(), "same".into()],
                 1 => vec!["a".into(), "b".into(), "a".into()],
@@ -2836,6 +2955,7 @@ fn owned_history_raw_duplicate_limit_wins_over_cursor_refusal() {
                 &owned_history_page(&[owned_history_row(kind, "duplicate")], "same"),
             );
         }
+        finish_empty_terminal_histories(&mut h);
         let rows: Vec<serde_json::Value> =
             serde_json::from_str(h.result(805).unwrap().as_ref().unwrap()).unwrap();
         assert_eq!(rows.len(), 1);
@@ -2889,7 +3009,7 @@ fn owned_history_window_recovery_preserves_first_incomplete_cause() {
             limit: None,
         },
     });
-    for page in 0..20 {
+    for page in 0..200 {
         h.respond(
             "/v5/order/history",
             200,
@@ -2908,7 +3028,7 @@ fn owned_history_window_recovery_preserves_first_incomplete_cause() {
         serde_json::from_str::<Vec<serde_json::Value>>(result)
             .unwrap()
             .len(),
-        20
+        200
     );
     let markers = owned_history_markers(&h, 807);
     assert_eq!(markers.len(), 1);
@@ -2954,8 +3074,9 @@ fn unsupported_reports_wait_for_admitted_join_and_never_rearm_on_clean_rows() {
     let mut healthy = snapshot_rows(OPEN_ORDERS).remove(0);
     healthy["orderId"] = serde_json::json!("healthy-report-peer");
     let rows = [unsupported, healthy];
-    let expected =
-        format!("Bybit order {ORDER_ID} has an unsupported type; its last known state is kept");
+    let expected = format!(
+        "Bybit order {ORDER_ID} has an unsupported type (orderType Some(\"FutureType\"), stopOrderType Some(\"UNKNOWN\"), createType None, tpslMode Some(\"Full\"), side Some(\"Buy\"), triggerPrice Some(\"0.00\")); its last known state is kept"
+    );
     let reports = |h: &Harness| {
         h.logs
             .iter()
@@ -3061,8 +3182,10 @@ fn stale_join_discards_staged_unsupported_diagnostics_without_consuming_memory()
     assert_eq!(
         h.logs
             .iter()
-            .filter(|m| m.as_str()
-                == "Bybit order staged-unsupported has an unsupported type and is not shown")
+            .filter(
+                |m| m.starts_with("Bybit order staged-unsupported has an unsupported type (")
+                    && m.ends_with(") and is not shown")
+            )
             .count(),
         1
     );
@@ -3074,6 +3197,7 @@ fn stale_join_discards_staged_unsupported_diagnostics_without_consuming_memory()
 fn trading_stop_amends_treat_tpsl_not_modified_as_satisfied() {
     for kind in ["full", "trailing"] {
         let mut h = ready();
+        price_at(&mut h, "BTCUSDT", 90_000.0);
         h.message(
             "/v5/private",
             r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Full","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#,
@@ -3106,6 +3230,64 @@ fn trading_stop_amends_treat_tpsl_not_modified_as_satisfied() {
         assert_eq!(h.result(55), Some(&Ok("[]".to_owned())), "{kind}");
         assert!(!h.has_request("/v5/position/trading-stop"), "{kind}");
     }
+}
+
+#[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let mut h = ready();
+    place(
+        &mut h,
+        31,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let first = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: first,
+        error: "connection reset",
+    });
+    while h.has_request("/v5/order/realtime") {
+        let read = h.take("/v5/order/realtime");
+        h.reply(
+            read.id,
+            200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[{"symbol":"ETHUSDT","orderId":"mm","stopOrderType":"NotARealType"}]}}"#,
+        );
+    }
+    place(
+        &mut h,
+        32,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    h.take("/v5/order/create-batch");
+}
+
+#[test]
+fn a_null_order_list_is_an_empty_read_and_releases_the_fence() {
+    let mut h = ready();
+    place(
+        &mut h,
+        31,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let first = h.take("/v5/order/create-batch").id;
+    h.event(Event::HttpFailed {
+        request: first,
+        error: "connection reset",
+    });
+    while h.has_request("/v5/order/realtime") {
+        let read = h.take("/v5/order/realtime");
+        h.reply(
+            read.id,
+            200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":null}}"#,
+        );
+    }
+    place(
+        &mut h,
+        32,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    h.take("/v5/order/create-batch");
 }
 
 /// 1d-ii A3: a reconcile asked for while an older order read is still out
@@ -3406,4 +3588,1078 @@ fn a_twice_refused_order_page_never_leaks_its_signed_origin() {
     );
     assert_private_notices_are_safe(&h);
     assert!(h.logs.iter().all(|line| !line.contains(LOG_SECRET)));
+}
+
+/// Answer every outstanding account read.
+fn drain_account_reads(h: &mut Harness) {
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY_LIST);
+    }
+    while h.has_request("/v5/position/list") {
+        h.respond("/v5/position/list", 200, EMPTY_LIST);
+    }
+    while h.has_request("/v5/account/wallet-balance") {
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
+    }
+}
+
+fn polls_account(h: &Harness) -> bool {
+    h.has_request("/v5/position/list") || h.has_request("/v5/account/wallet-balance")
+}
+
+#[test]
+fn live_private_topics_turn_position_and_wallet_polls_into_a_60s_safety_reconcile() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    respond_snapshot(&mut h);
+    // Before the topics are live, every tick re-reads positions and the wallet.
+    h.advance(POLL_MS);
+    assert!(polls_account(&h), "{:?}", h.paths());
+    drain_account_reads(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"c"}"#,
+    );
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe","conn_id":"c"}"#,
+    );
+    // The subscribe ack covers the gap with one read.
+    assert!(polls_account(&h));
+    drain_account_reads(&mut h);
+    // Live topics: no position or wallet reads for the next 55 s of ticks...
+    // (a live venue answers the private pings, so the socket stays up).
+    let pong = r#"{"success":true,"ret_msg":"pong","conn_id":"c","op":"pong"}"#;
+    // Positions keep their tick for a while after the snapshot's open position went flat.
+    for _ in 0..6 {
+        h.advance(POLL_MS);
+        h.message("/v5/private", pong);
+        assert!(!h.has_request("/v5/account/wallet-balance"));
+        drain_account_reads(&mut h);
+    }
+    for _ in 0..5 {
+        h.advance(POLL_MS);
+        h.message("/v5/private", pong);
+        assert!(!polls_account(&h), "{:?}", h.paths());
+    }
+    // ...then the 60 s safety reconcile, on the first tick past it.
+    for _ in 0..2 {
+        h.advance(POLL_MS);
+        h.message("/v5/private", pong);
+    }
+    assert!(h.has_request("/v5/position/list") && h.has_request("/v5/account/wallet-balance"));
+    drain_account_reads(&mut h);
+    // A dropped private socket falls back to every tick until the topics are live again.
+    h.event(Event::WsClosed { socket, code: 1006 });
+    drain_account_reads(&mut h);
+    h.advance(POLL_MS);
+    assert!(polls_account(&h), "{:?}", h.paths());
+}
+
+#[test]
+fn an_open_position_keeps_its_per_tick_position_read_while_the_wallet_waits() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    respond_snapshot(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"c"}"#,
+    );
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe","conn_id":"c"}"#,
+    );
+    // The gap read reports an open BTCUSDT long.
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY_LIST);
+    }
+    while h.has_request("/v5/position/list") {
+        h.respond("/v5/position/list", 200, POSITIONS);
+    }
+    while h.has_request("/v5/account/wallet-balance") {
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
+    }
+    let pong = r#"{"success":true,"ret_msg":"pong","conn_id":"c","op":"pong"}"#;
+    for _ in 0..11 {
+        h.advance(POLL_MS);
+        h.message("/v5/private", pong);
+        // Venue-reported unrealized PnL: positions every tick; the wallet waits.
+        assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
+        assert!(
+            !h.has_request("/v5/account/wallet-balance"),
+            "{:?}",
+            h.paths()
+        );
+        while h.has_request("/v5/position/list") {
+            h.respond("/v5/position/list", 200, POSITIONS);
+        }
+    }
+}
+
+#[test]
+fn a_settings_refresh_re_reads_the_mode_and_writes_nothing() {
+    let mut h = ready();
+    h.command(Command::Venue {
+        command: 40,
+        action: safe_cex_engine::VenueAction::RefreshSettings { symbol: None },
+    });
+    assert_eq!(h.result(40), Some(&Ok("null".to_owned())));
+    assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
+    assert!(
+        h.requests
+            .iter()
+            .all(|request| request.method == safe_cex_engine::Method::Get),
+        "no write: {:?}",
+        h.paths()
+    );
+}
+
+#[test]
+fn a_refused_batch_row_carries_the_venue_reason_in_its_error() {
+    let mut h = ready();
+    place(
+        &mut h,
+        93,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    let batch = h.take("/v5/order/create-batch");
+    h.reply(
+        batch.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"orderId":""}]},"retExtInfo":{"list":[{"code":110017,"msg":"current position is zero, cannot fix reduce-only order qty"}]}}"#,
+    );
+    assert_eq!(
+        h.result(93),
+        Some(&Err(
+            "Failed to place batch orders: current position is zero, cannot fix reduce-only order qty"
+                .to_owned()
+        ))
+    );
+}
+
+fn fetch_leverage(h: &mut Harness, command: u32, symbol: &str) -> safe_cex_engine::HttpRequest {
+    h.command(safe_cex_engine::Command::FetchLeverage {
+        command,
+        symbol: symbol.into(),
+    });
+    h.take("/v5/position/list")
+}
+
+#[test]
+fn a_flat_symbol_reads_its_leverage_with_a_symbol_query() {
+    let mut h = ready();
+    assert_eq!(
+        h.engine.capabilities().leverage_query,
+        safe_cex_engine::LeverageQuery::OnReadAndMetadata
+    );
+    let request = fetch_leverage(&mut h, 94, "ETHUSDT");
+    assert!(request.url.contains("category=linear"), "{}", request.url);
+    assert!(request.url.contains("symbol=ETHUSDT"), "{}", request.url);
+    assert!(!request.url.contains("settleCoin"), "{}", request.url);
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[{"symbol":"ETHUSDT","side":"","size":"0","positionIdx":0,"leverage":"50","avgPrice":"0"}],"nextPageCursor":"","category":"linear"}}"#,
+    );
+    let Some(Ok(result)) = h.result(94) else {
+        panic!("the read must succeed: {:?}", h.result(94));
+    };
+    let fetched: serde_json::Value = serde_json::from_str(result).unwrap();
+    assert_eq!(fetched["buyLeverage"], 50.0);
+    assert_eq!(fetched["sellLeverage"], 50.0);
+    assert_eq!(fetched["positionMode"], "oneway");
+    let setting = h.engine.store().setting("ETHUSDT").unwrap();
+    assert_eq!(setting.leverage, 50.0);
+    assert_eq!(setting.buy_leverage, None);
+    assert!(
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .all(|position| position.symbol != "ETHUSDT"),
+        "a flat row is not a position"
+    );
+}
+
+#[test]
+fn flat_hedged_rows_set_each_rail() {
+    let mut h = ready();
+    let request = fetch_leverage(&mut h, 95, "ETHUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","side":"","size":"0","positionIdx":1,"leverage":"20"},{"symbol":"ETHUSDT","side":"","size":"0","positionIdx":2,"leverage":"7"}]}}"#,
+    );
+    let setting = h.engine.store().setting("ETHUSDT").unwrap();
+    assert_eq!(setting.buy_leverage, Some(20.0));
+    assert_eq!(setting.sell_leverage, Some(7.0));
+    let Some(Ok(result)) = h.result(95) else {
+        panic!("the read must succeed");
+    };
+    let fetched: serde_json::Value = serde_json::from_str(result).unwrap();
+    assert_eq!(fetched["positionMode"], "hedged");
+}
+
+#[test]
+fn a_leverage_write_during_the_read_keeps_the_written_value() {
+    let mut h = ready();
+    let request = fetch_leverage(&mut h, 96, "ETHUSDT");
+    h.command(safe_cex_engine::Command::SetLeverage {
+        command: 97,
+        symbol: "ETHUSDT".into(),
+        leverage: 12.0,
+        side: None,
+    });
+    let write = h.take("/v5/position/set-leverage");
+    h.reply(write.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{}}"#);
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","positionIdx":0,"leverage":"50"}]}}"#,
+    );
+    assert_eq!(h.engine.store().setting("ETHUSDT").unwrap().leverage, 12.0);
+    let Some(Ok(result)) = h.result(96) else {
+        panic!("the read must succeed");
+    };
+    let fetched: serde_json::Value = serde_json::from_str(result).unwrap();
+    assert_eq!(fetched["buyLeverage"], 12.0);
+}
+
+#[test]
+fn a_portfolio_margin_row_fails_the_read_and_writes_nothing() {
+    let mut h = ready();
+    let before = h.engine.store().setting("ETHUSDT");
+    let request = fetch_leverage(&mut h, 98, "ETHUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","positionIdx":0,"leverage":""}]}}"#,
+    );
+    let Some(Err(error)) = h.result(98) else {
+        panic!("the read must fail");
+    };
+    assert!(error.contains("portfolio margin"), "{error}");
+    assert_eq!(h.engine.store().setting("ETHUSDT"), before);
+}
+
+#[test]
+fn an_unknown_market_is_refused_before_any_request() {
+    let mut h = ready();
+    h.command(safe_cex_engine::Command::FetchLeverage {
+        command: 99,
+        symbol: "NOPEUSDT".into(),
+    });
+    assert!(matches!(h.result(99), Some(Err(_))));
+    assert!(!h.has_request("/v5/position/list?category=linear&symbol=NOPEUSDT"));
+}
+
+#[test]
+fn a_position_row_on_another_symbol_does_not_discard_a_flat_read() {
+    let mut h = ready();
+    let request = fetch_leverage(&mut h, 100, "ETHUSDT");
+    h.message(
+        "/v5/private",
+        r#"{"topic":"position","data":[{"symbol":"BTCUSDT","category":"linear","side":"Buy","size":"0.5","positionIdx":0,"avgPrice":"90000","markPrice":"90000","positionValue":"45000","unrealisedPnl":"0","leverage":"9","seq":99999,"updatedTime":"1713434102753"}]}"#,
+    );
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","positionIdx":0,"leverage":"50"}]}}"#,
+    );
+    assert_eq!(h.engine.store().setting("ETHUSDT").unwrap().leverage, 50.0);
+}
+
+#[test]
+fn a_leverage_write_goes_out_unless_both_rails_already_match() {
+    let mut h = ready();
+    let request = fetch_leverage(&mut h, 101, "ETHUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","positionIdx":1,"leverage":"20"},{"symbol":"ETHUSDT","positionIdx":2,"leverage":"7"}]}}"#,
+    );
+    let set = |h: &mut Harness, command| {
+        h.command(Command::SetLeverage {
+            command,
+            symbol: "ETHUSDT".into(),
+            leverage: 20.0,
+            side: None,
+        });
+    };
+    set(&mut h, 102);
+    let write = h.take("/v5/position/set-leverage");
+    h.reply(write.id, 200, r#"{"retCode":0,"retMsg":"OK","result":{}}"#);
+    set(&mut h, 103);
+    assert!(!h.has_request("/v5/position/set-leverage"));
+}
+
+// B1: /v5/position/list lags the stream; a read issued just after a frame may omit it.
+#[test]
+fn a_lagging_position_read_cannot_flatten_a_fresh_frame_and_reads_continue_after_flat() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    respond_snapshot(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth","conn_id":"c"}"#,
+    );
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe","conn_id":"c"}"#,
+    );
+    let flat_reads = |h: &mut Harness| {
+        while h.has_request("/v5/position/list") {
+            h.respond("/v5/position/list", 200, EMPTY_LIST);
+        }
+    };
+    drain_account_reads(&mut h);
+    h.advance(POLL_MS);
+    flat_reads(&mut h);
+    h.advance(POLL_MS - 200.0);
+    flat_reads(&mut h);
+    h.message(
+        "/v5/private",
+        r#"{"topic":"position","data":[{"symbol":"BTCUSDT","positionIdx":0,"side":"Buy","size":"3","avgPrice":"50000","markPrice":"51000","positionValue":"153000","leverage":"10","unrealisedPnl":"300","curRealisedPnl":"0","positionIM":"30"}]}"#,
+    );
+    let contracts = |h: &Harness| {
+        h.engine
+            .store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == "BTCUSDT")
+            .map_or(0.0, |p| p.contracts)
+    };
+    assert_eq!(contracts(&h), 3.0);
+    // The tick 200 ms later reads; the venue has not caught up.
+    h.advance(200.0);
+    assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
+    flat_reads(&mut h);
+    assert_eq!(contracts(&h), 3.0);
+    // A read issued past the guard is believed...
+    h.advance(POLL_MS);
+    flat_reads(&mut h);
+    assert_eq!(contracts(&h), 0.0);
+    // ...and the tick keeps reading, so a wrong flat is not stuck for 60 s.
+    h.advance(POLL_MS);
+    assert!(h.has_request("/v5/position/list"), "{:?}", h.paths());
+}
+
+// A real frame after a mode switch: the Inactive legs must not teach the wrong mode.
+#[test]
+fn inactive_position_legs_are_ignored() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        r#"{"topic":"position","data":[{"symbol":"BTCUSDT","positionIdx":0,"size":"0","leverage":"50","positionStatus":"Normal","seq":836543325545},{"symbol":"BTCUSDT","positionIdx":1,"size":"0","leverage":"10","positionStatus":"Inactive","seq":-1},{"symbol":"BTCUSDT","positionIdx":2,"size":"0","leverage":"10","positionStatus":"Inactive","seq":-1}]}"#,
+    );
+    assert!(!h.engine.store().hedged());
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 50.0);
+}
+
+#[test]
+fn a_cancel_batch_in_a_rest_outage_is_bounded_per_command() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    h.command(Command::CancelOrders {
+        command: 14,
+        ids: vec![ORDER_ID.into()],
+    });
+    let mut sent = 0;
+    for _ in 0..600 {
+        while h.has_request("/v5/order/cancel-batch") {
+            sent += 1;
+            h.respond("/v5/order/cancel-batch", 503, "Service Unavailable");
+        }
+        h.advance(1_000.0);
+    }
+    assert!((1..=2).contains(&sent), "{sent} sends");
+}
+
+#[test]
+fn an_order_past_the_split_bound_is_refused_without_a_request() {
+    let mut h = ready();
+    let max = h
+        .engine
+        .store()
+        .market("BTCUSDT")
+        .unwrap()
+        .limits
+        .amount
+        .max;
+    let order = serde_json::from_value(serde_json::json!({
+        "symbol": "BTCUSDT", "type": "market", "side": "buy", "amount": max * 2000.0
+    }))
+    .unwrap();
+    h.engine.handle(
+        h.now,
+        safe_cex_engine::Event::Command(safe_cex_engine::Command::PlaceOrders {
+            command: 77,
+            orders: vec![order],
+        }),
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut h.engine, h.now);
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("safe split bound")),
+        "{actions:?}"
+    );
+}
+
+#[test]
+fn preset_legs_end_when_a_terminal_row_does_not_repeat_them() {
+    let id = "fd4300ae-7847-404e-b947-b46980a4d140";
+    let frame = |status: &str| {
+        let frame = order_frame(status, "0", "0.002", "EC_NoError");
+        let at = frame.find(r#""orderId":""#).unwrap() + 11;
+        let end = at + frame[at..].find('"').unwrap();
+        format!("{}{id}{}", &frame[..at], &frame[end..])
+    };
+    let mut h = ready();
+    h.message("/v5/private", &frame("New"));
+    let mut leg = h.engine.store().order(id).unwrap().clone();
+    leg.id = format!("{id}__stop_loss");
+    leg.parent_id = Some(id.into());
+    leg.kind = OrderType::StopLoss;
+    leg.status = OrderStatus::Open;
+    h.engine.store_mut().upsert_order(leg);
+    h.message("/v5/private", &frame("Cancelled"));
+    assert_eq!(
+        h.engine
+            .store()
+            .order(&format!("{id}__stop_loss"))
+            .unwrap()
+            .status,
+        OrderStatus::Canceled
+    );
+}
+
+#[test]
+fn a_fills_start_with_no_end_walks_to_now_and_no_limit_reads_every_page() {
+    let mut h = ready();
+    let from = h.now - 15.0 * 86_400_000.0;
+    h.command(Command::Query {
+        command: 36,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(from),
+            to_ms: None,
+            limit: None,
+        },
+    });
+    let mut windows = 0;
+    while h.has_request("/v5/execution/list") {
+        let request = h.take("/v5/execution/list");
+        assert!(request.url.contains("endTime="), "{}", request.url);
+        windows += 1;
+        h.reply(
+            request.id,
+            200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"nextPageCursor":"","list":[]}}"#,
+        );
+    }
+    assert_eq!(windows, 3);
+    assert!(h.result(36).unwrap().is_ok());
+}
+
+#[test]
+fn cancelling_an_attached_stop_alone_clears_it_on_its_parent() {
+    let mut h = ready();
+    h.message(
+        "/v5/private",
+        &order_frame("New", "0", "0.002", "EC_NoError"),
+    );
+    let id = h.engine.store().orders()[0].id.clone();
+    let mut leg = h.engine.store().order(&id).unwrap().clone();
+    leg.id = format!("{id}__stop_loss");
+    leg.parent_id = Some(id.clone());
+    leg.kind = OrderType::StopLoss;
+    h.engine.store_mut().upsert_order(leg.clone());
+    h.requests.clear();
+
+    h.command(Command::CancelOrders {
+        command: 61,
+        ids: vec![leg.id.clone()],
+    });
+    let amend = h.take("/v5/order/amend");
+    assert!(
+        body(&amend).contains(&format!(r#""orderId":"{id}""#)),
+        "{}",
+        body(&amend)
+    );
+    assert!(
+        body(&amend).contains(r#""stopLoss":"0""#),
+        "{}",
+        body(&amend)
+    );
+    h.reply(
+        amend.id,
+        200,
+        &format!(r#"{{"retCode":0,"retMsg":"OK","result":{{"orderId":"{id}","orderLinkId":""}},"retExtInfo":{{}},"time":1}}"#),
+    );
+    assert!(matches!(h.result(61), Some(Ok(_))), "{:?}", h.result(61));
+    assert!(h.engine.store().order(&leg.id).is_none());
+    assert!(h.engine.store().order(&id).is_some());
+}
+
+#[test]
+fn income_window_with_no_limit_is_not_capped_at_the_default() {
+    let mut h = ready();
+    h.command(Command::Query {
+        command: 805,
+        query: Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(1672120000000.0),
+            to_ms: Some(1672130000000.0),
+            limit: None,
+        },
+    });
+    let rows = (0..1000)
+        .map(|n| owned_history_row(2, &n.to_string()))
+        .collect::<Vec<_>>();
+    let mut chunks = rows.chunks(50).enumerate().peekable();
+    while let Some((index, chunk)) = chunks.next() {
+        let cursor = if chunks.peek().is_some() {
+            format!("c{index}")
+        } else {
+            "beyond-the-old-default".to_owned()
+        };
+        h.respond(
+            "/v5/account/transaction-log",
+            200,
+            &owned_history_page(chunk, &cursor),
+        );
+    }
+    let last = h.take("/v5/account/transaction-log");
+    assert!(last.url.contains("cursor=beyond-the-old-default"));
+    h.reply(
+        last.id,
+        200,
+        &owned_history_page(&[owned_history_row(2, "1000")], ""),
+    );
+    let result = h.result(805).unwrap().as_ref().unwrap();
+    let rows = serde_json::from_str::<Vec<serde_json::Value>>(result).unwrap();
+    assert_eq!(rows.len(), 1001);
+}
+
+/// A Bybit futures trailing take-profit, from the live row the unsupported-order
+/// log named: `stopOrderType` TrailingProfit, `createType` CreateByTrailingProfit.
+const TRAILING_PROFIT_ID: &str = "8f2b7c1e-5d4a-4b0e-9c3f-trailing-tp";
+const TRAILING_PROFIT_ROW: &str = r#"{"orderId":"8f2b7c1e-5d4a-4b0e-9c3f-trailing-tp","orderLinkId":"","blockTradeId":"","symbol":"DOGEUSDT","price":"0","qty":"1500","side":"Sell","isLeverage":"","positionIdx":0,"orderStatus":"Untriggered","cancelType":"UNKNOWN","rejectReason":"EC_NoError","avgPrice":"0","leavesQty":"1500","leavesValue":"0","cumExecQty":"0","cumExecValue":"0","cumExecFee":"0","timeInForce":"IOC","orderType":"Market","stopOrderType":"TrailingProfit","createType":"CreateByTrailingProfit","orderIv":"","triggerPrice":"0.0657","takeProfit":"0","stopLoss":"0","tpTriggerBy":"","slTriggerBy":"","triggerDirection":2,"triggerBy":"LastPrice","lastPriceOnCreated":"0.0712","reduceOnly":true,"closeOnTrigger":true,"smpType":"None","smpGroup":0,"smpOrderId":"","tpslMode":"Full","tpLimitPrice":"","slLimitPrice":"","placeType":"","createdTime":"1762140000000","updatedTime":"1762140000000","category":"linear"}"#;
+fn trailing_profit_row() -> serde_json::Value {
+    serde_json::from_str(TRAILING_PROFIT_ROW).unwrap()
+}
+
+fn assert_trailing_profit_shown(h: &Harness) {
+    let order = h.engine.store().order(TRAILING_PROFIT_ID).expect("shown");
+    assert_eq!(order.kind, OrderType::TakeProfit);
+    assert_eq!(order.price, 0.0657);
+    assert_eq!(order.amount, 0.0);
+    assert_eq!(order.side, OrderSide::Sell);
+    assert_eq!(order.status, OrderStatus::Open);
+    assert!(
+        !h.logs.iter().any(|m| m.contains("unsupported type")),
+        "{:?}",
+        h.logs
+    );
+}
+
+/// Over REST and over the private stream.
+fn with_trailing_profit() -> [Harness; 2] {
+    let mut rest = ready();
+    refresh_orders(&mut rest, &[trailing_profit_row()]);
+    let mut stream = ready();
+    stream.message(
+        "/v5/private",
+        &serde_json::json!({"topic": "order", "data": [trailing_profit_row()]}).to_string(),
+    );
+    [rest, stream]
+}
+
+#[test]
+fn a_trailing_take_profit_is_a_full_take_profit_at_its_trigger() {
+    for h in with_trailing_profit() {
+        assert_trailing_profit_shown(&h);
+    }
+}
+
+#[test]
+fn a_trailing_take_profit_cancels_by_order_id() {
+    for (command, mut h) in (120..).zip(with_trailing_profit()) {
+        h.requests.clear();
+        h.command(Command::CancelOrders {
+            command,
+            ids: vec![TRAILING_PROFIT_ID.into()],
+        });
+        // Linear cancels go in a batch, each row by its orderId.
+        let cancel = h.take("/v5/order/cancel-batch");
+        assert!(
+            body(&cancel).contains(&format!(r#""orderId":"{TRAILING_PROFIT_ID}""#)),
+            "{}",
+            body(&cancel)
+        );
+        assert!(!h.has_request("/v5/position/trading-stop"));
+        assert!(!h.has_request("/v5/order/amend"));
+    }
+}
+
+const TRAILING_PROFIT_REFUSAL: &str =
+    "A Bybit trailing take-profit cannot be edited here; cancel and recreate it on Bybit";
+
+fn assert_amend_refused(h: &mut Harness, command: u32) {
+    h.requests.clear();
+    // A size edit: the venue's own refusal decides, not the engine's price checks.
+    h.command(Command::AmendOrder {
+        command,
+        id: TRAILING_PROFIT_ID.into(),
+        price: None,
+        amount: Some(0.07),
+    });
+    assert!(h.requests.is_empty(), "{:?}", h.paths());
+    assert_eq!(
+        h.result(command),
+        Some(&Err(TRAILING_PROFIT_REFUSAL.to_owned()))
+    );
+}
+
+#[test]
+fn a_trailing_take_profit_amend_is_refused_without_a_request() {
+    for (command, mut h) in (130..).zip(with_trailing_profit()) {
+        assert_amend_refused(&mut h, command);
+    }
+}
+
+#[test]
+fn a_frame_fed_engine_refuses_a_trailing_take_profit_amend_from_the_source_state() {
+    for (command, mut source) in (140..).zip(with_trailing_profit()) {
+        let snapshot = source.engine.snapshot_frame(source.now).to_vec();
+        let mut engine = support::engine(credentials());
+        engine.set_frame_fed().unwrap();
+        let mut h = Harness::started_engine(engine);
+        h.respond("status=PreLaunch", 200, support::PRELAUNCH);
+        h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
+        h.engine.apply_frame(h.now, &snapshot, true).unwrap();
+        h.collect();
+        assert_eq!(
+            h.engine.store().order(TRAILING_PROFIT_ID).map(|o| o.kind),
+            Some(OrderType::TakeProfit)
+        );
+        assert_amend_refused(&mut h, command);
+    }
+}
+
+#[test]
+fn an_id_no_longer_trailing_amends_as_an_ordinary_full_take_profit() {
+    let mut h = ready();
+    let mut row = trailing_profit_row();
+    row["symbol"] = serde_json::json!("BTCUSDT");
+    row["triggerPrice"] = serde_json::json!("100000");
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic": "order", "data": [row.clone()]}).to_string(),
+    );
+    assert_amend_refused(&mut h, 150);
+    // The same id as an ordinary full take-profit keeps the trading-stop path.
+    row["stopOrderType"] = serde_json::json!("TakeProfit");
+    row["createType"] = serde_json::json!("CreateByTakeProfit");
+    h.message(
+        "/v5/private",
+        &serde_json::json!({"topic": "order", "data": [row]}).to_string(),
+    );
+    h.requests.clear();
+    h.command(Command::AmendOrder {
+        command: 151,
+        id: TRAILING_PROFIT_ID.into(),
+        price: Some(101000.0),
+        amount: None,
+    });
+    let amend = h.take("/v5/position/trading-stop");
+    assert_eq!(
+        body(&amend),
+        r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Full","takeProfit":"101000","tpTriggerBy":"LastPrice"}"#
+    );
+}
+
+#[test]
+fn already_set_margin_mode_updates_account_positions_and_settings() {
+    for isolated in [false, true] {
+        let mut h = ready();
+        h.command(Command::SetMarginType {
+            command: 601,
+            symbol: "BTCUSDT".into(),
+            isolated,
+        });
+        let request = h.take("/v5/account/set-margin-mode");
+        h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+        assert_eq!(h.result(601), Some(&Ok("[]".into())));
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == 601).count(), 1);
+        assert!(h.command_errors.is_empty());
+        let margin = Some(if isolated {
+            MarginType::Isolated
+        } else {
+            MarginType::Cross
+        });
+        assert_eq!(
+            h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+            margin
+        );
+        assert!(
+            h.engine
+                .store()
+                .positions()
+                .iter()
+                .all(|p| p.margin_type == margin)
+        );
+        assert!(!h.has_request("/v5/account/set-margin-mode"), "no resend");
+    }
+}
+
+#[test]
+fn gateway_margin_noop_is_unknown_and_keeps_the_previous_setting() {
+    let mut h = ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetMarginType {
+        command: 602,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 503, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+    assert!(h.result(602).unwrap().is_err());
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn margin_noop_with_native_failure_reasons_cannot_claim_success() {
+    let mut h = ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetMarginType {
+        command: 603,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"not modified","result":{"reasons":[{"reasonCode":"3400000","reasonMsg":"insufficient equity"}]}}"#);
+    assert!(h.result(603).unwrap().is_err());
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn review_3014_margin_code_must_not_satisfy_leverage() {
+    let mut h = ready();
+    let before = h.engine.store().setting("BTCUSDT");
+    h.command(Command::SetLeverage {
+        command: 701,
+        symbol: "BTCUSDT".into(),
+        leverage: 5.,
+        side: None,
+    });
+    let request = h.take("/v5/position/set-leverage");
+    h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+    assert!(
+        matches!(h.result(701), Some(Err(_))),
+        "margin-only code falsely satisfied leverage: {:?}; stored {:?}",
+        h.result(701),
+        h.engine.store().setting("BTCUSDT")
+    );
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+    assert!(!h.has_request("/v5/position/set-leverage"), "no resend");
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 701).count(), 1);
+}
+#[test]
+fn review_3014_margin_code_must_not_satisfy_position_mode() {
+    let mut h = ready();
+    let before = h.engine.store().hedged();
+    h.command(Command::SetPositionMode {
+        command: 702,
+        hedged: true,
+        symbol: None,
+    });
+    let request = h.take("/v5/position/switch-mode");
+    h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+    assert!(
+        matches!(h.result(702), Some(Err(_))),
+        "margin-only code falsely satisfied position mode: {:?}; hedged {}",
+        h.result(702),
+        h.engine.store().hedged()
+    );
+    assert_eq!(h.engine.store().hedged(), before);
+    assert!(!h.has_request("/v5/position/switch-mode"), "no resend");
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 702).count(), 1);
+}
+#[test]
+fn review_3014_margin_code_working_control() {
+    let mut h = ready();
+    h.command(Command::SetMarginType {
+        command: 703,
+        symbol: "BTCUSDT".into(),
+        isolated: true,
+    });
+    let request = h.take("/v5/account/set-margin-mode");
+    h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+    assert!(matches!(h.result(703), Some(Ok(_))));
+    assert_eq!(
+        h.engine.store().setting("BTCUSDT").unwrap().margin_type,
+        Some(MarginType::Isolated)
+    );
+}
+
+#[test]
+fn margin_noop_cannot_satisfy_full_or_partial_protection_writes_or_resend() {
+    for partial in [false, true] {
+        let mut h = ready();
+        let before = h.engine.store().positions().to_vec();
+        if partial {
+            h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Partial","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#);
+            h.command(Command::AmendOrder {
+                command: 704,
+                id: "position-stop".into(),
+                price: Some(87000.),
+                amount: None,
+            });
+            h.respond(
+                "/v5/order/cancel-batch",
+                200,
+                r#"{"retCode":0,"retMsg":"OK","retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
+            );
+        } else {
+            let mut stop = limit("BTCUSDT", OrderSide::Sell, 0., 86000.04);
+            stop.kind = OrderType::StopLoss;
+            place(&mut h, 704, vec![stop]);
+        }
+        let request = h.take("/v5/position/trading-stop");
+        h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
+        if partial {
+            // #3018: the refused replacement's cancel landed, so the old stop goes back once
+            // (a different write: its own 86000 body, not a resend of the replacement).
+            let restore = h.take("/v5/position/trading-stop");
+            assert!(
+                body(&restore).contains(r#""stopLoss":"86000""#),
+                "{}",
+                body(&restore)
+            );
+            h.reply(
+                restore.id,
+                200,
+                r#"{"retCode":0,"retMsg":"OK","result":{}}"#,
+            );
+        }
+        assert!(matches!(h.result(704), Some(Err(_))));
+        assert_eq!(h.engine.store().positions(), before);
+        assert!(!h.has_request("/v5/position/trading-stop"), "no resend");
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == 704).count(), 1);
+    }
+}
+
+/// Move a symbol's mark and last price, as its ticker stream would.
+fn price_at(h: &mut Harness, symbol: &str, price: f64) {
+    h.engine.store_mut().update_ticker(symbol, |ticker| {
+        ticker.mark = price;
+        ticker.last = price;
+    });
+}
+
+#[test]
+fn explicit_terminal_order_history_walks_independent_cursors_and_deduplicates() {
+    let mut h = ready();
+    let (query, path) = owned_history_query(1, None);
+    h.command(Command::Query {
+        command: 910,
+        query,
+    });
+    let filled = owned_history_row(1, "filled").replace("Cancelled", "Filled");
+    h.respond(
+        path,
+        200,
+        &owned_history_page(std::slice::from_ref(&filled), "same"),
+    );
+    h.respond(path, 200, &owned_history_page(&[], ""));
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let first = h.take(path);
+        assert!(first.url.contains(&format!("orderStatus={status}")));
+        assert!(
+            !first.url.contains("cursor="),
+            "each status starts a fresh cursor walk"
+        );
+        let row = owned_history_row(1, status).replace("Cancelled", status);
+        h.reply(first.id, 200, &owned_history_page(&[row], "same"));
+        let second = h.take(path);
+        assert!(second.url.contains(&format!("orderStatus={status}")));
+        assert!(second.url.ends_with("cursor=same"));
+        h.reply(
+            second.id,
+            200,
+            &owned_history_page(std::slice::from_ref(&filled), ""),
+        );
+    }
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(910).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(
+        rows.len(),
+        4,
+        "older API defaults can duplicate terminal rows"
+    );
+    for id in ["filled", "Cancelled", "Rejected", "Deactivated"] {
+        assert!(rows.iter().any(|row| row["id"] == id));
+    }
+    assert!(owned_history_markers(&h, 910).is_empty());
+    assert!(!h.has_request(path));
+}
+
+#[test]
+fn explicit_terminal_history_is_not_skipped_when_default_limit_is_full() {
+    let mut h = ready();
+    let (query, path) = owned_history_query(1, Some(1));
+    h.command(Command::Query {
+        command: 911,
+        query,
+    });
+    h.respond(
+        path,
+        200,
+        &owned_history_page(&[owned_history_row(1, "old")], ""),
+    );
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        let request = h.take(&format!("orderStatus={status}"));
+        let rows = if status == "Deactivated" {
+            vec![
+                owned_history_row(1, "new")
+                    .replace("Cancelled", "Deactivated")
+                    .replace("1671999000000", "1671999001000"),
+            ]
+        } else {
+            vec![]
+        };
+        h.reply(request.id, 200, &owned_history_page(&rows, ""));
+    }
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.result(911).unwrap().as_ref().unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0]["id"], "new",
+        "limit applies after merging all status axes"
+    );
+}
+
+#[test]
+fn explicit_terminal_history_failure_retains_rows_with_incomplete_marker() {
+    for has_rows in [false, true] {
+        let mut h = ready();
+        h.notices.clear();
+        let (query, path) = owned_history_query(1, None);
+        h.command(Command::Query {
+            command: 912,
+            query,
+        });
+        let rows = if has_rows {
+            vec![owned_history_row(1, "kept")]
+        } else {
+            vec![]
+        };
+        h.respond(path, 200, &owned_history_page(&rows, ""));
+        let terminal = h.take("orderStatus=Cancelled");
+        h.reply(terminal.id, 503, "unavailable");
+        if has_rows {
+            let result = h.result(912).unwrap().as_ref().unwrap();
+            assert!(result.contains("kept"));
+            assert_eq!(owned_history_markers(&h, 912).len(), 1);
+        } else {
+            assert!(h.result(912).unwrap().is_err());
+            assert!(owned_history_markers(&h, 912).is_empty());
+        }
+        assert!(!h.has_request(path));
+    }
+}
+
+#[test]
+fn terminal_order_history_reuses_the_requested_windows_for_each_status() {
+    let mut h = ready();
+    let to = 1_672_300_000_000.0;
+    h.command(Command::Query {
+        command: 913,
+        query: Query::OrderHistory {
+            symbol: Some("BTCUSDT".into()),
+            from_ms: Some(to - 8.0 * 86_400_000.0),
+            to_ms: Some(to),
+            limit: None,
+        },
+    });
+    let mut original = Vec::new();
+    for status in [
+        None,
+        Some("Cancelled"),
+        Some("Rejected"),
+        Some("Deactivated"),
+    ] {
+        for window in 0..2 {
+            let request = h.take("/v5/order/history");
+            assert_eq!(request.url.contains("orderStatus="), status.is_some());
+            if let Some(status) = status {
+                assert!(request.url.contains(&format!("orderStatus={status}")));
+            }
+            let bounds: Vec<_> = request
+                .url
+                .split('&')
+                .filter(|part| part.starts_with("startTime=") || part.starts_with("endTime="))
+                .map(str::to_owned)
+                .collect();
+            assert_eq!(bounds.len(), 2);
+            if status.is_none() {
+                original.push(bounds);
+            } else {
+                assert_eq!(bounds, original[window]);
+            }
+            h.reply(request.id, 200, EMPTY_LIST);
+        }
+    }
+    assert_eq!(h.result(913), Some(&Ok("[]".into())));
+    assert!(!h.has_request("/v5/order/history"));
+}
+
+#[test]
+fn terminal_status_failure_uses_the_same_incomplete_diagnostic_as_default_history() {
+    let mut observations = Vec::new();
+    for terminal in [false, true] {
+        let mut h = ready();
+        h.notices.clear();
+        let (query, path) = owned_history_query(1, None);
+        h.command(Command::Query {
+            command: 914,
+            query,
+        });
+        h.respond(
+            path,
+            200,
+            &owned_history_page(
+                &[owned_history_row(1, "kept")],
+                if terminal { "" } else { "next" },
+            ),
+        );
+        let failed = h.take(path);
+        assert_eq!(failed.url.contains("orderStatus=Cancelled"), terminal);
+        h.reply(failed.id, 503, "unavailable");
+        let markers = owned_history_markers(&h, 914);
+        assert_eq!(markers.len(), 1);
+        let safe_cex_engine::Notice::Event(event) = &h.notices[markers[0]] else {
+            panic!("owned marker");
+        };
+        assert_eq!(h.done.iter().filter(|(id, _)| *id == 914).count(), 1);
+        assert!(!h.notices.iter().any(|notice| matches!(
+            notice,
+            safe_cex_engine::Notice::CommandFailed { command: 914, .. }
+        )));
+        observations.push((h.result(914).unwrap().clone(), format!("{event:?}")));
+    }
+    assert_eq!(observations[0], observations[1]);
 }

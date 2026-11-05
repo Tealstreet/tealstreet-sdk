@@ -18,8 +18,66 @@ pub(super) const SERIAL: SerialCall = SerialCall {
 
 // BingX Swap V2 common error codes: https://bingx-api.github.io/docs/#/en-us/swapV2/base-info.html
 // 100001 is signature refusal; 80014 invalid parameter; 80016 order does not exist.
+const fn refused(code: i64, kind: ErrorKind) -> Row {
+    Row {
+        key: Key::Int(code),
+        verdict: Verdict::Refused(kind),
+        only: None,
+    }
+}
+
+/// A documented bar on placing this order; other intents keep the unlisted verdict.
+const fn place_refused(key: Key, kind: ErrorKind) -> Row {
+    Row {
+        key,
+        verdict: Verdict::Refused(kind),
+        only: Some(Intent::Place),
+    }
+}
+
 pub(super) const TABLE: CodeTable = CodeTable {
     rows: &[
+        // github.com/BingX-API/api-ai-skills: skills/references/error-codes.md, Futures.
+        // Not here, so Unknown: 101481/109201 (duplicates), 102201 (canceled), busy, internal.
+        place_refused(Key::Range(101201, 101202), ErrorKind::Rejected),
+        place_refused(Key::Int(101206), ErrorKind::InsufficientBalance),
+        place_refused(Key::Range(101209, 101210), ErrorKind::Rejected),
+        place_refused(Key::Int(101214), ErrorKind::Rejected),
+        place_refused(Key::Int(101219), ErrorKind::Rejected),
+        place_refused(Key::Int(101222), ErrorKind::Rejected),
+        place_refused(Key::Range(101412, 101415), ErrorKind::Rejected),
+        place_refused(Key::Int(101419), ErrorKind::Rejected),
+        place_refused(Key::Int(101429), ErrorKind::Rejected),
+        place_refused(Key::Int(101434), ErrorKind::Rejected),
+        place_refused(Key::Range(101460, 101461), ErrorKind::Rejected),
+        place_refused(Key::Int(101479), ErrorKind::Rejected),
+        place_refused(Key::Range(101483, 101485), ErrorKind::Rejected),
+        place_refused(Key::Int(109417), ErrorKind::Rejected),
+        place_refused(Key::Int(109425), ErrorKind::InvalidInput),
+        place_refused(Key::Int(110203), ErrorKind::Rejected),
+        place_refused(Key::Int(110206), ErrorKind::Rejected),
+        place_refused(Key::Int(110280), ErrorKind::Rejected),
+        place_refused(Key::Int(110287), ErrorKind::Rejected),
+        place_refused(Key::Int(110400), ErrorKind::InvalidInput),
+        place_refused(Key::Int(110402), ErrorKind::InvalidInput),
+        place_refused(Key::Range(110406, 110407), ErrorKind::Rejected),
+        place_refused(Key::Range(110411, 110415), ErrorKind::InvalidInput),
+        place_refused(Key::Range(110418, 110420), ErrorKind::InvalidInput),
+        place_refused(Key::Int(110424), ErrorKind::InsufficientBalance),
+        place_refused(Key::Range(110426, 110428), ErrorKind::InvalidInput),
+        place_refused(Key::Int(112414), ErrorKind::Rejected),
+        // Trading-rule refusals: nothing was placed.
+        refused(101205, ErrorKind::Rejected),
+        refused(101211, ErrorKind::InvalidInput),
+        refused(101212, ErrorKind::InsufficientBalance),
+        refused(101215, ErrorKind::Rejected),
+        refused(101253, ErrorKind::InsufficientBalance),
+        refused(101290, ErrorKind::Rejected),
+        refused(101400, ErrorKind::InvalidInput),
+        refused(109400, ErrorKind::InvalidInput),
+        refused(109421, ErrorKind::InvalidInput),
+        refused(110422, ErrorKind::Rejected),
+        refused(110425, ErrorKind::Rejected),
         Row {
             key: Key::Int(100001),
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
@@ -77,6 +135,33 @@ pub(super) const TABLE: CodeTable = CodeTable {
     unlisted: Verdict::Unknown(None),
     status: &[],
 };
+
+/// 101400 also covers a duplicate client order id, whose original may be live.
+pub(super) const DUPLICATE_TABLE: CodeTable = CodeTable {
+    rows: &[],
+    success: &[Key::Int(0)],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+
+/// 109400 naming the timestamp: the request aged out of BingX's window before
+/// any processing, so its one engine-granted resend, freshly stamped, cannot
+/// double-place.
+pub(super) const TIMESTAMP_TABLE: CodeTable = CodeTable {
+    rows: &[Row {
+        key: Key::Int(109400),
+        verdict: Verdict::RefusedResend(ErrorKind::InvalidInput),
+        only: None,
+    }],
+    success: &[Key::Int(0)],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+
+pub(super) fn names_duplicate_client_id(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("duplicate") && message.contains("client")
+}
 
 pub(super) enum Entry {
     Preflight(Preflight, Credential),
@@ -192,8 +277,27 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn documented_trading_rule_refusals_are_definite() {
+        use super::TABLE;
+        use safe_cex_engine::classify::{Intent, Native, NativeCode, Verdict};
+        for code in [
+            101205, 101211, 101212, 101215, 101253, 101290, 101400, 109400, 109421, 110422, 110425,
+        ] {
+            let native = Native {
+                code: NativeCode::Int(code),
+                message: "",
+            };
+            assert!(
+                matches!(TABLE.verdict(&native, Intent::Place), Verdict::Refused(_)),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
     fn bingx_table_is_well_formed() {
         safe_cex_engine::classify::assert_table(&super::TABLE);
+        safe_cex_engine::classify::assert_table(&super::TIMESTAMP_TABLE);
     }
 }
 

@@ -58,7 +58,10 @@ fn encode_result(query: &Query, rows: Vec<Mapped>) -> Result<String, VenueError>
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
-            rows.truncate(limit.unwrap_or(100).clamp(1, 100) as usize);
+            // No limit asks for the whole window; a cap here would close it as covered.
+            if let Some(limit) = limit {
+                rows.truncate((*limit).clamp(1, 100) as usize);
+            }
             serde_json::to_string(&rows)
         }
         Query::OrderHistory { .. } => {
@@ -163,7 +166,7 @@ struct Row<'a> {
     price: Number,
     #[serde(default)]
     average_price: Number,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_number")]
     size: Number,
     #[serde(default)]
     filled_size: Number,
@@ -753,7 +756,7 @@ impl Blofin {
                     },
                     status: match row.state.as_ref() {
                         "live" | "partially_filled" => OrderStatus::Open,
-                        "canceled" | "cancelled" => OrderStatus::Canceled,
+                        "canceled" | "cancelled" | "partially_canceled" => OrderStatus::Canceled,
                         _ => OrderStatus::Closed,
                     },
                     price: nonzero(row.price.0),
@@ -831,12 +834,16 @@ impl Blofin {
         let (page_limit, enough) = match &request.query {
             Query::Fills { limit, .. } => {
                 let count = limit.unwrap_or(100).clamp(1, 100) as usize;
-                (
-                    count,
-                    request.history.accepted_len() + request.history.staged_len() >= count,
-                )
+                let seen = request.history.accepted_len() + request.history.staged_len();
+                (count, limit.is_some() && seen >= count)
             }
             Query::Income { .. } => (100, false),
+            // A window with no limit walks its `after` cursor to the window's start.
+            Query::OrderHistory {
+                limit: None,
+                from_ms: Some(_),
+                ..
+            } => (100, false),
             _ => (usize::MAX, true),
         };
         let want_more = request.received >= page_limit && !request.reached_start && !enough;

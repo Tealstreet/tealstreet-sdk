@@ -71,6 +71,8 @@ struct Job {
     total: usize,
     /// A step took effect, so a later refusal cannot mean nothing happened.
     effective: bool,
+    /// An amend's symbol: its replacement's refusal leaves the order gone.
+    replaces: Option<String>,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -413,6 +415,7 @@ impl Polymarket {
                 symbols,
                 scope,
                 effective: false,
+                replaces: None,
             },
         );
         Ok(())
@@ -597,6 +600,9 @@ impl Polymarket {
                         HashSet::from([old.symbol.clone()]),
                         None,
                     )?;
+                    if let Some(job) = self.trading.jobs.get_mut(&command) {
+                        job.replaces = Some(old.symbol.clone());
+                    }
                     #[derive(Serialize)]
                     struct Cancel<'a> {
                         #[serde(rename = "orderID")]
@@ -659,6 +665,7 @@ impl Polymarket {
         response: Response<'_>,
     ) {
         let command = request.command();
+        let placing = matches!(request, Request::Place { .. });
         if !self.trading.jobs.contains_key(&command) {
             return;
         }
@@ -865,6 +872,7 @@ impl Polymarket {
                     // A 2xx answer that does not prove what happened.
                     VenueError::new(error).outcome(Outcome::Unknown)
                 };
+                let error = self.note_replacement_lost(command, placing, error);
                 self.trading_finish(cx, command, Err(error));
             }
         }
@@ -878,12 +886,35 @@ impl Polymarket {
         let error = VenueError::new(error)
             .kind(ErrorKind::Network)
             .outcome(Outcome::Unknown);
+        let placing = matches!(request, Request::Place { .. });
+        let error = self.note_replacement_lost(request.command(), placing, error);
         self.trading_finish(cx, request.command(), Err(error));
+    }
+    /// An amend's replacement failed after its cancel landed: the order no longer rests.
+    fn note_replacement_lost(
+        &self,
+        command: CommandId,
+        placing: bool,
+        mut error: VenueError,
+    ) -> VenueError {
+        if placing
+            && let Some(job) = self.trading.jobs.get(&command)
+            && job.ids.is_empty()
+            && let Some(symbol) = &job.replaces
+        {
+            let unknown = error.outcome == Some(Outcome::Unknown);
+            error.message = format!(
+                "{}: {}",
+                safe_cex_engine::error::order_gone_text(symbol, unknown),
+                error.message
+            );
+        }
+        error
     }
 }
 
 /// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
-fn http_failure(status: u16, message: String) -> VenueError {
+pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
     let error = VenueError::new(message);
     match status {
         408 | 500.. => error.outcome(Outcome::Unknown),

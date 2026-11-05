@@ -155,12 +155,22 @@ struct Job {
     ids: Vec<String>,
     collect_ids: bool,
     amendment: Option<f64>,
+    /// The amended order's side and kind: what its lost replacement costs.
+    amended: Option<(OrderSide, OrderType)>,
 }
 #[derive(Default)]
 pub struct Trading {
     jobs: HashMap<u64, Job>,
     next_client: u32,
     cancels: HashMap<String, (usize, OrderStatus)>,
+}
+
+fn gone_text(symbol: &str, side: OrderSide, kind: OrderType, unknown: bool) -> String {
+    if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+        safe_cex_engine::error::stop_gone_text(symbol, side, kind, unknown)
+    } else {
+        safe_cex_engine::error::order_gone_text(symbol, unknown)
+    }
 }
 
 fn client_id(id: &str) -> Result<u32, String> {
@@ -615,6 +625,12 @@ impl Backpack {
                 } else {
                     None
                 };
+                let amended = steps.first().and_then(|step| match step {
+                    Step::Cancel { id, .. } if collect_ids => {
+                        cx.store.order(id).map(|o| (o.side, o.kind))
+                    }
+                    _ => None,
+                });
                 let preflight = preflight.as_ref().unwrap();
                 if steps.is_empty() {
                     let _ = cx.done_empty_plan(preflight, "[]".into());
@@ -637,6 +653,7 @@ impl Backpack {
                         ids: vec![],
                         collect_ids,
                         amendment,
+                        amended,
                     },
                 );
                 self.run_trade(cx, u64::from(id));
@@ -1144,7 +1161,8 @@ impl Backpack {
                     }
                 }
                 Step::Leverage(leverage) => {
-                    if request.managed.is_some() {
+                    // Documented: PATCH /api/v1/account answers 200 with no content.
+                    if request.managed.is_some() && !response.body.trim().is_empty() {
                         validate_ack(response.body)?;
                     }
                     accept_trade(cx, &request, vec![])?;
@@ -1200,12 +1218,31 @@ impl Backpack {
             Err(e) => {
                 if let Some(managed) = &request.managed {
                     if recorded {
-                        let _ = cx.fail_plan(&managed.plan, VenueError::new(e));
+                        // An amend's cancel landed but its remainder cannot be re-placed.
+                        let gone = match &request.step {
+                            Step::Cancel { id, .. }
+                                if self
+                                    .trading
+                                    .jobs
+                                    .get(&request.command)
+                                    .is_some_and(|job| job.amendment.is_some()) =>
+                            {
+                                cx.store
+                                    .order(id)
+                                    .map(|o| gone_text(&o.symbol, o.side, o.kind, false))
+                            }
+                            _ => None,
+                        };
+                        let error = VenueError::new(e);
+                        let _ = match &gone {
+                            Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
+                            None => cx.fail_plan(&managed.plan, error),
+                        };
                         return;
                     }
-                    let fact = if (200..300).contains(&response.status)
-                        && !refused_in_body(response.body)
-                    {
+                    let unproven =
+                        (200..300).contains(&response.status) && !refused_in_body(response.body);
+                    let fact = if unproven {
                         cx.http_write_unproven(&managed.context, &e)
                     } else {
                         native_failure(cx, &managed.context, response.body, &e)
@@ -1214,7 +1251,12 @@ impl Backpack {
                         let _ = cx.fail_plan(&managed.plan, error.venue_error());
                         return;
                     }
-                    self.managed_trade_failed(cx, request, VenueError::new(e), true);
+                    let error = if unproven {
+                        VenueError::new(e).outcome(Outcome::Unknown)
+                    } else {
+                        VenueError::new(e)
+                    };
+                    self.managed_trade_failed(cx, request, error, true);
                     return;
                 }
                 let error = if !(200..300).contains(&response.status) {
@@ -1288,7 +1330,24 @@ impl Backpack {
             }
         }
         if !optional {
-            let _ = cx.fail_plan(&managed.plan, error);
+            // The amend's cancel landed and nothing replaced it.
+            let gone = match &request.step {
+                Step::Place { order, .. } => self
+                    .trading
+                    .jobs
+                    .get(&request.command)
+                    .filter(|job| job.ids.is_empty())
+                    .and_then(|job| job.amended)
+                    .map(|(side, kind)| {
+                        let unknown = error.outcome == Some(Outcome::Unknown);
+                        gone_text(&order.symbol, side, kind, unknown)
+                    }),
+                _ => None,
+            };
+            let _ = match &gone {
+                Some(gone) => cx.fail_plan_noted(&managed.plan, error, gone),
+                None => cx.fail_plan(&managed.plan, error),
+            };
             return;
         }
         let settled = if data {
@@ -1426,7 +1485,7 @@ fn refused_in_body(body: &str) -> bool {
 }
 
 /// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
-fn http_failure(status: u16, message: String) -> VenueError {
+pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
     let error = VenueError::new(message);
     match status {
         408 | 500.. => error.outcome(Outcome::Unknown),

@@ -80,6 +80,9 @@ pub struct ExtraKeyPolicy {
     /// Declared decoding of the extra material; authoritative over caller metadata.
     #[serde(default)]
     pub encoding: Option<KeyEncoding>,
+    /// Trim with Rust Unicode White_Space before decoding. Optional blanks are absent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub trim: bool,
 }
 
 /// Extra refs never fall back across slots, so there is no fallback variant.
@@ -89,6 +92,8 @@ pub enum ExtraFieldPolicy {
     #[default]
     Optional,
     RequiredForPrivate,
+    /// Secondary only: alias the primary's installed role; never accept own material.
+    AliasPrimary,
 }
 
 /// Trusted setup decoding of supplied key material. Nothing here is inferred.
@@ -120,12 +125,15 @@ pub enum ExtraKey {
     ZklinkSeed,
     /// Polymarket L1 wallet: the raw 32-byte secp256k1 scalar; primary only.
     L1Wallet,
+    /// Optional KuCoin broker attribution HMAC, shared by both credential slots.
+    KucoinBroker,
 }
 impl ExtraKey {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ZklinkSeed => "zklinkSeed",
             Self::L1Wallet => "l1Wallet",
+            Self::KucoinBroker => "kucoinBroker",
         }
     }
     /// The one algorithm a role ref serves, for `Sign` and public operations.
@@ -133,6 +141,7 @@ impl ExtraKey {
         match self {
             Self::ZklinkSeed => Algorithm::ZkLinkContract,
             Self::L1Wallet => Algorithm::Secp256k1Digest,
+            Self::KucoinBroker => Algorithm::HmacSha256,
         }
     }
     /// The L1 wallet derives the session identity, which is primary only.
@@ -172,7 +181,11 @@ impl CredentialSetupPolicy {
             (identities.secondary.as_ref(), self.secondary, false),
         ] {
             let declared = policy.and_then(|policy| policy.extra);
-            if !primary && declared.is_some_and(|declared| declared.key.primary_only()) {
+            if !primary && declared.is_some_and(|declared| declared.key.primary_only())
+                || primary
+                    && declared
+                        .is_some_and(|declared| declared.field == ExtraFieldPolicy::AliasPrimary)
+            {
                 return Err(SignError::InvalidRequest);
             }
             let Some(identity) = identity else { continue };
@@ -184,8 +197,19 @@ impl CredentialSetupPolicy {
                 return Err(SignError::InvalidRequest);
             }
             if let Some(declared) = declared {
+                if let Some(reference) = identity.extra.get(&declared.key)
+                    && (!valid_key_ref(reference)
+                        || declared.field == ExtraFieldPolicy::AliasPrimary
+                            && identities
+                                .primary
+                                .as_ref()
+                                .and_then(|id| id.extra.get(&declared.key))
+                                != Some(reference))
+                {
+                    return Err(SignError::InvalidRequest);
+                }
                 let required = match declared.field {
-                    ExtraFieldPolicy::Optional => false,
+                    ExtraFieldPolicy::Optional | ExtraFieldPolicy::AliasPrimary => false,
                     ExtraFieldPolicy::RequiredForPrivate => !(primary && public_data_only),
                 };
                 if required
@@ -244,6 +268,17 @@ impl CredentialSetupPolicy {
                 .as_mut()
                 .expect("existing secondary")
                 .passphrase = passphrase;
+        }
+        if let Some(declared) = self.secondary.and_then(|policy| policy.extra)
+            && declared.field == ExtraFieldPolicy::AliasPrimary
+            && let Some(reference) = identities
+                .primary
+                .as_ref()
+                .and_then(|id| id.extra.get(&declared.key))
+                .cloned()
+            && let Some(secondary) = identities.secondary.as_mut().filter(|id| complete(id))
+        {
+            secondary.extra.entry(declared.key).or_insert(reference);
         }
         // An Optional family accepts only a primary credential-only slot that
         // is otherwise valid; Required (and every secondary) is exactly today.
@@ -600,8 +635,10 @@ impl Identity {
         credential: &crate::request_context::Credential,
         write: Option<&crate::request_context::Credential>,
     ) -> bool {
+        // A trusted ScalarOnly primary's only authority is its signing ref; for
+        // every credential-present identity `authority_ref()` is the credential.
         credential.slot == crate::CredentialSlot::Primary
-            && credential.reference == self.credential
+            && credential.reference == *self.authority_ref()
             && self.validate_credential().is_ok()
             && write.is_none_or(|write| write == credential && self.signing_ref().is_ok())
     }
@@ -1012,7 +1049,12 @@ impl SignRequest {
     }
 }
 
-/// Algorithms with a public form; consumers exist only for these two.
+/// The byte length of `algorithm`'s public key, if it has one.
+pub fn public_key_length(algorithm: Algorithm) -> Option<usize> {
+    public_key_len(algorithm)
+}
+
+/// Algorithms with a public form.
 fn public_key_len(algorithm: Algorithm) -> Option<usize> {
     match algorithm {
         Algorithm::Ed25519 | Algorithm::StarkDigest => Some(32),
@@ -1508,6 +1550,7 @@ mod setup_field_policy_tests {
                     key: ExtraKey::ZklinkSeed,
                     field,
                     encoding: None,
+                    trim: false,
                 }),
                 ..Default::default()
             }),
@@ -1645,6 +1688,120 @@ mod setup_field_policy_tests {
                     ]
                     .map(|bytes| PayloadPart::Bytes { bytes })
             );
+        }
+    }
+}
+
+/// Test fixture: a ScalarOnly primary marked through trusted setup's own
+/// `install_scalar_only_primary`, never by setting the private flag.
+#[cfg(test)]
+pub(crate) mod scalar_only_fixture {
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    use super::*;
+
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    pub(crate) fn trusted_scalar_only(
+        primary: Identity,
+        secondary: Option<Identity>,
+    ) -> Identities {
+        let mut identities = Identities {
+            primary: Some(primary),
+            secondary,
+        };
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                source: PrimarySource::ScalarOnly,
+                signing_algorithm: Some(Algorithm::Secp256k1Digest),
+                ..Default::default()
+            }),
+            secondary: None,
+        }
+        .install_scalar_only_primary(&mut identities)
+        .expect("trusted ScalarOnly setup");
+        assert!(identities.primary.as_ref().unwrap().credential_absent);
+        identities
+    }
+}
+
+#[cfg(test)]
+mod scalar_only_session_root_tests {
+    #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
+    mod gated {
+        use super::super::scalar_only_fixture::trusted_scalar_only;
+        use super::super::*;
+        use crate::CredentialSlot;
+        use crate::request_context::Credential;
+
+        fn scalar(signing: &str) -> Identity {
+            let mut identity = Identity::new(KeyRef(String::new()), Some(KeyRef(signing.into())));
+            identity.passphrase = Some(KeyRef("scalar.passphrase".into()));
+            identity
+                .extra
+                .insert(ExtraKey::L1Wallet, KeyRef("scalar.extra".into()));
+            trusted_scalar_only(identity, None).primary.unwrap()
+        }
+        fn root(slot: CredentialSlot, reference: &str) -> Credential {
+            Credential {
+                slot,
+                reference: KeyRef(reference.into()),
+            }
+        }
+
+        #[test]
+        fn a_scalar_only_primary_binds_its_authority_as_the_session_root() {
+            let identity = scalar("scalar.a");
+            let session = root(CredentialSlot::Primary, "scalar.a");
+            assert!(identity.accepts_session_root(&session, None));
+            assert!(identity.accepts_session_root(&session, Some(&session)));
+        }
+
+        #[test]
+        fn a_session_bound_to_another_signing_ref_never_binds_a_rebuilt_primary() {
+            let identity = scalar("scalar.b");
+            let session = root(CredentialSlot::Primary, "scalar.a");
+            assert!(!identity.accepts_session_root(&session, None));
+            assert!(!identity.accepts_session_root(&session, Some(&session)));
+        }
+
+        #[test]
+        fn the_empty_credential_field_never_binds_through_the_fallback() {
+            let identity = scalar("scalar.a");
+            let empty = root(CredentialSlot::Primary, "");
+            assert!(!identity.accepts_session_root(&empty, None));
+            assert!(!identity.accepts_session_root(&empty, Some(&empty)));
+        }
+
+        #[test]
+        fn passphrase_extra_secondary_and_mismatched_write_refs_never_bind() {
+            let identity = scalar("scalar.a");
+            for reference in ["scalar.passphrase", "scalar.extra"] {
+                let session = root(CredentialSlot::Primary, reference);
+                assert!(
+                    !identity.accepts_session_root(&session, None),
+                    "{reference}"
+                );
+            }
+            let secondary = root(CredentialSlot::Secondary, "scalar.a");
+            assert!(!identity.accepts_session_root(&secondary, None));
+            let session = root(CredentialSlot::Primary, "scalar.a");
+            let write = root(CredentialSlot::Primary, "scalar.extra");
+            assert!(!identity.accepts_session_root(&session, Some(&write)));
+        }
+
+        /// PRESERVATION: a credential-present identity still binds only its
+        /// credential; its signing ref cannot stand in.
+        #[test]
+        fn an_ordinary_identity_still_refuses_its_signing_ref_as_the_root() {
+            let identity = Identity::new(
+                KeyRef("ordinary.credential".into()),
+                Some(KeyRef("ordinary.signing".into())),
+            );
+            assert!(
+                !identity
+                    .accepts_session_root(&root(CredentialSlot::Primary, "ordinary.signing"), None)
+            );
+            let credential = root(CredentialSlot::Primary, "ordinary.credential");
+            assert!(identity.accepts_session_root(&credential, Some(&credential)));
         }
     }
 }

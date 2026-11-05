@@ -426,6 +426,71 @@ fn successful_amend_uses_fresh_generated_index() {
 }
 
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, _) = ready_unattributed();
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 8,
+            id: "42".into(),
+            price: Some(92.0),
+            amount: None,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let cancel = http(&mut e, "sendTx");
+    ack(&mut e, &cancel);
+    let t = timer(&mut e);
+    e.handle(NOW + 100.0, Event::TimerFired { timer: t });
+    let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
+    reply_at(
+        &mut e,
+        NOW + 100.0,
+        &replacement,
+        200,
+        r#"{"code":21702,"message":"replacement refused"}"#,
+    );
+    let error = failure(&mut e);
+    assert!(error.contains("order is gone"), "{error}");
+}
+
+#[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    let (mut e, _) = ready_unattributed();
+    e.store_mut().update_order("42", |o| {
+        o.kind = OrderType::StopLoss;
+        o.side = OrderSide::Sell;
+        o.reduce_only = true;
+    });
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 8,
+            id: "42".into(),
+            price: Some(92.0),
+            amount: None,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let cancel = http(&mut e, "sendTx");
+    ack(&mut e, &cancel);
+    let t = timer(&mut e);
+    e.handle(NOW + 100.0, Event::TimerFired { timer: t });
+    let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
+    reply_at(
+        &mut e,
+        NOW + 100.0,
+        &replacement,
+        200,
+        r#"{"code":21702,"message":"replacement refused"}"#,
+    );
+    let error = failure(&mut e);
+    assert!(error.contains("long position has no stop"), "{error}");
+}
+
+#[test]
 fn fill_overtaking_cancel_ack_aborts_amendment() {
     let (mut e, _) = ready_unattributed();
     e.handle(
@@ -1323,5 +1388,104 @@ fn robinhood_attribution_uses_47296_or_the_explicit_override_on_both_networks() 
                 json!({"1":expected,"2":250,"3":0})
             );
         }
+    }
+}
+
+#[test]
+fn documented_codes_in_a_200_refuse_a_placement_and_leave_no_fence() {
+    for code in [21120, 21301, 21508, 21601, 21702, 21739] {
+        let (mut e, _) = ready_unattributed();
+        let r = begin(&mut e, vec![limit()]);
+        let body = format!(r#"{{"code":{code},"message":"native"}}"#);
+        reply(&mut e, &r, 200, &body);
+        let (_, outcome) = completion(&mut e);
+        assert_eq!(outcome, Some(Outcome::Rejected), "{code}");
+        place(&mut e, vec![limit()]);
+        http(&mut e, "nextNonce");
+    }
+}
+
+#[test]
+fn an_unlisted_code_in_a_200_stays_unknown_and_clears_on_the_next_read() {
+    // 21728 is documented, but a duplicate says the first send may be live.
+    for code in [29500, 21728, 99999] {
+        let (mut e, _) = ready_unattributed();
+        let r = begin(&mut e, vec![limit()]);
+        let body = format!(r#"{{"code":{code},"message":"native"}}"#);
+        reply(&mut e, &r, 200, &body);
+        let settled = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        assert!(
+            settled.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { error, .. })
+                if error.outcome == Some(Outcome::Unknown))),
+            "{code}: {settled:?}"
+        );
+        let reads: Vec<_> = settled
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) if r.url.contains("accountActiveOrders") => Some(r.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(!reads.is_empty(), "{code}: the read starts with the answer");
+        place(&mut e, vec![limit()]);
+        let fenced = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        assert!(
+            fenced.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { error, .. })
+                if error.message.contains("uncertain"))),
+            "{code}: {fenced:?}"
+        );
+        for read in &reads {
+            reply(&mut e, read, 200, OPEN);
+        }
+        place(&mut e, vec![limit()]);
+        http(&mut e, "nextNonce");
+    }
+}
+
+#[test]
+fn a_refused_batch_in_a_200_keeps_its_unknown_handling() {
+    let (mut e, _) = ready_unattributed();
+    let r = begin(&mut e, vec![limit(), limit()]);
+    assert!(r.url.contains("sendTxBatch"));
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":21301,"message":"not enough collateral"}"#,
+    );
+    let (_, outcome) = completion(&mut e);
+    assert_eq!(outcome, Some(Outcome::Unknown));
+}
+
+#[test]
+fn a_maker_only_key_refusal_says_what_the_key_allows() {
+    // The user's sendTx text; the numeric code was not captured, so both shapes are covered.
+    for body in [
+        r#"{"code":21800,"message":"maker-only api key can only send 0ms delay transactions"}"#,
+        r#"{"message":"maker-only api key can only send 0ms delay transactions"}"#,
+    ] {
+        let (mut e, _) = ready_unattributed();
+        e.handle(
+            NOW,
+            Event::Command(Command::SetLeverage {
+                command: 8,
+                symbol: "ETH".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let nonce = http(&mut e, "nextNonce");
+        reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+        let write = http(&mut e, "sendTx");
+        reply(&mut e, &write, 400, body);
+        assert_eq!(
+            failure(&mut e),
+            "This Lighter API key is maker-only, which allows only post-only orders and cancels; \
+             change leverage or place market and stop orders from a key that is not maker-only: \
+             maker-only api key can only send 0ms delay transactions",
+            "{body}"
+        );
     }
 }

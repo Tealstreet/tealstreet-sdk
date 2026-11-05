@@ -102,15 +102,6 @@ impl Paradex {
         context: Context,
         error: VenueError,
     ) {
-        // An unsent read after a refused `/auth` failed because its Session was
-        // retired: that is the account's terminal credential refusal.
-        let error = if self.account.is_auth_rejected()
-            && error.outcome == Some(safe_cex_engine::Outcome::NotSent)
-        {
-            crate::account::auth_rejected_error()
-        } else {
-            error
-        };
-        finish(cx, &context, Err(error));
+        finish(cx, &context, Err(self.account.read_error(error)));
     }
 }

@@ -1,6 +1,5 @@
 //! Market discovery and one quote socket with reference-counted consumers.
 use crate::{ApexOmni, Pending, public_wire as wire};
-use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
@@ -16,6 +15,7 @@ use safe_cex_engine::socket_lifecycle::{FeedId, Interest, SocketError};
 use safe_cex_engine::{
     Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, VenueError,
 };
+use safe_cex_engine::{Level, SubscriptionTopic};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -587,19 +587,29 @@ impl ApexOmni {
             Self::socket_notice(cx, error);
         }
     }
+    pub(super) fn book_topic(symbol: &str) -> String {
+        format!("orderBook200.H.{symbol}")
+    }
+    /// `None` when ApeX has no native candle for `interval`.
+    pub(super) fn candle_topic(symbol: &str, interval_value: Interval) -> Option<String> {
+        interval(interval_value).map(|(native, _)| format!("candle.{native}.{symbol}"))
+    }
+    /// The public feed and interest key `topic` streams on.
+    pub(super) fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => Self::book_topic(symbol),
+            SubscriptionTopic::Candles { symbol, interval } => {
+                Self::candle_topic(symbol, *interval)?
+            }
+        };
+        Some((self.public.feed?, key))
+    }
     pub(super) fn public_topics(&self) -> Vec<String> {
         let mut topics = vec!["instrumentInfo.all".to_owned()];
-        topics.extend(
-            self.public
-                .books
-                .keys()
-                .map(|s| format!("orderBook200.H.{s}")),
-        );
+        topics.extend(self.public.books.keys().map(|s| Self::book_topic(s)));
         let mut trades = HashSet::new();
         for (s, i) in self.public.candles.keys() {
-            if let Some((i, _)) = interval(*i) {
-                topics.push(format!("candle.{i}.{s}"));
-            }
+            topics.extend(Self::candle_topic(s, *i));
             if !self.options.public_data_only {
                 trades.insert(format!("recentlyTrade.H.{s}"));
             }

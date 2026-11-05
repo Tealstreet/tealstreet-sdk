@@ -186,6 +186,65 @@ fn rejected_cancel_prevents_amend_replacement() {
     only_reconcile_pending(&h);
 }
 #[test]
+fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","state":"live"}]}"#);
+    let id =
+        h.e.store()
+            .orders()
+            .iter()
+            .find(|o| o.kind == safe_cex_engine::model::OrderType::TakeProfit)
+            .expect("the resting take profit")
+            .id
+            .clone();
+    h.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id,
+            price: Some(66000.0),
+            amount: None,
+        }),
+    );
+    h.collect();
+    h.reply(
+        "cancel-tpsl",
+        r#"{"code":"0","data":[{"tpslId":"91","code":"0","msg":null}]}"#,
+    );
+    let timer = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    h.handle(timer.1, Event::TimerFired { timer: timer.0 });
+    h.collect();
+    let r = h.take("order-tpsl");
+    h.respond(
+        r,
+        r#"{"code":"102014","msg":"trigger refused","data":null}"#,
+    );
+    let error = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("a failure");
+    assert!(
+        error.message.contains("BTC") && error.message.contains("no take profit"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
 fn conditional_amend_preserves_nested_protection_and_native_execution_provenance() {
     let mut h = Harness::new();
     h.open_private();
@@ -233,6 +292,59 @@ fn conditional_amend_preserves_nested_protection_and_native_execution_provenance
     h.respond(r, r#"{"code":"0","data":{"algoId":"88","code":"0"}}"#);
     assert!(!done(&h));
 }
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    seed_order(&mut h, "12", "");
+    h.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id: "12".into(),
+            price: Some(61000.0),
+            amount: None,
+        }),
+    );
+    h.collect();
+    h.reply(
+        "cancel-batch-orders",
+        r#"{"code":"0","data":[{"orderId":"12","code":"0","msg":null}]}"#,
+    );
+    let timer = h
+        .actions
+        .iter()
+        .rev()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 350.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    let at = h.now + 350.0;
+    h.handle(at, Event::TimerFired { timer });
+    h.collect();
+    h.reply("order-detail", r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"0"}}"#);
+    let r = h.take("batch-orders");
+    h.respond(
+        r,
+        r#"{"code":"102014","msg":"replacement refused","data":null}"#,
+    );
+    let error = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("a failure");
+    assert!(
+        error.message.contains("BTC") && error.message.contains("order is gone"),
+        "{}",
+        error.message
+    );
+}
+
 #[test]
 fn settings_rejections_preserve_known_leverage() {
     let mut h = Harness::new();
@@ -417,6 +529,11 @@ fn cancel_one_combined_leg_recreates_only_its_sibling() {
         }),
     );
     h.collect();
+    // The amend is tried first (ruled); a refused amend falls back to this path.
+    h.reply(
+        "amend-tpsl",
+        r#"{"code":"102014","msg":"amend refused","data":null}"#,
+    );
     h.reply(
         "cancel-tpsl",
         r#"{"code":"0","data":[{"tpslId":"91","code":"0","msg":null}]}"#,
@@ -530,7 +647,7 @@ fn isolated_hedge_leverage_sends_short_after_long_is_accepted() {
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     for path in [
         "orders-pending",
@@ -599,7 +716,7 @@ fn editing_inline_virtual_protection_preserves_parent_remainder_despite_child_am
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"12","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","filledSize":"4","price":"60000","state":"partially_filled","tpTriggerPrice":"65000","slTriggerPrice":"55000"}]}"#);
     for path in [
@@ -874,7 +991,7 @@ fn normal_batches_partition_instrument_and_margin_without_reordering_ids() {
     );
     h.reply(
         "balances",
-        r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+        r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
     for path in [
         "orders-pending",
@@ -1378,7 +1495,7 @@ fn closed_position_restores_account_margin_default_before_next_order() {
                 );
                 h.reply(
                     "balances",
-                    r#"{"code":"0","data":[{"available":"1000","frozen":"0"}]}"#,
+                    r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
                 );
             } else {
                 h.ws(&format!(
@@ -1441,13 +1558,31 @@ fn trading_failures_are_classified_without_changing_their_text() {
         ),
         (
             200,
-            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"102002","msg":"Insufficient balance"}]}"#,
+            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"103003","msg":"Insufficient balance"}]}"#,
             Some(ErrorKind::Rejected),
             Some(Outcome::Rejected),
         ),
         (
             200,
-            r#"{"code":"0","msg":"","data":[{"orderId":"9","code":"0","msg":"Order placed successfully"}]}"#,
+            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"102002","msg":"Duplicate customized order ID"}]}"#,
+            None,
+            Some(Outcome::Unknown),
+        ),
+        (
+            200,
+            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"150003","msg":"clientId already exist"}]}"#,
+            None,
+            Some(Outcome::Unknown),
+        ),
+        (
+            200,
+            r#"{"code":"1","msg":"","data":[{"orderId":"","code":"152030","msg":"Duplicated clientId."}]}"#,
+            None,
+            Some(Outcome::Unknown),
+        ),
+        (
+            200,
+            r#"{"code":"0","msg":"","data":[{"orderId":"9","msg":"Order placed successfully"}]}"#,
             Some(ErrorKind::Internal),
             Some(Outcome::Unknown),
         ),
@@ -1546,7 +1681,7 @@ fn margin_type_change_warns_while_orders_are_open() {
         h.reply("account/positions", r#"{"code":"0","data":[]}"#);
         h.reply(
             "balances",
-            r#"{"code":"0","data":[{"currency":"USDT","available":"1000","frozen":"0"}]}"#,
+            r#"{"code":"0","data":[{"currency":"USDT","balance":"1000","available":"1000","frozen":"0"}]}"#,
         );
         for path in [
             "orders-pending",
@@ -1619,4 +1754,59 @@ fn multi_position_mode_refusal_of_a_protective_order_is_explained() {
             .message
             .contains("Turn off Multi-Position mode on BloFin")
     );
+}
+
+#[test]
+fn a_size_amend_of_a_partly_filled_order_treats_the_size_as_the_new_total() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    seed_order(&mut h, "12", r#", "filledSize":"4""#);
+    h.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id: "12".into(),
+            price: None,
+            amount: Some(9.0),
+        }),
+    );
+    h.collect();
+    h.reply(
+        "cancel-batch-orders",
+        r#"{"code":"0","data":[{"orderId":"12","code":"0"}]}"#,
+    );
+    resume_cancel(&mut h);
+    h.reply("order-detail", r#"{"code":"0","data":{"instId":"BTC-USDT","orderId":"12","state":"canceled","filledSize":"4"}}"#);
+    let r = h.take("batch-orders");
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(p[0]["size"], "5");
+}
+
+// deaws2's live body.
+#[test]
+fn a_partly_succeeded_batch_with_an_already_gone_row_is_done() {
+    let mut h = Harness::new();
+    h.open_private();
+    h.seed();
+    seed_order(&mut h, "1000171264712", "");
+    seed_order(&mut h, "1000171264711", "");
+    h.handle(
+        1.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    h.collect();
+    h.reply("cancel-batch-orders", r#"{"code":"2","msg":"Batch operation partially succeeded.","data":[{"orderId":"1000171264712","clientOrderId":"","msg":"Cancel failed as the order has been filled, triggered, canceled or does not exist.","code":"1000"},{"orderId":"1000171264711","clientOrderId":"x","msg":"Order canceled","code":"0"}]}"#);
+    assert!(
+        !done(&h),
+        "{:?}",
+        h.actions
+            .iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+            .count()
+    );
+    assert!(h.e.store().order("1000171264712").is_none());
 }

@@ -1,9 +1,13 @@
 # CLAUDE.md — safe-cex/src/webworker/chaserOrder
 
-The chaser-order manager: places, watches, and re-places orders
+The TS chaser-order manager: places, watches, and re-places orders
 that follow a target price (typically chasing the bid/ask). One
 `ChaserOrderInstance` per active chase; lifecycle managed by
 `chaserOrderManagerInstance` (singleton).
+
+Only in-process CLI callers run it (cli-core `chase`/`twap chase`, `apps/cli`).
+The worker never does: its chases run in the engine's Rust algos (see
+`../CLAUDE.md` → "Chasers, TWAPs and exec run only in the Rust algos").
 
 Creation synchronizes the exchange's current native account state before
 capturing its starting position. A pending frame flush must not make the chase
@@ -13,15 +17,14 @@ Base seam.
 
 Completed chasers are not history rows. Every internal completion path routes
 through `cleanupInstance`, which detaches listeners, cancels remaining IDs, and
-splices the instance from the singleton. The postprocessor also excludes a
-stopped instance during the asynchronous cancellation window, so completed
-chasers cannot pin full orders payloads or grow worker memory without bound.
+splices the instance from the singleton, so completed chasers cannot pin full
+orders payloads or grow memory without bound.
 
-Exchange disposal owns chaser teardown too. `ExchangeWorker.dispose` calls the
-manager before disposing the exchange; matching instances are stopped, their
-listeners and singleton references are removed synchronously, cancellation is
-started for known IDs, and a bridged warning tells the user the chase was
-interrupted. Do not defer this cleanup to a future store update.
+`cleanupExchange` stops an exchange's chasers before it is disposed: matching
+instances are stopped, their listeners and singleton references are removed
+synchronously, cancellation is started for known IDs, and a bridged warning
+tells the user the chase was interrupted. Do not defer this cleanup to a future
+store update.
 
 ## Hot-path: order updates are immediate; ticker-only checks are rate-limited
 
@@ -254,7 +257,7 @@ could overfill the user's target.
 ## User-cancel must tear down listeners and just-placed orders synchronously
 
 User-initiated cancel (`ChaserOrderManager.remove` → STOP button,
-`chase cancel` CLI command, `chaser:terminate` worker payload) is
+`chase cancel` CLI command) is
 the hot path users hit repeatedly. Three races used to leak fresh
 resting orders past STOP, manifesting as "the chase order keeps
 coming back":

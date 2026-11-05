@@ -1412,7 +1412,26 @@ impl Grvt {
         } else {
             error.message.clone()
         };
-        error.message = message;
+        // Only an amend plans a guard: its replacement failed after the cancel landed.
+        error.message = if let Effect::Place(order) = &request.step.effect
+            && request.plan.guard.is_some()
+            && request.plan.created.is_empty()
+        {
+            let unknown = outcome == Outcome::Unknown;
+            let gone = if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                safe_cex_engine::error::stop_gone_text(
+                    &order.symbol,
+                    order.side,
+                    order.kind,
+                    unknown,
+                )
+            } else {
+                safe_cex_engine::error::order_gone_text(&order.symbol, unknown)
+            };
+            format!("{gone}: {message}")
+        } else {
+            message
+        };
         self.trade_finish(cx, *request.plan, Some(error.outcome(outcome)));
     }
     pub(crate) fn trade_response(

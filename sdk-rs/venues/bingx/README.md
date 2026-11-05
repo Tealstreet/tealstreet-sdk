@@ -6,6 +6,12 @@ internal public feed sends descending asks, which are sorted before delivery.
 Account polling supplements the private stream. Listen keys recover separately
 from socket liveness, with epoch guards on old requests and timers.
 
+REST open-order rows with readable identity, symbol, side and quantity remain
+visible and cancellable when optional fields fail to parse. Diagnostics name
+the malformed fields without their values. Degraded rows do not authorize
+amendments or clear uncertainty fences; a clean snapshot restores metadata.
+Private execution frames retain their strict decoder.
+
 Hosts connect directly to REST `open-api.bingx.com`, internal public WebSocket
 `ws-market-swap.qq-os.com`, and private WebSocket `open-api-swap.bingx.com`.
 Gzip/deflate frames are inflated by the browser/Worker/native transport before
@@ -14,7 +20,10 @@ permitted CORS egress or a transport on a server/Worker; API allowlists must
 include that host's direct egress IP. The internal public host is not BingX's
 documented public protocol and remains a deployment dependency for TS parity.
 
-Writes are sequenced and never retried after transport failures. A batch is
+Writes are sequenced and never retried after transport failures. A refusal
+BingX makes before processing, a bad signature (100001) or a stale timestamp
+(109400 naming it), is re-signed and resent once; a timestamp refusal also reads
+BingX server time and recalibrates this account's signing clock. A batch is
 fully preflighted before any order is sent. Caller IDs are honored verbatim on
 one ordinary order or rejected before writes. Leverage changes without a side
 update both hedge sides sequentially, matching the engine's symbol-level API.
@@ -34,3 +43,8 @@ after 45 seconds, with `Ping` every 15 seconds. Native `Ping`/`Pong` replies rem
 unchanged. Private expiry and watchdog recovery wait for backoff before POSTing
 a fresh key. Failed token acquisition retains a minimum 30-second retry pause.
 Retired epochs fence late token and keepalive responses.
+
+History read refusals retain a typed kind, the numeric venue code, and a closed
+`causeCode` (rate limit, key/permission, invalid parameters, venue failure, or
+decode). These diagnostics do not change one-resend or strict history recovery
+rules. Code meanings follow [BingX's error reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/error-codes.md).

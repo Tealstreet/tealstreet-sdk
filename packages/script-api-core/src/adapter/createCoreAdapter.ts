@@ -24,6 +24,8 @@ import type {
 import type { CoreAdapter } from './AdapterContext';
 import type { HostBindings, HostExchange, HostWriteEvent } from './HostBindings';
 
+import { OrderStatus } from '@tealstreet/safe-cex/src/types';
+
 import { clampReduceOnlyOrder, prepareOrder } from '../order/prepareOrder';
 import {
   assertMinimumPrice,
@@ -61,6 +63,10 @@ const EMPTY: readonly never[] = Object.freeze([]);
 
 const lower = (name: string | undefined, fallback: ExchangeName): ExchangeName =>
   ((name ?? fallback) as string).toLowerCase() as ExchangeName;
+
+// The store keeps terminal rows a while; to a script they are not resting orders.
+const isNotTerminal = (order: Pick<Order, 'status'>): boolean =>
+  order.status !== OrderStatus.Canceled && order.status !== OrderStatus.Closed;
 
 export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
   const requireExchange = (account: string): HostExchange => {
@@ -210,7 +216,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
 
     // ── Store reads ──────────────────────────────────────────────────────
     getMarkets: (account): readonly Market[] =>
-      host.readMarkets?.(account) ?? ((host.getStore(account)?.markets as readonly Market[]) ?? EMPTY),
+      host.readMarkets?.(account) ?? (host.getStore(account)?.markets as readonly Market[]) ?? EMPTY,
     getMarket: (symbol, account): Market | undefined => findMarket(symbol, account),
     getTicker: (symbol, account): Ticker | undefined => findTicker(symbol, account),
     getTickers: (symbols, account): readonly Ticker[] => {
@@ -226,7 +232,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
     getPositions: ({ account, symbol }): readonly Position[] =>
       bySymbol((host.getStore(account)?.positions as readonly Position[]) ?? EMPTY, symbol),
     getOrders: ({ account, symbol }): readonly Order[] =>
-      bySymbol((host.getStore(account)?.orders as readonly Order[]) ?? EMPTY, symbol),
+      bySymbol(((host.getStore(account)?.orders as readonly Order[]) ?? EMPTY).filter(isNotTerminal), symbol),
     getBalance: (account): Balance | undefined =>
       host.readBalance ? host.readBalance(account) : host.getStore(account)?.balance,
     getCombinedBalance: ({ accounts }): CombinedBalance => summarizeBalance(accounts),
@@ -329,7 +335,7 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
       guardWrites();
       const exchange = requireExchange(account);
       const cancelOrders = requireMethod(exchange, 'cancelOrders', account);
-      let candidates = (host.getStore(account)?.orders ?? []).slice();
+      let candidates = (host.getStore(account)?.orders ?? []).filter(isNotTerminal);
       // An id list answers the question the other fields exist to ask, so it
       // REPLACES them — a caller that enumerated 25 of 40 resting orders must
       // not have symbol/side widen that back to 40.

@@ -86,7 +86,7 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
           worker.handlePayload({ op: 'subscribeOrderBook', data: { symbol, subId: `cutover-${symbol}` } });
       }
       let framesBeforeReplay = frames.length;
-      if (input.polling) {
+      if (input.polling && name === 'breakoutprop') {
         // DXtrade market reads require a documented test login even in public
         // mode. Observe a natural post-startup HTTP poll, never invent a WS.
         expect(await startup).toBe(true);
@@ -110,6 +110,9 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
         // Natural polling may skip intermediate fixture timestamps. The exact
         // changed quote response must still be one of the recorded inputs.
         expect(input.breakoutQuotes).toContainEqual(input.publicPollResponses.at(-1)!.quotes);
+      } else if (input.polling) {
+        // A REST-only venue (Binance Options) loads its tickers over HTTP at startup.
+        expect(await startup).toBe(true);
       } else {
         const delivered = await input.replayPublicFrames();
         expect(delivered, `${name}: no fixture input reached a matching native socket`).toBeGreaterThan(0);
@@ -127,6 +130,8 @@ describe('every shipping Rust venue through the real worker frame bridge', () =>
       if (input.polling) {
         expect(input.connectedSocketUrls).toEqual([]);
         expect(input.replayedSocketUrls.size).toBe(0);
+      }
+      if (input.polling && name === 'breakoutprop') {
         expect(input.requests.some((request) => request.endsWith('/login'))).toBe(true);
         expect(input.requests.filter((request) => request.endsWith('/marketdata')).length).toBeGreaterThan(1);
       }

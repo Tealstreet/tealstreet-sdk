@@ -19,7 +19,8 @@ const policies = new Set([
   'quantityUnits', 'positionHistory', 'closedPositionFormat', 'fillHistoryTime',
   'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
   'finiteHistoryBounds', 'rejectOrderHistoryFilters', 'publicCatalogueValidation',
-  'isolatedBookSubscriptions', 'inverseClosedPositions',
+  'isolatedBookSubscriptions', 'inverseClosedPositions', 'orderHistoryNeedsSymbol',
+  'symbolCancelMissesUnseen', 'orderReadCovers',
 ]);
 const conditional = {
   account: (v) => v !== 'unsupported' ? [{ op: 'fetchAccount' }] : [],
@@ -47,6 +48,8 @@ const conditional = {
   marketRefresh: () => [{ op: 'refreshMarkets' }],
   stpControls: () => [{ op: 'fetchStpMode' }, { op: 'setStpMode', mode: 'EXPIRE_TAKER' }],
   scheduleCancel: () => [{ op: 'scheduleCancel', time: 5000 }, { op: 'scheduleCancel', time: null }],
+  freshPositions: () => [{ op: 'readPositions' }],
+  nukeAccountCancel: () => [{ op: 'cancelAccountOrders' }],
 };
 const fields = [...new Set([...Object.keys(enums), ...Object.keys(conditional), ...policies])];
 

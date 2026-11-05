@@ -12,17 +12,28 @@ import { BETA_LOADER, betaLoaderSource } from './generate-beta-loader.mjs';
 import { venueFamilies, venueFamily } from './venues.mjs';
 
 const OUT = [
-  'woo', 'mexc', 'grvt', 'backpack', 'coinbase', 'coinbasespot', 'orderly', 'kodiakfi', 'mode', 'salsadex',
-  'tealstreet-dex', 'what', 'woofi', 'kucoin', 'kucoinspot', 'polymarket', 'breakoutprop', 'txflow', 'weex',
-  'bitrue', 'hyrotrader', 'lighter-robinhood', 'bitgetinverse',
+  'polymarket', 'breakoutprop', 'txflow', 'weex',
+  'bitrue',
 ];
 
-test('the beta set is exactly the 27 IN venues in 15 families', () => {
-  assert.equal(betaVenueNames.length, 27);
+test('the beta set is exactly the 44 IN venues in 23 families', () => {
+  assert.equal(betaVenueNames.length, 44);
   assert.deepEqual(betaVenueFamilies, [
-    'apexomni', 'asterdex', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'cryptocom',
-    'hyperliquid', 'kraken', 'lighter', 'okx', 'paradex', 'phemex',
+    'apexomni', 'asterdex', 'backpack', 'binance', 'bingx', 'bitget', 'bitunix', 'blofin', 'bybit', 'coinbase',
+    'cryptocom', 'grvt', 'hyperliquid', 'kraken', 'kucoin', 'kucoinspot', 'lighter', 'mexc', 'okx', 'orderly',
+    'paradex', 'phemex', 'woo',
   ]);
+});
+
+test('retired brokers are rejected while all live Orderly names keep their family', () => {
+  for (const venue of ['salsadex', 'tealstreet-dex']) {
+    assert.throws(() => venueFamily(venue), /unsupported Rust venue/);
+    assert.throws(() => betaVenueFamily(venue), /unsupported Rust venue/);
+  }
+  for (const venue of ['orderly', 'woofi', 'kodiakfi', 'mode', 'what']) {
+    assert.equal(venueFamily(venue), 'orderly');
+    assert.equal(betaVenueFamily(venue), 'orderly');
+  }
 });
 
 test('every beta venue keeps the family the full registry gives it', () => {
@@ -44,9 +55,10 @@ test('the beta loader refuses an OUT venue before importing any engine', async (
     imports.push(family);
     return { default: async () => {} };
   }, betaVenueFamily);
-  await assert.rejects(load('woo'), BetaVenueUnavailableError);
+  await assert.rejects(load('bitrue'), BetaVenueUnavailableError);
   await load('okxeu');
-  assert.deepEqual(imports, ['okx']);
+  await load('lighter-robinhood');
+  assert.deepEqual(imports, ['okx', 'lighter']);
 });
 
 test('engine.beta.web.mjs is generated from the table and imports only beta families', () => {

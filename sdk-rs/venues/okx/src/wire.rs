@@ -209,6 +209,7 @@ pub struct OrderRow<'a> {
     pub algo_cl_ord_id: &'a str,
     pub ord_type: &'a str,
     pub state: &'a str,
+    pub fail_code: &'a str,
     pub side: &'a str,
     pub sz: &'a str,
     pub acc_fill_sz: &'a str,
@@ -269,4 +270,44 @@ pub struct AccountPush<'a> {
     pub total_eq: &'a str,
     #[serde(borrow, default)]
     pub details: Vec<Equity<'a>>,
+}
+
+/// A row the borrowed records cannot read, rewritten so they can: null fields dropped,
+/// numbers as text, JSON escapes resolved. Cold path: only after a row failed to parse.
+pub fn readable_rows(text: &str) -> Option<String> {
+    #[derive(Deserialize, serde::Serialize)]
+    #[serde(untagged)]
+    enum Json {
+        Null,
+        Bool(bool),
+        Int(i64),
+        Unsigned(u64),
+        Float(f64),
+        Text(String),
+        Array(Vec<Json>),
+        Object(std::collections::BTreeMap<String, Json>),
+    }
+    fn clean(row: &mut Json) {
+        match row {
+            Json::Array(rows) => rows.iter_mut().for_each(clean),
+            Json::Object(fields) => {
+                fields.retain(|_, value| !matches!(value, Json::Null));
+                for value in fields.values_mut() {
+                    let text = match value {
+                        Json::Int(number) => number.to_string(),
+                        Json::Unsigned(number) => number.to_string(),
+                        Json::Float(number) => {
+                            serde_json::to_string(number).ok().unwrap_or_default()
+                        }
+                        _ => continue,
+                    };
+                    *value = Json::Text(text);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut rows = serde_json::from_str::<Json>(text).ok()?;
+    clean(&mut rows);
+    serde_json::to_string(&rows).ok()
 }

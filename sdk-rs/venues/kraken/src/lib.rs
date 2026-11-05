@@ -10,6 +10,7 @@ pub mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::Level;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -541,6 +542,9 @@ impl Venue for Kraken {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_orders(cx);
     }
@@ -564,8 +568,27 @@ impl Venue for Kraken {
             position_history: safe_cex_engine::PositionHistory::FillsAccount,
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn socket_control(
         &self,
@@ -594,6 +617,13 @@ impl Venue for Kraken {
         ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.managed_encode(feed, subscribe, items, emit)
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -1134,6 +1164,26 @@ impl Venue for Kraken {
             _ => unreachable!(),
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        match pending {
+            Pending::History(request) => self.history_stream_error(cx, *request, response),
+            Pending::Account(request) => self.account_http(cx, request, response),
+            pending => self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            ),
+        }
+    }
+
     fn on_http_preparation_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1178,7 +1228,11 @@ impl Venue for Kraken {
                     error.message = format!("Kraken history failed: {}", error.message);
                     self.public_trades_failed(cx, *r, child, error)
                 }
-                pending => self.on_request_failed(cx, pending, &error.message),
+                pending => {
+                    self.account.read_error = Some(error.clone());
+                    self.on_request_failed(cx, pending, &error.message);
+                    self.account.read_error = None;
+                }
             }
         }
     }

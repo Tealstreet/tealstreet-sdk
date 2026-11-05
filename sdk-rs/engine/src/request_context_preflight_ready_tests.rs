@@ -840,6 +840,7 @@ fn readiness_socket_policy() -> crate::socket_lifecycle::FeedPolicy {
         invalidation: Invalidation::Required,
         subscription_interval_ms: 0.,
         close_floors: &[],
+        data_silence: None,
     }
 }
 #[cfg(feature = "managed-sockets")]

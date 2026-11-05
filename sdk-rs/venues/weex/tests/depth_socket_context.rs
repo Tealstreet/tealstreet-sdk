@@ -779,6 +779,7 @@ impl Venue for RetirementPressure {
                 invalidation: Invalidation::Required,
                 subscription_interval_ms: 0.,
                 close_floors: &[],
+                data_silence: None,
             })
             .expect("genuine foreign feed registration"),
         );
@@ -1147,6 +1148,9 @@ fn physical_depth_timeout(held: bool) {
             {
                 assert!(retry.replace((*timer, *at_ms)).is_none());
             }
+            // The rig's public socket stays silent, so this notice is true here.
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
             _ => panic!("unexpected physical-timeout effect: {action:?}"),
         }
     }

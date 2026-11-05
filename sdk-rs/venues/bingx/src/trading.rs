@@ -4,6 +4,8 @@
 use crate::Pending;
 #[path = "trading/context.rs"]
 mod context;
+#[path = "trading/venue_state.rs"]
+mod venue_state;
 
 /// BingX key refusals (common codes): bad signature, key without the permission,
 /// incorrect key, IP not whitelisted. Reads and writes share this one list.
@@ -19,6 +21,7 @@ use safe_cex_engine::request_context::plan::Slot;
 use safe_cex_engine::request_context::{
     Context, Error, HttpOwnerRetirement, Plan, ReconciliationData,
 };
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -113,8 +116,13 @@ struct Step {
 struct Job {
     steps: VecDeque<Step>,
     continue_on_error: bool,
+    sets_both_hedged_sides: bool,
     // A trigger move cancels before placing; a failed placement must say so.
-    replaces_cancelled: bool,
+    replaces_cancelled: Option<(String, OrderSide, OrderType)>,
+    // A limit's cancelReplace may cancel and then refuse the placement.
+    replaces_order: Option<String>,
+    // A failed bracket leaves the placed entry without the protection the user asked for.
+    entry_with_brackets: Option<String>,
 }
 struct Run {
     job: Job,
@@ -123,6 +131,36 @@ struct Run {
     next: Option<Slot>,
     native_ids: Vec<String>,
     error: Option<VenueError>,
+}
+/// Earlier writes that a later failure cannot roll back.
+fn partial_failure_note(run: &Run, request: &Request, may_be_live: bool) -> Option<String> {
+    if run.job.sets_both_hedged_sides
+        && let Call::Leverage {
+            symbol,
+            side: Some(PositionSide::Short),
+            ..
+        } = &request.call
+    {
+        return Some(format!(
+            "LONG leverage was updated for {symbol}, but SHORT leverage update was not confirmed"
+        ));
+    }
+    if !request.places_order() {
+        return None;
+    }
+    if let Some((symbol, side, kind)) = &run.job.replaces_cancelled {
+        return Some(safe_cex_engine::error::stop_gone_text(
+            symbol,
+            *side,
+            *kind,
+            may_be_live,
+        ));
+    }
+    let symbol = run.job.entry_with_brackets.as_ref()?;
+    (!run.native_ids.is_empty()).then(|| {
+        let state = if may_be_live { "may not be" } else { "is not" };
+        format!("Your {symbol} entry was placed, but its stop or take profit {state} in place")
+    })
 }
 struct Observation {
     order: Order,
@@ -137,6 +175,12 @@ pub struct Trading {
     /// Retired settings writes whose metadata custody finishes at the next callback.
     retired_settings: Vec<CommandId>,
     observed: HashMap<String, Observation>,
+    /// Frame-fed: source observations whose order has not been ingested yet.
+    pending_observed: HashMap<String, (String, String, bool, String)>,
+    /// Frame-fed: the data source knows the position mode (VENUE_STATE).
+    mode_known: bool,
+    /// tradeMinUSDT by contract id. Market limits carry no value minimum.
+    min_order_value: HashMap<String, f64>,
 }
 
 #[derive(Deserialize)]
@@ -179,7 +223,7 @@ struct Data<'a> {
     #[serde(default, borrow)]
     replace_result: Cow<'a, str>,
     #[serde(default)]
-    failed: Vec<serde::de::IgnoredAny>,
+    failed: Option<Vec<serde::de::IgnoredAny>>,
 }
 impl Data<'_> {
     fn has_order_claim(&self) -> bool {
@@ -661,6 +705,8 @@ impl Trading {
         else {
             return;
         };
+        // A transport loss arrives here too; only a call never sent is certainly not live.
+        let note = partial_failure_note(run, &request, error.outcome != Some(Outcome::NotSent));
         let _ = run.error.get_or_insert(error.clone());
         if run.job.continue_on_error
             && cx
@@ -668,6 +714,8 @@ impl Trading {
                 .is_ok()
         {
             self.advance(cx, credentials, request.command);
+        } else if let Some(note) = note {
+            let _ = cx.fail_plan_noted(&request.plan, error, &note);
         } else {
             let _ = cx.fail_plan(&request.plan, error);
         }
@@ -766,19 +814,59 @@ impl Trading {
                 .err()
                 .map(|error| error.message.clone())
                 .unwrap_or_else(|| "BingX order is already absent".into());
-            if request.places_order()
-                && self
+            let venue_refused = envelope.as_ref().is_ok_and(|e| {
+                e.code != 0
+                    && matches!(
+                        TABLE.verdict(
+                            &Native {
+                                code: NativeCode::Int(e.code),
+                                message: &e.msg,
+                            },
+                            Intent::Place,
+                        ),
+                        Verdict::Refused(_) | Verdict::RefusedResend(_)
+                    )
+            });
+            if let Some(note) = self
+                .jobs
+                .get(&request.command)
+                .and_then(|run| partial_failure_note(run, &request, !venue_refused))
+            {
+                message = format!("{note}: {message}");
+            }
+            if canceled
+                && let Some(symbol) = self
                     .jobs
                     .get(&request.command)
-                    .is_some_and(|run| run.job.replaces_cancelled)
+                    .and_then(|run| run.job.replaces_order.as_ref())
             {
-                message = format!("original bracket cancelled; replacement failed: {message}");
+                let refused = envelope.as_ref().is_ok_and(|e| e.code != 0)
+                    || data.is_some_and(|data| {
+                        !data.new_order_result.is_empty()
+                            && !matches!(
+                                data.new_order_result.as_ref(),
+                                "SUCCESS" | "true" | "TRUE"
+                            )
+                    });
+                let lost = safe_cex_engine::error::order_gone_text(symbol, !refused);
+                message = format!("{lost}: {message}");
             }
             let native = envelope.as_ref().ok().map(|e| Native {
                 code: NativeCode::Int(e.code),
                 message: &e.msg,
             });
-            let fact = match cx.classify_write(&request.context, &TABLE, native.as_ref(), message) {
+            let timestamp = crate::sign::timestamp::refused(response.body);
+            let table = if native
+                .as_ref()
+                .is_some_and(|n| context::names_duplicate_client_id(n.message))
+            {
+                &context::DUPLICATE_TABLE
+            } else if timestamp {
+                &context::TIMESTAMP_TABLE
+            } else {
+                &TABLE
+            };
+            let fact = match cx.classify_write(&request.context, table, native.as_ref(), message) {
                 Ok(fact) => fact,
                 Err(error) => {
                     let _ = cx.fail_plan(&request.plan, error.venue_error());
@@ -823,6 +911,9 @@ impl Trading {
                 {
                     Ok(context) => {
                         request.context = context;
+                        if timestamp {
+                            crate::sign::timestamp::note_resend(cx);
+                        }
                         self.queue(cx, credentials, request);
                     }
                     Err(error) => {
@@ -875,6 +966,10 @@ impl Trading {
     }
 
     fn place(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<Job, String> {
+        // Position side and reduce-only follow the mode; never guess one-way.
+        if cx.frame_fed() && !self.mode_known {
+            return Err("BingX position mode is not loaded yet".into());
+        }
         if orders.iter().any(|order| {
             order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some()
         }) {
@@ -905,8 +1000,15 @@ impl Trading {
         let mut job = Job::default();
         for o in orders {
             job.steps.extend(self.format(cx, o)?);
+            if orders.len() == 1 && (o.stop_loss.is_some() || o.take_profit.is_some()) {
+                job.entry_with_brackets = Some(o.symbol.clone());
+            }
         }
         Ok(job)
+    }
+
+    pub fn set_min_order_value(&mut self, id: &str, value: f64) {
+        self.min_order_value.insert(id.to_owned(), value);
     }
 
     fn format(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Vec<Step>, String> {
@@ -999,7 +1101,8 @@ impl Trading {
         if full && position.is_none() {
             return Err("Full-position stop requires an opposite-side position".into());
         }
-        if !full && (amount <= 0.0 || amount < market.limits.amount.min) {
+        // A close stays out, as below: dust left by a partial close must still be closable.
+        if !full && (amount <= 0.0 || (!closing && amount < market.limits.amount.min)) {
             return Err("Order quantity is below the market minimum".into());
         }
         let price = if o.kind != OrderType::Market {
@@ -1012,6 +1115,14 @@ impl Trading {
         };
         if price.is_some_and(|p| !p.is_finite() || p <= 0.0) {
             return Err("Order price rounds to zero".into());
+        }
+        // Closes stay out: nothing says the venue holds a reduce to this, and a stuck close is worse.
+        let min_value = self.min_order_value.get(&market.id).copied().unwrap_or(0.0);
+        let reference = price.or_else(|| cx.store.ticker(&o.symbol).map(|t| t.last));
+        if !closing && reference.is_some_and(|p| p > 0.0 && amount * p < min_value) {
+            return Err(format!(
+                "Order value is below the BingX minimum of {min_value} USDT"
+            ));
         }
         let kind = match o.kind {
             OrderType::Market => "MARKET",
@@ -1050,7 +1161,7 @@ impl Trading {
         } else {
             split(size, market.limits.amount.max, market.precision.amount)?
         };
-        if !full && lots.iter().any(|lot| *lot < market.limits.amount.min) {
+        if !full && !closing && lots.iter().any(|lot| *lot < market.limits.amount.min) {
             return Err("Split order lot is below the market minimum".into());
         }
         if o.client_order_id.is_some() && lots.len() != 1 {
@@ -1276,7 +1387,7 @@ impl Trading {
             }
             let mut job = self.cancel(cx, &[id.into()])?;
             job.continue_on_error = false;
-            job.replaces_cancelled = true;
+            job.replaces_cancelled = Some((opts.symbol.clone(), opts.side, opts.kind));
             if let Some(Step {
                 call: Call::Cancel { absent_ok, .. },
                 ..
@@ -1290,15 +1401,21 @@ impl Trading {
         if o.kind != OrderType::Limit
             || meta.native_kind != "LIMIT"
             || o.close == Some(true)
-            || meta.attached
-            || o.stop_loss.is_some()
-            || o.take_profit.is_some()
             || !matches!(
                 o.time_in_force,
                 Some(TimeInForce::GoodTillCancel | TimeInForce::PostOnly)
             )
         {
-            return Err("Native amendment requires unprotected GTC/PostOnly LIMIT order".into());
+            return Err("BingX amends only an open GTC or PostOnly LIMIT order".into());
+        }
+        // As legacy: a size change keeps the order and its TP/SL; a price move replaces the
+        // order, and BingX's cancel-replace cannot carry attached TP/SL across.
+        let protected = meta.attached || o.stop_loss.is_some() || o.take_profit.is_some();
+        if amount.is_some() && price.is_some() {
+            return Err("BingX changes a limit order's size or its price, not both at once".into());
+        }
+        if amount.is_none() && protected {
+            return Err("BingX cannot move this limit order's price without dropping its TP/SL. Cancel it and place it again at the new price with its TP/SL, or change its size instead".into());
         }
         let base = Params::new().str("symbol", &market.id);
         if let Some(amount) = amount {
@@ -1335,15 +1452,13 @@ impl Trading {
             .num("quantity", o.amount)
             .num("price", price)
             .str("timeInForce", tif(o.time_in_force.expect("checked TIF")))
-            .str("cancelReplaceMode", "STOP_ON_FAILURE")
-            .str(
-                "cancelRestrictions",
-                if meta.native_status == "PENDING" {
-                    "ONLY_PENDING"
-                } else {
-                    "ONLY_NEW"
-                },
-            );
+            .str("cancelReplaceMode", "STOP_ON_FAILURE");
+        // As legacy: a WORKING or OPEN order may still be PENDING at the venue.
+        params = match meta.native_status.as_ref() {
+            "PENDING" => params.str("cancelRestrictions", "ONLY_PENDING"),
+            "NEW" => params.str("cancelRestrictions", "ONLY_NEW"),
+            _ => params,
+        };
         if let Some(client) = o.client_order_id.as_deref().filter(|id| !id.is_empty()) {
             params = params.str("cancelClientOrderId", client);
         } else {
@@ -1370,6 +1485,7 @@ impl Trading {
             kind: OrderIdentityKind::ClientOrderId,
             identity,
         }];
+        job.replaces_order = Some(o.symbol.clone());
         Ok(job)
     }
     fn leverage(
@@ -1388,15 +1504,11 @@ impl Trading {
             return Err("Market leverage limits are invalid".into());
         }
         let leverage = input.clamp(market.limits.leverage.min, market.limits.leverage.max);
-        let side = if cx.store.hedged() {
-            Some(side.ok_or("Side is required when position mode is hedged")?)
-        } else {
-            None
-        };
-        Ok(one(
-            Method::Post,
-            crate::paths::LEVERAGE,
-            Params::new()
+        let step = |side| Step {
+            receipts: Vec::new(),
+            method: Method::Post,
+            path: crate::paths::LEVERAGE,
+            params: Params::new()
                 .str("symbol", &market.id)
                 .str(
                     "side",
@@ -1407,12 +1519,22 @@ impl Trading {
                     },
                 )
                 .num("leverage", leverage),
-            Call::Leverage {
+            call: Call::Leverage {
                 symbol: symbol.into(),
                 leverage,
                 side,
             },
-        ))
+        };
+        let mut job = Job::default();
+        if cx.store.hedged() && side.is_none() {
+            job.sets_both_hedged_sides = true;
+            job.steps.push_back(step(Some(PositionSide::Long)));
+            job.steps.push_back(step(Some(PositionSide::Short)));
+        } else {
+            job.steps
+                .push_back(step(if cx.store.hedged() { side } else { None }));
+        }
+        Ok(job)
     }
     fn margin(&self, cx: &Cx<'_, Pending>, symbol: &str, isolated: bool) -> Result<Job, String> {
         let market = cx.store.market(symbol).ok_or("Market not found")?;
@@ -1554,7 +1676,11 @@ fn decode(call: &Call, data: &Data<'_>, absent: bool) -> Result<Vec<String>, Ven
                     "BingX cancellation acknowledgement identifies another order",
                 ));
             }
-            if !data.failed.is_empty() {
+            if data
+                .failed
+                .as_ref()
+                .is_some_and(|failed| !failed.is_empty())
+            {
                 return Err(unknown(
                     "BingX cancel response reports failed cancellations",
                 ));
@@ -1660,6 +1786,7 @@ fn apply(trading: &mut Trading, cx: &mut Cx<'_, Pending>, call: &Call, canceled:
                     p.leverage = *leverage;
                 }
             });
+            cx.hold_setting(SettingKey::Leverage(symbol.clone()));
         }
         Call::Margin { symbol, isolated } => {
             cx.store.update_setting(symbol, |s| {
@@ -1669,8 +1796,12 @@ fn apply(trading: &mut Trading, cx: &mut Cx<'_, Pending>, call: &Call, canceled:
                     MarginType::Cross
                 })
             });
+            cx.hold_setting(SettingKey::MarginType(symbol.clone()));
         }
-        Call::Mode { hedged } => cx.store.set_hedged(*hedged),
+        Call::Mode { hedged } => {
+            cx.store.set_hedged(*hedged);
+            cx.hold_setting(SettingKey::Hedged);
+        }
     }
 }
 
@@ -1686,5 +1817,14 @@ pub(crate) fn evidence(
         for id in ids {
             evidence.order_id(&id);
         }
+    }
+}
+
+#[cfg(test)]
+mod reply_tests {
+    #[test]
+    fn a_cancel_all_with_a_null_failed_list_reads() {
+        let data: super::Data<'_> = serde_json::from_str(r#"{"failed":null}"#).unwrap();
+        assert!(data.failed.is_none());
     }
 }

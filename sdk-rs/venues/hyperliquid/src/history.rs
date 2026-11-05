@@ -168,8 +168,11 @@ impl Hyperliquid {
             client_order_id,
         } = &query
         {
+            // A Creating row may be a send still in flight; only the venue can say it is placed.
             let cached = cx.store.orders().iter().position(|o| {
-                o.symbol == *symbol && o.client_order_id.as_deref() == Some(client_order_id)
+                o.symbol == *symbol
+                    && o.status != safe_cex_engine::model::OrderStatus::Creating
+                    && o.client_order_id.as_deref() == Some(client_order_id)
             });
             if cached.is_some()
                 || !crate::account::valid_cloid(client_order_id)
@@ -219,7 +222,10 @@ impl Hyperliquid {
                     );
                 }
                 Query::Fills { .. } | Query::OrderHistory { .. } | Query::Income { .. } => {
-                    completion.incomplete("history is INCOMPLETE: Hyperliquid spot adapter has no native history read");
+                    completion.incomplete(
+                        safe_cex_engine::history::IncompleteReason::NoNativeRead,
+                        "history is INCOMPLETE: Hyperliquid spot adapter has no native history read",
+                    );
                     HistoryRows::<()>::new(completion, |rows| {
                         serde_json::to_string(rows)
                             .map_err(|error| VenueError::new(error.to_string()))
@@ -611,6 +617,16 @@ impl Hyperliquid {
                         return Err("Malformed Hyperliquid order lookup status".into());
                     }
                     let row = row.order.ok_or("Missing lookup order")?;
+                    // A rejection was never placed; an unknown status cannot say either way.
+                    if row.status == "rejected" || row.status.ends_with("Rejected") {
+                        return Ok("{\"found\":false,\"definitive\":true}".into());
+                    }
+                    let cancelled =
+                        row.status.ends_with("anceled") || row.status == "scheduledCancel";
+                    if !cancelled && !matches!(row.status.as_ref(), "open" | "triggered" | "filled")
+                    {
+                        return Ok("{\"found\":false,\"definitive\":false}".into());
+                    }
                     if let Some(mut order) = self.map_order(cx, &row.order)
                         && symbol_matches(&read.query, &order.symbol)
                     {
@@ -779,6 +795,12 @@ fn encode_query(
     rows: Vec<HistoryRow>,
 ) -> Result<String, VenueError> {
     let limit = match query {
+        // A window with no limit asks for all of it; a default here would close it as covered.
+        Query::Fills {
+            limit,
+            from_ms: Some(_),
+            ..
+        } => limit.map(|n| n.clamp(1, 500) as usize),
         Query::Fills { limit, .. } => Some(limit.unwrap_or(50).clamp(1, 500) as usize),
         Query::OrderHistory { limit, .. }
         | Query::Income { limit, .. }

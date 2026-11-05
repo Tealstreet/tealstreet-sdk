@@ -351,6 +351,7 @@ pub struct Options {
     pub api_key_index: Option<String>,
     pub integrator_account_index: Option<u64>,
     pub stop_slippage_pct: f64,
+    pub ws_routed: bool,
 }
 impl From<Options> for safe_cex_venue_lighter::Options {
     fn from(options: Options) -> Self {
@@ -366,6 +367,7 @@ impl From<Options> for safe_cex_venue_lighter::Options {
             api_key_index: options.api_key_index,
             integrator_account_index: options.integrator_account_index,
             stop_slippage_pct: options.stop_slippage_pct,
+            ws_routed: options.ws_routed,
         }
     }
 }
@@ -386,6 +388,7 @@ impl Default for Options {
             api_key_index: None,
             integrator_account_index: None,
             stop_slippage_pct: 1.0,
+            ws_routed: false,
         }
     }
 }

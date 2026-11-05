@@ -569,12 +569,21 @@ impl Woo {
             Self::fail_local_history(cx, "Invalid WOO history symbol, range or limit");
             return;
         }
-        let complete = route == Route::Income && from.is_some() && to.is_some() && limit.is_none();
-        let limit = limit.unwrap_or(if route == Route::Orders || complete {
-            100_000
-        } else {
-            500
-        }) as usize;
+        // A window with no limit walks to its start; no default may stop it.
+        let open_window = from.is_some() && limit.is_none();
+        let complete = route == Route::Income && open_window;
+        let limit = limit.map_or(
+            if complete {
+                100_000
+            } else if open_window {
+                usize::MAX
+            } else if route == Route::Orders {
+                100_000
+            } else {
+                500
+            },
+            |limit| limit as usize,
+        );
         let window = (from, to.or(from.map(|_| cx.now)));
         if window.0.zip(window.1).is_some_and(|(a, b)| a > b) {
             Self::fail_local_history(cx, "Invalid WOO history range");

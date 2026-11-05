@@ -1,10 +1,9 @@
 //! Preparation and final handoff for the existing native HTTP executor.
-use super::{NetworkTransport, open_socket};
-use crate::routing::{
-    HttpRoute, HttpRouteMode, Socket, authenticate_how, http_packet, insert_header, receive_http,
-};
+use super::NetworkTransport;
+use crate::how_pool::HowConnection;
+use crate::routing::{HttpRoute, HttpRouteMode, http_packet, insert_header};
 use crate::{Events, HostEvent};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use safe_cex_engine::request_context::RoutingIntent;
 use safe_cex_engine::{HttpRequest, Method, RequestId, RequestRoute};
 use std::fmt;
@@ -13,7 +12,6 @@ use std::pin::Pin;
 use std::time::Duration;
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
-use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HttpPrepareError {
@@ -59,7 +57,8 @@ struct Prepared {
     deadline: Instant,
     route: Option<HttpRoute>,
     proxy_header: Option<(String, String)>,
-    socket: Option<Socket>,
+    tunnel: Option<HowConnection>,
+    guard: Option<super::IoGuard>,
 }
 impl fmt::Debug for Prepared {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -71,12 +70,35 @@ impl fmt::Debug for Prepared {
 
 enum Packet {
     Direct(reqwest::Client, Box<reqwest::Request>),
-    How(Box<Socket>, String),
+    How(HowConnection, String),
 }
 struct Bound {
     request: RequestId,
     deadline: Instant,
     packet: Packet,
+    /// Sent through the Tealstreet REST proxy, whose own 401 is not the venue's.
+    proxied: bool,
+    /// Venue host and the way it went, for a transport failure's log line; never a URL.
+    route: String,
+    guard: Option<super::IoGuard>,
+}
+
+/// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`.
+fn route_label(origin: &str, packet: &Packet) -> String {
+    let host = |url: &str| {
+        reqwest::Url::parse(url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .unwrap_or_else(|| "unparsable url".to_owned())
+    };
+    let venue = host(origin);
+    match packet {
+        Packet::How(..) => format!("{venue} via HTTP tunnel"),
+        Packet::Direct(_, request) => match request.url().host_str() {
+            Some(sent) if sent != venue => format!("{venue} via {sent}"),
+            _ => format!("{venue} direct"),
+        },
+    }
 }
 impl fmt::Debug for Bound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -107,10 +129,14 @@ pub(super) fn prepare(
 ) -> HttpPrepareFuture {
     let http = transport.http.clone();
     let routing = transport.routing.clone();
+    let guard = transport.io_guard.clone();
     let deadline = Instant::now()
         + Duration::from_millis(u64::from(request.timeout_ms.unwrap_or(20_000).max(1)));
     Box::pin(async move {
         let operation = async {
+            if !super::io_allowed(&guard) {
+                return Err(HttpPrepareError::Invalid("account IO authority expired"));
+            }
             let origin = origin(&request.url)?;
             let route = match routing.as_ref() {
                 Some(state) => Some(
@@ -128,55 +154,44 @@ pub(super) fn prepare(
                 None => None,
             };
             let mut proxy_header = None;
-            let mut socket = None;
+            let mut tunnel = None;
             if let Some(route) = &route {
                 if route.authorize {
                     let state = routing.as_ref().expect("route has a routing state");
                     let token = (state.tokens)().await.map_err(|_| {
                         HttpPrepareError::Transport("Proxy authorization failed".into())
                     })?;
-                    if !token.is_empty() {
-                        proxy_header = Some((
-                            route.authorization_header.clone(),
-                            format!("Bearer {token}"),
+                    // Without a token the edge answers a plain 401 that venues read as a
+                    // refused key; the request is refused here instead, as our own failure.
+                    if token.is_empty() {
+                        return Err(HttpPrepareError::Transport(
+                            PROXY_AUTHORIZATION_MISSING.into(),
                         ));
                     }
+                    proxy_header = Some((
+                        route.authorization_header.clone(),
+                        format!("Bearer {token}"),
+                    ));
                 }
                 if route.mode == HttpRouteMode::How {
                     let state = routing.as_ref().expect("route has a routing state");
-                    let tunnel = route
+                    let url = route
                         .tunnel_url
                         .as_deref()
                         .ok_or(HttpPrepareError::Invalid("HOW route missing tunnelUrl"))?;
-                    let mut tunnel = reqwest::Url::parse(tunnel)
-                        .map_err(|_| HttpPrepareError::Invalid("Invalid HTTP tunnel URL"))?;
-                    let retained: Vec<_> = tunnel
-                        .query_pairs()
-                        .filter(|(name, _)| name != "v" && name != "t")
-                        .map(|(name, value)| (name.into_owned(), value.into_owned()))
-                        .collect();
-                    tunnel.set_query(None);
-                    tunnel
-                        .query_pairs_mut()
-                        .extend_pairs(retained)
-                        .append_pair("v", "2")
-                        .append_pair("t", &format!("{:.0}", crate::now_ms()));
                     let headers = state
                         .plan
                         .ws_headers
                         .iter()
                         .map(|(name, value)| (name.clone(), value.clone()))
                         .collect();
-                    let mut connected =
-                        open_socket(tunnel.as_str(), headers).await.map_err(|_| {
-                            HttpPrepareError::Transport("HTTP tunnel connection failed".into())
-                        })?;
-                    // The helper already redacts provider failures. Preserve
-                    // that caller-visible cause, without parsing error text.
-                    authenticate_how(&mut connected, &state.tokens)
+                    // The account's open socket for this route, opened (or reopened) on demand.
+                    let connection = state.how.connection(url, headers, state.tokens.clone());
+                    connection
+                        .ready()
                         .await
                         .map_err(HttpPrepareError::Transport)?;
-                    socket = Some(connected);
+                    tunnel = Some(connection);
                 }
             }
             Ok(Box::new(Prepared {
@@ -189,7 +204,8 @@ pub(super) fn prepare(
                 deadline,
                 route,
                 proxy_header,
-                socket,
+                tunnel,
+                guard,
             }) as Box<dyn PreparedHttp>)
         };
         tokio::time::timeout_at(deadline, operation)
@@ -203,6 +219,9 @@ impl PreparedHttp for Prepared {
         mut self: Box<Self>,
         mut packet: HttpRequest,
     ) -> Result<Box<dyn BoundHttp>, HttpPrepareError> {
+        if !super::io_allowed(&self.guard) {
+            return Err(HttpPrepareError::Invalid("account IO authority expired"));
+        }
         if Instant::now() >= self.deadline {
             return Err(HttpPrepareError::Expired);
         }
@@ -253,10 +272,12 @@ impl PreparedHttp for Prepared {
             }
             insert_header(&mut headers, name, value);
         }
-        let packet = if let Some(socket) = self.socket.take() {
+        let proxied =
+            self.tunnel.is_none() && self.route.as_ref().is_some_and(|route| route.authorize);
+        let packet = if let Some(tunnel) = self.tunnel.take() {
             let packet = http_packet(&packet, &headers)
                 .map_err(|_| HttpPrepareError::Invalid("Invalid HTTP tunnel packet"))?;
-            Packet::How(Box::new(socket), packet)
+            Packet::How(tunnel, packet)
         } else {
             let method = match packet.method {
                 Method::Get => reqwest::Method::GET,
@@ -284,17 +305,21 @@ impl PreparedHttp for Prepared {
                 ),
             )
         };
+        let route = route_label(&self.origin, &packet);
         Ok(Box::new(Bound {
             request: self.request,
             deadline: self.deadline,
             packet,
+            proxied,
+            route,
+            guard: self.guard.clone(),
         }))
     }
 }
 
 impl BoundHttp for Bound {
     fn ready(&self) -> bool {
-        Instant::now() < self.deadline
+        Instant::now() < self.deadline && super::io_allowed(&self.guard)
     }
 
     fn dispatch(self: Box<Self>, events: Events) -> AbortHandle {
@@ -302,27 +327,27 @@ impl BoundHttp for Bound {
             request,
             deadline,
             packet,
+            proxied,
+            route,
+            guard,
         } = *self;
+        let started = Instant::now();
         // These are the last controllable transport API calls. Route/token/HOW
         // preparation and packet validation have all finished before this point.
-        let response: Pin<Box<dyn Future<Output = Result<(), String>> + Send>> = match packet {
-            Packet::Direct(http, packet) => {
-                let response = http.execute(*packet);
-                Box::pin(direct_response(response, request, events.clone()))
+        let response_events = events.clone();
+        let response = async move {
+            if !super::io_allowed(&guard) {
+                return Err("account IO authority expired".to_owned());
             }
-            Packet::How(mut socket, packet) => {
-                let sent = socket.start_send_unpin(Message::Text(packet.into()));
-                let response_events = events.clone();
-                Box::pin(async move {
-                    sent.map_err(|_| "HTTP tunnel handoff failed".to_owned())?;
-                    socket
-                        .flush()
+            match packet {
+                Packet::Direct(http, packet) => {
+                    direct_response(http.execute(*packet), request, response_events, proxied).await
+                }
+                Packet::How(tunnel, packet) => {
+                    tunnel
+                        .request(request, packet, response_events, guard)
                         .await
-                        .map_err(|_| "HTTP tunnel handoff failed".to_owned())?;
-                    let result = receive_http(&mut socket, request, &response_events).await;
-                    let _ = socket.as_mut().close(None).await;
-                    result
-                })
+                }
             }
         };
         tokio::spawn(async move {
@@ -336,20 +361,66 @@ impl BoundHttp for Bound {
                 Ok(Err(error)) => error,
                 Err(_) => "transport request timed out".into(),
             };
+            super::log_request_failure(&route, &error, started.elapsed());
             let _ = events.send(HostEvent::HttpFailed(request, error));
         })
         .abort_handle()
     }
 }
 
+const PROXY_AUTHORIZATION_MISSING: &str =
+    "Tealstreet proxy authorization missing: no proxy token, so the private request was not sent";
+
+/// The edge's own refusal of our proxy authorization, as opposed to a venue's 401.
+fn is_proxy_auth_refusal(body: &str) -> bool {
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value["message"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| body.trim().to_owned());
+    message == "Authorization header is missing" || message == "Invalid JWT"
+}
+
 async fn direct_response(
     response: impl Future<Output = Result<reqwest::Response, reqwest::Error>>,
     request: RequestId,
     events: Events,
+    proxied: bool,
 ) -> Result<(), String> {
     let response = response
         .await
         .map_err(|error| error.without_url().to_string())?;
+    // The edge's 401 fails as a transport error (retried by the venue's read
+    // policy), never as a 401 the venue would classify as a refused key.
+    if proxied && response.status().as_u16() == 401 {
+        let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| Some(format!("{name}: {}", value.to_str().ok()?)))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let body = response
+            .bytes()
+            .await
+            .map_err(|error| error.without_url().to_string())?;
+        let text = String::from_utf8_lossy(&body);
+        if is_proxy_auth_refusal(&text) {
+            return Err(format!(
+                "Tealstreet proxy refused our proxy authorization (HTTP 401: {})",
+                text.trim()
+            ));
+        }
+        let _ = events.send(HostEvent::HttpStart {
+            request,
+            status,
+            headers,
+        });
+        for piece in body.chunks(16 * 1024) {
+            let _ = events.send(HostEvent::HttpChunk(request, piece.to_vec()));
+        }
+        let _ = events.send(HostEvent::HttpEnd(request));
+        return Ok(());
+    }
     let headers = response
         .headers()
         .iter()
@@ -376,6 +447,32 @@ async fn direct_response(
 mod tests {
     use super::*;
     use crate::{ProxyTokenProvider, RoutingPlan, Transport};
+
+    #[test]
+    fn a_failed_request_is_named_by_venue_host_and_route_never_its_url() {
+        let client = NetworkTransport::new().http.clone();
+        let direct = client
+            .get("https://api.bitget.com/api/v2/mix/market/contracts?productType=x")
+            .build();
+        assert_eq!(
+            route_label(
+                "https://api.bitget.com",
+                &Packet::Direct(client.clone(), Box::new(direct.unwrap()))
+            ),
+            "api.bitget.com direct"
+        );
+        let proxied = client
+            .get("https://proxy-jp.example/https://api.bitget.com/api/v2/mix/market/contracts?token=t")
+            .build()
+            .unwrap();
+        assert_eq!(
+            route_label(
+                "https://api.bitget.com",
+                &Packet::Direct(client, Box::new(proxied))
+            ),
+            "api.bitget.com via proxy-jp.example"
+        );
+    }
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::{mpsc, oneshot};
@@ -416,6 +513,63 @@ mod tests {
             )
             .await;
         assert!(matches!(result, Err(HttpPrepareError::Unsupported)));
+    }
+
+    #[tokio::test]
+    async fn io_guard_rechecks_bound_and_scheduled_packets_without_sending_them() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        for after_dispatch in [false, true] {
+            let (url, server) = answer_once("200 OK", "ok").await;
+            let allowed = Arc::new(AtomicBool::new(true));
+            let gate = allowed.clone();
+            let transport = NetworkTransport::new()
+                .with_io_guard(Arc::new(move || gate.load(Ordering::Acquire)));
+            let packet = request(&url);
+            let prepared = transport
+                .prepare_http(packet.clone(), RoutingIntent::Primary)
+                .await
+                .unwrap();
+            let bound = prepared.bind(packet).unwrap();
+            assert!(bound.ready());
+            let (events, mut replies) = tokio::sync::mpsc::unbounded_channel();
+            if after_dispatch {
+                bound.dispatch(events);
+                allowed.store(false, Ordering::Release);
+            } else {
+                allowed.store(false, Ordering::Release);
+                assert!(!bound.ready());
+                bound.dispatch(events);
+            }
+            let failure = tokio::time::timeout(Duration::from_secs(2), replies.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(failure, HostEvent::HttpFailed(_, ref text) if text == "account IO authority expired")
+            );
+            assert!(!server.is_finished());
+            server.abort();
+            assert!(server.await.unwrap_err().is_cancelled());
+        }
+        // Working control uses the same executor and a real loopback HTTP responder.
+        let (url, server) = answer_once("200 OK", "ok").await;
+        let transport = NetworkTransport::new().with_io_guard(Arc::new(|| true));
+        let packet = request(&url);
+        let bound = transport
+            .prepare_http(packet.clone(), RoutingIntent::Primary)
+            .await
+            .unwrap()
+            .bind(packet)
+            .unwrap();
+        let (events, _replies) = tokio::sync::mpsc::unbounded_channel();
+        bound.dispatch(events);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("/private/order")
+        );
     }
 
     #[tokio::test]
@@ -532,6 +686,164 @@ mod tests {
         assert!(bound.ready());
         tokio::time::advance(Duration::from_millis(21)).await;
         assert!(!bound.ready()); // neither signing/binding nor claim resets it
+    }
+
+    fn proxied(tokens: ProxyTokenProvider) -> NetworkTransport {
+        NetworkTransport::with_routing(
+            RoutingPlan {
+                http: HttpRoute {
+                    authorize: true,
+                    ..HttpRoute::default()
+                },
+                ..RoutingPlan::default()
+            },
+            tokens,
+        )
+    }
+
+    /// One HTTP exchange: answers `status` with `body`, returning the request head.
+    async fn answer_once(
+        status: &str,
+        body: &'static str,
+    ) -> (String, tokio::task::JoinHandle<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/private/order", listener.local_addr().unwrap());
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            while !bytes.windows(4).any(|b| b == b"\r\n\r\n") {
+                let mut next = [0; 1024];
+                let n = socket.read(&mut next).await.unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&next[..n]);
+            }
+            socket.write_all(response.as_bytes()).await.unwrap();
+            String::from_utf8(bytes).unwrap()
+        });
+        (url, server)
+    }
+
+    #[tokio::test]
+    async fn a_proxied_request_with_no_token_is_refused_not_sent_bare() {
+        let transport = proxied(Arc::new(|| Box::pin(async { Ok(String::new()) })));
+        let result = transport
+            .prepare_http(
+                request("https://venue.invalid/private"),
+                RoutingIntent::Primary,
+            )
+            .await;
+        let Err(HttpPrepareError::Transport(message)) = result else {
+            panic!("{result:?}")
+        };
+        assert!(
+            message.starts_with("Tealstreet proxy authorization missing"),
+            "{message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_edges_own_401_fails_as_transport_not_as_a_venue_401() {
+        for body in [
+            "Authorization header is missing",
+            r#"{"message":"Invalid JWT"}"#,
+        ] {
+            let (url, server) = answer_once("401 Unauthorized", body).await;
+            let transport = proxied(Arc::new(|| Box::pin(async { Ok("edge-token".to_owned()) })));
+            let packet = request(&url);
+            let prepared = transport
+                .prepare_http(packet.clone(), RoutingIntent::Primary)
+                .await
+                .unwrap();
+            let (events, mut inbox) = mpsc::unbounded_channel();
+            let _task = prepared.bind(packet).unwrap().dispatch(events);
+            match inbox.recv().await.unwrap() {
+                HostEvent::HttpFailed(request, error) => {
+                    assert_eq!(request, RequestId(17));
+                    assert!(
+                        error.starts_with(
+                            "Tealstreet proxy refused our proxy authorization (HTTP 401"
+                        ),
+                        "{error}"
+                    );
+                }
+                other => panic!("{body}: {other:?}"),
+            }
+            let head = server.await.unwrap().to_lowercase();
+            assert!(
+                head.contains("authorization: bearer edge-token\r\n"),
+                "{head}"
+            );
+        }
+    }
+
+    /// The fleet's route (`PROXY_PRIVATE_URL`) is unauthorized: it admits by network and
+    /// forwards every header, so the venue would receive our token.
+    #[tokio::test]
+    async fn a_fleet_route_sends_no_token_of_ours_and_keeps_the_venues_own_authorization() {
+        let fleet = |tokens: ProxyTokenProvider| {
+            NetworkTransport::with_routing(
+                RoutingPlan {
+                    http: HttpRoute {
+                        authorize: false,
+                        ..HttpRoute::default()
+                    },
+                    ..RoutingPlan::default()
+                },
+                tokens,
+            )
+        };
+        for venue_authorization in [None, Some("Bearer venue-jwt")] {
+            let (url, server) = answer_once("200 OK", "{}").await;
+            let transport = fleet(Arc::new(|| Box::pin(async { Ok("edge-token".to_owned()) })));
+            let mut packet = request(&url);
+            if let Some(value) = venue_authorization {
+                packet.headers.push(("Authorization", value.into()));
+            }
+            let prepared = transport
+                .prepare_http(packet.clone(), RoutingIntent::Primary)
+                .await
+                .unwrap();
+            let (events, mut inbox) = mpsc::unbounded_channel();
+            let _task = prepared.bind(packet).unwrap().dispatch(events);
+            while !matches!(inbox.recv().await.unwrap(), HostEvent::HttpEnd(_)) {}
+            let head = server.await.unwrap().to_lowercase();
+            assert!(!head.contains("edge-token"), "{head}");
+            match venue_authorization {
+                Some(_) => assert!(
+                    head.contains("authorization: bearer venue-jwt\r\n"),
+                    "{head}"
+                ),
+                None => assert!(!head.contains("authorization:"), "{head}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_venues_own_401_through_the_proxy_reaches_the_engine_unchanged() {
+        let venue = r#"{"retCode":10003,"retMsg":"API key is invalid."}"#;
+        let (url, _server) = answer_once("401 Unauthorized", venue).await;
+        let transport = proxied(Arc::new(|| Box::pin(async { Ok("edge-token".to_owned()) })));
+        let packet = request(&url);
+        let prepared = transport
+            .prepare_http(packet.clone(), RoutingIntent::Primary)
+            .await
+            .unwrap();
+        let (events, mut inbox) = mpsc::unbounded_channel();
+        let _task = prepared.bind(packet).unwrap().dispatch(events);
+        let mut body = Vec::new();
+        loop {
+            match inbox.recv().await.unwrap() {
+                HostEvent::HttpStart { status, .. } => assert_eq!(status, 401),
+                HostEvent::HttpChunk(_, chunk) => body.extend(chunk),
+                HostEvent::HttpEnd(_) => break,
+                other => panic!("unexpected request event: {other:?}"),
+            }
+        }
+        assert_eq!(body, venue.as_bytes());
     }
 
     #[tokio::test(start_paused = true)]

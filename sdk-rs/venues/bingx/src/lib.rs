@@ -1,6 +1,7 @@
 //! BingX stablecoin-margined perpetual swaps on the sans-I/O engine.
 pub mod account;
 pub mod account_wire;
+mod clock;
 mod history;
 mod identity;
 mod managed;
@@ -17,8 +18,10 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::selected_read::ReadRole;
+use safe_cex_engine::socket_lifecycle::FeedId;
 use safe_cex_engine::{
-    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, Store, SubscriptionTopic,
+    TimerId, Venue, num,
 };
 use serde::Deserialize;
 use sign::{Credentials, Params};
@@ -55,6 +58,8 @@ pub enum Pending {
         valid: bool,
     },
     Signed(Box<Signed>),
+    /// The unsigned server-time read after a 109400 timestamp refusal.
+    Clock(clock::Probe),
     /// One FetchLeverage read under its engine-admitted metadata Plan.
     Metadata(Box<account::MetadataLeg>),
 }
@@ -91,6 +96,16 @@ pub(crate) fn signature_rejected(body: &str) -> bool {
                 .to_ascii_lowercase()
                 .contains("signature verification failed")
     })
+}
+
+/// Refused before processing for its signature or timestamp: a signed read is
+/// re-signed and resent once. Notes a timestamp resend, so call it only then.
+pub(crate) fn resend_refused(cx: &mut Cx<'_, Pending>, body: &str) -> bool {
+    if sign::timestamp::refused(body) {
+        sign::timestamp::note_resend(cx);
+        return true;
+    }
+    signature_rejected(body)
 }
 
 /// Logs a read's skipped rows once, by identity only.
@@ -150,6 +165,8 @@ pub struct Bingx {
     seed_reported: Vec<bool>,
     sequence: std::cell::Cell<u64>,
     retries: safe_cex_engine::startup::Backoff<List>,
+    /// Set from a banning response for the failure it causes: how long every list waits.
+    ban_wait_ms: Option<f64>,
     reread_stalls: u8,
     // A failed or empty funding read commits tickers without it and retries.
     tickers_committed: bool,
@@ -157,6 +174,7 @@ pub struct Bingx {
     live_priced: Vec<bool>,
     // Rows created only to hold live fields before the REST seed commits.
     staged_tickers: Vec<String>,
+    clock_reading: bool,
 }
 
 impl Bingx {
@@ -203,10 +221,12 @@ impl Bingx {
             seed_reported: Vec::new(),
             sequence: std::cell::Cell::new(0),
             retries: Default::default(),
+            ban_wait_ms: None,
             reread_stalls: 0,
             tickers_committed: false,
             live_priced: Vec::new(),
             staged_tickers: Vec::new(),
+            clock_reading: false,
         }
     }
 
@@ -238,11 +258,29 @@ impl Bingx {
         remap(cx.store, previous, &mut self.live_priced);
     }
 
+    fn note_ban(&mut self, cx: &mut Cx<'_, Pending>, response: &Response<'_>) {
+        self.ban_wait_ms = ban_wait_ms(response, cx.now);
+        if let Some(wait_ms) = self.ban_wait_ms {
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!(
+                    "BingX rate-limited this IP; public reads wait {} s",
+                    (wait_ms / 1000.0).round()
+                ),
+            );
+        }
+    }
+
     fn retry_list(&mut self, cx: &mut Cx<'_, Pending>, kind: List) {
         if matches!(kind, List::Premium) {
             self.seed_reported.fill(false);
         }
-        self.retries.failed(cx, kind);
+        match self.ban_wait_ms.take() {
+            // The ban is per IP: `ban_until` holds every list's retry behind it.
+            Some(wait_ms) => self.retries.failed_after(cx, kind, wait_ms),
+            None => self.retries.failed(cx, kind),
+        }
     }
 
     fn candle_response_context(
@@ -253,6 +291,11 @@ impl Bingx {
         rows: Vec<Candle>,
         valid: bool,
     ) {
+        if let Some(error) = read_rate_limit(&response, cx.now) {
+            let _ = cx.command_error_context(context, error.message.clone());
+            let _ = cx.fail_context(context, error);
+            return;
+        }
         let result = success(response).and_then(|_| {
             if valid {
                 candle_data(rows)
@@ -377,27 +420,32 @@ impl Bingx {
         }
     }
 
-    fn symbol_id(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Option<String> {
-        cx.store.market(symbol).map(|m| m.id.clone())
+    fn symbol_id(store: &Store, symbol: &str) -> Option<String> {
+        store.market(symbol).map(|m| m.id.clone())
     }
 
-    fn topic_book(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Option<String> {
+    fn topic_book(store: &Store, symbol: &str) -> Option<String> {
         Some(format!(
             "market.depth.{}.step0.level100",
-            self.symbol_id(cx, symbol)?
+            Self::symbol_id(store, symbol)?
         ))
     }
-    fn topic_candle(
-        &self,
-        cx: &Cx<'_, Pending>,
-        symbol: &str,
-        interval: Interval,
-    ) -> Option<String> {
+    fn topic_candle(store: &Store, symbol: &str, interval: Interval) -> Option<String> {
         Some(format!(
             "market.kline.{}.{}.trade.utc+8",
-            self.symbol_id(cx, symbol)?,
+            Self::symbol_id(store, symbol)?,
             stream_interval(interval)?
         ))
+    }
+    /// The public feed and interest key `topic` streams on.
+    fn topic_interest(&self, store: &Store, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => Self::topic_book(store, symbol)?,
+            SubscriptionTopic::Candles { symbol, interval } => {
+                Self::topic_candle(store, symbol, *interval)?
+            }
+        };
+        Some((self.public.feed?, key))
     }
 
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
@@ -411,7 +459,7 @@ impl Bingx {
         if text == "Pong" {
             return;
         }
-        let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
+        let Ok(message) = Message::decode(text) else {
             return;
         };
         if message.ping.is_some() {
@@ -421,66 +469,73 @@ impl Bingx {
         if message.pong.is_some() {
             return;
         }
-        let Some(data) = message.data else { return };
         if message.data_type == "market.contracts" {
-            let result = safe_cex_engine::json::each_in_field::<LiveTicker<'_>>(
-                data.get(),
-                "contracts",
-                |row| {
-                    let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
-                        return;
-                    };
-                    // Before the seed commits, a staged row keeps live fields for its overlay;
-                    // afterwards, like TS, markets the daily or funding read omitted stay absent.
-                    let ticker = match self.seed_index.get(market as usize).copied().flatten() {
-                        Some(ticker) => ticker,
-                        None if !self.tickers_committed => {
-                            let symbol = cx.store.markets()[market as usize].symbol.clone();
-                            let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
-                                return;
-                            };
-                            if !self.staged_tickers.contains(&symbol) {
-                                self.staged_tickers.push(symbol);
-                            }
-                            ticker as usize
+            let mut update = |row: LiveTicker<'_>| {
+                let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
+                    return;
+                };
+                // Before the seed commits, a staged row keeps live fields for its overlay;
+                // afterwards, like TS, markets the daily or funding read omitted stay absent.
+                let ticker = match self.seed_index.get(market as usize).copied().flatten() {
+                    Some(ticker) => ticker,
+                    None if !self.tickers_committed => {
+                        let symbol = cx.store.markets()[market as usize].symbol.clone();
+                        let Some(ticker) = cx.store.ensure_ticker(&symbol) else {
+                            return;
+                        };
+                        if !self.staged_tickers.contains(&symbol) {
+                            self.staged_tickers.push(symbol);
                         }
-                        None => return,
-                    };
-                    let step = cx.store.markets()[market as usize].precision.price;
-                    let mut mask = (1 << 3) | (1 << 4) | (1 << 7);
-                    if row.trade_price > 0.0 {
-                        mask |= 7;
+                        ticker as usize
                     }
-                    if row.change_percentage.is_some() {
-                        mask |= 1 << 5;
+                    None => return,
+                };
+                let step = cx.store.markets()[market as usize].precision.price;
+                let mut mask = (1 << 3) | (1 << 4) | (1 << 7);
+                if row.trade_price > 0.0 {
+                    mask |= 7;
+                }
+                if row.change_percentage.is_some() {
+                    mask |= 1 << 5;
+                }
+                if row.volume.is_some() {
+                    mask |= 1 << 9;
+                }
+                if row.value.is_some() {
+                    mask |= 1 << 10;
+                }
+                cx.store.update_ticker_at(ticker as u32, |t| {
+                    if row.trade_price > 0. {
+                        t.last = row.trade_price;
+                        (t.bid, t.ask) = touch(row.trade_price, step)
                     }
-                    if row.volume.is_some() {
-                        mask |= 1 << 9;
-                    }
-                    if row.value.is_some() {
-                        mask |= 1 << 10;
-                    }
-                    cx.store.update_ticker_at(ticker as u32, |t| {
-                        if row.trade_price > 0. {
-                            t.last = row.trade_price;
-                            (t.bid, t.ask) = touch(row.trade_price, step)
-                        }
-                        t.mark = row.fair_price;
-                        t.index = row.index_price;
-                        t.funding_rate = row.funding_rate / 100.;
-                        t.percentage = row.change_percentage.unwrap_or_default();
-                        t.volume = row.volume.unwrap_or_default();
-                        t.quote_volume = row.value.unwrap_or_default();
-                        t.funding_time = 0.;
-                    });
-                    let symbol = &cx.store.markets()[market as usize].symbol;
-                    self.live_tickers.record(cx.store, symbol, mask);
-                    if self.live_priced.len() <= market as usize {
-                        self.live_priced.resize(cx.store.markets().len(), false);
-                    }
-                    self.live_priced[market as usize] = true;
-                },
-            );
+                    t.mark = row.fair_price;
+                    t.index = row.index_price;
+                    t.funding_rate = row.funding_rate / 100.;
+                    t.percentage = row.change_percentage.unwrap_or_default();
+                    t.volume = row.volume.unwrap_or_default();
+                    t.quote_volume = row.value.unwrap_or_default();
+                    t.funding_time = 0.;
+                });
+                let symbol = &cx.store.markets()[market as usize].symbol;
+                self.live_tickers.record(cx.store, symbol, mask);
+                if self.live_priced.len() <= market as usize {
+                    self.live_priced.resize(cx.store.markets().len(), false);
+                }
+                self.live_priced[market as usize] = true;
+            };
+            let result = if let Some(rows) = message.tickers {
+                rows.into_iter().for_each(&mut update);
+                Ok(true)
+            } else if let Some(data) = message.data {
+                safe_cex_engine::json::each_in_field::<LiveTicker<'_>>(
+                    data.get(),
+                    "contracts",
+                    update,
+                )
+            } else {
+                return;
+            };
             if result.is_err() {
                 cx.notice(
                     Level::Warn,
@@ -490,6 +545,7 @@ impl Bingx {
             }
             return;
         }
+        let Some(data) = message.data else { return };
         if let Some(rest) = message.data_type.strip_prefix("market.depth.") {
             let Some(id) = rest.strip_suffix(".step0.level100") else {
                 return;
@@ -539,6 +595,96 @@ impl Bingx {
                     cx.candle(&symbol, interval, candle)
                 }
             }
+        }
+    }
+}
+
+impl Bingx {
+    fn request_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: &str,
+        typed: Option<&safe_cex_engine::VenueError>,
+    ) {
+        let discovery = matches!(
+            &pending,
+            Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
+        );
+        match pending {
+            Pending::Clock(probe) => {
+                self.clock_failed(cx, probe, error);
+                return;
+            }
+            Pending::Metadata(leg) => {
+                // A failing private read surfaces as an Error at the retried-failure cadence.
+                cx.retried_failure(
+                    "bingx.lib:private",
+                    format!("BingX private request failed: {error}"),
+                );
+                account::fail_metadata_plan(cx, &leg, account::metadata_error(error));
+                return;
+            }
+            Pending::Signed(signed) => {
+                if let Some(context) = signed.context()
+                    && matches!(&signed.inner, Pending::Candles { .. })
+                {
+                    let _ = cx.command_error_context(context, error.to_owned());
+                    let _ = cx.fail_context(context, error);
+                    managed::finish(cx, signed.context().cloned());
+                    return;
+                }
+                let context = signed.context().cloned();
+                self.request_failed(cx, signed.inner, error, typed);
+                managed::finish(cx, context);
+                return;
+            }
+            Pending::Identity(read) => {
+                self.identity_failed(cx, read, error.into());
+                return;
+            }
+            Pending::History(request) => {
+                self.history.on_failed(cx, request, error);
+                return;
+            }
+            Pending::Trade(request) => {
+                self.trading
+                    .on_failed(cx, self.credentials.as_ref(), request, error);
+                return;
+            }
+            Pending::Account(request) => {
+                if let Some(c) = &self.credentials {
+                    self.account.request_failed(cx, request, error, typed, c);
+                }
+                return;
+            }
+            // Only a refused read admission leaves candles without custody.
+            Pending::Candles { command, .. } => {
+                cx.command_error(command, error);
+                refuse_candle_query(cx, error);
+                return;
+            }
+            Pending::Markets { .. } => self.retry_list(cx, List::Markets),
+            Pending::Daily { .. } => self.retry_list(cx, List::Daily),
+            Pending::Premium { .. } => {
+                if !self.tickers_committed {
+                    cx.notice(
+                        Level::Warn,
+                        code::REQUEST_FAILED,
+                        "BingX funding read failed; starting without funding rates",
+                    );
+                    self.commit_tickers(cx, true);
+                }
+                self.retry_list(cx, List::Premium)
+            }
+        }
+        let level = if discovery { Level::Warn } else { Level::Error };
+        if let Some(refused) =
+            typed.filter(|error| error.kind == Some(safe_cex_engine::ErrorKind::RateLimited))
+        {
+            cx.notice_error(level, code::REQUEST_FAILED, refused);
+        } else {
+            cx.notice(level, code::REQUEST_FAILED, error);
         }
     }
 }
@@ -613,6 +759,73 @@ fn interval_ms(interval: Interval) -> Option<f64> {
     stream_interval(interval).map(|_| interval.ms())
 }
 
+/// BingX's per-IP ban ("in the disabled period") outlasts any retry inside it.
+const IP_BANNED: i64 = 100410;
+/// The wait when a ban names no unblock time.
+const BAN_FLOOR_MS: f64 = 5.0 * 60_000.0;
+const BAN_LONGEST_MS: f64 = 24.0 * 3_600_000.0;
+
+/// A 100410 envelope or HTTP 429: how long to wait, from the unblock time the
+/// response names (an epoch in the message, or Retry-After), else BAN_FLOOR_MS.
+pub(crate) fn ban_wait_ms(response: &Response<'_>, now: f64) -> Option<f64> {
+    #[derive(Deserialize)]
+    struct Envelope {
+        code: i64,
+        #[serde(default)]
+        msg: String,
+    }
+    let envelope = serde_json::from_str::<Envelope>(response.body).ok();
+    let banned = response.status == 429 || envelope.as_ref().is_some_and(|e| e.code == IP_BANNED);
+    if !banned {
+        return None;
+    }
+    // The message only: the envelope's own `timestamp` is the server clock, not the unblock.
+    let named = response
+        .header("retry-after")
+        .and_then(|seconds| seconds.trim().parse::<f64>().ok())
+        .map(|seconds| seconds * 1000.0)
+        .or_else(|| unblock_at(&envelope?.msg).map(|at| at - now));
+    Some(
+        named
+            .filter(|wait| *wait > 0.0 && *wait <= BAN_LONGEST_MS)
+            .unwrap_or(BAN_FLOOR_MS),
+    )
+}
+
+/// Classify the envelope before any list codec, using the discovery ban policy.
+pub(crate) fn read_rate_limit(
+    response: &Response<'_>,
+    now: f64,
+) -> Option<safe_cex_engine::VenueError> {
+    let wait = ban_wait_ms(response, now)?;
+    let envelope = serde_json::from_str::<wire::Rejection<'_>>(response.body).ok();
+    let mut error = safe_cex_engine::VenueError::new(
+        success(*response)
+            .err()
+            .unwrap_or_else(|| "BingX rate limit".into()),
+    )
+    .kind(safe_cex_engine::ErrorKind::RateLimited)
+    .retry_after_ms(wait);
+    if let Some(envelope) = envelope {
+        if let Some(code) = envelope.code.filter(|code| *code != 0) {
+            error = error.venue_code(code.to_string());
+        }
+        error = error.venue_message(envelope.msg.into_owned());
+    }
+    Some(error)
+}
+
+/// The first epoch (13-digit milliseconds or 10-digit seconds) in a ban message.
+fn unblock_at(message: &str) -> Option<f64> {
+    message
+        .split(|c: char| !c.is_ascii_digit())
+        .find_map(|digits| match digits.len() {
+            13 => digits.parse::<f64>().ok(),
+            10 => digits.parse::<f64>().ok().map(|seconds| seconds * 1000.0),
+            _ => None,
+        })
+}
+
 pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
     #[derive(Deserialize)]
     struct Envelope {
@@ -633,6 +846,14 @@ pub(crate) fn success(response: Response<'_>) -> Result<(), String> {
 }
 
 impl Venue for Bingx {
+    /// Its native trigger kind decides, and it refuses a trigger that fires before canceling.
+    fn judges_protective_amend(
+        &self,
+        _store: &safe_cex_engine::store::Store,
+        _order: &safe_cex_engine::model::Order,
+    ) -> bool {
+        true
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -640,12 +861,35 @@ impl Venue for Bingx {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
             leverage_query: safe_cex_engine::LeverageQuery::OnReadAndMetadata,
+            fresh_positions: true,
+            order_read_covers: self.refreshes_orders(),
             ..safe_cex_engine::Capabilities::BASE
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match (action, &self.credentials) {
+            (safe_cex_engine::VenueAction::ReadPositions, Some(credentials)) => {
+                self.account.read_positions(cx, credentials);
+            }
+            (safe_cex_engine::VenueAction::ReadPositions, None) => {
+                let error = safe_cex_engine::VenueError::new("BingX account is not loaded")
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput);
+                safe_cex_engine::fresh_positions::refuse(cx, error);
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
     fn account_auth_outcome(
@@ -676,6 +920,13 @@ impl Venue for Bingx {
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.socket_event(cx, event)
     }
+    fn subscription_interest(
+        &self,
+        store: &Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(store, topic)
+    }
     fn encode_socket_interests(
         &self,
         _store: &safe_cex_engine::Store,
@@ -690,6 +941,22 @@ impl Venue for Bingx {
     }
 
     type Pending = Pending;
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.trading.export_venue_state(self.account.mode_known()))
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        if !self.trading.apply_venue_state(state, cx.store) {
+            cx.venue_state_unreadable("Unreadable BingX venue state from the data source");
+        }
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.trading.refresh_observed(cx.store);
+    }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        if let Some(keys) = self.credentials.as_ref() {
+            self.account.refresh_settings(cx, keys, symbol);
+        }
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(error) = self.config_error {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
@@ -727,7 +994,7 @@ impl Venue for Bingx {
     fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::Identity(_) | Pending::Metadata(_) => {}
+            Pending::Identity(_) | Pending::Metadata(_) | Pending::Clock(_) => {}
             Pending::Signed(signed) => {
                 if signed
                     .context()
@@ -744,40 +1011,49 @@ impl Venue for Bingx {
                 if rows.len() == rows.capacity() {
                     rows.reserve_exact(128)
                 }
-                let market = serde_json::from_str::<Contract<'_>>(item).map(|m| Market {
-                    id: m.symbol.to_string(),
-                    symbol: m.symbol.replace('-', ""),
-                    pretty_symbol: None,
-                    base: m.asset.into_owned(),
-                    quote: m.currency.into_owned(),
-                    active: m.status == 1.,
-                    precision: Precision {
-                        amount: 10f64.powi(m.quantity_precision as i32).recip(),
-                        price: 10f64.powi(m.price_precision as i32).recip(),
-                    },
-                    limits: Limits {
-                        amount: MinMax {
-                            min: m.trade_min_limit,
-                            max: f64::INFINITY,
+                let market = serde_json::from_str::<Contract<'_>>(item).map(|m| {
+                    self.trading
+                        .set_min_order_value(&m.symbol, m.trade_min_usdt);
+                    Market {
+                        id: m.symbol.to_string(),
+                        symbol: m.symbol.replace('-', ""),
+                        pretty_symbol: None,
+                        base: m.asset.into_owned(),
+                        quote: m.currency.into_owned(),
+                        active: m.status == 1.,
+                        precision: Precision {
+                            amount: 10f64.powi(m.quantity_precision as i32).recip(),
+                            price: 10f64.powi(m.price_precision as i32).recip(),
                         },
-                        leverage: MinMax {
-                            min: 1.,
-                            max: if m.max_long_leverage > 0. {
-                                m.max_long_leverage
-                            } else {
-                                100.
+                        limits: Limits {
+                            amount: MinMax {
+                                // tradeMinLimit is 0 on every live contract.
+                                min: if m.trade_min_quantity > 0. {
+                                    m.trade_min_quantity
+                                } else {
+                                    m.trade_min_limit
+                                },
+                                max: f64::INFINITY,
                             },
+                            leverage: MinMax {
+                                min: 1.,
+                                max: if m.max_long_leverage > 0. {
+                                    m.max_long_leverage
+                                } else {
+                                    100.
+                                },
+                            },
+                            price: None,
                         },
-                        price: None,
-                    },
-                    contract_size: None,
-                    is_expiring: None,
-                    is_inverse: None,
-                    is_spot: None,
-                    is_perpetual: None,
-                    is_read_only: None,
-                    taker_fee: None,
-                    maker_fee: None,
+                        contract_size: None,
+                        is_expiring: None,
+                        is_inverse: None,
+                        is_spot: None,
+                        is_perpetual: None,
+                        is_read_only: None,
+                        taker_fee: None,
+                        maker_fee: None,
+                    }
                 });
                 match market {
                     Ok(market) if market.precision.is_tradable() => rows.push(market),
@@ -853,6 +1129,13 @@ impl Venue for Bingx {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Clock(probe) = pending {
+            self.clock_response(cx, probe, response);
+            return;
+        }
+        if sign::timestamp::refused(response.body) {
+            self.resync_clock(cx);
+        }
         if let Pending::Metadata(leg) = pending {
             match &self.credentials {
                 Some(credentials) => {
@@ -877,7 +1160,7 @@ impl Venue for Bingx {
                 {
                     return;
                 }
-                if !signed.resent && signature_rejected(response.body) {
+                if !signed.resent && resend_refused(cx, response.body) {
                     self.resend_managed(cx, *signed);
                 } else {
                     let context = signed.context().cloned();
@@ -935,7 +1218,10 @@ impl Venue for Bingx {
             pending => pending,
         };
         if let Err(error) = success(response) {
-            self.on_request_failed(cx, pending, &error);
+            let typed = read_rate_limit(&response, cx.now);
+            self.note_ban(cx, &response);
+            self.request_failed(cx, pending, &error, typed.as_ref());
+            self.ban_wait_ms = None;
             return;
         }
         match pending {
@@ -973,6 +1259,10 @@ impl Venue for Bingx {
                 }
                 if refresh {
                     self.remap_market_slots(cx, &previous);
+                    return;
+                }
+                // Frame-fed: tickers and the account arrive as frames.
+                if cx.frame_fed() {
                     return;
                 }
                 if let Some(c) = &self.credentials {
@@ -1052,19 +1342,35 @@ impl Venue for Bingx {
         pending: Pending,
         response: Response<'_>,
     ) {
+        if sign::timestamp::refused(response.body) {
+            self.resync_clock(cx);
+        }
         match pending {
-            Pending::Signed(signed) if !signed.resent && signature_rejected(response.body) => {
+            Pending::Clock(probe) => {
+                let error = format!("HTTP {}: {}", response.status, response.body);
+                self.clock_failed(cx, probe, &error);
+            }
+            Pending::Signed(signed) if !signed.resent && resend_refused(cx, response.body) => {
                 self.resend_managed(cx, *signed);
             }
             Pending::Signed(signed) => {
                 if signed.context().is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
+                    if let Some(error) = read_rate_limit(&response, cx.now) {
+                        let context = signed.context().expect("checked candle custody");
+                        let _ = cx.command_error_context(context, error.message.clone());
+                        let _ = cx.fail_context(context, error);
+                        managed::finish(cx, signed.context().cloned());
+                        return;
+                    }
                     self.on_request_failed(
                         cx,
                         Pending::Signed(signed),
-                        &format!(
-                            "response did not contain the expected list: {}",
-                            response.body
-                        ),
+                        &success(response).err().unwrap_or_else(|| {
+                            format!(
+                                "response did not contain the expected list: {}",
+                                response.body
+                            )
+                        }),
                     );
                 } else {
                     let context = signed.context().cloned();
@@ -1073,14 +1379,37 @@ impl Venue for Bingx {
                 }
             }
             Pending::History(request) => self.history.on_stream_error(cx, request, response),
-            pending => self.on_request_failed(
-                cx,
-                pending,
-                &format!(
-                    "response did not contain the expected list: {}",
-                    response.body
-                ),
-            ),
+            pending
+                if matches!(
+                    pending,
+                    Pending::Account(
+                        account::Request::OpenOrders { .. } | account::Request::Positions { .. }
+                    )
+                ) && account::null_list(response.body) =>
+            {
+                self.on_response(cx, pending, response);
+            }
+            pending => {
+                if matches!(pending, Pending::Account(_))
+                    && let Some(error) = account::key_refusal(&response)
+                {
+                    cx.startup_read_refused(&error);
+                }
+                let typed = account::read_refusal(&response, cx.now);
+                self.note_ban(cx, &response);
+                self.request_failed(
+                    cx,
+                    pending,
+                    &success(response).err().unwrap_or_else(|| {
+                        format!(
+                            "response did not contain the expected list: {}",
+                            response.body
+                        )
+                    }),
+                    typed.as_ref(),
+                );
+                self.ban_wait_ms = None;
+            }
         }
     }
     fn on_http_failed(
@@ -1090,13 +1419,14 @@ impl Venue for Bingx {
         error: safe_cex_engine::VenueError,
     ) {
         match pending {
+            Pending::Clock(probe) => self.clock_failed(cx, probe, &error.message),
             Pending::Identity(read) => self.identity_failed(cx, read, error),
             Pending::History(request) => self.history.on_http_failed(cx, request, error),
             Pending::Trade(request) => {
                 self.trading
                     .on_sign_failed(cx, self.credentials.as_ref(), request, error)
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => self.request_failed(cx, pending, &error.message, Some(&error)),
         }
     }
     fn on_http_owner_retired(
@@ -1104,6 +1434,10 @@ impl Venue for Bingx {
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
     ) {
         self.trading.retired(owner);
+    }
+    // Every open-orders read commits its cover (`Account::on_response`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
         if let Some(credentials) = &self.credentials {
@@ -1157,6 +1491,7 @@ impl Venue for Bingx {
                 self.on_sign_error(cx, signed.inner, error);
                 managed::finish(cx, context);
             }
+            Pending::Clock(probe) => self.clock_failed(cx, probe, &error.message),
             Pending::Identity(read) => self.identity_failed(cx, read, error),
             Pending::History(request) => self.history.on_sign_failed(cx, request, error),
             Pending::Trade(request) => {
@@ -1170,82 +1505,11 @@ impl Venue for Bingx {
             }
             // Provider refusal is typed and is never venue-auth evidence.
             Pending::Metadata(leg) => account::fail_metadata_plan(cx, &leg, error),
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => self.request_failed(cx, pending, &error.message, Some(&error)),
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        let discovery = matches!(
-            &pending,
-            Pending::Markets { .. } | Pending::Daily { .. } | Pending::Premium { .. }
-        );
-        match pending {
-            Pending::Metadata(leg) => {
-                cx.notice(
-                    safe_cex_engine::Level::Warn,
-                    code::REQUEST_FAILED,
-                    format!("BingX private request failed: {error}"),
-                );
-                account::fail_metadata_plan(cx, &leg, account::metadata_error(error));
-                return;
-            }
-            Pending::Signed(signed) => {
-                if let Some(context) = signed.context()
-                    && matches!(&signed.inner, Pending::Candles { .. })
-                {
-                    let _ = cx.command_error_context(context, error.to_owned());
-                    let _ = cx.fail_context(context, error);
-                    managed::finish(cx, signed.context().cloned());
-                    return;
-                }
-                let context = signed.context().cloned();
-                self.on_request_failed(cx, signed.inner, error);
-                managed::finish(cx, context);
-                return;
-            }
-            Pending::Identity(read) => {
-                self.identity_failed(cx, read, error.into());
-                return;
-            }
-            Pending::History(request) => {
-                self.history.on_failed(cx, request, error);
-                return;
-            }
-            Pending::Trade(request) => {
-                self.trading
-                    .on_failed(cx, self.credentials.as_ref(), request, error);
-                return;
-            }
-            Pending::Account(request) => {
-                if let Some(c) = &self.credentials {
-                    self.account.on_request_failed(cx, request, error, c);
-                }
-                return;
-            }
-            // Only a refused read admission leaves candles without custody.
-            Pending::Candles { command, .. } => {
-                cx.command_error(command, error);
-                refuse_candle_query(cx, error);
-                return;
-            }
-            Pending::Markets { .. } => self.retry_list(cx, List::Markets),
-            Pending::Daily { .. } => self.retry_list(cx, List::Daily),
-            Pending::Premium { .. } => {
-                if !self.tickers_committed {
-                    cx.notice(
-                        Level::Warn,
-                        code::REQUEST_FAILED,
-                        "BingX funding read failed; starting without funding rates",
-                    );
-                    self.commit_tickers(cx, true);
-                }
-                self.retry_list(cx, List::Premium)
-            }
-        }
-        cx.notice(
-            if discovery { Level::Warn } else { Level::Error },
-            code::REQUEST_FAILED,
-            error,
-        );
+        self.request_failed(cx, pending, error, None);
     }
     fn read_root_retired(
         &mut self,
@@ -1253,6 +1517,7 @@ impl Venue for Bingx {
         _pending: Vec<Pending>,
     ) {
         self.history.retire(owner);
+        self.account.fresh_positions.retired(owner);
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {

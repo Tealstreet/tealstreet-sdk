@@ -205,12 +205,18 @@ fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
             ),
         );
         e.drain_plain().for_each(drop);
+        // A sell stop moves below the price, a take profit above it.
+        let moved = if raw.starts_with("take-profit") {
+            103.
+        } else {
+            97.
+        };
         e.handle(
             NOW,
             Event::Command(Command::AmendOrder {
                 command: 5,
                 id: "TRIGGER".into(),
-                price: Some(97.),
+                price: Some(moved),
                 amount: None,
             }),
         );
@@ -224,7 +230,7 @@ fn trigger_amend_uses_trigger_price_and_unsafe_types_reject_without_cancel() {
                 })
                 .unwrap();
             assert!(r.url.ends_with("AmendOrder"));
-            assert!(r.body.unwrap().contains("trigger_price=97"));
+            assert!(r.body.unwrap().contains(&format!("trigger_price={moved}")));
         } else {
             assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
             assert!(
@@ -719,7 +725,7 @@ mod owned_nonpageable {
         assert!(marker.message.contains("INCOMPLETE"));
         assert!(marker.message.contains("Kraken Spot"));
         assert!(
-            matches!(marker.fields.as_slice(), [("command", Value::Num(owner))] if *owner == f64::from(command))
+            matches!(marker.fields.as_slice(), [("command", Value::Num(owner)), ("reason", Value::Str(reason))] if *owner == f64::from(command) && reason == "noNativeRead")
         );
     }
 
@@ -1340,4 +1346,159 @@ fn slow_reconcile(held_completes_cleanly: bool) {
             .iter()
             .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder")))
     );
+}
+
+fn add_order_answer(
+    e: &mut safe_cex_engine::Engine<safe_cex_venue_kraken::KrakenSpot>,
+    command: u32,
+    body: &str,
+) -> Vec<Action> {
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    let write = requests(e)
+        .into_iter()
+        .find(|r| r.url.ends_with("AddOrder"))
+        .unwrap();
+    reply(e, &write, body);
+    e.drain_plain().collect()
+}
+fn spot_outcome(actions: &[Action]) -> Option<safe_cex_engine::Outcome> {
+    actions.iter().find_map(|a| match a {
+        Action::Notice(Notice::CommandFailed { error, .. }) => error.outcome,
+        _ => None,
+    })
+}
+
+#[test]
+fn documented_spot_errors_refuse_and_leave_no_fence() {
+    for code in [
+        "ETrade:Invalid request",
+        "EService:Market in cancel_only mode",
+        "EService:Market in post_only mode",
+    ] {
+        let (mut e, _, _) = ready(false);
+        let body = format!(r#"{{"error":["{code}"]}}"#);
+        let settled = add_order_answer(&mut e, 90, &body);
+        assert_eq!(
+            spot_outcome(&settled),
+            Some(safe_cex_engine::Outcome::Rejected),
+            "{code}"
+        );
+        let _ = add_order_answer(&mut e, 91, r#"{"error":["EOrder:Insufficient funds"]}"#);
+    }
+}
+
+#[test]
+fn an_unlisted_spot_error_stays_unknown_and_clears_on_the_next_read() {
+    let (mut e, _, _) = ready(false);
+    let settled = add_order_answer(&mut e, 90, r#"{"error":["EFuture:Unlisted"]}"#);
+    assert_eq!(
+        spot_outcome(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    let read = settled
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("OpenOrders") => Some(r.clone()),
+            _ => None,
+        })
+        .expect("the read starts with the answer");
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    assert!(
+        !requests(&mut e).iter().any(|r| r.url.ends_with("AddOrder")),
+        "fenced"
+    );
+    reply(&mut e, &read, r#"{"error":[],"result":{"open":{}}}"#);
+    let _ = add_order_answer(&mut e, 92, r#"{"error":["EOrder:Insufficient funds"]}"#);
+}
+
+#[test]
+fn reduce_only_position_is_closed_stays_unknown() {
+    let (mut e, _, _) = ready(false);
+    let settled = add_order_answer(
+        &mut e,
+        90,
+        r#"{"error":["EOrder:Reduce only:Position is closed"]}"#,
+    );
+    assert_eq!(
+        spot_outcome(&settled),
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+}
+
+#[test]
+fn a_fence_an_unreadable_order_holds_says_why() {
+    let (mut e, _, _) = ready(false);
+    let settled = add_order_answer(&mut e, 90, r#"{"error":["EFuture:Unlisted"]}"#);
+    let read = settled
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("OpenOrders") => Some(r.clone()),
+            _ => None,
+        })
+        .expect("the read starts with the answer");
+    reply(
+        &mut e,
+        &read,
+        r#"{"error":[],"result":{"open":{"O1":{"status":"open","descr":{"pair":"XBT/USD","type":"sideways","ordertype":"limit","price":"1"},"vol":"1","vol_exec":"0"}}}}"#,
+    );
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    let held = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message),
+            _ => None,
+        })
+        .expect("refused");
+    assert!(held.contains("Cancel that order on Kraken"), "{held}");
+}
+
+#[test]
+fn a_nuke_account_cancel_sends_cancel_all_with_no_order_in_the_store() {
+    let (mut e, _, _) = ready(false);
+    assert!(e.capabilities().nuke_account_cancel);
+    e.handle(
+        NOW,
+        Event::Command(Command::Venue {
+            command: 85,
+            action: safe_cex_engine::VenueAction::CancelAccountOrders,
+        }),
+    );
+    let sent = requests(&mut e).pop().expect("a cancel-all request");
+    assert!(sent.url.ends_with("/0/private/CancelAll"), "{}", sent.url);
+    reply(&mut e, &sent, r#"{"error":[],"result":{"count":0}}"#);
+    assert!(
+        e.drain_plain()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 85, .. })))
+    );
+}
+
+#[test]
+fn a_symbol_cancel_never_sends_the_account_wide_cancel() {
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 86,
+            symbol: String::new(),
+        }),
+    );
+    assert!(!requests(&mut e).iter().any(|r| r.url.contains("CancelAll")));
 }

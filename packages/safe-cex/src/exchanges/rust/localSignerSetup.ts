@@ -10,7 +10,7 @@ type LocalIdentity = LocalIdentityMetadata & {
   /** Secondary only, set by a family setup mapping: sign with the primary's ref. */
   signingFromPrimary?: true;
   /** Primary only, set by a family setup mapping: role-bound provider material. */
-  extra?: { zklinkSeed?: { value: string; encoding: 'hex' } };
+  extra?: { zklinkSeed?: { value: string; encoding: 'hex' }; kucoinBroker?: { value: string; encoding: 'utf8' } };
 };
 type Credentials = { primary?: LocalIdentity; secondary?: LocalIdentity };
 type Constructor = new (venue: string, optionsJson: string, signerSetupJson?: string) => WasmEngineLike;
@@ -124,11 +124,15 @@ export class LocalSignerSetup {
     resolveSetupPassphrase('secondary', secondary, options.secondary_passphrase, options.passphrase, policy.secondary, options.publicDataOnly === true);
     // A public-only PublicRead provider holds no primary (native drops it too).
     const primaryDropped = policy.readCredentials === 'publicRead' && options.publicDataOnly === true;
+    const broker = policy.primary?.extra?.key === 'kucoinBroker' ? options.extra?.kucoinBroker : undefined;
+    const brokerMaterial = typeof broker?.brokerKey === 'string' && rustTrim(broker.partner) && rustTrim(broker.brokerName)
+      ? { extra: { kucoinBroker: { value: broker.brokerKey, encoding: 'utf8' as const } } }
+      : {};
     this.#credentials = {
       ...(!primaryDropped && (options.key !== undefined || options.secret !== undefined || options.passphrase !== undefined || setupMetadata.primary !== undefined)
         ? { primary: {
           ...primaryMetadata, key: options.key, secret: options.secret, passphrase: options.passphrase,
-          ...(zklinkSeed ? { extra: { zklinkSeed: { value: zklinkSeed, encoding: 'hex' as const } } } : {}),
+          ...(zklinkSeed ? { extra: { zklinkSeed: { value: zklinkSeed, encoding: 'hex' as const } } } : brokerMaterial),
         } }
         : {}),
       ...(secondary
@@ -197,12 +201,17 @@ export const withoutSigningCredentials = (options: ExchangeOptions): ExchangeOpt
     auth,
     ...routing
   } = options;
-  // AsterDEX's wallet key is signing material; its public addresses stay.
+  const broker = routing.extra?.kucoinBroker;
+  const safeRouting = broker ? (() => {
+    const { brokerKey: _brokerKey, ...metadata } = broker;
+    return { ...routing, extra: { ...routing.extra, kucoinBroker: metadata } };
+  })() : routing;
+  // Signing material stays in provider setup; public addresses and broker labels stay.
   if (auth) {
     const { privateKey: _privateKey, ...addresses } = auth;
-    return { ...routing, auth: addresses } as ExchangeOptions;
+    return { ...safeRouting, auth: addresses } as ExchangeOptions;
   }
   // BaseExchange's legacy type requires key/secret; Rust uses the cached
   // construction record and provider refs instead of reading those fields.
-  return routing as ExchangeOptions;
+  return safeRouting as ExchangeOptions;
 };

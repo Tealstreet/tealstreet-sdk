@@ -78,7 +78,7 @@ pub type Writable<T> = T;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WritableStoreData {
-    pub latency: f64,
+    pub latency: Option<f64>,
     pub balance: Balance,
     pub markets: Vec<Market>,
     pub tickers: Vec<Ticker>,
@@ -153,7 +153,8 @@ mod strict_codecs {
     #[serde(remote = "super::WritableStoreData")]
     #[serde(rename_all = "camelCase")]
     struct WireWritableStoreData {
-        latency: f64,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        latency: Option<f64>,
         balance: Balance,
         markets: Vec<Market>,
         tickers: Vec<Ticker>,

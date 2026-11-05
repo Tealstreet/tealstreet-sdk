@@ -38,7 +38,8 @@ pub struct Signer {
 impl Signer {
     pub fn new(secret: &str) -> Result<Self, String> {
         let bytes = STANDARD
-            .decode(secret)
+            // As legacy's Buffer.from: a saved value's surrounding whitespace is not part of it.
+            .decode(secret.trim())
             .map_err(|_| "Kraken secret is not valid base64")?;
         if bytes.is_empty() {
             return Err("Kraken secret is empty".into());

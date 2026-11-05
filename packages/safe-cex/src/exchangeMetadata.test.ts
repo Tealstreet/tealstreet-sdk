@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
 import {
   exchangeMetadata,
   exchangePrettyNames,
@@ -274,6 +275,16 @@ describe('exchangeMetadata', () => {
       });
     });
 
+    // Since AWS_EXIT.md step 3e every private path egresses from the Vultr Tokyo fleet,
+    // so the form must never again suggest an AWS pool to whitelist on master.
+    it('every whitelist the account form can show is the Vultr Tokyo fleet', () => {
+      exchanges.forEach((name) => {
+        const m = exchangeMetadata[name];
+        const lists = [m.privateProxyIps, ...Object.values(m.privateProxyRegions)].filter((ips) => ips.length);
+        lists.forEach((ips) => expect(ips, name).toEqual(privateProxyIpsVultrTokyo));
+      });
+    });
+
     it('exchanges with requiresCors and no tunnel support should not silently get tunnel forced on', () => {
       // If an exchange has requiresCors (which enables tealstreetProxy), and does not
       // support tunnel (supportsTunnel: false, no enforceWsTunnel), verify that
@@ -434,5 +445,15 @@ describe('exchangeMetadata', () => {
       expect(exchangeMetadata.binanceinverse.requiresTickersForMarketsLoaded).toBe(true);
       expect(exchangeMetadata.binanceinverse.latencyDomain).toBe('dapi.binance.com');
     });
+  });
+});
+
+
+describe('Hyperliquid candle capabilities', () => {
+  it.each(['hyperliquid', 'hyperliquidspot'] as const)('declares the native candle set for %s', (name) => {
+    expect(exchangeMetadata[name].supportsKlineSeconds).toBe(false);
+    expect(exchangeMetadata[name].supportedCandleIntervals).toEqual([
+      '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '8h', '12h', '1d', '3d', '1w', '1M',
+    ]);
   });
 });

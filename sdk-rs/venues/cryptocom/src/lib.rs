@@ -18,7 +18,8 @@ use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, 
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
-    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue, num,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, SubscriptionTopic, TimerId, Venue,
+    num,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use wire::*;
@@ -123,6 +124,8 @@ pub struct Cryptocom {
     malformed_markets: HashSet<String>,
     reread_stalls: u8,
     subscriptions: BTreeMap<String, u32>,
+    /// Candlestick subscriptions past their first answer, which carries history.
+    candles_live: HashSet<String>,
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
     message_id: u64,
@@ -152,6 +155,16 @@ pub(crate) fn interval(value: Interval) -> Result<&'static str, String> {
         .find(|(i, _)| *i == value)
         .map(|(_, native)| *native)
         .ok_or_else(|| value.unsupported("Crypto.com"))
+}
+
+/// The channel every book subscribe, unsubscribe and repair names.
+fn book_channel(symbol: &str) -> String {
+    format!("book.{symbol}.50")
+}
+
+/// The channel every candle subscribe, unsubscribe and repair names.
+fn candle_channel(symbol: &str, value: Interval) -> Result<String, String> {
+    Ok(format!("candlestick.{}.{symbol}", interval(value)?))
 }
 
 fn quoted(s: &str) -> String {
@@ -258,6 +271,7 @@ impl Cryptocom {
             malformed_markets: HashSet::new(),
             reread_stalls: 0,
             subscriptions: BTreeMap::new(),
+            candles_live: HashSet::new(),
             indexes: HashMap::new(),
             books: HashMap::new(),
             message_id: 0,
@@ -321,9 +335,34 @@ impl Cryptocom {
             *count -= 1;
             if *count == 0 {
                 self.subscriptions.remove(&channel);
+                self.candles_live.remove(&channel);
                 self.subscribe(cx, &[channel], "unsubscribe");
             }
         }
+    }
+
+    fn repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        let channel = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                candle_channel(symbol, *interval).ok()
+            }
+            SubscriptionTopic::OrderBook { symbol } => Some(book_channel(symbol)),
+        }
+        .filter(|channel| self.subscriptions.contains_key(channel))
+        .ok_or_else(|| format!("{topic} is not subscribed"))?;
+        if !self.sockets[0].open || self.sockets[0].ready.is_some() {
+            return Err(format!("the market socket carrying {channel} is not open"));
+        }
+        // The resubscribe answers with history again, as after an unsubscribe.
+        self.candles_live.remove(&channel);
+        let channels = [channel];
+        self.subscribe(cx, &channels, "unsubscribe");
+        self.subscribe(cx, &channels, "subscribe");
+        Ok(())
     }
 
     fn market_channels(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -453,9 +492,17 @@ impl Cryptocom {
                 if !self.subscriptions.contains_key(message.subscription) {
                     return Ok(());
                 }
-                json::each::<CandleRow>(message.data.get(), |row| {
-                    cx.candle(symbol, timeframe, row.candle())
-                })?;
+                let mut candles = Vec::new();
+                json::each::<CandleRow>(message.data.get(), |row| candles.push(row.candle()))?;
+                candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                // A subscription's first answer carries history: only its newest row is live.
+                if self.candles_live.insert(message.subscription.to_owned()) {
+                    let newest = candles.pop();
+                    candles = newest.into_iter().collect();
+                }
+                for candle in candles {
+                    cx.candle(symbol, timeframe, candle);
+                }
             }
             _ => {}
         }
@@ -471,7 +518,19 @@ impl Venue for Cryptocom {
         safe_cex_engine::Capabilities {
             account: safe_cex_engine::AccountLookup::Query,
             order_book_query: true,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
+        }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
         }
     }
     fn on_http_preflight_ready(
@@ -515,6 +574,9 @@ impl Venue for Cryptocom {
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
     /// The engine asks once per uncertain seal and re-asks while fenced; the fresh
     /// order read reports through `orders_reconciled`.
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
@@ -522,6 +584,20 @@ impl Venue for Cryptocom {
     }
 
     type Pending = Pending;
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
+    fn status_exempt_refusal(
+        &self,
+        pending: &Pending,
+        response: safe_cex_engine::Response<'_>,
+    ) -> bool {
+        matches!(pending, Pending::Trade(request) if request.refused_by_body(response.body))
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(Err(error)) = self.options.secondary_validation {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
@@ -568,7 +644,19 @@ impl Venue for Cryptocom {
                 );
             } else if channel == 1 && envelope.method == "public/auth" {
                 let code = serde_json::from_str::<AuthenticationReply>(text)?.code;
-                if code != 0 {
+                // Only these name the key; busy, internal and nonce answers retry on reconnect.
+                if code != 0 && !matches!(code, 40101 | 40103 | 40104) {
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_UNAVAILABLE,
+                        format!(
+                            "Crypto.com private login not accepted, reconnecting: {} {}",
+                            envelope.code, envelope.message
+                        ),
+                    );
+                    cx.close(socket);
+                    self.on_close(cx, socket, 1011);
+                } else if code != 0 {
                     cx.notice(
                         Level::Error,
                         code::AUTH_REJECTED,
@@ -579,6 +667,13 @@ impl Venue for Cryptocom {
                     );
                     cx.close(socket);
                     self.on_close(cx, socket, 1008);
+                    cx.startup_read_refused(
+                        &safe_cex_engine::VenueError::new(format!(
+                            "Crypto.com private login rejected: {}",
+                            envelope.message
+                        ))
+                        .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                    );
                 } else if !self.sockets[channel].authenticated {
                     self.sockets[channel].authenticated = true;
                     self.sockets[channel].supervisor.authenticated(cx);
@@ -623,6 +718,8 @@ impl Venue for Cryptocom {
                 for state in self.books.values_mut() {
                     state.synced = false;
                 }
+                // Resubscribed on reconnect, each answers with history again.
+                self.candles_live.clear();
             }
         }
     }
@@ -776,7 +873,14 @@ impl Venue for Cryptocom {
         if let Some(error) = error {
             match pending {
                 Pending::Account(request) => {
-                    self.account_failed(cx, request, &error, reads::FailureRecovery::Response)
+                    // 40101 is retried once first; only its second answer is final.
+                    if request.retries >= 1 || !response.body.contains("40101") {
+                        cx.startup_read_refused(&reads::response_failure(response, error.clone()));
+                    }
+                    self.account.read_error =
+                        Some(reads::response_failure(response, error.clone()));
+                    self.account_failed(cx, request, &error, reads::FailureRecovery::Response);
+                    self.account.read_error = None;
                 }
                 Pending::History(request) => self.history_failed(
                     cx,
@@ -924,7 +1028,16 @@ impl Venue for Cryptocom {
             Pending::Identity(request) => self.identity_reject(cx, request, missing_list()),
             Pending::History(request) => self.history_failed(cx, request, missing_list(), recovery),
             Pending::Account(request) => {
-                self.account_failed(cx, request, &missing_list().message, recovery)
+                if request.retries >= 1 || !response.body.contains("40101") {
+                    cx.startup_read_refused(&reads::response_failure(
+                        response,
+                        missing_list().message,
+                    ));
+                }
+                self.account.read_error =
+                    Some(reads::response_failure(response, missing_list().message));
+                self.account_failed(cx, request, &missing_list().message, recovery);
+                self.account.read_error = None;
             }
             Pending::PublicTrades(trade) => self.public_trades_stream_failed(cx, *trade, response),
             pending => self.on_request_failed(
@@ -975,7 +1088,9 @@ impl Venue for Cryptocom {
             }
             Pending::Account(request) => {
                 let recovery = reads::FailureRecovery::released(&error);
+                self.account.read_error = Some(error.clone());
                 self.account_failed(cx, request, &error.message, recovery);
+                self.account.read_error = None;
             }
             Pending::PublicTrades(trade) => self.public_trades_failed(cx, *trade, error, true),
             Pending::BookQuery { context } | Pending::Candles { context, .. } => {
@@ -1041,6 +1156,7 @@ impl Venue for Cryptocom {
         self.public_trades
             .waiting
             .retain(|_, trade| trade.root().owner() != owner);
+        self.account.fresh_positions.retired(owner);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if let Some(trade) = self.public_trades.waiting.remove(&timer) {
@@ -1112,7 +1228,7 @@ impl Venue for Cryptocom {
                         synced: false,
                     });
                 state.subscribers += 1;
-                self.add_channel(cx, format!("book.{symbol}.50"));
+                self.add_channel(cx, book_channel(&symbol));
             }
             Command::UnsubscribeOrderBook { symbol } => {
                 if let Some(state) = self.books.get_mut(&symbol) {
@@ -1121,21 +1237,21 @@ impl Venue for Cryptocom {
                         self.books.remove(&symbol);
                     }
                 }
-                self.remove_channel(cx, format!("book.{symbol}.50"));
+                self.remove_channel(cx, book_channel(&symbol));
             }
             Command::SubscribeCandles {
                 symbol,
                 interval: timeframe,
-            } => match interval(timeframe) {
-                Ok(timeframe) => self.add_channel(cx, format!("candlestick.{timeframe}.{symbol}")),
+            } => match candle_channel(&symbol, timeframe) {
+                Ok(channel) => self.add_channel(cx, channel),
                 Err(error) => cx.notice(Level::Error, code::COMMAND_UNSUPPORTED, error),
             },
             Command::UnsubscribeCandles {
                 symbol,
                 interval: timeframe,
             } => {
-                if let Ok(timeframe) = interval(timeframe) {
-                    self.remove_channel(cx, format!("candlestick.{timeframe}.{symbol}"));
+                if let Ok(channel) = candle_channel(&symbol, timeframe) {
+                    self.remove_channel(cx, channel);
                 }
             }
             Command::FetchCandles {

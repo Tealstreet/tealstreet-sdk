@@ -1,5 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./env.d.ts" />
+import type { AccountReconnectDiagnostics } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import type { LocalSignerMetadata } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeErrorKind } from './commandOutcome';
 import type { RustPublicFeedPolicy } from './exchanges/rust/publicFeed';
@@ -51,8 +52,6 @@ export type ExchangeName =
   | 'polymarket'
   | 'kodiakfi'
   | 'mode'
-  | 'salsadex'
-  | 'tealstreet-dex'
   | 'txflow'
   | 'what'
   | 'weex'
@@ -140,6 +139,13 @@ export type ExchangeOptions = {
   /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
   readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
+  /** The host names a refused placement itself, so the exchange does not also report it. */
+  readonly callerReportsPlacementFailures?: boolean;
+  /**
+   * A main-thread instance paired with a worker that owns the account. Its reads
+   * and trading go to the worker, waiting for the bridge; it never runs an engine.
+   */
+  readonly workerMirror?: boolean;
   /** Retained input compatibility; this build always uses Rust for beta venues. */
   readonly engine?: 'rust';
   readonly privateOnly?: boolean;
@@ -281,6 +287,14 @@ export type ExchangeOptions = {
 // the validation call fetched in the same request (read `.total` for the USD value),
 // so callers get key-validity AND balance from one round-trip. Undefined for venues
 // whose validation doesn't fetch balance.
+/** What a nuke stopped before cancelling and closing: chaser and TWAP ids. */
+export interface NukeResult {
+  stoppedChasers: string[];
+  stoppedTwaps: string[];
+  /** Set where the venue's cancels can miss orders placed seconds ago: the user should check. */
+  warning?: string;
+}
+
 export interface ValidateAccountResult {
   error: string;
   balance?: Balance;
@@ -948,6 +962,8 @@ export type ActiveChaser = {
   stopReason: string;
   currentOrderIds?: string[];
   origin?: ChaserOrigin;
+  /** Set on a TWAP's slice chase: the TWAP it belongs to. */
+  twapId?: string;
 };
 
 export type OrderRiskProfile = {
@@ -1112,7 +1128,7 @@ export type DisplayedMargin = {
 };
 
 export type StoreData = {
-  readonly latency: number;
+  readonly latency: number | null;
   readonly balance: Balance;
   readonly markets: Market[];
   readonly tickers: Ticker[];
@@ -1181,6 +1197,7 @@ export type StoreData = {
      * clock-free, which matters because hosted exchange-server stamps these
      * on the server's clock.
      */
+    reconnectDiagnostics?: AccountReconnectDiagnostics;
     publicCloseCode?: number;
     privateCloseCode?: number;
     publicCloseCountTotal?: number;
@@ -1215,7 +1232,7 @@ export type Writable<T> =
             : T; // is primitive or literal value
 
 export type WritableStoreData = {
-  latency: number;
+  latency: number | null;
   balance: Writable<Balance>;
   markets: Array<Writable<Market>>;
   tickers: Array<Writable<Ticker>>;
@@ -1316,6 +1333,17 @@ export interface RemoteSignerRequest {
       | 'kraken-challenge'
       | 'apexomni-base64'
       | 'bitunix-double-sha256'
+      // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
+      // the digest from; `hyperliquid-address` binds the agent address.
+      | 'hyperliquid-l1'
+      | 'hyperliquid-address'
+      // Lighter: `toSign` is a transaction or auth statement the device re-derives
+      // the signed words from; the reply concatenates the 80-byte signatures.
+      | 'lighter-tx'
+      // Paradex: `toSign` is a closed `paradex/1` descriptor the device rebuilds
+      // the Stark digests from; `paradex-public` binds the Stark public key.
+      | 'paradex-stark'
+      | 'paradex-public'
       | 'coinbase-jwt';
     extraData?: unknown;
   };
