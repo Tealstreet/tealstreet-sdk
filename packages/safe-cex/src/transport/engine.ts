@@ -353,7 +353,7 @@ export const resolveEngineRoutingPlan = (
     ...(readPlan && readHttp
       ? {
           readHeader: secondaryReadHeaders[exchange],
-          readPublic: !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange),
+          readPublic: !hasOwnPublicReadRoute(exchange),
           readHttp,
           ...(exchange === 'binancespot' && { readPublicHttp: readPlan.publicHttp }),
         }
@@ -492,8 +492,15 @@ const PROXY_AUTHORIZATION_MISSING = 'Tealstreet proxy authorization missing';
 const DIRECT_PUBLIC_READS: ReadonlySet<ExchangeName> = new Set(['hyperliquid', 'hyperliquidspot']);
 
 /** Venues whose public reads may take a bypassed read key's egress; the rest keep their own route. */
+/** Binance and AsterDEX public reads keep their own route, never a read key's egress. */
+const hasOwnPublicReadRoute = (exchange: ExchangeName): boolean =>
+  ['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange);
+
 const publicReadEligible = (exchange: ExchangeName): boolean =>
-  !DIRECT_PUBLIC_READS.has(exchange) && !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange);
+  !DIRECT_PUBLIC_READS.has(exchange) && !hasOwnPublicReadRoute(exchange);
+
+/** The one method read routing reads: only a GET may take a read or public-read egress. */
+const isGet = (method: string): boolean => method.toUpperCase() === 'GET';
 
 /** REST left (or could not leave) an unreachable tunnel for the HTTP proxy; once per account and outage. */
 export interface TunnelProxyFallbackNotice {
@@ -1410,10 +1417,7 @@ export const createEngineTransport = (
                       readHttp &&
                       !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
                     ? readHttp
-                    : intent === 'public' &&
-                        publicReadHttp &&
-                        packet.method.toUpperCase() === 'GET' &&
-                        publicReadEligible(exchange)
+                    : intent === 'public' && publicReadHttp && isGet(packet.method) && publicReadEligible(exchange)
                       ? publicReadHttp
                       : http;
       if (!selected) throw new HttpPreparationError('unsupported');
@@ -1430,7 +1434,7 @@ export const createEngineTransport = (
           ? publicCorsHttp.request(nativeRequest)
           : Promise.reject(new Error('Public CORS request routing is not configured'));
       return readHttp &&
-        request.method.toUpperCase() === 'GET' &&
+        isGet(request.method) &&
         (!['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange) ||
           hasHeader(request.headers, secondaryReadHeaders[exchange]!))
         ? readHttp.request(nativeRequest)

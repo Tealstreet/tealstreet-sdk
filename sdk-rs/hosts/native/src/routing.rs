@@ -127,6 +127,11 @@ pub struct PublicWsRoute {
     pub route: WsRoute,
 }
 
+/// The one method read routing makes: a GET may take a read or public-read egress.
+fn is_get(request: &HttpRequest) -> bool {
+    request.method == safe_cex_engine::Method::Get
+}
+
 /// Serializable output of TS resolution. This host has no venue routing table.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -207,7 +212,7 @@ impl RoutingState {
                 .iter()
                 .any(|(name, value)| name.eq_ignore_ascii_case(header) && !value.is_empty())
         });
-        let read = request.method == safe_cex_engine::Method::Get
+        let read = is_get(request)
             && (self.plan.read_public
                 || self
                     .plan
@@ -260,10 +265,11 @@ impl RoutingState {
         {
             return Ok(route);
         }
-        if intent == RoutingIntent::Public && request.method == safe_cex_engine::Method::Get {
-            if let Some(route) = &self.plan.public_read_http {
-                return Ok(route.clone());
-            }
+        if intent == RoutingIntent::Public
+            && is_get(request)
+            && let Some(route) = &self.plan.public_read_http
+        {
+            return Ok(route.clone());
         }
         match intent {
             RoutingIntent::Primary => Ok(self.plan.http.clone()),
