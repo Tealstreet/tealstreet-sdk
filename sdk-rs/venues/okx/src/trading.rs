@@ -148,6 +148,7 @@ pub struct Request {
     path: &'static str,
 }
 struct Step {
+    query: Option<String>,
     receipts: Vec<OrderIdentityReceipt>,
     path: &'static str,
     body: String,
@@ -158,6 +159,7 @@ struct Step {
 pub struct TradingState {
     jobs: HashMap<CommandId, Job>,
     pub acknowledged: HashMap<String, Acknowledged>,
+    pub(crate) algo_orders: HashMap<String, ObservedAlgo>,
 }
 pub struct Acknowledged {
     pub(crate) symbol: String,
@@ -168,6 +170,8 @@ pub struct Acknowledged {
 struct Job {
     /// An amend that cancels a stop before placing its replacement.
     replacing_stop: Option<(String, OrderSide, OrderType)>,
+    trailing: Option<TrailingAmend>,
+    lookup: Option<Box<AmendLookup>>,
     /// Set at genuine entry; the Plan follows its admission.
     preflight: Option<Preflight>,
     plan: Option<Plan>,
@@ -178,6 +182,108 @@ struct Job {
     continue_cancel_errors: bool,
     /// A step took effect, so a later rejection cannot mean nothing happened.
     effective: bool,
+}
+#[derive(Clone, Copy, PartialEq)]
+enum LookupStage {
+    Order,
+    Ticker,
+}
+struct AmendLookup {
+    stage: LookupStage,
+    order: Order,
+    price: Option<f64>,
+    amount: Option<f64>,
+}
+#[derive(Clone, PartialEq)]
+pub(crate) struct ObservedAlgo {
+    pub order: Order,
+    pub trigger: bool,
+    trigger_price: Option<f64>,
+    trailing: Option<TrailingOrder>,
+}
+impl ObservedAlgo {
+    pub(crate) fn new(row: &wire::OrderRow<'_>, order: &Order) -> Option<Self> {
+        if !matches!(
+            row.ord_type,
+            "trigger" | "conditional" | "oco" | "move_order_stop"
+        ) {
+            return None;
+        }
+        let trailing = (row.ord_type == "move_order_stop").then(|| TrailingOrder {
+            inst_id: row.inst_id.into(),
+            td_mode: row.td_mode.into(),
+            side: row.side.into(),
+            pos_side: row.pos_side.into(),
+            ccy: row.ccy.into(),
+            tag: row.tag.into(),
+            ord_type: "move_order_stop",
+            sz: row.sz.into(),
+            reduce_only: row.reduce_only,
+            algo_cl_ord_id: row.algo_cl_ord_id.into(),
+            active_px: row.active_px.into(),
+            callback_ratio: row.callback_ratio.into(),
+            callback_spread: row.callback_spread.into(),
+        });
+        Some(Self {
+            order: order.clone(),
+            trigger: row.ord_type == "trigger",
+            trigger_price: row
+                .move_trigger_px
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite() && *n > 0.),
+            trailing,
+        })
+    }
+}
+#[derive(Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TrailingOrder {
+    inst_id: String,
+    td_mode: String,
+    side: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pos_side: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    ccy: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    tag: String,
+    ord_type: &'static str,
+    sz: String,
+    reduce_only: bool,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    algo_cl_ord_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    active_px: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    callback_ratio: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    callback_spread: String,
+}
+impl TrailingOrder {
+    fn valid(&self) -> bool {
+        let positive = |s: &str| s.parse::<f64>().is_ok_and(|n| n.is_finite() && n > 0.);
+        matches!(self.td_mode.as_str(), "cross" | "isolated" | "cash")
+            && matches!(self.pos_side.as_str(), "" | "net" | "long" | "short")
+            && positive(&self.sz)
+            && (self.active_px.is_empty() || positive(&self.active_px))
+            && ((positive(&self.callback_spread) && self.callback_ratio.is_empty())
+                || (positive(&self.callback_ratio) && self.callback_spread.is_empty()))
+    }
+}
+#[derive(PartialEq)]
+enum TrailingPhase {
+    Cancel,
+    Replace,
+    Restore,
+}
+struct TrailingAmend {
+    original: ObservedAlgo,
+    replacement: TrailingOrder,
+    phase: TrailingPhase,
+    restore: Option<Step>,
+    refusal: Option<VenueError>,
+    quote: Option<(f64, f64)>,
 }
 enum Finish {
     Ids,
@@ -422,7 +528,7 @@ impl Okx {
     fn start_job(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, mut job: Job) {
         let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
-            read_credential: None,
+            read_credential: job.lookup.as_ref().and_then(|_| self.primary_credential()),
             write_credential: self.primary_credential(),
         }) else {
             return;
@@ -443,7 +549,8 @@ impl Okx {
             pacing: None,
             refusals_complete: true,
         };
-        let (plan, slot) = match cx.admit_serial_plan(&preflight, SERIAL, policy) {
+        let call = next_call(&job);
+        let (plan, slot) = match cx.admit_serial_plan(&preflight, call, policy) {
             Ok(admitted) => admitted,
             Err(reason) => {
                 let _ = cx.fail_preflight(&preflight, not_sent(reason.venue_error().message));
@@ -680,10 +787,7 @@ impl Okx {
             pos_side,
             ..empty_payload()
         };
-        let generated = || {
-            safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
-                .map(|id| format!("{BROKER}{id}").chars().take(32).collect::<String>())
-        };
+        let generated = || generated_order_id(cx);
         if algo {
             p.algo_cl_ord_id = Some(generated()?);
         } else {
@@ -826,10 +930,39 @@ impl Okx {
         price: Option<f64>,
         amount: Option<f64>,
     ) -> Result<Job, String> {
+        if let Some(order) = cx.store.order(id)
+            && ((cx.frame_fed()
+                && matches!(
+                    order.kind,
+                    OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+                ))
+                || (order.kind == OrderType::TrailingStopLoss
+                    && safe_cex_engine::protective_amend::fresh_reference(
+                        cx.store,
+                        &order.symbol,
+                        StopTriggerType::LastPrice,
+                        cx.now,
+                    )
+                    .is_none()))
+        {
+            return lookup_job(cx, order.clone(), price, amount, LookupStage::Order);
+        }
+        self.plan_amend_known(cx, id, price, amount)
+    }
+
+    fn plan_amend_known(
+        &self,
+        cx: &Cx<'_, Pending>,
+        id: &str,
+        price: Option<f64>,
+        amount: Option<f64>,
+    ) -> Result<Job, String> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Amend<'a> {
             inst_id: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            cxl_on_fail: Option<bool>,
             #[serde(skip_serializing_if = "Option::is_none")]
             ord_id: Option<&'a str>,
             #[serde(skip_serializing_if = "Option::is_none")]
@@ -877,17 +1010,9 @@ impl Okx {
                     && native_id(&other.id) == native_id(id)
                     && matches!(other.kind, OrderType::StopLoss | OrderType::TakeProfit)
             });
-        if !oco
-            && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
-            && o.extra
-                .as_ref()
-                .and_then(|e| e.conditional_order_price)
-                .is_some_and(|p| p > 0.0)
-        {
-            return Err("Cannot amend a standalone protective limit order without preserving its execution price".into());
-        }
         let mut a = Amend {
             inst_id: &m.id,
+            cxl_on_fail: (o.kind != OrderType::Limit).then_some(false),
             ord_id: None,
             algo_id: None,
             new_px: None,
@@ -917,7 +1042,13 @@ impl Okx {
                 vec![step("/api/v5/trade/amend-order", &a, 1, false)?],
                 Finish::Amend(id.into()),
             )
-        } else if o.kind == OrderType::Conditional {
+        } else if o.kind == OrderType::Conditional
+            || self
+                .trading
+                .algo_orders
+                .get(id)
+                .is_some_and(|observed| observed.trigger)
+        {
             a.algo_id = Some(native_id(id));
             a.new_trigger_px = Some(num::format(adjusted(
                 price.unwrap_or(o.price),
@@ -939,7 +1070,7 @@ impl Okx {
                 vec![step("/api/v5/trade/amend-algos", &a, 1, false)?],
                 Finish::Amend(id.into()),
             )
-        } else if oco {
+        } else if oco || matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit) {
             a.algo_id = Some(native_id(id));
             let price = num::format(adjusted(
                 price.unwrap_or(o.price),
@@ -969,42 +1100,47 @@ impl Okx {
                 Finish::Amend(id.into()),
             )
         } else {
-            let group: Vec<_> = cx
-                .store
-                .orders()
-                .iter()
-                .filter(|c| native_id(&c.id) == native_id(id))
-                .map(|c| c.id.clone())
-                .collect();
-            let mut result = self.plan_cancel(cx, group)?;
-            let replacement = self.plan_place(
-                cx,
-                vec![PlaceOrderOpts {
-                    symbol: o.symbol.clone(),
-                    kind: o.kind,
-                    side: o.side,
-                    amount: amount.unwrap_or(o.amount),
-                    price: Some(price.unwrap_or(o.price)),
-                    trigger_price: None,
-                    stop_loss: None,
-                    take_profit: None,
-                    reduce_only: Some(o.reduce_only),
-                    time_in_force: o.time_in_force,
-                    trigger_type: o.trigger_type,
-                    sl_trigger_type: o.trigger_type,
-                    tp_trigger_type: o.trigger_type,
-                    client_order_id: None,
-                    close: o.close,
-                    stp_mode: None,
-                    max_slippage_pct: None,
-                    bybit_bbo: None,
-                    bybit_slippage_tolerance_ticks: None,
-                    implied_volatility: None,
-                }],
-            )?;
-            result.steps.extend(replacement.steps);
-            result.replacing_stop = matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
-                .then(|| (o.symbol.clone(), o.side, o.kind));
+            if o.kind != OrderType::TrailingStopLoss {
+                return Err("Unsupported OKX protective replacement".into());
+            }
+            let original = self.trading.algo_orders.get(id)
+                .filter(|native| native.order == *o)
+                .cloned().ok_or("OKX trailing parameters are unproven; refresh before editing, the stop is unchanged")?;
+            let native = original
+                .trailing
+                .as_ref()
+                .filter(|native| native.valid())
+                .ok_or("OKX trailing parameters cannot be restored; the stop is unchanged")?;
+            let mut replacement = native.clone();
+            if let Some(amount) = amount {
+                let size = adjusted(amount, m.precision.amount, false)?;
+                if size < m.limits.amount.min || size > m.limits.amount.max {
+                    return Err(
+                        "OKX trailing size is outside market limits; the stop is unchanged".into(),
+                    );
+                }
+                replacement.sz = num::format(size);
+            }
+            if let Some(price) = price {
+                replacement.callback_spread =
+                    num::format(adjusted(price, m.precision.price, false)?);
+                replacement.callback_ratio.clear();
+            }
+            replacement.algo_cl_ord_id = generated_order_id(cx)?;
+            let restore = trailing_step(&o.symbol, native)?;
+            let mut result = self.plan_cancel(cx, vec![id.into()])?;
+            result
+                .steps
+                .push_back(trailing_step(&o.symbol, &replacement)?);
+            result.trailing = Some(TrailingAmend {
+                original,
+                replacement,
+                phase: TrailingPhase::Cancel,
+                restore: Some(restore),
+                refusal: None,
+                quote: None,
+            });
+            result.replacing_stop = Some((o.symbol.clone(), o.side, o.kind));
             result.continue_cancel_errors = false;
             result.finish = Finish::Ids;
             result
@@ -1013,6 +1149,102 @@ impl Okx {
             result.optimistic.push((id.into(), o.status));
         }
         Ok(result)
+    }
+
+    pub(crate) fn trailing_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Pending::Trade(request) = pending else {
+            return Ok(());
+        };
+        let Some(amend) = self
+            .trading
+            .jobs
+            .get(&request.command)
+            .and_then(|job| job.trailing.as_ref())
+        else {
+            return Ok(());
+        };
+        if amend.phase != TrailingPhase::Cancel || request.path != "/api/v5/trade/cancel-algos" {
+            return Ok(());
+        }
+        let unchanged = || {
+            not_sent(
+                "OKX trailing stop changed or its price/size is unproven; the stop is unchanged",
+            )
+            .kind(ErrorKind::InvalidInput)
+        };
+        let source = &amend.original.order;
+        let current = store.order(&source.id).ok_or_else(unchanged)?;
+        let mut normalized = current.clone();
+        normalized.status = source.status;
+        if normalized != *source
+            || !matches!(
+                current.status,
+                OrderStatus::Open | OrderStatus::Updating | OrderStatus::Canceling
+            )
+            || self.trading.algo_orders.get(&source.id) != Some(&amend.original)
+        {
+            return Err(unchanged());
+        }
+        let market = store.market(&source.symbol).ok_or_else(unchanged)?;
+        let size = amend
+            .replacement
+            .sz
+            .parse::<f64>()
+            .map_err(|_| unchanged())?;
+        if !amend.replacement.valid()
+            || !market.limits.amount.min.is_finite()
+            || !market.limits.amount.max.is_finite()
+            || market.limits.amount.min < 0.
+            || size < market.limits.amount.min
+            || size > market.limits.amount.max
+            || adjusted(size, market.precision.amount, false).ok() != Some(size)
+        {
+            return Err(unchanged());
+        }
+        let now = release.time.raw_ms;
+        let store_quote = store
+            .reference_seen_at(&source.symbol, StopTriggerType::LastPrice)
+            .filter(|seen| *seen <= now)
+            .and_then(|seen| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    store,
+                    &source.symbol,
+                    StopTriggerType::LastPrice,
+                    now,
+                )
+                .map(|last| (last, seen))
+            });
+        let read_quote = amend.quote.filter(|(_, at)| {
+            *at <= now && now - at <= safe_cex_engine::protective_amend::FRESH_TICKER_MS
+        });
+        let (last, _) = match (store_quote, read_quote) {
+            (Some(store), Some(read)) => {
+                if read.1 > store.1 {
+                    read
+                } else {
+                    store
+                }
+            }
+            (Some(quote), None) | (None, Some(quote)) => quote,
+            (None, None) => return Err(unchanged()),
+        };
+        if amend
+            .original
+            .trigger_price
+            .is_some_and(|trigger| match source.side {
+                OrderSide::Sell => last <= trigger,
+                OrderSide::Buy => last >= trigger,
+            })
+        {
+            return Err(unchanged());
+        }
+        // activePx is activation, not a fixed stop trigger; either side of last is valid.
+        Ok(())
     }
 
     /// Mints the next call's leg from its slot and releases it signed. Progress
@@ -1046,10 +1278,14 @@ impl Okx {
             return;
         };
         let step = job.steps.front().expect("issued step");
-        let recipe =
-            sign::Http::new(self.credentials.clone(), step.path.into()).demo(self.options.testnet);
-        let url = format!("{}{}", self.rest(), step.path);
-        let body = Some(step.body.clone());
+        let read = step.query.is_some();
+        let path = step.query.as_ref().map_or_else(
+            || step.path.to_owned(),
+            |query| format!("{}?{query}", step.path),
+        );
+        let url = format!("{}{path}", self.rest());
+        let recipe = sign::Http::new(self.credentials.clone(), path).demo(self.options.testnet);
+        let body = (!read).then(|| step.body.clone());
         let request = Request {
             command,
             slot,
@@ -1059,7 +1295,7 @@ impl Okx {
         if let Err((pending, reason)) = cx.request_signed_managed(
             context,
             None,
-            Method::Post,
+            if read { Method::Get } else { Method::Post },
             url,
             body,
             Box::new(recipe),
@@ -1129,6 +1365,186 @@ impl Okx {
         };
     }
 
+    fn amend_source_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        if !(200..300).contains(&response.status)
+            || serde_json::from_str::<wire::Envelope<'_>>(response.body)
+                .is_ok_and(|envelope| envelope.code != "0")
+        {
+            let mut error = crate::account::read_error(
+                &response,
+                "OKX native order parameters could not be read; the order is unchanged".into(),
+            );
+            error.outcome = Some(Outcome::NotSent);
+            return self.end(cx, request.command, Some(&request), error, false);
+        }
+        let prepared = (|| -> Result<Job, String> {
+            let lookup = self
+                .trading
+                .jobs
+                .get(&request.command)
+                .and_then(|job| job.lookup.as_ref())
+                .ok_or("OKX amendment source retired")?;
+            if cx.store.order(&lookup.order.id) != Some(&lookup.order) {
+                return Err("OKX order changed while its native parameters were read; the order is unchanged".into());
+            }
+            if !(200..300).contains(&response.status) {
+                return Err(
+                    "OKX native order parameters could not be read; the order is unchanged".into(),
+                );
+            }
+            let envelope: wire::Envelope<'_> = serde_json::from_str(response.body)
+                .map_err(|_| "Malformed OKX native order source")?;
+            if envelope.code != "0" {
+                return Err(format!(
+                    "OKX {}: {}; the order is unchanged",
+                    envelope.code, envelope.msg
+                ));
+            }
+            if lookup.stage == LookupStage::Ticker {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Quote<'a> {
+                    inst_id: &'a str,
+                    last: &'a str,
+                }
+                let quotes: Vec<Quote<'_>> =
+                    serde_json::from_str(envelope.data.ok_or("Missing OKX ticker")?.get())
+                        .map_err(|_| "Malformed OKX ticker")?;
+                let [quote] = quotes.as_slice() else {
+                    return Err("OKX ticker must name exactly one instrument".into());
+                };
+                let market = cx
+                    .store
+                    .market(&lookup.order.symbol)
+                    .ok_or("Unknown OKX market")?;
+                let last = quote
+                    .last
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite() && *n > 0.)
+                    .ok_or("Invalid OKX ticker price")?;
+                if quote.inst_id != market.id {
+                    return Err("Foreign OKX ticker; the stop is unchanged".into());
+                }
+                let mut next =
+                    self.plan_amend_known(cx, &lookup.order.id, lookup.price, lookup.amount)?;
+                let trailing = next
+                    .trailing
+                    .as_mut()
+                    .ok_or("OKX ticker has no protective owner")?;
+                trailing.quote = Some((last, cx.now));
+                return Ok(next);
+            }
+            let rows: Vec<wire::OrderRow<'_>> = serde_json::from_str(
+                envelope
+                    .data
+                    .ok_or("Missing OKX native order source")?
+                    .get(),
+            )
+            .map_err(|_| "Malformed OKX native order source")?;
+            let [row] = rows.as_slice() else {
+                return Err("OKX native order source must name exactly one order".into());
+            };
+            let market = cx
+                .store
+                .market(&lookup.order.symbol)
+                .ok_or("Unknown OKX market")?;
+            let wanted_side = if lookup.order.side == OrderSide::Buy {
+                "buy"
+            } else {
+                "sell"
+            };
+            let admitted = matches!(row.state, "live" | "partially_effective" | "pause")
+                && row.algo_id == native_id(&lookup.order.id)
+                && row.inst_id == market.id
+                && row.side == wanted_side
+                && match lookup.order.kind {
+                    OrderType::TrailingStopLoss => row.ord_type == "move_order_stop",
+                    OrderType::StopLoss => {
+                        row.ord_type == "trigger"
+                            || matches!(row.ord_type, "conditional" | "oco")
+                                && num::parse(row.sl_trigger_px) > 0.
+                    }
+                    OrderType::TakeProfit => {
+                        row.ord_type == "trigger"
+                            || matches!(row.ord_type, "conditional" | "oco")
+                                && num::parse(row.tp_trigger_px) > 0.
+                    }
+                    _ => false,
+                };
+            if !admitted {
+                return Err("OKX native order source is foreign, terminal or changed; the order is unchanged".into());
+            }
+            let order = lookup.order.clone();
+            let (price, amount) = (lookup.price, lookup.amount);
+            let observed =
+                ObservedAlgo::new(row, &order).ok_or("Unproven OKX native algo parameters")?;
+            self.trading.algo_orders.insert(order.id.clone(), observed);
+            if order.kind == OrderType::TrailingStopLoss
+                && safe_cex_engine::protective_amend::fresh_reference(
+                    cx.store,
+                    &order.symbol,
+                    StopTriggerType::LastPrice,
+                    cx.now,
+                )
+                .is_none()
+            {
+                return lookup_job(cx, order, price, amount, LookupStage::Ticker);
+            }
+            self.plan_amend_known(cx, &order.id, price, amount)
+        })();
+        let mut next = match prepared {
+            Ok(next) => next,
+            Err(message) => {
+                return self.end(
+                    cx,
+                    request.command,
+                    Some(&request),
+                    not_sent(message),
+                    false,
+                );
+            }
+        };
+        let previous = self
+            .trading
+            .jobs
+            .remove(&request.command)
+            .expect("live source Plan");
+        let plan = previous.plan.expect("admitted source Plan");
+        next.preflight = previous.preflight;
+        next.plan = Some(plan.clone());
+        for (id, status) in &mut next.optimistic {
+            if let Some(current) = cx.store.order(id) {
+                *status = current.status;
+            }
+            cx.store.set_order_status(
+                id,
+                if matches!(next.finish, Finish::Amend(_)) {
+                    OrderStatus::Updating
+                } else {
+                    OrderStatus::Canceling
+                },
+            );
+        }
+        let call = next_call(&next);
+        self.trading.jobs.insert(request.command, next);
+        match cx.continue_serial_plan(&plan, &request.slot, &request.context, call) {
+            Ok(slot) => self.issue(cx, request.command, slot),
+            Err(reason) => self.end(
+                cx,
+                request.command,
+                Some(&request),
+                not_sent(reason.venue_error().message),
+                false,
+            ),
+        }
+    }
+
     pub(crate) fn trade_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1146,6 +1562,14 @@ impl Okx {
         // Exact released DATA custody before any decode, Store or job change.
         if cx.validate_plan_delivery(&plan, &request.context).is_err() {
             return;
+        }
+        if self
+            .trading
+            .jobs
+            .get(&request.command)
+            .is_some_and(|job| job.lookup.is_some())
+        {
+            return self.amend_source_response(cx, request, response);
         }
         // OKX 50004 explicitly leaves execution unknown, including HTTP 200/400 replies.
         let parsed = serde_json::from_str::<wire::Envelope<'_>>(response.body);
@@ -1397,9 +1821,29 @@ impl Okx {
             return;
         };
         job.steps.pop_front();
+        if let Some(trailing) = job.trailing.as_mut()
+            && trailing.phase == TrailingPhase::Cancel
+        {
+            trailing.phase = TrailingPhase::Replace;
+        }
         job.effective = true;
         if job.steps.is_empty() {
-            self.finish(cx, request);
+            let restored = job
+                .trailing
+                .as_mut()
+                .filter(|a| a.phase == TrailingPhase::Restore)
+                .and_then(|a| a.refusal.take());
+            if let Some(mut refusal) = restored {
+                refusal.message = format!(
+                    "{}; the original OKX trailing stop was restored",
+                    refusal.message
+                );
+                refusal.protection = Some(safe_cex_engine::error::Protection::Restored);
+                refusal.presents = true;
+                self.end(cx, request.command, Some(&request), refusal, false);
+            } else {
+                self.finish(cx, request);
+            }
         } else {
             match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
                 Ok(slot) => self.issue(cx, request.command, slot),
@@ -1514,9 +1958,59 @@ impl Okx {
         mut error: VenueError,
         uncertain: bool,
     ) {
+        if !uncertain
+            && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            && let Some(request) = current
+        {
+            let restore = self.trading.jobs.get_mut(&command).and_then(|job| {
+                let trailing = job.trailing.as_mut()?;
+                if trailing.phase != TrailingPhase::Replace {
+                    return None;
+                }
+                let restore = trailing.restore.take()?;
+                trailing.phase = TrailingPhase::Restore;
+                trailing.refusal = Some(error.clone());
+                job.steps.clear();
+                job.steps.push_back(restore);
+                Some(job.plan.clone().expect("admitted trailing Plan"))
+            });
+            if let Some(plan) = restore {
+                match cx.continue_serial_plan(&plan, &request.slot, &request.context, SERIAL) {
+                    Ok(slot) => {
+                        self.issue(cx, command, slot);
+                        return;
+                    }
+                    Err(reason) => {
+                        error.message =
+                            format!("{}; restore admission failed: {reason}", error.message)
+                    }
+                }
+            }
+        }
         let Some(job) = self.trading.jobs.remove(&command) else {
             return;
         };
+        let trailing_canceled = job
+            .trailing
+            .as_ref()
+            .is_some_and(|a| a.phase != TrailingPhase::Cancel);
+        if trailing_canceled
+            && error.protection != Some(safe_cex_engine::error::Protection::Restored)
+        {
+            if !uncertain {
+                error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+            }
+            error.presents = true;
+            error.message = format!(
+                "{}; {}",
+                error.message,
+                if uncertain {
+                    "OKX trailing protection is unconfirmed; check Open Orders before placing another stop"
+                } else {
+                    "The old OKX trailing stop was canceled and could not be replaced; the position is unprotected"
+                }
+            );
+        }
         if job.effective && !uncertain {
             error.outcome = None;
         }
@@ -1524,7 +2018,7 @@ impl Okx {
         let note = job
             .replacing_stop
             .as_ref()
-            .filter(|_| job.effective && job.ids.is_empty())
+            .filter(|_| job.effective && job.ids.is_empty() && job.trailing.is_none())
             .map(|(symbol, side, kind)| {
                 safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, uncertain)
             });
@@ -1541,7 +2035,7 @@ impl Okx {
             {
                 cx.store.set_order_status(
                     &id,
-                    if stop_gone {
+                    if stop_gone || trailing_canceled {
                         OrderStatus::Canceled
                     } else {
                         status
@@ -1653,12 +2147,79 @@ fn step<T: Serialize + ?Sized>(
     collect_ids: bool,
 ) -> Result<Step, String> {
     Ok(Step {
+        query: None,
         receipts: Vec::new(),
         path,
         body: serde_json::to_string(body).map_err(|e| e.to_string())?,
         expected,
         collect_ids,
     })
+}
+fn next_call(job: &Job) -> SerialCall {
+    if job.lookup.is_some() {
+        SerialCall {
+            operation: Operation::Read,
+            timeout_ms: 5_000,
+            attempts: 1,
+            ..SERIAL
+        }
+    } else {
+        SERIAL
+    }
+}
+fn lookup_job(
+    cx: &Cx<'_, Pending>,
+    order: Order,
+    price: Option<f64>,
+    amount: Option<f64>,
+    stage: LookupStage,
+) -> Result<Job, String> {
+    let (path, query) = match stage {
+        LookupStage::Order => (
+            "/api/v5/trade/order-algo",
+            format!(
+                "algoId={}",
+                safe_cex_engine::url::encode_component(native_id(&order.id))
+            ),
+        ),
+        LookupStage::Ticker => (
+            "/api/v5/market/ticker",
+            format!(
+                "instId={}",
+                safe_cex_engine::url::encode_component(
+                    &cx.store
+                        .market(&order.symbol)
+                        .ok_or("Unknown OKX market")?
+                        .id
+                )
+            ),
+        ),
+    };
+    let mut source = step(path, &(), 0, false)?;
+    source.query = Some(query);
+    let mut result = job(vec![source], Finish::Empty);
+    result.lookup = Some(Box::new(AmendLookup {
+        stage,
+        order,
+        price,
+        amount,
+    }));
+    Ok(result)
+}
+fn generated_order_id(cx: &Cx<'_, Pending>) -> Result<String, String> {
+    safe_cex_crypto::uuid::uuid_with_entropy(|bytes| cx.fill_entropy(bytes))
+        .map(|id| format!("{BROKER}{id}").chars().take(32).collect::<String>())
+}
+fn trailing_step(symbol: &str, payload: &TrailingOrder) -> Result<Step, String> {
+    let mut write = step("/api/v5/trade/order-algo", payload, 1, true)?;
+    if !payload.algo_cl_ord_id.is_empty() {
+        write.receipts.push(OrderIdentityReceipt {
+            symbol: symbol.into(),
+            kind: OrderIdentityKind::ClientOrderId,
+            identity: payload.algo_cl_ord_id.clone(),
+        });
+    }
+    Ok(write)
 }
 fn job(steps: Vec<Step>, finish: Finish) -> Job {
     Job {
@@ -1671,6 +2232,8 @@ fn job(steps: Vec<Step>, finish: Finish) -> Job {
         continue_cancel_errors: false,
         effective: false,
         replacing_stop: None,
+        trailing: None,
+        lookup: None,
     }
 }
 fn is_algo(kind: OrderType) -> bool {
