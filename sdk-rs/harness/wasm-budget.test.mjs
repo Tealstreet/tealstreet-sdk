@@ -141,8 +141,6 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
   for (const [venue, measured, cap] of [
     ['apexomni', 1_974_257, 1_984_512],
     ['backpack', 1_876_304, 1_887_232],
-    ['bitget', 2_306_497, 2_317_312],
-    ['bitgetusdc', 2_306_497, 2_317_312],
     ['bitrue', 1_810_954, 1_821_696],
     ['blofin', 1_952_470, 1_963_008],
     ['breakoutprop', 1_501_277, 1_512_448],
@@ -162,6 +160,19 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
   assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
+  assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
+});
+
+test('#3073 cancel confirmation (run 41931095253) retains headroom and siblings match', () => {
+  const measured = 2_334_811;
+  const cap = 2_345_984;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
   assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
 });
 

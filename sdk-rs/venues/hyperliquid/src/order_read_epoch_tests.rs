@@ -66,6 +66,9 @@ impl Venue for WeightedReads {
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.inner.reconcile_uncertain(cx, symbols);
     }
+    fn refreshes_orders(&self) -> bool {
+        self.inner.refreshes_orders()
+    }
     fn unproven_http_evidence(
         &self,
         pending: &Pending,
@@ -482,7 +485,7 @@ fn a_placement_re_reads_a_stale_unapproved_builder_without_waiting() {
     assert_eq!(engine.venue().inner.account.builder_approved, Some(true));
 }
 
-fn queued_census_bypasses_background_slots(spot: bool) {
+fn queued_census_uses_a_bounded_slot(spot: bool, refresh_ask: bool) {
     let mut engine = bootstrap(spot);
     let blocked = symbols(&mut engine, 2000., "queue_builders");
     assert_eq!(
@@ -513,6 +516,31 @@ fn queued_census_bypasses_background_slots(spot: bool) {
             error: "placement reply lost",
         },
     );
+    if refresh_ask {
+        engine.handle(
+            3500.,
+            Event::Command(Command::Venue {
+                command: 200,
+                action: VenueAction::RefreshOrders {
+                    symbols: Some(vec!["BTC-PERP".into()]),
+                },
+            }),
+        );
+    }
+    let actions = prepared_now(&mut engine);
+    assert!(
+        !actions.iter().any(|action| matches!(action,
+        Action::Http(r) if kind(r) == "frontendOpenOrders")),
+        "foreground Orders also obey the cap"
+    );
+    let builder = blocked
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut engine, builder, 3600., "30");
     let actions = prepared_now(&mut engine);
     let older = http(&actions, "frontendOpenOrders");
     assert_fenced(&place(&mut engine, 4000., 102, spot), 102);
@@ -522,6 +550,17 @@ fn queued_census_bypasses_background_slots(spot: bool) {
     assert_ne!(fresh.id, older.id);
     assert_fenced(&place(&mut engine, 4002., 103, spot), 103);
     reply(&mut engine, &fresh, 4003., "[]");
+    if refresh_ask {
+        let frame = engine.snapshot_frame(4003.).to_vec();
+        let (_, data) = safe_cex_engine::wire::sections(&frame)
+            .find(|(section, _)| *section == safe_cex_engine::wire::section::ORDERS_READ)
+            .unwrap();
+        assert_eq!(
+            f64::from_le_bytes(data[8..16].try_into().unwrap()),
+            4001.,
+            "fresh owed successor publishes its own attributable send time"
+        );
+    }
     let actions = place(&mut engine, 4400., 104, spot);
     assert!(
         actions
@@ -531,10 +570,15 @@ fn queued_census_bypasses_background_slots(spot: bool) {
 }
 
 #[test]
-fn perps_queued_census_and_fresh_successor_bypass_background_slots() {
-    queued_census_bypasses_background_slots(false);
+fn perps_queued_census_and_fresh_successor_take_priority_within_the_cap() {
+    queued_census_uses_a_bounded_slot(false, false);
 }
 #[test]
-fn spot_queued_census_and_fresh_successor_bypass_background_slots() {
-    queued_census_bypasses_background_slots(true);
+fn spot_queued_census_and_fresh_successor_take_priority_within_the_cap() {
+    queued_census_uses_a_bounded_slot(true, false);
+}
+
+#[test]
+fn queued_before_refresh_ask_keeps_its_epoch_and_owes_a_fresh_attributable_successor() {
+    queued_census_uses_a_bounded_slot(false, true);
 }

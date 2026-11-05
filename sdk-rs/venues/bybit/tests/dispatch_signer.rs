@@ -1121,9 +1121,18 @@ fn hyro_retry_refused_after_a_released_create_stays_unknown() {
         error: "lost after dispatch",
     });
     h.respond("/v5/order/realtime", 200, EMPTY_PAGE);
-    // Both axes are now complete and absent: the same-ID retry is signed next.
-    gate.mode.store(2, Ordering::SeqCst);
     h.respond("/v5/order/history", 200, EMPTY_PAGE);
+    for status in ["Cancelled", "Rejected", "Deactivated"] {
+        h.respond(&format!("orderStatus={status}"), 200, EMPTY_PAGE);
+    }
+    // A caller retry must still reconcile under its original uncertainty.
+    gate.mode.store(2, Ordering::SeqCst);
+    h.command(Command::PlaceOrders {
+        command: 43,
+        orders: vec![order()],
+    });
+    assert!(!h.has_request("/v5/order/create"));
+    assert_eq!(h.outcomes.last(), Some(&(43, Some(Outcome::Unknown))));
     assert_eq!(
         h.outcomes
             .iter()
