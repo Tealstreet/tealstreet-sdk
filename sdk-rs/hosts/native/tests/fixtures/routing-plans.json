@@ -11518,13 +11518,13 @@
     "http": [
       {
         "request": {
-          "url": "https://mainnet.zklighter.elliot.ai/fixture?signature=a%2Fb",
+          "url": "https://mainnet.zklighter.elliot.ai/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai/fixture?signature=a%2Fb",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai/fixture",
           "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
           "mode": "direct",
           "authorize": false,
