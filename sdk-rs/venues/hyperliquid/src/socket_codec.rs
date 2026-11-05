@@ -5,6 +5,13 @@ use safe_cex_engine::socket_lifecycle::{
     LifecycleEvent, RetireReason, TrafficPolicy,
 };
 
+// Diagnostic identity within this runtime; never used for socket or write authority.
+pub(super) fn next_repair_boot_sequence() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 const PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 30_000.;
 const MAX_PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 300_000.;
 
@@ -272,6 +279,47 @@ impl Hyperliquid {
             }
         }
         interests
+    }
+
+    pub(super) fn unnamed_candle_repair(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        let SubscriptionTopic::Candles { symbol, interval } = topic else {
+            return None;
+        };
+        let known = cx.store.market(symbol).is_some();
+        let discovery = if self.discovery_settled() && (self.spot || self.perps_published) {
+            "complete"
+        } else {
+            "pending"
+        };
+        let reason = if !known {
+            "unknown-market"
+        } else if !self.candles.contains_key(&(symbol.clone(), *interval)) {
+            "not-subscribed"
+        } else if self.connection.feed.is_none() {
+            "feed-not-started"
+        } else {
+            return None;
+        };
+        let attribution = format!(
+            "{reason} (engineBoot={},symbolKnown={known},catalogueSize={},discovery={discovery},feedRegistered={})",
+            self.repair_boot_sequence,
+            cx.store.markets().len(),
+            self.connection.feed.is_some()
+        );
+        if reason == "feed-not-started" {
+            cx.notice(
+                safe_cex_engine::Level::Debug,
+                code::SUBSCRIPTION_DEFERRED,
+                format!("{topic} repair deferred: {attribution}"),
+            );
+            Some(Ok(()))
+        } else {
+            Some(Err(attribution))
+        }
     }
 
     pub(super) fn socket_refused(cx: &mut Cx<'_, Pending>, error: SocketError) {
