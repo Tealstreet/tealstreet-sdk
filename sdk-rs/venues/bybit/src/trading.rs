@@ -76,6 +76,7 @@ enum Call {
     CancelPartialStop {
         id: String,
         batch: bool,
+        guard: PartialStopGuard,
     },
     CancelAll {
         ids: Vec<String>,
@@ -90,6 +91,61 @@ enum Call {
     PositionMode {
         hedged: bool,
     },
+}
+
+#[derive(Clone)]
+struct PartialStopGuard {
+    symbol: String,
+    side: OrderSide,
+    kind: OrderType,
+    price: f64,
+    reference: StopTriggerType,
+}
+
+impl PartialStopGuard {
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::LastPrice => "last",
+            StopTriggerType::IndexPrice => "index",
+        };
+        let current = store
+            .reference_seen_at(&self.symbol, self.reference)
+            .filter(|seen| *seen <= now)
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    store,
+                    &self.symbol,
+                    self.reference,
+                    now,
+                )
+            });
+        let Some(current) = current else {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "A fresh {label} price is required before replacing this protection; your {} order is unchanged",
+                self.symbol
+            ))));
+        };
+        let fires = match (self.side, self.kind) {
+            (OrderSide::Sell, OrderType::StopLoss) | (OrderSide::Buy, OrderType::TakeProfit) => {
+                self.price >= current
+            }
+            _ => self.price <= current,
+        };
+        if fires {
+            let name = if self.kind == OrderType::TakeProfit {
+                "take profit"
+            } else {
+                "stop"
+            };
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "A {name} at {} would trigger at once against the {label} price {current}; your {} order is unchanged",
+                number(self.price),
+                self.symbol
+            ))));
+        }
+        Ok(())
+    }
 }
 
 struct Planned {
@@ -753,7 +809,12 @@ impl BybitLinear {
         let tif = (limit_price.is_some() || execution.bbo_side.is_some())
             .then(|| tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel)));
 
-        let max = market.limits.amount.max;
+        let max = self
+            .order_caps
+            .get(&opts.symbol)
+            .map_or(market.limits.amount.max, |caps| {
+                caps.for_order(market.limits.amount.max, order_type == "Market")
+            });
         if !max.is_finite() || max <= 0.0 {
             return Err("Market has no valid maximum order quantity".into());
         }
@@ -1178,36 +1239,21 @@ impl BybitLinear {
             }
             let (body, reference) =
                 self.trading_stop_body(cx, order, kind, price, trigger, amount, limit);
-            // Judged against the price that fires the kind it became, on a fresh ticker.
-            let (label, by) = match reference {
-                "LastPrice" => ("last", StopTriggerType::LastPrice),
-                "IndexPrice" => ("index", StopTriggerType::IndexPrice),
-                _ => ("mark", StopTriggerType::MarkPrice),
+            let by = match reference {
+                "LastPrice" => StopTriggerType::LastPrice,
+                "IndexPrice" => StopTriggerType::IndexPrice,
+                _ => StopTriggerType::MarkPrice,
             };
-            if let Some(current) = safe_cex_engine::protective_amend::fresh_reference(
-                cx.store,
-                &order.symbol,
-                by,
-                cx.now,
-            ) {
-                let fires = match (order.side, kind) {
-                    (OrderSide::Sell, OrderType::StopLoss)
-                    | (OrderSide::Buy, OrderType::TakeProfit) => price >= current,
-                    _ => price <= current,
-                };
-                if fires {
-                    let name = if kind == OrderType::TakeProfit {
-                        "take profit"
-                    } else {
-                        "stop"
-                    };
-                    return Err(format!(
-                        "A {name} at {} would trigger at once against the {label} price {current}; your {} order is unchanged",
-                        number(price),
-                        order.symbol
-                    ));
-                }
-            }
+            let guard = PartialStopGuard {
+                symbol: order.symbol.clone(),
+                side: order.side,
+                kind,
+                price,
+                reference: by,
+            };
+            guard
+                .validate(cx.store, cx.now)
+                .map_err(|error| error.message)?;
             // The stop as it stands, to put back exactly if its replacement is refused.
             let (restore, _) = self.trading_stop_body(
                 cx,
@@ -1223,6 +1269,7 @@ impl BybitLinear {
                 planned.call = Call::CancelPartialStop {
                     id: order.id.clone(),
                     batch: self.paths.batch_orders,
+                    guard: guard.clone(),
                 };
             }
             job.steps.push_back(Step {

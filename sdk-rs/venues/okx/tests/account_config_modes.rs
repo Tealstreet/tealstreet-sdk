@@ -46,7 +46,7 @@ fn private_reads_started(actions: &[Action]) -> bool {
 
 fn startup_failed(actions: &[Action]) -> Option<String> {
     actions.iter().find_map(|a| match a {
-        Action::Notice(Notice::StartupFailed { error }) => Some(error.message.clone()),
+        Action::Notice(Notice::StartupFailed { error, .. }) => Some(error.message.clone()),
         _ => None,
     })
 }

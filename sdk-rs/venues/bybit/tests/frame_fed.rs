@@ -43,6 +43,34 @@ fn a_frame_fed_engine_loads_public_metadata_once_and_opens_no_socket() {
 }
 
 #[test]
+fn frame_fed_market_close_splits_with_the_public_market_quantity_cap() {
+    let mut h = frame_fed();
+    load(&mut h);
+    let mut order = support::order();
+    order.kind = safe_cex_engine::model::OrderType::Market;
+    order.amount = 1100.0;
+    order.reduce_only = Some(true);
+    h.command(Command::PlaceOrders {
+        command: 10,
+        orders: vec![order],
+    });
+    h.respond(
+        "/v5/position/list",
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0}]}}"#,
+    );
+    let request = h.take("/v5/order/create-batch");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let children = body["request"].as_array().unwrap();
+    let quantities: Vec<f64> = children
+        .iter()
+        .map(|child| child["qty"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(quantities, vec![500.0, 500.0, 100.0]);
+    assert!(children.iter().all(|child| child["reduceOnly"] == true));
+}
+
+#[test]
 fn writes_before_markets_and_non_writes_are_refused_without_a_request() {
     let mut h = frame_fed();
     h.command(Command::PlaceOrders {

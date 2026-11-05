@@ -291,7 +291,7 @@ fn a_selected_identity_without_a_passphrase_ref_refuses_at_startup() {
     );
     assert!(actions.iter().any(|a| matches!(
         a,
-        Action::Notice(safe_cex_engine::Notice::StartupFailed { error })
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { error, .. })
             if error.message == "BloFin requires a passphrase"
     )));
 }
