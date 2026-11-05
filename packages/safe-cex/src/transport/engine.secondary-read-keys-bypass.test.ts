@@ -126,8 +126,9 @@ describe('secondary read keys bypassed (SECONDARY_READ_KEYS_ENABLED = false)', (
     if (OWN_PUBLIC_ROUTE.has(exchange)) {
       expect(plan).toEqual(primary);
     } else {
-      expect(plan.readPublic).toBe(true);
-      expect(plan.readPublicHttp?.prefix).toBe(PUBLIC_CORS_PROXY);
+      expect(plan).not.toHaveProperty('readPublic');
+      expect(plan).not.toHaveProperty('readPublicHttp');
+      expect(plan.publicReadHttp?.prefix).toBe(PUBLIC_CORS_PROXY);
     }
   });
 
@@ -169,4 +170,50 @@ describe('secondary read keys bypassed (SECONDARY_READ_KEYS_ENABLED = false)', (
       createEngineTransport('okx', { ...primaryOnly(), secondary_key: 'read-key' }, probe().raw),
     ).not.toThrow();
   });
+});
+
+it('review3093: Option A does not reroute a managed PUBLIC POST', async () => {
+  const urls: string[] = [];
+  for (const options of [primaryOnly(), withSavedReadKey()]) {
+    const { raw, prepareHttp } = probe();
+    const routed = createEngineTransport('bybit', options, raw);
+    try {
+      await routed.prepareHttp!({
+        request: 9,
+        method: 'POST',
+        intent: 'public',
+        headers: {},
+        timeoutMs: 1000,
+        url: 'https://api.bybit.com/public-read',
+        body: '{}',
+      });
+      urls.push(prepareHttp.mock.lastCall![0].url);
+    } finally {
+      routed.dispose!();
+    }
+  }
+  expect(urls[1]).toBe(urls[0]);
+});
+
+it('review3093: native HL public POST keeps its existing route and agrees with TS', async () => {
+  const plan = resolveEngineRoutingPlan('hyperliquid', withSavedReadKey(), 'https://api.hyperliquid.xyz');
+  const primary = resolveEngineRoutingPlan('hyperliquid', primaryOnly(), 'https://api.hyperliquid.xyz');
+  const { raw, prepareHttp } = probe();
+  const routed = createEngineTransport('hyperliquid', withSavedReadKey(), raw);
+  const url = 'https://api.hyperliquid.xyz/info';
+  try {
+    await routed.prepareHttp!({
+      request: 10,
+      method: 'POST',
+      intent: 'public',
+      url,
+      headers: {},
+      timeoutMs: 1000,
+      body: '{"type":"meta"}',
+    });
+    expect(prepareHttp.mock.lastCall![0].url).toBe(url);
+    expect(plan).toEqual(primary);
+  } finally {
+    routed.dispose!();
+  }
 });

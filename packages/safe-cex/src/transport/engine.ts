@@ -77,6 +77,8 @@ export interface EngineRoutingPlan {
   publicHttp?: EngineHttpRoute;
   readHttp?: EngineHttpRoute;
   readPublicHttp?: EngineHttpRoute;
+  /** A bypassed read key's egress (secondaryReadKeys.ts): managed public GETs only. */
+  publicReadHttp?: EngineHttpRoute;
   readHeader?: string;
   readPublic?: boolean;
   publicCorsHttp?: EngineHttpRoute;
@@ -156,7 +158,10 @@ const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
 export const withSecondaryReadKeyPolicy = (options: ExchangeOptions): ExchangeOptions => {
   if (SECONDARY_READ_KEYS_ENABLED) return options;
   const { secondary_key: _key, secondary_secret: _secret, secondary_passphrase: _passphrase, ...primary } = options;
-  return primary;
+  // Signer setup reads secondary identity metadata as a requested read identity.
+  if (primary.localSigner?.secondary === undefined) return primary;
+  const { secondary: _identity, ...localSigner } = primary.localSigner;
+  return { ...primary, localSigner };
 };
 
 /** A bypassed read key's egress, kept for the account's unsigned public GETs only. */
@@ -353,11 +358,9 @@ export const resolveEngineRoutingPlan = (
           ...(exchange === 'binancespot' && { readPublicHttp: readPlan.publicHttp }),
         }
       : {}),
-    // Managed public reads only: with no readHttp, header-inferred GETs keep the account route.
-    ...(publicReadPlan && !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
+    ...(publicReadPlan && publicReadEligible(exchange)
       ? {
-          readPublic: true,
-          readPublicHttp:
+          publicReadHttp:
             exchange === 'binancespot' ? (publicReadPlan.publicHttp ?? publicReadPlan.http) : publicReadPlan.http,
         }
       : {}),
@@ -487,6 +490,10 @@ const PROXY_AUTHORIZATION_MISSING = 'Tealstreet proxy authorization missing';
 // Hyperliquid's public API is CORS-open. Its account traffic takes the tunnel,
 // but market data must not wait on it: the TS adapter read it from a public-only instance.
 const DIRECT_PUBLIC_READS: ReadonlySet<ExchangeName> = new Set(['hyperliquid', 'hyperliquidspot']);
+
+/** Venues whose public reads may take a bypassed read key's egress; the rest keep their own route. */
+const publicReadEligible = (exchange: ExchangeName): boolean =>
+  !DIRECT_PUBLIC_READS.has(exchange) && !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange);
 
 /** REST left (or could not leave) an unreachable tunnel for the HTTP proxy; once per account and outage. */
 export interface TunnelProxyFallbackNotice {
@@ -1379,10 +1386,15 @@ export const createEngineTransport = (
                 : intent === 'public' && DIRECT_PUBLIC_READS.has(exchange)
                   ? directHttp
                   : intent === 'public' &&
-                      (readHttp ?? publicReadHttp) &&
+                      readHttp &&
                       !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
-                    ? (readHttp ?? publicReadHttp)
-                    : http;
+                    ? readHttp
+                    : intent === 'public' &&
+                        publicReadHttp &&
+                        packet.method.toUpperCase() === 'GET' &&
+                        publicReadEligible(exchange)
+                      ? publicReadHttp
+                      : http;
       if (!selected) throw new HttpPreparationError('unsupported');
       return selected.prepareHttp({ ...packet, route, intent });
     },

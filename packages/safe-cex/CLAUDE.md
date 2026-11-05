@@ -1339,8 +1339,8 @@ keep payload-signed REST there, but are still refused with a credential header.
 saved read key before Rust signer setup and in the engine transport/plan, so
 signed reads use the primary key and route, with no warning. The account's
 `secondaryProxyUrl` remains only as the egress for managed unsigned public GETs
-(`publicReadHttp`, native `readPublic`/`readPublicHttp`, no `readHttp`);
-header-inferred GETs keep the account route. Coinbase drops that egress as
+(TS `publicReadHttp` and the native plan's `publicReadHttp`, no `readHttp`),
+except direct-public venues; POSTs and header-inferred GETs keep the account route. Coinbase drops that egress as
 before. Every secondary path below, and the NX UI and flags, stays intact behind
 the switch; tests pinning today's behaviour mock it to `true`.
 

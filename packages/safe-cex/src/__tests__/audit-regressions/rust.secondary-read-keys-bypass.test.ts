@@ -128,3 +128,16 @@ it('a partial saved read key no longer refuses the account', async () => {
   const { constructed } = await construct('okx', { secondary_key: 'read-key' });
   expect(constructed).toHaveBeenCalledOnce();
 });
+
+// Independent post-merge-review controls: primary identity must survive secondary metadata deprecation.
+it.each([false, true])('review3093: secondary metadata is ignored with partial=%s', async (partial) => {
+  const { constructed } = await construct('okx', {
+    secondary_key: 'read-key',
+    ...(partial ? {} : { secondary_secret: 'read-secret', secondary_passphrase: 'read-pass' }),
+    localSigner: { primary: { stableId: 'primary-owner' }, secondary: { stableId: 'read-owner' } },
+  });
+  expect(constructed).toHaveBeenCalledOnce();
+  const setup = JSON.parse(constructed.mock.calls[0]![2]!);
+  expect(setup.primary.stableId).toBe('primary-owner');
+  expect(setup).not.toHaveProperty('secondary');
+});

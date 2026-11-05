@@ -138,6 +138,9 @@ pub struct RoutingPlan {
     pub read_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_public_http: Option<HttpRoute>,
+    /// A bypassed read key's egress: managed public GETs only, never a signed request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_read_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_header: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -256,6 +259,11 @@ impl RoutingState {
             .filter(|_| request.route != Some(safe_cex_engine::RequestRoute::Secondary))
         {
             return Ok(route);
+        }
+        if intent == RoutingIntent::Public && request.method == safe_cex_engine::Method::Get {
+            if let Some(route) = &self.plan.public_read_http {
+                return Ok(route.clone());
+            }
         }
         match intent {
             RoutingIntent::Primary => Ok(self.plan.http.clone()),
@@ -977,6 +985,41 @@ mod tests {
                 .managed_http(&packet, RoutingIntent::Secondary)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn a_bypassed_read_egress_carries_only_managed_public_gets() {
+        use safe_cex_engine::request_context::RoutingIntent;
+        let route = |prefix: &str| HttpRoute {
+            prefix: prefix.into(),
+            ..HttpRoute::default()
+        };
+        let state = state(RoutingPlan {
+            http: route("account"),
+            public_read_http: Some(route("read-egress")),
+            ..RoutingPlan::default()
+        });
+        let request = |method| HttpRequest {
+            id: RequestId(0),
+            method,
+            route: None,
+            timeout_ms: None,
+            url: "https://venue.invalid/public".into(),
+            headers: vec![],
+            signer_headers: vec![],
+            body: None,
+        };
+        let prefix = |method, intent| state.managed_http(&request(method), intent).unwrap().prefix;
+        assert_eq!(prefix(Method::Get, RoutingIntent::Public), "read-egress");
+        assert_eq!(prefix(Method::Post, RoutingIntent::Public), "account");
+        assert_eq!(prefix(Method::Get, RoutingIntent::Primary), "account");
+        assert!(
+            state
+                .managed_http(&request(Method::Get), RoutingIntent::Secondary)
+                .is_err()
+        );
+        // Header-inferred requests never take it.
+        assert_eq!(state.http(&request(Method::Get)).unwrap().prefix, "account");
     }
 
     #[test]
