@@ -1191,6 +1191,22 @@ impl BybitLinear {
         self.account.partial_stop_refresh = Some(cx.set_timer(250.0));
     }
 
+    /// A fresh order read after the venue changed orders no row of ours names.
+    pub(crate) fn refresh_order_source(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.variant.is_hyro() {
+            if self.account.authed && self.account.handshake.is_none() {
+                if self.account.snapshot.is_some() {
+                    self.account.revision = self.account.revision.wrapping_add(1);
+                } else {
+                    self.start_hyro_snapshot(cx);
+                }
+            }
+        } else {
+            self.account.orders_follow_up |= self.account.orders.is_some();
+            self.fetch_orders(cx);
+        }
+    }
+
     pub(crate) fn note_order_terminal(&mut self, ids: &[String]) {
         // Terminal rows can be removed, or share the snapshot issue timestamp.
         self.account.revision = self.account.revision.wrapping_add(1);
@@ -2010,18 +2026,7 @@ impl BybitLinear {
         }
         if self.account.partial_stop_refresh == Some(timer) {
             self.account.partial_stop_refresh = None;
-            if self.variant.is_hyro() {
-                if self.account.authed && self.account.handshake.is_none() {
-                    if self.account.snapshot.is_some() {
-                        self.account.revision = self.account.revision.wrapping_add(1);
-                    } else {
-                        self.start_hyro_snapshot(cx);
-                    }
-                }
-            } else {
-                self.account.orders_follow_up |= self.account.orders.is_some();
-                self.fetch_orders(cx);
-            }
+            self.refresh_order_source(cx);
             return;
         }
         if self.account.handshake_timer == Some(timer) {
