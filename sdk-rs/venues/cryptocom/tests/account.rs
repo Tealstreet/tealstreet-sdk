@@ -1309,3 +1309,38 @@ fn a_refusal_ends_the_start_however_it_arrives() {
         assert_eq!(failures, 1, "{status} {body}");
     }
 }
+
+#[test]
+fn socket_login_refusal_is_reported_even_after_rest_finishes_startup() {
+    for rest_first in [false, true] {
+        let mut h = Harness::new();
+        h.engine.set_account_startup(true);
+        if rest_first {
+            h.load();
+        }
+        let socket = h.socket(true);
+        h.event(Event::WsMessage {
+            socket,
+            text: r#"{"method":"public/auth","code":40101,"message":"key refused"}"#,
+        });
+        let failures = h
+            .actions
+            .iter()
+            .filter(|action| {
+                matches!(
+                    action,
+                    Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                )
+            })
+            .count();
+        assert_eq!(
+            failures, 1,
+            "REST readiness must not suppress a definitive private-stream login refusal"
+        );
+        if !rest_first {
+            h.load();
+        }
+        let loaded = h.engine.store().loaded();
+        assert!(loaded.markets && loaded.balance && loaded.positions && loaded.orders);
+    }
+}
