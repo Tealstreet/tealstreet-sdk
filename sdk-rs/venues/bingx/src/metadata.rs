@@ -231,6 +231,11 @@ impl Account {
             }
             return;
         }
+        if let Some(error) = crate::read_rate_limit(&response, cx.now) {
+            cx.retried_failure_error("bingx.metadata:private", &error);
+            fail(cx, &leg, error);
+            return;
+        }
         if let Some(error) = response_error(response, false) {
             // A failing private read surfaces as an Error at the retried-failure cadence.
             cx.retried_failure(

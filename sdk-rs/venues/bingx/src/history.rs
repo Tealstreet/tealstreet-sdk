@@ -22,7 +22,7 @@ use std::fmt;
 
 // BingX-API/api-ai-skills references/error-codes.md: preserve native codes,
 // but never make diagnostics depend on a free-form venue message.
-fn response_failure(response: &Response<'_>, message: String) -> VenueError {
+fn response_failure(response: &Response<'_>, now: f64, message: String) -> VenueError {
     let code = serde_json::from_str::<wire::Rejection<'_>>(response.body)
         .ok()
         .and_then(|body| body.code)
@@ -47,7 +47,12 @@ fn response_failure(response: &Response<'_>, message: String) -> VenueError {
         (200..=299, _) => (ErrorKind::Internal, ErrorCause::HistoryDecode),
         _ => (ErrorKind::VenueUnavailable, ErrorCause::HistoryHttpError),
     };
-    let error = VenueError::new(message).kind(kind).cause_code(cause);
+    let mut error = VenueError::new(message).kind(kind).cause_code(cause);
+    if kind == ErrorKind::RateLimited
+        && let Some(wait) = crate::ban_wait_ms(response, now)
+    {
+        error = error.retry_after_ms(wait);
+    }
     if let Some(code) = code {
         error.venue_code(code.to_string())
     } else {
@@ -845,10 +850,13 @@ impl History {
         if let Ok(request) = self.resign(cx, request, response) {
             let error = response_failure(
                 &response,
-                format!(
-                    "response did not contain the expected list: {}",
-                    response.body
-                ),
+                cx.now,
+                crate::success(response).err().unwrap_or_else(|| {
+                    format!(
+                        "response did not contain the expected list: {}",
+                        response.body
+                    )
+                }),
             );
             self.on_http_failed(cx, request, error);
         }
@@ -929,6 +937,7 @@ impl History {
         if !(200..300).contains(&response.status) {
             let error = response_failure(
                 &response,
+                cx.now,
                 format!("history HTTP {}: {}", response.status, response.body),
             );
             self.on_http_failed(cx, request, error);
@@ -937,7 +946,7 @@ impl History {
         if let Ok(body) = serde_json::from_str::<wire::Rejection<'_>>(response.body)
             && let Some(code) = body.code.filter(|code| *code != 0)
         {
-            let error = response_failure(&response, format!("{code}: {}", body.msg));
+            let error = response_failure(&response, cx.now, format!("{code}: {}", body.msg));
             self.on_http_failed(cx, request, error);
             return;
         }

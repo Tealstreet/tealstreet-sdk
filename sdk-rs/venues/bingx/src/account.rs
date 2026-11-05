@@ -403,13 +403,8 @@ pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::Ve
         })
 }
 /// A typed cause for a failing read: a refused key, or a rate limit.
-pub(crate) fn read_refusal(response: &Response<'_>) -> Option<VenueError> {
-    key_refusal(response).or_else(|| {
-        (response.status == 429).then(|| {
-            VenueError::new(format!("BingX HTTP 429: {}", response.body))
-                .kind(ErrorKind::RateLimited)
-        })
-    })
+pub(crate) fn read_refusal(response: &Response<'_>, now: f64) -> Option<VenueError> {
+    key_refusal(response).or_else(|| crate::read_rate_limit(response, now))
 }
 impl Account {
     pub(crate) fn with_slots(slots: Slots<Identity>) -> Self {
@@ -1273,7 +1268,7 @@ impl Account {
         if let Some(error) = key_refusal(&response) {
             cx.startup_read_refused(&error);
         }
-        self.read_error = read_refusal(&response);
+        self.read_error = read_refusal(&response, cx.now);
         if let Some(error) = response_error(response, is_key).map(|error| request.named(error)) {
             if matches!(request, Request::Keepalive { .. })
                 && (response.status == 404 || {
@@ -1606,17 +1601,25 @@ impl Account {
         {
             return;
         }
+        let typed = self.read_error.take();
         let refresh = match &request {
             Request::SymbolLeverage { id, symbol } => Some((*id, symbol, true)),
             Request::SymbolMarginType { id, symbol } => Some((*id, symbol, false)),
             _ => None,
         };
         if let Some((id, symbol, leverage)) = refresh {
-            cx.notice(
-                Level::Warn,
-                code::REQUEST_FAILED,
-                format!("BingX settings refresh for {symbol} failed: {error}"),
-            );
+            if let Some(error) = typed
+                .as_ref()
+                .filter(|error| error.kind == Some(ErrorKind::RateLimited))
+            {
+                cx.notice_error(Level::Warn, code::REQUEST_FAILED, error);
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    format!("BingX settings refresh for {symbol} failed: {error}"),
+                );
+            }
             self.settle_symbol_settings(cx, symbol, id, |read| {
                 if leverage {
                     read.leverage = Some(None);
@@ -1627,10 +1630,17 @@ impl Account {
             return;
         }
         // A failing private read surfaces as an Error at the retried-failure cadence.
-        cx.retried_failure(
-            "bingx.account:private",
-            format!("BingX private request failed: {error}"),
-        );
+        if let Some(error) = typed
+            .as_ref()
+            .filter(|error| error.kind == Some(ErrorKind::RateLimited))
+        {
+            cx.retried_failure_error("bingx.account:private", error);
+        } else {
+            cx.retried_failure(
+                "bingx.account:private",
+                format!("BingX private request failed: {error}"),
+            );
+        }
         match request {
             Request::ListenKey { .. } => {
                 self.invalidate_private(cx);
@@ -1647,10 +1657,8 @@ impl Account {
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { read, .. } => {
                 self.positions_in_flight = None;
-                let fresh = self
-                    .read_error
-                    .take()
-                    .unwrap_or_else(|| VenueError::new(format!("BingX positions: {error}")));
+                let fresh =
+                    typed.unwrap_or_else(|| VenueError::new(format!("BingX positions: {error}")));
                 self.fresh_positions.failed(cx, 0, read, &fresh);
                 self.read_fresh_positions_again(cx, read, credentials);
             }

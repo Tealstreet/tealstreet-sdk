@@ -291,6 +291,11 @@ impl Bingx {
         rows: Vec<Candle>,
         valid: bool,
     ) {
+        if let Some(error) = read_rate_limit(&response, cx.now) {
+            let _ = cx.command_error_context(context, error.message.clone());
+            let _ = cx.fail_context(context, error);
+            return;
+        }
         let result = success(response).and_then(|_| {
             if valid {
                 candle_data(rows)
@@ -697,6 +702,29 @@ pub(crate) fn ban_wait_ms(response: &Response<'_>, now: f64) -> Option<f64> {
     )
 }
 
+/// Classify the envelope before any list codec, using the discovery ban policy.
+pub(crate) fn read_rate_limit(
+    response: &Response<'_>,
+    now: f64,
+) -> Option<safe_cex_engine::VenueError> {
+    let wait = ban_wait_ms(response, now)?;
+    let envelope = serde_json::from_str::<wire::Rejection<'_>>(response.body).ok();
+    let mut error = safe_cex_engine::VenueError::new(
+        success(*response)
+            .err()
+            .unwrap_or_else(|| "BingX rate limit".into()),
+    )
+    .kind(safe_cex_engine::ErrorKind::RateLimited)
+    .retry_after_ms(wait);
+    if let Some(envelope) = envelope {
+        if let Some(code) = envelope.code.filter(|code| *code != 0) {
+            error = error.venue_code(code.to_string());
+        }
+        error = error.venue_message(envelope.msg.into_owned());
+    }
+    Some(error)
+}
+
 /// The first epoch (13-digit milliseconds or 10-digit seconds) in a ban message.
 fn unblock_at(message: &str) -> Option<f64> {
     message
@@ -1100,8 +1128,10 @@ impl Venue for Bingx {
             pending => pending,
         };
         if let Err(error) = success(response) {
+            self.account.read_error = read_rate_limit(&response, cx.now);
             self.note_ban(cx, &response);
             self.on_request_failed(cx, pending, &error);
+            self.account.read_error = None;
             self.ban_wait_ms = None;
             return;
         }
@@ -1236,13 +1266,22 @@ impl Venue for Bingx {
             }
             Pending::Signed(signed) => {
                 if signed.context().is_some() && matches!(&signed.inner, Pending::Candles { .. }) {
+                    if let Some(error) = read_rate_limit(&response, cx.now) {
+                        let context = signed.context().expect("checked candle custody");
+                        let _ = cx.command_error_context(context, error.message.clone());
+                        let _ = cx.fail_context(context, error);
+                        managed::finish(cx, signed.context().cloned());
+                        return;
+                    }
                     self.on_request_failed(
                         cx,
                         Pending::Signed(signed),
-                        &format!(
-                            "response did not contain the expected list: {}",
-                            response.body
-                        ),
+                        &success(response).err().unwrap_or_else(|| {
+                            format!(
+                                "response did not contain the expected list: {}",
+                                response.body
+                            )
+                        }),
                     );
                 } else {
                     let context = signed.context().cloned();
@@ -1267,16 +1306,19 @@ impl Venue for Bingx {
                 {
                     cx.startup_read_refused(&error);
                 }
-                self.account.read_error = account::read_refusal(&response);
+                self.account.read_error = account::read_refusal(&response, cx.now);
                 self.note_ban(cx, &response);
                 self.on_request_failed(
                     cx,
                     pending,
-                    &format!(
-                        "response did not contain the expected list: {}",
-                        response.body
-                    ),
+                    &success(response).err().unwrap_or_else(|| {
+                        format!(
+                            "response did not contain the expected list: {}",
+                            response.body
+                        )
+                    }),
                 );
+                self.account.read_error = None;
                 self.ban_wait_ms = None;
             }
         }
@@ -1453,11 +1495,17 @@ impl Venue for Bingx {
                 self.retry_list(cx, List::Premium)
             }
         }
-        cx.notice(
-            if discovery { Level::Warn } else { Level::Error },
-            code::REQUEST_FAILED,
-            error,
-        );
+        let level = if discovery { Level::Warn } else { Level::Error };
+        if let Some(refused) = self
+            .account
+            .read_error
+            .take()
+            .filter(|error| error.kind == Some(safe_cex_engine::ErrorKind::RateLimited))
+        {
+            cx.notice_error(level, code::REQUEST_FAILED, &refused);
+        } else {
+            cx.notice(level, code::REQUEST_FAILED, error);
+        }
     }
     fn read_root_retired(
         &mut self,
