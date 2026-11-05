@@ -1021,8 +1021,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
         }
     }
 
-    /// A Hosted account's start failure, one line per account per MIRROR_EVERY. The
-    /// server has no Sentry client, so the journal is where these are alerted on.
+    /// A Hosted account's start failure, one line per account per MIRROR_EVERY, also
+    /// handed to the host's error sink (`report`).
     fn note_start_failure(&mut self, error: &VenueError) {
         let Some(label) = self.config.log_label.as_deref() else {
             return;
@@ -1040,6 +1040,13 @@ impl<V: Venue, T: Transport> Account<V, T> {
             "{}",
             start_failure_line(label, self.config.signing_mode, error)
         );
+        crate::report::report(&crate::report::ErrorReport {
+            kind: crate::report::ErrorKind::AccountStartFailed,
+            label: Some(label),
+            target: None,
+            error_kind: error.kind.map(|kind| kind.as_str()),
+            venue_code: error.venue_code.as_deref(),
+        });
     }
 
     /// Log notices never disconnect peers: an oversized one is cut to fit, and

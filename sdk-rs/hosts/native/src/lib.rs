@@ -7,6 +7,7 @@
 
 mod how_pool;
 mod managed_http;
+pub mod report;
 mod routing;
 mod server;
 mod socket_health;

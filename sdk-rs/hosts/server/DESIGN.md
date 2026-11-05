@@ -70,9 +70,9 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/*`; either missing/invalid value disables Access-authenticated proof, heartbeat and interruption-header handling and logs once at startup |
 | `TEALSTREET_IDLE_RELEASE_TTL_MS` | `20000` | Idle-release lease in milliseconds; operator drains never expire |
 | `CONNECT_REGION` | unset | Region label. Routing uses it for `proxyRegion` defaults; it also appears in `/health` and logs |
-| `TEALSTREET_RELEASE` | unset | Image revision shown in `/health`; whitespace and placeholder values (`undefined`, `null`, `unknown`) are omitted |
-| `TEALSTREET_BOX` | unset | Bun wrapper only: stable Sentry `server_name` and `box` tag (for example `exchange-01`); no hostname fallback |
-| `EXCHANGE_SERVER_SENTRY_DSN` | unset | Bun wrapper only: Sentry is off when unset |
+| `TEALSTREET_RELEASE` | unset | Image revision shown in `/health` and as the Sentry `release`; whitespace and placeholder values (`undefined`, `null`, `unknown`) are omitted |
+| `TEALSTREET_BOX` | unset | Stable Sentry `server_name` and `box` tag (for example `exchange-01`); no hostname fallback |
+| `EXCHANGE_SERVER_SENTRY_DSN` | unset | Native error capture (`src/telemetry.rs`); Sentry is off when unset |
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
@@ -82,13 +82,42 @@ Images do not contain credentials and the workflows do not deploy hosts.
 belong to the Bun gateway and have no meaning here. One process serves all
 connections.
 
-The native binary currently emits JSON logs, not Sentry events. The Bun gateway
-and exchange workers initialize Sentry through `packages/service-telemetry`.
-They use the existing runtime `TEALSTREET_RELEASE` image revision, never the
-literal `undefined`. Image OCI revision labels are external metadata, not
-process environment variables. Box identity comes only from `TEALSTREET_BOX`;
-missing or invalid labels are omitted. Their Sentry events omit `region` because
-`CONNECT_REGION` can be a legacy routing default rather than the box location.
+The native binary writes JSON logs and, when `EXCHANGE_SERVER_SENTRY_DSN` is
+set, sends Sentry events (`src/telemetry.rs`). Its identity rules match
+`packages/service-telemetry`, which the Bun gateway and exchange workers use.
+The release is the runtime `TEALSTREET_RELEASE` image revision, omitted when
+unset, and never the literal `undefined`. Image OCI revision labels are
+external metadata, not process environment variables. Box identity comes only
+from `TEALSTREET_BOX`; missing or invalid labels are omitted. Events omit
+`region` because `CONNECT_REGION` can be a legacy routing default rather than
+the box location. The SDK infers no host, release or environment.
+
+What it captures:
+- panics, through a panic hook that captures without flushing (a caught panic
+  on an engine thread never waits on Sentry), sending the code location and
+  never the payload;
+- `Log::error` conditions: drain and break-glass deadlines, router-lease
+  fencing, a failing signer, and algo shutdown deadlines;
+- the native host's account start failures and venue, relay and HTTP-tunnel
+  transport failures, through `safe_cex_native::report`.
+
+Warnings are not sent.
+
+Every event is rebuilt from an allowlist:
+- a fixed summary per condition, never error text or a venue payload;
+- a scrubbed fingerprint and exception type;
+- stack frames' function, module, file, line and column only;
+- tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue` and
+  `target`;
+- extras `user_tag` (a hash, never the user ID) and
+  `suppressed_since_last_event`.
+
+Account names, URLs with their query, auth headers, key-shaped strings and
+payloads do not leave. Events are throttled to one per fingerprint per 60 s
+and 30 per minute overall, tracking at most 500 fingerprints. They are sent
+from Sentry's transport thread through a bounded queue that drops when full.
+The only flush is the guard's at shutdown, bounded to 2 s, so telemetry never
+blocks or fails a trading path.
 
 ## HTTP routes
 
@@ -666,9 +695,10 @@ default exactly where the TS server reads it.
     src/frames.rs     FrameServer Outgoing to msg frame/notice mapping, base64
     src/signer.rs     4yjlw0 (wires safe-cex-remote-signer)
 
-Dependencies: `axum` (with `ws`), `tokio`, `jsonwebtoken`, `base64`, `serde_json`
-and `safe-cex-native`. Sentry capture currently belongs to the Bun wrapper,
-not this native crate.
+Dependencies: `axum` (with `ws`), `tokio`, `jsonwebtoken`, `base64`, `serde_json`,
+`safe-cex-native` and `sentry`. `sentry` runs without default features: only
+its panic event builder and the reqwest transport, over the rustls/ring stack the
+server already links. There is no native-tls, no host contexts and no sessions.
 
 ## Algos (claude-tbz5hr chaser, 55ao7t TWAP, zs5e83 exec)
 

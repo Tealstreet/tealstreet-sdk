@@ -24,6 +24,9 @@ futures-util = { version = "0.3.34", default-features = false, features = ["sink
 jsonwebtoken = { version = "9.3.1", default-features = false, features = ["use_pem"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# Error capture only: no default integrations, contexts (host inference),
+# sessions or native-tls; the reqwest transport over the rustls/ring already here.
+sentry = { version = "0.49.5", default-features = false, features = ["reqwest", "rustls-no-provider", "panic"] }
 base64.workspace = true
 getrandom.workspace = true
 serde.workspace = true
@@ -39,6 +42,7 @@ safe-cex-engine = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.53.3", features = ["test-util"] }
 safe-cex-venues = { workspace = true, features = ["hyperliquid"] }
 tokio-tungstenite = "0.30.0"
+sentry = { version = "0.49.5", default-features = false, features = ["test", "panic"] }
 
 [lints]
 workspace = true
