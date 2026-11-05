@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 import { BITGET_CUMULATIVE_ANCHOR } from './bitget-paired-steady.mjs';
+import { familyComparisonAuthority } from './cpu-family-identity.mjs';
 import { RETIRED_RUST_LANDING_TIP, selectBitgetPair } from './bitget-paired-ci.mjs';
 
 const A = 'a'.repeat(40), B = 'b'.repeat(40), H = 'c'.repeat(40), TREE = 'd'.repeat(40);
@@ -63,6 +64,65 @@ test('baseline comes from the authenticated checkout first parent on the actual 
   assert.ok(x.calls.some(args => args[0] === 'merge-tree'));
 });
 
+function mergePull(pull) {
+  pull.state = 'closed';
+  pull.merged = true;
+  pull.merged_at = '2026-11-05T20:18:39Z';
+  pull.merge_commit_sha = 'e'.repeat(40);
+}
+
+test('an exact merged PR retains the authenticated original comparison', async () => {
+  const x = fixture(), expected = await selectBitgetPair(x.context);
+  mergePull(x.pull);
+  assert.deepEqual(await selectBitgetPair(x.context), expected);
+});
+
+test('replay family selection accepts the same authenticated merged PR', async () => {
+  const x = fixture();
+  mergePull(x.pull);
+  x.jobs[0].name = 'Rust / replay measurement (binance)';
+  const result = await familyComparisonAuthority({ ...x.context, suite: 'binance' });
+  assert.equal(result.baseline, A);
+  assert.equal(result.candidate, B);
+  assert.equal(result.candidateTree, TREE);
+});
+
+test('a PR merging between association and refresh retains the original comparison', async () => {
+  const x = fixture();
+  x.pulls[0] = structuredClone(x.pull);
+  mergePull(x.pull);
+  const result = await selectBitgetPair(x.context);
+  assert.equal(result.baseline, A);
+  assert.equal(result.candidate, B);
+  assert.equal(result.head, H);
+});
+
+test('closed unmerged associations do not compete with the exact open PR', async () => {
+  const x = fixture();
+  x.pulls.push({ ...structuredClone(x.pull), number: 99, id: 100, state: 'closed', merged_at: null });
+  assert.equal((await selectBitgetPair(x.context)).pullNumber, 20);
+});
+
+test('merged selection retains ambiguity and refreshed source checks', async t => {
+  const cases = [
+    ['two eligible exact PRs', x => { x.pulls.push(structuredClone(x.pull)); }],
+    ['closed without a merge', x => { x.pull.merged = false; }],
+    ['missing merge time', x => { x.pull.merged_at = null; }],
+    ['invalid merge time', x => { x.pull.merged_at = 'not a timestamp'; }],
+    ['missing merge commit', x => { x.pull.merge_commit_sha = null; }],
+    ['head changed after association', x => { x.pull.head.sha = A; }],
+    ['foreign base after association', x => { x.pull.base.repo.full_name = 'fork/tealstreet-sdk'; }],
+    ['missing exact run association', x => { x.run.pull_requests = []; }],
+  ];
+  for (const [name, mutate] of cases) await t.test(name, async () => {
+    const x = fixture();
+    mergePull(x.pull);
+    x.pulls[0] = structuredClone(x.pull);
+    mutate(x);
+    await assert.rejects(selectBitgetPair(x.context));
+  });
+});
+
 test('ambiguous, stale, cross-branch or retried source/producer fails closed', async () => {
   for (const mutate of [x => x.pulls.push(x.pull), x => x.jobs.push(x.jobs[0]),
     x => { x.pulls.length = 0; }, x => { x.pull.state = 'closed'; }, x => { x.pull.base.ref = 'feat/other'; },
@@ -120,7 +180,7 @@ test('checkout API/local parents and trees, exact head and first-parent landing 
         url: 'https://api.github.com/repos/fork/tealstreet-sdk/git/refs/heads/master' });
     }, /ref from the base repository/],
     ['API and local landing ref disagree', x => { x.state.localLanding = H; }, /API and local current Rust landing ref/],
-    ['pull base repository is foreign', x => { x.pull.base.repo.full_name = 'fork/tealstreet-sdk'; }, /exact open PR/],
+    ['pull base repository is foreign', x => { x.pull.base.repo.full_name = 'fork/tealstreet-sdk'; }, /exact open or merged PR/],
     ['not a current landing ancestor', x => {
       x.state.landingTip = 'e'.repeat(40); x.state.localLanding = x.state.landingTip;
       const old = x.context.gitRead;

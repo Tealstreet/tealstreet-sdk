@@ -6,6 +6,12 @@ the pinned family build, retaining both packages and their metadata. The base
 is the checked PR composition's first parent, or the authenticated master push's
 actual first parent. A failed build or mismatched seal never grants a pass.
 
+An exact PR may be open or confirmed merged when its original run is processed.
+The selector still authenticates its head, repository, run association, checkout
+parents, landing ancestry and recomputed merge tree. Closed unmerged PRs and
+ambiguous or stale heads remain refused. Merging does not change the original
+comparison or grant a CPU certificate.
+
 When WASM and JS glue (and package metadata bytes) match, planning and final
 certification recheck the original producer's digest-checked artifact, archive
 source/run/family, actual file hashes, common tools/flags and candidate binding
