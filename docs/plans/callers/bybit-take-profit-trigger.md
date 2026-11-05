@@ -5,7 +5,8 @@ no initial TP reference. Bybit can refuse an omitted value as UNKNOWN. Attached
 virtual TP amendments, full-position TP changes and the existing missing-mark
 partial fallback now send the real MarkPrice, LastPrice or IndexPrice reference,
 defaulting to LastPrice when absent or unrecognized. Fresh TP placement and
-partial recreation preserve IndexPrice too. Stop-loss defaults are unchanged.
+partial recreation preserve IndexPrice too. Spot attached amendments omit the
+derivative-only field, matching spot create. Stop-loss defaults are unchanged.
 
 An attached TP leg uses its own `tpTriggerBy`, rather than inheriting an unrelated
 parent opening-trigger reference. Active native order levels with unrecognized

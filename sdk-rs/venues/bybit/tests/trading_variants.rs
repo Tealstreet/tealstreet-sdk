@@ -4657,3 +4657,26 @@ fn hyro_a_second_send_cannot_renew_the_earliest_send_retention_window() {
         "coverage is measured from the first send, not the second"
     );
 }
+
+#[test]
+fn spot_attached_take_profit_amend_omits_derivative_trigger_reference() {
+    let mut h = ready(Variant::Spot);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"spot","symbol":"BTCUSDT","orderId":"spot-parent","side":"Buy","orderType":"Limit","orderStatus":"New","qty":"1","price":"100","leavesQty":"1","takeProfit":"110","tpTriggerBy":"UNKNOWN"}]}"#);
+    assert!(h.engine.store().order("spot-parent__take_profit").is_some());
+    h.command(Command::AmendOrder {
+        command: 980,
+        id: "spot-parent__take_profit".into(),
+        price: Some(115.0),
+        amount: None,
+    });
+    let request = h.take("/v5/order/amend");
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["category"], "spot");
+    assert_eq!(body["orderId"], "spot-parent");
+    assert_eq!(body["takeProfit"], "115");
+    assert!(
+        body.get("tpTriggerBy").is_none(),
+        "spot has no derivative trigger reference: {body}"
+    );
+    assert!(!h.has_request("/v5/order/cancel"));
+}

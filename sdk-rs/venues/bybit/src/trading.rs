@@ -1326,7 +1326,7 @@ impl BybitLinear {
                     .str(field, &number(price))
                     .opt_str(
                         "tpTriggerBy",
-                        (order.kind == OrderType::TakeProfit)
+                        (order.kind == OrderType::TakeProfit && !self.variant.is_spot())
                             .then(|| take_profit_reference(order.trigger_type)),
                     ),
             );
