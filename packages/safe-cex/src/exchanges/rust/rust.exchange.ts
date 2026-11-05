@@ -1528,6 +1528,7 @@ export class RustEngineExchange extends BaseExchange {
         const { message, sentryData } = bybitPublicRateLimitReport(this.name, notice);
         this.emitter.emit('log', `[${this.name}] ${message}`, LogSeverity.Error, { sendToSentry: true, sentryData });
       },
+      (event) => this.receiveEvent(event),
     );
     this.httpStartupDiagnostics = routedTransport.startupDiagnostics;
     this.invalidateInfoCatalogue = routedTransport.invalidateCatalogue;
