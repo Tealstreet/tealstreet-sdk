@@ -101,6 +101,50 @@ pub enum ErrorCause {
     HistoryTimeout,
 }
 
+/// Closed native row schemas; never includes a symbol, identity or response text.
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistorySchema {
+    BitgetClassicFills,
+    BitgetUtaFills,
+    BitgetClassicOrders,
+    BitgetUtaOrders,
+    BitgetClassicIncome,
+    BitgetUtaIncome,
+    BitgetPublicTrades,
+    KrakenFills,
+    KrakenOrders,
+    KrakenIncome,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryDecodeReason {
+    RowShape,
+    Identity,
+    Symbol,
+    Quantity,
+    FilledQuantity,
+    Timestamp,
+    TimestampOrder,
+    Side,
+    OrderStatus,
+    OrderType,
+    Fee,
+    Market,
+    Economics,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryDecode {
+    pub schema: HistorySchema,
+    pub reason: HistoryDecodeReason,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VenueError {
@@ -114,6 +158,9 @@ pub struct VenueError {
     /// Closed, SDK-owned diagnostic classification, distinct from the venue's code.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cause_code: Option<ErrorCause>,
+    #[cfg(feature = "history-row-diagnostics")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_decode: Option<HistoryDecode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub venue_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -178,6 +225,14 @@ impl VenueError {
 
     pub fn cause_code(mut self, code: ErrorCause) -> Self {
         self.cause_code = Some(code);
+        self
+    }
+
+    #[cfg(feature = "history-row-diagnostics")]
+    pub fn history_decode(mut self, schema: HistorySchema, reason: HistoryDecodeReason) -> Self {
+        self.kind = Some(ErrorKind::Internal);
+        self.cause_code = Some(ErrorCause::HistoryDecode);
+        self.history_decode = Some(HistoryDecode { schema, reason });
         self
     }
 

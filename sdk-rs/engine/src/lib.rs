@@ -82,6 +82,8 @@ pub use error::{
     BuilderAuthorization, BuilderAuthorizationReason, ErrorCause, ErrorKind, Outcome, Partial,
     VenueError,
 };
+#[cfg(feature = "history-row-diagnostics")]
+pub use error::{HistoryDecode, HistoryDecodeReason, HistorySchema};
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::{OrderSnapshotToken, Store};
