@@ -1232,9 +1232,18 @@ pub async fn run(
         .await
         .is_err();
     if deadline_passed {
-        crate::state::Log::warn(&format!(
-            "{name}: chaser shutdown passed its deadline; cancels may be unsettled and orders may rest"
-        ));
+        crate::state::Log::error(
+            &format!(
+                "{name}: chaser shutdown passed its deadline; cancels may be unsettled and orders may rest"
+            ),
+            &crate::telemetry::Report {
+                kind: "algos.shutdown_deadline_passed",
+                summary: "chaser shutdown passed its deadline; cancels may be unsettled and orders may rest",
+                user_tag: Some(crate::accounts::user_tag(&who.user)),
+                venue: Some(&who.venue),
+                ..Default::default()
+            },
+        );
         // A live browser was told they stopped; now it must check the orders.
         if stopped.is_none() {
             for notice in &unsettled_notices {

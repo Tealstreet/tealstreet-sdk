@@ -2,7 +2,14 @@ import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
 
 import { describe, expect, it } from 'vitest';
 
-import { HttpTiming, httpTimingKind, tunnelHostLabel, upstreamMsFromHeaders, WINDOW_MS } from './httpTiming';
+import {
+  HttpTiming,
+  httpTimingKind,
+  httpTimingStage,
+  tunnelHostLabel,
+  upstreamMsFromHeaders,
+  WINDOW_MS,
+} from './httpTiming';
 
 const harness = (ping?: number) => {
   const events: EngineEvent[] = [];
@@ -17,6 +24,44 @@ const harness = (ping?: number) => {
 };
 
 describe('HttpTiming', () => {
+  it('extracts only closed order-stage labels and never copies body values', () => {
+    const origin = 'https://api.hyperliquid.xyz';
+    for (const [action, expected] of [
+      ['order', 'place'],
+      ['cancel', 'cancel'],
+      ['cancelByCloid', 'cancel'],
+      ['batchModify', 'modify'],
+    ] as const) {
+      expect(
+        httpTimingStage(`${origin}/exchange`, JSON.stringify({ action: { type: action, secret: 'never-log' } })),
+      ).toBe(expected);
+    }
+    for (const [type, expected] of [
+      ['orderStatus', 'orderStatus'],
+      ['maxBuilderFee', 'builderApproval'],
+      ['userRole', 'identity'],
+    ] as const) {
+      expect(httpTimingStage(`${origin}/info`, JSON.stringify({ type, user: 'never-log' }))).toBe(expected);
+    }
+    for (const body of [undefined, '', 'null', '[1]', '{', '{"type":"candleSnapshot"}', '{"type":"never-log"}']) {
+      expect(httpTimingStage(`${origin}/info`, body)).toBeUndefined();
+    }
+    expect(httpTimingStage(`${origin}/other`, '{"type":"orderStatus"}')).toBeUndefined();
+  });
+  it('times an order prerequisite individually while ordinary info reads stay aggregated', () => {
+    const { events, timing } = harness();
+    timing.record({ route: 'direct', kind: 'info', stage: 'orderStatus', outcome: 'ok', queuedMs: 4_000, wireMs: 20 });
+    expect(events).toEqual([
+      expect.objectContaining({
+        code: 'transport.http.timing',
+        fields: expect.objectContaining({ stage: 'orderStatus', queuedMs: 4_000, wireMs: 20 }),
+      }),
+    ]);
+    timing.record({ route: 'direct', kind: 'info', outcome: 'ok', queuedMs: 1, wireMs: 10 });
+    expect(events).toHaveLength(1);
+    timing.flush();
+    expect(events[1].code).toBe('transport.http.window');
+  });
   it('labels tunnel hosts and request kinds from closed sets', () => {
     expect(tunnelHostLabel('wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel')).toBe('vultr-tyo');
     expect(tunnelHostLabel('wss://fsjnpy143pbz.jp.tealstreet.io/tunnel')).toBe('aws-jp');

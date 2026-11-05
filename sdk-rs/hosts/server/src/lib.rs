@@ -14,5 +14,6 @@ pub mod pacing;
 pub mod router_lease;
 pub mod session;
 pub mod state;
+pub mod telemetry;
 pub mod threads;
 pub mod user_drain;

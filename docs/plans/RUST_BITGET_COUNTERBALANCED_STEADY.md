@@ -58,7 +58,7 @@ advance path. The coordinator derives anchor authority from the issued tip
 comparison authority and the checked-in fixed pin; uploaded evidence cannot
 issue either authority.
 
-The old A0 source is checked out only for BUILD. Its own checked-in build.sh,
+The old A0 source is checked out for its TS preflight and BUILD. Its own checked-in build.sh,
 tool pins, family profile, size checker and ci-wasm archive producer build and
 seal its package. No current runtime source is copied into that checkout. The
 external driver retains source seals, raw/web/node artifacts, metadata bytes
@@ -144,3 +144,25 @@ reviewing the holdout, both detection controls and the explicit live ruling.
 
 Independent integrity review, one qualifying PR run, and the auditor's exact
 tree GO remain mandatory. The owner performs the guarded head-matched merge.
+
+
+## Changed TS oracle output
+
+Before either comparison builds or measures Rust, a bounded TS-only replay runs
+from each authenticated source checkout against the identical candidate tape,
+books and Node executable. The original outputs, source/tree and runtime seals,
+logs and tape digest are retained. The candidate checkout is restored on failure.
+Every published replay field is compared structurally, excluding only `metrics`.
+Source edits with identical output do not suppress the existing certification.
+
+If the outputs differ, `steady-assessment.json` records `NOT-CERTIFIED`,
+`certified: false` and `certificate: null`; the paired job exits nonzero. It grants
+neither PASS nor an unchanged-bytes exception. This CPU job remains non-required;
+required replay correctness, family sizes and coverage retain their own gates.
+A failed TS replay is a collection error, not an oracle-change disposition.
+
+This guard prevents baseline Rust from being judged against changed candidate TS
+output. It does not establish arm-matched correctness: a future change must pair
+each Rust revision with its corresponding TS oracle before CPU comparisons of
+changed published output can certify. When TS output is unchanged, all existing
+strict baseline/candidate checks and frozen CPU thresholds still apply.
