@@ -108,3 +108,48 @@ fn orders_held_names_each_standing_fence_once_with_the_grace_of_its_clock() {
     );
     assert!(held.is_empty());
 }
+
+#[cfg(feature = "order-locks")]
+#[test]
+fn orders_held_forgets_lifted_names_floors_the_delay_and_asks_for_the_account() {
+    use super::orders_held_notice;
+    use crate::frame_fed::FENCE_GRACE_MS;
+    let mut locks = crate::order_locks::OrderLocks::default();
+    locks.fence(Some(&["ETHUSDT".into(), "BTCUSDT".into()]));
+    let marks = [(u64::MAX, 1_000.)];
+    let mut held = Vec::new();
+    assert!(orders_held_notice(&locks, &mut held, &marks, true, 1_000.).is_some());
+    // A lifted fence drops out of what was named, so fencing it again asks again.
+    let btc = locks
+        .uncertain_epochs()
+        .find(|(s, _)| *s == "BTCUSDT")
+        .unwrap()
+        .1;
+    locks.reconciled(Some("BTCUSDT"), btc);
+    assert_eq!(
+        orders_held_notice(&locks, &mut held, &marks, true, 1_000.),
+        None
+    );
+    assert_eq!(held, ["ETHUSDT"]);
+    locks.fence(Some(&["BTCUSDT".into()]));
+    assert_eq!(
+        orders_held_notice(&locks, &mut held, &marks, true, 1_000.),
+        Some(("BTCUSDT,ETHUSDT".to_owned(), FENCE_GRACE_MS))
+    );
+    // Past the oldest mark's grace, the read can lift it now.
+    held.clear();
+    assert_eq!(
+        orders_held_notice(
+            &locks,
+            &mut held,
+            &marks,
+            true,
+            1_000. + FENCE_GRACE_MS + 5_000.
+        ),
+        Some(("BTCUSDT,ETHUSDT".to_owned(), 0.))
+    );
+    // An all-symbols fence standing beside named ones asks for the account.
+    locks.fence(None);
+    let (named, _) = orders_held_notice(&locks, &mut held, &marks, true, 1_000.).unwrap();
+    assert_eq!(named, "");
+}
