@@ -169,7 +169,14 @@ impl OrderCaps {
         .unwrap_or(f64::INFINITY);
         Self {
             limit,
-            market: row.max_market_order_qty.0.unwrap_or(limit),
+            market: if inverse {
+                limit
+            } else {
+                row.max_market_order_qty
+                    .0
+                    .filter(|n| *n > 0.0)
+                    .unwrap_or(limit)
+            },
         }
     }
 

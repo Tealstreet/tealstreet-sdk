@@ -65,6 +65,21 @@ const inversePosition = {
 };
 
 describe('Bybit inverse contracts on the bybit connection', () => {
+  it.each(['40', '2000000', '0', '-1', undefined])(
+    'publishes a conservative maximum with native market cap %s',
+    async (marketCap) => {
+      const { exchange } = create(false);
+      routeGets(exchange, {
+        [`${ENDPOINTS.MARKETS}:linear`]: [{
+          ...linearRow,
+          lotSizeFilter: { ...linearRow.lotSizeFilter, maxMktOrderQty: marketCap },
+        }],
+      });
+      const [market] = await exchange.fetchMarkets();
+      expect(market.limits.amount.max).toBe(marketCap === '40' ? 40 : 1000000);
+    },
+  );
+
   it('routes inverse symbols to the inverse category whether or not the account opted in', () => {
     const { exchange } = create(false);
     expect(exchange.getCategoryForSymbol('BTCUSD')).toBe('inverse');

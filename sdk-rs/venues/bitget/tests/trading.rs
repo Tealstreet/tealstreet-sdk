@@ -88,7 +88,7 @@ fn market_quantity_cap_splits_reduce_only_children_but_keeps_the_limit_cap() {
 
 #[test]
 fn market_quantity_cap_never_exceeds_limit_and_missing_field_keeps_previous_cap() {
-    for cap in [None, Some("200")] {
+    for cap in [None, Some("200"), Some("0"), Some("-1")] {
         let mut h = classic_with_market_cap(cap);
         place(
             &mut h,
@@ -108,26 +108,26 @@ fn market_quantity_cap_never_exceeds_limit_and_missing_field_keeps_previous_cap(
 }
 
 #[test]
-fn market_quantity_cap_refuses_a_caller_identity_spanning_children_or_invalid_cap() {
-    for (cap, client_id) in [("40", Some("cap-control")), ("0", None)] {
-        let mut h = classic_with_market_cap(Some(cap));
-        let mut order = json!({"symbol":"BTCUSDT", "type":"market", "side":"sell", "amount":100.0, "reduceOnly":true});
-        if let Some(id) = client_id {
-            order["clientOrderId"] = json!(id);
-        }
-        place(&mut h, vec![order]);
-        assert!(
-            !h.requests
-                .iter()
-                .any(|request| request.url.contains("/batch-place-order"))
-        );
-        assert!(
-            h.done
-                .iter()
-                .any(|(id, result)| *id == 1 && result.is_err())
-        );
-    }
+fn market_quantity_cap_refuses_a_caller_identity_spanning_children() {
+    let mut h = classic_with_market_cap(Some("40"));
+    place(
+        &mut h,
+        vec![
+            json!({"symbol":"BTCUSDT", "type":"market", "side":"sell", "amount":100.0, "reduceOnly":true, "clientOrderId":"cap-control"}),
+        ],
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.url.contains("/batch-place-order"))
+    );
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 1 && result.is_err())
+    );
 }
+
 fn body(h: &mut Harness, path: &str) -> (safe_cex_engine::RequestId, Value) {
     let request = h.take(path);
     (

@@ -1,7 +1,7 @@
 # Bybit and Bitget market order quantity caps
 
 Bybit derivatives advertise `maxOrderQty` for limit/post-only orders and
-`maxMktOrderQty` for market orders. Bitget contracts advertise `maxOrderQty`
+`maxMktOrderQty` for market orders. Bitget linear USDT/USDC contracts advertise `maxOrderQty`
 and `maxMarketOrderQty`. Using the limit quantity for a market split could
 produce a child the venue refuses as too large, including a reduce-only close.
 
@@ -11,9 +11,16 @@ identity for a market order that must become several children. The displayed
 maximum and caller-ID admission are deliberately conservative for limit orders.
 Without a caller ID, the native limit formatter still uses the native limit cap;
 market children use the minimum. Every split close child retains reduce-only.
-A tighter store override remains binding. Missing market-specific caps retain
-the previous limit bound; explicit invalid/nonpositive caps do not authorize an
-unbounded market order.
+A tighter store override remains binding. Absent, invalid or nonpositive market-specific caps retain
+the previous limit bound, rather than publishing a zero maximum.
+
+The retained TS Bybit and Bitget linear reference catalogues publish the same
+conservative minimum, so replay parity checks the actual metadata policy.
+Bitget inverse keeps its legacy `maxTradeNum` bound unchanged: current docs call
+`maxMarketOrderQty` base-coin quantity, while existing inverse code and fixtures
+interpret native size/`maxTradeNum` as USD notional. Resolving those units is a
+separate investigation; this patch does not combine them. Bitget market-on-trigger
+algo sizing is outside this ordinary market/limit formatter change.
 
 Both frame-fed page engines already load the public instrument catalogue, so
 they learn these private formatting bounds without account reads. Bybit explicit

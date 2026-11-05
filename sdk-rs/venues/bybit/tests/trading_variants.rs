@@ -212,15 +212,44 @@ fn market_quantity_cap_splits_each_reduce_only_child_but_keeps_the_limit_cap() {
 }
 
 #[test]
+fn a_zero_market_only_cap_still_publishes_the_limit_maximum() {
+    let instrument = support::INSTRUMENTS.replace("500.000", "0");
+    assert!(instrument.contains("\"maxMktOrderQty\":\"0\""));
+    let h = ready_listing_with_instruments(options(Variant::Demo), EMPTY, Some(instrument));
+    assert_eq!(
+        h.engine
+            .store()
+            .market("BTCUSDT")
+            .unwrap()
+            .limits
+            .amount
+            .max,
+        1190.0
+    );
+}
+
+#[test]
 fn market_quantity_cap_never_exceeds_limit_cap_and_missing_field_keeps_limit_cap() {
     for (instrument, expected) in [
         (support::INSTRUMENTS.replace("500.000", "2000.000"), 1190.0),
+        (support::INSTRUMENTS.replace("500.000", "0"), 1190.0),
+        (support::INSTRUMENTS.replace("500.000", "-1"), 1190.0),
         (
             support::INSTRUMENTS.replace(",\"maxMktOrderQty\":\"500.000\"", ""),
             1190.0,
         ),
     ] {
         let mut h = ready_listing_with_instruments(options(Variant::Demo), EMPTY, Some(instrument));
+        assert_eq!(
+            h.engine
+                .store()
+                .market("BTCUSDT")
+                .unwrap()
+                .limits
+                .amount
+                .max,
+            expected
+        );
         let mut opts = order("BTCUSDT", 1500.0);
         opts.kind = OrderType::Market;
         opts.reduce_only = Some(true);

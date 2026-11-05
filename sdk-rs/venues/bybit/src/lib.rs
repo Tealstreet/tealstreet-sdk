@@ -298,7 +298,10 @@ impl OrderCaps {
     fn from_wire(row: &Instrument<'_>) -> Option<Self> {
         let lot = row.lot_size_filter.as_ref()?;
         let limit = float_of(&lot.max_order_qty);
-        let market = present(&lot.max_mkt_order_qty).map_or(limit, float);
+        let market = present(&lot.max_mkt_order_qty)
+            .map(float)
+            .filter(|cap| cap.is_finite() && *cap > 0.0)
+            .unwrap_or(limit);
         Some(Self { limit, market })
     }
 
