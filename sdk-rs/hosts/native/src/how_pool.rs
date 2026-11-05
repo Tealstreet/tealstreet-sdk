@@ -121,6 +121,7 @@ struct Job {
     request: RequestId,
     events: Events,
     done: oneshot::Sender<Result<(), String>>,
+    guard: Option<crate::transport::IoGuard>,
 }
 
 enum Command {
@@ -147,12 +148,13 @@ impl HowConnection {
             .unwrap_or_else(|_| Err("HTTP tunnel connection failed".into()))
     }
 
-    /// Sends one `rpc.http` and reports its answer to `events`.
+    /// Sends one `rpc.http`, rechecking authority when its queued job reaches the socket.
     pub(crate) async fn request(
         &self,
         request: RequestId,
         packet: String,
         events: Events,
+        guard: Option<crate::transport::IoGuard>,
     ) -> Result<(), String> {
         let (done, finished) = oneshot::channel();
         let job = Job {
@@ -161,6 +163,7 @@ impl HowConnection {
             request,
             events,
             done,
+            guard,
         };
         self.commands
             .send(Command::Send(job))
@@ -349,6 +352,11 @@ async fn run(route: Route, mut commands: mpsc::UnboundedReceiver<Command>) {
                     }
                 }
                 Some(Command::Send(job)) => {
+                    if job.done.is_closed() { continue; }
+                    if !job.guard.as_ref().is_none_or(|guard| guard()) {
+                        let _ = job.done.send(Err("account IO authority expired".into()));
+                        continue;
+                    }
                     let Some(open) = socket.as_mut() else {
                         let _ = job.done.send(Err("HTTP tunnel handoff failed".into()));
                         continue;
@@ -514,6 +522,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn queued_how_request_rechecks_io_authority_before_the_physical_send() {
+        use std::sync::atomic::AtomicBool;
+        let received = Arc::new(AtomicUsize::new(0));
+        let counted = received.clone();
+        let (url, _) = tunnel(move |mut socket| {
+            let counted = counted.clone();
+            async move {
+                while let Some(Ok(Message::Text(text))) = socket.next().await {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    let packet: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    socket
+                        .send(Message::text(answer(
+                            packet["nonce"].as_str().unwrap(),
+                            "ok",
+                        )))
+                        .await
+                        .unwrap();
+                }
+            }
+        })
+        .await;
+        let pool = HowPool::default();
+        let connection = pool.connection_with(
+            &url,
+            vec![],
+            tokens(),
+            Arc::new(OpenCap::new(10.0, 10.0)),
+            BASE_BACKOFF,
+        );
+        connection.ready().await.unwrap();
+        let allowed = Arc::new(AtomicBool::new(true));
+        let gate = allowed.clone();
+        let (events, _) = mpsc::unbounded_channel();
+        let packet =
+            |id| serde_json::json!({"type":"rpc.http","nonce":format!("native-{id}")}).to_string();
+        let mut queued = Box::pin(connection.request(
+            RequestId(1),
+            packet(1),
+            events.clone(),
+            Some(Arc::new(move || gate.load(Ordering::SeqCst))),
+        ));
+        // Queue on the single-thread runtime, then fence before the HOW actor can poll.
+        std::future::poll_fn(|cx| {
+            assert!(queued.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        allowed.store(false, Ordering::SeqCst);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), queued)
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert_eq!(received.load(Ordering::SeqCst), 0);
+        let mut abandoned = Box::pin(connection.request(
+            RequestId(2),
+            packet(2),
+            events.clone(),
+            Some(Arc::new(|| true)),
+        ));
+        std::future::poll_fn(|cx| {
+            assert!(abandoned.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        drop(abandoned);
+        connection
+            .request(RequestId(3), packet(3), events, Some(Arc::new(|| true)))
+            .await
+            .unwrap();
+        assert_eq!(received.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn requests_share_one_socket_and_answers_may_come_out_of_order() {
         let (url, opened) = tunnel(|mut socket| async move {
             let mut nonces = Vec::new();
@@ -546,8 +629,8 @@ mod tests {
             serde_json::json!({"type": "rpc.http", "nonce": format!("native-{id}")}).to_string()
         };
         let (first, second) = tokio::join!(
-            connection.request(RequestId(1), packet(1), events.clone()),
-            connection.request(RequestId(2), packet(2), events.clone()),
+            connection.request(RequestId(1), packet(1), events.clone(), None),
+            connection.request(RequestId(2), packet(2), events.clone(), None),
         );
         assert_eq!((first, second), (Ok(()), Ok(())));
         let mut bodies = HashMap::new();
@@ -594,7 +677,7 @@ mod tests {
         connection.ready().await.unwrap();
         let (events, _received) = mpsc::unbounded_channel();
         let packet = serde_json::json!({"type": "rpc.http", "nonce": "native-1"}).to_string();
-        let failed = connection.request(RequestId(1), packet, events).await;
+        let failed = connection.request(RequestId(1), packet, events, None).await;
         assert!(failed.unwrap_err().starts_with("HTTP tunnel closed"));
         connection.ready().await.unwrap();
         assert_eq!(
@@ -678,7 +761,7 @@ mod tests {
         let started = std::time::Instant::now();
         let failed = tokio::time::timeout(
             WRITE_TIMEOUT * 3,
-            connection.request(RequestId(1), packet, events.clone()),
+            connection.request(RequestId(1), packet, events.clone(), None),
         )
         .await
         .expect("a stalled write must not wedge the request");
@@ -699,10 +782,12 @@ mod tests {
             .unwrap();
         assert_eq!(opened.load(Ordering::SeqCst), 2, "a fresh socket");
         let packet = serde_json::json!({"type": "rpc.http", "nonce": "native-2"}).to_string();
-        let answered =
-            tokio::time::timeout(WRITE_TIMEOUT, again.request(RequestId(2), packet, events))
-                .await
-                .expect("the fresh socket answers");
+        let answered = tokio::time::timeout(
+            WRITE_TIMEOUT,
+            again.request(RequestId(2), packet, events, None),
+        )
+        .await
+        .expect("the fresh socket answers");
         assert_eq!(answered, Ok(()));
         assert_eq!(http_body(&mut received, 2), "body native-2");
     }
@@ -779,7 +864,7 @@ mod tests {
             // A request without an open socket is refused at once, not queued.
             let packet = serde_json::json!({"type": "rpc.http", "nonce": "native-0"}).to_string();
             let refused = connection
-                .request(RequestId(0), packet, events.clone())
+                .request(RequestId(0), packet, events.clone(), None)
                 .await;
             assert_eq!(refused, Err("HTTP tunnel handoff failed".into()));
         }
@@ -819,7 +904,7 @@ mod tests {
         let packet = serde_json::json!({"type": "rpc.http", "nonce": "native-1"}).to_string();
         let answered = stepped(tokio::time::timeout(
             WRITE_TIMEOUT,
-            again.request(RequestId(1), packet, events),
+            again.request(RequestId(1), packet, events, None),
         ))
         .await
         .expect("the reopened socket answers");

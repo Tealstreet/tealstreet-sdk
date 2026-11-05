@@ -61,8 +61,12 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | Variable | Default | Meaning |
 |---|---|---|
 | `TEALSTREET_PORT` | `23456` | Listen port |
+| `TEALSTREET_BOX` | unset | Stable display / Sentry box label, e.g. `exchange-01`; never router ownership identity |
+| `TEALSTREET_ROUTER_BOX_ID` | unset | Opaque canonical ID from router `BOXES`, e.g. `01`; required to enable enforcement, exact heartbeat `box` match |
+| `TEALSTREET_ROUTER_LEASE_MS` | `90000` | Full lease / enable grace in milliseconds (20000–3600000); asserted ownership may extend at most half this duration |
+| `TEALSTREET_ROUTER_LEASE_ENFORCE` | `0` | `0` records shadow ownership only; `1` enforces expiry and parks algos |
 | `TEALSTREET_ACCESS_TEAM_DOMAIN` | unset | Bare `<team>.cloudflareaccess.com` host for release-proof JWT verification; no scheme, port or path |
-| `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/*`; either missing/invalid value disables both proof endpoints and logs once at startup |
+| `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/*`; either missing/invalid value disables Access-authenticated proof, heartbeat and interruption-header handling and logs once at startup |
 | `TEALSTREET_IDLE_RELEASE_TTL_MS` | `20000` | Idle-release lease in milliseconds; operator drains never expire |
 | `CONNECT_REGION` | unset | Region label. Routing uses it for `proxyRegion` defaults; it also appears in `/health` and logs |
 | `TEALSTREET_RELEASE` | unset | Release id, sent to Sentry and shown in `/health` |
@@ -206,7 +210,12 @@ Success is 200 `{userTag,drainId,released:true,checkedAt,expiresAt}`. Refusal is
 `{released:false,reason,checkedAt}` and changes no admission or job state. The
 closed reasons are `live-socket`, `running-jobs`, `parked-jobs`, `pending-starts`,
 `already-draining` and `request-spent`. Paused TWAPs and jobs held by a parked
-session still prevent release. No job is stopped, parked, canceled or replayed by this route.
+session still prevent release. Positive work on a revoked lease or already lease-parked account
+returns `parked-jobs`, including pending work before its actor publishes paused
+rows. The idle-release route never invokes the park or cancel path. Its on-box
+admission reservation is acquired before interruption-header authentication and
+before HTTP 101, then held until `Session` owns the socket count, without a gap.
+No job is stopped, parked, canceled or replayed by this route.
 
 Both timestamps are Unix wall-clock milliseconds, captured once with
 `expiresAt = checkedAt + TEALSTREET_IDLE_RELEASE_TTL_MS`. A repeat of the same
@@ -234,33 +243,134 @@ same drainId still works after destination ownership commits; the router does
 not require admin access. An operator start/force takes over an idle latch as a
 permanent operator drain; ordinary operator drain behavior is unchanged.
 
+## Router ownership lease and self-fencing
+
+The frozen router/box interface is:
+
+> Ownership is asserted per user by each owning user DO's alarm (every <=10 s, including parked users); there's no directory. POST /lease/router-heartbeat {box, issuedAt, users:[{userId, ownerEpoch, sequence, notAfter}]}, bounded batches, with the same Access service token + on-box JWT verification as /proof (public 404). Box rules: verify the authenticated box identity matches; reject stale or future issuedAt beyond the skew bound; per-user monotonic (ownerEpoch, sequence), so an older epoch/sequence never supersedes a newer accepted one; NEVER extend a user's lease past their notAfter; fence the user when now > notAfter (the box-side lease is notAfter itself, not a box-computed N/2); missing or uncertain state fails closed (fenced). Router side (ih35js, later): persist ownerEpoch/sequence and the max notAfter ever issued BEFORE sending; takeover first retires the sender epoch and stops old alarms, then waits past the max issued notAfter plus the skew margin, never trusting the last ACK. Constants I'm setting: clock-skew bound 5 s; notAfter = issuedAt + 45 s (TEALSTREET_ROUTER_LEASE_MS default 90000 means takeover is no earlier than ~50 s after the last issued heartbeat); heartbeat cadence 10 s. Unfencing needs a fresh valid assertion naming that user with a newer (epoch, sequence).
+
+Contact means a valid authenticated assertion for that user, including users whose
+sessions are parked. Socket absence, `/health`, and another user's heartbeat do
+not renew ownership. The box verifies the Access JWT using the configured team
+issuer/JWKS and AUD, then matches the body `box` exactly to `TEALSTREET_ROUTER_BOX_ID`. Missing or invalid
+router identity causes a clear startup error with enforcement enabled; shadow
+mode continues and reports `routerBoxId: null`. `TEALSTREET_BOX` is only a
+display/Sentry label and is not an ownership identifier. The router
+must return public 404 for `/lease/*`, as for `/proof/*` and `/admin/*`.
+
+`POST /lease/router-heartbeat` returns `{accepted, checkedAt}` with Unix
+milliseconds. A batch contains 1–256 distinct users, user IDs at most 512 bytes,
+and a body at most 256 KiB. Epoch and sequence are positive JS-safe integers.
+Old or duplicate tuples never extend a grant; invalid assertions return 400.
+A separate bounded peer limiter allows a 1024-request burst and 512 requests/s,
+without consuming the proof endpoint's smaller allowance. There are at most
+4096 tracked users; epoch high-water marks are retained until process exit and
+capacity exhaustion fails closed. No raw user IDs are logged.
+
+`POST /admin/router-lease/status {userId}` uses the existing on-box admin guard
+and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,
+`sequence`, `notAfter`, `generation`, `routerBoxId`, and `missingHeartbeatGraceMs`. It grants
+no placement, renewal or write authority. Expiry uses both wall-clock
+`notAfter` and a monotonic deadline so a clock rollback cannot extend ownership.
+
+### Rollout and recovery
+
+Enforcement defaults OFF. In shadow mode heartbeats and would-fence state are
+recorded, but IO and algos continue. Roll out the box image with enforcement off,
+then router heartbeats, verify shadow state, then set enforcement on. Environment
+changes take effect on process restart. A user never heartbeated gets one full
+lease (90 s by default) from enable/start before fencing; an existing assertion
+expires at its own `notAfter`. The router must wait for this rollout grace or
+explicit enforce-readiness before a no-proof takeover of a never-granted user;
+the 50 s last-issued-heartbeat rule alone is insufficient during rollout.
+
+After enforcement, each account holds generation-bound authority. A fresh newer
+assertion can authorize a rebuilt account, but cannot revive an old account's
+queued work. Missing/expired ownership rejects new account, order and algo starts
+with the typed `ServerDraining` refusal (`venueUnavailable`, `notSent`). The final
+native HTTP handoff and every WebSocket send also check authority, including
+prepared HTTP, messages queued behind a socket handshake, and algo continuations.
+All private-account outbound IO is stopped while that account retires; unrelated
+users and public sources continue. No request is replayed on recovery.
+
+`Registry::park_expired_router_leases` sends `AlgoInput::RouterFence`: it pauses
+TWAP scheduling, stops chase repricing, aborts algo continuations and retires the
+account host. It does **not** cancel resting/manual/chase orders. A request already
+handed to the network may still complete or fill, and has no fabricated canceled
+outcome. The same generation check on session cleanup prevents ordinary disposal
+from racing expiry into cancel-on-dispose. Reconnect builds a fresh account;
+restored running TWAP state is forced paused after a lease generation change.
+The user checks Open Orders, explicitly resumes TWAPs, or starts a new chase.
+
+### Interruption warnings
+
+Box break-glass drain and forced user drain retain their existing #8699 forced
+algo notice before closing sockets. Self-fencing also broadcasts a forced notice
+and retains it for same-box reconnect: chases stopped, TWAPs paused, resting
+orders kept, an in-flight order may still fill, and explicit checking/resume is
+required. A disconnected user receives the retained notice on account init.
+
+For cross-box recovery the router persists a one-shot interruption marker in the
+user DO, strips client-supplied copies, and adds
+`X-Tealstreet-Interrupted: {"reason":"owner-released"|"lease-expired","fromBox":"01","at":<ms>}`
+on the next successful upgrade to a box. The box accepts it only alongside a
+valid Access JWT and the normal authenticated user's proxy token. On successful
+private account init it sends one #8699 forced notice for that user, saying the
+previous server's algos stopped and must be checked. Missing, malformed or
+unauthenticated markers do nothing. Repeated upgrades with the same marker do
+not duplicate the notice; failed enqueue preserves it for the next account init.
+`fromBox` is a bounded opaque router ID, with no validation against the display
+name. When it matches this box's router ID, the notice uses the configured
+`TEALSTREET_BOX` display name; otherwise it displays the router ID as-is.
+A fresh destination at generation zero has no server-side jobs from the dead box
+to restore. However, NX can send persisted client TWAP state at account start.
+For either interruption reason, unacknowledged restored jobs are forced paused
+even after the one-shot notice has been delivered. Progress and stable IDs are
+preserved. A successful explicit `twap:resume` that actually makes the paused job
+running acknowledges only that user/account/job and the observed marker plus
+lease generation. Later account rebuilds preserve that job's client state;
+another job or account stays protected. Invalid, refused or ineffective resume
+attempts do not acknowledge. A newer marker or lease generation re-arms the job.
+No-marker/no-fence restores keep their normal behavior. Because there is no
+complete restored-job census, the marker is retained for at most 24 hours,
+measured monotonically and bounded by its original timestamp; it is not cleared
+when the first job resumes. Lease-generation restore guards also expire after
+24 hours without relaxing IO ownership. Acknowledgements are bounded to 4096 per
+user and 4096 users; a full ledger refuses resume before changing job state. There is no chase/EXEC restore operation in the current hosted API;
+new restore operations must join this gate. The forced notice tells the user to
+check their algos and orders before resuming. This does not invent a job handoff
+or durable restore from a dead box; that remains psmp2r-39. Same-box lease-fenced
+restore uses the same pause policy through its retired generation.
+The bounded process-local marker ledger is not an external durable job store.
+
 ### Future: long-lived job handoff
 
-The intended future contract is an external store holding the job queue, with
-state transitions executed in memory: pause new transitions, wait only for
-in-flight transitions to commit (seconds, not the job lifetime), then hand off.
-The destination picks jobs up from that store. Completion or a committed durable
-handoff could satisfy the same release decision; today only completion does.
-No external store or transition-based algo refactor is implemented here.
+Sam's intended future semantics are: "an external store holds the job queue, job
+state transitions happen in memory, draining only has to wait for all jobs to
+move to their next state transition, and new transitions are paused." Drain will
+pause new transitions, wait only for in-flight transitions to commit (seconds,
+not the job lifetime), then hand off; the next box picks jobs up from the store.
+No external store or transition-engine refactor is introduced here.
 
-The single start/commit boundary belongs at `User::admit` and the synchronous
-`Running::refresh` publication in `algos::run`. The new idle-release decision
-uses that same lock. A future transition reservation would start there and stay
-counted until its durable commit, with the latch pausing new reservations.
-`Users::idle_release` and `User::snapshot` would accept a proven jobs-movable
-handoff alternative instead of requiring every job to finish; operator force
-would remain separate.
+Today's logical admission hook is `user_drain::User::admit`; the final physical
+transition-start gate is `NetworkTransport::with_io_guard`, `http::Bound::dispatch`
+and the final socket send (including the queued HOW job's final send). A future shared transition token would start there
+and commit on `HostEvent::HttpEnd`/`HttpFailed` plus owned command completion in
+`Port::settle`; ambiguous network outcomes must be reconciled before handoff.
+A chase would split placement, fill reconciliation and cancel/reprice into
+transitions. A TWAP would split due-slice admission, placement reconciliation and
+schedule advance. The existing algo lifecycle is unchanged today.
 
-Chase transitions would split around a quote decision, place/amend/cancel and
-its settled result; TWAP transitions around slice scheduling, placement and its
-settled result; EXEC continuations remain counted until their handoff commits.
-Job records must keep a stable id and user owner independent of sockets and box.
-Today's `Job` id/kind and the `Users` owner key preserve that identity, but are
-not a durable resume format. `Registry::park`, its `Parked` account records and
-`Registry::resume` are the self-fencing/resume hook points: a future serializable
-parked record must retain schedule, progress, outstanding command identities
-and uncertainty needed to resume safely. Today's parked accounts are in-memory
-Arcs; neither they nor a release proof claim a durable or transferable handoff.
+`user_drain::User::snapshot` (`algosDone`, `pendingStarts`, readiness),
+`Users::idle_release`, and `Registry::live_here`/parked ownership are the hook points for a future
+jobs-movable / committed-handoff alternative to jobs-finished. The drain latch
+must stay installed while that decision commits. Capture a user-owned,
+serializable stable-job-ID record before `AlgoInput::RouterFence` disposes the
+scope: `TwapBook::serialize_state` carries options, progress and in-flight state;
+`ActiveChaser.id`, `ChaserBook::progress` and `currentOrderIds` identify chase
+resume/reconciliation state. Ownership and these records must be independent of
+the socket and box. Today's paused TWAP restore and interruption warning require
+explicit user action; no speculative restore or automatic cross-box replay runs.
 
 ## Authentication
 

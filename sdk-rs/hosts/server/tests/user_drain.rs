@@ -221,7 +221,7 @@ async fn natural_completion_waits_for_the_whole_user_and_force_is_user_scoped() 
         assert_eq!(code,200);
         assert_eq!(forced["settled"],true,"{forced}");
         assert_eq!(other.ending(Duration::from_secs(3)).await,support::Ending::Closed(4100,"draining: reconnect".into()));
-        assert!(other.ops("error").iter().any(|d|d["data"][1]["algo"]["kind"]=="chase"),"stop notice flushed before4100: {:?}",other.seen);
+        assert!(other.ops("error").iter().any(|d|d["data"][1]["algo"]["kind"]=="chase" && d["data"][1]["forceToast"]==true),"stop notice flushed before4100: {:?}",other.seen);
         assert_eq!(app.registry.user_drains.proof("target",drain["drainId"].as_str().unwrap())["released"],true);
         assert_eq!(support::health(&address).await.0,200);
         assert!(survivor.running.any(), "force must not stop another user's chase");
@@ -268,6 +268,79 @@ async fn queued_starts_cannot_run_after_the_latch_and_paused_twaps_are_inventory
         assert_eq!(status["hasRunningAlgo"],true);
         assert_eq!(status["released"],false);
         testing::algo_op(&paused,"twap:stop",&id.to_string());
+    }).await;
+}
+
+#[tokio::test]
+async fn box_break_glass_surfaces_the_interruption_toast_before_4100() {
+    tokio::task::LocalSet::new().run_until(async {
+        use safe_cex_exchange_server::{accounts::testing, envelope::InitPayload};
+        let app = support::app(support::config(Duration::from_secs(60)), Verifier::unsigned());
+        let init: InitPayload = serde_json::from_value(json!({"accountName":"acct","exchangeName":"bybit","key":"k"})).unwrap();
+        let _account = testing::trading_account(&app.registry, "target", &init);
+        let address = support::serve(app).await;
+        let mut page = Page::open(&address, &token("target"), None).await;
+        page.init(&init).await;
+        page.until("frame", |d| d["snapshot"] == true).await;
+        page.op("acct", "chaser:start", json!({"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"})).await;
+        page.until("store", |d| d["data"]["activeChasers"].as_array().is_some_and(|rows| rows.len() == 1)).await;
+        let (status, _) = json_post(&address, "/admin/drain?now=1", json!({}), "").await;
+        assert_eq!(status, 200);
+        assert_eq!(page.ending(Duration::from_secs(3)).await, support::Ending::Closed(4100, "draining: reconnect".into()));
+        assert!(page.ops("error").iter().any(|d| d["data"][1]["forceToast"] == true
+            && d["data"][1]["algo"]["kind"] == "chase"), "{:?}", page.seen);
+    }).await;
+}
+
+#[tokio::test]
+async fn self_fence_parks_and_same_box_reconnect_gets_the_retained_notice() {
+    tokio::task::LocalSet::new().run_until(async {
+        use safe_cex_exchange_server::{accounts::{testing, now_ms}, envelope::InitPayload, router_lease};
+        let mut config = support::config(Duration::from_secs(60));
+        config.router_lease = router_lease::Config { box_id: Some("exchange-01".into()), enforce: true, ..Default::default() };
+        let app = support::app(config, Verifier::unsigned());
+        let init: InitPayload = serde_json::from_value(json!({"accountName":"acct","exchangeName":"bybit","key":"k"})).unwrap();
+        let now = now_ms();
+        let beat = |sequence, issued| router_lease::Heartbeat { r#box:"exchange-01".into(), issued_at:issued,
+            users:vec![router_lease::Assertion { user_id:"target".into(), owner_epoch:1, sequence, not_after:issued+1500 }] };
+        app.registry.router_leases.accept(&beat(1, now)).unwrap();
+        let account = testing::trading_account(&app.registry, "target", &init);
+        let address = support::serve(app.clone()).await;
+        let mut page = Page::open(&address, &token("target"), None).await;
+        page.init(&init).await;
+        page.until("frame", |d| d["snapshot"] == true).await;
+        page.op("acct", "chaser:start", json!({"symbol":"BTCUSDT","size":0.01,"side":"buy","maxAttempts":1000,"reduceOnly":false,"delay":500,"origin":"web"})).await;
+        page.until("store", |d| d["data"]["activeChasers"].as_array().is_some_and(|rows| rows.len() == 1)).await;
+        // Parked accounts count too: no live socket is needed to expire a lease.
+        page.close().await;
+        tokio::time::sleep(Duration::from_millis(1600)).await;
+        app.registry.park_expired_router_leases();
+        assert!(app.registry.user_lease_fenced("target"));
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while account.running.any() { tokio::time::sleep(Duration::from_millis(1)).await; }
+        }).await.unwrap();
+        let mut renewed = beat(2, now_ms());
+        renewed.users[0].not_after = renewed.issued_at + 45_000;
+        app.registry.router_leases.accept(&renewed).unwrap();
+        let _fresh = testing::trading_account(&app.registry, "target", &init);
+        let mut returned = Page::open(&address, &token("target"), None).await;
+        returned.init(&init).await;
+        returned.until("error", |d| d["data"][1]["forceToast"] == true).await;
+        assert!(returned.ops("error").iter().any(|d| d["data"][0].as_str().is_some_and(|text| text.contains("Router ownership expired"))));
+        let market = json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,
+            "precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":100}},"isPerpetual":true});
+        let options = json!({"accountName":"acct","activeMarket":market,"size":0.1,"duration":10,
+            "ordersCount":10,"side":"buy","chaserDelay":500,"reduceOnly":false,"randomnessPercentage":0,
+            "useLimitOrders":false,"useChaserOrders":false,"origin":"web"});
+        let now = now_ms();
+        let state = json!({"accountName":"acct","activeMarket":market,"size":0.1,"ordersSizes":[0.01,0.01,0.01],
+            "side":"buy","status":"running","ordersCount":10,"ordersExecuted":7,"nextOrderAt":now+60_000,
+            "origin":"web","createdAt":now-180_000,"startedAt":now-180_000});
+        returned.op("acct", "twap:state", json!([{"id":"parked-twap","options":options,"state":state}])).await;
+        let store = returned.until("store", |d| d["data"]["activeTWAPs"].as_array().is_some_and(|rows| !rows.is_empty())).await;
+        assert_eq!(store["data"]["activeTWAPs"][0]["status"], "paused");
+        assert_eq!(store["data"]["activeTWAPs"][0]["ordersExecuted"], 7);
+        returned.close().await;
     }).await;
 }
 

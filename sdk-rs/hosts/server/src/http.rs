@@ -68,16 +68,34 @@ pub async fn drain_now(app: &App) -> bool {
 }
 
 pub fn router(app: Arc<App>) -> Router {
+    let access = Arc::new(crate::access::Verifier::new(app.config.access.clone()));
+    router_with_access(app, access)
+}
+
+fn router_with_access(app: Arc<App>, access: Arc<crate::access::Verifier>) -> Router {
     let proof = Arc::new(Proof {
         registry: app.registry.clone(),
-        verifier: crate::access::Verifier::new(app.config.access.clone()),
+        verifier: access,
         limiter: crate::access::Limiter::default(),
         idle_release_ttl: app.config.idle_release_ttl,
+        heartbeat_limiter: crate::access::Limiter::router_heartbeats(),
+    });
+    let weak = Arc::downgrade(&app.registry);
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_millis(100));
+        loop {
+            tick.tick().await;
+            let Some(registry) = weak.upgrade() else {
+                return;
+            };
+            registry.park_expired_router_leases();
+        }
     });
     routes(app, proof)
 }
 
 fn routes(app: Arc<App>, proof: Arc<Proof>) -> Router {
+    let access = proof.verifier.clone();
     Router::new()
         .route(
             "/proof/user-drain",
@@ -85,8 +103,15 @@ fn routes(app: Arc<App>, proof: Arc<Proof>) -> Router {
         )
         .route(
             "/proof/user-idle-release",
-            post(user_idle_release).with_state(proof),
+            post(user_idle_release).with_state(proof.clone()),
         )
+        .route(
+            "/lease/router-heartbeat",
+            post(router_heartbeat)
+                .with_state(proof)
+                .layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
+        )
+        .route("/admin/router-lease/status", post(router_lease_status))
         .route("/health", get(health).options(preflight))
         .route("/admin/drain", post(admin_drain))
         .route("/admin/undrain", post(admin_undrain))
@@ -104,6 +129,7 @@ fn routes(app: Arc<App>, proof: Arc<Proof>) -> Router {
         .route("/account", get(upgrade))
         .layer(axum::extract::DefaultBodyLimit::max(2048))
         .with_state(app)
+        .layer(axum::Extension(access))
 }
 
 fn cors(mut response: Response) -> Response {
@@ -240,8 +266,9 @@ struct UserDrainRequest {
 
 struct Proof {
     registry: Arc<Registry>,
-    verifier: crate::access::Verifier,
+    verifier: Arc<crate::access::Verifier>,
     limiter: crate::access::Limiter,
+    heartbeat_limiter: crate::access::Limiter,
     idle_release_ttl: Duration,
 }
 
@@ -356,6 +383,62 @@ async fn user_drain_proof(
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
+}
+
+async fn router_heartbeat(
+    State(proof): State<Arc<Proof>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !proof.heartbeat_limiter.allow(peer.ip()) {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
+    let Some(token) = headers
+        .get("Cf-Access-Jwt-Assertion")
+        .and_then(|v| v.to_str().ok())
+    else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    if !proof.verifier.verify(token).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Ok(heartbeat) = serde_json::from_slice::<crate::router_lease::Heartbeat>(&body) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    match proof.registry.router_leases.accept(&heartbeat) {
+        Ok(accepted) => {
+            let mut response =
+                axum::Json(json!({"accepted":accepted,"checkedAt":now_ms()})).into_response();
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
+        Err(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+async fn router_lease_status(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = match user_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
+    };
+    let Some(user) = app.registry.router_leases.get(&request.user_id) else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let mut status = serde_json::to_value(user.status()).unwrap();
+    status["userTag"] = crate::accounts::user_tag(&request.user_id).into();
+    status["routerBoxId"] = serde_json::json!(app.registry.router_leases.box_id());
+    axum::Json(status).into_response()
 }
 
 fn user_request(body: &[u8]) -> Result<UserDrainRequest, StatusCode> {
@@ -605,8 +688,21 @@ pub fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
         .unwrap_or(peer_ip)
 }
 
+async fn trusted_interruption(
+    verifier: &crate::access::Verifier,
+    headers: &HeaderMap,
+) -> Option<crate::interruption::Marker> {
+    let raw = headers.get("X-Tealstreet-Interrupted")?.to_str().ok()?;
+    let jwt = headers.get("Cf-Access-Jwt-Assertion")?.to_str().ok()?;
+    if !verifier.verify(jwt).await {
+        return None;
+    }
+    crate::interruption::Marker::parse(raw, now_ms())
+}
+
 async fn upgrade(
     State(app): State<Arc<App>>,
+    axum::Extension(access): axum::Extension<Arc<crate::access::Verifier>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Query(query): Query<UpgradeQuery>,
@@ -666,6 +762,12 @@ async fn upgrade(
             });
         }
     };
+    if let Some(user) = &identity.user
+        && let Some(marker) = trusted_interruption(&access, &headers).await
+        && app.registry.interruptions.record(user, marker).is_err()
+    {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     let public_ip = identity.user.is_none().then(|| client_ip(&headers, peer));
     if let Some(ip) = public_ip {
         let mut counts = app.public_per_ip.lock().unwrap();
@@ -854,6 +956,257 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn authenticated_upgrade_marker_reaches_account_once_and_untrusted_headers_do_nothing() {
+        use tokio_tungstenite::tungstenite::{Message as ClientMessage, client::IntoClientRequest};
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = crate::accounts::tests::registry();
+                let app = Arc::new(App {
+                    registry: registry.clone(),
+                    metrics: Arc::default(),
+                    verifier: Arc::new(Verifier::unsigned()),
+                    config: Config {
+                        port: 0,
+                        region: None,
+                        release: None,
+                        engine_threads: 1,
+                        max_connections: 16,
+                        max_public_per_ip: 2,
+                        idle_timeout: Duration::from_secs(30),
+                        resume_grace: Duration::from_secs(60),
+                        account_flush: Duration::from_millis(60),
+                        access: None,
+                        router_lease: Default::default(),
+                        idle_release_ttl: Duration::from_millis(
+                            crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS,
+                        ),
+                    },
+                    started: Instant::now(),
+                    public_per_ip: Default::default(),
+                    closing: tokio::sync::watch::channel(false).0,
+                });
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let router =
+                    router_with_access(app, Arc::new(crate::access::tests::verifier().await));
+                tokio::spawn(async move {
+                    axum::serve(
+                        listener,
+                        router.into_make_service_with_connect_info::<SocketAddr>(),
+                    )
+                    .await
+                    .unwrap();
+                });
+                let init: crate::envelope::InitPayload = serde_json::from_value(json!({
+                    "accountName":"acct","exchangeName":"bybit","key":"k"
+                }))
+                .unwrap();
+                let marker =
+                    json!({"reason":"lease-expired","fromBox":"exchange-01","at":now_ms()})
+                        .to_string();
+                let jwt = crate::access::tests::token(json!({}), "test");
+                let mut accounts = Vec::new();
+                for (user, header, assertion, expected) in [
+                    ("absent", false, None, 0),
+                    ("forged", true, Some("forged"), 0),
+                    ("trusted", true, Some(jwt.as_str()), 1),
+                    ("trusted", true, Some(jwt.as_str()), 0),
+                ] {
+                    if user != "trusted" || accounts.len() == 2 {
+                        accounts.push(crate::accounts::testing::trading_account(
+                            &registry, user, &init,
+                        ));
+                    }
+                    let token = crate::auth::unsigned_token(user, now_ms() / 1000 + 3600);
+                    let mut request =
+                        format!("ws://{address}/account?proxyToken={token}&resumable=1")
+                            .into_client_request()
+                            .unwrap();
+                    if header {
+                        request
+                            .headers_mut()
+                            .insert("X-Tealstreet-Interrupted", marker.parse().unwrap());
+                    }
+                    if let Some(jwt) = assertion {
+                        request
+                            .headers_mut()
+                            .insert("Cf-Access-Jwt-Assertion", jwt.parse().unwrap());
+                    }
+                    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+                    socket
+                        .send(ClientMessage::text(
+                            json!({"t":"init","d":init}).to_string(),
+                        ))
+                        .await
+                        .unwrap();
+                    socket
+                        .send(ClientMessage::text(
+                            json!({"t":"ping","d":null}).to_string(),
+                        ))
+                        .await
+                        .unwrap();
+                    let notices = tokio::time::timeout(Duration::from_secs(3), async {
+                        let mut notices = 0;
+                        loop {
+                            let ClientMessage::Text(text) = socket.next().await.unwrap().unwrap()
+                            else {
+                                continue;
+                            };
+                            let frame: serde_json::Value = serde_json::from_str(&text).unwrap();
+                            if frame["d"]["op"] == "error" {
+                                assert_eq!(frame["d"]["data"][1]["forceToast"], true, "{frame}");
+                                assert!(
+                                    frame["d"]["data"][0]
+                                        .as_str()
+                                        .unwrap()
+                                        .contains("previous server")
+                                );
+                                notices += 1;
+                            }
+                            if frame["t"] == "pong" {
+                                return notices;
+                            }
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    assert_eq!(notices, expected, "{user}");
+                    socket.close(None).await.unwrap();
+                }
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn interruption_header_is_trusted_only_with_a_valid_access_assertion() {
+        let verifier = crate::access::tests::verifier().await;
+        let mut headers = HeaderMap::new();
+        assert!(trusted_interruption(&verifier, &headers).await.is_none());
+        headers.insert(
+            "X-Tealstreet-Interrupted",
+            HeaderValue::from_str(
+                &json!({
+                    "reason":"owner-released","fromBox":"exchange-01","at":now_ms(),
+                })
+                .to_string(),
+            )
+            .unwrap(),
+        );
+        assert!(trusted_interruption(&verifier, &headers).await.is_none());
+        headers.insert(
+            "Cf-Access-Jwt-Assertion",
+            HeaderValue::from_static("forged"),
+        );
+        assert!(trusted_interruption(&verifier, &headers).await.is_none());
+        headers.insert(
+            "Cf-Access-Jwt-Assertion",
+            HeaderValue::from_str(&crate::access::tests::token(json!({}), "test")).unwrap(),
+        );
+        assert_eq!(
+            trusted_interruption(&verifier, &headers)
+                .await
+                .unwrap()
+                .reason,
+            crate::interruption::Reason::OwnerReleased
+        );
+        assert!(
+            trusted_interruption(&crate::access::Verifier::new(None), &headers)
+                .await
+                .is_none()
+        );
+        headers.remove("X-Tealstreet-Interrupted");
+        assert!(trusted_interruption(&verifier, &headers).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn router_heartbeat_requires_access_and_reports_shadow_without_identity_leaks() {
+        let registry = Arc::new(
+            Registry::new(
+                crate::threads::EngineThreads::start(1).unwrap(),
+                Duration::from_millis(60),
+                Duration::from_secs(60),
+            )
+            .with_router_lease(crate::router_lease::Config {
+                box_id: Some("exchange-01".into()),
+                ..Default::default()
+            }),
+        );
+        let proof = Arc::new(Proof {
+            registry: registry.clone(),
+            verifier: Arc::new(crate::access::tests::verifier().await),
+            limiter: crate::access::Limiter::default(),
+            heartbeat_limiter: crate::access::Limiter::router_heartbeats(),
+            idle_release_ttl: Duration::from_millis(crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS),
+        });
+        let peer: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let now = now_ms();
+        let body = json!({"box":"exchange-01","issuedAt":now,"users":[{
+            "userId":"private-user-sentinel", "ownerEpoch":1,"sequence":1,"notAfter":now+45000
+        }]})
+        .to_string();
+        let call = |headers, body: String| {
+            router_heartbeat(
+                State(proof.clone()),
+                ConnectInfo(peer),
+                headers,
+                body.into(),
+            )
+        };
+        assert_eq!(
+            call(HeaderMap::new(), body.clone()).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(
+            registry
+                .router_leases
+                .get("private-user-sentinel")
+                .unwrap()
+                .status()
+                .would_fence
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Cf-Access-Jwt-Assertion",
+            HeaderValue::from_str(&crate::access::tests::token(json!({}), "test")).unwrap(),
+        );
+        for _ in 0..40 {
+            assert!(proof.limiter.allow(peer.ip()));
+        }
+        assert!(!proof.limiter.allow(peer.ip()));
+        let accepted = call(headers.clone(), body.clone()).await;
+        assert_eq!(accepted.status(), StatusCode::OK);
+        assert_eq!(accepted.headers()[header::CACHE_CONTROL], "no-store");
+        let bytes = axum::body::to_bytes(accepted.into_body(), 4096)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["accepted"], 1);
+        assert!(!String::from_utf8_lossy(&bytes).contains("private-user-sentinel"));
+        let repeated = call(headers.clone(), body.clone()).await;
+        let value: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(repeated.into_body(), 4096)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(value["accepted"], 0);
+        assert_eq!(
+            call(headers, body.replace("exchange-01", "exchange-02"))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let state = registry
+            .router_leases
+            .get("private-user-sentinel")
+            .unwrap()
+            .status();
+        assert!(!state.enforced);
+        assert!(!state.would_fence);
+        assert!(!state.fenced);
+    }
+
+    #[tokio::test]
     async fn idle_release_uses_real_access_proofs_and_socket_admission_and_admin_cancel() {
         let registry = crate::accounts::tests::registry();
         let ttl = Duration::from_millis(crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS);
@@ -873,6 +1226,7 @@ mod tests {
                 account_flush: Duration::from_millis(60),
                 access: None,
                 idle_release_ttl: ttl,
+                router_lease: Default::default(),
             },
             started: Instant::now(),
             public_per_ip: Mutex::default(),
@@ -880,9 +1234,10 @@ mod tests {
         });
         let proof = Arc::new(Proof {
             registry: registry.clone(),
-            verifier: crate::access::tests::verifier().await,
+            verifier: Arc::new(crate::access::tests::verifier().await),
             limiter: crate::access::Limiter::default(),
             idle_release_ttl: ttl,
+            heartbeat_limiter: crate::access::Limiter::router_heartbeats(),
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -1065,8 +1420,9 @@ mod tests {
         let registry = crate::accounts::tests::registry();
         let proof = Arc::new(Proof {
             registry: registry.clone(),
-            verifier: crate::access::tests::verifier().await,
+            verifier: Arc::new(crate::access::tests::verifier().await),
             limiter: crate::access::Limiter::default(),
+            heartbeat_limiter: crate::access::Limiter::router_heartbeats(),
             idle_release_ttl: Duration::from_millis(crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS),
         });
         let peer: SocketAddr = "127.0.0.1:5000".parse().unwrap();
@@ -1194,6 +1550,7 @@ mod tests {
                     resume_grace: Duration::from_secs(60),
                     account_flush: Duration::from_millis(60),
                     access: None,
+        router_lease: Default::default(),
                     idle_release_ttl: Duration::from_millis(crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS),
                 };
                 let app = Arc::new(App {

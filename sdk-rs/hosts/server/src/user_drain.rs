@@ -507,6 +507,11 @@ fn idle_refusal(state: &Activity) -> Option<&'static str> {
     for tracked in &state.tracked {
         if let Some(running) = tracked.running.upgrade() {
             let (jobs, pending) = running.jobs();
+            if (!running.io_allowed() || running.parked_by_lease())
+                && (!jobs.is_empty() || pending > 0)
+            {
+                return Some("parked-jobs");
+            }
             if pending > 0 {
                 return Some("pending-starts");
             }
@@ -650,6 +655,151 @@ mod tests {
         drop(live);
         drop(pending_socket);
         assert!(users.idle_release("pending-socket", REQUEST, TTL).is_ok());
+    }
+
+    #[tokio::test]
+    async fn composed_upgrade_reserves_before_101_and_keeps_idle_release_refused() {
+        let registry = crate::accounts::tests::registry();
+        let app = Arc::new(crate::http::App {
+            registry: registry.clone(),
+            metrics: Arc::default(),
+            verifier: Arc::new(crate::auth::Verifier::unsigned()),
+            config: crate::config::Config {
+                port: 0,
+                region: None,
+                release: None,
+                engine_threads: 1,
+                max_connections: 16,
+                max_public_per_ip: 2,
+                idle_timeout: Duration::from_secs(30),
+                resume_grace: Duration::from_secs(60),
+                account_flush: Duration::from_millis(60),
+                access: None,
+                router_lease: Default::default(),
+                idle_release_ttl: TTL,
+            },
+            started: std::time::Instant::now(),
+            public_per_ip: Mutex::default(),
+            closing: tokio::sync::watch::channel(false).0,
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = crate::http::router(app);
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let client = reqwest::Client::new();
+        assert_eq!(
+            client
+                .get(format!("http://{address}/health"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
+        let entry = registry.user_drains.get("u");
+        let target = registry.clone();
+        let (done, finished) = tokio::sync::oneshot::channel();
+        let peer = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            let mut socket = std::net::TcpStream::connect(address).unwrap();
+            let token = crate::auth::unsigned_token("u", crate::accounts::now_ms() / 1000 + 3600);
+            let admission = entry.state.lock().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            write!(socket,"GET /account?proxyToken={token} HTTP/1.1\r\nHost: {address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").unwrap();
+            let mut bytes = [0; 4096];
+            let before = socket.read(&mut bytes);
+            drop(admission);
+            let blocked = before.as_ref().is_err_and(|error| {
+                matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                )
+            });
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let received = match before {
+                Ok(n) => n,
+                Err(_) => socket.read(&mut bytes).unwrap(),
+            };
+            let response = String::from_utf8_lossy(&bytes[..received]).into_owned();
+            let refusal = target
+                .user_drains
+                .idle_release("u", REQUEST, TTL)
+                .unwrap_err()
+                .refusal();
+            done.send((blocked, response, refusal)).unwrap();
+        });
+        let (blocked, response, refusal) = finished.await.unwrap();
+        peer.join().unwrap();
+        assert!(
+            blocked,
+            "HTTP101 must wait for the admission reservation, not just Session::new after the upgrade"
+        );
+        assert!(response.starts_with("HTTP/1.1 101"), "{response}");
+        assert_eq!(refusal["reason"], "live-socket");
+        server.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lease_fenced_and_parked_work_refuses_idle_release_without_mutating_work() {
+        let users = Users::default();
+        let running = tracked(&users, "u");
+        let leases = crate::router_lease::Users::new(crate::router_lease::Config {
+            box_id: Some("01".into()),
+            enforce: true,
+            ..Default::default()
+        });
+        let now = crate::accounts::now_ms();
+        leases
+            .accept(&crate::router_lease::Heartbeat {
+                r#box: "01".into(),
+                issued_at: now,
+                users: vec![crate::router_lease::Assertion {
+                    user_id: "u".into(),
+                    owner_epoch: 1,
+                    sequence: 1,
+                    not_after: now + 1000,
+                }],
+            })
+            .unwrap();
+        running.attach_lease(leases.get("u").unwrap().permit());
+        running.refresh(&[], &[json!({"id":"schedule","status":"running"})], 0);
+        assert_eq!(
+            users.idle_release("u", REQUEST, TTL).unwrap_err().refusal()["reason"],
+            "running-jobs"
+        );
+        tokio::time::advance(Duration::from_millis(1001)).await;
+        assert!(!running.io_allowed());
+        for (jobs, pending) in [
+            (vec![json!({"id":"schedule","status":"running"})], 0),
+            (vec![], 1),
+            (vec![json!({"id":"schedule","status":"paused"})], 0),
+        ] {
+            running.refresh(&[], &jobs, pending);
+            let before = users.status("u");
+            assert_eq!(
+                users.idle_release("u", REQUEST, TTL).unwrap_err().refusal()["reason"],
+                "parked-jobs"
+            );
+            assert_eq!(users.status("u"), before);
+            assert!(!users.get("u").latched());
+        }
+        assert!(running.claim_lease_park());
+        assert_eq!(
+            users.idle_release("u", REQUEST, TTL).unwrap_err().refusal()["reason"],
+            "parked-jobs"
+        );
+        assert!(users.reserve_socket("other").is_ok());
     }
 
     #[tokio::test]

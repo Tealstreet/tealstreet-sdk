@@ -189,10 +189,19 @@ async fn fetch_keys(client: &reqwest::Client, issuer: &str) -> Option<JwkSet> {
 }
 
 /// At most forty immediately, then ten per second per peer; bounded source map.
-#[derive(Default)]
-pub struct Limiter(std::sync::Mutex<HashMap<IpAddr, (Instant, f64)>>);
+pub struct Limiter(std::sync::Mutex<HashMap<IpAddr, (Instant, f64)>>, f64, f64);
+
+impl Default for Limiter {
+    fn default() -> Self {
+        Self(Default::default(), 40., 10.)
+    }
+}
 
 impl Limiter {
+    /// Per-user DO alarms share the cloudflared peer: bounded separately from proofs.
+    pub fn router_heartbeats() -> Self {
+        Self(Default::default(), 1024., 512.)
+    }
     pub fn allow(&self, peer: IpAddr) -> bool {
         let peer = peer.to_canonical();
         let mut sources = self.0.lock().unwrap();
@@ -201,8 +210,8 @@ impl Limiter {
         if !sources.contains_key(&peer) && sources.len() >= 1024 {
             return false;
         }
-        let (at, tokens) = sources.entry(peer).or_insert((now, 40.));
-        *tokens = (*tokens + now.duration_since(*at).as_secs_f64() * 10.).min(40.);
+        let (at, tokens) = sources.entry(peer).or_insert((now, self.1));
+        *tokens = (*tokens + now.duration_since(*at).as_secs_f64() * self.2).min(self.1);
         *at = now;
         if *tokens < 1. {
             return false;

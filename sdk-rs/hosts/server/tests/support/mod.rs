@@ -27,6 +27,7 @@ pub fn config(resume_grace: Duration) -> Config {
         resume_grace,
         account_flush: Duration::from_millis(60),
         access: None,
+        router_lease: Default::default(),
         idle_release_ttl: Duration::from_millis(
             safe_cex_exchange_server::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS,
         ),
@@ -35,11 +36,14 @@ pub fn config(resume_grace: Duration) -> Config {
 
 pub fn app(config: Config, verifier: Verifier) -> Arc<App> {
     Arc::new(App {
-        registry: Arc::new(Registry::new(
-            EngineThreads::start(1).unwrap(),
-            config.account_flush,
-            config.resume_grace,
-        )),
+        registry: Arc::new(
+            Registry::new(
+                EngineThreads::start(1).unwrap(),
+                config.account_flush,
+                config.resume_grace,
+            )
+            .with_router_lease(config.router_lease.clone()),
+        ),
         metrics: Arc::new(Metrics::default()),
         verifier: Arc::new(verifier),
         config,
