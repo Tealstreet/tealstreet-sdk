@@ -772,7 +772,7 @@ fn rejected_ws_protection_retains_cancel_route_against_older_rest_plan_metadata(
 }
 
 #[test]
-fn rejected_ws_leg_does_not_erase_prior_valid_financial_timestamp() {
+fn rejected_ws_leg_preserves_local_receipt_protection_until_a_fresh_read_after_grace() {
     let mut h = Harness::classic();
     let seed = hedge_row("long", serde_json::json!("2"));
     h.respond(
@@ -804,7 +804,7 @@ fn rejected_ws_leg_does_not_erase_prior_valid_financial_timestamp() {
         "long",
         serde_json::json!({"bad":1})
     )])));
-    h.timer_after(500.0);
+    h.timer_after(499.0); // Join the already owed repair at the earlier deadline.
     let mut newer = hedge_row("long", serde_json::json!("3"));
     newer["uTime"] = serde_json::json!("300");
     h.respond(
@@ -814,8 +814,23 @@ fn rejected_ws_leg_does_not_erase_prior_valid_financial_timestamp() {
     );
     assert_eq!(
         h.engine.store().positions()[0].contracts,
+        2.0,
+        "a later native timestamp cannot overrule recent WS receipt"
+    );
+    h.now += 5_001.0;
+    h.command(safe_cex_engine::Command::Venue {
+        command: 98,
+        action: safe_cex_engine::VenueAction::ReadPositions,
+    });
+    h.respond(
+        "/all-position",
+        200,
+        &serde_json::json!({"code":"00000","data":[newer]}).to_string(),
+    );
+    assert_eq!(
+        h.engine.store().positions()[0].contracts,
         3.0,
-        "fresh newer native proof must heal"
+        "fresh read heals once the bounded receipt protection has passed"
     );
 }
 fn two_market_rows() -> Harness {
