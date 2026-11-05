@@ -27,10 +27,17 @@ pub struct Trading {
     retry_step: usize,
     expected: HashSet<String>,
     uncertain_settings: HashSet<String>,
-    amend_wait: Option<TimerId>,
+    amend_wait: Option<(TimerId, AmendRead)>,
     amend_issuing: bool,
-    amend_retry: Option<(TimerId, String)>,
+    amend_retry: Option<(TimerId, String, AmendRead)>,
 }
+/// A read continuation is bound to one genuine preflight and its original bound.
+#[derive(Clone, Copy, PartialEq)]
+pub struct AmendRead {
+    owner: safe_cex_engine::request_context::Owner,
+    deadline: f64,
+}
+
 struct Job {
     custody: Option<custody::Custody>,
     command: CommandId,
@@ -719,9 +726,10 @@ impl Hyperliquid {
             }
             let job = self.trading.active.as_mut().unwrap();
             job.amend_read = true;
-            self.trading.amend_wait = Some(cx.set_timer(job.amend_deadline.unwrap() - cx.now));
+            let amend = job.amend_owner().unwrap();
+            self.trading.amend_wait = Some((cx.set_timer(amend.deadline - cx.now), amend));
             self.trading.amend_issuing = true;
-            self.read_amend_source(cx, &source);
+            self.read_amend_source(cx, &source, amend);
             self.trading.amend_issuing = false;
             return;
         }
@@ -1363,10 +1371,10 @@ impl Hyperliquid {
         }
     }
     fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
-        if let Some(timer) = self.trading.amend_wait.take() {
+        if let Some((timer, _)) = self.trading.amend_wait.take() {
             cx.clear_timer(timer);
         }
-        if let Some((timer, _)) = self.trading.amend_retry.take() {
+        if let Some((timer, _, _)) = self.trading.amend_retry.take() {
             cx.clear_timer(timer);
         }
         self.trading.inflight = false;
@@ -1430,16 +1438,26 @@ impl Hyperliquid {
             )),
         );
     }
-    pub(crate) fn amend_read_pending(&mut self, cx: &mut Cx<'_, Pending>, id: &str) -> bool {
-        let Some(job) = self.trading.active.as_ref().filter(|job| {
-            job.amend_source.as_deref() == Some(id) && self.trading.amend_wait.is_some()
-        }) else {
+    pub(crate) fn amend_read_current(&self, id: &str, amend: AmendRead) -> bool {
+        self.trading.active.as_ref().is_some_and(|job| {
+            job.amend_source.as_deref() == Some(id)
+                && job.amend_owner() == Some(amend)
+                && self
+                    .trading
+                    .amend_wait
+                    .is_some_and(|(_, current)| current == amend)
+        })
+    }
+    pub(crate) fn amend_read_pending(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        amend: AmendRead,
+    ) -> bool {
+        if !self.amend_read_current(id, amend) {
             return false;
-        };
-        if job
-            .amend_deadline
-            .is_none_or(|deadline| !before_amend_deadline(cx.now, deadline))
-        {
+        }
+        if !before_amend_deadline(cx.now, amend.deadline) {
             self.expire_amend(cx);
             return false;
         }
@@ -1450,23 +1468,24 @@ impl Hyperliquid {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         id: &str,
+        amend: AmendRead,
         read: Result<(&str, f64, f64), String>,
     ) {
-        if !self.amend_read_pending(cx, id) {
+        if !self.amend_read_pending(cx, id, amend) {
             return;
         }
         let job = self.trading.active.as_mut().unwrap();
         // A job popped inside another's callback cannot open a read until it returns.
         if read.is_err() && std::mem::take(&mut self.trading.amend_issuing) {
-            self.trading.amend_retry = Some((cx.set_timer(1.0), id.to_owned()));
+            self.trading.amend_retry = Some((cx.set_timer(1.0), id.to_owned(), amend));
             return;
         }
         // A 429 clears soon; the read bound still ends the wait.
         if read.as_ref().is_err_and(|error| error.contains("HTTP 429")) {
-            self.trading.amend_retry = Some((cx.set_timer(AMEND_RETRY_MS), id.to_owned()));
+            self.trading.amend_retry = Some((cx.set_timer(AMEND_RETRY_MS), id.to_owned(), amend));
             return;
         }
-        if let Some(timer) = self.trading.amend_wait.take() {
+        if let Some((timer, _)) = self.trading.amend_wait.take() {
             cx.clear_timer(timer);
         }
         let sized = read.and_then(|(status, total, left)| {
@@ -1513,12 +1532,19 @@ impl Hyperliquid {
             .trading
             .amend_retry
             .as_ref()
-            .is_some_and(|(t, _)| *t == timer)
-            && let Some((_, id)) = self.trading.amend_retry.take()
+            .is_some_and(|(t, _, _)| *t == timer)
+            && let Some((_, id, amend)) = self.trading.amend_retry.take()
         {
-            self.read_amend_source(cx, &id);
+            self.read_amend_source(cx, &id, amend);
         }
-        if self.trading.amend_wait == Some(timer) {
+        if let Some((current, amend)) = self.trading.amend_wait
+            && current == timer
+            && self
+                .trading
+                .active
+                .as_ref()
+                .is_some_and(|job| job.amend_owner() == Some(amend))
+        {
             self.expire_amend(cx);
         }
         if self.trading.builder_wait == Some(timer) {
@@ -1547,6 +1573,15 @@ impl Hyperliquid {
         }
     }
 }
+impl Job {
+    fn amend_owner(&self) -> Option<AmendRead> {
+        Some(AmendRead {
+            owner: self.custody.as_ref()?.owner(),
+            deadline: self.amend_deadline?,
+        })
+    }
+}
+
 fn before_amend_deadline(now: f64, deadline: f64) -> bool {
     now.is_finite() && deadline.is_finite() && now < deadline
 }

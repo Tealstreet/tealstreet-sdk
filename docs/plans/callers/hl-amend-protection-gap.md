@@ -10,6 +10,12 @@ replacement after that deadline. Failure or timeout refuses NotSent with the
 original protective order untouched. Partial fills still reduce the replacement
 to the freshly read remainder.
 
+Both identity and sizing continuations retain the opaque engine preflight owner
+and original deadline. Retry and deadline timers carry that same binding. A
+retired generation cannot resolve identity, issue another read, change sizing or
+clear a successor's wait, even for the same native order ID. Queued retired reads
+are discarded before HTTP; late success and failure only retire their own read.
+
 Source account bootstrap already warms maxBuilderFee and exports the approval
 to frame-fed engines. Each amend captures its optional builder pair before its
 cancel. Unknown approval chooses the existing permitted no-builder fallback

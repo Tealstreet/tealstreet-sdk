@@ -432,3 +432,135 @@ fn a_cancel_released_in_time_still_replaces_after_the_pre_cancel_deadline() {
     let actions = prepared_now(&mut e);
     assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange") && body(r)["action"]["type"] == "order")));
 }
+
+#[test]
+fn review_3098_retired_sizing_reply_cannot_release_a_new_amend_for_same_order() {
+    review_sizing_owner(false);
+}
+#[test]
+fn review_3098_successors_own_sizing_reply_still_releases_cancel() {
+    review_sizing_owner(true);
+}
+#[test]
+fn retired_sizing_failures_cannot_abort_or_rearm_the_successor() {
+    for status in [429, 500] {
+        review_sizing_owner_response(false, status);
+    }
+}
+fn review_sizing_owner(use_current: bool) {
+    review_sizing_owner_response(use_current, 200);
+}
+fn review_sizing_owner_response(use_current: bool, status: u16) {
+    let (mut e, _, _) = boot(false);
+    let actions = begin_amend(&mut e);
+    let old = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "orderStatus" => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5000. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 5000., Event::TimerFired { timer });
+    let failed = prepared_now(&mut e);
+    assert!(failed.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: OWNER, error }) if error.outcome == Some(Outcome::NotSent))));
+    assert_eq!(e.store().order("9").unwrap().status, OrderStatus::Open);
+    e.handle(
+        NOW + 5100.,
+        Event::Command(Command::AmendOrder {
+            command: OWNER + 1,
+            id: "9".into(),
+            price: Some(70.),
+            amount: None,
+        }),
+    );
+    let actions = prepared_now(&mut e);
+    let current = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "orderStatus" => Some(r.clone()),
+            _ => None,
+        })
+        .expect("new command owns a distinct fresh sizing read");
+    assert_ne!(old.id, current.id);
+    let before = serde_json::to_value(e.store().order("9").unwrap()).unwrap();
+    e.handle(7150., Event::TimerFired { timer });
+    let stale_timer = prepared_now(&mut e);
+    assert!(!stale_timer.iter().any(|a| matches!(
+        a,
+        Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+    )));
+    let response = if use_current { current.id } else { old.id };
+    e.handle(NOW + 5200., Event::HttpResponse {
+        request: response,
+        response: safe_cex_engine::Response { status, headers: "",
+            body: r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"0","sz":"0"},"status":"open"}}"#,
+        },
+    });
+    let actions = prepared_now(&mut e);
+    let canceled = actions
+        .iter()
+        .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")));
+    assert_eq!(
+        canceled, use_current,
+        "a retired read must not borrow the successor command's deadline or authority"
+    );
+    if !use_current {
+        assert_eq!(
+            serde_json::to_value(e.store().order("9").unwrap()).unwrap(),
+            before
+        );
+        assert!(!actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandFailed { .. })
+                | Action::Notice(Notice::CommandDone { .. })
+        )));
+        e.handle(7300., Event::HttpResponse {request: current.id, response: safe_cex_engine::Response {status:200, headers:"", body:r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"0","sz":"0"},"status":"open"}}"#}});
+        assert!(
+            prepared_now(&mut e)
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+        );
+    }
+}
+
+#[test]
+fn a_retired_sizing_reply_after_timeout_alone_does_not_change_the_order() {
+    let (mut e, _, _) = boot(false);
+    let actions = begin_amend(&mut e);
+    let old = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "orderStatus" => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 5000. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(7000., Event::TimerFired { timer });
+    prepared_now(&mut e);
+    let before = serde_json::to_value(e.store().order("9").unwrap()).unwrap();
+    e.handle(7200., Event::HttpResponse {request: old.id, response: safe_cex_engine::Response {status:200, headers:"", body:r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"100","sz":"3"},"status":"open"}}"#}});
+    let actions = prepared_now(&mut e);
+    assert!(!actions.iter().any(|a| matches!(
+        a,
+        Action::Http(_)
+            | Action::Notice(Notice::CommandFailed { .. })
+            | Action::Notice(Notice::CommandDone { .. })
+    )));
+    assert_eq!(
+        serde_json::to_value(e.store().order("9").unwrap()).unwrap(),
+        before
+    );
+}

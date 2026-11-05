@@ -35,7 +35,9 @@ revaluation so UPNL and available margin follow provider prices.
 An amend resolves account identity and fresh partial-fill sizing within the
 exclusive five-second deadline from command receipt before cancelling. Read
 receipts and the final cancel claim enforce it independently of timer order.
-The deadline never abandons a replacement after a cancel already left. It captures the optional builder fee
+The deadline never abandons a replacement after a cancel already left. Identity
+and sizing reads/timers retain the genuine amend preflight owner and original
+deadline; retired replies cannot resolve or release a newer edit of the same order. It captures the optional builder fee
 from the startup/source cache before cancel; unknown approval uses the existing
 no-builder fallback immediately. A replacement never starts or waits for a fee
 check, and a late approval cannot add a fee to that amend. A later refusal may

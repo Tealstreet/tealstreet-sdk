@@ -517,3 +517,100 @@ fn a_frame_fed_protective_amend_resolves_identity_and_size_before_cancellation()
         assert!(body["action"].get("builder").is_none());
     }
 }
+
+#[test]
+fn a_retired_amend_role_cannot_resolve_or_release_its_successor() {
+    let (mut source, socket) = ready_custom("disabled", false, None, "null");
+    message(
+        &mut source,
+        socket,
+        1200.,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","triggerPx":"80","origSz":"0","sz":"0","reduceOnly":true,"orderType":"Stop Market"},"status":"open"}]}"#,
+    );
+    let frame = source.snapshot_frame(1500.).to_vec();
+    let (mut e, _) = page_engine_for(None);
+    e.apply_frame(1500., &frame, true).unwrap();
+    e.handle(
+        2000.,
+        Event::Command(Command::AmendOrder {
+            command: 90,
+            id: "9".into(),
+            price: Some(75.),
+            amount: None,
+        }),
+    );
+    let actions = prepared_now(&mut e);
+    let old = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "userRole" => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 7000. => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(7000., Event::TimerFired { timer });
+    prepared_now(&mut e);
+    e.handle(
+        7100.,
+        Event::Command(Command::AmendOrder {
+            command: 91,
+            id: "9".into(),
+            price: Some(70.),
+            amount: None,
+        }),
+    );
+    let actions = prepared_now(&mut e);
+    let current = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "userRole" => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let before = e.store().order("9").unwrap().clone();
+    e.handle(7200., Event::HttpResponse {request: old.id, response: safe_cex_engine::Response {status: 200, headers: "", body: r#"{"role":"agent","data":{"user":"0x9999999999999999999999999999999999999999"}}"#}});
+    let actions = prepared_now(&mut e);
+    assert!(
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
+        "retired role must not issue a successor sizing read"
+    );
+    assert_eq!(
+        serde_json::to_value(e.store().order("9").unwrap()).unwrap(),
+        serde_json::to_value(&before).unwrap()
+    );
+    e.handle(
+        7300.,
+        Event::HttpResponse {
+            request: current.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: &format!(r#"{{"role":"agent","data":{{"user":"{ACCOUNT}"}}}}"#),
+            },
+        },
+    );
+    let actions = prepared_now(&mut e);
+    let sizing = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "orderStatus" => Some(r),
+            _ => None,
+        })
+        .expect("current role still resolves its own account");
+    assert_eq!(
+        serde_json::from_str::<Value>(sizing.body.as_deref().unwrap()).unwrap()["user"],
+        ACCOUNT
+    );
+    answer_order_status(&mut e, sizing);
+    assert!(
+        prepared_now(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+}

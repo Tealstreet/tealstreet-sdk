@@ -377,6 +377,26 @@ impl Hyperliquid {
             "wss://api-ui.hyperliquid.xyz/ws"
         }
     }
+    fn discard_retired_amend_read(&mut self, cx: &mut Cx<'_, Pending>, pending: &Pending) -> bool {
+        let inner = match pending {
+            Pending::ManagedInfo(read) => &read.pending,
+            other => other,
+        };
+        let Pending::Account(request) = inner else {
+            return false;
+        };
+        let Some((id, amend)) = request.amend_read() else {
+            return false;
+        };
+        if self.amend_read_current(id, amend) {
+            return false;
+        }
+        if let Pending::ManagedInfo(read) = pending {
+            let _ = cx.finish_http_context(&read.context);
+            self.finish_background_read(cx, read.background);
+        }
+        true
+    }
     fn info(&mut self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
         self.info_read(cx, body, pending, Some(at), false);
     }
@@ -1368,6 +1388,9 @@ impl Venue for Hyperliquid {
         self.live_balance(cx);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if self.discard_retired_amend_read(cx, &pending) {
+            return;
+        }
         if let Pending::ManagedCandles(read) = &pending
             && cx
                 .validate_read_http_delivery(&read.context, &read.context)
@@ -1692,6 +1715,9 @@ impl Venue for Hyperliquid {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if self.discard_retired_amend_read(cx, &pending) {
+            return;
+        }
         if matches!(
             pending,
             Pending::Meta { .. } | Pending::SpotMeta { .. } | Pending::Dexs { .. }

@@ -31,6 +31,12 @@ pub(super) struct Custody {
     ready: bool,
     wait: Option<ConditionWait>,
 }
+impl Custody {
+    pub(super) fn owner(&self) -> safe_cex_engine::request_context::Owner {
+        self.preflight.owner()
+    }
+}
+
 impl Hyperliquid {
     pub(crate) fn sealed_agent(&self) -> Option<String> {
         let (_, identity) = self.credentials.select(CredentialRole::Mutation).ok()?;
