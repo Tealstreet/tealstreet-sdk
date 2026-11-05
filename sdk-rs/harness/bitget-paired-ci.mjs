@@ -23,6 +23,8 @@ const retiredLandingHolds = (gitRead, landingTip) =>
   gitRead('merge-base', '--is-ancestor', RETIRED_RUST_LANDING_TIP, landingTip) === '' &&
   gitRead('rev-list', '--first-parent', RETIRED_RUST_LANDING_TIP).split('\n').includes(BITGET_CUMULATIVE_ANCHOR);
 const write = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
+const mergedPull = pull => pull.state === 'closed' && typeof pull.merged_at === 'string' &&
+  Number.isFinite(Date.parse(pull.merged_at)) && /^[a-f0-9]{40}$/.test(pull.merge_commit_sha ?? '');
 
 /** Select from authenticated run/PR/commit APIs, never an input baseline flag.
  * The Git tree is recomputed before measuring, not accepted from the PR. */
@@ -37,21 +39,29 @@ export async function selectCpuComparison({ reader, runId, root, jobName, gitRea
     landing = await reader.getCommit(run.head_sha); mergeTree = checkoutTree;
   } else {
     const associated = await reader.listCommitPulls(run.head_sha);
-    const matching = associated.filter(item => item.state === 'open' && item.head?.sha === run.head_sha &&
+    const matching = associated.filter(item => (item.state === 'open' || mergedPull(item)) && item.head?.sha === run.head_sha &&
       item.base?.ref === 'master' && item.base?.repo?.full_name === 'Tealstreet/tealstreet-sdk');
-    insist(matching.length === 1, 'missing/ambiguous exact open PR for this run');
+    insist(matching.length === 1, 'missing/ambiguous exact open or merged PR for this run');
     pull = await reader.getPull(matching[0].number);
-    insist(pull.state === 'open' && pull.head?.sha === run.head_sha &&
+    const confirmedMerged = mergedPull(pull) && pull.merged === true;
+    insist((pull.state === 'open' || confirmedMerged) && pull.head?.sha === run.head_sha &&
       pull.base?.ref === 'master' && pull.base.repo?.full_name === 'Tealstreet/tealstreet-sdk' &&
-      run.repository.full_name === 'Tealstreet/tealstreet-sdk', 'live PR must name the authenticated Rust landing base');
+      run.repository.full_name === 'Tealstreet/tealstreet-sdk', 'open or confirmed merged PR must name the authenticated Rust landing base');
     let associatedBase;
     if (run.event === 'pull_request') {
-      const snapshots = run.pull_requests?.filter(item => item.number === pull.number && item.head?.sha === run.head_sha);
-      insist(snapshots?.length === 1 && snapshots[0].base?.ref === pull.base.ref &&
-        snapshots[0].base.repo?.url === `https://api.github.com/repos/${run.repository.full_name}` &&
-        snapshots[0].head.repo?.url === `https://api.github.com/repos/${run.repository.full_name}`,
-      'missing exact run PR association');
-      associatedBase = snapshots[0].base.sha;
+      // GitHub clears merged runs' PR snapshots; authenticate both head repositories instead.
+      if (confirmedMerged && Array.isArray(run.pull_requests) && run.pull_requests.length === 0) {
+        insist(pull.head.repo?.full_name === 'Tealstreet/tealstreet-sdk' &&
+          run.head_repository?.full_name === run.repository.full_name,
+        'merged PR without run snapshot requires authenticated same-repository heads');
+      } else {
+        const snapshots = run.pull_requests?.filter(item => item.number === pull.number && item.head?.sha === run.head_sha);
+        insist(snapshots?.length === 1 && snapshots[0].base?.ref === pull.base.ref &&
+          snapshots[0].base.repo?.url === `https://api.github.com/repos/${run.repository.full_name}` &&
+          snapshots[0].head.repo?.url === `https://api.github.com/repos/${run.repository.full_name}`,
+        'missing exact run PR association');
+        associatedBase = snapshots[0].base.sha;
+      }
     }
     const checkout = await reader.getCommit(checkoutSha);
     const localParents = gitRead('show', '-s', '--format=%P', checkoutSha).split(' ');

@@ -59,6 +59,7 @@ struct Prepared {
     proxy_header: Option<(String, String)>,
     tunnel: Option<HowConnection>,
     guard: Option<super::IoGuard>,
+    venue: Option<std::sync::Arc<str>>,
 }
 impl fmt::Debug for Prepared {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -81,6 +82,7 @@ struct Bound {
     /// Venue host and the way it went, for a transport failure's log line; never a URL.
     route: String,
     guard: Option<super::IoGuard>,
+    venue: Option<std::sync::Arc<str>>,
 }
 
 /// `api.venue.com direct`, `api.venue.com via proxy.host` or `api.venue.com via HTTP tunnel`.
@@ -130,6 +132,7 @@ pub(super) fn prepare(
     let http = transport.http.clone();
     let routing = transport.routing.clone();
     let guard = transport.io_guard.clone();
+    let venue = transport.venue.clone();
     let deadline = Instant::now()
         + Duration::from_millis(u64::from(request.timeout_ms.unwrap_or(20_000).max(1)));
     Box::pin(async move {
@@ -206,6 +209,7 @@ pub(super) fn prepare(
                 proxy_header,
                 tunnel,
                 guard,
+                venue,
             }) as Box<dyn PreparedHttp>)
         };
         tokio::time::timeout_at(deadline, operation)
@@ -313,6 +317,7 @@ impl PreparedHttp for Prepared {
             proxied,
             route,
             guard: self.guard.clone(),
+            venue: self.venue.clone(),
         }))
     }
 }
@@ -330,6 +335,7 @@ impl BoundHttp for Bound {
             proxied,
             route,
             guard,
+            venue,
         } = *self;
         let started = Instant::now();
         // These are the last controllable transport API calls. Route/token/HOW
@@ -361,7 +367,7 @@ impl BoundHttp for Bound {
                 Ok(Err(error)) => error,
                 Err(_) => "transport request timed out".into(),
             };
-            super::log_request_failure(&route, &error, started.elapsed());
+            super::log_request_failure(&route, &error, started.elapsed(), venue.as_deref());
             let _ = events.send(HostEvent::HttpFailed(request, error));
         })
         .abort_handle()
