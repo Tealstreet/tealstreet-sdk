@@ -149,6 +149,15 @@ pub fn error(account_name: Option<&str>, message: &str) -> String {
     )
 }
 
+/// Optional error metadata; old clients still receive the original first argument.
+pub fn moving(account_name: &str, message: &str) -> String {
+    envelope(
+        "msg",
+        json!({"op":"error", "accountName":account_name,
+        "data":[message, {"reason":"moving"}]}),
+    )
+}
+
 /// An algo error: shown even over a reconnect or to a hidden tab (`forceToast`), which
 /// would otherwise only log it, since it can mean an order is left resting.
 pub fn algo_error(account_name: &str, message: Value) -> String {

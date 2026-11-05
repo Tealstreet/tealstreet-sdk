@@ -46,6 +46,7 @@ struct Drain {
     capped: bool,
     ready: bool,
     forcing: bool,
+    forced: bool,
     idle: Option<IdleRelease>,
 }
 
@@ -149,6 +150,26 @@ impl User {
         self.snapshot()["state"]
             .as_str()
             .is_some_and(|state| matches!(state, "closing" | "drained"))
+    }
+
+    pub(crate) fn forced(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .drain
+            .as_ref()
+            .is_some_and(|drain| drain.forced)
+    }
+
+    pub(crate) fn planned_move(&self) -> bool {
+        self.should_close()
+            && self
+                .state
+                .lock()
+                .unwrap()
+                .drain
+                .as_ref()
+                .is_some_and(|drain| !drain.forced)
     }
 
     fn snapshot(&self) -> Value {
@@ -333,6 +354,7 @@ impl Users {
             capped: false,
             ready: true,
             forcing: false,
+            forced: false,
             idle: Some(IdleRelease {
                 request_id: request.into(),
                 checked_at,
@@ -373,6 +395,7 @@ impl Users {
                 capped: false,
                 ready: false,
                 forcing: false,
+                forced: false,
                 idle: None,
             });
         }
@@ -422,6 +445,7 @@ impl Users {
         }
         drain.capped = false;
         drain.forcing = true;
+        drain.forced = true;
         retire_idle(&mut state);
         Some(
             state
@@ -448,6 +472,16 @@ impl Users {
         json!({"userTag":crate::accounts::user_tag(user),"drainId":id,
             "released":status["drainId"] == id && status["released"] == true,
             "checkedAt":crate::accounts::now_ms()})
+    }
+
+    pub(crate) fn users_with_sockets(&self) -> std::collections::HashSet<String> {
+        self.entries
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, entry)| entry.state.lock().unwrap().sockets > 0)
+            .map(|(user, _)| user.clone())
+            .collect()
     }
 
     pub fn list(&self) -> Result<Value, &'static str> {
@@ -750,6 +784,23 @@ mod tests {
         server.abort();
     }
 
+    #[test]
+    fn summary_socket_users_are_deduplicated_and_exclude_latches_and_closed_sockets() {
+        let users = Users::default();
+        let first = users.socket("connected");
+        let second = users.socket("connected");
+        users.start("operator-latch-only", DEFAULT_CAP_MS);
+        let pending = users.reserve_socket("pending-upgrade").unwrap();
+        assert_eq!(
+            users.users_with_sockets(),
+            std::collections::HashSet::from(["connected".into(), "pending-upgrade".into()])
+        );
+        drop(first);
+        assert!(users.users_with_sockets().contains("connected"));
+        drop(second);
+        drop(pending);
+        assert!(users.users_with_sockets().is_empty());
+    }
     #[tokio::test(start_paused = true)]
     async fn lease_fenced_and_parked_work_refuses_idle_release_without_mutating_work() {
         let users = Users::default();

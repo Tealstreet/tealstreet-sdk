@@ -618,7 +618,7 @@ impl Session {
             }
             Err(error) => {
                 self.drop_early(&name, "account did not join");
-                self.send(envelope::error(Some(&name), error));
+                self.account_stop_error(&account, error);
                 self.registry
                     .release(&account, self.socket, Disposal::JoinFailed);
             }
@@ -683,10 +683,23 @@ impl Session {
                 true
             }
             Err(error) => {
-                self.send(envelope::error(Some(name), error));
+                self.account_stop_error(&account, error);
                 false
             }
         }
+    }
+
+    fn account_stop_error(&self, account: &Account, error: &str) {
+        // A latch alone is not evidence: an unrelated actor crash must still report.
+        let frame = if error == "account stopped"
+            && account.moving()
+            && self.registry.planned_move(&account.user)
+        {
+            envelope::moving(&account.name, error)
+        } else {
+            envelope::error(Some(&account.name), error)
+        };
+        self.send(frame);
     }
 
     fn leave(&self, joined: Joined, disposal: Disposal) {
@@ -1311,6 +1324,11 @@ impl Session {
 
     /// On close: park private accounts for resumable sockets, release the rest.
     pub fn close(mut self) {
+        let disposal = if self.moved && self.registry.planned_move(self.user()) {
+            Disposal::Moving
+        } else {
+            Disposal::SocketClosed
+        };
         let joined: Vec<Joined> = self.joined.drain().map(|(_, joined)| joined).collect();
         let mut parked = Vec::new();
         for joined in joined {
@@ -1326,7 +1344,7 @@ impl Session {
                 parked.push((joined.account, self.socket));
             } else {
                 self.registry
-                    .release(&joined.account, self.socket, Disposal::SocketClosed);
+                    .release(&joined.account, self.socket, disposal);
             }
         }
         if let Some(user) = &self.identity.user {
@@ -1881,6 +1899,91 @@ mod tests {
                     1,
                     "the page is told the chase stopped: {told:?}"
                 );
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn review_3086_crash_before_drain_close_is_not_a_planned_move() {
+        tokio::task::LocalSet::new().run_until(async {
+            for mode in ["user", "box"] {
+                let registry = crate::accounts::tests::registry();
+                let init = acct_init();
+                let account = crate::accounts::testing::trading_account(&registry, "u", &init);
+                let (mut original, _frames) = user_session(registry.clone(), "u");
+                assert!(original.init(init).await.is_ok());
+                account.handle.dispose();
+                tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    while account.handle.join(99_998, true).await.is_ok() {
+                        account.handle.leave(99_998);
+                        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                    }
+                }).await.expect("actor is already dead before any drain disposal");
+                assert!(!account.moving());
+                if mode == "user" {
+                    registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+                } else {
+                    registry.start_drain();
+                }
+                assert_eq!(original.drain_close(), Some(Close::Moved));
+                original.close();
+                let (mut late, mut frames) = user_session(registry, "u");
+                late.join(account).await;
+                let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
+                assert_eq!(frame["d"]["data"], json!(["account stopped"]),
+                    "{mode}: closing a draining session must not relabel an earlier actor crash: {frame}");
+            }
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn planned_move_stop_errors_carry_the_reason_but_real_actor_stops_do_not() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                for mode in ["user", "box", "crash", "crash_during_drain"] {
+                    let registry = crate::accounts::tests::registry();
+                    let init = acct_init();
+                    let account = crate::accounts::testing::trading_account(&registry, "u", &init);
+                    let (mut session, _frames) = user_session(registry.clone(), "u");
+                    assert!(session.init(init).await.is_ok());
+                    match mode {
+                        "user" => {
+                            registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+                        }
+                        "box" => registry.start_drain(),
+                        "crash_during_drain" => {
+                            registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+                            account.handle.dispose();
+                        }
+                        _ => account.handle.dispose(),
+                    }
+                    if matches!(mode, "user" | "box") {
+                        assert_eq!(session.drain_close(), Some(Close::Moved));
+                        session.close();
+                    }
+                    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                        while account.handle.join(99_999, true).await.is_ok() {
+                            account.handle.leave(99_999);
+                            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                        }
+                    })
+                    .await
+                    .expect("the account really ended");
+                    let (mut late, mut frames) = user_session(registry, "u");
+                    late.join(account).await;
+                    let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
+                    assert_eq!(frame["d"]["op"], "error");
+                    assert_eq!(frame["d"]["data"][0], "account stopped");
+                    if matches!(mode, "user" | "box") {
+                        assert_eq!(frame["d"]["data"][1]["reason"], "moving", "{mode}: {frame}");
+                    } else {
+                        assert_eq!(
+                            frame["d"]["data"],
+                            json!(["account stopped"]),
+                            "{mode}: {frame}"
+                        );
+                    }
+                }
             })
             .await;
     }

@@ -1325,6 +1325,25 @@ secondary client's `overrideProxyUrl`. `createExchangeFromAccount` sets
 `secondaryProxyUrl` to `PUBLIC_CORS_PROXY` — the same
 edge Worker `/api/public_proxy` host `getPublicCorsProxy()` returns (the tunnel hosts' own IPs, never the whitelisted fleet).
 
+**Nothing credentialed goes to the public proxy (`transport/publicProxyGuard.ts`).**
+Engine `prepare` refuses, before I/O, any request bound for `publicCorsProxy()`
+with primary/secondary intent, an `Authorization`/venue key header or a
+`signature`/`sign` query param (`SignedPublicProxyRefusal`, code
+`HTTP_PREPARATION_INVALID`). Secondary read keys are deprecated, so their default
+public-proxy reads fail closed, and the native plan omits a public-proxy
+`readHttp`. Lighter's `usesRestProxy` profiles (`payloadSignedViaPublicProxy`)
+keep payload-signed REST there. The native short-lived token
+(`deadline:account:key-index:hex(80-byte signature)`) may appear in `Authorization`
+or the `auth` query parameter only on that deployment's exact API origin and this
+explicit method/path allowlist:
+GET `/api/v1/trades`, `/api/v1/accountInactiveOrders`, `/api/v1/accountActiveOrders`,
+`/api/v1/positionFunding`, `/api/v1/accountLimits`; POST `/api/v1/changeAccountTier` (the existing user setting).
+Every other venue credential header and every `signature`/`sign` query parameter
+is refused, including on Lighter. Binding repeats the check on the signer's final
+URL, query tokens and venue headers before raw binding; refusal releases the
+preparation. Legacy binding checks the captured send URL and refuses any URL change.
+Proxy-owned authorization is separate from the venue's signed headers.
+
 The Rust `SecondaryKeyClients` exposes the same get-only split, keeping generic
 request calls on the primary. The raw secondary adapter is private, so its
 execution surface is GET-only. Its default-off path shares the primary adapter;

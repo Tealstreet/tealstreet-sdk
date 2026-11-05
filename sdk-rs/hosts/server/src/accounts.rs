@@ -3,6 +3,7 @@
 use crate::envelope::InitPayload;
 use crate::state::Log;
 use crate::threads::EngineThreads;
+use safe_cex_native::DisposalCause;
 use safe_cex_native::resolve::{self, AccountTransport, Provider};
 use safe_cex_native::{
     AccountHandle, NetworkTransport, ProxyTokenProvider, RoutingPlan, ServerConfig,
@@ -182,6 +183,8 @@ pub enum Disposal {
     JoinFailed,
     /// Its last socket closed without resuming.
     SocketClosed,
+    /// Its last socket deliberately moved under an active drain.
+    Moving,
 }
 
 impl Disposal {
@@ -196,6 +199,7 @@ impl Disposal {
             Self::Orphaned => "orphaned",
             Self::JoinFailed => "join_failed",
             Self::SocketClosed => "socket_closed",
+            Self::Moving => "moving",
         }
     }
 
@@ -241,6 +245,10 @@ impl Holders {
 }
 
 impl Account {
+    pub(crate) fn moving(&self) -> bool {
+        self.handle.disposal_cause() == Some(DisposalCause::Moving)
+    }
+
     pub fn is_public(&self) -> bool {
         self.link.is_none()
     }
@@ -375,6 +383,8 @@ pub struct Registry {
     pub resume_grace: Duration,
     /// The process is going away: no new account starts.
     stopping: AtomicBool,
+    /// Sticky before forced cleanup starts, until explicit undrain.
+    box_forced: AtomicBool,
     /// The operator's drain before a restart (see DESIGN "Drain and roll").
     drain: tokio::sync::watch::Sender<Drain>,
     /// Bumped as any account's chases or TWAPs end.
@@ -701,6 +711,7 @@ impl Registry {
             },
             resume_grace,
             stopping: AtomicBool::new(false),
+            box_forced: AtomicBool::new(false),
             drain: tokio::sync::watch::channel(Drain::Off).0,
             algos_ended: Arc::new(tokio::sync::watch::channel(0).0),
             pacer: crate::pacing::Pacer::new(7, Duration::from_millis(60)),
@@ -743,6 +754,7 @@ impl Registry {
                     ..Default::default()
                 },
             );
+            account.handle.begin_disposal(DisposalCause::Stopped);
             let stopped = self.keep_notice(&account, "router-lease");
             if !account.algos.as_ref().is_some_and(|sender| {
                 sender
@@ -787,6 +799,19 @@ impl Registry {
     /// Server-allocated, process-unique IDs for sockets, park holders and clients.
     pub fn next_id(&self) -> u64 {
         self.ids.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub fn router_lease_counts(&self) -> crate::router_lease::Counts {
+        let mut users = self.user_drains.users_with_sockets();
+        users.extend(
+            self.accounts
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|account| !account.is_public())
+                .map(|account| account.user.clone()),
+        );
+        self.router_leases.counts(&users)
     }
 
     pub fn account_count(&self) -> usize {
@@ -902,7 +927,12 @@ impl Registry {
             Arc::downgrade(&account),
         );
         if self.user_drains.get(user).latched() {
-            Self::stop(&account, "the user is draining", None);
+            Self::stop(
+                &account,
+                "the user is draining",
+                None,
+                DisposalCause::Moving,
+            );
             return Err("The user is draining; reconnecting".into());
         }
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
@@ -1180,7 +1210,13 @@ impl Registry {
     }
 
     /// With algos, their host settles chases first, then disposes the engine and signer.
-    fn stop(account: &Account, reason: &str, stopped: Option<crate::algos::StopNotice>) {
+    fn stop(
+        account: &Account,
+        reason: &str,
+        stopped: Option<crate::algos::StopNotice>,
+        cause: DisposalCause,
+    ) {
+        account.handle.begin_disposal(cause);
         if !account.running.io_allowed() {
             let stopped = stopped.unwrap_or_else(|| Box::new(|_| {}));
             if !account.algos.as_ref().is_some_and(|sender| {
@@ -1321,7 +1357,12 @@ impl Registry {
         } else {
             stopped
         };
-        Self::stop(account, reason, stopped);
+        let cause = if disposal == Disposal::Moving && self.planned_move(&account.user) {
+            DisposalCause::Moving
+        } else {
+            DisposalCause::Stopped
+        };
+        Self::stop(account, reason, stopped, cause);
     }
 
     /// The process is stopping: every account's algos settle and its engine ends,
@@ -1332,7 +1373,12 @@ impl Registry {
         self.user_drains.box_draining(true);
         let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
         for account in &accounts {
-            Self::stop(account, "the server is restarting", None);
+            Self::stop(
+                account,
+                "the server is restarting",
+                None,
+                DisposalCause::Stopped,
+            );
         }
         let until = tokio::time::Instant::now() + deadline;
         while self.threads.accounts() > 0 {
@@ -1361,6 +1407,7 @@ impl Registry {
     /// each live page what stopped, and only then move every socket. False if some
     /// account had not ended within `deadline`.
     pub async fn break_glass(&self, deadline: Duration) -> bool {
+        self.box_forced.store(true, Ordering::Release);
         self.start_drain();
         let until = tokio::time::Instant::now() + deadline;
         let mut settled = self.drain(deadline).await;
@@ -1381,6 +1428,18 @@ impl Registry {
         self.stopping.store(false, Ordering::Relaxed);
         self.drain.send_replace(Drain::Off);
         self.user_drains.box_draining(false);
+        self.box_forced.store(false, Ordering::Release);
+    }
+
+    pub(crate) fn planned_move(&self, user: &str) -> bool {
+        let entry = self.user_drains.get(user);
+        if self.box_forced.load(Ordering::Acquire)
+            || entry.forced()
+            || self.drain_state() == Drain::Now
+        {
+            return false;
+        }
+        self.drain_state() == Drain::Waiting || entry.planned_move()
     }
 
     pub fn start_user_drain(&self, user: &str, cap_ms: u64) -> Value {
@@ -1411,7 +1470,12 @@ impl Registry {
                     }
                     keep(kept);
                 });
-                Self::stop(&account, "the operator forced a user drain", Some(stopped));
+                Self::stop(
+                    &account,
+                    "the operator forced a user drain",
+                    Some(stopped),
+                    DisposalCause::Stopped,
+                );
             }
             let until = tokio::time::Instant::now() + crate::user_drain::FORCE_DEADLINE;
             let settled = loop {
@@ -2000,6 +2064,86 @@ pub mod testing {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[tokio::test]
+    async fn review_3086_box_force_is_unquieted_during_cleanup() {
+        use std::future::Future;
+        let registry = registry();
+        let (send, receive) = tokio::sync::oneshot::channel();
+        assert!(registry.threads.place(move |placement| {
+            assert!(send.send(placement).is_ok());
+        }));
+        let _held_actor_cleanup = receive.await.unwrap();
+        registry.start_drain();
+        assert!(
+            registry.planned_move("u"),
+            "ordinary box drain is a working control"
+        );
+        let force = registry.break_glass(Duration::from_secs(25));
+        tokio::pin!(force);
+        let pending =
+            std::future::poll_fn(|cx| std::task::Poll::Ready(force.as_mut().poll(cx).is_pending()))
+                .await;
+        assert!(pending, "forced box cleanup is really in flight");
+        assert!(registry.stopping.load(Ordering::Relaxed));
+        assert_eq!(registry.drain_state(), Drain::Waiting);
+        assert!(
+            !registry.planned_move("u"),
+            "break-glass cannot be quieted while forced actor cleanup is still pending"
+        );
+    }
+
+    #[tokio::test]
+    async fn box_force_intent_survives_cancelled_cleanup_until_explicit_undrain() {
+        use std::future::Future;
+        let registry = registry();
+        let (send, receive) = tokio::sync::oneshot::channel();
+        assert!(registry.threads.place(move |placement| {
+            assert!(send.send(placement).is_ok());
+        }));
+        let held_actor_cleanup = receive.await.unwrap();
+        {
+            let force = registry.break_glass(Duration::from_secs(25));
+            tokio::pin!(force);
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(
+                    force.as_mut().poll(cx).is_pending()
+                ))
+                .await
+            );
+        }
+        registry.start_drain();
+        assert!(
+            !registry.planned_move("u"),
+            "dropping force must not clear its intent"
+        );
+        drop(held_actor_cleanup);
+        registry.undrain();
+        registry.start_drain();
+        assert!(registry.planned_move("u"));
+    }
+
+    #[test]
+    fn a_forced_drain_never_becomes_a_quiet_move_even_after_cleanup() {
+        let registry = registry();
+        let status = registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+        let id = status["drainId"].as_str().unwrap();
+        assert!(registry.planned_move("u"));
+        assert!(registry.user_drains.begin_force("u", id).is_some());
+        registry.user_drains.end_force("u", id);
+        assert!(!registry.planned_move("u"));
+        registry.start_drain();
+        assert!(
+            !registry.planned_move("u"),
+            "a box drain cannot hide a forced user stop"
+        );
+        registry.start_user_drain("other", crate::user_drain::DEFAULT_CAP_MS);
+        registry.drain.send_replace(Drain::Now);
+        assert!(
+            !registry.planned_move("other"),
+            "break-glass box drain wins over a user latch"
+        );
+    }
+
     #[test]
     fn a_rebuild_onto_public_data_is_told_apart_from_new_settings() {
         assert_eq!(Disposal::rebuild(false, true), Disposal::PublicData);
@@ -2287,6 +2431,80 @@ pub(crate) mod tests {
         ))
     }
 
+    #[tokio::test]
+    async fn summary_counts_account_and_socket_users_once_without_creating_lease_records() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let registry = registry();
+                let link = SignerLink::new(0, Arc::new(|_| false));
+                let (first, _inbox) = account_on(
+                    Idle,
+                    ("parked-private", "first", "bitget"),
+                    Some(link.clone()),
+                    String::new(),
+                    Arc::default(),
+                );
+                let (second, _inbox) = account_on(
+                    Idle,
+                    ("parked-private", "second", "bitget"),
+                    Some(link),
+                    String::new(),
+                    Arc::default(),
+                );
+                let (public, _inbox) = account_on(
+                    Idle,
+                    ("", PUBLIC_ACCOUNT, PUBLIC_EXCHANGE),
+                    None,
+                    String::new(),
+                    Arc::default(),
+                );
+                for account in [&first, &second, &public] {
+                    registry.accounts.lock().unwrap().insert(
+                        (account.user.clone(), account.name.clone()),
+                        (*account).clone(),
+                    );
+                }
+                let socket = registry.user_drains.socket("socket-only");
+                let duplicate = registry.user_drains.socket("parked-private");
+                registry.user_drains.start("latch-only", 1000);
+                let counts = registry.router_lease_counts();
+                assert_eq!(counts.live_users_without_lease, 2);
+                assert_eq!(counts.tracked_users, 0);
+                registry.router_leases.get("socket-only").unwrap();
+                let counts = registry.router_lease_counts();
+                assert_eq!(counts.live_users_without_lease, 1);
+                assert_eq!(counts.tracked_users, 1);
+                assert_eq!(counts.would_fence_users, 1);
+                drop(socket);
+                drop(duplicate);
+                assert_eq!(
+                    registry.router_lease_counts().live_users_without_lease,
+                    1,
+                    "parked account remains live without any socket"
+                );
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .remove(&(first.user.clone(), first.name.clone()));
+                assert_eq!(
+                    registry.router_lease_counts().live_users_without_lease,
+                    1,
+                    "second private account keeps the same user live"
+                );
+                registry
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .remove(&(second.user.clone(), second.name.clone()));
+                assert_eq!(
+                    registry.router_lease_counts().live_users_without_lease,
+                    0,
+                    "public account and operator latch do not count as hosted activity"
+                );
+            })
+            .await;
+    }
     #[tokio::test(start_paused = true)]
     async fn a_stop_notice_reaches_its_owner_past_another_session_and_expires_after_a_day() {
         tokio::task::LocalSet::new()

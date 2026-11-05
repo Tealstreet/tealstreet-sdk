@@ -21,8 +21,8 @@ pub use routing::{
 #[cfg(feature = "venues")]
 pub use server::spawn_venue_account;
 pub use server::{
-    AccountHandle, BookLevels, ClientLink, FrameServer, InputRefused, Outgoing, ServerConfig,
-    spawn_account,
+    AccountHandle, BookLevels, ClientLink, DisposalCause, FrameServer, InputRefused, Outgoing,
+    ServerConfig, spawn_account,
 };
 pub use socket_health::{
     SOCKET_STALE_MS, SocketDiagnostics, SocketHealth, SocketStats, SocketSummary,

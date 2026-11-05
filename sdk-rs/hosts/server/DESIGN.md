@@ -140,10 +140,12 @@ chase or TWAP is cut short. `scripts/roll.sh` runs the whole roll on the box.
   - Each answers `{drain: "off"|"waiting"|"now", algos: {chases, twaps}}`; break-glass adds `settled`.
 - **`/health` while draining:** 503 with `ok:false` and `draining:true`, so the load balancer pool fails over. `algos: {chases, twaps}` counts the chases and TWAPs on this box, parked accounts included. A stopped chase counts until its cleanup ends, since that may still need a signature; a paused TWAP counts too.
 - **The moved close:** `4100` with reason `draining: reconnect`. It means this box is going away and the page should reconnect.
+  - A join/re-snapshot racing an account deliberately stopped for an active drain may send the original `op:error` frame with optional `data[1].reason: "moving"`. This marker requires the native account handle's first disposal cause plus an active drain for its user or this box. Native disposal/termination and host cleanup share a one-time cause record; a later holder release cannot relabel an earlier stop or crash. Old clients still receive the same first error argument.
+  - Break-glass disposal never marks a planned move; its `forceToast` algo notices are unchanged and still flush before 4100.
 - **While waiting:** a socket whose accounts run no chase or TWAP gets the moved close when the drain starts, and again as each algo ends. A socket with a running algo stays until those algos end. The drain never stops an algo.
   - An `init` from a user with no account on this box gets the moved close. A user already here (a second tab, a resume) is still accepted.
   - A moved socket releases its accounts instead of parking them: its page is reconnecting elsewhere.
-- **Break-glass:** it stops every account through the SIGTERM path. Each live page gets the algo host's own stop notice ("Chase on X stopped: the server is restarting."), and the cancels settle while browsers can still sign. Only then does every socket get the moved close, with the stop notice flushed first.
+- **Break-glass:** sticky force intent is published before any cleanup await and excludes planned-move classification until explicit undrain. It stops every account through the SIGTERM path. Each live page gets the algo host's own stop notice ("Chase on X stopped: the server is restarting."), and the cancels settle while browsers can still sign. Only then does every socket get the moved close, with the stop notice flushed first.
 - **`roll.sh [--now] [--ceiling SECONDS] [--unit NAME] [ADMIN_URL]`:** drains, then polls `/health` until no chase or TWAP runs. The ceiling defaults to 1800s; past it the script fails and leaves the box drained. It then runs `systemctl restart exchange-server`, waits up to 120s for `/health` ok, and undrains. `--now` uses break-glass instead of waiting.
 
 ### Per-user drain (psmp2r-1)
@@ -330,6 +332,25 @@ and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,
 `sequence`, `notAfter`, `generation`, `routerBoxId`, and `missingHeartbeatGraceMs`. It grants
 no placement, renewal or write authority. Expiry uses both wall-clock
 `notAfter` and a monotonic deadline so a clock rollback cannot extend ownership.
+
+`POST /admin/router-lease/summary` accepts an empty body or `{}` under the
+same on-box admin guard. It returns only
+`{routerBoxId, enforced, enableGraceUntil, trackedUsers, fencedUsers,
+wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+`wouldFenceUsers` counts the exact per-user `wouldFence` predicate, including
+wall-clock and monotonic expiry, independently of shadow/enforcement mode.
+`fencedUsers` counts the per-user actual `fenced` flag. Hosted users with private
+accounts (including parked accounts) or authenticated sockets are deduplicated;
+those with no lease record count as `liveUsersWithoutLease`. Pending authenticated
+upgrade reservations count as sockets. Anonymous public data and drain latches
+alone do not count as hosted activity. Reading the summary never creates lease
+records for absent users. `enableGraceUntil` is the active explicit enable-grace
+deadline only while enforcement is on, otherwise null. It uses the same
+absolute/monotonic expiry predicate as the heartbeat ACK and never grants grace
+on restart. Without an explicit active deadline, ungranted tracked users count
+as fenced immediately in enforcement mode. Operators gate enabling on both boxes reporting
+`wouldFenceUsers == 0 && liveUsersWithoutLease == 0`. This is a current-state
+snapshot, not an admission latch or takeover proof.
 
 ### Rollout and recovery
 

@@ -37,6 +37,14 @@ pub(crate) enum Row {
     Refused { code: i64, message: String },
 }
 
+/// A confirmed cancel-batch: per-target rows in request order, and how many
+/// successful echoes named orders we never requested (a venue-side cascade).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Cancelled {
+    pub(crate) rows: Vec<Row>,
+    pub(crate) foreign: usize,
+}
+
 /// The acknowledgement does not prove anything about the write.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Malformed;
@@ -293,7 +301,7 @@ pub(crate) fn cancelled_rows(
     result: Option<&RawValue>,
     ext: Option<&RawValue>,
     order_ids: &[&str],
-) -> Result<Vec<Row>, Malformed> {
+) -> Result<Cancelled, Malformed> {
     let echoed = result
         .map(object)
         .transpose()?
@@ -374,7 +382,10 @@ pub(crate) fn cancelled_rows(
         })
         .collect::<Result<_, Malformed>>()?;
     rows.sort_unstable_by_key(|(target, _)| *target);
-    Ok(rows.into_iter().map(|(_, row)| row).collect())
+    Ok(Cancelled {
+        rows: rows.into_iter().map(|(_, row)| row).collect(),
+        foreign: 0,
+    })
 }
 
 fn status_row(status: Status, order_id: &str) -> Row {
@@ -388,28 +399,29 @@ fn status_row(status: Status, order_id: &str) -> Row {
     }
 }
 
-/// More echoes than targets: every row must name a requested order and every
-/// order must appear. A repeated order is cancelled only by a success whose
-/// other rows are all order-not-found; anything else proves nothing.
+/// More echoes than targets: every row named, every target judged by its own
+/// rows (a repeat needs a success, other rows order-not-found). A non-target row
+/// must be a success beside a cancelled target; a failure has no cascade to explain.
 fn over_counted_rows(
     results: &[Identity],
     statuses: Vec<Status>,
     order_ids: &[&str],
-) -> Result<Vec<Row>, Malformed> {
+) -> Result<Cancelled, Malformed> {
     let mut grouped: Vec<Vec<Status>> = order_ids.iter().map(|_| Vec::new()).collect();
+    let mut foreign = 0;
     for (row, status) in results.iter().zip(statuses) {
         let id = row
             .order_id
             .as_deref()
             .filter(|id| !id.is_empty() && id.len() <= MAX_ID_BYTES)
             .ok_or(Malformed)?;
-        let target = order_ids
-            .iter()
-            .position(|target| *target == id)
-            .ok_or(Malformed)?;
-        grouped[target].push(status);
+        match order_ids.iter().position(|target| *target == id) {
+            Some(target) => grouped[target].push(status),
+            None if status.code == 0 => foreign += 1,
+            None => return Err(Malformed),
+        }
     }
-    grouped
+    let rows = grouped
         .into_iter()
         .zip(order_ids)
         .map(|(mut rows, order_id)| match rows.len() {
@@ -424,7 +436,11 @@ fn over_counted_rows(
             }
             _ => Err(Malformed),
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    if foreign > 0 && !rows.iter().any(|row| matches!(row, Row::Accepted(_))) {
+        return Err(Malformed);
+    }
+    Ok(Cancelled { rows, foreign })
 }
 
 /// Counts, field presence and Bybit status codes only: no order IDs, client IDs, native
@@ -472,12 +488,13 @@ pub(crate) fn cancel_diagnostic(
         }
     }
     format!(
-        "targets={}; result.list={result_shape}/{}; retExtInfo.list={status_shape}/{}; orderId fields/nonempty/matched={native_fields}/{native_ids}/{target_matches}; orderLinkId fields/nonempty={client_fields}/{client_ids}; statuses success/failed/invalid={success}/{failed}/{invalid}; failure codes={}; duplicated targets={}",
+        "targets={}; result.list={result_shape}/{}; retExtInfo.list={status_shape}/{}; orderId fields/nonempty/matched={native_fields}/{native_ids}/{target_matches}; orderLinkId fields/nonempty={client_fields}/{client_ids}; statuses success/failed/invalid={success}/{failed}/{invalid}; failure codes={}; duplicated targets={}; foreign rows={}",
         order_ids.len(),
         results.as_ref().map_or(0, Vec::len),
         statuses.as_ref().map_or(0, Vec::len),
         failure_codes.join(","),
         echoed_targets.iter().filter(|count| **count > 1).count(),
+        native_ids - target_matches,
     )
 }
 

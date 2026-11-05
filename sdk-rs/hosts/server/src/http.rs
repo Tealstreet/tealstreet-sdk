@@ -128,6 +128,10 @@ fn routes(app: Arc<App>, proof: Arc<Proof>) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
         )
         .route("/admin/router-lease/status", post(router_lease_status))
+        .route(
+            "/admin/router-lease/summary",
+            post(router_lease_summary).layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
         .route("/health", get(health).options(preflight))
         .route("/admin/drain", post(admin_drain))
         .route("/admin/undrain", post(admin_undrain))
@@ -437,6 +441,30 @@ async fn router_heartbeat(
         }
         Err(_) => StatusCode::BAD_REQUEST.into_response(),
     }
+}
+
+async fn router_lease_summary(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !body.is_empty()
+        && !serde_json::from_slice::<HashMap<String, serde::de::IgnoredAny>>(&body)
+            .is_ok_and(|fields| fields.is_empty())
+    {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let counts = app.registry.router_lease_counts();
+    let summary = app.registry.router_leases.summary(counts);
+    let mut response = axum::Json(summary).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 async fn router_lease_status(

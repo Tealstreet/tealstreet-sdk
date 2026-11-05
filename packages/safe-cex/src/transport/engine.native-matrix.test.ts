@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { BASE_WS_PRIVATE_URL, BASE_WS_PRIVATE_UTA_URL, BASE_WS_URL } from '../exchanges/bitget/bitget.types';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
+import { payloadSignedViaPublicProxy } from './publicProxyGuard';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 import { setWsRelayEnabled } from './tealstreet/wsRelay';
@@ -313,7 +314,9 @@ const buildCase = async (input: Case) => {
   const http = [];
   const keyModes = input.exchange.startsWith('binance') || input.exchange === 'bitunix' ? [false, true] : [false];
   for (const keyed of keyModes) {
-    const url = `${input.baseURL}/fixture?signature=a%2Fb`;
+    // Public Binance reads and Lighter's payload-signed protocol have no signature query.
+    const noQuerySignature = (input.exchange.startsWith('binance') && !keyed) || payloadSignedViaPublicProxy(input.exchange, options);
+    const url = `${input.baseURL}/fixture${noQuerySignature ? '' : '?signature=a%2Fb'}`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(keyed ? { [input.exchange === 'bitunix' ? 'api-key' : 'x-mbx-apikey']: options.secondary_key ?? 'fixture-venue-key' } : {}),
@@ -337,6 +340,11 @@ const buildCase = async (input: Case) => {
     } : options;
     // Reproduce the TS public-client bypass; other requests go through the real
     // provider independently, without passing the engine's pre-resolved plan.
+    // A secondary read bound for the public proxy has no native read route: it fails closed (publicProxyGuard).
+    if (read && !plan.readHttp) {
+      expect(selectedOptions.overrideProxyUrl, input.name).toBe(provider.publicCorsProxy());
+      continue;
+    }
     const route = publicBinance
       ? { baseURL: url, proxied: false }
       : provider.rest({ exchange: input.exchange, options: selectedOptions, config: { baseURL: url, headers } });
