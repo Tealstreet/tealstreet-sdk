@@ -133,6 +133,7 @@ struct InfoSuccessor {
 #[derive(Default)]
 struct Connection {
     feed: Option<FeedId>,
+    feed_refused: bool,
     // Native topic eligibility, updated only by accepted shared lifecycle events.
     open: bool,
     private_bootstrap: socket_codec::PrivateBootstrap,
@@ -149,6 +150,7 @@ struct Ladder {
     book: Book,
 }
 pub struct Hyperliquid {
+    repair_boot_sequence: u64,
     options: Options,
     /// The standalone `hyperliquidspot` venue: spot is the whole product.
     spot: bool,
@@ -194,6 +196,7 @@ impl Hyperliquid {
             Default::default(),
         );
         Self {
+            repair_boot_sequence: socket_codec::next_repair_boot_sequence(),
             options,
             spot: false,
             spot_markets,
@@ -1376,6 +1379,13 @@ impl Venue for Hyperliquid {
         topic: &SubscriptionTopic,
     ) -> Vec<(FeedId, String)> {
         self.topic_interests(store, topic)
+    }
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        self.unnamed_candle_repair(cx, topic)
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self
