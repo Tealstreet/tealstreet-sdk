@@ -539,9 +539,15 @@ pub fn capture(report: &Report<'_>) {
 
 /// The native host's account-start and transport failures.
 fn native_report(report: &safe_cex_native::report::ErrorReport<'_>) {
+    capture(&from_native(report));
+}
+
+/// A native report as a Sentry report: the transport's venue when it named one,
+/// else the label's. The label is `user_tag account venue`; the account name
+/// stays in the journal.
+fn from_native<'a>(report: &safe_cex_native::report::ErrorReport<'a>) -> Report<'a> {
     use safe_cex_native::report::ErrorKind;
-    // The label is `user_tag account venue`; the account name stays in the journal.
-    let words: Vec<&str> = report
+    let words: Vec<&'a str> = report
         .label
         .unwrap_or_default()
         .split_whitespace()
@@ -551,15 +557,17 @@ fn native_report(report: &safe_cex_native::report::ErrorReport<'_>) {
         ErrorKind::SocketOpenFailed => "venue, relay or tunnel socket did not open",
         ErrorKind::RequestFailed => "venue request failed in transport",
     };
-    capture(&Report {
+    Report {
         kind: report.kind.as_str(),
         summary,
         user_tag: (words.len() >= 2).then(|| words[0].to_owned()),
-        venue: (words.len() >= 2).then(|| words[words.len() - 1]),
+        venue: report
+            .venue
+            .or_else(|| (words.len() >= 2).then(|| words[words.len() - 1])),
         target: report.target,
         error_kind: report.error_kind,
         venue_code: report.venue_code,
-    });
+    }
 }
 
 #[cfg(test)]
@@ -875,5 +883,56 @@ mod tests {
             let _ = std::panic::catch_unwind(|| panic!("caught on an engine thread"));
         });
         assert_eq!(FLUSHES.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn transport_reports_carry_their_venue_and_route_but_no_url() {
+        use safe_cex_native::report::{ErrorKind, ErrorReport};
+        let events = captured(Identity::default(), || {
+            for (venue, target) in [
+                (Some("bybitdemo"), "api-demo.bybit.com direct"),
+                (None, "ws.okx.com"),
+            ] {
+                sentry::capture_event(
+                    from_native(&ErrorReport {
+                        kind: ErrorKind::RequestFailed,
+                        label: None,
+                        target: Some(target),
+                        error_kind: None,
+                        venue_code: None,
+                        venue,
+                    })
+                    .event(),
+                );
+            }
+        });
+        let tags = |event: &Event<'static>| {
+            event
+                .tags
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            tags(&events[0]),
+            [
+                ("kind".to_owned(), "transport.request_failed".to_owned()),
+                ("service".to_owned(), "exchange-server".to_owned()),
+                ("target".to_owned(), "api-demo.bybit.com direct".to_owned()),
+                ("venue".to_owned(), "bybitdemo".to_owned()),
+            ]
+        );
+        assert!(!events[1].tags.contains_key("venue"));
+        // An account's start failure still takes its venue from the label.
+        let start = from_native(&ErrorReport {
+            kind: ErrorKind::AccountStartFailed,
+            label: Some("a1b2c3 Main account kraken"),
+            target: None,
+            error_kind: Some("auth"),
+            venue_code: None,
+            venue: None,
+        });
+        assert_eq!(start.venue, Some("kraken"));
+        assert_eq!(start.user_tag.as_deref(), Some("a1b2c3"));
     }
 }

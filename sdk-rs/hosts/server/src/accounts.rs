@@ -1038,7 +1038,7 @@ impl Registry {
         };
         let (spawned, receive) = tokio::sync::oneshot::channel();
         let placed = self.threads.place(move |placement| {
-            let mut transport = NetworkTransport::with_routing(plan, tokens);
+            let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
             if let Some(lease) = lease {
                 transport = transport.with_io_guard(Arc::new(move || lease.allowed()));
             }

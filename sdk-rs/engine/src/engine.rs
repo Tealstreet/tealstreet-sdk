@@ -5110,43 +5110,15 @@ impl<V: Venue> Engine<V> {
         if !self.source_read_covers {
             return;
         }
-        let standing: Vec<(String, u64)> = self
-            .io
-            .core
-            .order_locks
-            .uncertain_epochs()
-            .map(|(symbol, epoch)| (symbol.to_owned(), epoch))
-            .collect();
-        self.orders_held
-            .retain(|named| standing.iter().any(|(symbol, _)| symbol == named));
-        if standing
-            .iter()
-            .all(|(symbol, _)| self.orders_held.contains(symbol))
-        {
-            return;
-        }
-        let marks = &self.fence_marks;
-        let Some(oldest) = standing
-            .iter()
-            .filter_map(|(_, epoch)| marks.iter().find(|(token, _)| token >= epoch))
-            .map(|(_, at)| *at)
-            .min_by(f64::total_cmp)
-        else {
+        let Some((named, lift_after_ms)) = orders_held_notice(
+            &self.io.core.order_locks,
+            &mut self.orders_held,
+            &self.fence_marks,
+            self.source_clock_offset.is_some(),
+            now,
+        ) else {
             return;
         };
-        let grace = if self.source_clock_offset.is_some() {
-            crate::frame_fed::FENCE_GRACE_MS
-        } else {
-            crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
-        };
-        let mut symbols: Vec<String> = standing.into_iter().map(|(symbol, _)| symbol).collect();
-        symbols.sort();
-        let named = if symbols.iter().any(String::is_empty) {
-            String::new()
-        } else {
-            symbols.join(",")
-        };
-        self.orders_held = symbols;
         Cx {
             now,
             store: &mut self.store,
@@ -5158,7 +5130,7 @@ impl<V: Venue> Engine<V> {
             "Holding an uncertain write until the data source reads its orders",
             vec![
                 ("symbols", Value::Str(named)),
-                ("liftAfterMs", Value::Num((oldest + grace - now).max(0.))),
+                ("liftAfterMs", Value::Num(lift_after_ms)),
             ],
         );
     }
@@ -5283,30 +5255,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn apply_shared_tickers(&mut self, now: f64) {
-        let mut missing = Vec::new();
-        for ticker in self.shared_tickers.values() {
-            if self.store.ticker(&ticker.symbol).is_none()
-                && let Some(market) = self.store.market(&ticker.symbol)
-            {
-                missing.push(crate::model::Ticker {
-                    id: market.id.clone(),
-                    symbol: market.symbol.clone(),
-                    ..Default::default()
-                });
-            }
-        }
-        if !missing.is_empty() {
-            let mut tickers = self.store.tickers().to_vec();
-            tickers.extend(missing);
-            self.store.set_tickers(tickers);
-        }
-        // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
-        for ticker in self.shared_tickers.values() {
-            if self.store.market(&ticker.symbol).is_some() {
-                self.store
-                    .update_ticker(&ticker.symbol, |target| ticker.apply(target));
-            }
-        }
+        copy_shared_tickers(&mut self.store, &self.shared_tickers);
         // A venue may have revalued its account using REST prices before restoration.
         let mut cx = Cx {
             now,
@@ -7792,6 +7741,78 @@ impl SigningLatch {
             }));
         }
     }
+}
+
+/// Shared provider quotes into the Store: a placeholder row for each missing
+/// ticker, then every quote. Venue-independent, so one copy serves every family.
+#[inline(never)]
+fn copy_shared_tickers(
+    store: &mut Store,
+    shared: &HashMap<String, crate::public_feed::PublicTicker>,
+) {
+    let mut missing = Vec::new();
+    for ticker in shared.values() {
+        if store.ticker(&ticker.symbol).is_none()
+            && let Some(market) = store.market(&ticker.symbol)
+        {
+            missing.push(crate::model::Ticker {
+                id: market.id.clone(),
+                symbol: market.symbol.clone(),
+                ..Default::default()
+            });
+        }
+    }
+    if !missing.is_empty() {
+        let mut tickers = store.tickers().to_vec();
+        tickers.extend(missing);
+        store.set_tickers(tickers);
+    }
+    // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
+    for ticker in shared.values() {
+        if store.market(&ticker.symbol).is_some() {
+            store.update_ticker(&ticker.symbol, |target| ticker.apply(target));
+        }
+    }
+}
+
+/// The `orders.held` notice's symbols and `liftAfterMs`, or None when every
+/// standing fence is already named or none has a mark. Records what it names.
+#[cfg(feature = "order-locks")]
+#[inline(never)]
+fn orders_held_notice(
+    locks: &crate::order_locks::OrderLocks,
+    held: &mut Vec<String>,
+    marks: &[(u64, f64)],
+    synced: bool,
+    now: f64,
+) -> Option<(String, f64)> {
+    let standing: Vec<(String, u64)> = locks
+        .uncertain_epochs()
+        .map(|(symbol, epoch)| (symbol.to_owned(), epoch))
+        .collect();
+    held.retain(|named| standing.iter().any(|(symbol, _)| symbol == named));
+    if standing.iter().all(|(symbol, _)| held.contains(symbol)) {
+        return None;
+    }
+    let oldest = standing
+        .iter()
+        .filter_map(|(_, epoch)| marks.iter().find(|(token, _)| token >= epoch))
+        .map(|(_, at)| *at)
+        .min_by(f64::total_cmp)?;
+    let grace = if synced {
+        crate::frame_fed::FENCE_GRACE_MS
+    } else {
+        crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
+    };
+    let mut symbols: Vec<String> = standing.into_iter().map(|(symbol, _)| symbol).collect();
+    symbols.sort();
+    let named = if symbols.iter().any(String::is_empty) {
+        String::new()
+    } else {
+        symbols.join(",")
+    };
+    *held = symbols;
+    Some((named, (oldest + grace - now).max(0.)))
 }
 
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
@@ -11452,6 +11473,10 @@ mod http_plan_boundary_tests;
 #[cfg(feature = "http-plans")]
 #[path = "http_plan_expiry.rs"]
 mod http_plan_expiry;
+
+#[cfg(test)]
+#[path = "cold_path_tests.rs"]
+mod cold_path_tests;
 
 #[cfg(all(test, feature = "order-locks"))]
 #[path = "read_cover_lift_tests.rs"]

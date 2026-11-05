@@ -99,7 +99,10 @@ What it captures:
 - `Log::error` conditions: drain and break-glass deadlines, router-lease
   fencing, a failing signer, and algo shutdown deadlines;
 - the native host's account start failures and venue, relay and HTTP-tunnel
-  transport failures, through `safe_cex_native::report`.
+  transport failures, through `safe_cex_native::report`. Each account's
+  transport is built `with_venue`, so its failures carry `venue` beside `kind`
+  and `target` (host and route, never a URL). The shared HTTP-tunnel socket
+  pool serves many venues and reports none.
 
 Warnings are not sent.
 
