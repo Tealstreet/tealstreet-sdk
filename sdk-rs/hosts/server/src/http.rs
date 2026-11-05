@@ -77,9 +77,9 @@ fn router_with_access(app: Arc<App>, access: Arc<crate::access::Verifier>) -> Ro
         registry: app.registry.clone(),
         verifier: access,
         limiter: crate::access::Limiter::default(),
+        idle_release_ttl: app.config.idle_release_ttl,
         heartbeat_limiter: crate::access::Limiter::router_heartbeats(),
     });
-    let access = proof.verifier.clone();
     let weak = Arc::downgrade(&app.registry);
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(100));
@@ -91,10 +91,19 @@ fn router_with_access(app: Arc<App>, access: Arc<crate::access::Verifier>) -> Ro
             registry.park_expired_router_leases();
         }
     });
+    routes(app, proof)
+}
+
+fn routes(app: Arc<App>, proof: Arc<Proof>) -> Router {
+    let access = proof.verifier.clone();
     Router::new()
         .route(
             "/proof/user-drain",
             post(user_drain_proof).with_state(proof.clone()),
+        )
+        .route(
+            "/proof/user-idle-release",
+            post(user_idle_release).with_state(proof.clone()),
         )
         .route(
             "/lease/router-heartbeat",
@@ -260,6 +269,85 @@ struct Proof {
     verifier: Arc<crate::access::Verifier>,
     limiter: crate::access::Limiter,
     heartbeat_limiter: crate::access::Limiter,
+    idle_release_ttl: Duration,
+}
+
+impl Proof {
+    async fn authorize(&self, headers: &HeaderMap, peer: SocketAddr) -> Result<(), StatusCode> {
+        if !self.limiter.allow(peer.ip()) {
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+        let token = headers
+            .get("Cf-Access-Jwt-Assertion")
+            .and_then(|token| token.to_str().ok())
+            .ok_or(StatusCode::FORBIDDEN)?;
+        if !self.verifier.verify(token).await {
+            return Err(StatusCode::FORBIDDEN);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IdleReleaseRequest {
+    user_id: String,
+    request_id: String,
+}
+
+fn idle_request(body: &[u8]) -> Result<IdleReleaseRequest, StatusCode> {
+    let request: IdleReleaseRequest =
+        serde_json::from_slice(body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let uuid = request.request_id.as_bytes();
+    if body.len() > 2048
+        || request.user_id.is_empty()
+        || request.user_id.len() > 512
+        || request.user_id.chars().any(char::is_control)
+        || uuid.len() != 36
+        || !uuid.iter().enumerate().all(|(i, c)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                *c == b'-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        })
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(request)
+}
+
+async fn user_idle_release(
+    State(proof): State<Arc<Proof>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if let Err(status) = proof.authorize(&headers, peer).await {
+        return status.into_response();
+    }
+    let request = match idle_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
+    };
+    let (status, body) = match proof.registry.user_drains.idle_release(
+        &request.user_id,
+        &request.request_id,
+        proof.idle_release_ttl,
+    ) {
+        Ok(proof) => (StatusCode::OK, proof),
+        Err(crate::user_drain::IdleReleaseError::Refused(refusal)) => {
+            (StatusCode::CONFLICT, refusal)
+        }
+        Err(crate::user_drain::IdleReleaseError::Capacity) => {
+            return StatusCode::TOO_MANY_REQUESTS.into_response();
+        }
+    };
+    let mut response = (status, axum::Json(body)).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 #[derive(Deserialize)]
@@ -275,17 +363,8 @@ async fn user_drain_proof(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    if !proof.limiter.allow(peer.ip()) {
-        return StatusCode::TOO_MANY_REQUESTS.into_response();
-    }
-    let Some(token) = headers
-        .get("Cf-Access-Jwt-Assertion")
-        .and_then(|token| token.to_str().ok())
-    else {
-        return StatusCode::FORBIDDEN.into_response();
-    };
-    if !proof.verifier.verify(token).await {
-        return StatusCode::FORBIDDEN.into_response();
+    if let Err(status) = proof.authorize(&headers, peer).await {
+        return status.into_response();
     }
     let Ok(request) = serde_json::from_slice::<ProofRequest>(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
@@ -663,6 +742,26 @@ async fn upgrade(
             resumable: false,
         },
     };
+    let pending_socket = match identity
+        .user
+        .as_deref()
+        .map(|user| app.registry.user_drains.reserve_socket(user))
+        .transpose()
+    {
+        Ok(reservation) => reservation,
+        Err(()) => {
+            return upgrade.on_upgrade(|mut socket| async move {
+                let _ = tokio::time::timeout(
+                    SEND_TIMEOUT,
+                    socket.send(Message::Close(Some(CloseFrame {
+                        code: crate::session::MOVED_CODE,
+                        reason: crate::session::MOVED_REASON.into(),
+                    }))),
+                )
+                .await;
+            });
+        }
+    };
     if let Some(user) = &identity.user
         && let Some(marker) = trusted_interruption(&access, &headers).await
         && app.registry.interruptions.record(user, marker).is_err()
@@ -682,7 +781,7 @@ async fn upgrade(
         upgrade
             .max_message_size(MAX_MESSAGE_BYTES)
             .on_upgrade(move |socket| async move {
-                serve(app.clone(), identity, socket).await;
+                serve(app.clone(), identity, socket, pending_socket).await;
                 if let Some(ip) = public_ip {
                     let mut counts = app.public_per_ip.lock().unwrap();
                     if let Some(count) = counts.get_mut(&ip) {
@@ -732,7 +831,12 @@ fn idle_dropped(socket: u64, user: Option<&str>) -> String {
     )
 }
 
-async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
+async fn serve(
+    app: Arc<App>,
+    identity: Identity,
+    socket: WebSocket,
+    pending_socket: Option<crate::user_drain::Socket>,
+) {
     app.metrics.connections.fetch_add(1, Ordering::Relaxed);
     let (mut sink, mut stream) = socket.split();
     let (out, mut outgoing, overflow) = Out::channel(OUTBOUND_CAPACITY);
@@ -745,6 +849,8 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
         app.registry.user_connected(user);
     }
     let mut session = Session::new(app.registry.clone(), app.metrics.clone(), identity, out);
+    // Session now owns its live count; the pending upgrade never leaves a zero-count gap.
+    drop(pending_socket);
     let mut loaded = session.take_loaded();
     let mut dropped = session.take_dropped();
     session.open().await;
@@ -871,6 +977,9 @@ mod tests {
                         account_flush: Duration::from_millis(60),
                         access: None,
                         router_lease: Default::default(),
+                        idle_release_ttl: Duration::from_millis(
+                            crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS,
+                        ),
                     },
                     started: Instant::now(),
                     public_per_ip: Default::default(),
@@ -1027,6 +1136,7 @@ mod tests {
             verifier: Arc::new(crate::access::tests::verifier().await),
             limiter: crate::access::Limiter::default(),
             heartbeat_limiter: crate::access::Limiter::router_heartbeats(),
+            idle_release_ttl: Duration::from_millis(crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS),
         });
         let peer: SocketAddr = "127.0.0.1:5000".parse().unwrap();
         let now = now_ms();
@@ -1097,6 +1207,215 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn idle_release_uses_real_access_proofs_and_socket_admission_and_admin_cancel() {
+        let registry = crate::accounts::tests::registry();
+        let ttl = Duration::from_millis(crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS);
+        let app = Arc::new(App {
+            registry: registry.clone(),
+            metrics: Arc::default(),
+            verifier: Arc::new(Verifier::unsigned()),
+            config: Config {
+                port: 0,
+                region: None,
+                release: None,
+                engine_threads: 1,
+                max_connections: 16,
+                max_public_per_ip: 2,
+                idle_timeout: Duration::from_secs(30),
+                resume_grace: Duration::from_secs(60),
+                account_flush: Duration::from_millis(60),
+                access: None,
+                idle_release_ttl: ttl,
+                router_lease: Default::default(),
+            },
+            started: Instant::now(),
+            public_per_ip: Mutex::default(),
+            closing: tokio::sync::watch::channel(false).0,
+        });
+        let proof = Arc::new(Proof {
+            registry: registry.clone(),
+            verifier: Arc::new(crate::access::tests::verifier().await),
+            limiter: crate::access::Limiter::default(),
+            idle_release_ttl: ttl,
+            heartbeat_limiter: crate::access::Limiter::router_heartbeats(),
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = routes(app.clone(), proof);
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap();
+        });
+        let client = reqwest::Client::new();
+        let url = format!("http://{address}/proof/user-idle-release");
+        let request = json!({"userId":"u","requestId":"12345678-1234-4234-8234-123456789abc"});
+        for token in [None, Some("forged")] {
+            let mut call = client.post(&url).body(request.to_string());
+            if let Some(token) = token {
+                call = call.header("Cf-Access-Jwt-Assertion", token);
+            }
+            assert_eq!(call.send().await.unwrap().status(), StatusCode::FORBIDDEN);
+            assert!(!registry.user_drains.get("u").latched());
+        }
+        let token = crate::access::tests::token(json!({}), "test");
+        let call = |body: serde_json::Value| {
+            client
+                .post(&url)
+                .header("Cf-Access-Jwt-Assertion", &token)
+                .body(body.to_string())
+                .send()
+        };
+        let response = call(request.clone()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert!(
+            !response
+                .headers()
+                .contains_key("access-control-allow-origin")
+        );
+        let original: serde_json::Value =
+            serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+        assert_eq!(original.as_object().unwrap().len(), 5);
+        assert_eq!(original["released"], true);
+        assert_eq!(
+            original["expiresAt"].as_u64().unwrap() - original["checkedAt"].as_u64().unwrap(),
+            20_000
+        );
+        tokio::time::sleep(Duration::from_millis(3)).await;
+        assert!(now_ms() > original["checkedAt"].as_u64().unwrap());
+        let repeated: serde_json::Value =
+            serde_json::from_slice(&call(request.clone()).await.unwrap().bytes().await.unwrap())
+                .unwrap();
+        assert_eq!(repeated, original);
+        let different = json!({"userId":"u","requestId":"87654321-1234-4234-8234-123456789abc"});
+        let refused = call(different).await.unwrap();
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        let refused: serde_json::Value =
+            serde_json::from_slice(&refused.bytes().await.unwrap()).unwrap();
+        assert_eq!(refused["reason"], "already-draining");
+        assert_eq!(refused.as_object().unwrap().len(), 3);
+        assert_eq!(
+            registry.user_drains.status("u")["drainId"],
+            original["drainId"]
+        );
+        let proxy = crate::auth::unsigned_token("u", now_ms() / 1000 + 3600);
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(format!("ws://{address}/account?proxyToken={proxy}"))
+                .await
+                .unwrap();
+        let close = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(close, tokio_tungstenite::tungstenite::Message::Close(Some(frame))
+            if u16::from(frame.code) == 4100 && frame.reason == "draining: reconnect")
+        );
+        assert_eq!(registry.user_drains.status("u")["liveSockets"], 0);
+        assert_eq!(
+            app.metrics.snapshot().0,
+            0,
+            "a rejected upgrade must never construct a session"
+        );
+        let cancel_url = format!("http://{address}/admin/user-drain/cancel");
+        let bad_cancel = client
+            .post(&cancel_url)
+            .body(json!({"userId":"u","drainId":"old"}).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(bad_cancel.status(), StatusCode::CONFLICT);
+        let cancelled = client
+            .post(&cancel_url)
+            .body(json!({"userId":"u","drainId":original["drainId"]}).to_string())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(cancelled.status(), StatusCode::OK);
+        assert!(!registry.user_drains.get("u").latched());
+        let spent = call(request.clone()).await.unwrap();
+        assert_eq!(spent.status(), StatusCode::CONFLICT);
+        let spent: serde_json::Value =
+            serde_json::from_slice(&spent.bytes().await.unwrap()).unwrap();
+        assert_eq!(spent["reason"], "request-spent");
+        assert_eq!(spent.as_object().unwrap().len(), 3);
+        assert!(!registry.user_drains.get("u").latched());
+        let (mut live, _) =
+            tokio_tungstenite::connect_async(format!("ws://{address}/account?proxyToken={proxy}"))
+                .await
+                .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), live.next())
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let refused =
+            call(json!({"userId":"u","requestId":"87654321-1234-4234-8234-123456789abc"}))
+                .await
+                .unwrap();
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        let refused: serde_json::Value =
+            serde_json::from_slice(&refused.bytes().await.unwrap()).unwrap();
+        assert_eq!(refused["reason"], "live-socket");
+        assert!(!registry.user_drains.get("u").latched());
+        for n in 0..crate::user_drain::MAX_IDLE_REQUESTS {
+            let request = format!("12345678-1234-4234-8234-{n:012x}");
+            let proof = registry
+                .user_drains
+                .idle_release("capacity", &request, ttl)
+                .unwrap();
+            assert!(
+                registry
+                    .user_drains
+                    .cancel("capacity", proof["drainId"].as_str().unwrap())
+            );
+        }
+        let full =
+            call(json!({"userId":"capacity","requestId":"87654321-1234-4234-8234-123456789abc"}))
+                .await
+                .unwrap();
+        assert_eq!(full.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(!registry.user_drains.get("capacity").latched());
+        let spent =
+            call(json!({"userId":"capacity","requestId":"12345678-1234-4234-8234-000000000000"}))
+                .await
+                .unwrap();
+        assert_eq!(
+            spent.status(),
+            StatusCode::CONFLICT,
+            "a spent ID must still be classified at capacity"
+        );
+        let spent: serde_json::Value =
+            serde_json::from_slice(&spent.bytes().await.unwrap()).unwrap();
+        assert_eq!(spent["reason"], "request-spent");
+        server.abort();
+    }
+
+    #[test]
+    fn idle_release_requires_a_bounded_user_and_uuid_and_rejects_unknown_fields() {
+        let valid = json!({"userId":"u","requestId":"12345678-1234-4234-8234-123456789abc"});
+        assert!(idle_request(valid.to_string().as_bytes()).is_ok());
+        for body in [
+            json!({}),
+            json!({"userId":"u"}),
+            json!({"userId":"u","requestId":null}),
+            json!({"userId":"u","requestId":"not-a-uuid"}),
+            json!({"userId":"","requestId":valid["requestId"]}),
+            json!({"userId":"u\n","requestId":valid["requestId"]}),
+            json!({"userId":"x".repeat(513),"requestId":valid["requestId"]}),
+            json!({"userId":"u","requestId":valid["requestId"],"force":true}),
+        ] {
+            assert!(idle_request(body.to_string().as_bytes()).is_err(), "{body}");
+        }
+    }
+
+    #[tokio::test]
     async fn release_proof_requires_a_real_access_assertion_and_never_echoes_inventory() {
         let registry = crate::accounts::tests::registry();
         let proof = Arc::new(Proof {
@@ -1104,6 +1423,7 @@ mod tests {
             verifier: Arc::new(crate::access::tests::verifier().await),
             limiter: crate::access::Limiter::default(),
             heartbeat_limiter: crate::access::Limiter::router_heartbeats(),
+            idle_release_ttl: Duration::from_millis(crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS),
         });
         let peer: SocketAddr = "127.0.0.1:5000".parse().unwrap();
         let mut headers = HeaderMap::new();
@@ -1231,6 +1551,7 @@ mod tests {
                     account_flush: Duration::from_millis(60),
                     access: None,
         router_lease: Default::default(),
+                    idle_release_ttl: Duration::from_millis(crate::user_drain::DEFAULT_IDLE_RELEASE_TTL_MS),
                 };
                 let app = Arc::new(App {
                     registry: registry.clone(),

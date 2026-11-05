@@ -1,4 +1,4 @@
-//! Cloudflare Access authentication for the read-only release proof only.
+//! Cloudflare Access authentication for the release-proof endpoints.
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use serde::Deserialize;
 use std::collections::HashMap;

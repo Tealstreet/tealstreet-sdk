@@ -343,3 +343,27 @@ async fn self_fence_parks_and_same_box_reconnect_gets_the_retained_notice() {
         returned.close().await;
     }).await;
 }
+
+#[tokio::test]
+async fn idle_release_route_fails_closed_without_access_config() {
+    let app = support::app(
+        support::config(Duration::from_secs(60)),
+        Verifier::unsigned(),
+    );
+    let address = support::serve(app.clone()).await;
+    let before = app.registry.user_drains.status("u");
+    for extra in ["", "Cf-Access-Jwt-Assertion: forged\r\n"] {
+        let (status, _) = json_post(
+            &address,
+            "/proof/user-idle-release",
+            json!({"userId":"u","requestId":"12345678-1234-4234-8234-123456789abc"}),
+            extra,
+        )
+        .await;
+        assert_eq!(
+            status, 403,
+            "idle release must use the same fail-closed Access gate"
+        );
+        assert_eq!(app.registry.user_drains.status("u"), before);
+    }
+}
