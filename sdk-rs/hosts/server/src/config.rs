@@ -13,6 +13,7 @@ pub struct Config {
     pub idle_timeout: Duration,
     pub resume_grace: Duration,
     pub account_flush: Duration,
+    pub access: Option<crate::access::Config>,
 }
 
 impl Config {
@@ -39,6 +40,10 @@ impl Config {
             idle_timeout: Duration::from_secs(30),
             resume_grace: Duration::from_secs(60),
             account_flush: Duration::from_millis(60),
+            access: crate::access::Config::parse(
+                var("TEALSTREET_ACCESS_TEAM_DOMAIN").as_deref(),
+                var("TEALSTREET_ACCESS_AUD").as_deref(),
+            ),
         })
     }
 }

@@ -68,10 +68,24 @@ pub async fn drain_now(app: &App) -> bool {
 }
 
 pub fn router(app: Arc<App>) -> Router {
+    let proof = Arc::new(Proof {
+        registry: app.registry.clone(),
+        verifier: crate::access::Verifier::new(app.config.access.clone()),
+        limiter: crate::access::Limiter::default(),
+    });
     Router::new()
+        .route(
+            "/proof/user-drain",
+            post(user_drain_proof).with_state(proof),
+        )
         .route("/health", get(health).options(preflight))
         .route("/admin/drain", post(admin_drain))
         .route("/admin/undrain", post(admin_undrain))
+        .route("/admin/users", post(admin_users))
+        .route("/admin/user-drain/start", post(user_drain_start))
+        .route("/admin/user-drain/status", post(user_drain_status))
+        .route("/admin/user-drain/cancel", post(user_drain_cancel))
+        .route("/admin/user-drain/force", post(user_drain_force))
         .route("/capabilities", get(capabilities).options(preflight))
         .route(
             "/account/capabilities",
@@ -79,6 +93,7 @@ pub fn router(app: Arc<App>) -> Router {
         )
         .route("/", get(upgrade))
         .route("/account", get(upgrade))
+        .layer(axum::extract::DefaultBodyLimit::max(2048))
         .with_state(app)
 }
 
@@ -204,6 +219,218 @@ async fn admin_undrain(
     Log::info("admin: undrain");
     app.registry.undrain();
     axum::Json(drain_status(&app)).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UserDrainRequest {
+    user_id: String,
+    drain_id: Option<String>,
+    cap_ms: Option<u64>,
+}
+
+struct Proof {
+    registry: Arc<Registry>,
+    verifier: crate::access::Verifier,
+    limiter: crate::access::Limiter,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProofRequest {
+    user_id: String,
+    drain_id: String,
+}
+
+async fn user_drain_proof(
+    State(proof): State<Arc<Proof>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !proof.limiter.allow(peer.ip()) {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
+    let Some(token) = headers
+        .get("Cf-Access-Jwt-Assertion")
+        .and_then(|token| token.to_str().ok())
+    else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    if !proof.verifier.verify(token).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Ok(request) = serde_json::from_slice::<ProofRequest>(&body) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if request.user_id.len() > 512 || request.drain_id.len() > 128 {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let mut response = axum::Json(
+        proof
+            .registry
+            .user_drains
+            .proof(&request.user_id, &request.drain_id),
+    )
+    .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn user_request(body: &[u8]) -> Result<UserDrainRequest, StatusCode> {
+    if body.len() > 2048 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let request: UserDrainRequest =
+        serde_json::from_slice(body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    if request.user_id.is_empty()
+        || request.user_id.len() > 512
+        || request.user_id.chars().any(char::is_control)
+        || request
+            .drain_id
+            .as_ref()
+            .is_some_and(|id| id.is_empty() || id.len() > 64 || !id.is_ascii())
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(request)
+}
+
+async fn admin_users(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match app.registry.user_drains.list() {
+        Ok(users) => axum::Json(users).into_response(),
+        Err(message) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(json!({"error":message})),
+        )
+            .into_response(),
+    }
+}
+
+async fn user_drain_start(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = match user_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
+    };
+    user_admin_action(app, request, "start").await
+}
+
+async fn user_drain_status(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = match user_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
+    };
+    user_admin_action(app, request, "status").await
+}
+
+async fn user_drain_cancel(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = match user_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
+    };
+    user_admin_action(app, request, "cancel").await
+}
+
+async fn user_drain_force(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = match user_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
+    };
+    user_admin_action(app, request, "force").await
+}
+
+async fn user_admin_action(app: Arc<App>, request: UserDrainRequest, action: &str) -> Response {
+    let user = request.user_id.as_str();
+    match action {
+        "start" => {
+            if *app.closing.borrow() {
+                return StatusCode::CONFLICT.into_response();
+            }
+            let cap = request.cap_ms.unwrap_or(crate::user_drain::DEFAULT_CAP_MS);
+            if !(1..=crate::user_drain::MAX_CAP_MS).contains(&cap) {
+                return StatusCode::BAD_REQUEST.into_response();
+            }
+            Log::info(&format!(
+                "admin user drain start user_tag={}",
+                crate::accounts::user_tag(user)
+            ));
+            axum::Json(app.registry.start_user_drain(user, cap)).into_response()
+        }
+        "cancel" => {
+            if *app.closing.borrow()
+                || !request
+                    .drain_id
+                    .as_deref()
+                    .is_some_and(|id| app.registry.user_drains.cancel(user, id))
+            {
+                return StatusCode::CONFLICT.into_response();
+            }
+            Log::info(&format!(
+                "admin user drain cancel user_tag={}",
+                crate::accounts::user_tag(user)
+            ));
+            axum::Json(app.registry.user_drains.status(user)).into_response()
+        }
+        "force" => {
+            let Some(task) = request
+                .drain_id
+                .as_deref()
+                .and_then(|id| app.registry.force_user_drain(user, id))
+            else {
+                return StatusCode::CONFLICT.into_response();
+            };
+            Log::info(&format!(
+                "admin user drain force user_tag={}",
+                crate::accounts::user_tag(user)
+            ));
+            let settled = task.await.unwrap_or(false);
+            let mut status = app.registry.user_drains.status(user);
+            status["settled"] = settled.into();
+            axum::Json(status).into_response()
+        }
+        _ => axum::Json(app.registry.user_drains.status(user)).into_response(),
+    }
 }
 
 pub fn capabilities_json() -> serde_json::Value {
@@ -444,6 +671,12 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
         }))
     };
     loop {
+        if session.user_draining()
+            && let Some(moved) = session.drain_close()
+        {
+            move_away(&mut sink, &mut outgoing, moved).await;
+            break;
+        }
         tokio::select! {
             biased;
             _ = overflow.notified() => {
@@ -514,6 +747,78 @@ async fn serve(app: Arc<App>, identity: Identity, socket: WebSocket) {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn release_proof_requires_a_real_access_assertion_and_never_echoes_inventory() {
+        let registry = crate::accounts::tests::registry();
+        let proof = Arc::new(Proof {
+            registry: registry.clone(),
+            verifier: crate::access::tests::verifier().await,
+            limiter: crate::access::Limiter::default(),
+        });
+        let peer: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("1.2.3.4"));
+        let call = |headers, user: &str, id: &str| {
+            user_drain_proof(
+                State(proof.clone()),
+                ConnectInfo(peer),
+                headers,
+                axum::body::Bytes::from(json!({"userId":user,"drainId":id}).to_string()),
+            )
+        };
+        assert_eq!(
+            call(headers.clone(), "u", "unknown").await.status(),
+            StatusCode::FORBIDDEN
+        );
+        headers.insert(
+            "cf-access-jwt-assertion",
+            HeaderValue::from_str(&crate::access::tests::token(json!({}), "test")).unwrap(),
+        );
+        let started = registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+        let id = started["drainId"].as_str().unwrap();
+        let response = call(headers.clone(), "u", id).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert!(
+            !response
+                .headers()
+                .contains_key("access-control-allow-origin")
+        );
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body["released"], true);
+        assert_eq!(body.as_object().unwrap().len(), 4);
+        assert!(!body.to_string().contains("userId"));
+        assert!(!body.to_string().contains("accountName"));
+        for (user, id) in [("u", "unknown"), ("u", ""), ("other", id)] {
+            let response = call(headers.clone(), user, id).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), 4096)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(body["released"], false);
+        }
+        assert!(registry.user_drains.cancel("u", id));
+        let response = call(headers, "u", id).await;
+        let body: serde_json::Value = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            body["released"], false,
+            "a previously observed proof cannot survive cancellation"
+        );
+    }
+
     #[test]
     fn admin_routes_answer_only_an_unforwarded_loopback_peer() {
         let none = HeaderMap::new();
@@ -574,6 +879,7 @@ mod tests {
                     idle_timeout: Duration::from_secs(30),
                     resume_grace: Duration::from_secs(60),
                     account_flush: Duration::from_millis(60),
+                    access: None,
                 };
                 let app = Arc::new(App {
                     registry: registry.clone(),

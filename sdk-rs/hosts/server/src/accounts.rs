@@ -352,6 +352,7 @@ struct Parked {
 }
 
 pub struct Registry {
+    pub user_drains: crate::user_drain::Users,
     accounts: Mutex<HashMap<(String, String), Arc<Account>>>,
     parked: Mutex<HashMap<String, Parked>>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
@@ -675,6 +676,7 @@ fn usable_builder(builder: &crate::envelope::HyperliquidBuilder) -> bool {
 impl Registry {
     pub fn new(threads: EngineThreads, account_flush: Duration, resume_grace: Duration) -> Self {
         Self {
+            user_drains: crate::user_drain::Users::default(),
             accounts: Mutex::default(),
             parked: Mutex::default(),
             open: Mutex::default(),
@@ -825,6 +827,16 @@ impl Registry {
             )
             .await?;
         let account = Arc::new(account);
+        self.user_drains.track(
+            user,
+            &account.name,
+            &account.running,
+            Arc::downgrade(&account),
+        );
+        if self.user_drains.get(user).latched() {
+            Self::stop(&account, "the user is draining", None);
+            return Err("The user is draining; reconnecting".into());
+        }
         *account.algo_owner.lock().unwrap() = Some(Arc::downgrade(&account));
         account.hold(holder, live);
         if let Some(remote) = remote {
@@ -895,6 +907,8 @@ impl Registry {
         let held = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let algo_held = held.clone();
         let running = Arc::new(crate::algos::Running::new(self.algos_ended.clone()));
+        self.user_drains
+            .track(user, &init.account_name, &running, std::sync::Weak::new());
         let algo_running = running.clone();
         let (algos, algo_inbox) = if public_only {
             (None, None)
@@ -1200,6 +1214,7 @@ impl Registry {
     /// are told. False if some account had not ended by then.
     pub async fn drain(&self, deadline: Duration) -> bool {
         self.stopping.store(true, Ordering::Relaxed);
+        self.user_drains.box_draining(true);
         let accounts: Vec<Arc<Account>> = self.accounts.lock().unwrap().values().cloned().collect();
         for account in &accounts {
             Self::stop(account, "the server is restarting", None);
@@ -1217,6 +1232,7 @@ impl Registry {
     /// The operator drains the box: sockets move as their algos end, and only
     /// users already live here may init. Running algos are never stopped for it.
     pub fn start_drain(&self) {
+        self.user_drains.box_draining(true);
         self.drain.send_if_modified(|drain| {
             let starts = *drain == Drain::Off;
             if starts {
@@ -1249,6 +1265,55 @@ impl Registry {
     pub fn undrain(&self) {
         self.stopping.store(false, Ordering::Relaxed);
         self.drain.send_replace(Drain::Off);
+        self.user_drains.box_draining(false);
+    }
+
+    pub fn start_user_drain(&self, user: &str, cap_ms: u64) -> Value {
+        let status = self.user_drains.start(user, cap_ms);
+        self.algos_ended
+            .send_modify(|revision| *revision = revision.wrapping_add(1));
+        status
+    }
+
+    /// Detached from the HTTP request: disconnecting an operator cannot abandon cleanup.
+    pub fn force_user_drain(
+        self: &Arc<Self>,
+        user: &str,
+        id: &str,
+    ) -> Option<tokio::task::JoinHandle<bool>> {
+        let accounts = self.user_drains.begin_force(user, id)?;
+        let registry = self.clone();
+        let (user, id) = (user.to_owned(), id.to_owned());
+        Some(tokio::spawn(async move {
+            for account in accounts {
+                let keep = registry.keep_notice(&account, &id);
+                let weak = Arc::downgrade(&account);
+                let stopped = Box::new(move |kept: crate::algos::Kept| {
+                    if let Some(account) = weak.upgrade() {
+                        for frame in kept.frames(&account.name) {
+                            account.reach_live(Some(frame));
+                        }
+                    }
+                    keep(kept);
+                });
+                Self::stop(&account, "the operator forced a user drain", Some(stopped));
+            }
+            let until = tokio::time::Instant::now() + crate::user_drain::FORCE_DEADLINE;
+            let settled = loop {
+                if registry.user_drains.status(&user)["algosDone"] == true {
+                    break true;
+                }
+                if tokio::time::Instant::now() >= until {
+                    break false;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            };
+            registry.user_drains.end_force(&user, &id);
+            registry
+                .algos_ended
+                .send_modify(|revision| *revision = revision.wrapping_add(1));
+            settled
+        }))
     }
 
     pub fn drain_state(&self) -> Drain {
@@ -1799,6 +1864,12 @@ pub mod testing {
 
     /// `account` as the registry's account for its (user, name).
     pub fn register(registry: &Registry, account: &Arc<Account>) {
+        registry.user_drains.track(
+            &account.user,
+            &account.name,
+            &account.running,
+            Arc::downgrade(account),
+        );
         registry.accounts.lock().unwrap().insert(
             (account.user.clone(), account.name.clone()),
             account.clone(),
