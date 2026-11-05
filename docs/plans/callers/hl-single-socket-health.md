@@ -14,6 +14,8 @@ SDK Store latency is `number | null`; null is unmeasured, including after reset.
 Native STATUS uses flag 2 for a measured latency, preserving measured zero without
 a new section layout. Positive legacy frames retain their numeric sample; old
 zero frames mean unknown. Source and frame-fed engines preserve the flag.
+CLI exchange contracts accept null and omit unmeasured latency from connection
+status; a measured zero remains visible as 0ms.
 
 NX follow-ups (separate PRs): hide latency when null instead of displaying 0ms;
 Requests Log must classify frames on a mixed socket by topic, using this socket
