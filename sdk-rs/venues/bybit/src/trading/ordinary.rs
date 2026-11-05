@@ -1260,6 +1260,33 @@ impl BybitLinear {
         self.continue_ordinary(cx, request.command, entry);
     }
 
+    pub(crate) fn partial_stop_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Then::Ordinary(request) = &pending.then else {
+            return Ok(());
+        };
+        let Some(entry) = self.trading.ordinary.get(&request.command) else {
+            return Ok(());
+        };
+        let Stage::Plan(run) = &entry.stage else {
+            return Ok(());
+        };
+        let Some(active) = &run.active else {
+            return Ok(());
+        };
+        if active.context != request.context {
+            return Ok(());
+        }
+        if let Call::CancelPartialStop { guard, .. } = &active.leg.planned.call {
+            guard.validate(store, release.time.raw_ms)?;
+        }
+        Ok(())
+    }
+
     /// Record the classified failure before anything else. `weaken` marks a
     /// refusal the codec cannot prove; `evidence` IDs are reconciliation-only.
     #[allow(clippy::too_many_arguments)]
@@ -1622,7 +1649,10 @@ impl BybitLinear {
                     return Self::unproven(
                         cx,
                         context,
-                        "Bybit create-batch acknowledgement does not prove its orders",
+                        &format!(
+                            "Bybit create-batch acknowledgement does not prove its orders ({})",
+                            ack::create_diagnostic(result, ext, &refs),
+                        ),
                         &evidence,
                     );
                 };
@@ -1752,7 +1782,7 @@ impl BybitLinear {
                     | WriteResult::Failed(error) => Decision::Failed(error),
                 }
             }
-            Call::CancelPartialStop { id, batch } => {
+            Call::CancelPartialStop { id, batch, .. } => {
                 let row = if *batch {
                     ack::cancelled_one(result, ext, id)
                 } else {

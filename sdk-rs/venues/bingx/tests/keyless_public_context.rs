@@ -11,14 +11,20 @@ const COMMAND: u32 = 42;
 fn candle_rate_limit_is_typed_before_list_decode_for_keyless_and_signed_reads() {
     for keyed in [false, true] {
         for (status, headers, body, expected) in [
-            (200, "", r#"{"code":100410,"msg":"请稍后重试"}"#, 300_000.0),
+            // No named wait: no synthetic 5 min floor on a chart read, the chart's own backoff applies.
+            (200, "", r#"{"code":100410,"msg":"请稍后重试"}"#, None),
             (
                 200,
                 "",
                 r#"{"code":100410,"msg":"请稍后重试; unblocked after 0000000090011"}"#,
-                90_000.0,
+                Some(90_000.0),
             ),
-            (429, "Retry-After: 120", "Too Many Requests", 120_000.0),
+            (
+                429,
+                "Retry-After: 120",
+                "Too Many Requests",
+                Some(120_000.0),
+            ),
         ] {
             let mut engine = support::engine(support::Options {
                 key: keyed.then(|| "key".into()),
@@ -60,7 +66,7 @@ fn candle_rate_limit_is_typed_before_list_decode_for_keyless_and_signed_reads() 
                 errors[0].kind,
                 Some(safe_cex_engine::ErrorKind::RateLimited)
             );
-            assert_eq!(errors[0].retry_after_ms, Some(expected));
+            assert_eq!(errors[0].retry_after_ms, expected);
             assert!(!errors[0].message.contains("expected list"));
         }
     }

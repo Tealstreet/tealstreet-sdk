@@ -10,7 +10,7 @@ export const BITGET_PAIRED_FREEZE_SHA256 = 'ee6b8fd762184969b2eacf7a5ef030bc8872
 export const BITGET_CUMULATIVE_ANCHOR = '518d3953c09daf63c1345ea465bbc55bd313f53a';
 export const BITGET_MEASUREMENT_FILES = Object.freeze(['sdk-rs/harness/gate.mjs', 'sdk-rs/harness/replay.mjs', 'sdk-rs/harness/cpu-observation.mjs',
   'sdk-rs/harness/performance-policy.mjs', 'sdk-rs/harness/ci-wasm.mjs',
-  'sdk-rs/harness/bitget-paired-steady.mjs', 'sdk-rs/harness/cpu-ci.mjs', 'sdk-rs/harness/revalidate-gate.mjs']);
+  'sdk-rs/harness/bitget-paired-steady.mjs', 'sdk-rs/harness/bitget-paired-oracle.mjs', 'sdk-rs/harness/cpu-ci.mjs', 'sdk-rs/harness/revalidate-gate.mjs']);
 export const BITGET_COHORT_ORDER = Object.freeze(['baseline', 'candidate', 'candidate', 'baseline',
   'candidate', 'baseline', 'baseline', 'candidate']);
 export const BITGET_PAIRED_PROTOCOL_SHA256 = createHash('sha256').update(JSON.stringify({
@@ -18,6 +18,7 @@ export const BITGET_PAIRED_PROTOCOL_SHA256 = createHash('sha256').update(JSON.st
   statistic: `(median(B Rust${4 * PUBLIC_REPLAY_PAIRS})/median(B TS${4 * PUBLIC_REPLAY_PAIRS}))/(median(A Rust${4 * PUBLIC_REPLAY_PAIRS})/median(A TS${4 * PUBLIC_REPLAY_PAIRS}))`,
   scope: 'bitget:public:steadyCpuMs', freezeSha256: BITGET_PAIRED_FREEZE_SHA256,
   comparisons: ['tip', 'anchor'], cumulativeAnchor: BITGET_CUMULATIVE_ANCHOR,
+  oraclePreflight: 'each source TS output excluding metrics; differences never certify',
   measurementCheckout: 'candidate', measurementFiles: BITGET_MEASUREMENT_FILES,
 })).digest('hex');
 const authorities = new WeakSet();

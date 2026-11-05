@@ -249,7 +249,7 @@ fn a_refused_key_ends_the_start_with_the_reason() {
     let failed: Vec<_> = answered
         .iter()
         .filter_map(|x| match x {
-            Action::Notice(Notice::StartupFailed { error }) => Some(error.message.clone()),
+            Action::Notice(Notice::StartupFailed { error, .. }) => Some(error.message.clone()),
             _ => None,
         })
         .collect();

@@ -638,6 +638,61 @@ struct Pending {
     client: Option<u64>,
     original: u32,
 }
+
+struct StartupFailure {
+    notice: Arc<str>,
+    private_pending: bool,
+    recheck: Option<StartupRecheck>,
+}
+
+struct StartupRecheck {
+    attempts: u8,
+    next: Option<tokio::time::Instant>,
+    floor: Duration,
+}
+
+impl StartupRecheck {
+    fn new(now: tokio::time::Instant, floor: Duration, jitter: Duration) -> Self {
+        Self {
+            attempts: 0,
+            next: now.checked_add(Duration::from_secs(300).max(floor) + jitter),
+            floor,
+        }
+    }
+    fn defer(&mut self, now: tokio::time::Instant, floor: Duration) {
+        self.floor = self.floor.max(floor);
+        if let Some(next) = &mut self.next {
+            let Some(floor) = now.checked_add(floor) else {
+                self.next = None;
+                return;
+            };
+            *next = (*next).max(floor);
+        }
+    }
+    fn claim(&mut self, now: tokio::time::Instant, jitter: impl FnOnce() -> Duration) -> bool {
+        if self.next.is_none_or(|next| now < next) {
+            return false;
+        }
+        self.attempts += 1;
+        self.next = (self.attempts < 3)
+            .then(|| {
+                now.checked_add(
+                    Duration::from_secs(300 << self.attempts).max(self.floor) + jitter(),
+                )
+            })
+            .flatten();
+        true
+    }
+}
+
+fn startup_recheck_jitter() -> Duration {
+    let mut bytes = [0; 4];
+    if getrandom::getrandom(&mut bytes).is_err() {
+        return Duration::from_secs(30);
+    }
+    Duration::from_millis(u64::from(u32::from_le_bytes(bytes)) % 30_001)
+}
+
 struct Account<V: Venue, T: Transport> {
     #[cfg(feature = "address-nonce")]
     host: crate::SetupRunOwner<V, T>,
@@ -650,7 +705,7 @@ struct Account<V: Venue, T: Transport> {
     pending: HashMap<u32, Pending>,
     next_command: u32,
     /// Replayed to clients that join after startup failed, so none waits on it.
-    startup_failure: Option<Arc<str>>,
+    startup_failure: Option<StartupFailure>,
     /// Warn+ notices mirrored to stderr while clients are attached: per code, the
     /// last line written and how many were held back since.
     mirrored: HashMap<String, (std::time::Instant, u32)>,
@@ -796,6 +851,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     let gone: Vec<_> = self.peers.iter().filter(|(_, peer)| peer.outgoing.is_closed()).map(|(id, _)| *id).collect();
                     for client in gone { self.leave(client); }
                     self.flush();
+                    self.recheck_startup();
                 }
             }
             self.execute();
@@ -835,7 +891,7 @@ impl<V: Venue, T: Transport> Account<V, T> {
             return Err("snapshot exceeds connection limits");
         }
         if let Some(failure) = &self.startup_failure {
-            let _ = outgoing.try_send(Outgoing::Text(failure.clone()));
+            let _ = outgoing.try_send(Outgoing::Text(failure.notice.clone()));
         }
         self.peers.insert(
             client,
@@ -909,7 +965,10 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     })),
                     |peer| peer.account_auth,
                 ),
-                Notice::StartupFailed { error } => {
+                Notice::StartupFailed {
+                    error,
+                    read_refusal,
+                } => {
                     self.note_start_failure(&error);
                     let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     if text.len() > self.config.max_frame_bytes {
@@ -922,7 +981,41 @@ impl<V: Venue, T: Transport> Account<V, T> {
                         bounded.outcome = error.outcome;
                         text = encode_notice(ServerNotice::StartupFailed { detail: &bounded });
                     }
-                    self.startup_failure = Some(text.clone());
+                    let private_pending =
+                        read_refusal && self.host.engine.private_startup_pending();
+                    let mut recheck = self
+                        .startup_failure
+                        .take()
+                        .filter(|_| private_pending)
+                        .and_then(|failure| failure.recheck);
+                    if private_pending
+                        && matches!(
+                            error.kind,
+                            Some(
+                                safe_cex_engine::ErrorKind::AuthInvalid
+                                    | safe_cex_engine::ErrorKind::AuthExpired
+                                    | safe_cex_engine::ErrorKind::AuthPermission
+                            )
+                        )
+                    {
+                        let floor = error
+                            .retry_after_ms
+                            .filter(|ms| ms.is_finite() && *ms >= 0.)
+                            .map_or(Duration::ZERO, |ms| Duration::from_millis(ms.ceil() as u64));
+                        let now = tokio::time::Instant::now();
+                        match &mut recheck {
+                            Some(recheck) => recheck.defer(now, floor),
+                            None => {
+                                recheck =
+                                    Some(StartupRecheck::new(now, floor, startup_recheck_jitter()))
+                            }
+                        }
+                    }
+                    self.startup_failure = Some(StartupFailure {
+                        notice: text.clone(),
+                        private_pending,
+                        recheck,
+                    });
                     self.broadcast(Outgoing::Text(text))
                 }
                 Notice::Deactivate => {
@@ -1021,8 +1114,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
         }
     }
 
-    /// A Hosted account's start failure, one line per account per MIRROR_EVERY. The
-    /// server has no Sentry client, so the journal is where these are alerted on.
+    /// A Hosted account's start failure, one line per account per MIRROR_EVERY, also
+    /// handed to the host's error sink (`report`).
     fn note_start_failure(&mut self, error: &VenueError) {
         let Some(label) = self.config.log_label.as_deref() else {
             return;
@@ -1040,6 +1133,13 @@ impl<V: Venue, T: Transport> Account<V, T> {
             "{}",
             start_failure_line(label, self.config.signing_mode, error)
         );
+        crate::report::report(&crate::report::ErrorReport {
+            kind: crate::report::ErrorKind::AccountStartFailed,
+            label: Some(label),
+            target: None,
+            error_kind: error.kind.map(|kind| kind.as_str()),
+            venue_code: error.venue_code.as_deref(),
+        });
     }
 
     /// Log notices never disconnect peers: an oversized one is cut to fit, and
@@ -1121,6 +1221,15 @@ impl<V: Venue, T: Transport> Account<V, T> {
     }
 
     fn flush(&mut self) {
+        if self
+            .startup_failure
+            .as_ref()
+            .is_some_and(|failure| failure.private_pending)
+            && self.host.terminal.is_none()
+            && self.host.engine.private_startup_complete()
+        {
+            self.startup_failure = None;
+        }
         let frame = self.host.turn(|host| {
             host.engine
                 .take_frame((host.clock)())
@@ -1128,6 +1237,27 @@ impl<V: Venue, T: Transport> Account<V, T> {
         });
         if let Some(Some(frame)) = frame {
             self.broadcast(Outgoing::Frame(frame));
+        }
+    }
+
+    fn recheck_startup(&mut self) {
+        let Some(failure) = &mut self.startup_failure else {
+            return;
+        };
+        if !failure.private_pending || self.host.terminal.is_some() {
+            return;
+        }
+        let Some(recheck) = &mut failure.recheck else {
+            return;
+        };
+        if !recheck.claim(tokio::time::Instant::now(), startup_recheck_jitter) {
+            return;
+        }
+        let supported = self
+            .host
+            .turn(|host| host.engine.recheck_startup_reads((host.clock)()));
+        if supported != Some(true) {
+            recheck.next = None;
         }
     }
 
@@ -2880,16 +3010,80 @@ mod tests {
         );
     }
 
-    struct FailsStartup;
+    #[derive(Default)]
+    struct FailsStartup {
+        rechecks: Rc<std::cell::Cell<u8>>,
+        can_recheck: bool,
+        recover: bool,
+    }
     impl Venue for FailsStartup {
         type Pending = ();
+        fn rechecks_startup_reads() -> bool {
+            true
+        }
         fn start(&mut self, cx: &mut Cx<'_, ()>) {
-            cx.startup_failed(
-                VenueError::new("key rejected").kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            cx.store.set_markets(vec![safe_cex_engine::model::Market {
+                id: "BTC".into(),
+                symbol: "BTCUSDT".into(),
+                pretty_symbol: None,
+                base: "BTC".into(),
+                quote: "USDT".into(),
+                active: true,
+                precision: safe_cex_engine::model::Precision {
+                    amount: 0.001,
+                    price: 0.1,
+                },
+                limits: safe_cex_engine::model::Limits {
+                    amount: safe_cex_engine::model::MinMax {
+                        min: 0.001,
+                        max: 100.,
+                    },
+                    leverage: safe_cex_engine::model::MinMax { min: 1., max: 50. },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: Some(true),
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            }]);
+            cx.startup_read_refused(
+                &VenueError::new("key rejected").kind(safe_cex_engine::ErrorKind::AuthInvalid),
             );
         }
+        fn recheck_startup_reads(&mut self, cx: &mut Cx<'_, ()>) -> bool {
+            if !self.can_recheck {
+                return false;
+            }
+            self.rechecks.set(self.rechecks.get() + 1);
+            cx.request(
+                safe_cex_engine::Method::Get,
+                "https://fixture/account".into(),
+                vec![],
+                None,
+                (),
+            );
+            if self.recover {
+                cx.store
+                    .set_balance(safe_cex_engine::model::Balance::default());
+                cx.store.set_positions(vec![]);
+                cx.store.set_orders(vec![]);
+            }
+            true
+        }
         fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
-        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_message(&mut self, cx: &mut Cx<'_, ()>, _: SocketId, text: &str) {
+            let error =
+                VenueError::new("key rejected again").kind(safe_cex_engine::ErrorKind::AuthInvalid);
+            if text == "refuse again" {
+                cx.startup_read_refused(&error);
+            } else {
+                cx.startup_failed(error);
+            }
+        }
         fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
         fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
         fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
@@ -2973,7 +3167,7 @@ mod tests {
     async fn a_startup_failure_reaches_clients_that_join_later() {
         let mut actor = Account::new(
             Host::new(
-                safe_cex_engine::test_support::seeded_engine(FailsStartup),
+                safe_cex_engine::test_support::seeded_engine(FailsStartup::default()),
                 NoTransport,
             ),
             ServerConfig::default(),
@@ -2995,6 +3189,303 @@ mod tests {
         );
     }
 
+    struct SignerMissingAtStartup;
+    impl Venue for SignerMissingAtStartup {
+        type Pending = ();
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            cx.store.set_markets(vec![safe_cex_engine::model::Market {
+                id: "BTC".into(),
+                symbol: "BTCUSDT".into(),
+                pretty_symbol: None,
+                base: "BTC".into(),
+                quote: "USDT".into(),
+                active: true,
+                precision: safe_cex_engine::model::Precision {
+                    amount: 0.001,
+                    price: 0.1,
+                },
+                limits: safe_cex_engine::model::Limits {
+                    amount: safe_cex_engine::model::MinMax {
+                        min: 0.001,
+                        max: 100.,
+                    },
+                    leverage: safe_cex_engine::model::MinMax { min: 1., max: 50. },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: Some(true),
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            }]);
+            // As SigningLatch::missing_key reports it: primary material can never sign.
+            cx.startup_failed(
+                VenueError::new("Signing key is not installed")
+                    .kind(safe_cex_engine::ErrorKind::InvalidInput)
+                    .outcome(safe_cex_engine::Outcome::NotSent),
+            );
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_a_non_read_startup_failure_survives_unsigned_read_completion() {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(SignerMissingAtStartup);
+        engine.set_account_startup(true);
+        let mut actor = Account::new(Host::new(engine, NoTransport), ServerConfig::default());
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        let failure = actor.startup_failure.as_ref().unwrap();
+        assert!(!failure.private_pending);
+        assert!(failure.recheck.is_none());
+        // Unsigned (or secondary-key) account reads then load every section.
+        actor
+            .host
+            .engine
+            .store_mut()
+            .set_balance(safe_cex_engine::model::Balance::default());
+        actor.host.engine.store_mut().set_positions(vec![]);
+        actor.host.engine.store_mut().set_orders(vec![]);
+        let (outgoing, mut late) = mpsc::channel(4);
+        actor
+            .join(9, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(matches!(late.try_recv(), Ok(Outgoing::Frame(_))));
+        assert!(
+            matches!(late.try_recv(), Ok(Outgoing::Text(_))),
+            "a signing/config startup failure was retired by read completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn recovered_private_startup_does_not_replay_its_old_failure_to_late_joins() {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(FailsStartup::default());
+        engine.set_account_startup(true);
+        let mut actor = Account::new(Host::new(engine, NoTransport), ServerConfig::default());
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        let (outgoing, mut early) = mpsc::channel(4);
+        actor
+            .join(1, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(matches!(early.try_recv(), Ok(Outgoing::Frame(_))));
+        assert!(matches!(early.try_recv(), Ok(Outgoing::Text(_))));
+        actor
+            .host
+            .engine
+            .store_mut()
+            .set_balance(safe_cex_engine::model::Balance::default());
+        let (outgoing, mut partial) = mpsc::channel(4);
+        actor
+            .join(2, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(matches!(partial.try_recv(), Ok(Outgoing::Frame(_))));
+        assert!(
+            matches!(partial.try_recv(), Ok(Outgoing::Text(_))),
+            "balance alone must not clear the refusal"
+        );
+        while early.try_recv().is_ok() {}
+        actor.host.engine.store_mut().set_positions(vec![]);
+        actor.host.engine.store_mut().set_orders(vec![]);
+        let (outgoing, mut recovered) = mpsc::channel(4);
+        actor
+            .join(3, outgoing, watch::channel(false).0, false)
+            .unwrap();
+        assert!(matches!(recovered.try_recv(), Ok(Outgoing::Frame(_))));
+        assert!(
+            recovered.try_recv().is_err(),
+            "same-actor recovery must retire obsolete StartupFailed replay"
+        );
+        assert!(actor.host.engine.private_startup_complete());
+        assert!(
+            matches!(early.try_recv(), Ok(Outgoing::Frame(_))),
+            "connected peers must receive the frame whose loaded flags clear NX health"
+        );
+        assert!(
+            early.try_recv().is_err(),
+            "obsolete failure must not follow recovery"
+        );
+    }
+    #[tokio::test(start_paused = true)]
+    async fn startup_recheck_schedule_preserves_floors_jitter_and_three_attempt_budget() {
+        let now = tokio::time::Instant::now();
+        let jitter = Duration::from_secs(30);
+        let mut recheck = StartupRecheck::new(now, Duration::ZERO, jitter);
+        assert_eq!(recheck.next, Some(now + Duration::from_secs(330)));
+        assert!(!recheck.claim(now + Duration::from_secs(329), || panic!(
+            "early jitter must not run"
+        )));
+        recheck.defer(now, Duration::from_secs(400));
+        assert_eq!(recheck.next, Some(now + Duration::from_secs(400)));
+        let mut at = recheck.next.unwrap();
+        for expected in 1..=3 {
+            assert!(recheck.claim(at, || jitter));
+            assert_eq!(recheck.attempts, expected);
+            if expected < 3 {
+                let next = recheck.next.unwrap();
+                assert_eq!(next - at, Duration::from_secs(300 << expected) + jitter);
+                at = next;
+            }
+        }
+        assert_eq!(recheck.next, None);
+        recheck.defer(at, Duration::from_secs(9999));
+        assert!(!recheck.claim(at + Duration::from_secs(99999), || jitter));
+        assert_eq!(recheck.attempts, 3);
+        for _ in 0..16 {
+            assert!(startup_recheck_jitter() <= jitter);
+        }
+    }
+    struct ReadTransport(Rc<RefCell<Vec<HttpRequest>>>);
+    impl Transport for ReadTransport {
+        fn connect(&self, _: SocketId, _: String, _: Events) -> mpsc::UnboundedSender<String> {
+            mpsc::unbounded_channel().0
+        }
+        fn request(&self, request: HttpRequest, _: Events) {
+            self.0.borrow_mut().push(request);
+        }
+    }
+    #[tokio::test(start_paused = true)]
+    async fn startup_rechecks_are_bounded_reads_and_repeated_refusals_do_not_restart_the_budget() {
+        let count = Rc::new(std::cell::Cell::new(0));
+        let requests = Rc::new(RefCell::new(Vec::new()));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(FailsStartup {
+            rechecks: count.clone(),
+            can_recheck: true,
+            recover: false,
+        });
+        engine.set_account_startup(true);
+        let mut actor = Account::new(
+            Host::new(engine, ReadTransport(requests.clone())),
+            ServerConfig::default(),
+        );
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        actor.recheck_startup();
+        assert_eq!(count.get(), 0);
+        for attempt in 1..=3 {
+            let due = actor
+                .startup_failure
+                .as_ref()
+                .unwrap()
+                .recheck
+                .as_ref()
+                .unwrap()
+                .next
+                .unwrap();
+            tokio::time::advance(due - tokio::time::Instant::now()).await;
+            actor.recheck_startup();
+            actor.execute();
+            assert_eq!(count.get(), attempt);
+            assert_eq!(requests.borrow().len(), usize::from(attempt));
+            actor.host.engine.handle(
+                now,
+                Event::WsMessage {
+                    socket: SocketId(0),
+                    text: "refuse again",
+                },
+            );
+            actor.execute();
+            assert_eq!(
+                actor
+                    .startup_failure
+                    .as_ref()
+                    .unwrap()
+                    .recheck
+                    .as_ref()
+                    .unwrap()
+                    .attempts,
+                attempt
+            );
+        }
+        tokio::time::advance(Duration::from_secs(100_000)).await;
+        actor.recheck_startup();
+        actor.execute();
+        assert_eq!(count.get(), 3);
+        assert!(requests.borrow().iter().all(|request| request.method
+            == safe_cex_engine::Method::Get
+            && request.body.is_none()));
+        assert!(
+            !actor.pending.values().any(|_| true),
+            "rechecks create no command receipts"
+        );
+    }
+    #[tokio::test(start_paused = true)]
+    async fn startup_recheck_recovery_stops_further_attempts_without_replacing_the_actor() {
+        let count = Rc::new(std::cell::Cell::new(0));
+        let mut engine = safe_cex_engine::test_support::seeded_engine(FailsStartup {
+            rechecks: count.clone(),
+            can_recheck: true,
+            recover: true,
+        });
+        engine.set_account_startup(true);
+        let mut actor = Account::new(Host::new(engine, NoTransport), ServerConfig::default());
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        tokio::time::advance(Duration::from_secs(331)).await;
+        actor.recheck_startup();
+        actor.execute();
+        actor.flush();
+        assert_eq!(count.get(), 1);
+        assert!(actor.startup_failure.is_none());
+        tokio::time::advance(Duration::from_secs(100_000)).await;
+        actor.recheck_startup();
+        assert_eq!(count.get(), 1);
+        actor.host.engine.handle(
+            now,
+            Event::WsMessage {
+                socket: SocketId(0),
+                text: "new refusal",
+            },
+        );
+        actor.execute();
+        actor.flush();
+        assert!(
+            actor.startup_failure.is_some(),
+            "existing loaded flags cannot erase a newer refusal"
+        );
+    }
+    #[tokio::test]
+    async fn startup_failure_is_not_cleared_by_public_only_data() {
+        let mut actor = Account::new(
+            Host::new(
+                safe_cex_engine::test_support::seeded_engine(FailsStartup::default()),
+                NoTransport,
+            ),
+            ServerConfig::default(),
+        );
+        let now = (actor.host.clock)();
+        actor.host.engine.start(now);
+        actor.execute();
+        actor
+            .host
+            .engine
+            .store_mut()
+            .set_balance(safe_cex_engine::model::Balance::default());
+        actor.host.engine.store_mut().set_positions(vec![]);
+        actor.host.engine.store_mut().set_orders(vec![]);
+        actor.flush();
+        assert!(actor.startup_failure.is_some());
+        assert!(!actor.host.engine.recheck_startup_reads(now));
+    }
     #[tokio::test]
     async fn oversized_log_notice_is_truncated_instead_of_disconnecting_peers() {
         let mut actor = Account::new(

@@ -120,3 +120,8 @@ test('A/A diagnostics are explicit dispatch-only and cannot supply certification
   assert.match(scope, /if \[ '\$\{\{ github\.event_name \}\}' = workflow_dispatch \] && \[ '\$\{\{ inputs\.cpu_budget_diagnostic \}\}' = true \]/);
   assert.match(scope, /else\n\s+node sdk-rs\/harness\/ci-scope\.mjs/);
 });
+
+test('Binance replay measurement has 45 minutes while other matrix venues retain 30', () => {
+  const first = job(source, 'gate');
+  assert.match(first, /^    timeout-minutes: \$\{\{ matrix\.venue == 'binance' && 45 \|\| 30 \}\}$/m);
+});

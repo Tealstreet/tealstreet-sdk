@@ -333,15 +333,29 @@ impl OpenFailures {
 
 static FAILURES: std::sync::Mutex<Option<OpenFailures>> = std::sync::Mutex::new(None);
 
-fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) {
-    if let Some(line) = note(
+/// Whether a line was due (and written).
+fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) -> bool {
+    let line = note(
         FAILURES
             .lock()
             .unwrap()
             .get_or_insert_with(OpenFailures::default),
-    ) {
+    );
+    if let Some(line) = &line {
         eprintln!("{line}");
     }
+    line.is_some()
+}
+
+/// A transport failure the journal just logged, for the host's error sink.
+fn report_failure(kind: crate::report::ErrorKind, target: &str) {
+    crate::report::report(&crate::report::ErrorReport {
+        kind,
+        label: None,
+        target: Some(target),
+        error_kind: None,
+        venue_code: None,
+    });
 }
 
 /// A URL's host alone: a relay URL's query names its upstream and may carry a token.
@@ -353,12 +367,18 @@ pub(crate) fn host_of(url: &str) -> String {
 }
 
 pub(crate) fn log_open_failure(url: &str, error: &str) {
-    log_failure(|failures| failures.note(url, error, std::time::Instant::now()));
+    if log_failure(|failures| failures.note(url, error, std::time::Instant::now())) {
+        report_failure(crate::report::ErrorKind::SocketOpenFailed, &host_of(url));
+    }
 }
 
 /// A venue request that failed in transport (a timeout, a refused connection), by route.
 pub(crate) fn log_request_failure(route: &str, error: &str, elapsed: Duration) {
-    log_failure(|failures| failures.note_request(route, error, elapsed, std::time::Instant::now()));
+    if log_failure(|failures| {
+        failures.note_request(route, error, elapsed, std::time::Instant::now())
+    }) {
+        report_failure(crate::report::ErrorKind::RequestFailed, route);
+    }
 }
 
 const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
@@ -556,7 +576,7 @@ impl Transport for NetworkTransport {
                         },
                     }
                 };
-                log_failure(|failures| {
+                let _ = log_failure(|failures| {
                     failures.note_close(
                         &target,
                         code,
@@ -862,5 +882,44 @@ mod security_tests {
             assert!(decode_message(&compressed).is_err());
         }
         assert_eq!(decode_message(b"valid text").unwrap(), "valid text");
+    }
+
+    static REPORTED: std::sync::Mutex<Vec<(&'static str, String)>> =
+        std::sync::Mutex::new(Vec::new());
+
+    fn record(report: &crate::report::ErrorReport<'_>) {
+        REPORTED.lock().unwrap().push((
+            report.kind.as_str(),
+            report.target.unwrap_or_default().to_owned(),
+        ));
+    }
+
+    #[test]
+    fn a_logged_open_failure_reaches_the_error_sink_once_per_window_by_host() {
+        assert!(crate::report::set_error_sink(record));
+        let url = "wss://sink-test.example/tunnel?ts-relay=wss%3A%2F%2Fvenue&token=t";
+        log_open_failure(url, "refused");
+        log_open_failure(url, "refused");
+        log_request_failure("sink-test.example via HTTP tunnel", "reset", Duration::ZERO);
+        let reported: Vec<_> = REPORTED
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, target)| target.starts_with("sink-test.example"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            reported,
+            [
+                (
+                    "transport.socket_open_failed",
+                    "sink-test.example".to_owned()
+                ),
+                (
+                    "transport.request_failed",
+                    "sink-test.example via HTTP tunnel".to_owned()
+                ),
+            ]
+        );
     }
 }

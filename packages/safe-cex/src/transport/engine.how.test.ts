@@ -2,10 +2,13 @@ import type { EngineEvent, Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
+
 import { setTunnelEgressUrls } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { createEngineTransport } from './engine';
-import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 import { SignedPublicProxyRefusal } from './publicProxyGuard';
+import { tealstreetTransport } from './tealstreet/tealstreetTransport';
 
 const tunnels = vi.hoisted(
   () =>
@@ -173,6 +176,7 @@ describe('engine through the real HOW package', () => {
         fields: expect.objectContaining({
           route: 'tunnel',
           requestKind: 'exchange',
+          stage: 'cancel',
           outcome: 'ok',
           httpStatus: 200,
           upstreamMs: 57,
@@ -182,11 +186,17 @@ describe('engine through the real HOW package', () => {
       }),
     ]);
     // No URL, body or address in the event.
-    expect(JSON.stringify(events)).not.toMatch(/hyperliquid\.xyz|cancel|fixture/);
+    expect(JSON.stringify(events)).not.toMatch(/hyperliquid\.xyz|"action"|fixture/);
     await post('/info', '{"type":"clearinghouseState","user":"0x0000000000000000000000000000000000000001"}');
     expect(events).toHaveLength(1);
-    route.dispose?.();
+    await post('/info', '{"type":"orderStatus","user":"private-account","oid":123}');
     expect(events[1]).toMatchObject({
+      code: 'transport.http.timing',
+      fields: { requestKind: 'info', stage: 'orderStatus', queuedMs: expect.any(Number), wireMs: expect.any(Number) },
+    });
+    expect(JSON.stringify(events)).not.toMatch(/private-account|"oid"|hyperliquid\.xyz|"action"|fixture/);
+    route.dispose?.();
+    expect(events[2]).toMatchObject({
       code: 'transport.http.window',
       fields: { route: 'tunnel', count: 1, timeouts: 0, errors: 0 },
     });
@@ -292,5 +302,49 @@ describe('managed engine through real HOW preparation', () => {
     expect(raw.request).not.toHaveBeenCalled();
     expect(() => bound.dispatch()).toThrow();
     routed.dispose!();
+  });
+  it.each([
+    ['cancel', 'cancel'],
+    ['order', 'place'],
+    ['batchModify', 'modify'],
+  ] as const)('review3098 managed unsigned preparation labels its final %s body as %s', async (type, stage) => {
+    const events: EngineEvent[] = [];
+    const route = createEngineTransport(
+      'hyperliquid',
+      { key: 'fixture-key', secret: 'fixture-secret', tealstreetTunnel: true, transport: tealstreetTransport },
+      rawTransport(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (event) => events.push(event),
+    );
+    tunnelState(TOKYO_HOW_EGRESS).reply = { status: 200, data_raw: '{"status":"ok"}', headers: {} };
+    try {
+      const original = {
+        request: 96,
+        method: 'POST',
+        intent: 'primary' as const,
+        url: 'https://api.hyperliquid.xyz/exchange',
+        headers: { 'Content-Type': 'application/json' },
+        timeoutMs: 20_000,
+      };
+      const prepared = await route.prepareHttp!(original);
+      const bound = prepared.bind({
+        ...original,
+        body: JSON.stringify({ action: { type }, signature: 'must-not-log' }),
+      });
+      expect(bound.ready()).toBe(true);
+      await bound.dispatch();
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          code: 'transport.http.timing',
+          fields: expect.objectContaining({ requestKind: 'exchange', stage }),
+        }),
+      );
+      expect(JSON.stringify(events)).not.toContain('must-not-log');
+    } finally {
+      route.dispose?.();
+    }
   });
 });

@@ -370,3 +370,19 @@ test('changed bytes still require both measured witnesses and the unchanged froz
     assert.equal(certificate.anchor.originalReports.length, 8);
   }
 });
+
+test('an unchanged TS oracle still certifies, while baseline Rust corruption still fails', async () => {
+  const { assertBitgetOracleUnchanged } = await import('./bitget-paired-oracle.mjs');
+  const data = fixture();
+  const rawOracle = JSON.parse(data.evidence.cohorts[0].evidence.raw.find(slot => slot.impl === 'ts' && slot.mode === 'correctness').bytes);
+  const oracle = JSON.stringify({ ...rawOracle, checkpoints: [] });
+  assertBitgetOracleUnchanged({ baseline: oracle, candidate: oracle });
+  assert.equal(certificateFor(data).steadyAccepted, true);
+  const slot = data.evidence.cohorts[0].evidence.raw.find(slot => slot.impl === 'rust' && slot.mode === 'correctness');
+  const corrupted = JSON.parse(slot.bytes);
+  corrupted.markets[0].limits = { amount: { max: 999999 } };
+  slot.bytes = JSON.stringify(corrupted); slot.sha256 = sha(slot.bytes);
+  const result = assessBitgetPairedSteady(data);
+  assert.equal(result.valid, false);
+  assert.equal(result.certificate, null);
+});

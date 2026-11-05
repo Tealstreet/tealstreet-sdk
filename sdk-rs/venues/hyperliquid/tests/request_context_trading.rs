@@ -1975,7 +1975,8 @@ fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
         Command::AmendOrder {
             command: OWNER,
             id: "9".into(),
-            price: Some(85.),
+            // A buy stop must pass the local mark guard before testing venue refusal.
+            price: Some(115.),
             amount: None,
         },
     );
