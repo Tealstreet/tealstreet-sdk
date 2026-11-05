@@ -83,7 +83,7 @@ export interface EngineCapabilities {
   orderReadCovers: boolean;
 }
 export const LOADED_FLAG: { BALANCE: 1; ORDERS: 2; MARKETS: 4; TICKERS: 8; POSITIONS: 16 };
-export const STATUS_FLAG: { HEDGED: 1 };
+export const STATUS_FLAG: { HEDGED: 1; LATENCY_MEASURED: 2 };
 export const ORDER_COLUMNS: readonly ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
 export type OrderColumn = (typeof ORDER_COLUMNS)[number];
 export const POSITION_COLUMNS: readonly [
@@ -234,7 +234,7 @@ export interface Balance extends CurrencyBalance {
 export interface Status {
   loaded: number;
   hedged: boolean;
-  latency: number;
+  latency: number | null;
 }
 export interface SettingTable {
   count: number;

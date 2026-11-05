@@ -73,7 +73,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean; rejectRoute?: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void; onRouteExhausted?(): void },
+    handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean; rejectRoute?: boolean }; channel?: 'public' | 'private' | 'business'; publicTopics?: boolean; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void; onRouteExhausted?(): void },
   ): Socket;
   /** Explicit prepare/bind/claim support is mandatory for managed HTTP. */
   prepareHttp?(request: HttpPacket & { intent: 'public' | 'primary' | 'secondary' }): PreparedHttp | Promise<PreparedHttp>;
@@ -386,6 +386,7 @@ export interface EngineEvent {
 }
 
 /** One socket channel's state since host construction; times are `Date.now()`. */
+/** Per carried channel; a multiplexed physical socket contributes to both channels. */
 export interface EngineSocketStats {
   /** Sockets currently open. */
   open: number;

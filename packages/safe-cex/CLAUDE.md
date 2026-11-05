@@ -604,7 +604,11 @@ wire protocol. See B11 in `docs/plans/RUST_CUTOVER_CALLERS.md`.
 
 Engine venues own their sockets and reconnect policy; the wasm host only
 observes them. `EngineHost.socketHealth()` keeps per-channel (public, business,
-private) open/first-frame/close state, at one property write per frame.
+private) open/first-frame/close state, at one property write per carried channel
+per frame. `SocketSpec::public_topics(true)` declares that a primary private
+socket also carries public topics; it preserves routing/authentication and counts
+the one physical socket in both health channels. Hyperliquid and TxFlow use it
+only when their public topics are direct; separate sockets remain independent.
 `RustEngineExchange` exposes one `RustSocketHandle` per channel through the
 `BaseWebSocket` fields, so `getAllSockets`, `reconnect`, `recoverAfterOffline`,
 CLI `ConnectionMonitor` and the base `dispose` work unchanged. It writes
@@ -617,6 +621,11 @@ again resets it. Private `privateLastMessage` retains the last received frame's
 page-clock timestamp while the socket is uninitialized or reconnecting; a feed
 that has never received a frame still has no timestamp. Health/initialization
 flags remain independent of this diagnostic age.
+
+`store.latency` is nullable: null means no measurement, including on reset.
+STATUS keeps its fixed layout and uses `LATENCY_MEASURED` to distinguish an
+actual zero sample; positive legacy samples remain readable. Frame-fed engines
+and worker stores preserve null. UI callers must hide unknown latency.
 
 ## Client order ID contract
 
