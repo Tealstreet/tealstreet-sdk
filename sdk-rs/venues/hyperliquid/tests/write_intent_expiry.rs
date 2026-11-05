@@ -455,7 +455,20 @@ fn expiring_an_amend_read_cannot_leave_its_wait_or_old_timer_on_the_next_owner()
             .unwrap()
     };
     let caller_timer = timer_at(NOW + 10.);
-    let old_read_timer = timer_at(NOW + 5000.);
+    let old_read_timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 10. && *timer != caller_timer => {
+                Some(*timer)
+            }
+            _ => None,
+        })
+        .expect("the read timer shares the original caller bound");
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == NOW + 5000.))
+    );
     assert!(
         actions
             .iter()
@@ -494,4 +507,54 @@ fn expiring_an_amend_read_cannot_leave_its_wait_or_old_timer_on_the_next_owner()
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 3, .. })))
     );
+}
+
+#[test]
+fn amend_read_receipts_use_the_shorter_caller_bound_before_any_timer_delivery() {
+    for (delay, allowed) in [(9., true), (10., false), (11., false)] {
+        let (mut e, socket) = ready("disabled");
+        message(
+            &mut e,
+            socket,
+            1500.,
+            r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
+        );
+        e.drain_actions().for_each(drop);
+        e.handle_command(
+            NOW,
+            Command::AmendOrder {
+                command: 1,
+                id: "9".into(),
+                price: Some(85.),
+                amount: None,
+            },
+            Some(10),
+        )
+        .unwrap();
+        let actions = prepared_now(&mut e);
+        let read = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) if kind(r) == "orderStatus" => Some(r.clone()),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == NOW + 5000.))
+        );
+        e.handle(NOW + delay, Event::HttpResponse { request:read.id, response:safe_cex_engine::Response {
+            status:200, headers:"", body:r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1"},"status":"open"}}"#,
+        }});
+        let actions = prepared_now(&mut e);
+        assert_eq!(!writes(&actions).is_empty(), allowed, "receipt at {delay}");
+        if !allowed {
+            timeout(&actions, 1);
+            assert_eq!(
+                e.store().order("9").unwrap().status,
+                safe_cex_engine::model::OrderStatus::Open
+            );
+        }
+    }
 }

@@ -35,6 +35,12 @@ pub(super) struct Custody {
     ready: bool,
     wait: Option<ConditionWait>,
 }
+impl Custody {
+    pub(super) fn owner(&self) -> safe_cex_engine::request_context::Owner {
+        self.preflight.owner()
+    }
+}
+
 impl Hyperliquid {
     pub(crate) fn sealed_agent(&self) -> Option<String> {
         let (_, identity) = self.credentials.select(CredentialRole::Mutation).ok()?;
@@ -91,7 +97,14 @@ impl Hyperliquid {
                 return;
             }
         };
+        let remaining = if job.amend_source.is_some() {
+            remaining.min(AMEND_READ_MS as u32)
+        } else {
+            remaining
+        };
         let intent_deadline = cx.now + f64::from(remaining);
+        // Read continuations and final cancel Claim copy this one captured bound.
+        job.amend_deadline = job.amend_source.as_ref().map(|_| intent_deadline);
         let preflight = match cx.begin_preflight(PreflightPolicy {
             purpose: PreflightPurpose::WriteAfterReads,
             read_credential: None,
@@ -342,8 +355,14 @@ impl Hyperliquid {
         let committed_effect = effect.clone();
         let command = job.command;
         let intent_deadline = (!job.effective).then_some(custody.intent_deadline);
+        let cancel_deadline = if matches!(&effect, Effect::Cancel(_)) {
+            job.amend_deadline
+        } else {
+            None
+        };
         self.publish_trade_receipts(cx, command, &committed_effect);
         let pending = Pending::Trade(Request {
+            cancel_deadline,
             command,
             effect,
             plan,

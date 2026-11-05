@@ -6,7 +6,10 @@ engine's existing 120 s default; EngineHost forwards its configured timeoutMs.
 No new host cancellation or signed-wire field is introduced.
 
 Hyperliquid captures the remaining wait once in genuine preflight custody,
-floored to whole milliseconds by CommandWait. Queued jobs park with that bound.
+floored to whole milliseconds by CommandWait. For an amend, that same capture
+is capped at five seconds. Its read owner/deadline, read timer and final cancel
+claim all copy the captured custody bound; no second receipt clock is started.
+Queued jobs park with that bound.
 Builder and pre-cancel prerequisite waits retain its remainder. At dequeue and
 at the first physical HTTP Claim the same exclusive deadline is checked, so
 delayed timer delivery cannot authorize a late send. The original timer also

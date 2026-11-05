@@ -32,7 +32,9 @@ revaluation so UPNL and available margin follow provider prices.
 
 ## Rust queued write intent
 
-Native writes capture the original caller wait before entering the venue queue.
+Native writes capture the original caller wait before entering the venue queue;
+an amend caps it at five seconds in that same capture. Read owner/deadline
+bindings, read timers and both final Claim guards copy this one bound.
 Unsent queued or builder/prerequisite-waiting jobs expire through bounded owner
 custody, and the first physical Claim checks the same exclusive deadline even
 when the timer has not fired. Queue, preparation, signing and pacing never renew
@@ -44,6 +46,22 @@ only when their markets and order/client identities are disjoint from every
 older job. Same-market work and account-wide schedule controls remain barriers.
 The active owner is never preempted; nonce custody and 334 ms release pacing are
 unchanged. Expiry is a typed Timeout/NotSent for an entirely unsent command.
+
+## Rust amendments
+
+An amend resolves account identity and fresh partial-fill sizing within the
+exclusive deadline, at most five seconds and capped by the caller's original
+remaining wait, before cancelling. Read
+receipts and the final cancel claim enforce it independently of timer order.
+The deadline never abandons a replacement after a cancel already left. Identity
+and sizing reads/timers retain the genuine amend preflight owner and original
+deadline; retired replies cannot resolve or release a newer edit of the same order. It captures the optional builder fee
+from the startup/source cache before cancel; unknown approval uses the existing
+no-builder fallback immediately. A replacement never starts or waits for a fee
+check, and a late approval cannot add a fee to that amend. A later refusal may
+omit the captured fee. Standalone placements retain their existing approval wait.
+`transport.http.timing` distinguishes identity, builder approval, order status,
+cancel and place using closed labels derived from the final bound packet; ordinary info reads remain aggregated.
 
 ## Rust startup reads
 
