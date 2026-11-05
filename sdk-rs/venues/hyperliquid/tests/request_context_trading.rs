@@ -39,6 +39,14 @@ impl Venue for Probe {
     fn http_release() -> safe_cex_engine::HttpRelease<Self> {
         safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.inner.http_release_veto(store, pending, release)
+    }
     fn http_pacing(&self) -> &[safe_cex_engine::request_context::Pacing] {
         self.inner.http_pacing()
     }
@@ -1961,61 +1969,57 @@ fn a_price_only_amend_of_a_partly_filled_order_sends_what_is_left() {
 }
 
 #[test]
-fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
+fn a_native_stop_modify_refusal_keeps_the_original_protection() {
     let (mut e, socket) = boot();
-    e.handle(1500., Event::WsMessage { socket, text: r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"# });
+    let row = json!({"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"10","sz":"6","orderType":"Stop Market","triggerPx":"110","reduceOnly":true,"isTrigger":true});
+    e.handle(
+        1500.,
+        Event::WsMessage {
+            socket,
+            text: &json!({"channel":"orderUpdates","data":[{"order":row,"status":"open"}]})
+                .to_string(),
+        },
+    );
     e.drain_actions().for_each(drop);
-    e.store_mut().update_order("9", |row| {
-        row.kind = safe_cex_engine::model::OrderType::StopLoss;
-    });
-    let symbol = e.store().order("9").unwrap().symbol.clone();
+    let before = e.store().order("9").unwrap().clone();
     let amended = command(
         &mut e,
         NOW,
         Command::AmendOrder {
             command: OWNER,
             id: "9".into(),
-            // A buy stop must pass the local mark guard before testing venue refusal.
             price: Some(115.),
             amount: None,
         },
     );
-    let amended = answer_amend_read(&mut e, &amended, &status_body("10", "6", "open"));
-    let cancel = native_release(&mut e, &amended);
+    let amended = answer_amend_read(
+        &mut e,
+        &amended,
+        &json!({"status":"order","order":{"order":row,"status":"open"}}).to_string(),
+    );
+    let modify = native_release(&mut e, &amended);
+    let payload: Value = serde_json::from_str(modify.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["action"]["type"], "modify");
+    assert_eq!(payload["action"]["oid"], 9);
     respond(
         &mut e,
         NOW + 1.,
-        &cancel,
+        &modify,
         200,
-        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
-    );
-    let settled: Vec<_> = e.drain_actions().collect();
-    let paced = prepare_for_pacing(&mut e, NOW + 1., &settled);
-    let (timer, at) = paced
-        .iter()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms > NOW + 1. => Some((*timer, *at_ms)),
-            _ => None,
-        })
-        .expect("same-owner replacement pacing");
-    e.handle(at, Event::TimerFired { timer });
-    let actions: Vec<_> = e.drain_actions().collect();
-    let replacement = native_release_at(&mut e, at, &actions);
-    respond(
-        &mut e,
-        at + 1.,
-        &replacement,
-        200,
-        &statuses_reply("Order would trigger immediately"),
+        &statuses_reply("Invalid TP/SL price."),
     );
     let settled: Vec<_> = e.drain_actions().collect();
     let result = results(&settled, OWNER);
+    assert_eq!(result.len(), 1);
     let error = result[0].as_ref().unwrap_err();
+    assert_eq!(error.outcome, Some(Outcome::Rejected));
     assert!(
-        error.message.contains(&symbol) && error.message.contains("no stop"),
+        error.message.contains("Invalid TP/SL price.") && error.message.contains("order unchanged"),
         "{}",
         error.message
     );
+    assert_eq!(e.store().order("9"), Some(&before));
+    no_trade(&settled);
 }
 
 #[test]
