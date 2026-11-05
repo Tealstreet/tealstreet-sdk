@@ -1333,6 +1333,9 @@ with primary/secondary intent, an `Authorization`/venue key header or a
 public-proxy reads fail closed, and the native plan omits a public-proxy
 `readHttp`. Lighter's `usesRestProxy` profiles (`payloadSignedViaPublicProxy`)
 keep payload-signed REST there, but are still refused with a credential header.
+Binding repeats the check on the signer's final URL and venue headers before
+passing the packet to the raw transport; refusal releases the preparation.
+Proxy-owned authorization is separate from the venue's signed headers.
 
 The Rust `SecondaryKeyClients` exposes the same get-only split, keeping generic
 request calls on the primary. The raw secondary adapter is private, so its

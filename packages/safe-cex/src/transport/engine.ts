@@ -700,15 +700,17 @@ const httpTransport = (
       if (infoFacts && request.method === 'POST' && original.pathname === '/info')
         infoRead = infoFacts.begin(tunnelAdapter ? 'how' : route.proxied ? 'proxy' : 'direct', deadlineMs);
       const target = route.baseURL ?? request.url;
+      const publicProxy = provider.publicCorsProxy();
+      const payloadSigned = payloadSignedViaPublicProxy(exchange, options);
       refuseSignedPublicProxy({
         exchange,
-        publicProxy: provider.publicCorsProxy(),
+        publicProxy,
         target,
         url: request.url,
         headers: request.headers,
         intent,
         credentialHeaders: CREDENTIAL_HEADERS,
-        payloadSigned: payloadSignedViaPublicProxy(exchange, options),
+        payloadSigned,
       });
       const prefix = target.endsWith(request.url) ? target.slice(0, -request.url.length) : undefined;
       if (intent !== undefined && prefix === undefined) throw new HttpPreparationError('unsupported');
@@ -891,6 +893,16 @@ const httpTransport = (
             headers.set(name, value);
           }
           const url = intent === undefined ? target : `${prefix}${packet.url}`;
+          beforeRelease(() => refuseSignedPublicProxy({
+            exchange,
+            publicProxy,
+            target: url,
+            url: packet.url,
+            headers: packet.headers,
+            intent,
+            credentialHeaders: CREDENTIAL_HEADERS,
+            payloadSigned,
+          }));
           const finalConfig = { ...config, url, headers, data: packet.body, timeout: remaining(), signal };
           const network: Request = {
             ...packet,
