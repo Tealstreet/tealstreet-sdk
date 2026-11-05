@@ -31,15 +31,16 @@ import {
 import { HttpPreparationError, socketMessages } from '@tealstreet/safe-cex-wasm/host';
 import { captureProxyTokenProvider, refreshProxyToken, withProxyTokenProvider } from '../accessToken';
 import { getBybitSiteHeaders, isBybitSiteIdExchange } from '../exchanges/bybit/bybit.site';
+import { SECONDARY_READ_KEYS_ENABLED } from '../secondaryReadKeys';
 import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { sharedBinanceCatalogue } from './binanceCatalogue';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
 import { HttpTiming, httpTimingKind, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
-import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
 import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
+import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
 import {
@@ -151,7 +152,21 @@ const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
   ...Object.values(secondaryReadHeaders).map((name) => name!.toLowerCase()),
 ]);
 
+/** The account without its read credentials while secondary read keys are bypassed (secondaryReadKeys.ts). */
+export const withSecondaryReadKeyPolicy = (options: ExchangeOptions): ExchangeOptions => {
+  if (SECONDARY_READ_KEYS_ENABLED) return options;
+  const { secondary_key: _key, secondary_secret: _secret, secondary_passphrase: _passphrase, ...primary } = options;
+  return primary;
+};
+
+/** A bypassed read key's egress, kept for the account's unsigned public GETs only. */
+const publicReadOptions = (options: ExchangeOptions): ExchangeOptions | undefined =>
+  SECONDARY_READ_KEYS_ENABLED || !options.secondaryProxyUrl
+    ? undefined
+    : { ...options, secondaryProxyUrl: undefined, overrideProxyUrl: options.secondaryProxyUrl };
+
 export const assertEngineAccountRouting = (options: ExchangeOptions, exchange?: ExchangeName): void => {
+  options = withSecondaryReadKeyPolicy(options);
   if (
     options.secondary_key === undefined &&
     options.secondary_secret === undefined &&
@@ -271,6 +286,7 @@ export const resolveEngineRoutingPlan = (
   options: ExchangeOptions,
   baseURL: string,
 ): EngineRoutingPlan => {
+  options = withSecondaryReadKeyPolicy(options);
   assertEngineAccountRouting(options, exchange);
   const provider = getTransport(options);
   if (provider !== directTransport && provider !== tealstreetTransport) {
@@ -312,6 +328,8 @@ export const resolveEngineRoutingPlan = (
   // A signed read never goes to the public proxy (publicProxyGuard): the native host
   // gets no read route there, so its secondary reads fail closed before I/O.
   const readHttp = readPlan && readPlan.http.prefix !== provider.publicCorsProxy() ? readPlan.http : undefined;
+  const publicReadOnly = publicReadOptions(options);
+  const publicReadPlan = publicReadOnly && resolveEngineRoutingPlan(exchange, publicReadOnly, baseURL);
   const productRoutes = publicWsRoutes(exchange, options, provider);
   const privateRoutes = privateWsRoutes(routing);
   return {
@@ -333,6 +351,14 @@ export const resolveEngineRoutingPlan = (
           readPublic: !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange),
           readHttp,
           ...(exchange === 'binancespot' && { readPublicHttp: readPlan.publicHttp }),
+        }
+      : {}),
+    // Managed public reads only: with no readHttp, header-inferred GETs keep the account route.
+    ...(publicReadPlan && !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
+      ? {
+          readPublic: true,
+          readPublicHttp:
+            exchange === 'binancespot' ? (publicReadPlan.publicHttp ?? publicReadPlan.http) : publicReadPlan.http,
         }
       : {}),
     ...(exchange.startsWith('binance') ? { publicHeader: 'X-MBX-APIKEY', publicHttp: http('public') } : {}),
@@ -1147,6 +1173,7 @@ export const createEngineTransport = (
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
   onHttpTiming?: (event: EngineEvent) => void,
 ): EngineTransport => {
+  options = withSecondaryReadKeyPolicy(options);
   assertEngineAccountRouting(options, exchange);
   const infoFacts =
     exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidStartupFacts() : undefined;
@@ -1274,11 +1301,12 @@ export const createEngineTransport = (
         infoFacts,
       )
     : undefined;
-  const readOptions = credentials?.hasSecondary
-    ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
-    : options.secondary_key
-      ? secondaryReadOptions(options, provider)
-      : undefined;
+  const readOptions =
+    SECONDARY_READ_KEYS_ENABLED && credentials?.hasSecondary
+      ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
+      : options.secondary_key
+        ? secondaryReadOptions(options, provider)
+        : undefined;
   const readHttp = readOptions
     ? httpTransport(
         exchange,
@@ -1286,6 +1314,21 @@ export const createEngineTransport = (
         transport,
         provider,
         resolved(exchange, readOptions, provider).restRouting,
+        undefined,
+        proxyAuthorization,
+        onTunnelProxyFallback,
+        onBybitPublicRateLimit,
+        infoFacts,
+      )
+    : undefined;
+  const publicReadOnly = publicReadOptions(options);
+  const publicReadHttp = publicReadOnly
+    ? httpTransport(
+        exchange,
+        publicReadOnly,
+        transport,
+        provider,
+        resolved(exchange, publicReadOnly, provider).restRouting,
         undefined,
         proxyAuthorization,
         onTunnelProxyFallback,
@@ -1302,6 +1345,7 @@ export const createEngineTransport = (
       directHttp.invalidateCatalogue();
       publicCorsHttp?.invalidateCatalogue();
       readHttp?.invalidateCatalogue();
+      publicReadHttp?.invalidateCatalogue();
     },
     httpMode: http.mode,
     reconnectDiagnostics,
@@ -1335,9 +1379,9 @@ export const createEngineTransport = (
                 : intent === 'public' && DIRECT_PUBLIC_READS.has(exchange)
                   ? directHttp
                   : intent === 'public' &&
-                      readHttp &&
+                      (readHttp ?? publicReadHttp) &&
                       !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
-                    ? readHttp
+                    ? (readHttp ?? publicReadHttp)
                     : http;
       if (!selected) throw new HttpPreparationError('unsupported');
       return selected.prepareHttp({ ...packet, route, intent });
@@ -1362,6 +1406,7 @@ export const createEngineTransport = (
     dispose: () => {
       http.dispose();
       readHttp?.dispose();
+      publicReadHttp?.dispose();
       directHttp.dispose();
       publicCorsHttp?.dispose();
       transport.dispose?.();

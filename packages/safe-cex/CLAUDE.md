@@ -1334,6 +1334,16 @@ public-proxy reads fail closed, and the native plan omits a public-proxy
 `readHttp`. Lighter's `usesRestProxy` profiles (`payloadSignedViaPublicProxy`)
 keep payload-signed REST there, but are still refused with a credential header.
 
+**Secondary read keys are bypassed (`src/secondaryReadKeys.ts`,
+`SECONDARY_READ_KEYS_ENABLED = false`).** `withSecondaryReadKeyPolicy` drops the
+saved read key before Rust signer setup and in the engine transport/plan, so
+signed reads use the primary key and route, with no warning. The account's
+`secondaryProxyUrl` remains only as the egress for managed unsigned public GETs
+(`publicReadHttp`, native `readPublic`/`readPublicHttp`, no `readHttp`);
+header-inferred GETs keep the account route. Coinbase drops that egress as
+before. Every secondary path below, and the NX UI and flags, stays intact behind
+the switch; tests pinning today's behaviour mock it to `true`.
+
 The Rust `SecondaryKeyClients` exposes the same get-only split, keeping generic
 request calls on the primary. The raw secondary adapter is private, so its
 execution surface is GET-only. Its default-off path shares the primary adapter;
