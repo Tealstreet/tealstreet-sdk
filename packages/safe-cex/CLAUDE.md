@@ -569,7 +569,9 @@ change confers no ingestion completion or new history capability.
 
 Bitget and Kraken row refusals carry `causeCode: HISTORY_DECODE` and a closed
 `historyDecode: { schema, reason }` record through host and worker errors. The
-record contains no row values, identities or response text. Bitget rejects a
+record contains no row values, identities or response text. Only Bitget and
+Kraken enable the non-default `history-row-diagnostics` engine feature; the JS
+validator remains available when native detail is absent. Bitget rejects a
 proven invalid row immediately instead of replaying the same page; transport
 and envelope failures retain their bounded retry policy. Native strict checks
 and Kraken's existing accepted-prefix incomplete policy remain unchanged.

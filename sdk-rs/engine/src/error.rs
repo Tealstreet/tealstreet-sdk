@@ -102,6 +102,7 @@ pub enum ErrorCause {
 }
 
 /// Closed native row schemas; never includes a symbol, identity or response text.
+#[cfg(feature = "history-row-diagnostics")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HistorySchema {
@@ -117,6 +118,7 @@ pub enum HistorySchema {
     KrakenIncome,
 }
 
+#[cfg(feature = "history-row-diagnostics")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HistoryDecodeReason {
@@ -135,6 +137,7 @@ pub enum HistoryDecodeReason {
     Economics,
 }
 
+#[cfg(feature = "history-row-diagnostics")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryDecode {
@@ -155,6 +158,7 @@ pub struct VenueError {
     /// Closed, SDK-owned diagnostic classification, distinct from the venue's code.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cause_code: Option<ErrorCause>,
+    #[cfg(feature = "history-row-diagnostics")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_decode: Option<HistoryDecode>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -224,6 +228,7 @@ impl VenueError {
         self
     }
 
+    #[cfg(feature = "history-row-diagnostics")]
     pub fn history_decode(mut self, schema: HistorySchema, reason: HistoryDecodeReason) -> Self {
         self.kind = Some(ErrorKind::Internal);
         self.cause_code = Some(ErrorCause::HistoryDecode);
