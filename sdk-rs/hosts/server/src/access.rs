@@ -135,6 +135,16 @@ impl Verifier {
 #[derive(Deserialize)]
 struct Claims {
     exp: u64,
+    iss: String,
+    #[serde(default, deserialize_with = "deserialize_not_before")]
+    nbf: Option<u64>,
+}
+
+fn deserialize_not_before<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    u64::deserialize(deserializer).map(Some)
 }
 
 fn validate(token: &str, key: &DecodingKey, config: &Config) -> bool {
@@ -146,7 +156,12 @@ fn validate(token: &str, key: &DecodingKey, config: &Config) -> bool {
     validation.set_issuer(&[&config.issuer]);
     decode::<Claims>(token, key, &validation)
         .ok()
-        .is_some_and(|token| token.claims.exp > crate::accounts::now_ms() / 1000)
+        .is_some_and(|token| {
+            let now = crate::accounts::now_ms() / 1000;
+            token.claims.iss == config.issuer
+                && token.claims.exp > now
+                && token.claims.nbf.is_none_or(|not_before| not_before <= now)
+        })
 }
 
 async fn fetch_keys(client: &reqwest::Client, issuer: &str) -> Option<JwkSet> {
@@ -378,5 +393,72 @@ pub(crate) mod tests {
         tokio::time::advance(Duration::from_secs(61)).await;
         assert!(limiter.allow(IpAddr::V4(5000u32.into())));
         assert_eq!(limiter.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn review_3080_malformed_not_before_is_refused() {
+        let verifier = verifier().await;
+        assert!(verifier.verify(&token(json!({}), "test")).await);
+        assert!(
+            !verifier
+                .verify(&token(
+                    json!({"nbf":crate::accounts::now_ms()/1000+3600}),
+                    "test"
+                ))
+                .await
+        );
+        assert!(
+            !verifier
+                .verify(&token(json!({"nbf":"9999999999"}), "test"))
+                .await,
+            "signed non-numeric nbf must fail closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn review_3080_issuer_must_be_the_exact_string() {
+        let verifier = verifier().await;
+        assert!(verifier.verify(&token(json!({}), "test")).await);
+        assert!(
+            !verifier
+                .verify(&token(
+                    json!({"iss":"https://other.cloudflareaccess.com"}),
+                    "test"
+                ))
+                .await
+        );
+        let array_issuer = json!({"iss":[
+            "https://test-team.cloudflareaccess.com",
+            "https://other.cloudflareaccess.com"
+        ]});
+        assert!(
+            !verifier.verify(&token(array_issuer, "test")).await,
+            "array issuer must fail closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn optional_not_before_accepts_only_an_elapsed_numeric_date() {
+        let verifier = verifier().await;
+        let now = crate::accounts::now_ms() / 1000;
+        for claims in [json!({}), json!({"nbf":now}), json!({"nbf":now-1})] {
+            assert!(verifier.verify(&token(claims, "test")).await);
+        }
+        for not_before in [
+            json!(null),
+            json!(false),
+            json!(-1),
+            json!(0.5),
+            json!("0"),
+            json!([]),
+            json!({}),
+        ] {
+            assert!(
+                !verifier
+                    .verify(&token(json!({"nbf":not_before}), "test"))
+                    .await,
+                "malformed nbf must fail closed: {not_before}"
+            );
+        }
     }
 }

@@ -316,29 +316,69 @@ async fn admin_users(
     }
 }
 
-macro_rules! user_admin {
-    ($name:ident, $action:literal) => {
-        async fn $name(
-            State(app): State<Arc<App>>,
-            ConnectInfo(peer): ConnectInfo<SocketAddr>,
-            headers: HeaderMap,
-            body: axum::body::Bytes,
-        ) -> Response {
-            if !admin_peer(&headers, peer) {
-                return StatusCode::FORBIDDEN.into_response();
-            }
-            let request = match user_request(&body) {
-                Ok(request) => request,
-                Err(status) => return status.into_response(),
-            };
-            user_admin_action(app, request, $action).await
-        }
+async fn user_drain_start(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = match user_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
     };
+    user_admin_action(app, request, "start").await
 }
-user_admin!(user_drain_start, "start");
-user_admin!(user_drain_status, "status");
-user_admin!(user_drain_cancel, "cancel");
-user_admin!(user_drain_force, "force");
+
+async fn user_drain_status(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = match user_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
+    };
+    user_admin_action(app, request, "status").await
+}
+
+async fn user_drain_cancel(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = match user_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
+    };
+    user_admin_action(app, request, "cancel").await
+}
+
+async fn user_drain_force(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let request = match user_request(&body) {
+        Ok(request) => request,
+        Err(status) => return status.into_response(),
+    };
+    user_admin_action(app, request, "force").await
+}
 
 async fn user_admin_action(app: Arc<App>, request: UserDrainRequest, action: &str) -> Response {
     let user = request.user_id.as_str();
