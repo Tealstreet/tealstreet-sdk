@@ -148,6 +148,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #3118 run 42112075305 measured asterdex 2,139,837 B; CI size plus 10 KiB, rounded up to the KiB.
 // #3114 run 42104530272 measured hyperliquid 2,106,596 B: a single-venue family pays the outlined
 // shared-ticker/orders-held calls without the combined dedup. CI size plus 10 KiB rounded up; siblings equal.
+// #3122 run 42126229513 measured paradex 2,239,351 and blofin 1,979,025 B (guarded stop edits,
+// put-back, BloFin native amends and read-backs). CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
   asterdex: 2_150_400,
@@ -158,7 +160,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitgetusdc: 2_345_984,
   bitrue: 1_821_696,
   bitunix: 1_849_344,
-  blofin: 1_963_008,
+  blofin: 1_989_632,
   breakoutprop: 1_512_448,
   bybit: 2_225_152,
   coinbase: 1_826_816,
@@ -175,7 +177,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   mexc: 1_755_136,
   okx: 1_947_648,
   orderly: 1_732_608,
-  paradex: 2_234_368,
+  paradex: 2_249_728,
   phemex: 2_065_408,
   polymarket: 1_600_512,
   txflow: 1_838_080,

@@ -142,11 +142,9 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
     ['apexomni', 1_974_257, 1_984_512],
     ['backpack', 1_876_304, 1_887_232],
     ['bitrue', 1_810_954, 1_821_696],
-    ['blofin', 1_952_470, 1_963_008],
     ['breakoutprop', 1_501_277, 1_512_448],
     ['coinbase', 1_816_299, 1_826_816],
     ['okx', 1_936_660, 1_947_648],
-    ['paradex', 2_223_483, 2_234_368],
     ['txflow', 1_827_125, 1_838_080],
     ['weex', 1_925_507, 1_936_384],
     ['woo', 2_388_474, 2_399_232],
@@ -278,6 +276,19 @@ test('#3114 cold-path sharing (run 42104530272) retains Hyperliquid headroom and
   const cap = 2_117_632;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3122 protective stop edits (run 42126229513) retain Paradex and BloFin headroom', () => {
+  for (const [venue, measured, cap] of [
+    ['paradex', 2_239_351, 2_249_728],
+    ['blofin', 1_979_025, 1_989_632],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);

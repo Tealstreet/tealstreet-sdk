@@ -186,7 +186,7 @@ fn rejected_cancel_prevents_amend_replacement() {
     only_reconcile_pending(&h);
 }
 #[test]
-fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
+fn a_refused_take_profit_edit_leaves_it_in_place() {
     let mut h = Harness::new();
     h.open_private();
     h.seed();
@@ -209,22 +209,12 @@ fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
         }),
     );
     h.collect();
-    h.reply(
-        "cancel-tpsl",
-        r#"{"code":"0","data":[{"tpslId":"91","code":"0","msg":null}]}"#,
+    let r = h.take("amend-tpsl");
+    let body: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({"instId":"BTC-USDT","tpslId":"91","newTpTriggerPrice":"66000"})
     );
-    let timer = h
-        .actions
-        .iter()
-        .rev()
-        .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms > h.now => Some((*timer, *at_ms)),
-            _ => None,
-        })
-        .unwrap();
-    h.handle(timer.1, Event::TimerFired { timer: timer.0 });
-    h.collect();
-    let r = h.take("order-tpsl");
     h.respond(
         r,
         r#"{"code":"102014","msg":"trigger refused","data":null}"#,
@@ -238,10 +228,20 @@ fn a_stop_whose_replacement_is_refused_names_the_lost_stop() {
         })
         .expect("a failure");
     assert!(
-        error.message.contains("BTC") && error.message.contains("no take profit"),
+        error.message.contains("BTCUSDT take profit is unchanged"),
         "{}",
         error.message
     );
+    assert!(!h.pending.iter().any(|r| r.url.contains("cancel")));
+}
+
+/// Fresh mark, last and index prices: a replaced stop's cancel needs them.
+fn fresh_prices(h: &mut Harness) {
+    h.e.store_mut().update_ticker("BTCUSDT", |t| {
+        t.mark = 60010.0;
+        t.last = 60005.0;
+        t.index = 60000.0;
+    });
 }
 
 #[test]
@@ -250,6 +250,7 @@ fn conditional_amend_preserves_nested_protection_and_native_execution_provenance
     h.open_private();
     h.seed();
     h.ws(r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT","algoId":"77","orderType":"trigger","side":"buy","size":"3","triggerPrice":"61000","orderPrice":"60900","triggerPriceType":"mark","marginMode":"isolated","positionSide":"long","state":"live","attachAlgoOrders":[{"tpTriggerPrice":"65000","tpOrderPrice":"-1","tpTriggerPriceType":"index","slTriggerPrice":"55000","slOrderPrice":"-1","slTriggerPriceType":"mark"}]}]}"#);
+    fresh_prices(&mut h);
     h.handle(
         1.0,
         Event::Command(Command::AmendOrder {
@@ -726,6 +727,7 @@ fn editing_inline_virtual_protection_preserves_parent_remainder_despite_child_am
     ] {
         h.reply(path, r#"{"code":"0","data":[]}"#);
     }
+    fresh_prices(&mut h);
     h.handle(
         1.0,
         Event::Command(Command::AmendOrder {
