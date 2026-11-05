@@ -243,6 +243,8 @@ pub struct Summary {
     router_box_id: Option<String>,
     enforced: bool,
     enable_grace_until: Option<u64>,
+    capacity: usize,
+    remaining: usize,
     #[serde(flatten)]
     counts: Counts,
     checked_at: u64,
@@ -289,7 +291,13 @@ impl Users {
     pub fn enforced(&self) -> bool {
         self.policy.lock().unwrap().enforce
     }
+    pub fn lookup(&self, user: &str) -> Option<Arc<User>> {
+        self.entries.lock().unwrap().get(user).cloned()
+    }
     pub fn get(&self, user: &str) -> Option<Arc<User>> {
+        self.get_with_warning(user, crate::state::Log::warn)
+    }
+    fn get_with_warning(&self, user: &str, warn: impl FnOnce(&str)) -> Option<Arc<User>> {
         let mut entries = self.entries.lock().unwrap();
         if let Some(entry) = entries.get(user) {
             return Some(entry.clone());
@@ -312,6 +320,18 @@ impl Users {
             clock: self.clock.clone(),
         });
         entries.insert(user.to_owned(), entry.clone());
+        let tracked = entries.len();
+        drop(entries);
+        // Entries only grow: each exact threshold is crossed once per process.
+        let crossing = [80, 95]
+            .into_iter()
+            .find(|percent| tracked == (MAX_TRACKED_USERS * percent).div_ceil(100));
+        if let Some(percent) = crossing {
+            warn(&format!(
+                "router lease inventory reached {percent}% capacity: tracked={tracked} capacity={MAX_TRACKED_USERS} remaining={}; drain/roll before exhaustion",
+                MAX_TRACKED_USERS - tracked,
+            ));
+        }
         Some(entry)
     }
     pub fn counts(&self, live_users: &HashSet<String>) -> Counts {
@@ -343,6 +363,8 @@ impl Users {
             router_box_id: self.config.box_id.clone(),
             enforced: policy.enforce,
             enable_grace_until,
+            capacity: MAX_TRACKED_USERS,
+            remaining: MAX_TRACKED_USERS.saturating_sub(counts.tracked_users),
             counts,
             checked_at,
         }
@@ -431,6 +453,64 @@ impl Users {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn status_lookup_never_allocates_and_summary_reports_capacity() {
+        for enforce in [false, true] {
+            let (users, _) = setup(enforce);
+            assert!(users.lookup("unknown").is_none());
+            let empty = users.summary(users.counts(&HashSet::new()));
+            assert_eq!(empty.capacity, 4096);
+            assert_eq!(empty.remaining, 4096);
+            assert_eq!(empty.counts.tracked_users, 0);
+            let user = users.get("known").unwrap();
+            assert!(Arc::ptr_eq(&user, &users.lookup("known").unwrap()));
+            for _ in 0..3 {
+                assert!(users.lookup("unknown").is_none());
+            }
+            let summary = users.summary(users.counts(&HashSet::new()));
+            assert_eq!(summary.capacity, 4096);
+            assert_eq!(summary.remaining, 4095);
+            assert_eq!(summary.counts.tracked_users, 1);
+        }
+    }
+
+    #[test]
+    fn inventory_warnings_fire_once_per_crossing_and_high_water_marks_survive_saturation() {
+        let (users, now) = setup(true);
+        let at = now.load(Ordering::Relaxed);
+        assert_eq!(users.accept(&beat(at, 5, 10)).unwrap().accepted, 1);
+        let mut warnings = Vec::new();
+        for index in 1..4096 {
+            let name = format!("user-{index}");
+            assert!(
+                users
+                    .get_with_warning(&name, |message| warnings.push(message.to_owned()))
+                    .is_some()
+            );
+            assert!(
+                users
+                    .get_with_warning(&name, |_| panic!("existing entry warned twice"))
+                    .is_some()
+            );
+            assert!(users.lookup("untracked").is_none());
+        }
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].contains("80% capacity: tracked=3277 capacity=4096 remaining=819"));
+        assert!(warnings[1].contains("95% capacity: tracked=3892 capacity=4096 remaining=204"));
+        assert!(warnings.iter().all(|line| !line.contains("user-")));
+        assert!(
+            users
+                .get_with_warning("overflow", |_| panic!("full inventory repeated warning"))
+                .is_none()
+        );
+        let summary = users.summary(users.counts(&HashSet::new()));
+        assert_eq!(summary.remaining, 0);
+        assert_eq!(summary.counts.tracked_users, 4096);
+        assert_eq!(users.accept(&beat(at, 6, 1)).unwrap().accepted, 1);
+        assert_eq!(users.accept(&beat(at, 5, 11)).unwrap().accepted, 0);
+        assert_eq!(users.lookup("u").unwrap().status().owner_epoch, Some(6));
+    }
 
     #[test]
     fn router_identity_is_separate_from_display_and_required_only_for_enforcement() {

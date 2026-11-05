@@ -301,13 +301,20 @@ capacity exhaustion fails closed. No raw user IDs are logged.
 `POST /admin/router-lease/status {userId}` uses the existing on-box admin guard
 and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,
 `sequence`, `notAfter`, `generation`, `routerBoxId`, and `missingHeartbeatGraceMs`. It grants
-no placement, renewal or write authority. Expiry uses both wall-clock
+no placement, renewal or write authority. Lookup does not register a user;
+untracked users return 503 without changing inventory. Expiry uses both wall-clock
 `notAfter` and a monotonic deadline so a clock rollback cannot extend ownership.
 
 `POST /admin/router-lease/summary` accepts an empty body or `{}` under the
 same on-box admin guard. It returns only
-`{routerBoxId, enforced, enableGraceUntil, trackedUsers, fencedUsers,
-wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+`{routerBoxId, enforced, enableGraceUntil, capacity, remaining, trackedUsers,
+fencedUsers, wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+`capacity` stays 4096; `remaining` is capacity minus the same snapshot's
+`trackedUsers`. Inventory holds distinct users for the process lifetime, not
+just active users: accepted epoch/sequence high-water marks are never evicted.
+One count-only journal warning is emitted at each 80% and 95% crossing (3277 and
+3892 users); plan a drain/roll before exhaustion. Safe eviction would require a
+future authenticated router retirement watermark; expiry alone is insufficient.
 `wouldFenceUsers` counts the exact per-user `wouldFence` predicate, including
 wall-clock and monotonic expiry, independently of shadow/enforcement mode.
 `fencedUsers` counts the per-user actual `fenced` flag. Hosted users with private

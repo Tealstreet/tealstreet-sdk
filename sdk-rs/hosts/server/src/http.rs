@@ -464,7 +464,7 @@ async fn router_lease_status(
         Ok(request) => request,
         Err(status) => return status.into_response(),
     };
-    let Some(user) = app.registry.router_leases.get(&request.user_id) else {
+    let Some(user) = app.registry.router_leases.lookup(&request.user_id) else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let mut status = serde_json::to_value(user.status()).unwrap();
