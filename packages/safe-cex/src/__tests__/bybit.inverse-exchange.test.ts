@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BybitExchange } from './reference/bybit/bybit.exchange';
+import { BybitInverseExchange } from './reference/bybit/bybitinverse.exchange';
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
 import { BybitDemoExchange } from './reference/bybit/bybitdemo.exchange';
 import { DefaultStore } from '../store/store.base';
@@ -24,7 +25,7 @@ const inverseRow = marketRow('BTCUSD', 'USD', 'BTC', '1');
 
 const ok = (list: unknown[]) => ({ data: { retCode: 0, retMsg: 'OK', result: { list } } });
 
-const live: BybitExchange[] = [];
+const live: Array<BybitExchange | BybitInverseExchange> = [];
 afterEach(() => live.splice(0).forEach((e) => e.dispose()));
 
 const create = (enableInverseMarkets: boolean, Exchange: typeof BybitExchange = BybitExchange) => {
@@ -39,7 +40,7 @@ const create = (enableInverseMarkets: boolean, Exchange: typeof BybitExchange = 
   return { exchange, store };
 };
 
-const routeGets = (exchange: BybitExchange, rows: Record<string, unknown[]>) => {
+const routeGets = (exchange: BybitExchange | BybitInverseExchange, rows: Record<string, unknown[]>) => {
   const get = vi.fn((url: string, config?: any) => {
     if (config?.params?.status === 'PreLaunch') return Promise.resolve(ok([]));
     return Promise.resolve(ok(rows[`${url}:${config?.params?.category}`] ?? []));
@@ -65,6 +66,28 @@ const inversePosition = {
 };
 
 describe('Bybit inverse contracts on the bybit connection', () => {
+  it.each(['40', '2000000', '0', '-1', '', 'invalid', undefined])(
+    'dedicated inverse reference publishes a conservative maximum with native market cap %s',
+    async (marketCap) => {
+      const exchange = new BybitInverseExchange(
+        'bybitinverse',
+        { key: 'k', secret: 's', tuning: { consoleLogging: false } },
+        new DefaultStore(),
+      );
+      live.push(exchange);
+      vi.spyOn(exchange as any, 'fetchFees').mockResolvedValue([]);
+      routeGets(exchange, {
+        [`${ENDPOINTS.MARKETS}:inverse`]: [{
+          ...inverseRow,
+          lotSizeFilter: { ...inverseRow.lotSizeFilter, maxMktOrderQty: marketCap },
+        }],
+      });
+      const [market] = await exchange.fetchMarkets();
+      expect(market.isInverse).toBe(true);
+      expect(market.limits.amount.max).toBe(marketCap === '40' ? 40 : 1000000);
+    },
+  );
+
   it.each(['40', '2000000', '0', '-1', undefined])(
     'publishes a conservative maximum with native market cap %s',
     async (marketCap) => {

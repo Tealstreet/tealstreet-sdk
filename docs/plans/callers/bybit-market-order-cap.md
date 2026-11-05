@@ -14,8 +14,11 @@ market children use the minimum. Every split close child retains reduce-only.
 A tighter store override remains binding. Absent, invalid or nonpositive market-specific caps retain
 the previous limit bound, rather than publishing a zero maximum.
 
-The retained TS Bybit and Bitget linear reference catalogues publish the same
-conservative minimum, so replay parity checks the actual metadata policy.
+The retained TS Bybit (including its dedicated inverse class) and Bitget linear
+reference catalogues publish the same conservative minimum, so replay parity
+checks the actual metadata policy. The options mapper is not exercised by the
+current public replay tapes: none enables option markets or records option
+catalogue requests. Its existing option-only mapping is unchanged.
 Bitget inverse keeps its legacy `maxTradeNum` bound unchanged: current docs call
 `maxMarketOrderQty` base-coin quantity, while existing inverse code and fixtures
 interpret native size/`maxTradeNum` as USD notional. Resolving those units is a
@@ -40,3 +43,9 @@ settlement, redacted ACK diagnostics and close-outcome UI copy are separate work
 
 References: [Bybit instrument quantities](https://bybit-exchange.github.io/docs/v5/market/instrument),
 [Bybit batch reduce-only semantics](https://bybit-exchange.github.io/docs/v5/order/batch-place).
+
+The paired Bitget CPU baseline currently runs baseline Rust against the candidate
+TS reference. This intentional metadata change therefore fails its baseline
+correctness leg before measurement; it does not establish a CPU regression or a
+certification. The job is outside required coverage. Its NOT-CERTIFIED handling
+is a separate approved follow-up; this PR changes no harness or comparator.
