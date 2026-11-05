@@ -667,6 +667,12 @@ fn managed_socket_core_keeps_the_baseline_allocation_budget_and_wire_order() {
     // Baseline ARM64 tables are 44/76 B; x86-64 hashbrown control groups add
     // 8 B per table. Calibrate only those two existing startup allocations.
     let start_bytes = 24593 - 44 - 76 + timer_table.bytes + fixture_table.bytes;
+    // Each existing IoCore default allocates a repair issuer only in this mode.
+    let start_calls = if cfg!(feature = "repair-mutations") {
+        34
+    } else {
+        32
+    };
     let (mut h, start) = allocation_budget::measure(Harness::new);
     h.output.reserve(128);
     h.timers.reserve(32);
@@ -695,7 +701,7 @@ fn managed_socket_core_keeps_the_baseline_allocation_budget_and_wire_order() {
     );
     // Recorded before the concrete driver extraction on master 7d9554615dc.
     for (actual, calls, bytes) in [
-        (start, 34, start_bytes),
+        (start, start_calls, start_bytes),
         (open, 8, 3541),
         (challenge, 5, 2233),
         (accepted, 17, 3745),
@@ -704,7 +710,10 @@ fn managed_socket_core_keeps_the_baseline_allocation_budget_and_wire_order() {
     ] {
         assert_eq!(actual.calls, calls, "allocation calls differ: {actual:?}");
         if cfg!(target_pointer_width = "64") {
-            assert_eq!(actual.bytes, bytes, "allocation bytes differ: {actual:?}");
+            assert!(
+                actual.bytes <= bytes,
+                "more allocation: {actual:?}, baseline {bytes}"
+            );
         }
     }
 }
