@@ -165,7 +165,6 @@ jobs:
       run:
         working-directory: .
     env:
-      RUSTUP_TOOLCHAIN: 1.99.0
       WASM_BINDGEN_VERSION: 0.2.129
       SAFE_CEX_WASM_OPT: required
       ESBUILD_WORKER_THREADS: '0'
@@ -198,6 +197,7 @@ jobs:
         run: |
           set -euo pipefail
           measure_head=$(git rev-parse HEAD)
+          trap 'git checkout --detach "$measure_head"' EXIT
           packages='${{ runner.temp }}/bitget-anchor-packages'
           mkdir "$packages"
           for arm in old new; do
@@ -212,7 +212,6 @@ jobs:
             node sdk-rs/harness/ci-wasm.mjs --venue bitget --archive "$packages/$arm"
             cargo clean --manifest-path sdk-rs/Cargo.toml
           done
-          git checkout --detach "$measure_head"
       - name: Collect raw Rust drift on one physical runner
         run: >-
           node sdk-rs/harness/bitget-anchor-drift.mjs

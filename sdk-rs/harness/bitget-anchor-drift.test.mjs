@@ -1,9 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { DRIFT_ORDER, assessAnchorDrift } from './bitget-anchor-drift.mjs';
 
 const rows = (ratio = 1) => DRIFT_ORDER.map((arm) => ({ arm,
   samples: Array.from({ length: 16 }, () => arm === 'old' ? 10 : 10 * ratio) }));
+
+test('diagnostic preserves archive environment checks and restores checkout on failure', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+  const diagnostic = workflow.split('  bitget-anchor-drift:\n')[1].split('  selection:\n')[0];
+  assert.doesNotMatch(diagnostic, /RUSTUP_TOOLCHAIN:/);
+  const restore = diagnostic.indexOf('trap \'git checkout --detach "$measure_head"\' EXIT');
+  const build = diagnostic.indexOf('git checkout --detach "$ref"');
+  assert(restore > 0 && restore < build);
+});
 
 test('fixed counterbalanced Rust-only comparison records drift without certifying', () => {
   const result = assessAnchorDrift(rows(1.02));
