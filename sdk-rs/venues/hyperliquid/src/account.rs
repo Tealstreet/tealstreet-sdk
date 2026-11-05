@@ -740,6 +740,9 @@ impl Hyperliquid {
         );
     }
     pub(crate) fn read_amend_source(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        if !self.amend_read_pending(cx, id) {
+            return;
+        }
         #[derive(Serialize)]
         struct Read<'a> {
             r#type: &'static str,

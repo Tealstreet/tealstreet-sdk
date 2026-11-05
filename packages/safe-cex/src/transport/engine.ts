@@ -962,6 +962,7 @@ const httpTransport = (
             ready = inner ? () => inner.ready() : () => true;
             send = inner ? () => inner.dispatch() : () => transport.request(network);
           }
+          const timingStage = httpTimingStage(packet.url, packet.body);
           bound = true;
           let sent = false;
           let admitting = false;
@@ -1022,7 +1023,7 @@ const httpTransport = (
                 timing?.record({
                   route: tunnelAdapter ? 'tunnel' : route.proxied ? 'proxy' : 'direct',
                   kind: httpTimingKind(request.url),
-                  stage: httpTimingStage(request.url, request.body),
+                  stage: timingStage,
                   outcome,
                   queuedMs: dispatchedAt - started,
                   wireMs: Date.now() - dispatchedAt,

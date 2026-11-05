@@ -249,3 +249,186 @@ fn an_unanswered_sizing_read_refuses_before_cancel_within_five_seconds() {
     assert_eq!(terminal[0].outcome, Some(Outcome::NotSent));
     assert_eq!(e.store().order("9").unwrap().status, OrderStatus::Open);
 }
+
+#[test]
+fn review_3098_sizing_response_at_4999ms_still_cancels() {
+    review_sizing_receipt_deadline(4999.0, true);
+}
+#[test]
+fn review_3098_sizing_response_after_5s_cannot_beat_the_due_timer() {
+    review_sizing_receipt_deadline(5001.0, false);
+}
+fn review_sizing_receipt_deadline(delay: f64, may_cancel: bool) {
+    let (mut e, _, _) = boot(false);
+    let issued = begin_amend(&mut e);
+    let read = issued
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "orderStatus" => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        issued
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == NOW + 5000.))
+    );
+    e.handle(NOW + delay, Event::HttpResponse {
+        request: read.id,
+        response: safe_cex_engine::Response {
+            status: 200, headers: "",
+            body: r#"{"status":"order","order":{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","origSz":"0","sz":"0"},"status":"open"}}"#,
+        },
+    });
+    let actions = prepared_now(&mut e);
+    let cancel = actions
+        .iter()
+        .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")));
+    assert_eq!(
+        cancel, may_cancel,
+        "five-second pre-cancel deadline must hold regardless of callback ordering"
+    );
+    if !may_cancel {
+        assert_eq!(e.store().order("9").unwrap().status, OrderStatus::Open);
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: OWNER, error }) if error.outcome == Some(Outcome::NotSent))));
+    }
+}
+
+#[test]
+fn review_3098_unknown_fee_does_not_wait_for_any_amend_kind_or_partial_fill() {
+    for (kind, old_price, new_price, native) in [
+        (OrderType::Limit, 110., 115., "Limit"),
+        (OrderType::StopLoss, 80., 75., "Stop Market"),
+        (OrderType::TakeProfit, 120., 125., "Take Profit Market"),
+    ] {
+        let (mut e, socket, held) = boot(false);
+        assert_eq!(held.len(), 1);
+        message(
+            &mut e,
+            socket,
+            1501.,
+            &format!(
+                r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"side":"A","limitPx":"{old_price}","triggerPx":"{old_price}","origSz":"2","sz":"1","reduceOnly":true,"orderType":"{native}"}},"status":"open"}}]}}"#
+            ),
+        );
+        e.drain_actions().for_each(drop);
+        assert_eq!(e.store().order("9").unwrap().kind, kind);
+        assert_eq!(e.store().order("9").unwrap().filled, 1.);
+        e.handle(
+            NOW,
+            Event::Command(Command::AmendOrder {
+                command: OWNER,
+                id: "9".into(),
+                price: Some(new_price),
+                amount: None,
+            }),
+        );
+        let actions = prepared_now(&mut e);
+        let status = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) if kind_of_read(r) => Some(r),
+                _ => None,
+            })
+            .expect("one fresh partial sizing read");
+        answer_order_status(&mut e, status);
+        let actions = prepared_now(&mut e);
+        let cancel = actions
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
+                _ => None,
+            })
+            .expect("cancel after sizing");
+        let order = replacement(&mut e, &cancel);
+        assert!(body(&order)["action"].get("builder").is_none(), "{kind:?}");
+        assert_eq!(body(&order)["action"]["orders"][0]["s"], "1", "{kind:?}");
+    }
+}
+fn kind_of_read(r: &HttpRequest) -> bool {
+    kind(r) == "orderStatus"
+}
+
+#[test]
+fn sizing_response_at_the_exclusive_deadline_keeps_the_protection() {
+    review_sizing_receipt_deadline(5000., false);
+}
+
+#[test]
+fn a_cancel_prepared_before_the_deadline_cannot_claim_after_it() {
+    use safe_cex_engine::request_context::{HttpAction, Prepared};
+    for claim_at in [NOW + 5000., NOW + 5001.] {
+        let (mut e, _, _) = boot(false);
+        let issued = begin_amend(&mut e);
+        let read = issued
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) if kind(r) == "orderStatus" => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        answer_order_status(&mut e, read);
+        let (preparation, request) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } if request.url.ends_with("/exchange") => Some((preparation, request)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("cancel owns a genuine prepared route before deadline");
+        e.http_prepared(
+            NOW,
+            preparation,
+            Prepared {
+                id: request.id.0,
+                expires_at: None,
+            },
+        );
+        let permit = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("signed cancel bound before deadline");
+        assert!(
+            e.claim_http(claim_at, permit).is_err(),
+            "expired cancel must never be released"
+        );
+        let actions = prepared_now(&mut e);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+        );
+        assert_eq!(e.store().order("9").unwrap().status, OrderStatus::Open);
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: OWNER, error }) if error.outcome == Some(Outcome::NotSent))));
+    }
+}
+
+#[test]
+fn a_cancel_released_in_time_still_replaces_after_the_pre_cancel_deadline() {
+    let (mut e, cancel, _) = cancel_protection(false);
+    e.handle(
+        NOW + 5001.,
+        Event::HttpResponse {
+            request: cancel.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: CANCEL_ACK,
+            },
+        },
+    );
+    let actions = prepared_now(&mut e);
+    assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange") && body(r)["action"]["type"] == "order")));
+}

@@ -43,6 +43,8 @@ struct Job {
     amend_total: Option<f64>,
     /// The read that sizes this amend has been issued.
     amend_read: bool,
+    /// Exclusive absolute bound from command receipt through the cancel release.
+    amend_deadline: Option<f64>,
     builder_checked: bool,
     /// Optional fee decision captured before the amendment cancels anything.
     amend_builder: Option<Builder>,
@@ -73,6 +75,7 @@ pub struct Request {
     command: CommandId,
     effect: Effect,
     order_reply: OrderReply,
+    cancel_deadline: Option<f64>,
 }
 /// How long an unapproved builder fee stays believed before a placement re-reads it.
 const BUILDER_RECHECK_MS: f64 = 60_000.0;
@@ -459,6 +462,7 @@ impl Hyperliquid {
                 steps,
                 ids: Vec::new(),
                 replacement,
+                amend_deadline: amend_source.as_ref().map(|_| cx.now + AMEND_READ_MS),
                 amend_source,
                 amend_total: amend_size,
                 amend_read: false,
@@ -670,6 +674,15 @@ impl Hyperliquid {
         if self.trading.active.is_none() {
             return;
         }
+        if self.trading.active.as_ref().is_some_and(|job| {
+            matches!(job.steps.front(), Some(Step::Cancel(_)))
+                && job
+                    .amend_deadline
+                    .is_some_and(|deadline| !before_amend_deadline(cx.now, deadline))
+        }) {
+            self.expire_amend(cx);
+            return;
+        }
         if !self.trade_entry_ready(cx) {
             return;
         }
@@ -704,8 +717,9 @@ impl Hyperliquid {
                 self.finish_trade(cx, Err(error));
                 return;
             }
-            self.trading.active.as_mut().unwrap().amend_read = true;
-            self.trading.amend_wait = Some(cx.set_timer(AMEND_READ_MS));
+            let job = self.trading.active.as_mut().unwrap();
+            job.amend_read = true;
+            self.trading.amend_wait = Some(cx.set_timer(job.amend_deadline.unwrap() - cx.now));
             self.trading.amend_issuing = true;
             self.read_amend_source(cx, &source);
             self.trading.amend_issuing = false;
@@ -1349,6 +1363,12 @@ impl Hyperliquid {
         }
     }
     fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), VenueError>) {
+        if let Some(timer) = self.trading.amend_wait.take() {
+            cx.clear_timer(timer);
+        }
+        if let Some((timer, _)) = self.trading.amend_retry.take() {
+            cx.clear_timer(timer);
+        }
         self.trading.inflight = false;
         if let Some(mut job) = self.trading.active.take() {
             if let Err(mut error) = result {
@@ -1402,6 +1422,29 @@ impl Hyperliquid {
         }
         self.pump_trades(cx);
     }
+    fn expire_amend(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.finish_trade(
+            cx,
+            Err(not_sent(
+                "Hyperliquid amendment not sent: the order read did not answer",
+            )),
+        );
+    }
+    pub(crate) fn amend_read_pending(&mut self, cx: &mut Cx<'_, Pending>, id: &str) -> bool {
+        let Some(job) = self.trading.active.as_ref().filter(|job| {
+            job.amend_source.as_deref() == Some(id) && self.trading.amend_wait.is_some()
+        }) else {
+            return false;
+        };
+        if job
+            .amend_deadline
+            .is_none_or(|deadline| !before_amend_deadline(cx.now, deadline))
+        {
+            self.expire_amend(cx);
+            return false;
+        }
+        true
+    }
     /// The fresh read an amend waits on, or its failure: nothing has been canceled yet.
     pub(crate) fn amend_source_read(
         &mut self,
@@ -1409,12 +1452,10 @@ impl Hyperliquid {
         id: &str,
         read: Result<(&str, f64, f64), String>,
     ) {
-        let Some(job) = self.trading.active.as_mut() else {
-            return;
-        };
-        if job.amend_source.as_deref() != Some(id) || self.trading.amend_wait.is_none() {
+        if !self.amend_read_pending(cx, id) {
             return;
         }
+        let job = self.trading.active.as_mut().unwrap();
         // A job popped inside another's callback cannot open a read until it returns.
         if read.is_err() && std::mem::take(&mut self.trading.amend_issuing) {
             self.trading.amend_retry = Some((cx.set_timer(1.0), id.to_owned()));
@@ -1478,9 +1519,7 @@ impl Hyperliquid {
             self.read_amend_source(cx, &id);
         }
         if self.trading.amend_wait == Some(timer) {
-            self.trading.amend_wait = None;
-            let error = not_sent("Hyperliquid amendment not sent: the order read did not answer");
-            self.finish_trade(cx, Err(error));
+            self.expire_amend(cx);
         }
         if self.trading.builder_wait == Some(timer) {
             self.trading.builder_wait = None;
@@ -1508,6 +1547,25 @@ impl Hyperliquid {
         }
     }
 }
+fn before_amend_deadline(now: f64, deadline: f64) -> bool {
+    now.is_finite() && deadline.is_finite() && now < deadline
+}
+impl Request {
+    pub(crate) fn check_cancel_deadline(
+        &self,
+        now: f64,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        if self
+            .cancel_deadline
+            .is_some_and(|deadline| !before_amend_deadline(now, deadline))
+        {
+            Err(safe_cex_engine::request_context::Error::TimedOut)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 struct ReplyError {
     message: String,
     uncertain: bool,

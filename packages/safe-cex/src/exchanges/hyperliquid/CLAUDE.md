@@ -33,13 +33,15 @@ revaluation so UPNL and available margin follow provider prices.
 ## Rust amendments
 
 An amend resolves account identity and fresh partial-fill sizing within the
-five-second read bound before cancelling. It captures the optional builder fee
+exclusive five-second deadline from command receipt before cancelling. Read
+receipts and the final cancel claim enforce it independently of timer order.
+The deadline never abandons a replacement after a cancel already left. It captures the optional builder fee
 from the startup/source cache before cancel; unknown approval uses the existing
 no-builder fallback immediately. A replacement never starts or waits for a fee
 check, and a late approval cannot add a fee to that amend. A later refusal may
 omit the captured fee. Standalone placements retain their existing approval wait.
 `transport.http.timing` distinguishes identity, builder approval, order status,
-cancel and place using closed labels; ordinary info reads remain aggregated.
+cancel and place using closed labels derived from the final bound packet; ordinary info reads remain aggregated.
 
 ## Rust startup reads
 
