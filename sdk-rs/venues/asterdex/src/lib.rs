@@ -26,6 +26,7 @@ use safe_cex_engine::socket_lifecycle::{
     Interest as SocketInterest, Invalidation, LifecycleEvent, MAX_FRAME_BYTES, SocketCapabilities,
     SocketError, TrafficPolicy,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CredentialSlot, Cx, ErrorKind, PublicFeedPolicy, Response, SocketChannel, SocketId,
     SubscriptionTopic, TimerId, Venue, VenueError, json, num,
@@ -1645,7 +1646,7 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
             format!(
                 "Aster skipped {} malformed {kind} row(s): {}",
                 skipped.len(),
-                skipped.join(", ")
+                skipped.join_with(", ")
             ),
         );
     }

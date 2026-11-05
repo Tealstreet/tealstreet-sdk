@@ -7,6 +7,7 @@ use safe_cex_engine::request_context::{
     CommandEntryError, Context, Operation, Owner, Policy, RetryPolicy,
 };
 use safe_cex_engine::signing::Identity;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     CommandId, Cx, ErrorKind, HistoryDecodeReason, HistorySchema, Method, Query, Response, TimerId,
     VenueError, json::ArrayAt, num,
@@ -448,7 +449,7 @@ impl BitgetFutures {
                 .iter()
                 .map(|(k, v)| format!("{k}={}", sign::encode(v)))
                 .collect::<Vec<_>>()
-                .join("&")
+                .join_with("&")
         );
         let at = if r.uta && matches!(r.query, Query::Income { .. }) {
             ArrayAt::Path(&["data", "list"])

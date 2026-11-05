@@ -14,6 +14,7 @@ use safe_cex_engine::model::{
     Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, CommandId, Cx, Outcome, SocketId, VenueError, num};
 use std::collections::{HashMap, VecDeque};
 
@@ -675,7 +676,7 @@ impl BybitLinear {
                     chunk.iter().map(|lot| lot.item.clone().finish()).collect();
                 let body = Body::new()
                     .str("category", category.as_str())
-                    .raw("request", &format!("[{}]", items.join(",")))
+                    .raw("request", &format!("[{}]", items.join_with(",")))
                     .finish();
                 let fallback = chunk
                     .iter()
@@ -1565,7 +1566,7 @@ impl BybitLinear {
                     .collect();
                 let body = Body::new()
                     .str("category", category.as_str())
-                    .raw("request", &format!("[{}]", items.join(",")))
+                    .raw("request", &format!("[{}]", items.join_with(",")))
                     .finish();
                 job.steps.push_back(Step {
                     delay_ms: if index > 0 {

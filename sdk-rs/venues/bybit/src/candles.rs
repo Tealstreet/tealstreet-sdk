@@ -164,8 +164,7 @@ impl BybitLinear {
             return;
         }
         // Bybit lists newest first.
-        read.candles
-            .sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+        safe_cex_engine::model::sort_candles_by_time(&mut read.candles);
         let _ = cx.done_context(
             &read.context,
             serde_json::to_string(&read.candles).unwrap_or_default(),

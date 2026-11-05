@@ -7,6 +7,7 @@ use crate::{Grvt, Job, Pending};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     BuilderAuthorization, BuilderAuthorizationReason, Command, CommandId, Cx, ErrorKind, Outcome,
     Response, VenueError,
@@ -1356,13 +1357,13 @@ impl Grvt {
         match error {
             Some(mut error) => {
                 if !plan.created.is_empty() {
-                    let created = plan.created.join(",");
+                    let created = plan.created.join_with(",");
                     error.message = format!(
                         "{}; already created GRVT order IDs: {created}",
                         error.message
                     );
                 } else if !plan.cancel_attempts.is_empty() {
-                    let attempts = plan.cancel_attempts.join(",");
+                    let attempts = plan.cancel_attempts.join_with(",");
                     error.message = format!(
                         "{}; reconcile GRVT cancellation identities: {attempts}",
                         error.message

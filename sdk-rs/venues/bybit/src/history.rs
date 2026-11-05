@@ -9,6 +9,7 @@ use safe_cex_engine::history::{CursorAdmission, CursorHistory, ReadCompletion, R
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{self, CursorPage, CursorStep, CursorWalk, Stall, WindowOrder};
 use safe_cex_engine::request_context::{Context, Owner, Pacing};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, Cx, ErrorKind, Query as Read, Response, VenueError};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -365,13 +366,13 @@ fn incomes(row: &TransactionRow<'_>, out: &mut Vec<Income>) {
     .into_iter()
     .filter(|part| !part.is_empty())
     .collect();
-    let base = base.join("-");
+    let base = base.join_with("-");
     let source = [
         present(&row.id).unwrap_or_default(),
         present(&row.side).unwrap_or_default(),
         present(&row.size).unwrap_or_default(),
     ]
-    .join("|");
+    .join_with("|");
     let mut push = |income: f64, category: &'static str, suffix: &str| {
         out.push(Income {
             symbol: symbol.to_owned(),

@@ -8,6 +8,7 @@ use safe_cex_engine::request_context::{
     RetryPolicy, WriteResult,
     plan::{CallBound, RetryWindow, StepBound},
 };
+use safe_cex_engine::text::JoinWith;
 
 // WEEX common error reference: https://www.weex.com/help/articles/52122274060569
 // Only explicit validation/authentication refusals prove pre-execution denial.
@@ -388,7 +389,7 @@ fn record_rows(
         .filter(|row| !row.success)
         .map(|row| format!("{}: {}", row.client().unwrap_or(label), row.error()))
         .collect::<Vec<_>>()
-        .join("; ");
+        .join_with("; ");
     let mut result =
         project(cx.http_write_batch(context, &TABLE, expected, &items, message, None)?);
     if !placement && let Ok(ids) = &mut result {

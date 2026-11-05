@@ -13,6 +13,7 @@ use safe_cex_engine::request_context::{Context, Error, Operation, Owner, Policy,
 use safe_cex_engine::selected_read::{
     LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     CommandId, CommandWait, Cx, Method, Outcome, Query, Response, TimerId, VenueError,
@@ -373,7 +374,7 @@ fn query(parts: &[(&str, Option<String>)]) -> String {
         .into_iter()
         .map(|(k, v)| format!("{k}={}", encode(v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 fn time(value: Option<f64>) -> Option<String> {
     value.map(|v| format!("{:.0}", v.floor()))

@@ -22,6 +22,7 @@ use safe_cex_engine::request_context::{
     RetryEvidence, RetryPolicy, WriteResult,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError,
 };
@@ -1198,7 +1199,7 @@ impl BybitLinear {
                     .map(String::as_str)
                     .collect();
                 if let Some(first) = left.first().and_then(|order| cx.store.order(order)) {
-                    let (count, symbol, list) = (left.len(), &first.symbol, left.join(", "));
+                    let (count, symbol, list) = (left.len(), &first.symbol, left.join_with(", "));
                     let message = if confirmed {
                         format!("Bybit cancel-all left {count} live order(s) on {symbol}: {list}")
                     } else {
@@ -1670,7 +1671,7 @@ impl BybitLinear {
                     &BYBIT,
                     links.len(),
                     &items,
-                    format!("Failed to place batch orders: {}", reasons.join("; ")),
+                    format!("Failed to place batch orders: {}", reasons.join_with("; ")),
                     None,
                 ) else {
                     return Decision::Lost;

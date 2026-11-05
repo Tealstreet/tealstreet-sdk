@@ -2,6 +2,7 @@
 //! subsequent steps run only after the previous acknowledgement. Writes are
 //! never retried, including when the transport cannot determine their outcome.
 use crate::{Pending, Task, WeexFutures};
+use safe_cex_engine::text::JoinWith;
 #[path = "trading/context.rs"]
 mod context;
 use context::{Entry, record};
@@ -1273,7 +1274,7 @@ impl WeexFutures {
             let path_query = if pairs.is_empty() {
                 step.path.to_owned()
             } else {
-                format!("{}?{}", step.path, pairs.join("&"))
+                format!("{}?{}", step.path, pairs.join_with("&"))
             };
             let recipe =
                 crate::dispatch_signing::Http::new(identity, step.method, path_query, step.body);
@@ -1686,7 +1687,7 @@ fn apply_place(
     if errors.is_empty() {
         Ok(ids)
     } else {
-        Err(errors.join("; ").into())
+        Err(errors.join_with("; ").into())
     }
 }
 fn apply_cancel(
@@ -1735,7 +1736,7 @@ fn apply_cancel(
     if errors.is_empty() {
         Ok(vec![])
     } else {
-        Err(errors.join("; ").into())
+        Err(errors.join_with("; ").into())
     }
 }
 fn metadata(body: &str, symbol: Option<&String>) -> Result<(), VenueError> {
