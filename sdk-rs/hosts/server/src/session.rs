@@ -1904,6 +1904,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn review_3086_crash_before_drain_close_is_not_a_planned_move() {
+        tokio::task::LocalSet::new().run_until(async {
+            for mode in ["user", "box"] {
+                let registry = crate::accounts::tests::registry();
+                let init = acct_init();
+                let account = crate::accounts::testing::trading_account(&registry, "u", &init);
+                let (mut original, _frames) = user_session(registry.clone(), "u");
+                assert!(original.init(init).await.is_ok());
+                account.handle.dispose();
+                tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    while account.handle.join(99_998, true).await.is_ok() {
+                        account.handle.leave(99_998);
+                        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                    }
+                }).await.expect("actor is already dead before any drain disposal");
+                assert!(!account.moving());
+                if mode == "user" {
+                    registry.start_user_drain("u", crate::user_drain::DEFAULT_CAP_MS);
+                } else {
+                    registry.start_drain();
+                }
+                assert_eq!(original.drain_close(), Some(Close::Moved));
+                original.close();
+                let (mut late, mut frames) = user_session(registry, "u");
+                late.join(account).await;
+                let frame: Value = serde_json::from_str(&frames.recv().await.unwrap()).unwrap();
+                assert_eq!(frame["d"]["data"], json!(["account stopped"]),
+                    "{mode}: closing a draining session must not relabel an earlier actor crash: {frame}");
+            }
+        }).await;
+    }
+
+    #[tokio::test]
     async fn planned_move_stop_errors_carry_the_reason_but_real_actor_stops_do_not() {
         tokio::task::LocalSet::new()
             .run_until(async {
