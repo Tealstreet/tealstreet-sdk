@@ -563,9 +563,6 @@ impl Session {
             Ok(account) => {
                 self.metrics.note_init();
                 let private = !account.is_public();
-                if private && self.registry.interruptions.has_interruption(self.user()) {
-                    account.running.interrupt_restores();
-                }
                 self.join(account).await;
                 if private && self.joined.contains_key(&init.account_name) {
                     self.registry

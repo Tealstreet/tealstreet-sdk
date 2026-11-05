@@ -132,7 +132,7 @@ pub struct Running {
     work: Mutex<(Vec<crate::user_drain::Job>, usize)>,
     lease: OnceLock<crate::router_lease::Permit>,
     lease_parked: AtomicBool,
-    interrupted_restore: AtomicBool,
+    restores: OnceLock<crate::interruption::RestoreGuard>,
 }
 
 impl Running {
@@ -145,19 +145,25 @@ impl Running {
             work: Mutex::default(),
             lease: OnceLock::new(),
             lease_parked: AtomicBool::new(false),
-            interrupted_restore: AtomicBool::new(false),
+            restores: OnceLock::new(),
         }
     }
 
-    pub(crate) fn interrupt_restores(&self) {
-        self.interrupted_restore.store(true, Ordering::Release);
+    pub(crate) fn attach_restores(&self, guard: crate::interruption::RestoreGuard) {
+        let _ = self.restores.set(guard);
     }
-    fn restores_must_pause(&self) -> bool {
-        self.interrupted_restore.load(Ordering::Acquire)
-            || self
-                .lease
-                .get()
-                .is_some_and(|lease| lease.restores_must_pause())
+    fn restore_epoch(&self) -> crate::interruption::RestoreEpoch {
+        let lease = self
+            .lease
+            .get()
+            .and_then(|permit| permit.restore_generation());
+        self.restores.get().map_or(
+            crate::interruption::RestoreEpoch {
+                marker: None,
+                lease,
+            },
+            |guard| guard.epoch(lease),
+        )
     }
     pub(crate) fn attach_lease(&self, permit: crate::router_lease::Permit) {
         let _ = self.lease.set(permit);
@@ -997,21 +1003,34 @@ pub async fn run(
                         port.emit("error", crate::user_drain::refusal().to_string());
                         continue;
                     }
-                    if op == "twap:state" && running.restores_must_pause()
-                        && let Ok(mut rows) = serde_json::from_str::<Vec<Value>>(&data) {
+                    // The page acted on frames this store may not have read yet (a chase
+                    // started right after load found no market): read the engine first.
+                    if let Some(snapshot) = handle.read(projection::project).await {
+                        let change = port.apply(snapshot, Vec::new(), false);
+                        port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
+                    }
+                    if !running.io_allowed() {
+                        port.emit("error", crate::user_drain::refusal().to_string());
+                        continue;
+                    }
+                    let epoch = running.restore_epoch();
+                    if op == "twap:state" && let Ok(mut rows) = serde_json::from_str::<Vec<Value>>(&data) {
                         for row in &mut rows {
-                            if let Some(state) = row.get_mut("state").and_then(Value::as_object_mut)
+                            let pause = row.get("id").and_then(Value::as_str).is_some_and(|id|
+                                running.restores.get().is_some_and(|guard| guard.must_pause(id, epoch)));
+                            if pause && let Some(state) = row.get_mut("state").and_then(Value::as_object_mut)
                                 && state.get("status").and_then(Value::as_str) == Some("running") {
                                 state.insert("status".into(), "paused".into());
                             }
                         }
                         data = serde_json::to_string(&rows).unwrap();
                     }
-                    // The page acted on frames this store may not have read yet (a chase
-                    // started right after load found no market): read the engine first.
-                    if let Some(snapshot) = handle.read(projection::project).await {
-                        let change = port.apply(snapshot, Vec::new(), false);
-                        port.subscribers.borrow_mut().retain(|tx| tx.send(change.clone()).is_ok());
+                    let resume = (op == "twap:resume").then(|| serde_json::from_str::<String>(&data).ok()).flatten()
+                        .filter(|id| twap.active_twaps(&name).iter().any(|row| row["id"] == id.as_str() && row["status"] == "paused"));
+                    if let Some(id) = &resume && let Some(guard) = running.restores.get()
+                        && let Err(error) = guard.reserve_resume(id, epoch) {
+                        port.emit("error", serde_json::to_string(error).unwrap());
+                        continue;
                     }
                     let dispatch = || {
                         let result = registry.dispatch(&op, &data, &cx);
@@ -1029,6 +1048,11 @@ pub async fn run(
                             }
                         } else { dispatch() }
                     } else { dispatch() };
+                    if matches!(dispatched, Some(Ok(()))) && running.restore_epoch() == epoch
+                        && let Some(id) = &resume && let Some(guard) = running.restores.get()
+                        && twap.active_twaps(&name).iter().any(|row| row["id"] == id.as_str() && row["status"] == "running") {
+                        guard.acknowledge_resume(id, epoch);
+                    }
                     let result = match &dispatched {
                         Some(Ok(())) => Value::from("ok"),
                         Some(Err(error)) => {

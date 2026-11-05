@@ -270,10 +270,19 @@ name. When it matches this box's router ID, the notice uses the configured
 `TEALSTREET_BOX` display name; otherwise it displays the router ID as-is.
 A fresh destination at generation zero has no server-side jobs from the dead box
 to restore. However, NX can send persisted client TWAP state at account start.
-For either interruption reason, that restored state is forced paused even after
-the one-shot notice has been delivered. Progress and stable IDs are preserved;
-only explicit `twap:resume` restarts the job. No-marker restores keep their normal
-behavior. There is no chase/EXEC restore operation in the current hosted API;
+For either interruption reason, unacknowledged restored jobs are forced paused
+even after the one-shot notice has been delivered. Progress and stable IDs are
+preserved. A successful explicit `twap:resume` that actually makes the paused job
+running acknowledges only that user/account/job and the observed marker plus
+lease generation. Later account rebuilds preserve that job's client state;
+another job or account stays protected. Invalid, refused or ineffective resume
+attempts do not acknowledge. A newer marker or lease generation re-arms the job.
+No-marker/no-fence restores keep their normal behavior. Because there is no
+complete restored-job census, the marker is retained for at most 24 hours,
+measured monotonically and bounded by its original timestamp; it is not cleared
+when the first job resumes. Lease-generation restore guards also expire after
+24 hours without relaxing IO ownership. Acknowledgements are bounded to 4096 per
+user and 4096 users; a full ledger refuses resume before changing job state. There is no chase/EXEC restore operation in the current hosted API;
 new restore operations must join this gate. The forced notice tells the user to
 check their algos and orders before resuming. This does not invent a job handoff
 or durable restore from a dead box; that remains psmp2r-39. Same-box lease-fenced

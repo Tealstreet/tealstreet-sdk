@@ -354,7 +354,7 @@ struct Parked {
 pub struct Registry {
     pub user_drains: crate::user_drain::Users,
     pub router_leases: Arc<crate::router_lease::Users>,
-    pub interruptions: crate::interruption::Notices,
+    pub interruptions: Arc<crate::interruption::Notices>,
     accounts: Mutex<HashMap<(String, String), Arc<Account>>>,
     parked: Mutex<HashMap<String, Parked>>,
     /// Resumable sessions still open, by resume id: a resume of one whose drop
@@ -702,10 +702,10 @@ impl Registry {
     }
 
     pub fn with_router_lease(mut self, config: crate::router_lease::Config) -> Self {
-        self.interruptions = crate::interruption::Notices::with_box(
+        self.interruptions = Arc::new(crate::interruption::Notices::with_box(
             config.box_id.clone(),
             config.display_name.clone(),
-        );
+        ));
         self.router_leases = Arc::new(crate::router_lease::Users::new(config));
         self
     }
@@ -976,6 +976,7 @@ impl Registry {
             }
             running.attach_lease(lease.clone());
         }
+        running.attach_restores(self.interruptions.account(user, &init.account_name));
         let algo_running = running.clone();
         let (algos, algo_inbox) = if public_only {
             (None, None)
@@ -1953,6 +1954,9 @@ pub mod testing {
 
     /// `account` as the registry's account for its (user, name).
     pub fn register(registry: &Registry, account: &Arc<Account>) {
+        account
+            .running
+            .attach_restores(registry.interruptions.account(&account.user, &account.name));
         if let Some(user) = registry.router_leases.get(&account.user) {
             account.running.attach_lease(user.permit());
         }

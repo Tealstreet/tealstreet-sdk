@@ -84,6 +84,7 @@ struct State {
     not_after: Option<u64>,
     deadline: Option<Instant>,
     generation: u64,
+    retired_at: Option<Instant>,
     fenced: bool,
 }
 
@@ -99,8 +100,8 @@ pub struct Permit {
     generation: u64,
 }
 impl Permit {
-    pub fn restores_must_pause(&self) -> bool {
-        self.user.restores_must_pause()
+    pub fn restore_generation(&self) -> Option<u64> {
+        self.user.restore_generation()
     }
     pub fn allowed(&self) -> bool {
         self.user.allowed(self.generation)
@@ -130,6 +131,7 @@ impl User {
         if policy.enforce && !missing_grace && self.expired(state) && !state.fenced {
             state.fenced = true;
             state.generation = state.generation.saturating_add(1);
+            state.retired_at = Some(Instant::now());
         }
     }
     pub fn permit(self: &Arc<Self>) -> Permit {
@@ -150,8 +152,14 @@ impl User {
         self.observe(&policy, &mut state);
         !state.fenced && state.generation == generation
     }
-    pub fn restores_must_pause(&self) -> bool {
-        self.policy.lock().unwrap().enforce && self.state.lock().unwrap().generation > 0
+    fn restore_generation(&self) -> Option<u64> {
+        let policy = self.policy.lock().unwrap();
+        let state = self.state.lock().unwrap();
+        (policy.enforce
+            && state
+                .retired_at
+                .is_some_and(|at| at.elapsed() < crate::interruption::RETENTION))
+        .then_some(state.generation)
     }
     pub fn status(&self) -> Status {
         let policy = self.policy.lock().unwrap();
@@ -220,6 +228,7 @@ impl Users {
                 not_after: None,
                 deadline: None,
                 generation: 0,
+                retired_at: None,
                 fenced: false,
             }),
             clock: self.clock.clone(),
@@ -273,6 +282,7 @@ impl Users {
                 && !state.fenced
             {
                 state.generation = state.generation.saturating_add(1);
+                state.retired_at = Some(Instant::now());
             }
             state.accepted = Some(incoming);
             state.not_after = Some(assertion.not_after);
@@ -378,6 +388,23 @@ mod tests {
         assert!(!before.allowed());
         assert!(!users.get("other").unwrap().status().owner_epoch.is_some());
     }
+    #[tokio::test(start_paused = true)]
+    async fn same_box_restore_generation_expires_after_one_day_without_changing_io_authority() {
+        let (users, now) = setup(true);
+        users
+            .accept(&beat(now.load(Ordering::Relaxed), 1, 1))
+            .unwrap();
+        advance(&now, 45_001).await;
+        assert!(users.get("u").unwrap().status().fenced);
+        users
+            .accept(&beat(now.load(Ordering::Relaxed), 1, 2))
+            .unwrap();
+        let permit = users.get("u").unwrap().permit();
+        assert_eq!(permit.restore_generation(), Some(1));
+        tokio::time::advance(crate::interruption::RETENTION).await;
+        assert_eq!(permit.restore_generation(), None);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn regular_contact_keeps_a_live_generation_and_parked_users_are_explicit() {
         let (users, now) = setup(true);
