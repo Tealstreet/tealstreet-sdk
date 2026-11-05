@@ -9,6 +9,7 @@ use safe_cex_engine::request_context::{CommandEntryError, Error as RequestError,
 use safe_cex_engine::selected_read::{
     CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -160,7 +161,7 @@ impl Blofin {
                         ),
                         _ => "BloFin closed positions stopped at a repeated cursor; older positions were not fetched".into(),
                     },
-                    |rows| Ok(format!("[{}]", rows.join(","))),
+                    |rows| Ok(format!("[{}]", rows.join_with(","))),
                 ),
                 instrument,
                 from: from_ms,
@@ -207,7 +208,10 @@ impl Blofin {
         if let Some(after) = request.history.cursor() {
             params.push(format!("after={}", encode(after)));
         }
-        let path = format!("/api/v1/account/positions-history?{}", params.join("&"));
+        let path = format!(
+            "/api/v1/account/positions-history?{}",
+            params.join_with("&")
+        );
         let url = format!("{}{path}", self.host());
         let testnet = self.options.testnet;
         if let Err((Pending::Closed(request), reason)) = leg.queue(

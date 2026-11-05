@@ -634,6 +634,13 @@ pub struct Candle {
     pub volume: f64,
 }
 
+/// Oldest first, stable (equal timestamps keep their input order), by `f64::total_cmp`.
+/// One concrete copy for every venue: a per-site closure would monomorphize the sort each time.
+#[inline(never)]
+pub fn sort_candles_by_time(rows: &mut [Candle]) {
+    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BybitBbo {
@@ -710,6 +717,49 @@ fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candles_sort_oldest_first_stably_with_total_cmp_placement() {
+        let candle = |timestamp: f64, close: f64| Candle {
+            timestamp,
+            open: 0.,
+            high: 0.,
+            low: 0.,
+            close,
+            volume: 0.,
+        };
+        let mut rows = vec![
+            candle(2., 1.),
+            candle(f64::NAN, 2.),
+            candle(0., 3.),
+            candle(1., 4.),
+            candle(-f64::NAN, 5.),
+            candle(f64::INFINITY, 6.),
+            candle(-0., 7.),
+            candle(2., 8.),
+            candle(f64::NEG_INFINITY, 9.),
+            candle(1., 10.),
+        ];
+        let mut inline = rows.clone();
+        inline.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+        sort_candles_by_time(&mut rows);
+        let closes: Vec<_> = rows.iter().map(|row| row.close).collect();
+        // -NaN, -inf, -0 before +0, ties in input order, +inf, +NaN.
+        assert_eq!(closes, [5., 9., 7., 3., 4., 10., 1., 8., 6., 2.]);
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.timestamp.to_bits())
+                .collect::<Vec<_>>(),
+            inline
+                .iter()
+                .map(|row| row.timestamp.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            closes,
+            inline.iter().map(|row| row.close).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn only_two_positive_finite_steps_are_tradable() {

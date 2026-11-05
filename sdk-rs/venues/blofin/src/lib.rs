@@ -310,7 +310,7 @@ impl Blofin {
                 mut rows,
                 failed: false,
             } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
             other @ (Pending::Markets { .. } | Pending::Tickers { .. }) => self.public_failed(

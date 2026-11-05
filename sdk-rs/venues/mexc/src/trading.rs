@@ -6,6 +6,7 @@ use crate::{
 };
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError, num,
 };
@@ -600,7 +601,7 @@ impl MexcFutures {
                 batch.push_back(Step {
                     receipts,
                     path: BATCH,
-                    body: format!("[{}]", bodies.join(",")),
+                    body: format!("[{}]", bodies.join_with(",")),
                     call: Call::Batch {
                         orders: orders.to_vec(),
                     },
@@ -1100,7 +1101,7 @@ impl MexcFutures {
             }
             Call::Batch {orders}=>orders.iter().map(|o|self.regular_body(cx,o,true)).collect::<Result<Vec<_>,_>>().map(|rows| {
                 let (bodies, receipts): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
-                Step { receipts, path:BATCH,body:format!("[{}]",bodies.join(",")),call:Call::Batch{orders}}
+                Step { receipts, path:BATCH,body:format!("[{}]",bodies.join_with(",")),call:Call::Batch{orders}}
             }),
             Call::Leverage {symbol,position_type,leverage,isolated,keep_leverage,keep_margin}=>self.settings_steps(cx,&symbol,(!keep_leverage).then_some(leverage),(!keep_margin).then_some(isolated),Some(if position_type==1{PositionSide::Long}else{PositionSide::Short})).and_then(|steps|steps.into_iter().find(|s|matches!(&s.call,Call::Leverage {position_type:p,..}if *p==position_type)).ok_or_else(||"MEXC leverage rail missing".into())),
             _=>Ok(step),
@@ -1534,7 +1535,7 @@ impl MexcFutures {
                         refused = !unproven;
                         return Err(format!(
                             "MEXC batch order placement failed: {}",
-                            failures.join(", ")
+                            failures.join_with(", ")
                         ));
                     }
                 }
@@ -1580,7 +1581,7 @@ impl MexcFutures {
                         refused = !unproven;
                         return Err(format!(
                             "MEXC order cancellation failed: {}",
-                            errors.join(", ")
+                            errors.join_with(", ")
                         ));
                     }
                 }
