@@ -5,13 +5,15 @@ import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
  * user's tunnel round trip. A write (`/exchange`) emits one
  * `transport.http.timing` split into queued (engine prepare to dispatch),
  * wire (dispatch to the tunnel's answer) and upstream (the tunnel's own
- * request to the venue, when it reports one); reads are folded into one
+ * request to the venue, when it reports one). Order prerequisites emit their
+ * own samples; ordinary reads are folded into one
  * `transport.http.window` per route per minute. Every field is an enum or an
  * integer of milliseconds or counts: no URL, body, address or venue text.
  */
 export type HttpTimingRoute = 'tunnel' | 'proxy' | 'direct';
 export type HttpTimingKind = 'exchange' | 'info' | 'other';
 export type HttpTimingOutcome = 'ok' | 'timeout' | 'error';
+export type HttpTimingStage = 'place' | 'cancel' | 'modify' | 'orderStatus' | 'builderApproval' | 'identity';
 
 const TUNNEL_HOSTS: Record<string, string> = {
   'fsjnpy143pbz-tyo.tealstreet.io': 'vultr-tyo',
@@ -38,6 +40,38 @@ export const httpTimingKind = (url: string): HttpTimingKind => {
   }
 };
 
+/** Closed stage labels only: none of the parsed request data reaches telemetry. */
+export const httpTimingStage = (url: string, body: string | undefined): HttpTimingStage | undefined => {
+  if (!body) return undefined;
+  try {
+    const packet = JSON.parse(body) as { type?: unknown; action?: { type?: unknown } };
+    if (httpTimingKind(url) === 'exchange') {
+      switch (packet.action?.type) {
+        case 'order':
+          return 'place';
+        case 'cancel':
+        case 'cancelByCloid':
+          return 'cancel';
+        case 'modify':
+        case 'batchModify':
+          return 'modify';
+      }
+    } else if (httpTimingKind(url) === 'info') {
+      switch (packet.type) {
+        case 'orderStatus':
+          return 'orderStatus';
+        case 'maxBuilderFee':
+          return 'builderApproval';
+        case 'userRole':
+          return 'identity';
+      }
+    }
+  } catch {
+    /* A diagnostic cannot reject an HTTP packet. */
+  }
+  return undefined;
+};
+
 export const WINDOW_MS = 60_000;
 const MAX_WINDOW_SAMPLES = 4_096;
 
@@ -59,6 +93,7 @@ export interface HttpTimingSample {
   route: HttpTimingRoute;
   kind: HttpTimingKind;
   outcome: HttpTimingOutcome;
+  stage?: HttpTimingStage;
   /**
    * From the engine's prepare (issued when it accepts the command) to dispatch:
    * proxy token, tunnel socket, signing, info budget and admission waits.
@@ -83,7 +118,7 @@ export class HttpTiming {
 
   record(sample: HttpTimingSample) {
     try {
-      if (sample.kind === 'exchange') this.emit(this.timing(sample));
+      if (sample.kind === 'exchange' || sample.stage !== undefined) this.emit(this.timing(sample));
       else this.accumulate(sample);
     } catch {
       /* Telemetry cannot fail the request. */
@@ -111,6 +146,7 @@ export class HttpTiming {
       queuedMs,
       wireMs,
     };
+    if (sample.stage !== undefined) fields.stage = sample.stage;
     if (sample.upstreamMs !== undefined) fields.upstreamMs = whole(sample.upstreamMs);
     if (sample.status !== undefined && Number.isInteger(sample.status)) fields.httpStatus = sample.status;
     const ping = this.ping(sample.route);

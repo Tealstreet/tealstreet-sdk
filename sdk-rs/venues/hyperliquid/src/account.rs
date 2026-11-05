@@ -86,13 +86,21 @@ pub enum Request {
     Fees,
     AmendSource {
         id: String,
+        amend: crate::trading::AmendRead,
     },
     /// The frame-fed page never ran the startup role read; its amend reads need the account.
     AmendRole {
         id: String,
+        amend: crate::trading::AmendRead,
     },
 }
 impl Request {
+    pub(crate) fn amend_read(&self) -> Option<(&str, crate::trading::AmendRead)> {
+        match self {
+            Self::AmendRole { id, amend } | Self::AmendSource { id, amend } => Some((id, *amend)),
+            _ => None,
+        }
+    }
     pub(crate) fn is_builder(&self) -> bool {
         matches!(self, Self::Builder)
     }
@@ -564,6 +572,12 @@ impl Hyperliquid {
                 }
                 read => read,
             };
+            if let ReadContinuation::Account(request) = &read.continuation
+                && let Some((id, amend)) = request.amend_read()
+                && !self.amend_read_pending(cx, id, amend)
+            {
+                continue;
+            }
             let background = read.occupies_account_slot();
             let read_class = read.read_class();
             let QueuedRead {
@@ -856,7 +870,15 @@ impl Hyperliquid {
             Request::Builder,
         );
     }
-    pub(crate) fn read_amend_source(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+    pub(crate) fn read_amend_source(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        id: &str,
+        amend: crate::trading::AmendRead,
+    ) {
+        if !self.amend_read_pending(cx, id, amend) {
+            return;
+        }
         #[derive(Serialize)]
         struct Read<'a> {
             r#type: &'static str,
@@ -864,12 +886,17 @@ impl Hyperliquid {
             oid: u64,
         }
         let Ok(oid) = id.parse::<u64>() else {
-            self.amend_source_read(cx, id, Err("the order ID is not numeric".to_owned()));
+            self.amend_source_read(cx, id, amend, Err("the order ID is not numeric".to_owned()));
             return;
         };
         let Some(user) = self.user() else {
             let Some(key) = self.options.key.as_deref() else {
-                self.amend_source_read(cx, id, Err("the account is not resolved".to_owned()));
+                self.amend_source_read(
+                    cx,
+                    id,
+                    amend,
+                    Err("the account is not resolved".to_owned()),
+                );
                 return;
             };
             #[derive(Serialize)]
@@ -883,7 +910,14 @@ impl Hyperliquid {
             })
             .unwrap();
             self.account.fence_read = true;
-            self.read_body(cx, body, Request::AmendRole { id: id.to_owned() });
+            self.read_body(
+                cx,
+                body,
+                Request::AmendRole {
+                    id: id.to_owned(),
+                    amend,
+                },
+            );
             self.account.fence_read = false;
             return;
         };
@@ -894,7 +928,14 @@ impl Hyperliquid {
         })
         .unwrap();
         self.account.fence_read = true;
-        self.read_body(cx, body, Request::AmendSource { id: id.to_owned() });
+        self.read_body(
+            cx,
+            body,
+            Request::AmendSource {
+                id: id.to_owned(),
+                amend,
+            },
+        );
         self.account.fence_read = false;
     }
     pub(crate) fn builder(&self) -> crate::Builder {
@@ -1236,15 +1277,26 @@ impl Hyperliquid {
                     cx.hold_setting(crate::BUILDER_HOLD.clone());
                 }
             }
-            Request::AmendRole { id } => {
+            Request::AmendRole { id, amend } => {
+                if !self.amend_read_pending(cx, &id, amend) {
+                    return;
+                }
                 self.apply_role(raw);
                 if self.user().is_some() {
-                    self.read_amend_source(cx, &id);
+                    self.read_amend_source(cx, &id, amend);
                 } else {
-                    self.amend_source_read(cx, &id, Err("the account is not resolved".to_owned()));
+                    self.amend_source_read(
+                        cx,
+                        &id,
+                        amend,
+                        Err("the account is not resolved".to_owned()),
+                    );
                 }
             }
-            Request::AmendSource { id } => {
+            Request::AmendSource { id, amend } => {
+                if !self.amend_read_pending(cx, &id, amend) {
+                    return;
+                }
                 #[derive(serde::Deserialize)]
                 struct Lookup<'a> {
                     #[serde(borrow)]
@@ -1261,9 +1313,10 @@ impl Hyperliquid {
                     Ok(row) => self.amend_source_read(
                         cx,
                         &id,
+                        amend,
                         Ok((row.status.as_ref(), row.order.orig_sz, row.order.sz)),
                     ),
-                    Err(error) => self.amend_source_read(cx, &id, Err(error)),
+                    Err(error) => self.amend_source_read(cx, &id, amend, Err(error)),
                 }
             }
             Request::Fees => {
@@ -1662,8 +1715,11 @@ impl Hyperliquid {
                 }
             }
             Request::Builder => self.account.builder_approved = None,
-            Request::AmendSource { id } | Request::AmendRole { id } => {
-                self.amend_source_read(cx, &id, Err(error.to_owned()));
+            Request::AmendSource { id, amend } | Request::AmendRole { id, amend } => {
+                if !self.amend_read_current(&id, amend) {
+                    return;
+                }
+                self.amend_source_read(cx, &id, amend, Err(error.to_owned()));
             }
             Request::Fees => {}
         }
