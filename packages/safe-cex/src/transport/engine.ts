@@ -5,11 +5,11 @@ import type {
   TimerLatenessBucket,
 } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import type { TunnelOutage } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
-import type { HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
+import type { EngineEvent, HttpResponse, PreparedHttp, Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../types';
 import type { BybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
-import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
+import type { HttpTimingOutcome } from './httpTiming';
 import type { CatalogueRead } from './sharedCatalogue';
 import type { ResolvedRouting, ResolvedWs, RestTransport, TransportProvider } from './types';
 
@@ -35,6 +35,8 @@ import { WsDirectFallback } from '../utils/wsDirectFallback';
 import { sharedBinanceCatalogue } from './binanceCatalogue';
 import { bybitPublicRateLimitNotice } from './bybitPublicRateLimitTelemetry';
 import { directTransport } from './direct';
+import { HttpTiming, httpTimingKind, tunnelHostLabel, upstreamMsFromHeaders } from './httpTiming';
+import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { sharedHyperliquidCatalogue } from './hyperliquidCatalogue';
 import { HyperliquidInfoBudget, warnHyperliquidInfoBudgetUnavailable } from './hyperliquidInfoBudget';
 import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
@@ -481,6 +483,7 @@ const httpTransport = (
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
   infoFacts?: HyperliquidStartupFacts,
+  onHttpTiming?: (event: EngineEvent) => void,
 ): {
   mode: 'direct' | 'how';
   invalidateCatalogue(): void;
@@ -503,6 +506,14 @@ const httpTransport = (
   let disposed = false;
   const infoBudget =
     exchange === 'hyperliquid' || exchange === 'hyperliquidspot' ? new HyperliquidInfoBudget() : undefined;
+  const timing =
+    infoBudget && onHttpTiming
+      ? new HttpTiming(
+          tunnelHostLabel(adapter ? tunnelEgressUrl(routing.howEgress) : undefined),
+          () => (adapter as Partial<DisposableAxiosAdapter> | undefined)?.tunnelLatency?.(),
+          onHttpTiming,
+        )
+      : undefined;
   const catalogueOrigins = new Set<string>();
   const pending = new Set<AbortController>();
   // While this realm's tunnel is unreachable, REST goes through the HTTP proxy, which
@@ -985,10 +996,39 @@ const httpTransport = (
               });
               sent = true;
               if (!cached) infoRead?.sent();
+              const dispatchedAt = Date.now();
+              const sample = (outcome: HttpTimingOutcome, response?: HttpResponse) =>
+                timing?.record({
+                  route: tunnelAdapter ? 'tunnel' : route.proxied ? 'proxy' : 'direct',
+                  kind: httpTimingKind(request.url),
+                  outcome,
+                  queuedMs: dispatchedAt - started,
+                  wireMs: Date.now() - dispatchedAt,
+                  upstreamMs: tunnelAdapter ? upstreamMsFromHeaders(response?.headers) : undefined,
+                  status: response?.status,
+                });
               try {
                 const response = send();
                 physicalRequest = true;
                 return untilAborted(response, signal)
+                  .then(
+                    (value) => {
+                      if (!cached) sample('ok', value);
+                      return value;
+                    },
+                    (error) => {
+                      // A caller or host calling the request off is not a network outcome.
+                      if (!cached && !disposed && !request.signal?.aborted && !reroute.abandon?.aborted)
+                        sample(
+                          error instanceof TradeTunnelTimeoutError ||
+                            (error instanceof HttpPreparationError && error.code === 'timedOut') ||
+                            remaining() <= 0
+                            ? 'timeout'
+                            : 'error',
+                        );
+                      throw error;
+                    },
+                  )
                   .then((value) =>
                     route.proxied && !tunnelAdapter ? untilAborted(checkProxyAuthorization(value), signal) : value,
                   )
@@ -1081,6 +1121,7 @@ const httpTransport = (
     request,
     prepareHttp: (request) => (request.intent === 'public' ? preparePublic(request) : prepare(request, request.intent)),
     dispose: () => {
+      timing?.flush();
       disposed = true;
       for (const controller of pending) controller.abort(new Error('Engine transport disposed'));
       pending.clear();
@@ -1104,6 +1145,7 @@ export const createEngineTransport = (
   onProxyAuthorizationFailure?: (message: string) => void,
   onTunnelProxyFallback?: (notice: TunnelProxyFallbackNotice) => void,
   onBybitPublicRateLimit?: (notice: BybitPublicRateLimitNotice) => void,
+  onHttpTiming?: (event: EngineEvent) => void,
 ): EngineTransport => {
   assertEngineAccountRouting(options, exchange);
   const infoFacts =
@@ -1201,6 +1243,7 @@ export const createEngineTransport = (
     onTunnelProxyFallback,
     onBybitPublicRateLimit,
     infoFacts,
+    onHttpTiming,
   );
   // Explicit public requests bypass account proxy/tunnel policy. URLs stay in
   // the host; venues choose only the typed route name.

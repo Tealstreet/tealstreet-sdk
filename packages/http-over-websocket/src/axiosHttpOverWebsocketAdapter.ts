@@ -413,6 +413,8 @@ export class TradeTunnelPreparationError extends Error {
 export type DisposableAxiosAdapter = AxiosAdapter & {
   connectionDiagnostic(): ConnectionCloseDiagnostic | undefined;
   hiddenTimerLateness(): TimerLatenessBucket;
+  /** The smoothed client-to-tunnel ping of the socket this adapter last used. */
+  tunnelLatency(): number | undefined;
   prepare(config: InternalAxiosRequestConfig): Promise<PreparedTunnelRequest>;
   /** Opaque TS/legacy requests only; never managed engine release proof. */
   prepareLegacy(config: InternalAxiosRequestConfig): Promise<PreparedTunnelRequest>;
@@ -944,6 +946,7 @@ const createAxiosHttpOverWebsocketAdapter = (
   return Object.assign(adapter, {
     connectionDiagnostic: () => lastSocket?.diagnostics.lastClose,
     hiddenTimerLateness: () => lastSocket?.timerLateness.bucket ?? 'unknown',
+    tunnelLatency: () => lastSocket?.tunnelLatency,
     prepare: (config: InternalAxiosRequestConfig) => prepare(config),
     prepareLegacy: (config: InternalAxiosRequestConfig) => prepare(config, true),
     dispose: () => {
