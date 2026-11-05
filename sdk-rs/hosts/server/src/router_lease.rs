@@ -194,6 +194,17 @@ pub struct Counts {
     pub live_users_without_lease: usize,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    router_box_id: Option<String>,
+    enforced: bool,
+    enable_grace_until: Option<u64>,
+    #[serde(flatten)]
+    counts: Counts,
+    checked_at: u64,
+}
+
 pub struct Users {
     config: Config,
     policy: Arc<Mutex<Policy>>,
@@ -261,6 +272,27 @@ impl Users {
             .filter(|user| !entries.contains_key(*user))
             .count();
         counts
+    }
+    pub fn summary(&self, counts: Counts) -> Summary {
+        let policy = self.policy.lock().unwrap();
+        let checked_at = (self.clock)();
+        let enable_grace_until = if policy.enforce {
+            policy
+                .grace_until
+                .checked_duration_since(Instant::now())
+                .map(|remaining| {
+                    checked_at.saturating_add(remaining.as_nanos().div_ceil(1_000_000) as u64)
+                })
+        } else {
+            None
+        };
+        Summary {
+            router_box_id: self.config.box_id.clone(),
+            enforced: policy.enforce,
+            enable_grace_until,
+            counts,
+            checked_at,
+        }
     }
     pub fn accept(&self, heartbeat: &Heartbeat) -> Result<usize, &'static str> {
         let now = (self.clock)();

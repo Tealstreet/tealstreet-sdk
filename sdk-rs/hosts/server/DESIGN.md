@@ -282,6 +282,22 @@ and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,
 no placement, renewal or write authority. Expiry uses both wall-clock
 `notAfter` and a monotonic deadline so a clock rollback cannot extend ownership.
 
+`POST /admin/router-lease/summary` accepts an empty body or `{}` under the
+same on-box admin guard. It returns only
+`{routerBoxId, enforced, enableGraceUntil, trackedUsers, fencedUsers,
+wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+`wouldFenceUsers` counts the exact per-user `wouldFence` predicate, including
+wall-clock and monotonic expiry, independently of shadow/enforcement mode.
+`fencedUsers` counts the per-user actual `fenced` flag. Hosted users with private
+accounts (including parked accounts) or authenticated sockets are deduplicated;
+those with no lease record count as `liveUsersWithoutLease`. Pending authenticated
+upgrade reservations count as sockets. Anonymous public data and drain latches
+alone do not count as hosted activity. Reading the summary never creates lease
+records for absent users. `enableGraceUntil` is the active explicit enable-grace
+deadline, otherwise null. Operators gate enabling on both boxes reporting
+`wouldFenceUsers == 0 && liveUsersWithoutLease == 0`. This is a current-state
+snapshot, not an admission latch or takeover proof.
+
 ### Rollout and recovery
 
 Enforcement defaults OFF. In shadow mode heartbeats and would-fence state are
