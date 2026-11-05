@@ -65,10 +65,11 @@ import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter'
 import { aggregateBybitClosedPnl } from '../../journal/bybit.position-adapter';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
 import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
+import { SECONDARY_READ_KEYS_ENABLED } from '../../secondaryReadKeys';
 import { FrameApplier, FrameApplyError } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
 import { bybitPublicRateLimitReport } from '../../transport/bybitPublicRateLimitTelemetry';
-import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
+import { assertEngineAccountRouting, createEngineTransport, withSecondaryReadKeyPolicy } from '../../transport/engine';
 import { withRequestsLog } from '../../transport/requestsLog';
 import { tunnelProxyFallbackReport } from '../../transport/tunnelProxyFallbackTelemetry';
 import { LogSeverity, OrderSide, OrderType, PositionSide } from '../../types';
@@ -812,6 +813,16 @@ export class RustEngineExchange extends BaseExchange {
     assertBetaAccount(exchangeName, options);
     const accountOptions = options;
     const bridgeConstruction = deriveBridgeConstruction(exchangeName, options);
+    // Coinbase drops its read egress with the key, as it always has (secondaryReadKeys.ts).
+    if (
+      !SECONDARY_READ_KEYS_ENABLED &&
+      bridgeConstruction.primaryCredentialsOnly &&
+      [options.secondary_key, options.secondary_secret, options.secondary_passphrase].some((v) => v !== undefined)
+    ) {
+      const { secondaryProxyUrl: _readProxy, ...primaryOnly } = options;
+      options = primaryOnly;
+    }
+    options = withSecondaryReadKeyPolicy(options);
     const lighterL1Address =
       deriveSignerSetupMapping(exchangeName) === 'lighter' && typeof options.key === 'string'
         ? options.key.match(/0x[0-9a-fA-F]{40}(?![0-9a-fA-F])/)?.[0]

@@ -72,7 +72,7 @@ const CAPABILITY_ENUMS = [
   ['fillHistoryTime', ['asProvided', 'secondsOrMilliseconds', 'nonnegativeSecondsOrMilliseconds']],
 ];
 export const LOADED_FLAG = { BALANCE: 1, ORDERS: 2, MARKETS: 4, TICKERS: 8, POSITIONS: 16 };
-export const STATUS_FLAG = { HEDGED: 1 };
+export const STATUS_FLAG = { HEDGED: 1, LATENCY_MEASURED: 2 };
 
 export const ORDER_COLUMNS = ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
 export const ORDER_STATUS = ['open', 'closed', 'canceled', 'creating', 'updating', 'canceling'];
@@ -565,7 +565,10 @@ export class Frame {
     requireEnd(section, section.offset + 16);
     const [loaded, flags] = new Uint32Array(this.buffer, section.offset, 2);
     const latency = new Float64Array(this.buffer, section.offset + 8, 1)[0];
-    return { loaded, hedged: (flags & STATUS_FLAG.HEDGED) !== 0, latency };
+    return {
+      loaded, hedged: (flags & STATUS_FLAG.HEDGED) !== 0,
+      latency: (flags & STATUS_FLAG.LATENCY_MEASURED) !== 0 || latency > 0 ? latency : null,
+    };
   }
 
   /** Per-market account settings, replacing any earlier table. */
