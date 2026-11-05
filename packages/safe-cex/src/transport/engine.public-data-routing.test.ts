@@ -106,6 +106,14 @@ describe('a keyless public-data engine reads through the public CORS proxy, off 
     }
   });
 
+  // BingX tunnels unless the account switches it off (usesTunnel), so an unset flag is not direct.
+  it('follows the venue tunnel default when the account leaves the flag unset', async () => {
+    const unset = chartSource({ tealstreetProxy: false, tealstreetTunnel: undefined });
+    expect((await sent('bingx', unset)).url).toBe(`${getPublicCorsProxy()}/${KLINES}`);
+    const mexc = 'https://api.mexc.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=500';
+    expect((await sent('mexc', unset, 'GET', mexc)).url).toBe(mexc);
+  });
+
   it('routes a managed public read (the chart path) the same way', async () => {
     const dispatch = vi.fn(async () => ({ status: 200, body: new Uint8Array() }));
     const bind = vi.fn((_packet: Parameters<Transport['request']>[0]) => ({ ready: () => true, dispatch }));

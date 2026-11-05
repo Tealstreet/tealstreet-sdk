@@ -82,6 +82,32 @@ describe('a signed request is never sent toward the public proxy', () => {
     }
   });
 
+  it('refuses a GRVT session on the public proxy, but not the bare login cookie', async () => {
+    const url = 'https://market-data.grvt.io/full/v1/kline';
+    for (const headers of [
+      { 'x-ts-grvt-session': 'session' },
+      { 'X-Grvt-Account-Id': 'account' },
+      { Cookie: 'rm=true; gravity=session' },
+      { cookie: 'gravity=session' },
+    ] as Record<string, string>[]) {
+      const raw = makeRaw();
+      const routed = createEngineTransport('grvt', options(), raw);
+      await expect(
+        routed.request({ route: 'publicCors', method: 'POST', url, headers }),
+        JSON.stringify(headers),
+      ).rejects.toThrow('refused: signed request to the public proxy');
+      expect(raw.request).not.toHaveBeenCalled();
+    }
+    const raw = makeRaw();
+    await createEngineTransport('grvt', options(), raw).request({
+      route: 'publicCors',
+      method: 'POST',
+      url,
+      headers: { Cookie: 'rm=true' },
+    });
+    expect(raw.request.mock.calls[0][0].url).toBe(`${getPublicCorsProxy()}/${url}`);
+  });
+
   it('lets an unsigned public read through the public proxy', async () => {
     const raw = makeRaw();
     const routed = createEngineTransport('binance', options(), raw);
