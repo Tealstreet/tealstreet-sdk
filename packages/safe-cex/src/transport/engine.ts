@@ -1341,7 +1341,8 @@ export const createEngineTransport = (
     : undefined;
   // A keyless public-data engine (a mirror's chart source) on an opted-in venue holds no
   // credential, so its reads to allowlisted hosts leave through the public CORS proxy, off the
-  // trading fleet's IPs; the signed-packet guard still refuses anything credentialed.
+  // trading fleet's IPs, unless the account is plain direct; the signed-packet guard still
+  // refuses anything credentialed.
   const keylessPublicReads =
     publicCorsHttp !== undefined &&
     PUBLIC_PROXY_READ_HOSTS[exchange] !== undefined &&
@@ -1349,7 +1350,7 @@ export const createEngineTransport = (
     !options.key &&
     !options.secret &&
     !options.passphrase &&
-    options.tealstreetProxy === true &&
+    (options.tealstreetProxy === true || options.tealstreetTunnel === true) &&
     !DIRECT_PUBLIC_READS.has(exchange);
   const readOptions =
     SECONDARY_READ_KEYS_ENABLED && credentials?.hasSecondary

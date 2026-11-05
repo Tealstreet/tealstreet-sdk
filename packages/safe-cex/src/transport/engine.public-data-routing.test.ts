@@ -91,6 +91,21 @@ describe('a keyless public-data engine reads through the public CORS proxy, off 
     expect((await sent('blofin', chartSource(), 'GET', mainnet)).url).toBe(`${getPublicCorsProxy()}/${mainnet}`);
   });
 
+  // A tunnel-only account's chart source has no tunnel on MEXC or BingX (public data only), so
+  // it reads through the public proxy too; only a plain direct account stays direct.
+  it('moves a tunnel-only account off the trading fleet and keeps a direct account direct', async () => {
+    const mexc = 'https://api.mexc.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=500';
+    for (const [exchange, url] of [
+      ['mexc', mexc],
+      ['bingx', KLINES],
+    ] as const) {
+      const tunnelOnly = await sent(exchange, chartSource({ tealstreetProxy: false }), 'GET', url);
+      expect(tunnelOnly.url, exchange).toBe(`${getPublicCorsProxy()}/${url}`);
+      const direct = chartSource({ tealstreetProxy: false, tealstreetTunnel: false });
+      expect((await sent(exchange, direct, 'GET', url)).url, exchange).toBe(url);
+    }
+  });
+
   it('routes a managed public read (the chart path) the same way', async () => {
     const dispatch = vi.fn(async () => ({ status: 200, body: new Uint8Array() }));
     const bind = vi.fn((_packet: Parameters<Transport['request']>[0]) => ({ ready: () => true, dispatch }));
