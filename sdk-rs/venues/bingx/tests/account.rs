@@ -3942,3 +3942,122 @@ fn old_delivery_after_fresh_commit_is_inert() {
     assert_eq!(h.engine.store().order(ORDER_ID).unwrap().price, 59001.);
     assert_eq!(account_cover(&mut h), cover);
 }
+
+#[test]
+fn keepalive_recovery_does_not_taint_a_later_local_deadline() {
+    let mut h = Harness::ready();
+    h.fire_at(1_801_000.);
+    let put = h.take(KEY);
+    assert_eq!(put.method, Method::Put);
+    h.reply(
+        put.id,
+        200,
+        r#"{"code":100410,"msg":"listen key expired; 请稍后重试"}"#,
+    );
+    h.fire_recovery();
+    let key = h.take(KEY);
+    assert_eq!(key.method, Method::Post);
+    h.events.clear();
+    h.fire_at(h.now + 20_000.);
+    let bad: Vec<_> = h
+        .events
+        .iter()
+        .filter(|e| {
+            e.fields.iter().any(|(k, v)| {
+                *k == "kind" && *v == safe_cex_engine::Value::Str("rateLimited".into())
+            })
+        })
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "local timeout inherited a prior response: {bad:?}"
+    );
+}
+
+#[test]
+fn keepalive_rate_evidence_cannot_mask_a_later_provider_refusal() {
+    struct Refusing {
+        inner: safe_cex_engine::signing::Provider,
+        refuse: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl safe_cex_engine::signing::Signer for Refusing {
+        fn immediate(&self) -> bool {
+            true
+        }
+        fn sign(
+            &self,
+            request: safe_cex_engine::signing::SignRequest,
+        ) -> safe_cex_engine::signing::SignFuture {
+            self.inner.sign(request)
+        }
+        fn sign_ready(
+            &self,
+            request: &safe_cex_engine::signing::SignRequest,
+        ) -> Option<Result<safe_cex_engine::signing::SignResult, safe_cex_engine::signing::SignError>>
+        {
+            if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+                Some(Err(safe_cex_engine::signing::SignError::Refused))
+            } else {
+                self.inner.sign_ready(request)
+            }
+        }
+    }
+
+    for expired in [false, true] {
+        let refuse = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = refuse.clone();
+        let mut h = Harness::unstarted_with_provider(|inner| {
+            std::sync::Arc::new(Refusing {
+                inner,
+                refuse: flag,
+            })
+        });
+        h.respond("/quote/contracts", 200, MARKETS);
+        h.respond("/quote/ticker", 200, DAILY);
+        h.respond("/quote/premiumIndex", 200, PREMIUM);
+        let mut h = Harness::finish_ready(h, OPEN);
+        h.fire_at(1_801_000.);
+        let put = h.take(KEY);
+        let message = if expired {
+            "listen key expired; 请稍后重试"
+        } else {
+            "请稍后重试"
+        };
+        h.reply(
+            put.id,
+            200,
+            &format!(r#"{{"code":100410,"msg":"{message}"}}"#),
+        );
+        refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+        h.event(Event::Command(Command::Venue {
+            command: 999,
+            action: safe_cex_engine::VenueAction::ReadPositions,
+        }));
+        let error = &h
+            .failures
+            .iter()
+            .find(|(id, _)| *id == 999)
+            .expect("provider refusal")
+            .1;
+        assert_ne!(
+            error.kind,
+            Some(safe_cex_engine::ErrorKind::RateLimited),
+            "expired={expired}: {error:?}"
+        );
+        assert_eq!(error.venue_code, None, "expired={expired}: {error:?}");
+        assert_eq!(error.retry_after_ms, None, "expired={expired}: {error:?}");
+        assert!(
+            error.message.contains(
+                &safe_cex_engine::signing::SignError::Refused
+                    .venue_error()
+                    .message
+            ),
+            "{error:?}"
+        );
+        assert_eq!(
+            error,
+            &safe_cex_engine::signing::SignError::Refused.venue_error()
+        );
+        assert_eq!(h.failures.iter().filter(|(id, _)| *id == 999).count(), 1);
+    }
+}

@@ -24,3 +24,9 @@ treating the refusal as corrupt data or a credential error. Failed snapshots
 retain the previous financial state. Auth refusal, genuine malformed-list
 diagnostics and successful empty/null lists keep their existing behavior.
 No caller API or deletion prerequisite changes.
+
+Typed failure evidence is borrowed directly from the current response or
+provider failure through the failure handlers; `Account` stores no failure
+evidence. Listen-key recovery can therefore return early without contaminating
+a later positions read, signer refusal or local timeout. A signer refusal
+keeps its own typed cause and has no previous HTTP response's retry delay.

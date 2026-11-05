@@ -140,8 +140,6 @@ pub struct Account {
     /// Numbers every positions read, so `readPositions` can name one it may trust.
     positions_read: u32,
     pub(crate) fresh_positions: FreshPositions,
-    /// The typed cause of the read failure being delivered, for its waiters.
-    pub(crate) read_error: Option<VenueError>,
     balance_in_flight: Option<u64>,
     mode_guard: StaleGuard,
     balance_guard: StaleGuard,
@@ -535,7 +533,7 @@ impl Account {
                 pending => pending,
             };
             if let Pending::Account(request) = pending {
-                self.on_request_failed(cx, request, &error.message, credentials);
+                self.request_failed(cx, request, &error.message, Some(&error), credentials);
             }
         }
     }
@@ -1268,7 +1266,6 @@ impl Account {
         if let Some(error) = key_refusal(&response) {
             cx.startup_read_refused(&error);
         }
-        self.read_error = read_refusal(&response, cx.now);
         if let Some(error) = response_error(response, is_key).map(|error| request.named(error)) {
             if matches!(request, Request::Keepalive { .. })
                 && (response.status == 404 || {
@@ -1286,7 +1283,8 @@ impl Account {
                 );
                 self.fresh_key(cx, credentials);
             } else {
-                self.on_request_failed(cx, request, &error, credentials);
+                let typed = read_refusal(&response, cx.now);
+                self.request_failed(cx, request, &error, typed.as_ref(), credentials);
             }
             return;
         }
@@ -1586,7 +1584,7 @@ impl Account {
         if owns_read {
             // Native recovery owns retries and listen-key epoch checks. A provider
             // failure supplies no response and therefore no venue-auth evidence.
-            self.on_request_failed(cx, request, &error.message, credentials);
+            self.request_failed(cx, request, &error.message, Some(&error), credentials);
         }
     }
 
@@ -1597,21 +1595,28 @@ impl Account {
         error: &str,
         credentials: &Credentials,
     ) {
+        self.request_failed(cx, request, error, None, credentials);
+    }
+
+    pub(crate) fn request_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+        typed: Option<&VenueError>,
+        credentials: &Credentials,
+    ) {
         if matches!(&request,Request::ListenKey{epoch}|Request::Keepalive{epoch} if *epoch!=self.epoch)
         {
             return;
         }
-        let typed = self.read_error.take();
         let refresh = match &request {
             Request::SymbolLeverage { id, symbol } => Some((*id, symbol, true)),
             Request::SymbolMarginType { id, symbol } => Some((*id, symbol, false)),
             _ => None,
         };
         if let Some((id, symbol, leverage)) = refresh {
-            if let Some(error) = typed
-                .as_ref()
-                .filter(|error| error.kind == Some(ErrorKind::RateLimited))
-            {
+            if let Some(error) = typed.filter(|error| error.kind == Some(ErrorKind::RateLimited)) {
                 cx.notice_error(Level::Warn, code::REQUEST_FAILED, error);
             } else {
                 cx.notice(
@@ -1630,10 +1635,7 @@ impl Account {
             return;
         }
         // A failing private read surfaces as an Error at the retried-failure cadence.
-        if let Some(error) = typed
-            .as_ref()
-            .filter(|error| error.kind == Some(ErrorKind::RateLimited))
-        {
+        if let Some(error) = typed.filter(|error| error.kind == Some(ErrorKind::RateLimited)) {
             cx.retried_failure_error("bingx.account:private", error);
         } else {
             cx.retried_failure(
@@ -1657,8 +1659,9 @@ impl Account {
             Request::Balance { .. } => self.balance_in_flight = None,
             Request::Positions { read, .. } => {
                 self.positions_in_flight = None;
-                let fresh =
-                    typed.unwrap_or_else(|| VenueError::new(format!("BingX positions: {error}")));
+                let fresh = typed
+                    .cloned()
+                    .unwrap_or_else(|| VenueError::new(format!("BingX positions: {error}")));
                 self.fresh_positions.failed(cx, 0, read, &fresh);
                 self.read_fresh_positions_again(cx, read, credentials);
             }
