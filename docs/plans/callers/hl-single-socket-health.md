@@ -6,8 +6,8 @@ authentication role. Hyperliquid/Spot and TxFlow declare this; Lighter and Parad
 retain independent public/private sockets. Shared/disabled public-feed policies
 must not claim public traffic on a private socket.
 
-The wasm host counts open, first-frame, last-message and close health in every
-carried channel. Reconnecting either carried channel retires the physical socket
+The wasm and native hosts count open, first-frame, last-message and close health
+in every carried channel. Reconnecting either carried channel retires the physical socket
 once. This describes socket traffic, not per-topic subscription success.
 
 SDK Store latency is `number | null`; null is unmeasured, including after reset.
