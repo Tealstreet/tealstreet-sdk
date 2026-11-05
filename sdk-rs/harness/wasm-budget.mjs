@@ -147,6 +147,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #3094 run 42062090938 measured bybit 2,214,254 B; CI size plus 10 KiB rounded up to the KiB.
 // #3114 run 42104530272 measured hyperliquid 2,106,596 B: a single-venue family pays the outlined
 // shared-ticker/orders-held calls without the combined dedup. CI size plus 10 KiB rounded up; siblings equal.
+// #3121 run 42122802638, job 127583372751 at cce3b8d1f5f measured okx 1,962,129 B.
+// CI size plus 10 KiB rounded up to the KiB; all OKX variants share the okx family cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 1_984_512,
   asterdex: 2_137_088,
@@ -172,7 +174,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   lighter: 2_001_920,
   'lighter-robinhood': 2_001_920,
   mexc: 1_755_136,
-  okx: 1_947_648,
+  okx: 1_973_248,
   orderly: 1_732_608,
   paradex: 2_234_368,
   phemex: 2_065_408,
