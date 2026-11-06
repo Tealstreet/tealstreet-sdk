@@ -13,6 +13,10 @@ const records = [{ t: 0, type: 'meta', epoch: EPOCH, private: true }];
 const ok = (data) => ({ code: 0, data });
 // Real ApeX write replies carry no `code`; a cancel's `data` is the bare order id.
 const written = (data) => ({ data, timeCost: 21 });
+// Rust proves an amend's cancel terminal with GET /v3/order before its
+// replacement; TS sends the replacement on the cancel's acknowledgement.
+const canceled = (row) => http('GET', '/v3/order', { id: row.id }, ok({ ...row, status: 'CANCELED', cancelReason: 'USER_CANCELED' }),
+  undefined, { impl: 'rust' });
 const stage = () => ({ afterCommand: records.filter((r) => r.type === 'command').length });
 function http(method, path, params, data, requestBody, extra = {}) {
   records.push({ t: 0, type: 'http', method, url: `${REST}${path}${params ? `?${new URLSearchParams(params)}` : ''}`, status: 200,
@@ -83,6 +87,7 @@ ws(2000, PRIVATE, { op: 'ping', args: ['private-token', 7] });
 command(2400, 'amendOrder', { id: 'order-bracket__stop_loss', price: 58100 });
 openOrders = [brackets('order-replaced', '58100')]; snapshot();
 http('POST', '/v3/delete-order', null, written('order-bracket'), { id: 'order-bracket' });
+canceled(brackets('order-bracket'));
 http('POST', '/v3/order', null, written({ id: 'order-replaced' }), bracketBody('58100', '57809.5', '0.086715'));
 accountWs(2750, { orders: [brackets('order-replaced', '58100')] });
 
@@ -155,6 +160,7 @@ command(12400, 'amendOrder', { id: 'partial-entry', price: 59900 });
 const residual = order('partial-replaced', '0.004', '59900');
 openOrders = [residual]; snapshot();
 http('POST', '/v3/delete-order', null, written('partial-entry'), { id: 'partial-entry' });
+canceled(partial);
 http('POST', '/v3/order', null, written({ id: 'partial-replaced' }), generated('0.004', '59900', { limitFee: '0.119800' }));
 accountWs(12600, { orders: [residual] });
 command(12700, 'cancelOrders', { ids: ['partial-replaced'] });

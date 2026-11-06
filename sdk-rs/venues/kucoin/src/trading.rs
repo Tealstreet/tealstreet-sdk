@@ -1375,6 +1375,11 @@ impl Kucoin {
                 error.outcome = Some(Outcome::NotSent);
             }
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
+            let guarded = replacing.is_some() || job.restoring;
+            // A 429 may have placed the order: for a guarded stop it is unknown, not refused.
+            if guarded && error.kind == Some(ErrorKind::RateLimited) {
+                error.outcome = Some(Outcome::Unknown);
+            }
             let refused = error.outcome == Some(Outcome::Rejected);
             // A definite refusal proves no replacement exists: put the original back once.
             if replacing.is_some()
@@ -1392,9 +1397,9 @@ impl Kucoin {
                 self.trading.timer = Some(cx.set_timer(20.0));
                 return;
             }
-            let lost_stop = (replacing.is_some() || job.restoring) && job.protect.is_some();
+            let lost_stop = guarded && job.protect.is_some();
             if let Some((symbol, (side, kind))) = replacing.filter(|_| job.ids.is_empty()) {
-                let unknown = error.outcome == Some(Outcome::Unknown);
+                let unknown = !refused;
                 let gone = if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
                     safe_cex_engine::error::stop_gone_text(&symbol, side, kind, unknown)
                 } else {

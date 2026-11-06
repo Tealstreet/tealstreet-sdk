@@ -135,13 +135,13 @@ impl H {
             },
         });
     }
-    fn respond_status(&mut self, r: HttpRequest, status: u16) {
+    fn respond_status(&mut self, r: HttpRequest, status: u16, body: &str) {
         self.event(Event::HttpResponse {
             request: r.id,
             response: Response {
                 status,
                 headers: "",
-                body: "",
+                body,
             },
         });
     }
@@ -1727,6 +1727,49 @@ fn protective_amend_refusal_restores_exact_original_stop_once() {
     );
     assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
 }
+const RATE_LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests."}"#;
+
+/// A 429 may have placed the order, so it is unknown: never "refused" or Unprotected.
+fn assert_unknown_stop(h: &H) {
+    let error = result(h, 991).as_ref().unwrap_err();
+    assert!(
+        error.contains("outcome is unknown. Check Open Orders"),
+        "{error}"
+    );
+    assert!(!error.contains("refused"), "{error}");
+    assert_eq!(h.failures.last().unwrap().protection, None);
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+}
+#[test]
+fn protective_amend_rate_limited_restore_is_unknown_not_unprotected() {
+    for body in [RATE_LIMITED, ""] {
+        let mut h = guarded_stop();
+        amend_guarded_stop(&mut h, 105.0);
+        let cancel = h.take("/order");
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replacement = h.take("/order");
+        h.respond(
+            replacement,
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let restore = h.take("/order");
+        assert!(restore.url.contains("stopPrice=110"));
+        h.respond_status(restore, 429, body);
+        assert_unknown_stop(&h);
+    }
+}
+#[test]
+fn protective_amend_rate_limited_replacement_is_unknown_and_never_put_back() {
+    for body in [RATE_LIMITED, ""] {
+        let mut h = guarded_stop();
+        amend_guarded_stop(&mut h, 105.0);
+        let cancel = h.take("/order");
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replacement = h.take("/order");
+        h.respond_status(replacement, 429, body);
+        assert_unknown_stop(&h);
+    }
+}
 #[test]
 fn protective_amend_restore_refusal_is_visible_and_never_retries() {
     let mut h = guarded_stop();
@@ -2009,7 +2052,7 @@ fn protective_amend_restore_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         );
         let restore = h.take("/order");
         assert_eq!(restore.method, safe_cex_engine::Method::Post);
-        h.respond_status(restore, status);
+        h.respond_status(restore, status, "");
         let error = h.failures.last().unwrap().clone();
         assert!(
             error.message.contains("put-back's outcome is unknown")

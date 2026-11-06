@@ -80,6 +80,11 @@ const CODES: CodeTable = CodeTable {
     ],
 };
 
+/// Whether a failed place proves no order exists. A 429 may have placed it.
+fn definite_refusal(error: &VenueError) -> bool {
+    error.outcome != Some(Outcome::Unknown) && error.kind != Some(ErrorKind::RateLimited)
+}
+
 const fn refused(key: Key, kind: ErrorKind) -> Row {
     Row {
         key,
@@ -2153,7 +2158,7 @@ impl Blofin {
                     debug_assert!(finished.is_ok(), "Plan call seal stranded");
                 }
                 // Its row ended only because the cancel landed: nothing replaced it.
-                let unknown = error.outcome == Some(safe_cex_engine::Outcome::Unknown);
+                let unknown = !definite_refusal(&error);
                 let mut error = error;
                 if active.job.restoring {
                     error.protection =
@@ -2534,7 +2539,7 @@ impl Blofin {
             if request.step.is_place()
                 && !active.job.restoring
                 && !active.job.restore.is_empty()
-                && error.outcome != Some(Outcome::Unknown)
+                && definite_refusal(&error)
             {
                 active.job.steps = std::mem::take(&mut active.job.restore);
                 active.job.restoring = true;
@@ -2590,6 +2595,8 @@ impl Blofin {
                     .filter(|reply| !reply.code.is_empty())
                     .map(|reply| (&*reply.code, &*reply.msg));
                 setting_failure(request.step.path, response.status, detail)
+            } else if response.status == 429 {
+                http_failure(response.status, response.body).kind(ErrorKind::RateLimited)
             } else {
                 http_failure(response.status, response.body)
             };

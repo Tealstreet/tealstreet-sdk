@@ -754,6 +754,55 @@ fn a_refused_restore_is_visibly_unprotected_and_never_retried() {
     assert_eq!(order_posts(&h), 0, "one restore, never a retry");
 }
 
+/// A 429 may have placed the order, so it is unknown: never "refused" or Unprotected.
+fn assert_unknown_stop(h: &Harness, command: u32) {
+    let error = h.result(command).unwrap_err();
+    assert!(
+        error.contains("outcome is unknown. Check Open Orders"),
+        "{error}"
+    );
+    assert!(!error.contains("refused"), "{error}");
+    assert_eq!(h.failures.last().unwrap().protection, None);
+}
+
+#[test]
+fn a_rate_limited_restore_is_unknown_not_unprotected() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let place = h.take("/orders");
+    h.respond(place, 400, r#"{"error":"VALIDATION","message":"refused"}"#);
+    let restore = h.take("/orders");
+    h.respond(
+        restore,
+        429,
+        r#"{"error":"RATE_LIMIT","message":"slow down"}"#,
+    );
+    assert_unknown_stop(&h, 13);
+    assert_eq!(order_posts(&h), 0, "one restore, never a retry");
+}
+
+#[test]
+fn a_rate_limited_replacement_is_unknown_and_never_put_back() {
+    let mut h = with_untriggered_stop();
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let place = h.take("/orders");
+    h.respond(
+        place,
+        429,
+        r#"{"error":"RATE_LIMIT","message":"slow down"}"#,
+    );
+    assert_eq!(
+        order_posts(&h),
+        0,
+        "a maybe-placed replacement is never doubled"
+    );
+    assert_unknown_stop(&h, 13);
+}
+
 #[test]
 fn a_stale_crossed_or_changed_stop_at_the_final_send_cancels_nothing() {
     for case in ["stale", "crossed", "changed"] {
