@@ -995,7 +995,7 @@ impl Venue for BreakoutProp {
         if !(200..300).contains(&response.status) {
             let mut error = http_failure(response.status);
             if response.status == 429
-                && matches!(&pending.operation,Operation::Trade(request) if request.protective_write())
+                && matches!(&pending.operation,Operation::Trade(trade) if trade.protective_write())
             {
                 error.outcome = Some(Outcome::Unknown);
             }
