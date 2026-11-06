@@ -139,12 +139,12 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });
 
-test('#3150 final CI 42258955401 cap refresh: refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
+test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
     ['coinbase', 1_816_299, 1_826_816],
-    ['txflow', 1_839_762, 1_850_368],
+    ['txflow', 1_827_125, 1_838_080],
     ['weex', 1_925_507, 1_936_384],
-    ['woo', 2_402_361, 2_413_568],
+    ['woo', 2_388_474, 2_399_232],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -195,10 +195,10 @@ test('#3018 protective-amend caps (run 41854021043 at 824ff543b6d) retain the ru
   }
 });
 
-test('#3150 final CI 42258955401 cap refresh: refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain headroom and siblings match', () => {
+test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['bitunix', 1_850_459, 1_861_632],
-    ['cryptocom', 1_727_568, 1_738_752],
+    ['bitunix', 1_838_517, 1_849_344],
+    ['cryptocom', 1_716_657, 1_727_488],
     ['kucoinspot', 2_253_260, 2_264_064],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
@@ -210,9 +210,9 @@ test('#3150 final CI 42258955401 cap refresh: refresh-ask caps after #3039 (PR r
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });
 
-test('#3150 final CI 42258955401 cap refresh: Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom and siblings match', () => {
+test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['phemex', 2_066_964, 2_077_696],
+    ['phemex', 2_054_401, 2_065_408],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -360,9 +360,9 @@ test('#3149 activeAssetData scoping (run 42197163575) retains Hyperliquid headro
   }
 });
 
-test('#3150 final CI 42258955401 cap refresh: #3145 trades as last (run 42218930349 job 127896386942) retains Hyperliquid headroom and siblings match', () => {
-  const measured = 2_166_092;
-  const cap = 2_177_024;
+test('#3145 trades as last (run 42218930349 job 127896386942) retains Hyperliquid headroom and siblings match', () => {
+  const measured = 2_153_944;
+  const cap = 2_164_736;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -372,9 +372,9 @@ test('#3150 final CI 42258955401 cap refresh: #3145 trades as last (run 42218930
   }
 });
 
-test('#3150 final CI 42258955401 cap refresh: #3122 protective stop edits (run 42126229513) retain Paradex and BloFin headroom', () => {
+test('#3122 protective stop edits (run 42126229513) retain Paradex and BloFin headroom', () => {
   for (const [venue, measured, cap] of [
-    ['paradex', 2_252_369, 2_263_040],
+    ['paradex', 2_239_351, 2_249_728],
     ['blofin', 1_979_025, 1_989_632],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
