@@ -322,7 +322,9 @@ for (let run = 0; run < correctnessRuns; run++) {
     // Paradex caps a socket at 200 subscriptions, so Rust takes trades only for charted markets.
     // Binance futures: Rust streams !bookTicker for public-data-only accounts too (#2899); TS
     // skipped it there, leaving a guest the startup REST bid and ask.
+    // Hyperliquid: Rust streams trades for each watched coin as its last; TS used the mid.
     const paced = (key) => field === 'subscriptions' && ((values.venue.startsWith('lighter') && key.includes('"channel":"ticker/')) ||
+      (values.venue.startsWith('hyperliquid') && key.includes('"type":"trades"')) ||
       (values.venue === 'kraken' && key.includes('"feed":"heartbeat"')) ||
       (values.venue === 'paradex' && key.includes('"channel":"trades.')) ||
       (values.venue.startsWith('binance') && key.includes('"!bookTicker"')));
