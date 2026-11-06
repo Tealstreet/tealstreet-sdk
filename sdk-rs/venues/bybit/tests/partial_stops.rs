@@ -329,10 +329,10 @@ fn partial_same_kind_keeps_supported_trigger_and_uses_destination_defaults_other
                 if kind == "StopLoss" {
                     assert_eq!(
                         request.sl_trigger_by.as_deref(),
-                        Some(if trigger == "LastPrice" {
-                            "LastPrice"
-                        } else {
-                            "MarkPrice"
+                        Some(match trigger {
+                            "LastPrice" => "LastPrice",
+                            "IndexPrice" => "IndexPrice",
+                            _ => "MarkPrice",
                         })
                     );
                     assert!(request.tp_trigger_by.is_none());
@@ -466,84 +466,6 @@ fn partial_amount_only_replaces_shared_family_but_inverse_refuses() {
             Some(if profile.inverse() { "9" } else { "9.234" })
         );
         assert_eq!(request.sl_trigger_by.as_deref(), Some("LastPrice"));
-    }
-}
-
-#[test]
-fn missing_mark_fallback_treats_tpsl_not_modified_as_satisfied() {
-    for profile in PROFILES
-        .into_iter()
-        .filter(|profile| !profile.variant.is_hyro())
-    {
-        let mut h = ready(profile);
-        seed(
-            &mut h,
-            profile,
-            "Sell",
-            "StopLoss",
-            "LastPrice",
-            false,
-            true,
-        );
-        h.engine.store_mut().set_tickers(Vec::new());
-        amend(&mut h, Some(100.049), None);
-        assert!(!h.has_request(profile.cancel_path()));
-        h.respond(
-            "/v5/position/trading-stop",
-            200,
-            r#"{"retCode":34040,"retMsg":"not modified","result":{}}"#,
-        );
-        assert_eq!(h.result(91), Some(&Ok("[]".into())), "{profile:?}");
-        assert!(!h.unknown.contains(&91));
-    }
-}
-
-#[test]
-fn missing_mark_fallback_retains_raw_fields_original_kind_and_ordinary_position_index() {
-    for profile in PROFILES {
-        for mark in [Some(0.0), Some(f64::NAN), None] {
-            for side in ["Sell", "Buy"] {
-                let mut h = ready(profile);
-                seed(&mut h, profile, side, "StopLoss", "LastPrice", true, false);
-                let mut tickers = h.engine.store().tickers().to_vec();
-                match mark {
-                    Some(mark) => {
-                        for ticker in &mut tickers {
-                            ticker.mark = mark;
-                        }
-                    }
-                    None => tickers.clear(),
-                }
-                h.engine.store_mut().set_tickers(tickers);
-                amend(&mut h, Some(100.049), Some(9.234));
-                assert!(!h.has_request(profile.cancel_path()));
-                assert!(!h.has_request("/v5/order/amend"));
-                let request = h.take("/v5/position/trading-stop");
-                let request: StopWrite = serde_json::from_str(body(&request)).unwrap();
-                assert_eq!(request.stop_loss.as_deref(), Some("100.049"));
-                assert!(request.take_profit.is_none());
-                assert!(request.sl_trigger_by.is_none());
-                assert!(request.tp_trigger_by.is_none());
-                assert_eq!(
-                    request.position_idx,
-                    if profile.variant.is_hyro() {
-                        0
-                    } else if side == "Sell" {
-                        2
-                    } else {
-                        1
-                    }
-                );
-                assert_eq!(
-                    request.tpsl_mode.as_deref(),
-                    (profile.variant != Variant::Inverse).then_some("Partial")
-                );
-                assert_eq!(
-                    request.sl_size.as_deref(),
-                    (profile.variant != Variant::Inverse).then_some("9.234")
-                );
-            }
-        }
     }
 }
 
@@ -750,12 +672,12 @@ fn partial_invalid_updates_and_terminal_rows_fail_before_any_write() {
 }
 
 #[test]
-fn partial_fallback_preserves_optional_raw_size_and_does_not_switch_to_full() {
+fn missing_mark_refuses_price_size_and_full_conversion_edits() {
     for profile in PROFILES {
-        for (price, amount, level, size) in [
-            (Some(100.049), None, Some("100.049"), "7"),
-            (None, Some(3.234), None, "3.234"),
-            (Some(100.049), Some(0.0), Some("100.049"), "0"),
+        for (price, amount) in [
+            (Some(100.049), None),
+            (None, Some(3.234)),
+            (Some(100.049), Some(0.0)),
         ] {
             let mut h = ready(profile);
             seed(
@@ -774,21 +696,17 @@ fn partial_fallback_preserves_optional_raw_size_and_does_not_switch_to_full() {
             h.engine.store_mut().set_tickers(tickers);
             amend(&mut h, price, amount);
             if profile.variant == Variant::Inverse && price.is_none() {
-                assert!(!h.has_request("/v5/position/trading-stop"));
-                continue;
+                assert!(
+                    h.result(91)
+                        .unwrap()
+                        .as_ref()
+                        .unwrap_err()
+                        .contains("cannot be edited")
+                );
+                assert!(h.requests.is_empty());
+            } else {
+                assert_guard_refused(&h, "fresh mark");
             }
-            let request = h.take("/v5/position/trading-stop");
-            let request: StopWrite = serde_json::from_str(body(&request)).unwrap();
-            assert_eq!(request.stop_loss.as_deref(), level);
-            assert_eq!(
-                request.tpsl_mode.as_deref(),
-                (profile.variant != Variant::Inverse).then_some("Partial")
-            );
-            assert_eq!(
-                request.sl_size.as_deref(),
-                (profile.variant != Variant::Inverse).then_some(size)
-            );
-            assert!(!h.has_request(profile.cancel_path()));
         }
     }
 }
@@ -1591,6 +1509,7 @@ fn review_dk2_fresh_last_boundary_and_stale_last_both_refuse_before_cancel() {
     for (age, cause) in [(5000., "would trigger at once"), (5001., "fresh last")] {
         let (mut h, profile) = dk2_long_partial_last_stop();
         h.now += age;
+        h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","markPrice":"79130"}}"#);
         amend(&mut h, Some(79124.9), None);
         assert!(!h.has_request(profile.cancel_path()), "age {age}");
         let error = h.result(91).unwrap().as_ref().unwrap_err();
@@ -1950,6 +1869,29 @@ fn tp_amend_native_rows_keep_real_reference_or_use_last_when_unknown() {
                     price: Some(115.0),
                     amount: None,
                 });
+                if path == "missing-mark" {
+                    assert!(
+                        h.requests
+                            .iter()
+                            .all(|r| r.method == safe_cex_engine::Method::Get)
+                    );
+                    assert!(
+                        h.result(93)
+                            .unwrap()
+                            .as_ref()
+                            .unwrap_err()
+                            .contains("fresh mark")
+                    );
+                    assert!(
+                        h.outcomes
+                            .contains(&(93, Some(safe_cex_engine::Outcome::NotSent)))
+                    );
+                    assert_eq!(
+                        h.engine.store().order(id).unwrap().status,
+                        OrderStatus::Open
+                    );
+                    continue;
+                }
                 assert!(!h.has_request(profile.cancel_path()));
                 let request = h.take(if path == "attached" {
                     "/v5/order/amend"
@@ -1964,6 +1906,45 @@ fn tp_amend_native_rows_keep_real_reference_or_use_last_when_unknown() {
                     "{profile:?}/{path}/{native}"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn new_sl_placements_keep_the_existing_index_to_mark_wire_policy() {
+    for profile in PROFILES {
+        for path in ["standalone", "attached", "position"] {
+            let mut h = ready(profile);
+            h.message("/v5/private", &serde_json::json!({"topic":"position","data":[{
+                "category":profile.category(),"symbol":profile.symbol(),"side":"Buy","size":if path == "position" {"20"} else {"0"},"avgPrice":"100","markPrice":"100","leverage":"10","unrealisedPnl":"0","positionIdx":0
+            }]}).to_string());
+            let mut order = serde_json::json!({
+                "symbol":profile.symbol(),"type":"stop_market","side":"sell",
+                "amount":7,"price":90,"slTriggerType":"index_price"
+            });
+            if path == "attached" {
+                order["type"] = "limit".into();
+                order["stopLoss"] = 85.into();
+            }
+            h.command(Command::PlaceOrders {
+                command: 95,
+                orders: vec![serde_json::from_value(order).unwrap()],
+            });
+            let request = if path == "position" {
+                h.take("/v5/position/trading-stop")
+            } else if h.has_request("/v5/order/create-batch") {
+                h.take("/v5/order/create-batch")
+            } else {
+                h.take("/v5/order/create")
+            };
+            let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            let payload = payload.get("request").map_or(&payload, |rows| &rows[0]);
+            let field = if path == "standalone" {
+                "triggerBy"
+            } else {
+                "slTriggerBy"
+            };
+            assert_eq!(payload[field], "MarkPrice", "{profile:?}/{path}");
         }
     }
 }
@@ -2069,6 +2050,118 @@ fn attached_sl_amend_preserves_own_native_reference_or_existing_mark_default() {
             assert!(payload.get("tpTriggerBy").is_none());
             assert!(!h.has_request(profile.cancel_path()));
             assert!(!h.has_request("/v5/position/trading-stop"));
+        }
+    }
+}
+
+#[test]
+fn partial_stop_without_mark_refuses_without_adding_another_stop() {
+    for profile in PROFILES {
+        for kind in ["StopLoss", "TakeProfit"] {
+            for mark in [None, Some(0.0), Some(f64::NAN)] {
+                let mut h = ready(profile);
+                seed(&mut h, profile, "Sell", kind, "LastPrice", false, true);
+                h.engine.store_mut().update_order("partial", |order| {
+                    order.filled = 0.;
+                    order.remaining = order.amount;
+                });
+                let original = h.engine.store().order("partial").unwrap().clone();
+                let mut tickers = h.engine.store().tickers().to_vec();
+                if let Some(mark) = mark {
+                    for ticker in &mut tickers {
+                        ticker.mark = mark;
+                    }
+                } else {
+                    tickers.clear();
+                }
+                h.engine.store_mut().set_tickers(tickers);
+                amend(
+                    &mut h,
+                    Some(if kind == "StopLoss" { 95. } else { 105. }),
+                    None,
+                );
+                assert_guard_refused(&h, "fresh mark");
+                assert!(
+                    h.requests
+                        .iter()
+                        .all(|r| r.method == safe_cex_engine::Method::Get)
+                );
+                assert_eq!(h.engine.store().order("partial"), Some(&original));
+            }
+        }
+    }
+}
+
+#[test]
+fn partial_stop_stale_mark_is_not_renewed_by_its_fresh_last_source() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "LastPrice",
+        false,
+        true,
+    );
+    let public = h.socket("/v5/public/linear").unwrap();
+    h.event(Event::WsOpened { socket: public });
+    h.now += 5001.;
+    h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","lastPrice":"100"}}"#);
+    assert_eq!(
+        h.engine.store().reference_seen_at(
+            "BTCUSDT",
+            safe_cex_engine::model::StopTriggerType::LastPrice
+        ),
+        Some(h.now)
+    );
+    amend(&mut h, Some(95.), None);
+    assert_guard_refused(&h, "fresh mark");
+}
+
+#[test]
+fn partial_replacement_and_put_back_preserve_each_native_trigger_source() {
+    for profile in PROFILES {
+        for kind in ["StopLoss", "TakeProfit"] {
+            for source in ["LastPrice", "MarkPrice", "IndexPrice"] {
+                let mut h = ready(profile);
+                seed(&mut h, profile, "Sell", kind, source, false, true);
+                h.engine.store_mut().update_order("partial", |order| {
+                    order.filled = 0.;
+                    order.remaining = order.amount;
+                });
+                let field = if kind == "StopLoss" {
+                    "slTriggerBy"
+                } else {
+                    "tpTriggerBy"
+                };
+                amend(
+                    &mut h,
+                    Some(if kind == "StopLoss" { 95. } else { 105. }),
+                    None,
+                );
+                accept_cancel(&mut h, profile);
+                let replacement = h.take("/v5/position/trading-stop");
+                let leg: StopWrite = serde_json::from_str(body(&replacement)).unwrap();
+                if kind == "StopLoss" {
+                    assert_eq!(leg.stop_loss.as_deref(), Some("95"));
+                    assert!(leg.take_profit.is_none());
+                } else {
+                    assert_eq!(leg.take_profit.as_deref(), Some("105"));
+                    assert!(leg.stop_loss.is_none());
+                }
+                let payload: serde_json::Value = serde_json::from_str(body(&replacement)).unwrap();
+                assert_eq!(payload[field], source, "{profile:?}/{kind}");
+                h.reply(
+                    replacement.id,
+                    200,
+                    r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
+                );
+                let restore = h.take("/v5/position/trading-stop");
+                let payload: serde_json::Value = serde_json::from_str(body(&restore)).unwrap();
+                assert_eq!(payload[field], source, "put-back {profile:?}/{kind}");
+            }
         }
     }
 }

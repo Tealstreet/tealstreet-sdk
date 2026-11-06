@@ -55,6 +55,19 @@ join preserves orders and retries instead of silently ending the read.
 The SDK transport admits all `/info` reads through one weighted token bucket per
 API origin, including metadata, candles and history. Its initial 1,000-weight
 capacity permits cold discovery immediately, then refills at 1,000 weight/minute.
+Native pending metadata promotes amend identity/sizing and order-fence reads to
+explicit critical; account State/Orders, reconnect snapshots and Role/Mode/Spot
+are financial reconciliation, below explicit critical but above normal work.
+Both classes may use the same 200-weight reserve. Caller history and candles are bulk. Noncritical work has an 800-weight
+ceiling, leaving 200 for critical work within the same total. Native and shared
+queues keep FIFO within each class, and native refill is continuous. Queued
+candles retain their original 20 s bound, shortened by a smaller caller wait.
+Startup-only fees/builder wait for pending financial reads before their managed
+20 s deadline starts. A live placement may release its queued builder check;
+this does not promote it to critical. Catalogue completion refreshes its own DEX,
+but any shared identity/index remap retains a conservative all-DEX refresh.
+Spot catalogue joins keep their broad refresh. The source census epoch, revision
+and row-coverage guards remain unchanged.
 A 429 empties the bucket and pauses refill until Retry-After ends. Immediately
 before dispatch, an atomic shared-state check refuses prepared reads whose grant
 generation changed or whose origin is paused. Managed claim and send execute
