@@ -225,7 +225,6 @@ test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom
 
 test('#3018 after merging d171fbb0e31 (run 41893192741 at b94d76fa368) retains the ruled headroom', () => {
   for (const [venue, measured, cap] of [
-    ['bingx', 2_026_253, 2_036_736],
     ['orderly', 1_721_849, 1_732_608],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
@@ -371,4 +370,15 @@ test('#3121 protective amendments (run 42122802638) retain OKX headroom and all 
     assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
+});
+
+test('#3152 BingX protective edits (run 42200843544) retain measured headroom and the exact boundary', () => {
+  const measured = 2_063_923;
+  const cap = 2_074_624;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(venueFamily('bingx'), 'bingx');
+  assert.equal(WASM_VENUE_OVERRIDES.bingx, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'bingx'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
