@@ -283,6 +283,16 @@ fn classic_cancel_plan_empty_success_does_not_mark_canceled() {
         h.engine.store().order("77").map(|o| o.status),
         Some(OrderStatus::Canceled)
     );
+    // The confirming read still lists it.
+    h.respond(
+        "orderId=77",
+        200,
+        r#"{"code":"00000","data":{"entrustedList":[{"orderId":"77","symbol":"BTCUSDT","planType":"loss_plan","planStatus":"live"}],"endId":"77"}}"#,
+    );
+    assert_ne!(
+        h.engine.store().order("77").map(|o| o.status),
+        Some(OrderStatus::Canceled)
+    );
     assert!(
         h.done
             .iter()
