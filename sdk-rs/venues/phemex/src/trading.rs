@@ -1952,8 +1952,8 @@ impl PhemexPerpetuals {
         {
             return;
         }
-        job.replacing = Some((guard.symbol.clone(), guard.side, guard.kind));
         if let Some(protect) = guard.stop.take() {
+            job.replacing = Some((guard.symbol.clone(), guard.side, guard.kind));
             job.protect = Some(protect);
         }
         if job.protect.is_some()
@@ -2024,6 +2024,11 @@ impl PhemexPerpetuals {
                 VenueError::new("Phemex order changed while canceling; replacement was not sent"),
             );
             return;
+        }
+        // Ordinary amends retain the original set-at-send bookkeeping: a local
+        // fill veto above must not claim that an unissued replacement was refused.
+        if let Some(guard) = &step.replacement {
+            job.replacing = Some((guard.symbol.clone(), guard.side, guard.kind));
         }
         let Some(slot) = job.slot.take() else {
             self.fail_unissued_trade(

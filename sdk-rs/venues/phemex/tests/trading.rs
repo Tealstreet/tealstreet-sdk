@@ -4505,6 +4505,14 @@ fn ordinary_same_symbol_fills_veto_planning_or_replacement() {
         };
         assert!(writes(&a).is_empty());
         assert!(done(&a).is_err());
+        assert_eq!(
+            failure(&a).message,
+            if before_plan {
+                "Phemex fills are awaiting order reconciliation; wait before amending"
+            } else {
+                "Phemex order changed while canceling; replacement was not sent"
+            }
+        );
         assert_eq!(failure(&a).protection, None);
     }
 }
