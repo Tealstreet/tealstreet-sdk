@@ -7,16 +7,12 @@ fn fail_catalogue(mode: u8) {
     let mut engine = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
-            spot_only: mode >= 4,
+            spot_only: true,
             ..Default::default()
         })
         .unwrap(),
     );
-    let symbol = if mode >= 4 {
-        "BTC-USD"
-    } else {
-        "BTC-PERP-INTX"
-    };
+    let symbol = "BTC-USD";
     engine.start(0.);
     let catalogue = engine
         .drain_actions()
@@ -49,9 +45,8 @@ fn fail_catalogue(mode: u8) {
         Action::Http(_) | Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
     )));
     let (status, body) = match mode {
-        1 | 4 => (503, "{}"),
+        4 => (503, "{}"),
         5 => (200, r#"{"products":[],"pagination":{"has_next":false}}"#),
-        2 => (200, "[]"),
         _ => (200, "not-json"),
     };
     if mode == 0 {
@@ -129,7 +124,7 @@ fn fail_catalogue(mode: u8) {
             response: Response {
                 status: 200,
                 headers: "",
-                body: if mode >= 4 { r#"{"products":[{"product_type":"SPOT","product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"1","price_percentage_change_24h":"0"}],"pagination":{"has_next":false}}"# } else { support::INSTRUMENTS },
+                body: support::PRODUCTS,
             },
         },
     );
@@ -166,14 +161,6 @@ fn fail_catalogue(mode: u8) {
 #[test]
 fn transport_failure_settles_deferred_candles_once() {
     fail_catalogue(0);
-}
-#[test]
-fn http_failure_settles_deferred_candles_once() {
-    fail_catalogue(1);
-}
-#[test]
-fn empty_catalogue_settles_deferred_candles_once() {
-    fail_catalogue(2);
 }
 #[test]
 fn malformed_catalogue_settles_deferred_candles_once() {

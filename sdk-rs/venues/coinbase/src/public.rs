@@ -216,6 +216,18 @@ pub(crate) fn timestamp(text: &str) -> Option<f64> {
     let days = time::days_from_civil(year, month, day);
     Some((days * 86400 + hour * 3600 + min * 60) as f64 + sec)
 }
+/// INTX perpetuals left Advanced Trade on 2026-10-01; its endpoints are gone.
+pub(crate) const INTX_MOVED: &str =
+    "Coinbase INTX perpetuals moved to the Deribit gateway on 2026-10-01 and are not yet supported";
+
+/// Ends startup with a typed, user-visible refusal; nothing INTX is requested.
+pub(crate) fn intx_unsupported(cx: &mut Cx<'_, Pending>) {
+    cx.notice(Level::Error, code::CONFIG_INVALID, INTX_MOVED);
+    cx.startup_failed(
+        safe_cex_engine::VenueError::new(INTX_MOVED).kind(safe_cex_engine::ErrorKind::Unsupported),
+    );
+}
+
 impl Coinbase {
     fn public_poll_interval(&self) -> f64 {
         if self.public.kind == Some(ProductKind::Cfm) {
@@ -228,8 +240,8 @@ impl Coinbase {
         if self.options.spot_only {
             self.private_ready(ProductKind::Spot, cx);
         } else {
-            self.public.kind = Some(ProductKind::Intx);
-            self.instruments(cx, true);
+            // Keyless perpetuals are INTX's public catalogue.
+            intx_unsupported(cx);
         }
     }
     pub(crate) fn private_ready(&mut self, kind: ProductKind, cx: &mut Cx<'_, Pending>) {

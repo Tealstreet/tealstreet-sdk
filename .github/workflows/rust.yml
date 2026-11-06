@@ -836,7 +836,7 @@ jobs:
       - name: Coinbase product and CDP algorithm variants (correctness)
         if: matrix.venue == 'coinbase'
         run: |
-          for profile in intx cfm spot; do
+          for profile in cfm spot; do
             for algorithm in ES256 EdDSA; do
               tape="sdk-rs/harness/tapes/coinbase-$profile-$algorithm-private.jsonl"
               corepack yarn rust:private-tape-coinbase --venue coinbase --profile "$profile" --algorithm "$algorithm" --out "$tape"
@@ -1207,7 +1207,7 @@ jobs:
       - name: Coinbase product and CDP algorithm variants (correctness)
         if: matrix.venue == 'coinbase'
         run: |
-          for profile in intx cfm spot; do
+          for profile in cfm spot; do
             for algorithm in ES256 EdDSA; do
               tape="sdk-rs/harness/tapes/coinbase-$profile-$algorithm-private.jsonl"
               corepack yarn rust:private-tape-coinbase --venue coinbase --profile "$profile" --algorithm "$algorithm" --out "$tape"
