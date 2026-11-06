@@ -2800,3 +2800,16 @@ pub(crate) fn auth_token(body: &str) -> Option<String> {
             .or(t.token.filter(|s| !s.trim().is_empty()))
     })
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Auth { .. } => S::ACCOUNT,
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}

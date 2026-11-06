@@ -3638,6 +3638,20 @@ pub(crate) fn read_error(response: &Response<'_>, message: String) -> VenueError
     .error
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Probe => S::ACCOUNT,
+            Self::Balance { .. } => S::BALANCE,
+            Self::UtaBalance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders(_) => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod secondary_policy_tests {
     use super::*;
@@ -3685,4 +3699,12 @@ mod key_refusal_tests {
             );
         }
     }
+}
+
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    assert_eq!(
+        Request::Probe.startup_sections(),
+        safe_cex_engine::startup::Sections::ACCOUNT
+    );
 }

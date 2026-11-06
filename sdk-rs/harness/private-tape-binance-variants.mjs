@@ -70,7 +70,11 @@ else http('GET','/papi/v1/balance',null,[
 const order = (extra = {}) => ({ symbol:symbols[0],orderId:1001,clientOrderId:'resting',price:'90000',origQty:inverse?'7':'0.01',executedQty:inverse?'2':'0.002',
   status:'PARTIALLY_FILLED',timeInForce:'GTC',type:'LIMIT',side:'BUY',positionSide:'BOTH',stopPrice:'0',reduceOnly:false,closePosition:false,workingType:'CONTRACT_PRICE',...extra });
 http('GET', `${prefix}/openOrders`, null, [order()]);
-if (!spot && !inverse) http('GET', `${prefix}/conditional/openOrders`, null, []);
+if (!spot && !inverse) {
+  // The retained TS oracle uses the retired route; Rust uses its algo replacement.
+  http('GET', `${prefix}/conditional/openOrders`, null, [], {impl:'ts'});
+  http('GET', `${prefix}/algo/openAlgoOrders`, null, [], {impl:'rust'});
+}
 if (spot) {
   const request = (id,method) => records.push({t:0,type:'ws-send',url:PRIVATE,text:JSON.stringify({id,method})});
   request('subscribe','userDataStream.subscribe.signature');
@@ -96,7 +100,7 @@ command('cancelOrders',{ids:[inverse?'1001':'resting']});
 http('DELETE',`${prefix}/order`,{symbol:symbols[0],...(inverse?{orderId:'1001'}:{origClientOrderId:'resting'})},order({status:'CANCELED',...(spot?{origClientOrderId:'resting',clientOrderId:'cancel-resting'}:{})}));
 command('cancelSymbolOrders',{symbol:symbols[1]});
 http('DELETE',spot?`${prefix}/openOrders`:`${prefix}/allOpenOrders`,{symbol:symbols[1]},spot?[]:{code:200,msg:'success'});
-if (!spot && !inverse) http('DELETE',`${prefix}/conditional/allOpenOrders`,{symbol:symbols[1]},{code:200,msg:'success'},{impl:'rust'});
+if (!spot && !inverse) http('DELETE',`${prefix}/algo/allOpenOrders`,{symbol:symbols[1]},{code:200,msg:'success'},{impl:'rust'});
 const out=values.out??`sdk-rs/harness/tapes/${name}-private.jsonl`;
 mkdirSync(dirname(out),{recursive:true});records.sort((a,b)=>a.t-b.t);
 writeFileSync(out,records.map((record)=>JSON.stringify(record)).join('\n')+'\n');

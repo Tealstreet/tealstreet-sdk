@@ -181,43 +181,47 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // ddi2il standing rule: CI + 10 KiB rounded up; all Bybit variants share this family cap.
 // #3145 run 42218930349 job 127896386942 measured hyperliquid 2,153,944 B: trades as last for
 // watched coins. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
+// #3187 run 42251340763 measured binance 2,212,299 B: PM algo migration and cancel proof.
+// CI size plus 10 KiB, rounded up; all Binance aliases use this single family cap.
 // #3178 run 42239151280, job 127965614325: Hyperliquid 2,154,756 B at 81206ca3c02.
 // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
+// #3188 startup attribution, run 42260192686 at cda38ed52a9: CI + 10 KiB rounded up.
+// Only measured over-cap families grow; shared siblings stay equal and larger incoming caps win.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
-  asterdex: 2_150_400,
+  asterdex: 2_161_664,
   backpack: 1_937_408,
-  binance: 2_206_720,
+  binance: 2_223_104,
   bingx: 2_074_624,
   bitget: 2_359_296,
   bitgetusdc: 2_359_296,
   bitrue: 1_840_128,
-  bitunix: 1_849_344,
+  bitunix: 1_863_680,
   blofin: 1_989_632,
   breakoutprop: 1_565_696,
-  bybit: 2_257_920,
+  bybit: 2_270_208,
   coinbase: 1_826_816,
-  cryptocom: 1_727_488,
+  cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_165_760,
-  hyperliquidspot: 2_165_760,
+  hyperliquid: 2_180_096,
+  hyperliquidspot: 2_180_096,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
-  kucoinspot: 2_264_064,
-  lighter: 2_079_744,
-  'lighter-robinhood': 2_079_744,
+  kucoinspot: 2_277_376,
+  lighter: 2_093_056,
+  'lighter-robinhood': 2_093_056,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   mexc: 1_858_560,
   okx: 1_973_248,
   orderly: 1_732_608,
-  paradex: 2_249_728,
-  phemex: 2_065_408,
-  polymarket: 1_600_512,
-  txflow: 1_838_080,
+  paradex: 2_266_112,
+  phemex: 2_079_744,
+  polymarket: 1_611_776,
+  txflow: 1_852_416,
   weex: 1_936_384,
-  woo: 2_399_232,
+  woo: 2_416_640,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
