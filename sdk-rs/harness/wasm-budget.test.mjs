@@ -275,9 +275,9 @@ test('#3118 Aster protection guard (run 42112075305) retains measured headroom',
   assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
 
-test('#3149 activeAssetData scoping (run 42197163575) retains Hyperliquid headroom and siblings match', () => {
-  const measured = 2_143_008;
-  const cap = 2_153_472;
+test('#3145 trades as last (run 42218930349 job 127896386942) retains Hyperliquid headroom and siblings match', () => {
+  const measured = 2_153_944;
+  const cap = 2_164_736;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
