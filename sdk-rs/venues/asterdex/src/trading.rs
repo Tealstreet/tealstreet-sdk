@@ -1420,6 +1420,14 @@ impl AsterDex {
             let native = self.trading.protections.get(id)
                 .filter(|native| native.order == *order)
                 .ok_or_else(|| format!("Your {} stop was not changed: its exact native parameters must be refreshed before cancellation", order.symbol))?;
+            // STOP and TAKE_PROFIT rest a limit: the replacement places only market stops, and
+            // moving the trigger alone would leave a stale limit, so they are not edited at all.
+            if matches!(native.query.value("type"), Some("STOP" | "TAKE_PROFIT")) {
+                return Err(format!(
+                    "Your {} stop-limit was not changed: AsterDEX limit stops cannot be edited without losing their limit price; cancel it and place a new one",
+                    order.symbol
+                ));
+            }
             if order.filled != 0.0 {
                 return Err(format!(
                     "Your {} stop was not changed: it already has fills",

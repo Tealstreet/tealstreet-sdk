@@ -2075,3 +2075,39 @@ fn protective_amend_restore_sealed_on_a_5xx_says_its_outcome_is_unknown() {
         );
     }
 }
+
+fn guarded_row(row: &str) -> H {
+    let mut h = H::pending_mode_with_orders(&format!("[{row}]"));
+    h.reply("/positionSide/dual", r#"{"dualSidePosition":false}"#);
+    h.engine.store_mut().update_ticker("BTCUSDT", |t| {
+        t.last = 90.0;
+        t.mark = 100.0;
+    });
+    h
+}
+
+// STOP and TAKE_PROFIT rest a limit; the replacement placed only market stops, so an
+// edit silently turned a stop-limit into a stop-market. They are refused before any cancel.
+#[test]
+fn a_limit_stop_edit_is_refused_before_any_cancel() {
+    for (kind, stop) in [("STOP", "110"), ("TAKE_PROFIT", "80")] {
+        let mut h = guarded_row(&format!(
+            r#"{{"orderId":991,"symbol":"BTCUSDT","type":"{kind}","side":"BUY","price":"111","stopPrice":"{stop}","origQty":"2","executedQty":"0","reduceOnly":true,"closePosition":false,"workingType":"MARK_PRICE","priceProtect":false,"timeInForce":"GTC","clientOrderId":"limit-stop","positionSide":"BOTH","status":"NEW"}}"#
+        ));
+        amend_guarded_stop(&mut h, if kind == "STOP" { 105.0 } else { 85.0 });
+        assert!(
+            !h.requests.iter().any(|r| r.url.contains("/order")),
+            "{kind}: {:?}",
+            h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+        );
+        let error = result(&h, 991).as_ref().unwrap_err();
+        assert!(
+            error.contains("stop-limit was not changed"),
+            "{kind}: {error}"
+        );
+        assert_eq!(
+            h.engine.store().order("991").unwrap().status,
+            OrderStatus::Open
+        );
+    }
+}
