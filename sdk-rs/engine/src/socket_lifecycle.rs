@@ -10,6 +10,46 @@ use sorted::{Map, Set};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+/// Host observation of committed upstream interests, never desired or queued rows.
+pub enum InterestObservation<'a> {
+    Attached,
+    Released {
+        feed: FeedId,
+        subscribed: bool,
+        interest: &'a Interest,
+    },
+    Cleared {
+        feed: FeedId,
+    },
+    /// Native transport handoff for a venue without managed interests.
+    TransportSent {
+        socket: SocketId,
+        text: &'a str,
+    },
+    TransportClosed {
+        socket: SocketId,
+    },
+    Dropped,
+}
+
+#[derive(Clone)]
+pub struct InterestObserver(Arc<dyn Fn(InterestObservation<'_>) + Send + Sync>);
+
+impl InterestObserver {
+    pub fn new(observe: impl Fn(InterestObservation<'_>) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(observe))
+    }
+    pub fn observe(&self, event: InterestObservation<'_>) {
+        (self.0)(event);
+    }
+}
+
+impl std::fmt::Debug for InterestObserver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("InterestObserver")
+    }
+}
+
 pub const MAX_FEEDS: usize = 512;
 pub const MAX_INTERESTS: usize = 8192;
 pub const MAX_FRAMES: usize = 4096;
@@ -488,6 +528,14 @@ pub(crate) struct Lifecycle {
     socket_lookups: std::cell::Cell<usize>,
     pending_frames: usize,
     external_queue_bytes: usize,
+    pub(crate) observer: Option<InterestObserver>,
+}
+impl Drop for Lifecycle {
+    fn drop(&mut self) {
+        if let Some(observer) = &self.observer {
+            observer.observe(InterestObservation::Dropped);
+        }
+    }
 }
 impl Lifecycle {
     pub(crate) fn reserve_external(&mut self, bytes: usize) -> Result<(), SocketError> {
@@ -562,6 +610,9 @@ impl Lifecycle {
         f.phase = Phase::Quarantined;
         f.authenticated = false;
         f.interests.clear_queue(&mut self.pending_frames);
+        if let Some(observer) = &self.observer {
+            observer.observe(InterestObservation::Cleared { feed });
+        }
         f.interests.released.clear();
         self.retire(feed)
     }
@@ -625,6 +676,9 @@ impl Lifecycle {
         f.phase = Phase::Connecting;
         f.authenticated = false;
         f.pong_seen = false;
+        if let Some(observer) = &self.observer {
+            observer.observe(InterestObservation::Cleared { feed });
+        }
         f.interests.released.clear();
         f.interests.clear_queue(&mut self.pending_frames);
         self.current_sockets.insert(socket.0, epoch);
@@ -827,6 +881,9 @@ impl Lifecycle {
         f.phase = Phase::Quarantined;
         f.authenticated = false;
         f.interests.clear_queue(&mut self.pending_frames);
+        if let Some(observer) = &self.observer {
+            observer.observe(InterestObservation::Cleared { feed });
+        }
         f.interests.released.clear();
         Some(Retirement {
             epoch,
@@ -850,6 +907,9 @@ impl Lifecycle {
             f.phase = Phase::Quarantined;
             f.authenticated = false;
             f.interests.clear_queue(&mut self.pending_frames);
+            if let Some(observer) = &self.observer {
+                observer.observe(InterestObservation::Cleared { feed: *feed });
+            }
             f.interests.released.clear();
         }
         feeds
@@ -1168,9 +1228,22 @@ impl Lifecycle {
         for key in queued.batch.covered_keys {
             if queued.subscribe {
                 let row = f.interests.desired.get(&key)?.clone();
+                if let Some(observer) = &self.observer {
+                    observer.observe(InterestObservation::Released {
+                        feed: epoch.feed,
+                        subscribed: true,
+                        interest: &row,
+                    });
+                }
                 f.interests.released.insert(key, row);
-            } else {
-                f.interests.released.remove(&key);
+            } else if let Some(row) = f.interests.released.remove(&key)
+                && let Some(observer) = &self.observer
+            {
+                observer.observe(InterestObservation::Released {
+                    feed: epoch.feed,
+                    subscribed: false,
+                    interest: &row,
+                });
             }
         }
         Some(queued.batch.text)

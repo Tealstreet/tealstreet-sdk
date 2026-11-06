@@ -444,6 +444,20 @@ impl crate::engine::CoreRef<'_> {
 }
 
 impl<V: Venue> Engine<V> {
+    /// Install before start; observes final managed subscription handoff and retirement.
+    pub fn set_interest_observer(&mut self, observer: crate::socket_lifecycle::InterestObserver) {
+        assert!(
+            !self.has_started(),
+            "interest observer must precede engine start"
+        );
+        assert!(
+            self.io.core.socket_driver.state.observer.is_none(),
+            "interest observer already installed"
+        );
+        observer.observe(crate::socket_lifecycle::InterestObservation::Attached);
+        self.io.core.socket_driver.state.observer = Some(observer);
+    }
+
     pub(super) fn has_socket_work(&self) -> bool {
         if !V::managed_sockets() {
             return false;
