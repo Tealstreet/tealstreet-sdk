@@ -255,15 +255,17 @@ test('#3094 batch acknowledgements (run 42062090938) retain Bybit headroom', () 
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
 });
 
-test('#2314 Lighter managed sockets (job 127434185656) retain headroom and siblings match', () => {
-  const measured = 2_034_142;
-  const cap = 2_044_928;
+test('#3158 Lighter guarded edits (run 42215250423, job 127884302751) retain headroom and siblings match', () => {
+  const measured = 2_068_697;
+  const cap = 2_079_744;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES.lighter, cap);
-  assert.equal(WASM_VENUE_OVERRIDES['lighter-robinhood'], cap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'lighter'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'lighter'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'lighter'), /exceeds/);
+  for (const venue of ['lighter', 'lighter-robinhood']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(2_034_142, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
 
 test('#3118 Aster protection guard (run 42112075305) retains measured headroom', () => {
