@@ -43,23 +43,23 @@ impl Delivery {
     }
 }
 
+#[inline(never)]
 pub(crate) fn error_kind(value: &str) -> Option<ErrorKind> {
-    [
-        ErrorKind::Rejected,
-        ErrorKind::InvalidInput,
-        ErrorKind::InsufficientBalance,
-        ErrorKind::AuthInvalid,
-        ErrorKind::AuthExpired,
-        ErrorKind::AuthPermission,
-        ErrorKind::RateLimited,
-        ErrorKind::Network,
-        ErrorKind::Timeout,
-        ErrorKind::VenueUnavailable,
-        ErrorKind::Unsupported,
-        ErrorKind::Internal,
-    ]
-    .into_iter()
-    .find(|kind| kind.as_str() == value)
+    Some(match value {
+        "rejected" => ErrorKind::Rejected,
+        "invalidInput" => ErrorKind::InvalidInput,
+        "insufficientBalance" => ErrorKind::InsufficientBalance,
+        "authInvalid" => ErrorKind::AuthInvalid,
+        "authExpired" => ErrorKind::AuthExpired,
+        "authPermission" => ErrorKind::AuthPermission,
+        "rateLimited" => ErrorKind::RateLimited,
+        "network" => ErrorKind::Network,
+        "timeout" => ErrorKind::Timeout,
+        "venueUnavailable" => ErrorKind::VenueUnavailable,
+        "unsupported" => ErrorKind::Unsupported,
+        "internal" => ErrorKind::Internal,
+        _ => return None,
+    })
 }
 
 #[derive(Default)]
@@ -188,6 +188,34 @@ impl Causes {
                     fields.push((status, value.into()));
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closed_error_kind_parser_round_trips_without_accepting_message_text() {
+        for kind in [
+            ErrorKind::Rejected,
+            ErrorKind::InvalidInput,
+            ErrorKind::InsufficientBalance,
+            ErrorKind::AuthInvalid,
+            ErrorKind::AuthExpired,
+            ErrorKind::AuthPermission,
+            ErrorKind::RateLimited,
+            ErrorKind::Network,
+            ErrorKind::Timeout,
+            ErrorKind::VenueUnavailable,
+            ErrorKind::Unsupported,
+            ErrorKind::Internal,
+        ] {
+            assert_eq!(error_kind(kind.as_str()), Some(kind));
+        }
+        for text in ["", "authPermission: private account", "TIMEOUT"] {
+            assert_eq!(error_kind(text), None);
         }
     }
 }

@@ -3192,11 +3192,8 @@ impl<P> Cx<'_, P> {
     /// Explicit failed startup issue, including admission refusals with no HTTP id.
     pub fn startup_request_refused(&mut self, pending: &P, error: &VenueError) {
         let sections = (self.io.startup_reads)(pending);
-        let status = (self.io.core.startup_delivery.sections == sections)
-            .then_some(self.io.core.startup_delivery.status)
-            .flatten();
         self.io.core.startup_causes.failed(
-            &mut crate::startup_causes::Delivery::new(sections, status),
+            &mut crate::startup_causes::Delivery::new(sections, None),
             error,
             true,
         );

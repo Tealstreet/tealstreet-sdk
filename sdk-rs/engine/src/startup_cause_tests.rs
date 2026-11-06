@@ -50,7 +50,29 @@ impl Venue for Probe {
         issue(cx, Sections::ORDERS, 100);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Read>, read: Read, response: Response<'_>) {
-        if response.body == "issue-then-refuse" {
+        if response.body == "pre-send-refused" {
+            let context = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 120_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            let pending = Read {
+                sections: read.sections,
+                context,
+            };
+            cx.startup_request_refused(
+                &pending,
+                &VenueError::new("local recipe refusal").kind(ErrorKind::InvalidInput),
+            );
+            let _ = cx.finish_http_context(&pending.context);
+        } else if response.body == "issue-then-refuse" {
             issue(cx, Sections::NONE, 120_000);
             cx.notice_error(
                 Level::Warn,
@@ -266,6 +288,38 @@ fn review_issuing_another_read_must_not_clear_the_delivering_startup_cause() {
     );
     assert!(
         got.contains(&("startupMarketsHttpStatus", 200_u16.into())),
+        "{got:?}"
+    );
+}
+
+#[test]
+fn local_pre_send_failure_does_not_borrow_the_current_response_status() {
+    let mut engine = crate::test_support::seeded_engine(Probe);
+    engine.start(0.);
+    let requests = requests(&mut engine, 0.);
+    engine.handle(
+        1.,
+        Event::HttpResponse {
+            request: requests[0].id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "pre-send-refused",
+            },
+        },
+    );
+    let got = fields(&mut engine, STARTUP_WATCH_MS);
+    assert!(
+        got.contains(&("startupMarketsState", "refused".into())),
+        "{got:?}"
+    );
+    assert!(
+        got.contains(&("startupMarketsKind", "invalidInput".into())),
+        "{got:?}"
+    );
+    assert!(
+        !got.iter()
+            .any(|(key, _)| *key == "startupMarketsHttpStatus"),
         "{got:?}"
     );
 }

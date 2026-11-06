@@ -34,12 +34,12 @@ impl Level {
 #[derive(Clone, Debug)]
 pub enum Value {
     Str(String),
-    /// Closed engine vocabulary, encoded as the same JSON string without allocation.
-    StaticStr(&'static str),
     Num(f64),
     Bool(bool),
     /// A field whose value must never leave the engine.
     Redacted,
+    /// Closed engine vocabulary, encoded as the same JSON string without allocation.
+    StaticStr(&'static str),
 }
 
 impl Value {
