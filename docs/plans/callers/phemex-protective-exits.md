@@ -12,8 +12,12 @@ Native sparse executions retain their symbol alongside the order identity.
 This scoped fence intentionally applies to ordinary limit amends as well: an
 unrelated-symbol fill permits both cancel planning and replacement, while a
 same-symbol fill still refuses. Ordinary refusal/5xx presentation is unchanged.
-The ordinary post-cancel pause wording is deliberately deferred to a separate
-follow-up; this PR narrows the new pause handling to protective jobs.
+For an ordinary amend paused after a proven terminal cancel, the single message
+is now: `Phemex order was canceled; replacement not sent (rate limited); re-place it`.
+Before cancellation, the existing `mutation was not sent` message remains.
+Only this ordinary presentation changes: its outcome, reconciliation, transport,
+and retry behavior stay unchanged. Protective pause handling remains typed as
+above.
 Amend admission, the final protective cancel claim, and the post-cancel fence
 check the edited symbol and original order. A fill on another symbol no longer
 blocks a native replacement. Unknown or overflowed fill evidence remains a
