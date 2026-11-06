@@ -920,6 +920,7 @@ impl AsterDex {
         let unproven = response
             .as_ref()
             .is_ok_and(|r| r.status == 408 || r.status >= 500);
+        let status_429 = response.as_ref().is_ok_and(|r| r.status == 429);
         let outcome = match response {
             Ok(ref response) => venue_error(response).map_or(Ok(response.body), Err),
             Err(error) => Err((0, error.to_owned())),
@@ -939,6 +940,8 @@ impl AsterDex {
             outcome => outcome,
         };
         let replied = outcome.is_ok();
+        // A 429 may have placed the order: a guarded stop's outcome is unknown, not refused.
+        let rate_limited = status_429 || matches!(outcome, Err((-1003, _)));
         let mut placed = None;
         let mut result = None;
         let outcome = match (request.call, outcome) {
@@ -1124,7 +1127,7 @@ impl AsterDex {
                         .jobs
                         .get(&command)
                         .filter(|_| was_place)
-                        .and_then(|job| job.gone_text(false))
+                        .and_then(|job| job.gone_text(rate_limited))
                     {
                         Some(gone) => format!("{gone}: {message}"),
                         None => message.clone(),
@@ -1160,7 +1163,10 @@ impl AsterDex {
                         Some(Outcome::Rejected)
                     )
                 });
-                if definitive && let Some(restore) = job.restore.take() {
+                if definitive
+                    && !rate_limited
+                    && let Some(restore) = job.restore.take()
+                {
                     job.steps.clear();
                     job.steps.push_back(restore);
                     job.restoring = true;
@@ -1213,7 +1219,7 @@ impl AsterDex {
                 Ok(()) => job.successes += 1,
                 Err((code, message)) => {
                     cx.command_error(command, message.clone());
-                    let mut error = status_error.unwrap_or_else(|| failure(code, message));
+                    let mut error = status_error.unwrap_or_else(|| failure(code, message.clone()));
                     // An earlier leg that may have executed keeps the command unknown.
                     if unproven
                         || job
@@ -1223,13 +1229,23 @@ impl AsterDex {
                     {
                         error.outcome = Some(Outcome::Unknown);
                     }
+                    let guarded = was_place && job.gone_text(true).is_some();
+                    if guarded && rate_limited {
+                        error.outcome = Some(Outcome::Unknown);
+                    }
                     let unknown = error.outcome == Some(Outcome::Unknown);
                     job.sweep_failed |= was_sweep;
                     if was_place && let Some(gone) = job.gone_text(unknown) {
                         error.protection =
                             (!unknown).then_some(safe_cex_engine::error::Protection::Unprotected);
                         error.presents = true;
-                        error.message = format!("{gone}: {}", error.message);
+                        // A status-only refusal already carries the gone text it was classified with.
+                        let detail = if rate_limited {
+                            &message
+                        } else {
+                            &error.message
+                        };
+                        error.message = format!("{gone}: {detail}");
                     }
                     job.error = Some(error);
                 }

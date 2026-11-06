@@ -1237,7 +1237,8 @@ impl Trading {
                     _ => None,
                 };
                 if let Some((symbol, side, kind)) = gone_stop {
-                    let unknown = error.outcome == Some(Outcome::Unknown);
+                    // Only a definite refusal proves the order absent; a 429 may have placed it.
+                    let unknown = error.outcome != Some(Outcome::Rejected);
                     let gone = safe_cex_engine::error::stop_gone_text(&symbol, side, kind, unknown);
                     error.message = if error.message.is_empty() {
                         gone
