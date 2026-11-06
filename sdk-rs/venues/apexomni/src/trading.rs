@@ -1725,21 +1725,27 @@ impl ApexOmni {
         let Ok(steps) = self.prepare_order(cx, &restore, &mut issued) else {
             return false;
         };
-        let job = self.trading.active.as_mut().expect("an active amend");
-        job.steps = steps.into();
-        job.restoring = true;
-        self.trading.waiting = false;
+        // One attempt: no native resend can send the put-back twice. A refused
+        // continuation leaves the job as it was: the stop was removed.
+        let put_back_call = SerialCall {
+            attempts: 1,
+            ..mutation_call()
+        };
         if cx
             .continue_serial_plan(
                 &delivery.plan,
                 &delivery.slot,
                 &delivery.context,
-                mutation_call(),
+                put_back_call,
             )
             .is_err()
         {
             return false;
         }
+        let job = self.trading.active.as_mut().expect("an active amend");
+        job.steps = steps.into();
+        job.restoring = true;
+        self.trading.waiting = false;
         self.drive_trading(cx);
         true
     }

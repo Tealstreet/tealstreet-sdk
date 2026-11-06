@@ -2676,3 +2676,26 @@ fn cancels_of_the_original_during_and_after_its_put_back() {
             .collect::<Vec<_>>()
     );
 }
+
+/// The put-back is one attempt: a refusal the engine would otherwise resend
+/// (20016) is never sent twice.
+#[test]
+fn a_put_back_is_one_attempt_on_the_wire() {
+    use safe_cex_engine::error::Protection;
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(&mut e, &replacement, NOW + 200.0, REFUSED);
+    let restore = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &restore,
+        NOW + 201.0,
+        r#"{"code":20016,"msg":"signature expired"}"#,
+    );
+    let out = actions(&mut e);
+    assert!(placements(&http(out.clone())).is_empty(), "never resent");
+    let error = failure_of(&out);
+    assert!(error.message.contains("both refused"), "{}", error.message);
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+}
