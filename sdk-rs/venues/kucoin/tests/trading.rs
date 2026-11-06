@@ -2738,3 +2738,177 @@ fn managed_stop_discovery_receipts_keep_row_time_and_require_a_valid_native_fiel
         }
     }
 }
+
+fn protective_kind(h: &mut Harness, kind: OrderType, side: OrderSide) -> f64 {
+    resting_stop_limit(h, kind, false);
+    h.engine.store_mut().update_order("old", |order| order.side = side);
+    let mut position = short_position();
+    position.side = if side == OrderSide::Buy { PositionSide::Short } else { PositionSide::Long };
+    h.engine.store_mut().set_positions(vec![position]);
+    if (kind == OrderType::StopLoss) == (side == OrderSide::Buy) { 120.0 } else { 90.0 }
+}
+fn original_safe_quote(kind: OrderType, side: OrderSide) -> f64 {
+    if (kind == OrderType::StopLoss) == (side == OrderSide::Buy) { 95.0 } else { 110.0 }
+}
+fn confirm_protective_target(h: &mut Harness) {
+    h.metadata(false, "CROSS");
+    h.reply("/api/v1/orders/old", r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#);
+    h.pace();
+    let read = h.take("/api/v1/orders/old");
+    assert_eq!(read.method, Method::Get);
+    h.response(&read, 200, r#"{"code":"200000","data":{"id":"old","isActive":false,"cancelExist":true,"filledSize":0}}"#);
+}
+fn hold_protective_create(h: &mut Harness, trigger: f64) -> safe_cex_engine::request_context::Preparation {
+    use safe_cex_engine::request_context::HttpAction;
+    let index = h.actions.iter().position(|a| matches!(a, Action::SetTimer { at_ms, .. } if *at_ms == h.now + 20.0)).unwrap();
+    let Action::SetTimer { timer, at_ms } = h.actions.remove(index) else { unreachable!() };
+    h.now = at_ms;
+    h.engine.handle(h.now, Event::TimerFired { timer });
+    h.engine.prepare_dispatch(h.now);
+    let actions: Vec<_> = h.engine.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(r) if r.method == Method::Post)));
+    let preparation = actions.iter().find_map(|action| match action {
+        Action::ManagedHttp(action) => match action.as_ref() {
+            HttpAction::Prepare { preparation, request, .. } if request.method == Method::Post => {
+                assert_eq!(request.url, "https://api-futures.kucoin.com/api/v1/orders");
+                let body: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+                assert_eq!(body["stopPrice"], trigger.to_string());
+                assert_eq!(body["type"], "limit");
+                assert_eq!(body["price"], "130");
+                Some(*preparation)
+            },
+            _ => None,
+        },
+        _ => None,
+    });
+    assert!(preparation.is_some(), "a genuine prepared create: {actions:?}");
+    preparation.unwrap()
+}
+
+#[test]
+fn replacement_claim_checks_its_own_fresh_trigger_for_both_kinds_and_sides() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        for side in [OrderSide::Buy, OrderSide::Sell] {
+            for case in ["equal", "stale", "live"] {
+                let mut h = Harness::new();
+                let trigger = protective_kind(&mut h, kind, side);
+                let seen = h.now;
+                amend_stop(&mut h, "old", trigger);
+                confirm_protective_target(&mut h);
+                let held = hold_protective_create(&mut h, trigger);
+                match case {
+                    "equal" => h.fresh_ticker(trigger),
+                    "stale" => h.now = seen + 5_000.25,
+                    _ => h.now = seen + 5_000.0,
+                }
+                release_held(&mut h, held);
+                if case == "live" {
+                    assert_eq!(h.take("/api/v1/orders").method, Method::Post);
+                    assert!(h.failures.is_empty());
+                } else {
+                    assert!(writes(&h).is_empty(), "{kind:?} {side:?} {case}: {:?}", writes(&h));
+                    assert_eq!(h.failures.len(), 1);
+                    assert_eq!(failure(&h).protection, Some(Protection::Unprotected));
+                    assert!(failure(&h).message.contains(if case == "equal" { "crossed" } else { "stale" }));
+                    assert!(h.engine.store().order("old").is_none());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn put_back_claim_checks_the_original_trigger_for_both_kinds_and_sides() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        for side in [OrderSide::Buy, OrderSide::Sell] {
+            for case in ["equal", "stale", "live"] {
+                let mut h = Harness::new();
+                let trigger = protective_kind(&mut h, kind, side);
+                amend_stop(&mut h, "old", trigger);
+                let replacement = to_replacement(&mut h, "old", 0.0);
+                h.fresh_ticker(original_safe_quote(kind, side));
+                let seen = h.now;
+                h.response(&replacement, 200, REFUSED);
+                let held = hold_protective_create(&mut h, 100.0);
+                match case {
+                    "equal" => h.fresh_ticker(100.0),
+                    "stale" => h.now = seen + 5_000.25,
+                    _ => h.now = seen + 5_000.0,
+                }
+                release_held(&mut h, held);
+                if case == "live" {
+                    assert_eq!(h.take("/api/v1/orders").method, Method::Post);
+                    assert!(h.failures.is_empty());
+                } else {
+                    assert!(writes(&h).is_empty(), "{kind:?} {side:?} {case}: {:?}", writes(&h));
+                    assert_eq!(h.failures.len(), 1);
+                    assert_eq!(failure(&h).protection, Some(Protection::Unprotected));
+                    assert!(failure(&h).message.contains(if case == "equal" { "crossed" } else { "stale" }));
+                    assert!(h.engine.store().order("old").is_none());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn replacement_crossed_during_proof_polling_sends_no_create_or_put_back() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut h = Harness::new();
+        let trigger = protective_kind(&mut h, kind, OrderSide::Buy);
+        amend_stop(&mut h, "old", trigger);
+        h.metadata(false, "CROSS");
+        h.reply("/api/v1/orders/old", r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#);
+        h.pace();
+        let first = h.take("/api/v1/orders/old");
+        h.response(&first, 200, r#"{"code":"200000","data":{"id":"old","isActive":true,"filledSize":0}}"#);
+        h.fresh_ticker(trigger);
+        h.advance(100.0);
+        let proof = h.take("/api/v1/orders/old");
+        h.response(&proof, 200, r#"{"code":"200000","data":{"id":"old","isActive":false,"cancelExist":true,"filledSize":0}}"#);
+        h.pace();
+        assert!(writes(&h).is_empty(), "{kind:?}: {:?}", writes(&h));
+        assert_eq!(h.failures.len(), 1);
+        assert_eq!(failure(&h).protection, Some(Protection::Unprotected));
+        assert!(failure(&h).message.contains("crossed"));
+    }
+}
+
+#[test]
+fn protective_failure_words_keep_the_kind_and_protected_position_side() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        for side in [OrderSide::Buy, OrderSide::Sell] {
+            for result in ["restored", "refused", "unknown_place", "unknown_restore"] {
+                let mut h = Harness::new();
+                let trigger = protective_kind(&mut h, kind, side);
+                amend_stop(&mut h, "old", trigger);
+                let replacement = to_replacement(&mut h, "old", 0.0);
+                if result == "unknown_place" {
+                    h.event(Event::HttpFailed { request: replacement.id, error: "lost replacement" });
+                } else {
+                    h.fresh_ticker(original_safe_quote(kind, side));
+                    h.response(&replacement, 200, REFUSED);
+                    h.pace();
+                    let restore = h.take("/api/v1/orders");
+                    match result {
+                        "restored" => h.response(&restore, 200, r#"{"code":"200000","data":{"orderId":"restored"}}"#),
+                        "refused" => h.response(&restore, 200, REFUSED),
+                        _ => h.event(Event::HttpFailed { request: restore.id, error: "lost put-back" }),
+                    }
+                }
+                let error = failure(&h);
+                let position = if side == OrderSide::Buy { "short" } else { "long" };
+                let label = if kind == OrderType::TakeProfit { "take profit" } else { "stop" };
+                let prefix = match result {
+                    "restored" => format!("Your BTCUSDT {position} position's {label} is unchanged"),
+                    "refused" => format!("Your BTCUSDT {position} position has no {label}"),
+                    "unknown_place" => format!("Your BTCUSDT {position} position may have no {label}"),
+                    _ => format!("Your BTCUSDT {position} position's {label} put-back outcome is unknown"),
+                };
+                assert!(error.message.starts_with(&prefix), "{result}: {}", error.message);
+                assert_eq!(error.protection, match result { "restored" => Some(Protection::Restored), "refused" => Some(Protection::Unprotected), _ => None });
+                assert!(writes(&h).is_empty());
+            }
+        }
+    }
+}
