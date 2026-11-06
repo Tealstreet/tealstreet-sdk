@@ -199,15 +199,14 @@ export class ExchangeWorker {
   private log(level: 'info' | 'warn' | 'error', message: string, context?: Record<string, any>) {
     this._ctx.postMessage({
       op: 'log',
-      data: {
-        level,
-        message,
-        context: {
-          exchange: this._exchangeName,
-          account: this._accountName,
-          ...context,
-        },
-      },
+      data: [
+        JSON.stringify({
+          level,
+          message,
+          context: { exchange: this._exchangeName, account: this._accountName, ...context },
+        }),
+        level === 'warn' ? 'warning' : level,
+      ],
     });
   }
 
