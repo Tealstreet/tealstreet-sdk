@@ -134,6 +134,7 @@ struct TickerState {
     sequence: Option<u64>,
     first_sequence: Option<u64>,
     subscriptions: u8,
+    references: trading::protection::References,
 }
 pub struct Grvt {
     options: safe_cex_crypto::secrets::Sensitive<Options>,
@@ -487,6 +488,7 @@ impl Grvt {
             state.subscriptions = 0;
             state.sequence = None;
             state.first_sequence = None;
+            state.references = Default::default();
         }
         for depth in self.books.values_mut() {
             depth.restart();
@@ -698,6 +700,14 @@ impl Grvt {
                 if let Some(v) = feed.open_price {
                     state.open = v.0;
                 }
+                state.references.observe(
+                    cx.now,
+                    [
+                        feed.last.map(|v| v.0),
+                        feed.mark.map(|v| v.0),
+                        feed.index.map(|v| v.0),
+                    ],
+                );
                 // This venue constructs tickers in catalog order at every replacement.
                 cx.store.update_ticker_at(index, |t| {
                     if let Some(v) = feed.last {
@@ -1029,8 +1039,15 @@ impl Venue for Grvt {
         }
         if let Err(error) = wire::check(&response) {
             let code = wire::code(&response);
+            let (restoring, protective) = if let Job::Trade(request) = &pending.job {
+                (request.is_restore(), request.is_protective())
+            } else {
+                (false, false)
+            };
             if code == "1000"
                 && !pending.auth_resent
+                && !restoring
+                && (!protective || wire::venue_rejected(&response))
                 && !matches!(pending.job, Job::Account(account::Request::Login))
                 && !matches!(pending.job, Job::Markets { .. } | Job::Candles(_))
                 && !matches!(&pending.job,Job::History(request) if request.is_public())
