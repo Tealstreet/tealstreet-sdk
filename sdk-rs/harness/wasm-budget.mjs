@@ -168,6 +168,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // to the KiB, bitgetusdc equal to bitget.
 // #3143 run 42181736999 measured hyperliquid 2,126,281 B: the public data watch, error-channel
 // refusals and Control::Unwatched. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
+// #3152 run 42200843544, job 127838799471 measured bingx 2,063,923 B.
+// CI size plus 10 KiB, rounded up to the KiB.
 // #3149 run 42197163575 measured hyperliquid 2,143,008 B: activeAssetData scoping, the
 // FetchLeverage read and subscription.count. CI size plus 10 KiB, rounded up; siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
@@ -175,7 +177,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   asterdex: 2_150_400,
   backpack: 1_937_408,
   binance: 2_206_720,
-  bingx: 2_036_736,
+  bingx: 2_074_624,
   bitget: 2_359_296,
   bitgetusdc: 2_359_296,
   bitrue: 1_840_128,
