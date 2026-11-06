@@ -256,6 +256,9 @@ pub enum Control {
     #[cfg(feature = "socket-native-timing")]
     Traffic,
     Other,
+    /// Delivered traffic that proves nothing about a watched stream (account
+    /// updates sharing a public socket, acknowledgements): never data.
+    Unwatched,
     Pong,
     Auth(AuthEvidence),
 }
