@@ -43,6 +43,21 @@ fn raw(e: &mut Engine<PhemexPerpetuals>, r: &HttpRequest, body: &str) -> Vec<Act
     e.drain_actions().collect()
 }
 
+fn raw_status(e: &mut Engine<PhemexPerpetuals>, r: &HttpRequest, status: u16) -> Vec<Action> {
+    e.handle(
+        1001.,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status,
+                headers: "",
+                body: "",
+            },
+        },
+    );
+    e.drain_actions().collect()
+}
+
 fn respond(e: &mut Engine<PhemexPerpetuals>, r: &HttpRequest, body: Value) -> Vec<Action> {
     raw(e, r, &body.to_string())
 }
@@ -4121,4 +4136,31 @@ fn a_stop_entry_edit_is_refused_before_its_cancel() {
             .contains("opening trigger orders are disabled")
     );
     assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+}
+
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
+#[test]
+fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
+    for status in [408, 503] {
+        let (mut e, _) = authenticated("OneWay");
+        let a = refused_stop_replacement(&mut e);
+        let restore = &writes(&a)[0];
+        let a = raw_status(&mut e, restore, status);
+        let error = failure(&a);
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("TE_NO_ENOUGH"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}"
+        );
+        assert_eq!(error.protection, None, "{status}");
+        assert!(writes(&a).is_empty(), "{status}: never resent");
+    }
 }

@@ -2035,3 +2035,43 @@ fn protective_amend_checks_the_rounded_wire_trigger_and_size_only_edits() {
         );
     }
 }
+
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
+#[test]
+fn protective_amend_restore_sealed_on_a_5xx_says_its_outcome_is_unknown() {
+    for status in [408, 503] {
+        let mut h = guarded_stop();
+        amend_guarded_stop(&mut h, 105.0);
+        let cancel = h.take("/order");
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replacement = h.take("/order");
+        h.respond(
+            replacement,
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let restore = h.take("/order");
+        assert_eq!(restore.method, safe_cex_engine::Method::Post);
+        h.respond_status(restore, status, "");
+        let error = h.failures.last().unwrap().clone();
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("immediately trigger"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}"
+        );
+        assert_eq!(error.protection, None, "{status}");
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.method == safe_cex_engine::Method::Post),
+            "{status}: never resent"
+        );
+    }
+}

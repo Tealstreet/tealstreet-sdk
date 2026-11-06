@@ -139,7 +139,6 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
 
 test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['backpack', 1_876_304, 1_887_232],
     ['bitrue', 1_810_954, 1_821_696],
     ['breakoutprop', 1_501_277, 1_512_448],
     ['coinbase', 1_816_299, 1_826_816],
@@ -187,7 +186,6 @@ test('#3018 after merging 78bc1ae5a39 (run 41870743418 at c9d4de158d5) retains h
 
 test('#3018 protective-amend caps (run 41854021043 at 824ff543b6d) retain the ruled headroom', () => {
   for (const [venue, measured, cap] of [
-    ['grvt', 1_770_412, 1_780_736],
     ['polymarket', 1_590_031, 1_600_512],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
@@ -293,6 +291,16 @@ test('#3122 protective stop edits (run 42126229513) retain Paradex and BloFin he
   }
 });
 
+
+test('#3129 guarded GRVT edits (run 42145552491) retain measured headroom', () => {
+  const [venue, measured, cap] = ['grvt', 1_806_590, 1_817_600];
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+});
+
 test('#3127 KuCoin guarded stop edits (run 42140111861) retain KuCoin headroom', () => {
   for (const [venue, measured, cap] of [['kucoin', 1_681_540, 1_692_672]]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
@@ -314,6 +322,16 @@ test('#3131 MEXC protective edits (run 42150228180) retain measured headroom', (
 
 test('#3128 ApeX guarded amends (run 42146728975) retain ApeX headroom', () => {
   for (const [venue, measured, cap] of [['apexomni', 2_002_359, 2_013_184]]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3130 Backpack guarded trigger amends (run 42154583609) retain Backpack headroom', () => {
+  for (const [venue, measured, cap] of [['backpack', 1_926_668, 1_937_408]]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);

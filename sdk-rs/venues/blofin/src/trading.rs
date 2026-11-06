@@ -2023,6 +2023,27 @@ impl Blofin {
                 not_sent("BloFin requires API credentials"),
             );
         };
+        // A 408 or 5xx on a put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        if active.job.restoring && matches!(step.effect, Effect::Place { .. }) {
+            let what = active
+                .job
+                .replacing_stop
+                .as_ref()
+                .map(|(_, symbol, ..)| format!("{symbol} stop"))
+                .or_else(|| {
+                    active
+                        .job
+                        .replacing_order
+                        .as_ref()
+                        .map(|(_, symbol)| format!("{symbol} order"))
+                })
+                .unwrap_or_else(|| "order".into());
+            let words = format!(
+                "Your {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+            );
+            let _ = cx.present_plan_failure(&plan, words);
+        }
         match &step.effect {
             Effect::Place { .. } => {
                 cx.store.invalidate_order_snapshots();
