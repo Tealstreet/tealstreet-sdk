@@ -179,11 +179,13 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3168 run 42227488436, job 127925185663 measured bybit 2,246,685 B.
 // Guarded Partial edits add serial Plans, terminal/lineage reads and one-shot put-back.
 // ddi2il standing rule: CI + 10 KiB rounded up; all Bybit variants share this family cap.
+// #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
+// and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
   backpack: 1_937_408,
-  binance: 2_206_720,
+  binance: 2_217_984,
   bingx: 2_074_624,
   bitget: 2_359_296,
   bitgetusdc: 2_359_296,

@@ -235,8 +235,8 @@ test('#3018 after merging d171fbb0e31 (run 41893192741 at b94d76fa368) retains t
   }
 });
 
-test('master b0d2122742d release cut (run 41901638294) retains the ruled binance headroom', () => {
-  const [measured, cap] = [2_195_793, 2_206_720];
+test('#3179 COIN-M algo routing (run 42250922133) retains the ruled binance headroom', () => {
+  const [measured, cap] = [2_207_171, 2_217_984];
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   assert.equal(WASM_VENUE_OVERRIDES.binance, cap);
   assert.equal(wasmBudgetError(measured, 'venue', 'binance'), undefined);
