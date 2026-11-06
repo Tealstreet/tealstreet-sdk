@@ -1209,3 +1209,258 @@ fn a_refused_lot_reports_the_accepted_lot_as_partial() {
         .expect("the command failed");
     assert_eq!(error.partial.unwrap().order_ids, ["1"]);
 }
+
+/// A sell stop at 61000 guarding the long, edited down to 58000 on the mark.
+fn guarded_stop() -> TestEngine {
+    let mut e = engine();
+    e.store_mut().set_positions(vec![position()]);
+    let mark = e.store().ticker("BTCUSDT").unwrap().mark;
+    let mut stop = order("22", OrderType::StopLoss);
+    stop.price = mark - 1000.0;
+    stop.parent_id = Some("22".into());
+    e.store_mut().set_orders(vec![stop]);
+    e
+}
+fn edit_stop(e: &mut TestEngine, command: u32, price: f64) -> Vec<Action> {
+    e.handle(
+        1000.0,
+        Event::Command(Command::AmendOrder {
+            command,
+            id: "22".into(),
+            price: Some(price),
+            amount: None,
+        }),
+    );
+    e.drain_actions().collect()
+}
+fn failed(actions: &[Action], command: u32) -> safe_cex_engine::VenueError {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: c, error }) if *c == command => {
+                Some(error.clone())
+            }
+            _ => None,
+        })
+        .expect("a failure")
+}
+/// Fires the pacing timer if one is armed: the next queued step goes out.
+fn settle(e: &mut TestEngine, actions: Vec<Action>) -> Vec<Action> {
+    if actions.iter().any(|a| matches!(a, Action::SetTimer { .. })) {
+        let more = tick(e, &actions);
+        [actions, more].concat()
+    } else {
+        actions
+    }
+}
+fn puts(actions: &[Action]) -> usize {
+    actions
+        .iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Put))
+        .count()
+}
+const EDIT_SENT: &str = r#"{"success":true,"data":{"success":true,"status":"EDIT_SENT"}}"#;
+
+#[test]
+fn a_stale_crossed_changed_or_flat_stop_edit_is_not_sent() {
+    use safe_cex_engine::Outcome;
+    for (case, why) in [
+        ("stale", "mark price reference is stale"),
+        ("crossed", "already crossed the mark price"),
+        ("changed", "changed or filled before the edit"),
+        ("flat", "no position for it to protect"),
+    ] {
+        let mut e = guarded_stop();
+        let mark = e.store().ticker("BTCUSDT").unwrap().mark;
+        // A placement ahead of it: the edit is planned now and sent after.
+        let a = placed(&mut e, vec![opts()]);
+        let first = req(&a, Method::Post, "/v1/order");
+        edit_stop(&mut e, 2, mark - 2000.0);
+        let mut at = 1010.0;
+        match case {
+            "stale" => at = 1000.0 + 6_000.0,
+            "crossed" => e
+                .store_mut()
+                .update_ticker("BTCUSDT", |t| t.mark = mark - 2100.0),
+            "changed" => {
+                e.store_mut().update_order("22", |o| o.amount = 0.02);
+            }
+            _ => e.store_mut().set_positions(vec![]),
+        }
+        let a = reply(&mut e, &first, at, r#"{"success":true,"order_id":1}"#);
+        let a = settle(&mut e, a);
+        assert_eq!(puts(&a), 0, "{case}: no edit sent");
+        let error = failed(&a, 2);
+        assert!(
+            error.message.contains("was not changed") && error.message.contains(why),
+            "{case}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::NotSent), "{case}");
+    }
+}
+
+#[test]
+fn a_stop_edit_that_never_reads_as_edited_is_a_typed_error() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let mut e = guarded_stop();
+    let old = e.store().order("22").unwrap().price;
+    let new = old - 500.0;
+    let a = edit_stop(&mut e, 1, new);
+    let r = req(&a, Method::Put, "/v3/algo/order/22");
+    let mut a = reply(&mut e, &r, 1010.0, EDIT_SENT);
+    let mut now = 1010.0;
+    for _ in 0..3 {
+        a = tick(&mut e, &a);
+        let read = req(&a, Method::Get, "/v3/algo/order/22");
+        now += 400.0;
+        a = reply(
+            &mut e,
+            &read,
+            now,
+            &format!(
+                r#"{{"success":true,"data":{{"algoOrderId":22,"algoStatus":"NEW","triggerPrice":{old}}}}}"#
+            ),
+        );
+    }
+    let error = failure(&a);
+    assert!(
+        error.message.contains("does not read as edited"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
+    assert_ne!(
+        error.outcome,
+        Some(Outcome::NotSent),
+        "the edit was accepted"
+    );
+    assert_eq!(puts(&a), 0, "never resent");
+}
+
+#[test]
+fn a_stop_edit_whose_read_back_fails_is_typed_apart() {
+    use safe_cex_engine::ErrorKind;
+    let mut e = guarded_stop();
+    let new = e.store().order("22").unwrap().price - 500.0;
+    let a = edit_stop(&mut e, 1, new);
+    let r = req(&a, Method::Put, "/v3/algo/order/22");
+    let a = reply(&mut e, &r, 1010.0, EDIT_SENT);
+    let a = tick(&mut e, &a);
+    let read = req(&a, Method::Get, "/v3/algo/order/22");
+    e.handle(
+        1400.0,
+        Event::HttpResponse {
+            request: read.id,
+            response: Response {
+                status: 503,
+                headers: "",
+                body: r#"{"success":false,"message":"busy"}"#,
+            },
+        },
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    let error = failure(&a);
+    assert!(
+        error.message.contains("could not be read back"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.kind, Some(ErrorKind::VenueUnavailable));
+}
+
+#[test]
+fn a_trailing_edit_that_did_not_take_leaves_the_stop_unchanged() {
+    use safe_cex_engine::Outcome;
+    let mut e = engine();
+    e.store_mut().set_positions(vec![position()]);
+    let mut trailing = order("12", OrderType::TrailingStopLoss);
+    trailing.price = 59000.0;
+    e.store_mut().set_orders(vec![trailing]);
+    e.handle(
+        1000.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "12".into(),
+            price: Some(59500.0),
+            amount: None,
+        }),
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    let r = req(&a, Method::Put, "/v3/algo/order/12");
+    let mut a = reply(&mut e, &r, 1010.0, EDIT_SENT);
+    let mut now = 1010.0;
+    for _ in 0..3 {
+        a = tick(&mut e, &a);
+        let read = req(&a, Method::Get, "/v3/algo/order/12");
+        now += 400.0;
+        a = reply(
+            &mut e,
+            &read,
+            now,
+            r#"{"success":true,"data":{"algoOrderId":12,"algoStatus":"NEW","callbackValue":7}}"#,
+        );
+    }
+    let error = failure(&a);
+    assert!(
+        error.message.contains("was not changed") && error.message.contains("did not take"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert!(
+        !a.iter().any(|a| matches!(a, Action::Http(r) if r.method == Method::Delete || r.method == Method::Post)),
+        "never a cancel and replace"
+    );
+}
+
+#[test]
+fn a_trailing_edit_to_a_zero_distance_is_not_sent() {
+    use safe_cex_engine::Outcome;
+    let mut e = engine();
+    e.store_mut().set_positions(vec![position()]);
+    e.store_mut()
+        .set_orders(vec![order("12", OrderType::TrailingStopLoss)]);
+    let last = e.store().ticker("BTCUSDT").unwrap().last;
+    e.handle(
+        1000.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "12".into(),
+            price: Some(last),
+            amount: None,
+        }),
+    );
+    let a: Vec<_> = e.drain_actions().collect();
+    assert_eq!(puts(&a), 0);
+    let error = failure(&a);
+    assert!(
+        error.message.contains("trailing distance"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+}
+
+/// The v3 algo API documents MARKET_PRICE as the only trigger source: a
+/// trailing stop never sends MARK_PRICE, whatever source it was asked for.
+#[test]
+fn a_trailing_stop_always_trails_the_last_price() {
+    for asked in [None, Some(StopTriggerType::MarkPrice)] {
+        let mut e = engine();
+        e.store_mut().set_positions(vec![position()]);
+        let mut o = opts();
+        o.kind = OrderType::TrailingStopLoss;
+        o.side = OrderSide::Sell;
+        o.price = Some(59000.0);
+        o.amount = 0.001;
+        o.sl_trigger_type = asked;
+        let a = placed(&mut e, vec![o]);
+        let r = req(&a, Method::Post, "/v3/algo/order");
+        let b = r.body.as_ref().unwrap();
+        assert!(
+            b.contains(r#""triggerPriceType":"MARKET_PRICE""#),
+            "{asked:?}: {b}"
+        );
+    }
+}
