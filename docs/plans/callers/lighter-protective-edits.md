@@ -79,8 +79,8 @@ Market-stop edits recover their effective slippage percentage from the accepted
 original native execution bound and trigger. Both guarded replacements and tx17
 apply that percentage to the new trigger using the existing placement rounding.
 This preserves the venue-rounded band; the original unrounded caller percentage
-is not retained. Wrong-side or greater-than-50% bounds are not recoverable under
-the placement policy, so they use the account setting as before. Ordinary
+is not retained. Wrong-side or greater-than-50% bounds refuse before any write
+with an unsupported-original-bound message; the user must re-place it. Ordinary
 placement is unchanged; stop-limits continue to preserve their explicit limit.
 
 Stop-limit edits refuse before any write if the kept sell limit exceeds the new

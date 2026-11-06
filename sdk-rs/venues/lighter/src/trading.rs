@@ -505,6 +505,23 @@ impl Lighter {
                     }
                 };
                 let kind = old.kind;
+                let original = self
+                    .protection
+                    .originals
+                    .get(&old.id)
+                    .filter(|original| original.observed == old);
+                let max_slippage_pct = original.and_then(protection::Original::market_slippage_pct);
+                if original.is_some_and(|original| matches!(original.native.order_type, 2 | 4))
+                    && max_slippage_pct.is_none()
+                {
+                    refuse(
+                        cx,
+                        not_sent(
+                            "Lighter stop not changed: original slippage bound unsupported; re-place it",
+                        ),
+                    );
+                    return;
+                }
                 let opts = PlaceOrderOpts {
                     symbol: old.symbol.clone(),
                     kind,
@@ -521,12 +538,7 @@ impl Lighter {
                     sl_trigger_type: None,
                     client_order_id: None,
                     close: old.close,
-                    max_slippage_pct: self
-                        .protection
-                        .originals
-                        .get(&old.id)
-                        .filter(|original| original.observed == old)
-                        .and_then(protection::Original::market_slippage_pct),
+                    max_slippage_pct,
                     stp_mode: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,

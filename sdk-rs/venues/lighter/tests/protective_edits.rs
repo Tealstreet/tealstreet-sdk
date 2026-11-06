@@ -708,10 +708,6 @@ fn market_stop_edits_preserve_the_native_orders_slippage_on_both_paths() {
                 (2, false, 120., 180., 130., 19500),
                 (2, true, 80., 78.99, 70., 6912),
                 (2, false, 120., 121.01, 130., 13109),
-                (2, true, 80., 81., 70., 6860),
-                (2, false, 120., 119., 130., 13260),
-                (2, true, 80., 39.99, 70., 6860),
-                (2, false, 120., 180.01, 130., 13260),
             ] {
                 let (mut e, feeds, mut timers) = ready_feeds(
                     Options {
@@ -794,6 +790,72 @@ fn market_stop_edits_preserve_the_native_orders_slippage_on_both_paths() {
                 );
                 assert_eq!(wire["TriggerPrice"], (new_trigger * 100.) as u64);
                 assert_eq!(wire["BaseAmount"], 2000);
+            }
+        }
+    }
+}
+
+#[test]
+fn unsupported_original_slippage_refuses_before_any_write_and_keeps_the_stop() {
+    for robinhood in [false, true] {
+        for native_modify in [false, true] {
+            for (ask, trigger, bound, new_trigger) in [
+                (true, 80., 81., 70.),
+                (false, 120., 119., 130.),
+                (true, 80., 39.99, 70.),
+                (false, 120., 180.01, 130.),
+            ] {
+                let (mut e, feeds, _) = ready_feeds(
+                    Options {
+                        robinhood,
+                        testnet: true,
+                        stop_slippage_pct: 2.,
+                        ..options()
+                    },
+                    true,
+                );
+                let mut row = original();
+                row["is_ask"] = json!(ask);
+                row["trigger_status"] = json!(if native_modify {
+                    "mark-price"
+                } else {
+                    "untriggered"
+                });
+                row["trigger_price"] = json!(trigger.to_string());
+                row["price"] = json!(bound.to_string());
+                e.store_mut().update_positions(|p| {
+                    p.side = if ask {
+                        safe_cex_engine::model::PositionSide::Long
+                    } else {
+                        safe_cex_engine::model::PositionSide::Short
+                    }
+                });
+                message(
+                    &mut e,
+                    feeds.private,
+                    NOW,
+                    &json!({"channel":"account_all_orders","orders":[row]}).to_string(),
+                );
+                mark(&mut e, &feeds, NOW, json!({"mark_price":"100"}));
+                drain_at(&mut e, &mut vec![], NOW);
+                let old = e.store().order("42").unwrap().clone();
+                e.handle(
+                    NOW,
+                    Event::Command(Command::AmendOrder {
+                        command: 8,
+                        id: "42".into(),
+                        price: Some(new_trigger),
+                        amount: None,
+                    }),
+                );
+                let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+                assert!(
+                    !out.iter().any(|a| matches!(a, Action::Http(_))),
+                    "RH={robinhood}, modify={native_modify}, ask={ask}, bound={bound}: {out:?}"
+                );
+                assert_eq!(e.store().order("42"), Some(&old));
+                assert_eq!(old.status, safe_cex_engine::model::OrderStatus::Open);
+                assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. }) if error.outcome == Some(Outcome::NotSent) && error.message == "Lighter stop not changed: original slippage bound unsupported; re-place it")), "{out:?}");
             }
         }
     }
