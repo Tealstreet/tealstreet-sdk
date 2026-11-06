@@ -1775,6 +1775,7 @@ impl ApexOmni {
             &raw.id,
             raw.cum_success_fill_size.unwrap_or(0.0),
             matches!(raw.status.as_ref(), "FILLED" | "EXPIRED"),
+            matches!(raw.status.as_ref(), "FILLED" | "EXPIRED" | "CANCELED"),
             raw.updated_at
                 .or(raw.updated_time)
                 .map(execution_milliseconds)
