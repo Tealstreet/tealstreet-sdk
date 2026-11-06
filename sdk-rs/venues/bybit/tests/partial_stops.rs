@@ -2330,6 +2330,349 @@ fn partial_put_back_never_rounds_the_original_native_size_to_current_precision()
 }
 
 #[test]
+fn partial_history_census_uses_proved_creation_time_and_keeps_incomplete_or_paired_rows_unproven() {
+    for profile in PROFILES {
+        for census in [
+            "complete",
+            "history-incomplete",
+            "live-incomplete",
+            "paired",
+            "nearby-unrelated-partial",
+            "outside-window",
+            "missing-time",
+        ] {
+            let mut h = ready(profile);
+            seed(
+                &mut h,
+                profile,
+                "Sell",
+                "StopLoss",
+                "MarkPrice",
+                false,
+                true,
+            );
+            let original = h.engine.store().order("partial").unwrap().clone();
+            let created = h.now as u64 - 100;
+            let mut target = native_partial_target(&h, profile, &original);
+            target["createdTime"] = created.to_string().into();
+            amend(&mut h, Some(95.0), None);
+            h.respond(profile.cancel_path(), 200, r#"{"retCode":0,"result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+            h.respond("&orderId=partial", 200, &serde_json::json!({"retCode":0,"result":{"category":profile.category(),"list":[target.clone()],"nextPageCursor":""}}).to_string());
+            h.respond("&openOnly=0&limit=50", 200, &serde_json::json!({"retCode":0,"result":{"category":profile.category(),"list":[],"nextPageCursor":if census == "live-incomplete" {"more-live"} else {""}}}).to_string());
+            let history = h.take("/v5/order/history");
+            let parameter = |name: &str| {
+                history
+                    .url
+                    .split('&')
+                    .filter_map(|part| part.split_once('='))
+                    .find(|(key, _)| *key == name)
+                    .and_then(|(_, value)| value.parse::<u64>().ok())
+            };
+            let bounded = parameter("startTime") == Some(created.saturating_sub(5_000).max(1))
+                && parameter("endTime") == Some(created + 5_000);
+            assert_eq!(history.method, safe_cex_engine::Method::Get);
+            let peers = if matches!(
+                census,
+                "paired" | "nearby-unrelated-partial" | "outside-window" | "missing-time"
+            ) {
+                let mut peer = target;
+                peer["orderId"] = "paired-leg".into();
+                peer["stopOrderType"] = "TakeProfit".into();
+                peer["triggerPrice"] = "110".into();
+                if census != "paired" {
+                    peer["orderLinkId"] = "unrelated".into();
+                }
+                if census == "nearby-unrelated-partial" {
+                    peer["createdTime"] = (created + 1_000).to_string().into();
+                }
+                if census == "outside-window" {
+                    peer["createdTime"] = (created + 5_001).to_string().into();
+                }
+                if census == "missing-time" {
+                    peer.as_object_mut().unwrap().remove("createdTime");
+                }
+                vec![peer]
+            } else {
+                Vec::new()
+            };
+            // The unbounded seven-day census on a busy account has another page.
+            h.reply(history.id, 200, &serde_json::json!({"retCode":0,"result":{"category":profile.category(),"list":peers,"nextPageCursor":if !bounded || census == "history-incomplete" {"busy-account-next-page"} else {""}}}).to_string());
+            h.respond(
+                "/v5/position/trading-stop",
+                200,
+                r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#,
+            );
+            assert_eq!(
+                h.has_request("/v5/position/trading-stop"),
+                census == "complete",
+                "{profile:?}/{census}: only proved standalone lineage may put back"
+            );
+            if census == "complete" && h.has_request("/v5/position/trading-stop") {
+                h.respond("/v5/position/trading-stop", 200, OK);
+            }
+            let error = h
+                .notices
+                .iter()
+                .find_map(|notice| match notice {
+                    safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            let expected = if census == "complete" {
+                safe_cex_engine::error::Protection::Restored
+            } else {
+                safe_cex_engine::error::Protection::Unprotected
+            };
+            assert_eq!(
+                error.protection,
+                Some(expected),
+                "{profile:?}/{census}: {error:?}"
+            );
+            assert!(
+                bounded,
+                "history must use native createdTime, not Store last_update: {}",
+                history.url
+            );
+            assert!(!h.has_request("/v5/position/trading-stop"));
+        }
+    }
+}
+
+#[test]
+fn partial_initial_cancel_prearms_open_orders_words_for_engine_owned_failures() {
+    for profile in PROFILES {
+        for failure in ["transport", "timeout", "refused"] {
+            let mut h = ready(profile);
+            seed(
+                &mut h,
+                profile,
+                "Sell",
+                "StopLoss",
+                "MarkPrice",
+                false,
+                true,
+            );
+            amend(&mut h, Some(95.0), None);
+            let cancel = h.take(profile.cancel_path());
+            match failure {
+                "transport" => h.event(Event::HttpFailed {
+                    request: cancel.id,
+                    error: "cancel transport lost",
+                }),
+                "timeout" => h.advance(20_001.0),
+                _ => h.reply(
+                    cancel.id,
+                    200,
+                    r#"{"retCode":10001,"retMsg":"cancel refused","result":{}}"#,
+                ),
+            }
+            let error = h
+                .notices
+                .iter()
+                .find_map(|notice| match notice {
+                    safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            if failure == "refused" {
+                assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+                assert!(error.message.contains("cancel refused"), "{error:?}");
+                assert!(!error.message.contains("unknown outcome"), "{error:?}");
+            } else {
+                assert_eq!(
+                    error.outcome,
+                    Some(safe_cex_engine::Outcome::Unknown),
+                    "{error:?}"
+                );
+                assert!(
+                    error.message.contains("unknown outcome")
+                        && error.message.contains("Open Orders"),
+                    "{profile:?}/{failure}: {error:?}"
+                );
+            }
+            assert_eq!(error.protection, None);
+            assert!(!h.has_request("/v5/position/trading-stop"));
+            assert!(!h.has_request(profile.cancel_path()));
+        }
+    }
+}
+
+#[test]
+fn partial_initial_cancel_keeps_a_known_unsent_preparation_refusal() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    let preparation = defer_partial_cancel(&mut h);
+    h.engine.http_preparation_failed(
+        h.now,
+        preparation,
+        safe_cex_engine::request_context::Error::Invalid,
+        safe_cex_engine::VenueError::new("cancel preparation refused")
+            .kind(safe_cex_engine::ErrorKind::InvalidInput),
+    );
+    h.collect();
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::NotSent),
+        "{error:?}"
+    );
+    assert_eq!(error.message, "cancel preparation refused");
+    assert_eq!(error.protection, None);
+    assert_eq!(
+        h.engine.store().order("partial").unwrap().status,
+        OrderStatus::Open
+    );
+    assert!(!h.has_request(profile.cancel_path()));
+    assert!(!h.has_request("/v5/position/trading-stop"));
+}
+
+#[test]
+fn partial_initial_cancel_preparation_timeout_does_not_claim_an_unknown_write() {
+    let profile = PROFILES[0];
+    let mut h = ready(profile);
+    seed(
+        &mut h,
+        profile,
+        "Sell",
+        "StopLoss",
+        "MarkPrice",
+        false,
+        true,
+    );
+    let _preparation = defer_partial_cancel(&mut h);
+    h.advance(20_001.0);
+    let error = h
+        .notices
+        .iter()
+        .find_map(|notice| match notice {
+            safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::NotSent),
+        "{error:?}"
+    );
+    assert!(error.message.contains("timed out"), "{error:?}");
+    assert!(!error.message.contains("unknown outcome"), "{error:?}");
+    assert_eq!(error.protection, None);
+    assert_eq!(
+        h.engine.store().order("partial").unwrap().status,
+        OrderStatus::Open
+    );
+    assert!(!h.has_request(profile.cancel_path()));
+    assert!(!h.has_request("/v5/position/trading-stop"));
+}
+
+#[test]
+fn partial_unproved_creation_time_allows_replacement_without_history_or_put_back() {
+    for profile in PROFILES {
+        for (created, succeeds) in [
+            "missing",
+            "",
+            "0",
+            "-1",
+            "NaN",
+            "18446744073709551616",
+            "1001",
+        ]
+        .into_iter()
+        .flat_map(|created| [(created, true), (created, false)])
+        {
+            let mut h = ready(profile);
+            seed(
+                &mut h,
+                profile,
+                "Sell",
+                "StopLoss",
+                "MarkPrice",
+                false,
+                true,
+            );
+            let original = h.engine.store().order("partial").unwrap().clone();
+            let mut target = native_partial_target(&h, profile, &original);
+            if created == "missing" {
+                target.as_object_mut().unwrap().remove("createdTime");
+            } else {
+                target["createdTime"] = created.into();
+            }
+            amend(&mut h, Some(95.0), None);
+            h.respond(profile.cancel_path(), 200, r#"{"retCode":0,"result":{"orderId":"partial"},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+            h.respond("&orderId=partial", 200, &serde_json::json!({"retCode":0,"result":{"category":profile.category(),"list":[target],"nextPageCursor":""}}).to_string());
+            h.respond("&openOnly=0&limit=50", 200, &serde_json::json!({"retCode":0,"result":{"category":profile.category(),"list":[],"nextPageCursor":""}}).to_string());
+            assert!(!h.has_request("/v5/order/history"), "{created}");
+            assert!(h.has_request("/v5/position/trading-stop"), "{created}");
+            let replacement = h.take("/v5/position/trading-stop");
+            let body: serde_json::Value =
+                serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+            assert_eq!(body["stopLoss"], "95");
+            h.reply(
+                replacement.id,
+                200,
+                if succeeds {
+                    OK
+                } else {
+                    r#"{"retCode":10001,"retMsg":"replacement refused","result":{}}"#
+                },
+            );
+            assert!(!h.has_request("/v5/order/history"), "{created}");
+            assert!(!h.has_request("/v5/position/trading-stop"), "{created}");
+            if succeeds {
+                assert!(
+                    !h.notices.iter().any(|notice| matches!(
+                        notice,
+                        safe_cex_engine::Notice::CommandFailed { command: 91, .. }
+                    )),
+                    "{created}"
+                );
+                assert!(
+                    h.notices.iter().any(|notice| matches!(
+                        notice,
+                        safe_cex_engine::Notice::CommandDone { command: 91, .. }
+                    )),
+                    "{created}"
+                );
+                continue;
+            }
+            let error = h
+                .notices
+                .iter()
+                .find_map(|notice| match notice {
+                    safe_cex_engine::Notice::CommandFailed { command: 91, error } => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                error.protection,
+                Some(safe_cex_engine::error::Protection::Unprotected),
+                "{created}: {error:?}"
+            );
+            assert!(
+                error.message.contains("replacement refused") && error.message.contains("re-place"),
+                "{created}: {error:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn partial_unknown_replacement_or_put_back_never_restores_or_resends() {
     for leg in ["replacement", "put-back"] {
         for (status, reply) in [

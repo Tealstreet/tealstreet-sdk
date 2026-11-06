@@ -15,7 +15,7 @@ use crate::{BybitLinear, Category, Pending, Rest, Then};
 use safe_cex_engine::classify::{
     self, BatchItem, CodeTable, Intent, Native, NativeCode, ReadRetry, Released, Verdict, WriteFact,
 };
-use safe_cex_engine::model::{MarginType, OrderStatus};
+use safe_cex_engine::model::{MarginType, OrderStatus, OrderType};
 use safe_cex_engine::request_context::plan::{
     CallBound, CallTerms, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound,
 };
@@ -198,6 +198,39 @@ fn fields(body: &str) -> Fields {
         order_link_id: None,
         order_id: None,
         items: Vec::new(),
+    })
+}
+
+/// The amend's every field, compared with the stored open order it names: the trigger
+/// against the stored trigger and any quantity against the stored size, as sent.
+fn trigger_amend_matches_store(store: &safe_cex_engine::Store, body: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct TriggerAmend<'a> {
+        #[serde(rename = "category")]
+        _category: &'a str,
+        symbol: &'a str,
+        order_id: &'a str,
+        trigger_price: &'a str,
+        qty: Option<&'a str>,
+    }
+    let Ok(request) = serde_json::from_str::<TriggerAmend>(body) else {
+        return false;
+    };
+    // Only a trigger-bearing row stores its trigger as its price; a limit's is where it fills.
+    store.order(request.order_id).is_some_and(|order| {
+        order.status == OrderStatus::Open
+            && matches!(
+                order.kind,
+                OrderType::StopLoss | OrderType::TakeProfit | OrderType::Conditional
+            )
+            && order.price.is_finite()
+            && order.price > 0.0
+            && request.symbol == order.symbol
+            && request.trigger_price == super::number(order.price)
+            && request
+                .qty
+                .is_none_or(|qty| qty == super::number(order.amount))
     })
 }
 
@@ -702,7 +735,10 @@ impl BybitLinear {
         if run.partial.is_some()
             && matches!(
                 leg.planned.call,
-                Call::PartialProof(_) | Call::PartialStop { .. } | Call::RestorePartialStop { .. }
+                Call::CancelPartialStop { .. }
+                    | Call::PartialProof(_)
+                    | Call::PartialStop { .. }
+                    | Call::RestorePartialStop { .. }
             )
         {
             let _ = cx.present_plan_failure(
@@ -993,7 +1029,18 @@ impl BybitLinear {
                             self.local_order_lifecycle(),
                         );
                     }
-                    if axis == partial::Axis::History && !run.partial.as_ref().unwrap().restorable()
+                    if axis == partial::Axis::Live {
+                        let flow = run.partial.as_mut().unwrap();
+                        if let Some(history) = flow.history_proof() {
+                            run.queue.front_mut().unwrap().planned = history;
+                        } else {
+                            flow.skip_history();
+                            run.queue.pop_front();
+                        }
+                    }
+                    if matches!(axis, partial::Axis::Live | partial::Axis::History)
+                        && !run.partial.as_ref().unwrap().restorable()
+                        && run.partial.as_ref().unwrap().history_done()
                     {
                         for leg in &mut run.queue {
                             if let Call::PartialStop { restore, .. } = &mut leg.planned.call {
@@ -1117,6 +1164,11 @@ impl BybitLinear {
                 }
             }
             Decision::Failed(mut error) => {
+                if matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
+                    && error.outcome != Some(Outcome::Unknown)
+                {
+                    error.presents = true;
+                }
                 if matches!(active.leg.planned.call, Call::PartialStop { .. })
                     && error.outcome != Some(Outcome::Unknown)
                 {
@@ -1385,6 +1437,14 @@ impl BybitLinear {
             .as_ref()
             .is_some_and(|active| active.context == request.context);
         if matches
+            && error.outcome == Some(Outcome::NotSent)
+            && run.active.as_ref().is_some_and(|active| {
+                matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
+            })
+        {
+            let _ = cx.present_plan_failure(&run.plan, error.message.clone());
+        }
+        if matches
             && run
                 .active
                 .as_ref()
@@ -1537,7 +1597,10 @@ impl BybitLinear {
                 message,
                 result,
                 ext,
-            }) => self.refused_leg(cx, id, active, code, message, result, ext),
+            }) => {
+                let http_ok = (200..300).contains(&response.status);
+                self.refused_leg(cx, id, active, code, message, result, ext, http_ok)
+            }
             Ok(Answer::Success { result, ext }) => {
                 self.accepted_leg(cx, active, response, result, ext)
             }
@@ -1578,6 +1641,7 @@ impl BybitLinear {
         message: String,
         result: Option<&serde_json::value::RawValue>,
         ext: Option<&serde_json::value::RawValue>,
+        http_ok: bool,
     ) -> Decision {
         let context = &active.context;
         let planned = &active.leg.planned;
@@ -1589,6 +1653,26 @@ impl BybitLinear {
             && matches!(planned.call, Call::Amend)
             && message == "order not modified"
             && !planned.body.contains("\"triggerPrice\"")
+        {
+            let target = fields(&planned.body).order_id.unwrap_or_default();
+            return if Self::accepted(cx, context, vec![target.clone()]) {
+                Decision::Next(vec![target])
+            } else {
+                Decision::Lost
+            };
+        }
+        // A trigger amend is done only when the whole answer is provably clean (a 2xx
+        // naming nothing but its own order, strictly decoded) and every value it carries
+        // already equals the stored stop's: compared directly, never masking a refusal.
+        if code == 10001
+            && matches!(planned.call, Call::Amend)
+            && message == "order not modified"
+            && planned.body.contains("\"triggerPrice\"")
+            && http_ok
+            && fields(&planned.body)
+                .order_id
+                .is_some_and(|own| ack::clean_amend_refusal(result, ext, &own).is_ok())
+            && trigger_amend_matches_store(cx.store, &planned.body)
         {
             let target = fields(&planned.body).order_id.unwrap_or_default();
             return if Self::accepted(cx, context, vec![target.clone()]) {
