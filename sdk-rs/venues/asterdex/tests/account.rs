@@ -2180,6 +2180,23 @@ fn an_ordinary_replacement_refused_with_an_unlisted_code_stays_refused() {
     assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
 }
 
+// -1015 TOO_MANY_ORDERS is a documented rate limit: on a stop's replacement it may have
+// placed the order, so it is unknown and never put back, whatever the HTTP status.
+#[test]
+fn a_too_many_orders_replacement_is_unknown_and_never_put_back() {
+    let mut h = guarded_stop();
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond_status(
+        replacement,
+        400,
+        r#"{"code":-1015,"msg":"Too many new orders."}"#,
+    );
+    assert_unknown_stop(&h);
+}
+
 // The put-back is a protective write too: an undocumented code on it is unknown, and
 // nothing is sent again.
 #[test]

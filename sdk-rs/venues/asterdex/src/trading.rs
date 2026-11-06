@@ -980,8 +980,9 @@ impl AsterDex {
             outcome => outcome,
         };
         let replied = outcome.is_ok();
-        // A 429 may have placed the order: a guarded stop's outcome is unknown, not refused.
-        let rate_limited = status_429 || matches!(outcome, Err((-1003, _)));
+        // A 429 or a documented rate-limit code (-1003 TOO_MANY_REQUESTS, -1015
+        // TOO_MANY_ORDERS) may have placed the order: a guarded leg's outcome is unknown.
+        let rate_limited = status_429 || matches!(outcome, Err((-1003 | -1015, _)));
         let mut placed = None;
         let mut result = None;
         let outcome = match (request.call, outcome) {
