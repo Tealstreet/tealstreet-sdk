@@ -3056,7 +3056,7 @@ impl BitgetFutures {
                     .collect();
                 items.extend(failures.iter().map(|(code, message)| {
                     BatchItem::Native(Native {
-                        code: table_code(*code, message).map_or(NativeCode::None, NativeCode::Int),
+                        code: code.map_or(NativeCode::None, NativeCode::Int),
                         message: message.as_str(),
                     })
                 }));
@@ -3822,13 +3822,17 @@ fn failure_text(failures: &[(Option<i64>, String)]) -> String {
         .join_with("; ")
 }
 
-/// Each failed row's message and integer code, when Bitget sends one.
+/// Each failed row's message and integer code, when Bitget sends one. The code
+/// is read from the venue's own text here, before any rewording of the message.
 fn failure_messages(failures: &[Failure]) -> Vec<(Option<i64>, String)> {
     failures
         .iter()
         .map(|e| {
             let code = e.error_code.0.filter(|code| code.fract() == 0.0);
-            (code.map(|code| code as i64), e.error_msg.clone())
+            (
+                table_code(code.map(|code| code as i64), &e.error_msg),
+                e.error_msg.clone(),
+            )
         })
         .collect()
 }
@@ -3953,6 +3957,27 @@ mod code_table_tests {
                 assert_eq!(row.key, Key::Int(40009), "{row:?}");
             }
             assert!(!matches!(row.verdict, Verdict::Satisfied(_)), "{row:?}");
+        }
+    }
+
+    /// The position refusal's code is fixed from the venue's text when the rows are
+    /// read, so a message reworded after that (the close-locked wording) still classifies.
+    #[test]
+    fn a_code_less_position_refusal_keeps_its_kind_after_rewording() {
+        let rows: Vec<Failure> = serde_json::from_str(
+            r#"[{"errorMsg":"Not enough position is available"},{"errorMsg":"Not enough position is available","errorCode":"40999"}]"#,
+        )
+        .unwrap();
+        for (code, _) in failure_messages(&rows) {
+            let reworded = "only 0.4 of the 1 BTCUSDT long is free to close; 0.6 is held by open close orders, cancel them first (Not enough position is available)";
+            let native = Native {
+                code: code.map_or(NativeCode::None, NativeCode::Int),
+                message: reworded,
+            };
+            assert_eq!(
+                CODES.verdict(&native, Intent::Place),
+                Verdict::Refused(ErrorKind::InvalidInput)
+            );
         }
     }
 }
