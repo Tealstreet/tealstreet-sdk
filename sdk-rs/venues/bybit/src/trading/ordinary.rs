@@ -201,6 +201,32 @@ fn fields(body: &str) -> Fields {
     })
 }
 
+/// The amend's every field, compared with the stored open order it names: the trigger
+/// against the stored trigger and any quantity against the stored size, as sent.
+fn trigger_amend_matches_store(store: &safe_cex_engine::Store, body: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct TriggerAmend<'a> {
+        #[serde(rename = "category")]
+        _category: &'a str,
+        symbol: &'a str,
+        order_id: &'a str,
+        trigger_price: &'a str,
+        qty: Option<&'a str>,
+    }
+    let Ok(request) = serde_json::from_str::<TriggerAmend>(body) else {
+        return false;
+    };
+    store.order(request.order_id).is_some_and(|order| {
+        order.status == OrderStatus::Open
+            && request.symbol == order.symbol
+            && request.trigger_price == super::number(order.price)
+            && request
+                .qty
+                .is_none_or(|qty| qty == super::number(order.amount))
+    })
+}
+
 const TRAILING_PROFIT_UNEDITABLE: &str =
     "A Bybit trailing take-profit cannot be edited here; cancel and recreate it on Bybit";
 
@@ -1589,6 +1615,21 @@ impl BybitLinear {
             && matches!(planned.call, Call::Amend)
             && message == "order not modified"
             && !planned.body.contains("\"triggerPrice\"")
+        {
+            let target = fields(&planned.body).order_id.unwrap_or_default();
+            return if Self::accepted(cx, context, vec![target.clone()]) {
+                Decision::Next(vec![target])
+            } else {
+                Decision::Lost
+            };
+        }
+        // A trigger amend is done only when every value it carries already equals the
+        // stored order's: compared directly, so a genuine refusal is never masked.
+        if code == 10001
+            && matches!(planned.call, Call::Amend)
+            && message == "order not modified"
+            && planned.body.contains("\"triggerPrice\"")
+            && trigger_amend_matches_store(cx.store, &planned.body)
         {
             let target = fields(&planned.body).order_id.unwrap_or_default();
             return if Self::accepted(cx, context, vec![target.clone()]) {

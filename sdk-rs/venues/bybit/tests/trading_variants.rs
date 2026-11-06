@@ -4940,3 +4940,61 @@ fn spot_attached_stop_loss_amend_omits_derivative_trigger_reference() {
     );
     assert!(!h.has_request("/v5/order/cancel"));
 }
+
+fn stop_row(trigger: &str, qty: &str) -> String {
+    format!(
+        r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"stop","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"Stop","triggerPrice":"{trigger}","triggerBy":"MarkPrice","side":"Sell","price":"0","qty":"{qty}","leavesQty":"{qty}","reduceOnly":true,"closeOnTrigger":true}}]}}"#
+    )
+}
+
+fn amend_stop(h: &mut Harness, command: u32, price: f64, amount: Option<f64>) -> String {
+    h.command(Command::AmendOrder {
+        command,
+        id: "stop".into(),
+        price: Some(price),
+        amount,
+    });
+    if h.has_request("/v5/position/list") {
+        resolve_mode(h, "BTCUSDT");
+    }
+    let request = h.take("/v5/order/amend");
+    let body = request.body.clone().unwrap_or_default();
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    body
+}
+
+/// A stop moved to the trigger it already has: Bybit answers "order not modified"
+/// (prod, release 7dd55432) and the edit is done, not an error.
+#[test]
+fn a_trigger_amend_equal_to_the_stored_stop_is_done_when_not_modified() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("60000", "1"));
+    let body = amend_stop(&mut h, 3, 60000.0, None);
+    assert!(body.contains(r#""triggerPrice":"60000""#), "{body}");
+    assert!(h.result(3).unwrap().is_ok(), "{:?}", h.result(3));
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("60000", "1"));
+    amend_stop(&mut h, 4, 60000.0, Some(1.0));
+    assert!(h.result(4).unwrap().is_ok(), "{:?}", h.result(4));
+}
+
+/// Anything the stored stop does not already hold stays Bybit's refusal.
+#[test]
+fn a_trigger_amend_that_differs_from_the_stored_stop_stays_refused() {
+    for (price, amount) in [(60100.0, None), (60000.0, Some(2.0))] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        amend_stop(&mut h, 5, price, amount);
+        let result = h.result(5).unwrap();
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.contains("order not modified")),
+            "{price} {amount:?}: {result:?}"
+        );
+    }
+}
