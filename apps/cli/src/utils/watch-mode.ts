@@ -8,6 +8,7 @@
  * - Alternate screen buffer
  * - Cleanup and readline restoration
  */
+import { terminalText } from '../console-glyphs';
 import { resumeFooter, suspendFooter } from '../footer';
 import { suspendStatusLine, resumeStatusLine } from '../status-line';
 
@@ -223,9 +224,9 @@ export class WatchMode {
   render(content: string): void {
     if (!this._isActive) return;
     if (this.config.useAltScreen) {
-      process.stdout.write(CURSOR_HOME + CLEAR_SCREEN + content);
+      process.stdout.write(CURSOR_HOME + CLEAR_SCREEN + terminalText(content));
     } else {
-      process.stdout.write(content);
+      process.stdout.write(terminalText(content));
     }
   }
 
@@ -234,7 +235,7 @@ export class WatchMode {
    */
   write(content: string): void {
     if (!this._isActive) return;
-    process.stdout.write(content);
+    process.stdout.write(terminalText(content));
   }
 }
 
