@@ -201,9 +201,6 @@ pub struct AccountState {
     derivative_trade_order: VecDeque<(String, u64, i64)>,
     derivative_fill_watermarks: HashMap<(String, u64), f64>,
     terminal_algo_ids: HashSet<String>,
-    /// COIN-M orders read or placed through the algo endpoints. Stops placed before the
-    /// CM algo migration stay on the order endpoint and are cancelled there.
-    pub(crate) coin_algo_ids: HashSet<String>,
     /// Orders whose native type executes at a limit price once triggered.
     pub(crate) limit_stops: HashSet<String>,
     /// The native hedge side of open rows; `reduceOnly` alone does not prove it.
@@ -1471,17 +1468,15 @@ impl BinanceFutures {
                     });
                 });
                 rejected.extend(undecodable);
+                // COIN-M algo rows say so on the row itself, so the routing reaches a
+                // frame-fed engine with the order (stops placed before the migration lack it).
                 if self.is_inverse() {
                     for order in &mut orders {
                         order.extra = Some(OrderExtra {
                             remaining_native: Some(order.remaining),
+                            native_algo: true,
                             ..OrderExtra::default()
                         });
-                    }
-                    if parsed.is_ok() {
-                        self.account
-                            .coin_algo_ids
-                            .extend(orders.iter().map(|order| order.id.clone()));
                     }
                 }
                 let read = cx.order_read_mark();
@@ -2581,9 +2576,6 @@ impl BinanceFutures {
                 };
                 self.note_limit_stops([(id.clone(), executes_at_limit(&o.o, false))]);
                 self.note_position_side(&id, o.ps.as_deref());
-                if self.is_inverse() {
-                    self.account.coin_algo_ids.insert(id.clone());
-                }
                 let amount = opt(&o.q);
                 cx.store.upsert_order(Order {
                     id,
@@ -2606,6 +2598,7 @@ impl BinanceFutures {
                     stop_loss: None,
                     extra: self.is_inverse().then(|| OrderExtra {
                         remaining_native: Some(amount),
+                        native_algo: true,
                         ..OrderExtra::default()
                     }),
                 });

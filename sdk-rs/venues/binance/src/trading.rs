@@ -295,6 +295,11 @@ fn tif_text(tif: TimeInForce) -> &'static str {
     }
 }
 
+/// A row read or streamed from the venue's algo endpoints, carried on the row itself.
+fn native_algo(order: &Order) -> bool {
+    order.extra.as_ref().is_some_and(|extra| extra.native_algo)
+}
+
 fn is_algo(kind: OrderType) -> bool {
     matches!(
         kind,
@@ -913,7 +918,6 @@ impl BinanceFutures {
         let mut evidence_ids = Vec::new();
         let mut known_cancel_effects = false;
         let mut restore_planned = false;
-        let places_algo = matches!(call, Call::PlaceAlgo { .. });
         let error = match (call, outcome) {
             (Call::PlaceOne { .. }, Ok(body)) if self.is_options() => {
                 if let Some(id) = crate::options::placed_id(body) {
@@ -960,9 +964,6 @@ impl BinanceFutures {
                 match serde_json::from_str::<PlacedOrder>(body) {
                     Ok(placed) => match placed.order_id.or(placed.algo_id) {
                         Some(id) => {
-                            if places_algo && self.is_inverse() {
-                                self.account.coin_algo_ids.insert(id.to_string());
-                            }
                             ids.push(id.to_string());
                             None
                         }
@@ -1513,7 +1514,7 @@ impl BinanceFutures {
         }
         // COIN-M stops placed before the algo migration still live on the order endpoint.
         if self.is_inverse() {
-            return self.account.coin_algo_ids.contains(&order.id);
+            return native_algo(order);
         }
         is_algo(order.kind)
     }
@@ -2863,7 +2864,7 @@ impl BinanceFutures {
             && !self.client_order_row_is_foreign(cx, &target.symbol, &target.id)
             && cx.store.order(&target.id).is_none_or(|order| {
                 let algo = if self.is_inverse() {
-                    self.account.coin_algo_ids.contains(&order.id)
+                    native_algo(order)
                 } else {
                     !self.is_spot() && is_algo(order.kind)
                 };

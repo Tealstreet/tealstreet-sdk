@@ -378,3 +378,114 @@ fn an_ordinary_limit_is_unchanged() {
         "POST https://dapi.binance.com/dapi/v1/order?symbol=BTCUSD_PERP&positionSide=BOTH&side=BUY&type=LIMIT&workingType=MARK_PRICE&price=9100&timeInForce=GTC&quantity=7&newClientOrderId=x-s3vFFRQpj7sHRjFY3nmpX4uRVHBu&timestamp=1000&recvWindow=20000&signature=36ee5df57d02fc0698c861e3049ecdc200a8e4976380ec12891debeab7e07000"
     );
 }
+
+/// A frame-fed COIN-M engine (no sockets, no account reads) fed `source`'s snapshot:
+/// the algo routing rides each order row, so its writes match the source's.
+fn fed_from(source: &mut Harness) -> Harness {
+    let mut engine = support::engine(Options {
+        variant: Variant::CoinM,
+        key: Some("api-key".into()),
+        secret: Some("secret".into()),
+        ..Options::default()
+    });
+    engine.set_frame_fed().unwrap();
+    let mut fed = Harness::from_engine(engine);
+    fed.respond("/dapi/v1/exchangeInfo", 200, r#"{"symbols":[{"symbol":"BTCUSD_PERP","status":"TRADING","baseAsset":"BTC","quoteAsset":"USD","marginAsset":"BTC","contractType":"PERPETUAL","contractSize":100,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"},{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}]}]}"#);
+    assert!(fed.requests.is_empty(), "{:?}", fed.paths());
+    fed.now = source.now;
+    let frame = source.engine.snapshot_frame(source.now).to_vec();
+    fed.engine.apply_frame(fed.now, &frame, true).unwrap();
+    fed.collect();
+    assert!(
+        fed.requests.is_empty(),
+        "ingest reads nothing: {:?}",
+        fed.paths()
+    );
+    for id in ["5550", "14"] {
+        assert!(fed.engine.store().order(id).is_some(), "{id} ingested");
+    }
+    fed
+}
+
+#[test]
+fn a_frame_fed_engine_cancels_an_algo_stop_by_its_algo_id_and_a_legacy_one_on_the_order_endpoint() {
+    let mut source = ready();
+    let mut fed = fed_from(&mut source);
+    fed.event(Event::Command(Command::CancelOrders {
+        command: 40,
+        ids: vec!["5550".into()],
+    }));
+    let cancel = fed.take("/dapi/v1/algoOrder");
+    assert_eq!(cancel.method, Method::Delete);
+    assert_eq!(param(&cancel.url, "algoId").as_deref(), Some("5550"));
+    assert!(fed.requests.is_empty(), "{:?}", fed.paths());
+    fed.event(Event::Command(Command::CancelOrders {
+        command: 41,
+        ids: vec!["14".into()],
+    }));
+    let legacy = fed.take("/dapi/v1/order");
+    assert_eq!(legacy.method, Method::Delete);
+    assert_eq!(param(&legacy.url, "orderId").as_deref(), Some("14"));
+}
+
+#[test]
+fn a_frame_fed_engine_amends_an_algo_stop_through_the_algo_endpoint() {
+    let mut source = ready();
+    let mut fed = fed_from(&mut source);
+    fed.event(Event::Command(Command::AmendOrder {
+        command: 42,
+        id: "5550".into(),
+        price: Some(8600.0),
+        amount: None,
+    }));
+    let cancel = fed.take("/dapi/v1/algoOrder");
+    assert_eq!(cancel.method, Method::Delete);
+    assert!(!fed.has_request("/dapi/v1/order?"), "{:?}", fed.paths());
+    fed.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":5550,"clientAlgoId":"algo","code":"200","msg":"success"}"#,
+    );
+    let replacement = fed.take("/dapi/v1/algoOrder");
+    assert_eq!(replacement.method, Method::Post);
+    assert_eq!(
+        param(&replacement.url, "triggerPrice").as_deref(),
+        Some("8600")
+    );
+}
+
+#[test]
+fn a_frame_fed_cancel_all_cancels_its_algo_stops_by_algo_id() {
+    let mut source = ready();
+    let mut fed = fed_from(&mut source);
+    fed.event(Event::Command(Command::CancelSymbolOrders {
+        command: 43,
+        symbol: "BTCUSD_PERP".into(),
+    }));
+    let all = fed.take("/dapi/v1/allOpenOrders");
+    let algo = fed.take("/dapi/v1/algoOrder");
+    assert_eq!(algo.method, Method::Delete);
+    assert_eq!(param(&algo.url, "algoId").as_deref(), Some("5550"));
+    fed.reply(
+        all.id,
+        200,
+        "",
+        r#"{"code":200,"msg":"The operation of cancel all open order is done."}"#,
+    );
+    // Until its own cancel answers, the algo stop is not counted cancelled.
+    assert_ne!(
+        fed.engine.store().order("5550").unwrap().status,
+        OrderStatus::Canceled
+    );
+    fed.reply(
+        algo.id,
+        200,
+        "",
+        r#"{"algoId":5550,"clientAlgoId":"algo","code":"200","msg":"success"}"#,
+    );
+    assert_eq!(
+        fed.engine.store().order("5550").unwrap().status,
+        OrderStatus::Canceled
+    );
+}
