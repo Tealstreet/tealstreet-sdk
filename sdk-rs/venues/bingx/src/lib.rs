@@ -19,6 +19,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::selected_read::ReadRole;
 use safe_cex_engine::socket_lifecycle::FeedId;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketId, Store, SubscriptionTopic,
     TimerId, Venue, num,
@@ -125,7 +126,7 @@ pub(crate) fn log_skipped(cx: &mut Cx<'_, Pending>, kind: &str, ids: &[String]) 
         format!(
             "BingX skipped {} malformed {kind} row(s): {}{}",
             ids.len(),
-            shown.join(", "),
+            shown.join_with(", "),
             if more > 0 {
                 format!(" and {more} more")
             } else {
@@ -1779,7 +1780,7 @@ fn reread_partial<P>(
 }
 
 fn candle_data(mut rows: Vec<Candle>) -> Result<String, String> {
-    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+    safe_cex_engine::model::sort_candles_by_time(&mut rows);
     serde_json::to_string(&rows).map_err(|error| error.to_string())
 }
 

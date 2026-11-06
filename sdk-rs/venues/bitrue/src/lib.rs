@@ -848,7 +848,7 @@ impl Bitrue {
                                             && to.is_none_or(|t| c.timestamp * 1000.0 <= t)
                                     })
                                     .collect();
-                                result.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                                safe_cex_engine::model::sort_candles_by_time(&mut result);
                                 result.dedup_by(|a, b| a.timestamp == b.timestamp);
                                 if result.len() > limit as usize {
                                     result.drain(..result.len() - limit as usize);
@@ -877,6 +877,24 @@ impl Venue for Bitrue {
     }
     fn guard_order_mutations(&self) -> bool {
         true
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        match &pending.job {
+            Job::Trade(request) => self.trade_release_veto(store, request, release),
+            _ => Ok(()),
+        }
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
     }
     fn capture_http_reconciliation(
         &self,

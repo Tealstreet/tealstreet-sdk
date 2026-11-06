@@ -80,6 +80,11 @@ const CODES: CodeTable = CodeTable {
     ],
 };
 
+/// Whether a failed place proves no order exists. A 429 may have placed it.
+fn definite_refusal(error: &VenueError) -> bool {
+    error.outcome != Some(Outcome::Unknown) && error.kind != Some(ErrorKind::RateLimited)
+}
+
 const fn refused(key: Key, kind: ErrorKind) -> Row {
     Row {
         key,
@@ -105,7 +110,13 @@ pub(crate) struct Trading {
     /// A job whose Plan the engine sealed itself: restore its Store rows and
     /// reconcile at the next callback that holds Cx.
     retired: Option<Job>,
+    /// Orders put back under new ids after a refused replacement: (original
+    /// native id, new native ids, symbol). A later cancel of the original or its
+    /// market reaches them.
+    restored: VecDeque<(String, Vec<String>, String)>,
 }
+/// How many put-back orders are remembered for a later cancel to follow.
+const RESTORED_KEPT: usize = 64;
 struct Queued {
     preflight: Preflight,
     command: Command,
@@ -150,6 +161,66 @@ struct Job {
     amend_fallback: VecDeque<Step>,
     /// The read-back that must show the kept leg after an accepted amend-tpsl.
     amend_verify: Option<Step>,
+    /// An amend's replaced original, re-checked when its cancel is finally sent.
+    guard: Option<StopGuard>,
+    /// The original placed again, unchanged, once its replacement is refused.
+    restore: VecDeque<Step>,
+    /// The put-back is under way: the replacement was refused.
+    restoring: bool,
+}
+/// The amended order (and the entry it is attached to) as planned, and the
+/// replacement trigger's reference: the cancel goes only while all still hold.
+struct StopGuard {
+    order: Order,
+    parent: Option<Order>,
+    trigger: f64,
+    reference: StopTriggerType,
+    /// The side a live protective trigger must stay on; None when nothing can
+    /// fire at once (an untriggered entry or the leg of an unfilled entry).
+    below: Option<bool>,
+}
+impl StopGuard {
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        let unchanged = || format!("Your {} order was not changed", self.order.symbol);
+        // This cancel's own optimistic Canceling status is not a change.
+        let same = |planned: &Order| {
+            store.order(&planned.id).is_some_and(|current| {
+                current == planned
+                    || (current.status == OrderStatus::Canceling && {
+                        let mut current = current.clone();
+                        current.status = planned.status;
+                        current == *planned
+                    })
+            })
+        };
+        if !same(&self.order) || self.parent.as_ref().is_some_and(|parent| !same(parent)) {
+            return Err(refused(Some(format!(
+                "{}: it changed before cancellation",
+                unchanged()
+            ))));
+        }
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::IndexPrice => "index",
+            StopTriggerType::LastPrice => "last",
+        };
+        let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
+            return Err(refused(Some(format!(
+                "{}: a fresh {label} price is required before cancellation",
+                unchanged()
+            ))));
+        };
+        if let Some(below) = self.below
+            && ((below && self.trigger >= price) || (!below && self.trigger <= price))
+        {
+            return Err(refused(Some(format!(
+                "{}: the replacement would trigger immediately against the {label} price",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
 }
 struct Step {
     receipts: Vec<OrderIdentityReceipt>,
@@ -176,7 +247,23 @@ enum Effect {
         kept: OrderType,
     },
     Verify(Target),
+    /// A native in-place stop edit (amend-order, amend-tpsl or amend-algo): a
+    /// refusal leaves the stop as it was. `symbol` names it ("BTCUSDT stop").
+    NativeAmend {
+        symbol: String,
+    },
+    /// The read after an accepted native edit: the order must show exactly it.
+    VerifyAmend(Box<AmendCheck>),
     Setting,
+}
+/// What an accepted native stop edit must leave on its native order.
+struct AmendCheck {
+    symbol: String,
+    /// The native id field and value naming the order in the read.
+    key: (&'static str, String),
+    inst_id: String,
+    /// Native fields and the values they must now read.
+    fields: Vec<(&'static str, f64)>,
 }
 #[derive(Default)]
 enum Commit {
@@ -407,12 +494,18 @@ impl Job {
             replacing_order: None,
             amend_fallback: VecDeque::new(),
             amend_verify: None,
+            guard: None,
+            restore: VecDeque::new(),
+            restoring: false,
         }
     }
 }
 impl Step {
     fn read(&self) -> bool {
-        matches!(self.effect, Effect::Verify(_) | Effect::VerifyTpsl { .. })
+        matches!(
+            self.effect,
+            Effect::Verify(_) | Effect::VerifyTpsl { .. } | Effect::VerifyAmend(_)
+        )
     }
     fn is_place(&self) -> bool {
         matches!(self.effect, Effect::Place { .. })
@@ -421,8 +514,8 @@ impl Step {
         match self.effect {
             Effect::Place { .. } => Intent::Place,
             Effect::Cancel(_) => Intent::Cancel,
-            Effect::AmendTpsl(_) => Intent::Amend,
-            Effect::Verify(_) | Effect::VerifyTpsl { .. } => Intent::Read,
+            Effect::AmendTpsl(_) | Effect::NativeAmend { .. } => Intent::Amend,
+            Effect::Verify(_) | Effect::VerifyTpsl { .. } | Effect::VerifyAmend(_) => Intent::Read,
             Effect::Setting => Intent::Setting,
         }
     }
@@ -655,15 +748,21 @@ impl Blofin {
                             source.sl_order_price
                         }));
                 }
+                // The original row's references, sent explicitly; BloFin's default is last.
+                let reference = |kind: &str| match kind {
+                    "" => Some("last".to_owned()),
+                    "last" | "mark" | "index" => Some(kind.to_owned()),
+                    _ => None,
+                };
                 if payload.protection.tp_trigger_price.is_some()
-                    && matches!(source.tp_type.as_str(), "last" | "mark" | "index")
+                    && let Some(kind) = reference(&source.tp_type)
                 {
-                    payload.protection.tp_trigger_price_type = Some(source.tp_type.clone());
+                    payload.protection.tp_trigger_price_type = Some(kind);
                 }
                 if payload.protection.sl_trigger_price.is_some()
-                    && matches!(source.sl_type.as_str(), "last" | "mark" | "index")
+                    && let Some(kind) = reference(&source.sl_type)
                 {
-                    payload.protection.sl_trigger_price_type = Some(source.sl_type.clone());
+                    payload.protection.sl_trigger_price_type = Some(kind);
                 }
             }
             if !conditional && !protective && (!payload.attach_algo_orders.is_empty()) {
@@ -935,6 +1034,311 @@ impl Blofin {
             }
         }
         Ok(out)
+    }
+    /// A stop, take-profit or trigger edit BloFin cannot make in place: its
+    /// cancel is re-checked at the final send, and the original (with its
+    /// attached legs, or the entry carrying it) is placed again if the
+    /// replacement is refused outright.
+    fn guard_replacement(
+        &self,
+        cx: &Cx<'_, Pending>,
+        job: &mut Job,
+        order: &Order,
+        price: Option<f64>,
+    ) -> Result<(), String> {
+        let leg = matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        if !leg && order.kind != OrderType::Conditional {
+            return Ok(());
+        }
+        let source = self.account.sources.get(&order.id);
+        let parent = source
+            .filter(|s| leg && s.tpsl_id.is_empty() && !s.order_id.is_empty())
+            .and_then(|s| cx.store.order(&s.order_id))
+            .cloned();
+        let original = parent.as_ref().unwrap_or(order);
+        let m = cx
+            .store
+            .market(&order.symbol)
+            .ok_or("Unknown replacement market")?;
+        let trigger = num::adjust(price.unwrap_or(order.price), m.precision.price);
+        let kind = match (order.kind, source) {
+            (OrderType::StopLoss, Some(s)) => s.sl_type.as_str(),
+            (OrderType::TakeProfit, Some(s)) => s.tp_type.as_str(),
+            (_, Some(s)) => s.trigger_price_type.as_str(),
+            (_, None) => "",
+        };
+        let reference = match kind {
+            "mark" => StopTriggerType::MarkPrice,
+            "index" => StopTriggerType::IndexPrice,
+            _ => StopTriggerType::LastPrice,
+        };
+        // A leg acts only once its entry has filled; a standalone stop acts at once.
+        let live = leg && parent.as_ref().is_none_or(|p| p.filled > 0.0);
+        let below =
+            live.then(|| (order.kind == OrderType::StopLoss) == (order.side == OrderSide::Sell));
+        let guard = StopGuard {
+            order: order.clone(),
+            parent: parent.clone(),
+            trigger,
+            reference,
+            below,
+        };
+        guard
+            .validate(cx.store, cx.now)
+            .map_err(|error| error.message)?;
+        let mut restore = Job::new(job.command, Intent::Place);
+        Self::add_placements(&mut restore, self.replacement(cx, original, None, None)?);
+        job.guard = Some(guard);
+        job.restore = restore.steps;
+        Ok(())
+    }
+    /// The final-claim re-check of an amend's destructive cancel.
+    pub(crate) fn stop_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Pending::Trade(request) = pending else {
+            return Ok(());
+        };
+        let Effect::Cancel(_) = &request.step.effect else {
+            return Ok(());
+        };
+        let Some(guard) = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|active| active.job.command == request.command && !active.job.restoring)
+            .and_then(|active| active.job.guard.as_ref())
+        else {
+            return Ok(());
+        };
+        guard.validate(store, release.time.raw_ms)
+    }
+    /// A stop edit BloFin can make in place: the edited field alone (omitted
+    /// fields stay unchanged), then a read that must show exactly that edit.
+    /// None when the order's shape has no native edit (the guarded replacement).
+    fn native_amend(
+        &self,
+        cx: &Cx<'_, Pending>,
+        order: &Order,
+        price: Option<f64>,
+        amount: Option<f64>,
+    ) -> Result<Option<Vec<Step>>, String> {
+        let Some(source) = self.account.sources.get(&order.id) else {
+            return Ok(None);
+        };
+        if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
+            return Err("Cannot amend a terminal BloFin order".into());
+        }
+        let m = cx
+            .store
+            .market(&order.symbol)
+            .ok_or("Unknown amend market")?;
+        let trigger = price
+            .map(|p| {
+                let trigger = num::adjust(p, m.precision.price);
+                positive(trigger, "amend price").map(|()| trigger)
+            })
+            .transpose()?;
+        let contract = m.contract_size.unwrap_or(1.0);
+        let size = amount
+            .map(|total| {
+                let filled = order
+                    .extra
+                    .as_ref()
+                    .and_then(|e| e.filled_in_placement_units)
+                    .unwrap_or(order.filled / contract);
+                num::left_of_total(total, filled)
+            })
+            .transpose()?;
+        let leg = matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit);
+        let sl = order.kind == OrderType::StopLoss;
+        // The sibling leg, which must still read as it was.
+        let sibling = |sl: bool| if sl { source.tp } else { source.sl };
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Amend<'a> {
+            inst_id: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            order_id: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            tpsl_id: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            algo_id: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_size: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_trigger_price: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_tp_trigger_price: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            new_sl_trigger_price: Option<String>,
+        }
+        let mut body = Amend {
+            inst_id: &source.inst_id,
+            order_id: None,
+            tpsl_id: None,
+            algo_id: None,
+            new_size: None,
+            new_trigger_price: None,
+            new_tp_trigger_price: None,
+            new_sl_trigger_price: None,
+        };
+        let mut fields = Vec::new();
+        let (path, read, key) = if leg && !source.tpsl_id.is_empty() {
+            // A standalone TP/SL order: its legs and size.
+            if let Some(trigger) = trigger {
+                let value = Some(num::format(trigger));
+                if sl {
+                    body.new_sl_trigger_price = value;
+                    fields.push(("slTriggerPrice", trigger));
+                } else {
+                    body.new_tp_trigger_price = value;
+                    fields.push(("tpTriggerPrice", trigger));
+                }
+            }
+            if sibling(sl) > 0.0 {
+                fields.push((
+                    if sl {
+                        "tpTriggerPrice"
+                    } else {
+                        "slTriggerPrice"
+                    },
+                    sibling(sl),
+                ));
+            }
+            if let Some(size) = size {
+                body.new_size = Some(num::format(size));
+                fields.push(("size", size));
+            }
+            body.tpsl_id = Some(&source.tpsl_id);
+            (
+                "/api/v1/trade/amend-tpsl",
+                "/api/v1/trade/orders-tpsl-pending",
+                ("tpslId", source.tpsl_id.clone()),
+            )
+        } else if leg && !source.order_id.is_empty() {
+            // Attached to an entry: only an open, unfilled limit entry edits in place.
+            let Some(parent) = cx.store.order(&source.order_id) else {
+                return Ok(None);
+            };
+            if parent.kind != OrderType::Limit
+                || parent.status != OrderStatus::Open
+                || parent.filled != 0.0
+            {
+                return Ok(None);
+            }
+            let Some(trigger) = trigger else {
+                // Attached protection follows its entry's size.
+                return Ok(None);
+            };
+            if sl {
+                body.new_sl_trigger_price = Some(num::format(trigger));
+                fields.push(("slTriggerPrice", trigger));
+            } else {
+                body.new_tp_trigger_price = Some(num::format(trigger));
+                fields.push(("tpTriggerPrice", trigger));
+            }
+            if sibling(sl) > 0.0 {
+                fields.push((
+                    if sl {
+                        "tpTriggerPrice"
+                    } else {
+                        "slTriggerPrice"
+                    },
+                    sibling(sl),
+                ));
+            }
+            fields.push(("price", parent.price));
+            fields.push((
+                "size",
+                parent
+                    .extra
+                    .as_ref()
+                    .and_then(|e| e.remaining_native)
+                    .unwrap_or(parent.amount / contract),
+            ));
+            body.order_id = Some(&source.order_id);
+            (
+                "/api/v1/trade/amend-order",
+                "/api/v1/trade/order-detail",
+                ("orderId", source.order_id.clone()),
+            )
+        } else if order.kind == OrderType::Conditional
+            && source.algo_id == order.id
+            && source.tp <= 0.0
+            && source.sl <= 0.0
+        {
+            // A trigger order without attached legs: its trigger and size.
+            if let Some(trigger) = trigger {
+                body.new_trigger_price = Some(num::format(trigger));
+                fields.push(("triggerPrice", trigger));
+            }
+            if let Some(size) = size {
+                body.new_size = Some(num::format(size));
+                fields.push(("size", size));
+            }
+            if source.order_price > 0.0 {
+                fields.push(("orderPrice", source.order_price));
+            }
+            body.algo_id = Some(&source.algo_id);
+            (
+                "/api/v1/trade/amend-algo",
+                "/api/v1/trade/orders-algo-pending",
+                ("algoId", source.algo_id.clone()),
+            )
+        } else {
+            return Ok(None);
+        };
+        if body.new_size.is_none()
+            && body.new_trigger_price.is_none()
+            && body.new_tp_trigger_price.is_none()
+            && body.new_sl_trigger_price.is_none()
+        {
+            return Err("BloFin amend has nothing to change".into());
+        }
+        let amend = Step {
+            receipts: Vec::new(),
+            orders: Vec::new(),
+            path,
+            body: serde_json::to_string(&body).map_err(|e| e.to_string())?,
+            effect: Effect::NativeAmend {
+                symbol: format!(
+                    "{} {}",
+                    order.symbol,
+                    match order.kind {
+                        OrderType::TakeProfit => "take profit",
+                        OrderType::StopLoss => "stop",
+                        _ => "trigger order",
+                    }
+                ),
+            },
+            delay: 0.0,
+        };
+        let verify = Step {
+            receipts: Vec::new(),
+            orders: Vec::new(),
+            path: read,
+            body: String::new(),
+            effect: Effect::VerifyAmend(Box::new(AmendCheck {
+                symbol: format!(
+                    "{} {}",
+                    order.symbol,
+                    match order.kind {
+                        OrderType::TakeProfit => "take profit",
+                        OrderType::StopLoss => "stop",
+                        _ => "trigger order",
+                    }
+                ),
+                key,
+                inst_id: source.inst_id.clone(),
+                fields,
+            })),
+            delay: 0.0,
+        };
+        Ok(Some(vec![amend, verify]))
     }
     /// An amend-tpsl that removes one leg of a two-leg tpsl order, when that is the whole cancel.
     fn single_leg_amend(
@@ -1269,7 +1673,20 @@ impl Blofin {
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &cancel_ids)?);
                     Self::add_placements(&mut job, rows);
                 }
-                Command::CancelOrders { ids, .. } => {
+                Command::CancelOrders { mut ids, .. } => {
+                    for (old, new, _) in &self.trading.restored {
+                        if ids
+                            .iter()
+                            .any(|id| id.split("__").next() == Some(old.as_str()))
+                        {
+                            ids.extend(
+                                new.iter()
+                                    .filter(|n| !ids.contains(n))
+                                    .cloned()
+                                    .collect::<Vec<_>>(),
+                            );
+                        }
+                    }
                     let mut preserved = Vec::new();
                     let mut seen = HashSet::new();
                     for id in &ids {
@@ -1354,6 +1771,21 @@ impl Blofin {
                     id, price, amount, ..
                 } => {
                     let order = cx.store.order(&id).ok_or("Unknown order to amend")?;
+                    // A leg attached to its entry carries the entry's size; a resize would be dropped.
+                    let attached =
+                        matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                            && self
+                                .account
+                                .sources
+                                .get(&id)
+                                .is_some_and(|s| s.tpsl_id.is_empty() && !s.order_id.is_empty());
+                    if attached && amount.is_some() {
+                        return Err("BloFin attached stop size follows its entry".into());
+                    }
+                    if let Some(steps) = self.native_amend(cx, order, price, amount)? {
+                        job.steps.extend(steps);
+                        return Ok(job);
+                    }
                     if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit) {
                         job.replacing_stop =
                             Some((id.clone(), order.symbol.clone(), order.side, order.kind));
@@ -1392,6 +1824,7 @@ impl Blofin {
                     }
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &[id])?);
                     Self::add_placements(&mut job, rows);
+                    self.guard_replacement(cx, &mut job, order, price)?;
                 }
                 Command::SetLeverage {
                     symbol, leverage, ..
@@ -1607,6 +2040,27 @@ impl Blofin {
                 not_sent("BloFin requires API credentials"),
             );
         };
+        // A 408 or 5xx on a put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        if active.job.restoring && matches!(step.effect, Effect::Place { .. }) {
+            let what = active
+                .job
+                .replacing_stop
+                .as_ref()
+                .map(|(_, symbol, ..)| format!("{symbol} stop"))
+                .or_else(|| {
+                    active
+                        .job
+                        .replacing_order
+                        .as_ref()
+                        .map(|(_, symbol)| format!("{symbol} order"))
+                })
+                .unwrap_or_else(|| "order".into());
+            let words = format!(
+                "Your {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+            );
+            let _ = cx.present_plan_failure(&plan, words);
+        }
         match &step.effect {
             Effect::Place { .. } => {
                 cx.store.invalidate_order_snapshots();
@@ -1623,7 +2077,9 @@ impl Blofin {
                 }
             }
             Effect::AmendTpsl(_)
+            | Effect::NativeAmend { .. }
             | Effect::VerifyTpsl { .. }
+            | Effect::VerifyAmend(_)
             | Effect::Verify(_)
             | Effect::Setting => {}
         }
@@ -1633,6 +2089,14 @@ impl Blofin {
                 format!(
                     "{}?instId={}&orderId={}",
                     step.path, target.inst_id, target.id
+                ),
+            )
+        } else if let Effect::VerifyAmend(check) = &step.effect {
+            (
+                Method::Get,
+                format!(
+                    "{}?instId={}&{}={}",
+                    step.path, check.inst_id, check.key.0, check.key.1
                 ),
             )
         } else if let Effect::VerifyTpsl {
@@ -1711,7 +2175,13 @@ impl Blofin {
                     debug_assert!(finished.is_ok(), "Plan call seal stranded");
                 }
                 // Its row ended only because the cancel landed: nothing replaced it.
-                let unknown = error.outcome == Some(safe_cex_engine::Outcome::Unknown);
+                let unknown = !definite_refusal(&error);
+                let mut error = error;
+                if active.job.restoring {
+                    error.protection =
+                        (!unknown).then_some(safe_cex_engine::error::Protection::Unprotected);
+                    error.presents = true;
+                }
                 let order_gone = active
                     .job
                     .replacing_order
@@ -1762,6 +2232,40 @@ impl Blofin {
         if let Some((slot, context)) = current {
             let finished = cx.finish_plan_call(plan, slot, context);
             debug_assert!(finished.is_ok(), "Plan call seal stranded");
+        }
+        if active.job.restoring {
+            let what = active
+                .job
+                .replacing_stop
+                .as_ref()
+                .map(|(_, symbol, ..)| format!("{symbol} stop"))
+                .or_else(|| {
+                    active
+                        .job
+                        .replacing_order
+                        .as_ref()
+                        .map(|(_, symbol)| format!("{symbol} order"))
+                })
+                .unwrap_or_else(|| "order".into());
+            let mut error = VenueError::new(format!(
+                "Your {what} is unchanged: its replacement was refused, so the original was put back as a new order"
+            ));
+            error.protection = Some(safe_cex_engine::error::Protection::Restored);
+            error.presents = true;
+            if let Some(guard) = &active.job.guard {
+                let old = guard.parent.as_ref().unwrap_or(&guard.order).id.clone();
+                if self.trading.restored.len() >= RESTORED_KEPT {
+                    self.trading.restored.pop_front();
+                }
+                self.trading.restored.push_back((
+                    old.split("__").next().unwrap_or(&old).to_owned(),
+                    active.job.ids.clone(),
+                    guard.order.symbol.clone(),
+                ));
+            }
+            let failed = cx.fail_plan(plan, error.partial_ids(&active.job.ids));
+            debug_assert!(failed.is_ok(), "Plan terminal stranded");
+            return self.next_job(cx);
         }
         let ids = serde_json::to_string(&active.job.ids).expect("order ids");
         if cx.done_plan(plan, ids).is_ok() {
@@ -2009,6 +2513,30 @@ impl Blofin {
                 self.end(cx, active, current, error)
             };
         }
+        if let Effect::VerifyAmend(check) = &request.step.effect {
+            return match amend_mismatch(&response, check) {
+                None => self.drive(cx, active, At::Data(&request.slot, &request.context)),
+                Some(fault) => {
+                    self.reconcile_orders(cx);
+                    // The edit took effect (the journal holds its accepted write, so
+                    // the outcome is never NotSent or Rejected); the kind says why
+                    // it is unconfirmed: an unread order or one that reads otherwise.
+                    let error = match fault {
+                        ReadBackFault::Unread(why) => VenueError::new(format!(
+                            "BloFin accepted the {} edit, but it could not be read back ({why}). Check Open Orders",
+                            check.symbol
+                        ))
+                        .kind(ErrorKind::VenueUnavailable),
+                        ReadBackFault::Differs(found) => VenueError::new(format!(
+                            "BloFin accepted the {} edit, but the order does not read as edited ({found}). Check Open Orders",
+                            check.symbol
+                        ))
+                        .kind(ErrorKind::Internal),
+                    };
+                    self.end(cx, active, current, error)
+                }
+            };
+        }
         if let Effect::VerifyTpsl { tpsl_id, kept, .. } = &request.step.effect {
             if !tpsl_keeps_leg(&response, tpsl_id, *kept) {
                 // The kept leg is not there: the cancel and re-place put it back.
@@ -2023,6 +2551,16 @@ impl Blofin {
         if let Err(error) = self.write_answer(cx, &mut active.job, &request, &response) {
             if request.step.is_place() {
                 cx.store.invalidate_order_snapshots();
+            }
+            // Only a definite refusal proves no replacement exists: put the original back once.
+            if request.step.is_place()
+                && !active.job.restoring
+                && !active.job.restore.is_empty()
+                && definite_refusal(&error)
+            {
+                active.job.steps = std::mem::take(&mut active.job.restore);
+                active.job.restoring = true;
+                return self.drive(cx, active, At::Data(&request.slot, &request.context));
             }
             return self.end(cx, active, current, error);
         }
@@ -2074,6 +2612,8 @@ impl Blofin {
                     .filter(|reply| !reply.code.is_empty())
                     .map(|reply| (&*reply.code, &*reply.msg));
                 setting_failure(request.step.path, response.status, detail)
+            } else if response.status == 429 {
+                http_failure(response.status, response.body).kind(ErrorKind::RateLimited)
             } else {
                 http_failure(response.status, response.body)
             };
@@ -2369,7 +2909,52 @@ impl Blofin {
                 }
                 Ok(())
             }
-            Effect::Verify(_) | Effect::VerifyTpsl { .. } => unreachable!("a Read call"),
+            Effect::NativeAmend { symbol } => {
+                let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
+                if reply.code == "0" && refused.is_none() {
+                    let _ = cx.http_write_fact(
+                        context,
+                        WriteFact::Accepted { order_ids: vec![] },
+                        None,
+                    );
+                    cx.store.invalidate_order_snapshots();
+                    return Ok(());
+                }
+                // A row speaks for its order, whatever the envelope says.
+                let (code, msg) = match refused {
+                    Some(row) => (&*row.code, &*row.msg),
+                    None => (&*reply.code, &*reply.msg),
+                };
+                let gone = matches!(code, "1000" | "102068")
+                    || (code == "500"
+                        && msg
+                            .to_ascii_lowercase()
+                            .contains("filled, triggered, canceled or does not exist"));
+                let unknown_outcome = !gone && outcome_unknown(code, msg);
+                let message = if gone {
+                    format!(
+                        "Your {symbol} was already filled, triggered or canceled; nothing was edited"
+                    )
+                } else if unknown_outcome {
+                    format!(
+                        "BloFin edit {code}: {msg}; whether your {symbol} changed is unknown. Check Open Orders"
+                    )
+                } else {
+                    format!("Your {symbol} is unchanged: BloFin refused the edit ({code}: {msg})")
+                };
+                record_failed(cx, context, Some(native(code, msg)), &message);
+                if gone {
+                    self.reconcile_orders(cx);
+                }
+                Err(if unknown_outcome {
+                    unknown(message)
+                } else {
+                    VenueError::new(message).outcome(Outcome::Rejected)
+                })
+            }
+            Effect::Verify(_) | Effect::VerifyTpsl { .. } | Effect::VerifyAmend(_) => {
+                unreachable!("a Read call")
+            }
         }
     }
 }
@@ -2402,6 +2987,85 @@ fn tpsl_keeps_leg(response: &Response<'_>, tpsl_id: &str, kept: OrderType) -> bo
                     }
             })
         })
+}
+
+/// Why an accepted native edit could not be confirmed.
+enum ReadBackFault {
+    /// The read itself failed: the order's state is unconfirmed.
+    Unread(String),
+    /// The read answered, and the order does not show the edit.
+    Differs(String),
+}
+/// The fields an amend read-back compares, across the three pending reads.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadBackRow<'a> {
+    #[serde(borrow, default)]
+    order_id: crate::wire::Str<'a>,
+    #[serde(borrow, default)]
+    tpsl_id: crate::wire::Str<'a>,
+    #[serde(borrow, default)]
+    algo_id: crate::wire::Str<'a>,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    tp_trigger_price: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    sl_trigger_price: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    size: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    price: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    trigger_price: crate::wire::Number,
+    #[serde(default, deserialize_with = "crate::wire::nullable_number")]
+    order_price: crate::wire::Number,
+}
+impl ReadBackRow<'_> {
+    fn id(&self, key: &str) -> &str {
+        match key {
+            "orderId" => &self.order_id,
+            "tpslId" => &self.tpsl_id,
+            _ => &self.algo_id,
+        }
+    }
+    fn field(&self, name: &str) -> f64 {
+        match name {
+            "tpTriggerPrice" => self.tp_trigger_price.0,
+            "slTriggerPrice" => self.sl_trigger_price.0,
+            "size" => self.size.0,
+            "price" => self.price.0,
+            "triggerPrice" => self.trigger_price.0,
+            _ => self.order_price.0,
+        }
+    }
+}
+/// What an accepted native edit's read shows that differs from `expected`, if anything.
+fn amend_mismatch(response: &Response<'_>, expected: &AmendCheck) -> Option<ReadBackFault> {
+    if !(200..300).contains(&response.status) || check(response).is_err() {
+        return Some(ReadBackFault::Unread(format!(
+            "the read answered HTTP {}",
+            response.status
+        )));
+    }
+    let Ok(reply) = serde_json::from_str::<Data<OneOrMany<ReadBackRow<'_>>>>(response.body) else {
+        return Some(ReadBackFault::Unread("the read was not understood".into()));
+    };
+    let rows: Vec<&ReadBackRow<'_>> = match &reply.data {
+        OneOrMany::One(row) => vec![row],
+        OneOrMany::Many(rows) => rows.iter().collect(),
+    };
+    let (key, id) = (&expected.key.0, &expected.key.1);
+    let Some(row) = rows.into_iter().find(|row| row.id(key) == id.as_str()) else {
+        return Some(ReadBackFault::Differs(format!("{key} {id} is not listed")));
+    };
+    for (field, want) in &expected.fields {
+        let got = row.field(field);
+        if (got - want).abs() > want.abs() * 1e-9 + 1e-12 {
+            return Some(ReadBackFault::Differs(format!(
+                "{field} reads {got}, expected {want}"
+            )));
+        }
+    }
+    None
 }
 
 /// BloFin refuses placements in Multi-Position mode with this code.

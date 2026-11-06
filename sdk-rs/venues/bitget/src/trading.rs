@@ -14,6 +14,7 @@ use safe_cex_engine::request_context::{
     RetryPolicy, WriteResult,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -1578,7 +1579,7 @@ impl BitgetFutures {
                     .filter(|position| position.symbol == order.symbol)
                     .map(|position| format!("{:?}:{}", position.side, position.contracts))
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join_with(", ");
                 cx.notice(Level::Warn, code::COMMAND_UNSUPPORTED, format!(
                     "Sized {} stop became a full-position stop: no open {:?} position to size requested {} against, positions seen [{}]",
                     order.symbol, protected_position(order.side), order.amount,
@@ -2648,8 +2649,8 @@ impl BitgetFutures {
                     .unwrap_or_default();
                 error = Some(format!(
                     "Bitget batch cancel did not acknowledge every order; these may still be open: {} (acknowledged [{}]{plan})",
-                    rest.join(", "),
-                    listed.join(", ")
+                    rest.join_with(", "),
+                    listed.join_with(", ")
                 ));
             }
         }
@@ -3709,7 +3710,7 @@ fn failure_text(failures: &[(Option<i64>, String)]) -> String {
         .iter()
         .map(|(_, message)| message.as_str())
         .collect::<Vec<_>>()
-        .join("; ")
+        .join_with("; ")
 }
 
 /// Each failed row's message and integer code, when Bitget sends one.
