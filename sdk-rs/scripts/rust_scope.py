@@ -199,7 +199,9 @@ def binders(stream):
     found = []
     for i, token in enumerate(stream):
         following = stream[i + 1] if i + 1 < len(stream) else None
-        if token in ITEMS and following and IDENT.fullmatch(following.removeprefix('r#')):
+        # `'static` and other lifetimes tokenize as a quote plus a word, never an item.
+        if token in ITEMS and stream[i - 1:i] != ["'"] and following \
+                and IDENT.fullmatch(following.removeprefix('r#')):
             found.append((following.removeprefix('r#'), token, i))
             if token == 'enum':
                 found += [(name, 'variant', i) for name in enum_variants(stream, i)]

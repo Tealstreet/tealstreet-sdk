@@ -4,8 +4,8 @@ import { AxiosError } from 'axios';
 import {
   BreakoutpropExchange,
   parseDxSessionTimeoutMs,
-} from '../../exchanges/breakoutprop/breakoutprop.exchange';
-import { ENDPOINTS } from '../../exchanges/breakoutprop/breakoutprop.types';
+} from '../reference/breakoutprop/breakoutprop.exchange';
+import { ENDPOINTS } from '../reference/breakoutprop/breakoutprop.types';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, OrderSide, OrderType } from '../../types';
 

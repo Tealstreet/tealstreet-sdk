@@ -1,6 +1,6 @@
 // The replay gate's timing policy, in one place.
 //
-// Public tapes run at least seven interleaved TS/Rust pairs, alternating which
+// Public tapes run a fixed even budget of interleaved TS/Rust pairs, alternating which
 // side runs first, and compare per-metric medians. Rust must be at least 10%
 // below TS on main-thread, steady-state and process CPU and on retained memory.
 //
@@ -8,7 +8,7 @@
 // 100 ms are tens of ms of mostly shared replay work, where tied runs of the
 // same code move several percent between CI runners (docs/plans/
 // RUST_GATE_TIMING.md: Hyperliquid Spot steady 0.73-1.08 Rust/TS across runs
-// of unchanged code). They get nine pairs and pass when Rust is at most
+// of unchanged code). They pass when Rust is at most
 // max(1 ms, 5%) above TS; this subsumes #1380's sub-10 ms 1 ms allowance.
 // Process CPU and memory keep the 10% rule at every size. A per-message
 // slowdown on Bybit and Hyperliquid still fails these rules (PR #1461).
@@ -16,10 +16,9 @@
 // for those objectives; it cannot catch a regression that keeps Rust within 5%
 // of TS on a small window. Revisit if one slips through.
 
-export const MIN_PUBLIC_RUNS = 7;
+export const PUBLIC_REPLAY_PAIRS = 16;
 export const REQUIRED_IMPROVEMENT = 0.10;
 export const SMALL_WINDOW_MS = 100;
-export const SMALL_WINDOW_RUNS = 9;
 export const SMALL_WINDOW_FLOOR_MS = 1;
 export const SMALL_WINDOW_FLOOR_RATIO = 0.05;
 const SMALL_WINDOW_FIELDS = ['cpuMs', 'steadyCpuMs'];
@@ -32,16 +31,10 @@ export const median = (values) => {
 };
 
 export function replayRunCount(raw, isPrivate) {
-  const count = Number(raw ?? (isPrivate ? 1 : MIN_PUBLIC_RUNS));
-  if (!Number.isSafeInteger(count) || count < (isPrivate ? 1 : MIN_PUBLIC_RUNS))
-    throw new Error(isPrivate ? 'private runs must be a positive integer' : `public performance requires at least ${MIN_PUBLIC_RUNS} interleaved runs`);
+  const count = Number(raw ?? (isPrivate ? 1 : PUBLIC_REPLAY_PAIRS));
+  if (!Number.isSafeInteger(count) || count < (isPrivate ? 1 : PUBLIC_REPLAY_PAIRS) || (!isPrivate && count % 2 !== 0))
+    throw new Error(isPrivate ? 'private runs must be a positive integer' : `public performance requires at least ${PUBLIC_REPLAY_PAIRS} balanced interleaved runs`);
   return count;
-}
-
-/** Total public pairs once the first `runs` pairs' TS samples are known. */
-export function smallWindowRunCount(runs, tsSamples) {
-  const small = SMALL_WINDOW_FIELDS.some((field) => median(tsSamples.map((sample) => sample[field])) < SMALL_WINDOW_MS);
-  return small ? Math.max(runs, SMALL_WINDOW_RUNS) : runs;
 }
 
 /** How far Rust may exceed a small-window TS median. */

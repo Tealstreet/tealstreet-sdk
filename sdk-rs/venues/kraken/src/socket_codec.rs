@@ -1,5 +1,6 @@
 //! Shared engine lifecycle admission; Kraken retains native protocol evidence.
 use super::*;
+use safe_cex_engine::ErrorKind;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy, Interest,
@@ -17,7 +18,7 @@ pub(super) fn policy(private: bool, futures: bool) -> FeedPolicy {
             connect_timeout_ms: if private && futures { 15_000. } else { 45_000. },
             auth_timeout_ms: (private && futures).then_some(15_000.),
             idle_timeout_ms: if private && futures { 60_000. } else { 45_000. },
-            ping_interval_ms: Some(if private && futures { 10_000. } else { 15_000. }),
+            ping_interval_ms: (!private || !futures).then_some(15_000.),
             backoff_cap_ms: if private && futures { 30_000. } else { 16_000. },
             ..Config::default()
         },
@@ -36,6 +37,8 @@ pub(super) fn policy(private: bool, futures: bool) -> FeedPolicy {
             Invalidation::Required
         },
         subscription_interval_ms: 0.,
+        close_floors: &[],
+        data_silence: None,
     }
 }
 
@@ -112,6 +115,13 @@ impl Kraken {
             format!("Kraken socket admission failed: {error:?}"),
         );
     }
+    /// The public feed and key `topic` streams on; candles are REST-polled.
+    pub(super) fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let SubscriptionTopic::OrderBook { symbol } = topic else {
+            return None;
+        };
+        Some((self.public.feed?, book_interest(symbol).key.to_string()))
+    }
     fn public_interests(&self, store: &safe_cex_engine::Store) -> Vec<Interest> {
         let selected: Vec<_> = store
             .markets()
@@ -131,7 +141,7 @@ impl Kraken {
         let mut books: Vec<_> = self.books.keys().collect();
         books.sort();
         for symbol in books {
-            interests.push(futures_interest("book", &[symbol.as_str()]));
+            interests.push(book_interest(symbol));
         }
         interests
     }
@@ -144,10 +154,8 @@ impl Kraken {
     }
     pub(super) fn repair_book(&self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         if let Some(feed) = self.public.feed
-            && let Err(error) = cx.repair_socket_interests(
-                feed,
-                vec![futures_interest("book", &[symbol]).key.to_string()],
-            )
+            && let Err(error) =
+                cx.repair_socket_interests(feed, vec![book_interest(symbol).key.to_string()])
         {
             self.socket_error(cx, false, error);
         }
@@ -190,11 +198,30 @@ impl Kraken {
                 cx.send(epoch.socket(), r#"{"event":"ping"}"#);
             }
             LifecycleEvent::AuthFailure { evidence, .. } => {
-                cx.notice(
-                    Level::Error,
-                    code::AUTH_REJECTED,
-                    format!("Kraken private socket refused: {evidence:?}"),
-                );
+                if let safe_cex_engine::socket_lifecycle::AuthEvidence::Rejected(mut error) =
+                    evidence
+                {
+                    error.message = format!("Kraken private socket refused: {}", error.message);
+                    let code = if matches!(
+                        error.kind,
+                        Some(
+                            ErrorKind::AuthInvalid
+                                | ErrorKind::AuthExpired
+                                | ErrorKind::AuthPermission
+                        )
+                    ) {
+                        code::AUTH_REJECTED
+                    } else {
+                        code::SUBSCRIPTION_REJECTED
+                    };
+                    cx.notice_error(Level::Error, code, &error);
+                } else {
+                    cx.notice(
+                        Level::Error,
+                        code::AUTH_REJECTED,
+                        format!("Kraken private socket refused: {evidence:?}"),
+                    );
+                }
             }
             LifecycleEvent::InterestsRefused { feed, error, .. } => {
                 let private = self.private_feed(feed)?;
@@ -259,6 +286,9 @@ struct FuturesFrame<'a> {
     event: &'a str,
     feed: &'a str,
     product_ids: &'a [String],
+}
+fn book_interest(symbol: &str) -> Interest {
+    futures_interest("book", &[symbol])
 }
 fn futures_interest(feed: &str, products: &[&str]) -> Interest {
     Interest::from_wire_args(

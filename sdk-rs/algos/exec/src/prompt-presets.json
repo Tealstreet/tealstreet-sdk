@@ -1,0 +1,22 @@
+{
+  "minimal": {
+    "format": "[{symbol}]> ",
+    "prefix": "ts"
+  },
+  "default": {
+    "format": "{version} {conn}[{account} {symbol} {price} {side}{size}]> ",
+    "prefix": ""
+  },
+  "detailed": {
+    "format": "{version} {conn}[{account} {symbol} {price}] {side} {size} @ {entry} ({pnl}) [{orders}o]> ",
+    "prefix": ""
+  },
+  "trader": {
+    "format": "{version} {conn}[{account} {symbol}] {side} {size} entry:{entry} liq:{liq} pnl:{pnl%} [{orders}]> ",
+    "prefix": ""
+  },
+  "compact": {
+    "format": "[{account} {symbol} {price} {pnl%}]> ",
+    "prefix": ""
+  }
+}

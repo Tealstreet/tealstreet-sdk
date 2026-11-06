@@ -9,6 +9,8 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_polymarket::{Options, Pending, Polymarket};
 
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const GOOD: &str = r#"{"markets":[{"conditionId":"c","slug":"election","active":true,"clobTokenIds":"[\"1\"]","outcomes":"[\"Yes\"]"}]}"#;
 struct Pressure {
     inner: Polymarket,
@@ -132,7 +134,7 @@ fn retry(a: &[Action], now: f64) -> TimerId {
 }
 fn no_work(a: &[Action]) {
     assert!(!a.iter().any(|a| match a {
-        Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. } => true,
+        Action::Http(_) | Action::Sign { .. } => true,
         Action::ManagedHttp(a) => !matches!(a.as_ref(), HttpAction::Cancel { .. }),
         Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. }) => true,
         _ => false,
@@ -280,7 +282,7 @@ fn expired_stream_cannot_poison_retry_dedup_or_new_preparation() {
     e.handle(12.,Event::HttpChunk{request:old.id,data:br#"{"markets":[{"conditionId":"c","slug":"election","clobTokenIds":"[\"1\"]","outcomes":"[\"Yes\"]"},"#});
     assert!(e.drain_actions().next().is_none());
     e.handle(
-        20_010.,
+        DISCOVERY_DEADLINE_MS + 10.,
         Event::HttpChunk {
             request: old.id,
             data: br#"{"slug":"late","clobTokenIds":"broken","outcomes":"[]"}]}"#,
@@ -288,16 +290,19 @@ fn expired_stream_cannot_poison_retry_dedup_or_new_preparation() {
     );
     let a: Vec<_> = e.drain_actions().collect();
     no_work(&a);
-    let timer = retry(&a, 20_010.);
+    let timer = retry(&a, DISCOVERY_DEADLINE_MS + 10.);
     assert!(!a.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.message.contains("Skipped malformed public discovery row"))));
-    e.handle(21_010., Event::TimerFired { timer });
+    e.handle(DISCOVERY_DEADLINE_MS + 1010., Event::TimerFired { timer });
     let current = prepare(&mut e);
-    e.handle(21_011., Event::HttpEnd { request: old.id });
+    e.handle(
+        DISCOVERY_DEADLINE_MS + 1011.,
+        Event::HttpEnd { request: old.id },
+    );
     assert!(e.http_preparation_pending(current));
     let a: Vec<_> = e.drain_actions().collect();
     no_work(&a);
     e.http_prepared(
-        21_012.,
+        DISCOVERY_DEADLINE_MS + 1012.,
         current,
         Prepared {
             id: current.attempt().request.0,
@@ -317,10 +322,10 @@ fn expired_stream_cannot_poison_retry_dedup_or_new_preparation() {
         })
         .unwrap();
     assert!(matches!(
-        e.claim_http(21_012., permit),
+        e.claim_http(DISCOVERY_DEADLINE_MS + 1012., permit),
         Ok(Claim::Released(_))
     ));
-    complete(&mut e, &r, 21_013.);
+    complete(&mut e, &r, DISCOVERY_DEADLINE_MS + 1013.);
     assert_eq!(e.store().markets()[0].id, "1");
 }
 #[test]

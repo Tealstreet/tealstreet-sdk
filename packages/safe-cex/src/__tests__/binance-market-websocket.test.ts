@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceMarketWebsocket } from '../exchanges/binance/binance.ws-public';
-import type { BinanceExchange } from '../exchanges/binance/binance.exchange';
+import { BinanceMarketWebsocket } from './reference/binance/binance.ws-public';
+import type { BinanceExchange } from './reference/binance/binance.exchange';
 
 const OPEN = typeof WebSocket === 'undefined' ? 1 : WebSocket.OPEN;
 const CONNECTING = typeof WebSocket === 'undefined' ? 0 : WebSocket.CONNECTING;

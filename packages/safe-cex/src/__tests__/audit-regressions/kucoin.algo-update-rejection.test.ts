@@ -2,7 +2,7 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
+import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { Market, OrderType } from '../../types';
 

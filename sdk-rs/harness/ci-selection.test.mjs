@@ -21,6 +21,9 @@ test('each leaf selects its whole family, including aliases and dependent crates
   assert.deepEqual(select('sdk-rs/venues/bitget/src/lib.rs').replay.map(x => x.venue), ['bitget', 'bitgetusdc']);
   assert.deepEqual(select('sdk-rs/venues/kucoin/src/lib.rs').families, ['kucoin', 'kucoinspot']);
   assert.deepEqual(select('packages/safe-cex/src/exchanges/kraken/message.ts').families, ['kraken']);
+  // The frozen TS replay oracle selects its venue exactly like the runtime helpers.
+  assert.deepEqual(select('packages/safe-cex/src/__tests__/reference/kraken/kraken.exchange.ts').families, ['kraken']);
+  assert.deepEqual(select('packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts').nativeCrates, ['kucoin']);
   for (const [venue, crate] of [['bitgetusdc', 'bitget'], ['bybitinverse', 'bybit'], ['kucoinspot', 'kucoin'], ['krakenspot', 'kraken']]) {
     const result = select(`packages/safe-cex/src/exchanges/${venue}/message.ts`);
     assert.deepEqual(result.nativeCrates, [crate]);
@@ -57,13 +60,19 @@ test('venue feature declarations retain complete engine combinations and wasm ch
 
 test('cross-venue and non-venue TS imports conservatively select the full matrix', () => {
   const sources = [
-    ['packages/safe-cex/src/exchanges/binance/binanceoptions.exchange.ts', "import { options } from '../bybit/bybit.options'"],
+    ['packages/safe-cex/src/__tests__/reference/binance/binanceoptions.exchange.ts', "import { options } from '../bybit/bybit.options'"],
     ['packages/safe-cex/src/transport/engine.ts', "import { site } from '../exchanges/bybit/bybit.site'"],
     ['packages/safe-cex/src/exchanges/bitget/ticker.ts', "import { row } from './wire'"],
   ];
   const externalImports = externallyImportedVenues(sources);
   assert.equal(selectCi({ paths: ['packages/safe-cex/src/exchanges/bybit/bybit.site.ts'], manifests, externalImports }).full, true);
   assert.equal(selectCi({ paths: ['packages/safe-cex/src/exchanges/bitget/ticker.ts'], manifests, externalImports }).full, false);
+  const oracle = externallyImportedVenues([
+    ['packages/safe-cex/src/__tests__/reference/binance/binance.exchange.ts', "import { x } from '../okx/okx.wire'"],
+    ['packages/safe-cex/src/__tests__/reference/okx/okx.exchange.ts', "import { y } from './okx.wire'"],
+  ]);
+  assert.deepEqual([...oracle], ['okx']);
+  assert.equal(selectCi({ paths: ['packages/safe-cex/src/__tests__/reference/okx/okx.wire.ts'], manifests, externalImports: oracle }).full, true);
 });
 
 test('edited integration controls execute, and engine support shared with wire examples builds consumers', () => {
@@ -126,7 +135,7 @@ test('base dependency edges and transitive users survive removed dependencies', 
 
 test('selection uses actual checkout parents, never a stale event base SHA', () => {
   const a = 'a'.repeat(40), b = 'b'.repeat(40), c = 'c'.repeat(40), t = 'd'.repeat(40);
-  const event = { pull_request: { head: { sha: b }, base: { sha: c, ref: 'feat/rust-rewrite', repo: { full_name: 'Tealstreet/tealstreet-sdk' } } } };
+  const event = { pull_request: { head: { sha: b }, base: { sha: c, ref: 'master', repo: { full_name: 'Tealstreet/tealstreet-sdk' } } } };
   const value = { event, checkout: c, parents: [a, b], tree: t, mergeTree: t };
   assert.equal(checkoutBase(value), a);
   for (const change of [{ parents: [a] }, { parents: [a, c] }, { parents: [a, b, c] }, { mergeTree: a },

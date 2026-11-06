@@ -74,7 +74,7 @@ test('synchronous completions, validation errors and no-reply events allocate no
     setTimeout() { timerCalls++; throw new Error('unnecessary timer'); }, clearTimeout() {} });
   assert.equal(await host.command({ op: 'getAccount' }), 42);
   await assert.rejects(host.command({ op: 'bad' }), /native validation/);
-  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setPollScale', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles']) {
+  for (const op of ['publicFeedUpdate', 'setTickerSymbols', 'setPollScale', 'subscribeOrderBook', 'unsubscribeOrderBook', 'subscribeCandles', 'unsubscribeCandles', 'repairSubscription']) {
     await host.command({ op });
   }
   assert.equal(timerCalls, 0);
@@ -216,7 +216,6 @@ test('normal disposal settles all callers despite failures in every cleanup adap
   r.transport.clearTimeout = () => { throw new Error('clear failed'); };
   r.transport.dispose = () => { disposed++; throw new Error('dispose failed'); };
   r.host.requests.set(1, { abort() { aborted++; throw new Error('abort failed'); } });
-  r.host.signings.set(2, { controller: { abort() { aborted++; throw new Error('sign abort failed'); } }, timer: 99 });
   r.host.sockets.set(3, { close() { closed++; throw new Error('close failed'); } });
   r.host.timers.set(4, 100);
   const pending = Promise.allSettled([
@@ -231,10 +230,10 @@ test('normal disposal settles all callers despite failures in every cleanup adap
   assert.equal(write.reason.clientOrderId, 'one');
   assert.deepEqual(write.reason.clientOrderIds, ['one']);
   assert.equal(read.reason.outcome, undefined);
-  assert.equal(aborted, 2);
+  assert.equal(aborted, 1);
   assert.equal(closed, 1);
   assert.equal(disposed, 1);
-  for (const key of ['commands', 'requests', 'signings', 'sockets', 'timers']) assert.equal(r.host[key].size, 0);
+  for (const key of ['commands', 'requests', 'sockets', 'timers']) assert.equal(r.host[key].size, 0);
   r.advance(DEFAULT_COMMAND_TIMEOUT_MS);
   assert.equal(r.host.dead, false);
   await assert.rejects(r.host.command({ op: 'placeOrders' }), (error) => error.code === 'ENGINE_DISPOSED' && error.outcome === undefined);
@@ -477,6 +476,25 @@ test('a history.incomplete event naming the command marks its rows incomplete', 
   assert.equal((await other).incomplete, undefined);
 });
 
+
+test("an incomplete event's closed reason code rides the rows, never its message", async () => {
+  const r = rig();
+  const reasoned = r.host.command({ op: 'fetchFills' });
+  const bare = r.host.command({ op: 'fetchFills' });
+  r.host.run(JSON.stringify([
+    { op: 'event', level: 'warn', code: 'history.incomplete', message: 'venue said: ip 1.2.3.4', fields: { command: 1, reason: 'cursorStalled' } },
+    { op: 'event', level: 'warn', code: 'history.incomplete', message: 'older engine', fields: { command: 2 } },
+    { op: 'done', command: 1, result: '[{"id":"a"}]' },
+    { op: 'done', command: 2, result: '[{"id":"b"}]' },
+  ]));
+  const rows = await reasoned;
+  assert.equal(rows.incomplete, true);
+  assert.equal(rows.incompleteReason, 'cursorStalled');
+  assert.deepEqual(Object.keys(rows), ['0'], 'the reason is not enumerable either');
+  const older = await bare;
+  assert.equal(older.incomplete, true);
+  assert.equal(older.incompleteReason, undefined);
+});
 
 const coverageEvent = (command) => ({
   op: 'event', level: 'warn', code: 'history.incomplete', message: 'partial history', fields: { command },

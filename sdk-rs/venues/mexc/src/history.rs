@@ -29,6 +29,7 @@ pub struct Request {
     limit: usize,
     size: u32,
     bad: bool,
+    resynced: bool,
 }
 enum Root {
     Private(ReadRoot),
@@ -55,6 +56,10 @@ impl Leg {
     }
 }
 impl Request {
+    pub(crate) fn clock_root(&self, cx: &Cx<'_, Pending>) -> Option<Context> {
+        (matches!(self.root, Root::Private(_)) && !self.resynced && self.current(cx))
+            .then(|| self.root.context().clone())
+    }
     fn current(&self, cx: &Cx<'_, Pending>) -> bool {
         let Some(leg) = &self.leg else {
             return false;
@@ -215,7 +220,7 @@ impl MexcFutures {
     pub fn start_query(&self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
-                Self::fail_local_read(cx, "MEXC client-order-ID lookup is unsupported");
+                Self::fail_unsupported_read(cx, "MEXC client-order-ID lookup is unsupported");
                 return;
             }
             Query::Fills {
@@ -238,12 +243,22 @@ impl MexcFutures {
                 to_ms,
                 limit,
             } => {
-                if kind
-                    .as_deref()
-                    .is_none_or(|k| !k.eq_ignore_ascii_case("FUNDING_FEE"))
-                {
-                    Self::fail_local_read(cx, "MEXC income supports only kind FUNDING_FEE");
-                    return;
+                // A named kind MEXC has no ledger for is Unsupported, so ingestion skips it.
+                // No kind asks for the whole ledger, which funding alone cannot answer: that
+                // stays a plain refusal, as the advertised income handler exists.
+                match kind.as_deref() {
+                    Some(k) if k.eq_ignore_ascii_case("FUNDING_FEE") => {}
+                    Some(_) => {
+                        Self::fail_unsupported_read(
+                            cx,
+                            "MEXC income supports only kind FUNDING_FEE",
+                        );
+                        return;
+                    }
+                    None => {
+                        Self::fail_local_read(cx, "MEXC income supports only kind FUNDING_FEE");
+                        return;
+                    }
                 }
                 (Kind::Funding, symbol, None, from_ms, to_ms, limit)
             }
@@ -279,7 +294,10 @@ impl MexcFutures {
             Self::fail_local_read(cx, error);
             return;
         }
-        let limit = limit.unwrap_or(100) as usize;
+        // A window with no limit walks to its start; no default may stop it.
+        let limit = limit.map_or(if from.is_some() { usize::MAX } else { 100 }, |limit| {
+            limit as usize
+        });
         let (window_from, window_to) = match (from, to) {
             // Whole milliseconds keep newest-first window edges gap-free.
             (Some(a), None) => (Some(a), Some(cx.now.floor())),
@@ -347,6 +365,7 @@ impl MexcFutures {
                 limit,
                 size: limit.min(100) as u32,
                 bad: false,
+                resynced: false,
             },
         );
     }
@@ -481,6 +500,11 @@ impl MexcFutures {
         if let Err((Pending::History(request), error)) = result {
             self.query_failed(cx, request, &error.venue_error().message);
         }
+    }
+    pub(crate) fn replay_history(&self, cx: &mut Cx<'_, Pending>, mut request: Request) {
+        request.retire(cx);
+        request.resynced = true;
+        self.query_page(cx, request);
     }
     pub fn query_item(&self, cx: &Cx<'_, Pending>, r: &mut Request, item: &str) {
         if !r.current(cx) {
@@ -720,8 +744,13 @@ impl MexcFutures {
         }
         let _ = r.owner.finish(cx, Ok(()));
     }
-    pub fn query_failed(&self, cx: &mut Cx<'_, Pending>, mut r: Request, error: &str) {
+    pub fn query_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        mut r: Request,
+        error: impl Into<VenueError>,
+    ) {
         r.retire(cx);
-        let _ = r.owner.finish(cx, Err(VenueError::new(error)));
+        let _ = r.owner.finish(cx, Err(error.into()));
     }
 }

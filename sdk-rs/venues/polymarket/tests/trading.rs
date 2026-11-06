@@ -404,6 +404,16 @@ fn fully_filled_and_incomplete_final_proofs_never_create_replacement() {
 }
 
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = H::new();
+    replace(&mut h, 1);
+    h.response("/data/order/o1", 200, &detail("o1", "CANCELED", 4.0));
+    h.response("/order", 400, r#"{"error":"not enough balance"}"#);
+    let error = h.done.last().unwrap().1.clone().unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}
+
+#[test]
 fn amend_preflight_and_conflicting_mutations_fail_before_cancel() {
     let mut h = H::new();
     h.command(Command::AmendOrder {

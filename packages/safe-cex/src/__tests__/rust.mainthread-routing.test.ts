@@ -1,12 +1,18 @@
+import type { ExchangeName } from '../types';
 import type { AppSettingsWorkerType } from '../webworker/AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../webworker/ExchangeMetadataWorkerType';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { getExchangeMetadata } from '../exchangeMetadata';
 import { RustEngineExchange, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
+import { aggregateBybitClosedPnl } from '../journal/bybit.position-adapter';
+import { FrameApplier } from '../store/frameApplier';
 import { DefaultStore } from '../store/store.base';
-import { OrderSide, OrderType } from '../types';
+import { OrderSide, OrderType, PositionSide } from '../types';
 import { ExchangeWorker } from '../webworker/ExchangeWorker';
+import { engineCapabilities } from './fixtures/engineCapabilities';
+import { inverseUnitsFrame, inverseUnitsFrameBytes } from './fixtures/scxfFrame';
 
 const order = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 2 };
 
@@ -32,6 +38,84 @@ describe('main-thread Rust trading routing', () => {
     expect(main.hasStarted).toBe(true);
     await expect(main.placeOrder(order)).resolves.toEqual(['1']);
     expect(calls).toEqual(['placeOrder']);
+  });
+
+  it('never runs an engine on a worker mirror used before its bridge is wired', async () => {
+    const loader = vi.fn(() => new Promise<never>(() => {}));
+    setWasmEngineLoader(loader);
+    const store = new DefaultStore();
+    main = new RustEngineExchange('bybit', { key: '', secret: '', workerMirror: true }, store);
+    const calls: string[] = [];
+    const replies: Record<string, unknown> = {
+      fetchEngineCapabilities: undefined,
+      fetchOrders: [{ id: 'o1' }],
+      fetchPositions: [],
+      getAccount: { userId: 'u1' },
+      placeOrder: ['p1'],
+    };
+    // The warm start runs before the host wires `callMethod`.
+    const capabilities = main.loadCapabilities();
+    const orders = main.fetchOrders();
+    const positions = main.fetchPositions();
+    const account = main.getAccount();
+    const markets = main.fetchMarkets();
+    void main.start();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls).toEqual([]);
+    main.on('callMethod', (event: { requestId: string; method: string }) => {
+      calls.push(event.method);
+      main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: replies[event.method] });
+    });
+    await expect(capabilities).resolves.toBeDefined();
+    await expect(orders).resolves.toEqual([{ id: 'o1' }]);
+    await expect(positions).resolves.toEqual([]);
+    await expect(account).resolves.toEqual({ userId: 'u1' });
+    await expect(main.placeOrder(order)).resolves.toEqual(['p1']);
+    // The worker's frames, not a local engine, load the mirror's catalogue.
+    store.update({ markets: [], loaded: { ...store.loaded, markets: true } });
+    await expect(markets).resolves.toEqual([]);
+    expect(loader).not.toHaveBeenCalled();
+    expect(calls.sort()).toEqual(['fetchEngineCapabilities', 'fetchOrders', 'fetchPositions', 'getAccount', 'placeOrder']);
+    expect(main.hasStarted).toBe(false);
+    expect(store.orders).toEqual([]);
+  });
+
+  it('asks the worker for capabilities after hosted signing built a mirror its signing host', async () => {
+    const loader = vi.fn(() => new Promise<never>(() => {}));
+    setWasmEngineLoader(loader);
+    main = new RustEngineExchange('hyperliquid', { key: '', secret: '', workerMirror: true }, new DefaultStore());
+    // A signing-only host exists once main answered a hosted sign request.
+    (main as unknown as { host: object }).host = { dispose: () => {}, flush: () => {} };
+    const calls: string[] = [];
+    main.on('callMethod', (event: { requestId: string; method: string }) => {
+      calls.push(event.method);
+      main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: undefined });
+    });
+    await expect(main.loadCapabilities()).resolves.toBeDefined();
+    expect(calls).toEqual(['fetchEngineCapabilities']);
+    expect(main.hasStarted).toBe(false);
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it('settles an idle mirror read on disposal without waiting for the store', async () => {
+    main = new RustEngineExchange('bybit', { key: '', secret: '', workerMirror: true }, new DefaultStore());
+    const markets = main.fetchMarkets();
+    main.dispose();
+    await expect(markets).rejects.toThrow('disposed');
+  });
+
+  it('strips the mirror flag from the options a worker runs its engine with', () => {
+    const worker = new ExchangeWorker(
+      { postMessage: vi.fn() } as unknown as Worker,
+      'mirror',
+      'bybit',
+      { key: 'k', secret: 's', workerMirror: true },
+      {} as AppSettingsWorkerType,
+      {} as ExchangeMetadataWorkerType,
+      'session',
+    );
+    expect((worker as unknown as { _options: { workerMirror?: boolean } })._options.workerMirror).toBeUndefined();
+    worker.dispose();
   });
 
   it('waits longer for multi-command methods than for one command', async () => {
@@ -115,7 +199,31 @@ describe('main-thread Rust trading routing', () => {
     expect(loader).not.toHaveBeenCalled();
   });
 
-  it('forwards main-thread candle and journal reads to the worker', async () => {
+  // Candles now follow fetchOHLCVInWorker; flag-false routing has a real-WASM public-source control.
+  it('forwards main-thread candle reads only for a worker-opted-in venue', async () => {
+    const loader = vi.fn(() => new Promise<never>(() => {}));
+    setWasmEngineLoader(loader);
+    main = new RustEngineExchange(
+      'lighter',
+      { key: '', secret: '', workerMirror: true, publicDataOnly: true },
+      new DefaultStore(),
+    );
+    expect(getExchangeMetadata(main.name).fetchOHLCVInWorker).toBe(true);
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      queueMicrotask(() =>
+        main!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: [] }),
+      );
+    });
+    const candleOptions = { symbol: 'BTCUSDT', interval: '1m' as const, from: 1, to: 2 };
+    await expect(main.fetchOHLCV(candleOptions)).resolves.toEqual([]);
+    expect(calls).toEqual([{ method: 'fetchOHLCV', args: [candleOptions] }]);
+    expect(loader).not.toHaveBeenCalled();
+    expect(main.hasStarted).toBe(false);
+  });
+
+  it('forwards main-thread journal reads to the worker', async () => {
     main = new RustEngineExchange('kraken', { key: 'k', secret: 's' }, new DefaultStore());
     const calls: Array<{ method: string; args: unknown[] }> = [];
     main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
@@ -125,21 +233,120 @@ describe('main-thread Rust trading routing', () => {
       );
     });
     const window = { from: 1, to: 2 };
-    await main.fetchOHLCV({ symbol: 'PF_XBTUSD', interval: '1m', from: 1, to: 2 });
     await main.fetchHistoricalFills(window);
     await main.fetchHistoricalOrders(window);
     await main.fetchIncomeHistory({ startTime: 1, endTime: 2 });
     await main.fetchIncomeHistoryRange(1, 2);
-    await main.fetchHistoricalPositions!({ ...window, account: 'a' });
     expect(calls.map(({ method }) => method)).toEqual([
-      'fetchOHLCV',
       'fetchHistoricalFills',
       'fetchHistoricalOrders',
       'fetchIncomeHistory',
       'fetchIncomeHistoryRange',
-      'fetchHistoricalPositions',
     ]);
     expect(main.hasStarted).toBe(false);
+  });
+
+  /** A mirror whose worker (or hosted server) answers each method from `answers`. */
+  const answering = (name: ExchangeName, answers: Record<string, unknown>) => {
+    setWasmEngineLoader(() => new Promise(() => {}));
+    main = new RustEngineExchange(name, { key: 'k', secret: 's' }, new DefaultStore());
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    main.on('callMethod', (event: { requestId: string; method: string; args: unknown[] }) => {
+      calls.push({ method: event.method, args: event.args });
+      queueMicrotask(() =>
+        main!.emitter.emit('callMethod:done', {
+          requestId: event.requestId,
+          success: true,
+          result: answers[event.method],
+        }),
+      );
+    });
+    return calls;
+  };
+
+  it('folds the Bybit journal on the mirror from forwarded raw closed-position rows and orders', async () => {
+    const rows = [
+      {
+        symbol: 'BTCUSDT',
+        orderId: 'o1',
+        side: 'Sell',
+        closedSize: '1',
+        avgEntryPrice: '100',
+        avgExitPrice: '110',
+        closedPnl: '10',
+        createdTime: '1000',
+        updatedTime: '1001',
+      },
+    ];
+    const orders = [{ id: 'o1', positionSide: PositionSide.Long }];
+    const calls = answering('bybit', {
+      fetchEngineCapabilities: JSON.parse(engineCapabilities('bybit')),
+      fetchClosedPositions: rows,
+      fetchHistoricalOrders: orders,
+    });
+    const window = { from: 1_000, to: 2_000 };
+    const records = await main!.fetchHistoricalPositions!({ ...window, account: 'a' });
+    expect(records).toEqual(
+      aggregateBybitClosedPnl(rows, {
+        account: 'a',
+        resolveSettleCurrency: () => 'USDT',
+        resolveLeg: (orderId: string) => (orderId === 'o1' ? PositionSide.Long : undefined),
+      }),
+    );
+    expect(records.length).toBe(1);
+    expect(calls).toEqual([
+      { method: 'fetchEngineCapabilities', args: [] },
+      { method: 'fetchClosedPositions', args: [window] },
+      { method: 'fetchHistoricalOrders', args: [window] },
+    ]);
+    expect(main!.hasStarted).toBe(false);
+  });
+
+  it('folds a fill venue journal on the mirror from forwarded fills and income', async () => {
+    const calls = answering('kraken', {
+      fetchEngineCapabilities: JSON.parse(engineCapabilities('kraken')),
+      fetchHistoricalFills: [],
+      fetchIncomeHistoryRange: [],
+    });
+    await expect(main!.fetchHistoricalPositions!({ from: 1_000, to: 2_000, account: 'a' })).resolves.toEqual([]);
+    const methods = calls.map(({ method }) => method);
+    expect(methods[0]).toBe('fetchEngineCapabilities');
+    expect(methods).toContain('fetchHistoricalFills');
+    expect(methods).not.toContain('fetchHistoricalPositions');
+    expect(main!.hasStarted).toBe(false);
+  });
+
+  it('builds hosted account-read rows with the same FrameApplier as the worker', async () => {
+    const options = {
+      units: 3,
+      contractSize: 100,
+      native: true,
+      positions: true,
+      orders: [{ id: 'o1', amount: 3, filled: 1, remaining: 2, native: 2 }],
+    };
+    const bytes = new Uint8Array(inverseUnitsFrameBytes(options));
+    const accountFrame = btoa(String.fromCharCode(...bytes));
+    answering('bybit', { fetchOrders: { accountFrame }, fetchPositions: { accountFrame } });
+    const worker = new DefaultStore();
+    new FrameApplier(worker).apply(inverseUnitsFrame(options));
+    const positions = await main!.fetchPositions();
+    expect(positions).toEqual(worker.positions);
+    expect(positions[0].extra?.contractsNative).toBeDefined();
+    expect(await main!.fetchOrders(['BTCUSD'])).toEqual(worker.orders);
+    expect(await main!.fetchOrders(['ETHUSD'])).toEqual([]);
+    expect(main!.hasStarted).toBe(false);
+  });
+
+  it('answers a mirror journal read on the worker with the engine rows', async () => {
+    const worker = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, new DefaultStore());
+    const command = vi
+      .spyOn(worker as unknown as { command: (c: Record<string, unknown>) => Promise<unknown> }, 'command')
+      .mockResolvedValue([{ symbol: 'BTCUSDT' }]);
+    await expect(worker.fetchClosedPositions({ symbol: 'BTCUSDT', from: 1, to: 2 })).resolves.toEqual([
+      { symbol: 'BTCUSDT' },
+    ]);
+    expect(command.mock.calls[0][0]).toEqual({ op: 'fetchClosedPositions', symbol: 'BTCUSDT', from: 1, to: 2 });
+    worker.dispose();
   });
 
   it('forwards main-thread native account reads to the worker without starting an engine', async () => {

@@ -68,7 +68,7 @@ impl<P> Cx<'_, P> {
         page: Option<(&Slot, &Context)>,
         released_failure: bool,
         error: Option<VenueError>,
-        marker: Option<String>,
+        marker: Option<(crate::history::IncompleteReason, String)>,
     ) -> Result<PreparedHistoryTerminal, Error> {
         if self.io.core.http_owner_poison
             || self.io.core.http_plan_poison
@@ -116,11 +116,14 @@ impl<P> Cx<'_, P> {
         let Owner::Command { id, .. } = plan.owner() else {
             unreachable!()
         };
-        let marker = marker.map(|message| crate::log::LogEvent {
+        let marker = marker.map(|(reason, message)| crate::log::LogEvent {
             level: Level::Warn,
             code: crate::log::code::HISTORY_INCOMPLETE,
             message,
-            fields: vec![("command", Value::Num(f64::from(id)))],
+            fields: vec![
+                ("command", Value::Num(f64::from(id))),
+                ("reason", Value::Str(reason.code().into())),
+            ],
         });
         Ok(PreparedHistoryTerminal {
             plan: plan.clone(),

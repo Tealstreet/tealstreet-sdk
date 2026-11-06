@@ -72,6 +72,22 @@ pub struct Request {
     identity: Identity,
 }
 impl Request {
+    /// A documented refusal code in the body proves nothing executed, whatever the status.
+    pub(crate) fn refused_by_body(&self, body: &str) -> bool {
+        use safe_cex_engine::classify::{Native, NativeCode};
+        serde_json::from_str::<crate::wire::RestEnvelope<'_>>(body).is_ok_and(|e| {
+            let native = Native {
+                code: NativeCode::Int(e.code),
+                message: e.message,
+            };
+            // A resendable refusal at 5xx stays unproven: only a plain refusal is exempt.
+            e.code != 0
+                && matches!(
+                    ERRORS.verdict(&native, self.step.call.intent()),
+                    safe_cex_engine::classify::Verdict::Refused(_)
+                )
+        })
+    }
     pub(crate) fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
         match &self.physical {
             Physical::Prerequisite { preflight, context } => {
@@ -644,6 +660,7 @@ impl Cryptocom {
         );
     }
     fn queue_trade(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+        self.account.writes += 1;
         let path = request.step.path;
         let url = format!("{}/{path}", self.rest);
         let recipe = crate::sign::Envelope::http(
@@ -670,6 +687,7 @@ impl Cryptocom {
         request: Request,
         error: VenueError,
     ) {
+        self.account.writes += 1;
         match &request.physical {
             Physical::Prerequisite { preflight, .. } => {
                 let _ = cx.fail_preflight(preflight, error);
@@ -685,6 +703,7 @@ impl Cryptocom {
         request: Request,
         error: VenueError,
     ) {
+        self.account.writes += 1;
         let Physical::Write {
             plan,
             slot,
@@ -787,6 +806,7 @@ impl Cryptocom {
                 Some(Authority::Plan(own)) if retirement.matches_plan(own) => Some(*id),
                 _ => None,
             })?;
+        self.account.writes += 1;
         let active = self.trading.queue.front() == Some(&command);
         self.trading.jobs.remove(&command);
         self.trading.queue.retain(|id| *id != command);
@@ -811,6 +831,7 @@ impl Cryptocom {
         mut request: Request,
         response: Response<'_>,
     ) {
+        self.account.writes += 1;
         if !request.delivered(cx) {
             return;
         }
@@ -1010,9 +1031,10 @@ pub(crate) const ERRORS: CodeTable = CodeTable {
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
+        // INVALID_NONCE: a clock or ordering fault, not the key.
         Row {
             key: Key::Int(40102),
-            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
         Row {
@@ -1052,6 +1074,37 @@ pub(crate) const ERRORS: CodeTable = CodeTable {
         },
         Row {
             key: Key::Int(309),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        // Documented refusals; 415 and 43005 come at HTTP 500.
+        Row {
+            key: Key::Int(415),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(43005),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(213),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(315),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(1110),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40004),
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },

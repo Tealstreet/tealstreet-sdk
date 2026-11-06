@@ -98,6 +98,8 @@ export interface HostBindings {
   // ── Where the host keeps things ────────────────────────────────────────
   getExchange(account: string): HostExchange | undefined;
   getStore(account: string): Store | undefined;
+  /** Host-owned optimistic ids and wake/account lifetime checks, after shared rounding. */
+  submitOrderAmend?(account: string, options: UpdateOrderOpts): Promise<unknown>;
 
   // ── Ambient session state ──────────────────────────────────────────────
   readActiveAccount(): string;

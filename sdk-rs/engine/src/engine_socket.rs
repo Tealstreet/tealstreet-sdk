@@ -3,7 +3,8 @@ use super::*;
 use crate::socket_driver::{ControlWork, Driver, Effect};
 use crate::socket_lifecycle::{
     Admission, Control, ControlPolicy, EncodedBatch, Epoch, FeedId, FeedPolicy, Ingress, Interest,
-    LifecycleEvent, MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, SocketError,
+    LifecycleEvent, MAX_FEEDS, MAX_INTEREST_BYTES, MAX_INTERESTS, RetireReason, Retirement,
+    SocketError,
 };
 const MAX_EFFECTS: usize = MAX_FEEDS * 16;
 const MAX_PROPOSALS: usize = MAX_FEEDS;
@@ -33,21 +34,8 @@ pub(super) struct Continuation<P> {
 }
 
 impl<P> Cx<'_, P> {
-    fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
-        let mut driver = self.take_socket_driver();
-        let result = f(&mut driver, self);
-        self.restore_socket_driver(driver);
-        result
-    }
-    // Shared out of line: every driver closure would otherwise inline the
-    // driver's default construction and drop.
-    #[inline(never)]
-    fn take_socket_driver(&mut self) -> Driver {
-        std::mem::take(&mut self.io.core.socket_driver)
-    }
-    #[inline(never)]
-    fn restore_socket_driver(&mut self, driver: Driver) {
-        self.io.core.socket_driver = driver;
+    fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut CoreCx<'_>) -> R) -> R {
+        self.core().with_socket_driver(f)
     }
     #[inline(never)]
     pub(super) fn socket_effects(&mut self, effects: Vec<Effect>) {
@@ -85,6 +73,9 @@ impl<P> Cx<'_, P> {
         self.io.core.socket_effects.extend(effects);
     }
     pub fn register_socket_feed(&mut self, policy: FeedPolicy) -> Result<FeedId, SocketError> {
+        if !self.io.core.managed_sockets_declared {
+            return Err(SocketError::NotPermitted);
+        }
         self.io.opaque_entry_activity();
         if self.io.core.socket_failed {
             return Err(SocketError::NotPermitted);
@@ -99,6 +90,9 @@ impl<P> Cx<'_, P> {
         policy: FeedPolicy,
         timing: crate::socket_lifecycle::NativeTiming,
     ) -> Result<FeedId, SocketError> {
+        if !self.io.core.managed_sockets_declared {
+            return Err(SocketError::NotPermitted);
+        }
         self.io.assert_actions_safe();
         self.io.opaque_entry_activity();
         if self.io.core.socket_failed {
@@ -132,6 +126,9 @@ impl<P> Cx<'_, P> {
         &mut self,
         policy: FeedPolicy,
     ) -> Result<FeedId, SocketError> {
+        if !self.io.core.managed_sockets_declared {
+            return Err(SocketError::NotPermitted);
+        }
         self.io.assert_actions_safe();
         self.io.opaque_entry_activity();
         if self.io.core.socket_failed {
@@ -170,6 +167,11 @@ impl<P> Cx<'_, P> {
     }
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
         self.io.core.socket_driver.state.authenticated(feed)
+    }
+    /// Whether `key`'s subscribe frame was sent on the feed's current socket (and not
+    /// since unsubscribed): what was released, not what was encoded.
+    pub fn socket_released(&self, feed: FeedId, key: &str) -> bool {
+        self.io.core.socket_driver.state.released(feed, key)
     }
     /// Native one-shot frames ordered after current interests, retained with
     /// their epoch until final drain. They are never persistent interests.
@@ -222,6 +224,9 @@ impl<P> Cx<'_, P> {
         spec.channel = Some(role);
         let socket = SocketId(self.io.next());
         let epoch = self.with_socket_driver(|d, cx| d.begin(cx, feed, socket))?;
+        if self.io.core.socket_driver.take_reject_route(feed) {
+            spec = spec.reject_route();
+        }
         self.queue_socket_transport(socket, spec);
         Ok(epoch)
     }
@@ -388,6 +393,23 @@ impl<P> Cx<'_, P> {
             Some((required, pending)),
         )
     }
+    /// Retires a feed that answers pings but carries no data, and reconnects it
+    /// on the ordinary backoff; the next silence window doubles.
+    pub(crate) fn reconnect_silent_feed(&mut self, feed: FeedId) {
+        let effects = self.with_socket_driver(|driver, cx| {
+            driver.note_silent_reconnect(feed);
+            driver
+                .retire(
+                    cx,
+                    feed,
+                    crate::socket_lifecycle::RetireReason::Timeout(crate::socket::Timeout::Silent),
+                    true,
+                )
+                .into_iter()
+                .collect::<Vec<_>>()
+        });
+        self.socket_effects(effects);
+    }
     /// Force native unsubscribe/subscribe for unchanged current interests.
     pub fn repair_socket_interests(
         &mut self,
@@ -427,7 +449,25 @@ impl crate::engine::CoreRef<'_> {
 }
 
 impl<V: Venue> Engine<V> {
+    /// Install before start; observes final managed subscription handoff and retirement.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_interest_observer(&mut self, observer: crate::socket_lifecycle::InterestObserver) {
+        assert!(
+            !self.has_started(),
+            "interest observer must precede engine start"
+        );
+        assert!(
+            self.io.core.socket_driver.state.observer.is_none(),
+            "interest observer already installed"
+        );
+        observer.observe(crate::socket_lifecycle::InterestObservation::Attached);
+        self.io.core.socket_driver.state.observer = Some(observer);
+    }
+
     pub(super) fn has_socket_work(&self) -> bool {
+        if !V::managed_sockets() {
+            return false;
+        }
         !self.io.core.socket_effects.is_empty()
             || !self.io.socket_proposals.is_empty()
             || self
@@ -452,7 +492,7 @@ impl<V: Venue> Engine<V> {
     fn socket_mutate<R>(
         &mut self,
         now: f64,
-        f: impl FnOnce(&mut Driver, &mut Cx<'_, V::Pending>) -> R,
+        f: impl FnOnce(&mut Driver, &mut CoreCx<'_>) -> R,
     ) -> R {
         self.assert_live();
         let mut cx = Cx {
@@ -487,6 +527,9 @@ impl<V: Venue> Engine<V> {
         result
     }
     fn socket_enqueue(&mut self, now: f64, effects: Vec<Effect>) {
+        if !V::managed_sockets() {
+            return;
+        }
         let mut cx = Cx {
             now,
             store: &mut self.store,
@@ -531,6 +574,9 @@ impl<V: Venue> Engine<V> {
     }
     #[inline(always)]
     pub(super) fn process_socket_work(&mut self, now: f64) {
+        if !V::managed_sockets() {
+            return;
+        }
         self.assert_live();
         if !self.io.core.managed_sockets {
             return;
@@ -560,24 +606,22 @@ impl<V: Venue> Engine<V> {
         loop {
             self.assert_live();
             if processed >= MAX_EFFECTS && !self.io.core.socket_failed {
-                self.io.core.socket_failed = true;
-                self.io
-                    .core
-                    .socket_effects
-                    .retain(|e| matches!(e, Effect::Retired { .. }));
-                self.io.socket_proposals.clear();
-                self.io.core.socket_proposal_bytes = 0;
-                let mut cx = Cx {
+                Cx {
                     now,
                     store: &mut self.store,
                     io: &mut self.io,
-                };
-                cx.notice(
-                    Level::Error,
-                    log_code::SUBSCRIPTION_REJECTED,
-                    "Managed socket effect processing capacity exhausted",
-                );
-                let stopped = self.socket_mutate(now, |d, cx| d.stop_all(cx));
+                }
+                .core()
+                .exhaust_socket_work_before_clear();
+                self.io.socket_proposals.clear();
+                Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                }
+                .core()
+                .exhaust_socket_work_after_clear();
+                let stopped = self.socket_mutate(now, |driver, cx| driver.stop_all(cx));
                 self.io.core.socket_effects.extend(stopped);
             }
             if let Some(effect) = self.io.core.socket_effects.pop_front() {
@@ -586,48 +630,32 @@ impl<V: Venue> Engine<V> {
                     retirement,
                     reason,
                     retry,
+                    close_code,
                 } = effect
                 {
                     if V::socket_capabilities().handoff {
                         self.cancel_socket_continuations(retirement.epoch);
                     }
-                    let pending = std::mem::take(&mut self.io.core.socket_after);
-                    for (epoch, text) in pending {
-                        if epoch == retirement.epoch {
-                            self.io
-                                .core
-                                .socket_driver
-                                .state
-                                .release_external(text.len());
-                        } else {
-                            self.io.core.socket_after.push_back((epoch, text));
-                        }
+                    Cx {
+                        now,
+                        store: &mut self.store,
+                        io: &mut self.io,
                     }
-                    {
-                        let mut cx = Cx {
-                            now,
-                            store: &mut self.store,
-                            io: &mut self.io,
-                        };
-                        if reason == RetireReason::Closed
-                            && cx.io.core.sockets.closed(retirement.epoch.socket(), true)
-                        {
-                            cx.io.core.health.count(log_code::WS_CLOSED);
-                        }
-                        cx.close_socket_transport(retirement.epoch.socket());
-                    }
+                    .core()
+                    .retire_socket_transport(retirement, reason);
                     let result = self.socket_native(
                         now,
                         LifecycleEvent::Retired {
                             epoch: retirement.epoch,
                             reason,
+                            close_code,
                         },
                     );
                     if let Err(error) = result {
                         self.socket_refused(now, "invalidation", error);
                     }
                     if let Err(error) = self.socket_mutate(now, |d, cx| {
-                        d.acknowledge_retirement(cx, retirement, result.is_ok(), retry)
+                        d.acknowledge_retirement(cx, retirement, result.is_ok(), retry, close_code)
                     }) {
                         self.socket_refused(now, "retirement", error);
                     }
@@ -691,6 +719,10 @@ impl<V: Venue> Engine<V> {
             }
             let event = match self.socket_replace(proposal.feed, proposal.update) {
                 Ok(revision) => {
+                    // The watch follows the committed interests: only a continuous stream counts.
+                    self.socket_mutate(now, |driver, cx| {
+                        driver.refresh_data_watch(cx, proposal.feed)
+                    });
                     if V::socket_capabilities().handoff {
                         if let Some(mut work) = proposal.continuation {
                             work.revision = revision;
@@ -724,6 +756,9 @@ impl<V: Venue> Engine<V> {
         self.socket_enqueue(now, effects);
     }
     pub(super) fn handle_managed_socket(&mut self, now: f64, event: &Event<'_>) -> bool {
+        if !V::managed_sockets() {
+            return false;
+        }
         if !self.io.core.managed_sockets {
             return false;
         }
@@ -745,14 +780,13 @@ impl<V: Venue> Engine<V> {
                 }
             }
         }
-        let (socket, kind) = match event {
-            Event::WsOpened { socket } => (*socket, Ingress::Open),
+        let (socket, kind, close_code) = match event {
+            Event::WsOpened { socket } => (*socket, Ingress::Open, None),
             Event::WsMessage { socket, .. } | Event::WsBinary { socket, .. } => {
-                (*socket, Ingress::Message)
+                (*socket, Ingress::Message, None)
             }
-            Event::WsClosed { socket, .. } | Event::WsRouteExhausted { socket } => {
-                (*socket, Ingress::Close)
-            }
+            Event::WsClosed { socket, code } => (*socket, Ingress::Close, Some(*code)),
+            Event::WsRouteExhausted { socket } => (*socket, Ingress::Close, None),
             _ => return false,
         };
         let admission = if kind == Ingress::Message {
@@ -760,7 +794,8 @@ impl<V: Venue> Engine<V> {
             let admission = self.io.core.socket_driver.admit_ingress(now, socket, kind);
             self.assert_live();
             if matches!(admission, Admission::Expired(..)) {
-                let result = self.socket_mutate(now, |d, cx| d.finish_ingress(cx, admission, kind));
+                let result =
+                    self.socket_mutate(now, |d, cx| d.finish_ingress(cx, admission, kind, None));
                 self.socket_enqueue(now, result.effects);
             } else if self.io.core.socket_effects.len() > MAX_EFFECTS {
                 // Empty publication still owns exhaustion cleanup at this
@@ -769,7 +804,12 @@ impl<V: Venue> Engine<V> {
             }
             admission
         } else {
-            let result = self.socket_mutate(now, |d, cx| d.ingress(cx, socket, kind));
+            let exhausted = matches!(event, Event::WsRouteExhausted { .. });
+            let result = self.socket_mutate(now, |d, cx| match close_code {
+                _ if exhausted => d.route_exhausted(cx, socket),
+                Some(code) => d.close(cx, socket, code),
+                None => d.ingress(cx, socket, kind),
+            });
             self.socket_enqueue(now, result.effects);
             result.admission
         };
@@ -805,7 +845,9 @@ impl<V: Venue> Engine<V> {
                 };
                 let other = matches!(
                     control,
-                    Control::Other | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
+                    Control::Other
+                        | Control::Unwatched
+                        | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
                 );
                 #[cfg(feature = "socket-native-timing")]
                 let other = other || matches!(control, Control::Traffic);
@@ -858,6 +900,9 @@ impl<V: Venue> Engine<V> {
         true
     }
     pub(super) fn socket_gate(&mut self, now: f64, socket: SocketId, connect: bool) -> bool {
+        if !V::managed_sockets() {
+            return true;
+        }
         if !self.io.core.managed_sockets {
             return true;
         }
@@ -887,6 +932,9 @@ impl<V: Venue> Engine<V> {
         }
     }
     pub(super) fn fence_socket_actions(&mut self, now: f64) {
+        if !V::managed_sockets() {
+            return;
+        }
         if !self.io.core.managed_sockets {
             return;
         }
@@ -902,6 +950,9 @@ impl<V: Venue> Engine<V> {
         });
     }
     pub(super) fn drain_socket_frames(&mut self, now: f64) {
+        if !V::managed_sockets() {
+            return;
+        }
         if !self.io.core.managed_sockets || self.io.core.socket_failed {
             return;
         }
@@ -1055,6 +1106,9 @@ impl<V: Venue> Engine<V> {
         }
     }
     pub(super) fn arm_socket_continuations(&mut self, now: f64) {
+        if !V::managed_sockets() {
+            return;
+        }
         if self.io.socket_continuations.is_empty() || self.io.core.socket_failed {
             return;
         }
@@ -1198,10 +1252,71 @@ impl<V: Venue> Engine<V> {
     }
 }
 
+impl CoreCx<'_> {
+    fn with_socket_driver<R>(&mut self, f: impl FnOnce(&mut Driver, &mut Self) -> R) -> R {
+        let mut driver = self.take_socket_driver();
+        let result = f(&mut driver, self);
+        self.restore_socket_driver(driver);
+        result
+    }
+    #[inline(never)]
+    fn take_socket_driver(&mut self) -> Driver {
+        std::mem::take(&mut self.io.core.socket_driver)
+    }
+    #[inline(never)]
+    fn restore_socket_driver(&mut self, driver: Driver) {
+        self.io.core.socket_driver = driver;
+    }
+    // Typed proposal destruction remains between these two phases, before notice and stop.
+    #[inline(never)]
+    fn exhaust_socket_work_before_clear(&mut self) {
+        self.io.core.socket_failed = true;
+        self.io
+            .core
+            .socket_effects
+            .retain(|e| matches!(e, Effect::Retired { .. }));
+    }
+    #[inline(never)]
+    fn exhaust_socket_work_after_clear(&mut self) {
+        self.io.core.socket_proposal_bytes = 0;
+        self.notice(
+            Level::Error,
+            log_code::SUBSCRIPTION_REJECTED,
+            "Managed socket effect processing capacity exhausted",
+        );
+    }
+    #[inline(never)]
+    fn retire_socket_transport(&mut self, retirement: Retirement, reason: RetireReason) {
+        let pending = std::mem::take(&mut self.io.core.socket_after);
+        for (epoch, text) in pending {
+            if epoch == retirement.epoch {
+                self.io
+                    .core
+                    .socket_driver
+                    .state
+                    .release_external(text.len());
+            } else {
+                self.io.core.socket_after.push_back((epoch, text));
+            }
+        }
+        if reason == RetireReason::Closed
+            && self.io.core.sockets.closed(retirement.epoch.socket(), true)
+        {
+            self.io.core.health.count(log_code::WS_CLOSED);
+        }
+        if reason == RetireReason::RouteExhausted {
+            self.io.core.sockets.closed(retirement.epoch.socket(), true);
+        }
+        self.close_socket_transport(retirement.epoch.socket());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::socket_lifecycle::{AuthMode, AuthRecovery, Invalidation, TrafficPolicy};
+    use crate::socket_lifecycle::{
+        AuthEvidence, AuthMode, AuthRecovery, Invalidation, TrafficPolicy,
+    };
     use crate::{book::Book, socket::Config};
 
     #[derive(Default)]
@@ -1218,6 +1333,15 @@ mod tests {
         borrowed_http_delivery: bool,
         catch_fatal_on_ping: bool,
         caught_fatal: bool,
+        /// Login-gated feed whose "refused" frame is a route refusal.
+        route_auth: bool,
+        /// The interest key `subscription_interest` names; `None` keeps the default.
+        repair_key: Option<&'static str>,
+        /// Registers and connects `second_feed` alongside `feed`.
+        two_feeds: bool,
+        second_feed: Option<FeedId>,
+        /// Keys `subscription_interests` names, `true` on `second_feed`; empty keeps `repair_key`.
+        repair_keys: Vec<(bool, &'static str)>,
     }
     fn policy() -> FeedPolicy {
         FeedPolicy {
@@ -1230,20 +1354,39 @@ mod tests {
             controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
+            data_silence: None,
         }
     }
     impl Venue for Probe {
+        fn managed_sockets() -> bool {
+            true
+        }
         type Pending = ();
         fn start(&mut self, cx: &mut Cx<'_, ()>) {
             let mut declared = policy();
             declared.controls = self.controls;
+            if self.route_auth {
+                declared.auth = AuthMode::Required;
+            }
             let feed = cx.register_socket_feed(declared).unwrap();
             self.feed = Some(feed);
-            cx.connect_socket(feed, "wss://socket.test").unwrap();
+            cx.connect_socket(feed, self.spec()).unwrap();
+            if self.two_feeds {
+                let second = cx.register_socket_feed(policy()).unwrap();
+                self.second_feed = Some(second);
+                cx.connect_socket(second, self.spec()).unwrap();
+            }
         }
-        fn socket_control(&self, _: &Store, _: FeedId, _: bool, _: &str) -> Control {
+        fn socket_control(&self, _: &Store, _: FeedId, _: bool, text: &str) -> Control {
             self.control_calls.set(self.control_calls.get() + 1);
-            Control::Other
+            match text {
+                "refused" if self.route_auth => Control::Auth(AuthEvidence::RouteRefused(
+                    VenueError::new("egress refused"),
+                )),
+                "login" if self.route_auth => Control::Auth(AuthEvidence::Accepted),
+                _ => Control::Other,
+            }
         }
         fn on_socket_event(
             &mut self,
@@ -1269,7 +1412,7 @@ mod tests {
             }
             match event {
                 LifecycleEvent::Reconnect(feed) => {
-                    cx.connect_socket(feed, "wss://socket.test")?;
+                    cx.connect_socket(feed, self.spec())?;
                 }
                 LifecycleEvent::Ready { .. } if self.refuse_ready => {
                     return Err(SocketError::InvalidInterest);
@@ -1297,6 +1440,31 @@ mod tests {
             }
             Ok(())
         }
+        fn subscription_interest(
+            &self,
+            _: &Store,
+            _: &crate::SubscriptionTopic,
+        ) -> Option<(FeedId, String)> {
+            Some((self.feed?, self.repair_key?.into()))
+        }
+        fn subscription_interests(
+            &self,
+            store: &Store,
+            topic: &crate::SubscriptionTopic,
+        ) -> Vec<(FeedId, String)> {
+            if self.repair_keys.is_empty() {
+                return self
+                    .subscription_interest(store, topic)
+                    .into_iter()
+                    .collect();
+            }
+            let mut interests = Vec::new();
+            for (second, key) in &self.repair_keys {
+                let feed = if *second { self.second_feed } else { self.feed };
+                interests.push((feed.unwrap(), (*key).into()));
+            }
+            interests
+        }
         fn on_signing_receipt(&mut self, _: SigningTarget<'_, ()>, _: crate::signing::SignReceipt) {
             self.receipts += 1;
         }
@@ -1321,6 +1489,16 @@ mod tests {
         }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
             Box::new(std::iter::empty())
+        }
+    }
+    impl Probe {
+        fn spec(&self) -> SocketSpec {
+            let spec = SocketSpec::new("wss://socket.test");
+            if self.route_auth {
+                spec.feed("private", false)
+            } else {
+                spec
+            }
         }
     }
     fn engine() -> (Engine<Probe>, SocketId) {
@@ -1689,6 +1867,268 @@ mod tests {
         assert_eq!(e.io.core.health.ws_closed, 1);
     }
     #[test]
+    fn route_exhaustion_retires_as_exhausted_not_a_close() {
+        let (mut e, socket) = engine();
+        e.drain_actions().for_each(drop);
+        e.venue.events.clear();
+        e.handle(1., Event::WsRouteExhausted { socket });
+        assert!(
+            e.venue.events.iter().any(|event| matches!(
+                event,
+                LifecycleEvent::Retired {
+                    reason: RetireReason::RouteExhausted,
+                    ..
+                }
+            )),
+            "the venue must see the exhaustion: {:?}",
+            e.venue.events
+        );
+        assert_eq!(
+            e.io.core.health.ws_closed, 0,
+            "nothing was dialled, so nothing closed"
+        );
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. } | Action::WsConnect { .. })),
+            "no route is left, so the engine must not schedule a reconnect"
+        );
+        e.handle(1., Event::WsRouteExhausted { socket });
+        assert_eq!(
+            e.venue
+                .events
+                .iter()
+                .filter(|event| matches!(event, LifecycleEvent::Retired { .. }))
+                .count(),
+            1,
+            "a stale exhaustion is not admitted twice"
+        );
+    }
+    /// Opens `socket`, sends `frame`, and returns the reconnect timer's due
+    /// time and the WsConnect it fires, with that connect's reject_route.
+    fn refuse_and_redial(
+        e: &mut Engine<Probe>,
+        socket: SocketId,
+        now: f64,
+        frame: &str,
+    ) -> (f64, SocketId, bool) {
+        e.handle(now, Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.handle(
+            now,
+            Event::WsMessage {
+                socket,
+                text: frame,
+            },
+        );
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .expect("a refused route schedules exactly one redial");
+        e.handle(at, Event::TimerFired { timer });
+        let (next, reject) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket, context, ..
+                } => Some((socket, context.is_some_and(|c| c.reject_route))),
+                _ => None,
+            })
+            .expect("the redial connects");
+        (at, next, reject)
+    }
+    fn route_engine() -> (Engine<Probe>, SocketId) {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            route_auth: true,
+            ..Probe::default()
+        });
+        e.start(0.);
+        let socket = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        (e, socket)
+    }
+    #[test]
+    fn route_refusal_redials_at_once_then_backoff_paced_with_reject_route() {
+        let (mut e, socket) = route_engine();
+        let (first_at, second, reject) = refuse_and_redial(&mut e, socket, 10., "refused");
+        assert_eq!(
+            first_at, 10.,
+            "the first refusal of a streak switches route at once"
+        );
+        assert!(reject, "the redial asks the host for another route");
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::RouteRefused,
+                ..
+            }
+        )));
+        // A host that ignores reject_route refuses again: later refusals pay backoff.
+        let (second_at, third, reject) = refuse_and_redial(&mut e, second, 20., "refused");
+        assert!(
+            second_at > 20.,
+            "a second refusal in the streak is backoff-paced"
+        );
+        assert!(reject);
+        let (third_at, _, _) = refuse_and_redial(&mut e, third, second_at, "refused");
+        // Each later refusal counts a failure, so the backoff gap keeps growing.
+        assert!(
+            third_at - second_at > second_at - 20.,
+            "the streak's backoff grows: {second_at} then {third_at}"
+        );
+    }
+    #[test]
+    fn a_login_ends_the_route_refusal_streak() {
+        let (mut e, socket) = route_engine();
+        let (_, second, _) = refuse_and_redial(&mut e, socket, 10., "refused");
+        e.handle(10., Event::WsOpened { socket: second });
+        e.handle(
+            10.,
+            Event::WsMessage {
+                socket: second,
+                text: "login",
+            },
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            11.,
+            Event::WsClosed {
+                socket: second,
+                code: 1006,
+            },
+        );
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(at, Event::TimerFired { timer });
+        let (third, reject) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect {
+                    socket, context, ..
+                } => Some((socket, context.is_some_and(|c| c.reject_route))),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            !reject,
+            "an ordinary close after a login does not leave the route"
+        );
+        let (redial_at, _, reject) = refuse_and_redial(&mut e, third, at, "refused");
+        assert_eq!(
+            redial_at, at,
+            "a new streak's first refusal is immediate again"
+        );
+        assert!(reject);
+    }
+    #[test]
+    fn a_refusal_surfaces_the_venue_error_but_never_burns_a_logged_in_route() {
+        let (mut e, socket) = route_engine();
+        e.handle(10., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        e.handle(
+            10.,
+            Event::WsMessage {
+                socket,
+                text: "refused",
+            },
+        );
+        assert!(
+            e.drain_actions().any(|a| matches!(
+                a,
+                Action::Notice(Notice::Event(LogEvent { level: Level::Warn, ref message, .. }))
+                    if message == "egress refused; trying the next route"
+            )),
+            "the venue's refusal text reaches the user, as TS warns"
+        );
+
+        let (mut e, socket) = route_engine();
+        e.handle(10., Event::WsOpened { socket });
+        e.handle(
+            10.,
+            Event::WsMessage {
+                socket,
+                text: "login",
+            },
+        );
+        e.drain_actions().for_each(drop);
+        e.venue.events.clear();
+        e.handle(
+            11.,
+            Event::WsMessage {
+                socket,
+                text: "refused",
+            },
+        );
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::AuthFailure {
+                evidence: AuthEvidence::Rejected(_),
+                ..
+            }
+        )));
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::Authentication,
+                ..
+            }
+        )));
+        assert!(!e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::RouteRefused,
+                ..
+            }
+        )));
+        let (timer, at) = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(at, Event::TimerFired { timer });
+        assert!(
+            e.drain_actions().any(|a| matches!(
+                a,
+                Action::WsConnect { context: Some(ref c), .. } if !c.reject_route
+            )),
+            "a logged-in route is proven; the redial stays on it"
+        );
+    }
+    #[test]
+    fn refusal_on_every_route_ends_in_route_exhausted() {
+        let (mut e, socket) = route_engine();
+        let (_, second, reject) = refuse_and_redial(&mut e, socket, 10., "refused");
+        assert!(reject);
+        e.venue.events.clear();
+        e.handle(10., Event::WsRouteExhausted { socket: second });
+        assert!(e.venue.events.iter().any(|event| matches!(
+            event,
+            LifecycleEvent::Retired {
+                reason: RetireReason::RouteExhausted,
+                ..
+            }
+        )));
+        assert!(
+            !e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. } | Action::WsConnect { .. })),
+            "exhaustion stays down"
+        );
+    }
+    #[test]
     fn managed_frames_reset_auth_health_per_event_and_keep_common_epilogue() {
         let (mut e, socket) = engine();
         e.handle(0., Event::WsOpened { socket });
@@ -1906,6 +2346,180 @@ mod tests {
             1
         );
     }
+    fn sent(e: &mut Engine<Probe>) -> Vec<String> {
+        e.drain_actions()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+    fn repair_warnings(actions: &[Action]) -> Vec<&LogEvent> {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(
+                    event @ LogEvent {
+                        code: log_code::SUBSCRIPTION_REJECTED,
+                        level: Level::Warn,
+                        ..
+                    },
+                )) => Some(event),
+                _ => None,
+            })
+            .collect()
+    }
+    fn repair_command() -> Event<'static> {
+        Event::Command(Command::RepairSubscription(
+            crate::SubscriptionTopic::OrderBook {
+                symbol: "BTCUSDT".into(),
+            },
+        ))
+    }
+    /// Opens the probe feed with one desired `book` interest.
+    fn subscribed_probe(repair_key: Option<&'static str>) -> (Engine<Probe>, FeedId) {
+        let (mut e, socket) = engine();
+        e.venue.repair_key = repair_key;
+        e.handle(0., Event::WsOpened { socket });
+        e.drain_actions().for_each(drop);
+        let feed = e.venue.feed.unwrap();
+        Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        }
+        .set_socket_interests(
+            feed,
+            vec![Interest {
+                key: "book".into(),
+                wire_args: "native-book".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(sent(&mut e), vec!["true:native-book"]);
+        (e, feed)
+    }
+    #[test]
+    fn repair_subscription_command_resubscribes_the_named_interest() {
+        let (mut e, feed) = subscribed_probe(Some("book"));
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(repair_warnings(&actions).is_empty());
+        let frames: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(frames, ["false:native-book", "true:native-book"]);
+        assert_eq!(
+            e.io.core.socket_driver.state.desired(feed).unwrap().len(),
+            1
+        );
+    }
+    #[test]
+    fn repair_subscription_without_a_venue_interest_warns_and_sends_nothing() {
+        let (mut e, _) = subscribed_probe(None);
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+        let warnings = repair_warnings(&actions);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            warnings[0].message,
+            "Probe cannot repair the order book BTCUSDT subscription: \
+             the venue cannot name its stream for this topic"
+        );
+        assert!(
+            warnings[0]
+                .fields
+                .contains(&("topic", "order book BTCUSDT".into()))
+        );
+        assert!(warnings[0].fields.contains(&("venue", "Probe".into())));
+    }
+    #[test]
+    fn repair_subscription_for_an_undesired_key_warns_and_sends_nothing() {
+        let (mut e, _) = subscribed_probe(Some("other"));
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+        let warnings = repair_warnings(&actions);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.ends_with("other is not subscribed"));
+    }
+    #[test]
+    fn repair_subscription_groups_several_keys_by_feed_and_skips_undesired_ones() {
+        let mut e = crate::test_support::seeded_engine(Probe {
+            two_feeds: true,
+            repair_keys: vec![
+                (false, "book"),
+                (true, "trades"),
+                (false, "bbo"),
+                (false, "tier"),
+            ],
+            ..Probe::default()
+        });
+        e.start(0.);
+        let sockets: Vec<_> = e
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sockets.len(), 2);
+        for socket in sockets {
+            e.handle(0., Event::WsOpened { socket });
+        }
+        e.drain_actions().for_each(drop);
+        let (first, second) = (e.venue.feed.unwrap(), e.venue.second_feed.unwrap());
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        for (feed, keys) in [(first, &["book", "bbo"][..]), (second, &["trades"][..])] {
+            let interests = keys.iter().map(|k| Interest::from_wire_args(*k)).collect();
+            cx.set_socket_interests(feed, interests).unwrap();
+        }
+        assert_eq!(sent(&mut e), ["true:bbo", "true:book", "true:trades"]);
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(repair_warnings(&actions).is_empty());
+        let frames: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            frames,
+            [
+                "false:bbo",
+                "false:book",
+                "true:bbo",
+                "true:book",
+                "false:trades",
+                "true:trades"
+            ]
+        );
+        let state = &e.io.core.socket_driver.state;
+        assert_eq!(state.desired(first).unwrap().len(), 2);
+        assert_eq!(state.desired(second).unwrap().len(), 1);
+    }
+    #[test]
+    fn repair_subscription_names_every_key_when_none_is_desired() {
+        let (mut e, _) = subscribed_probe(None);
+        e.venue.repair_keys = vec![(false, "bbo"), (false, "tier")];
+        e.handle(1., repair_command());
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::WsSend { .. })));
+        let warnings = repair_warnings(&actions);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.ends_with("bbo, tier is not subscribed"));
+    }
     #[test]
     fn auth_progress_invalid_deadlines_leave_watch_and_auth_bound_unchanged() {
         for now in [f64::NAN, f64::INFINITY, f64::MAX] {
@@ -1925,11 +2539,14 @@ mod tests {
             }
             let actions = e.io.core.actions.len();
             let timers = e.io.core.timers.clone();
-            supervisor.authentication_progress(&mut Cx {
-                now,
-                store: &mut e.store,
-                io: &mut e.io,
-            });
+            supervisor.authentication_progress_core(
+                &mut Cx {
+                    now,
+                    store: &mut e.store,
+                    io: &mut e.io,
+                }
+                .core(),
+            );
             assert_eq!(e.io.core.actions.len(), actions);
             assert_eq!(e.io.core.timers, timers);
             assert_eq!(
@@ -1957,11 +2574,14 @@ mod tests {
         }
         let actions = e.io.core.actions.len();
         let timers = e.io.core.timers.clone();
-        supervisor.authentication_progress(&mut Cx {
-            now: f64::MAX / 2.,
-            store: &mut e.store,
-            io: &mut e.io,
-        });
+        supervisor.authentication_progress_core(
+            &mut Cx {
+                now: f64::MAX / 2.,
+                store: &mut e.store,
+                io: &mut e.io,
+            }
+            .core(),
+        );
         assert_eq!(e.io.core.actions.len(), actions);
         assert_eq!(e.io.core.timers, timers);
         assert_eq!(
@@ -1991,11 +2611,14 @@ mod tests {
         e.io.core.next_id =
             crate::resource_ids::ResourceIds::starting_at(crate::resource_ids::MAX_RESOURCE_ID + 1);
         let trapped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            supervisor.authentication_progress(&mut Cx {
-                now: 14_000.,
-                store: &mut e.store,
-                io: &mut e.io,
-            });
+            supervisor.authentication_progress_core(
+                &mut Cx {
+                    now: 14_000.,
+                    store: &mut e.store,
+                    io: &mut e.io,
+                }
+                .core(),
+            );
         }));
         assert!(trapped.is_err());
         assert!(e.failed());
@@ -2192,6 +2815,7 @@ mod tests {
             let mut io = Io::<()> {
                 core: IoCore {
                     next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                    managed_sockets_declared: true,
                     ..IoCore::default()
                 },
                 ..Default::default()
@@ -2222,6 +2846,7 @@ mod tests {
     fn snapshot_invalid_policy_does_not_register_a_feed() {
         let mut store = Store::default();
         let mut io = Io::<()>::default();
+        io.core.managed_sockets_declared = true;
         let mut cx = Cx {
             now: 0.,
             store: &mut store,
@@ -2241,6 +2866,7 @@ mod tests {
             let mut io = Io::<()> {
                 core: IoCore {
                     next_id: crate::resource_ids::ResourceIds::with_ceiling(ceiling),
+                    managed_sockets_declared: true,
                     ..IoCore::default()
                 },
                 ..Default::default()
@@ -2291,6 +2917,18 @@ mod handoff_tests;
 #[path = "socket_capability_tests.rs"]
 mod capability_tests;
 
+#[cfg(test)]
+#[path = "socket_declaration_tests.rs"]
+mod declaration_tests;
+
+#[cfg(test)]
+#[path = "socket_close_floor_tests.rs"]
+mod close_floor_tests;
+
 #[cfg(all(test, feature = "socket-native-timing"))]
 #[path = "socket_native_timing_tests.rs"]
 mod native_timing_tests;
+
+#[cfg(test)]
+#[path = "socket_data_silence_tests.rs"]
+mod data_silence_tests;

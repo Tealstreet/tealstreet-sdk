@@ -8,31 +8,30 @@ mod public;
 mod sbe;
 pub mod sign;
 mod trading;
+mod venue_state;
 mod wire;
 
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, Cx, Response, SocketId, TimerId, Venue, book::Book};
 
 #[derive(Clone, Default)]
 pub struct Options {
     pub testnet: bool,
     pub public_data_only: bool,
-    pub key: Option<String>,
     pub paradex_address: Option<String>,
     pub subkey_address: Option<String>,
-    pub payload_signer: bool,
+    /// Trusted local setup's identity; its Stark public key is sealed there.
+    pub credentials: Option<safe_cex_engine::signing::Identity>,
+    /// Setup derived the Stark key from an Ethereum key, so the account
+    /// address is the one that key derives.
+    pub ethereum_key: bool,
 }
 safe_cex_crypto::redacted_debug!(Options);
-impl safe_cex_crypto::secrets::EraseSecrets for Options {
-    fn erase_secrets(&mut self) {
-        safe_cex_crypto::secrets::erase(&mut self.key);
-        safe_cex_crypto::secrets::erase(&mut self.subkey_address);
-    }
-}
 
 impl Options {
     fn private_enabled(&self) -> bool {
         !self.public_data_only
-            && self.key.as_deref().is_some_and(|s| !s.is_empty())
+            && self.credentials.is_some()
             && self
                 .paradex_address
                 .as_deref()
@@ -51,11 +50,13 @@ pub enum Pending {
     Trade(trading::Request),
     History(history::Request),
     PublicTrades(history::public_trades::Request),
-    Identity(safe_cex_engine::CommandId),
+    Identity(safe_cex_engine::request_context::Context),
+    /// A FetchLeverage command Read and its symbol.
+    Leverage(safe_cex_engine::request_context::Context, String),
 }
 
 pub struct Paradex {
-    options: safe_cex_crypto::secrets::Sensitive<Options>,
+    options: Options,
     public: public::Public,
     account: account::Account,
     trading: trading::Trading,
@@ -64,9 +65,8 @@ pub struct Paradex {
 
 impl Paradex {
     pub fn new(options: Options) -> Self {
-        let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
-            account: account::Account::new((*options).clone()),
+            account: account::Account::new(options.clone()),
             trading: trading::Trading::default(),
             history: history::History,
             options,
@@ -91,6 +91,41 @@ impl Paradex {
 
 impl Venue for Paradex {
     type Pending = Pending;
+    /// A host-answered provider binds its Stark public key before start; a
+    /// trusted local provider keeps the key it sealed at setup.
+    fn public_key_setup(
+        &self,
+    ) -> Option<(
+        safe_cex_engine::AddressSetupSlots,
+        safe_cex_engine::signing::Algorithm,
+    )> {
+        self.options.credentials.as_ref().map(|_| {
+            (
+                safe_cex_engine::AddressSetupSlots::Primary,
+                safe_cex_engine::signing::Algorithm::StarkDigest,
+            )
+        })
+    }
+    /// Only `/auth` is credential evidence: a 401/403 is a definitive refusal,
+    /// and a 2xx carrying a JWT is acceptance.
+    fn account_auth_outcome(
+        &self,
+        pending: &Self::Pending,
+        response: &Response<'_>,
+        _now: f64,
+        _store: &safe_cex_engine::Store,
+    ) -> Option<safe_cex_engine::AuthOutcome> {
+        if !matches!(pending, Pending::Account(account::Request::Auth { .. })) {
+            return None;
+        }
+        match response.status {
+            401 | 403 => Some(safe_cex_engine::AuthOutcome::Rejected),
+            200..=299 => {
+                account::auth_token(response.body).map(|_| safe_cex_engine::AuthOutcome::Accepted)
+            }
+            _ => None,
+        }
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::FillsSymbol,
@@ -99,11 +134,70 @@ impl Venue for Paradex {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account: safe_cex_engine::AccountLookup::Query,
             order_book_query: true,
+            fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
+    // Every orders read commits its cover (`commit_orders_plan`).
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.account.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
+    }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_start(cx);
+    }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        // Paradex reads every market's margin config at once.
+        self.account.refresh_settings(cx);
+    }
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.account.export_venue_state())
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        if let Err(error) = self.account.apply_venue_state(state) {
+            cx.venue_state_unreadable(error);
+        }
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.prune_native(cx.store);
+    }
+    // reconcile_uncertain starts an order read dispatched after the write.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
+    // Private reads bind the account's JWT Session; the engine copies the Bearer
+    // only at prepare and re-prepares when the JWT moves before release.
+    fn session_bearer(&self, generation: u64) -> safe_cex_engine::request_context::SessionBearer {
+        self.account.session_bearer(generation)
+    }
+    fn session_bearer_revision(&self, generation: u64) -> Option<u64> {
+        self.account.session_bearer_revision(generation)
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.account.reconcile_orders(cx);
+        self.failures(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.handles_socket(socket) {
@@ -143,7 +237,10 @@ impl Venue for Paradex {
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::History(request) => self.history.on_item(cx, request, item),
             Pending::PublicTrades(read) => history::public_trades::item(cx, read, item),
-            Pending::Trade(_) | Pending::Identity(_) | Pending::BookQuery(_) => {}
+            Pending::Trade(_)
+            | Pending::Identity(_)
+            | Pending::Leverage(..)
+            | Pending::BookQuery(_) => {}
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
@@ -153,7 +250,11 @@ impl Venue for Paradex {
                 return;
             }
             Pending::PublicTrades(read) => history::public_trades::response(cx, read, response),
-            Pending::Identity(command) => self.identity_response(cx, command, response),
+            Pending::Identity(context) => self.identity_response(cx, context, response),
+            Pending::Leverage(context, symbol) => {
+                self.trading
+                    .leverage_response(cx, &mut self.account, &context, &symbol, response)
+            }
             Pending::Public(request) => {
                 self.public_response(cx, request, response);
                 if cx.store.loaded().markets {
@@ -232,6 +333,13 @@ impl Venue for Paradex {
                 let _ = cx.fail_context(&context, error);
             }
             Pending::PublicTrades(read) => history::public_trades::failed(cx, read, error),
+            Pending::Identity(context) => self.identity_failed(cx, context, error),
+            Pending::Leverage(context, _) => self.leverage_failed(cx, &context, error),
+            Pending::History(request) => {
+                let error = self.account.read_error(error);
+                self.history.rejected(cx, request, error);
+                self.failures(cx);
+            }
             Pending::Public(request) if request.is_command_candle() => {
                 request.reject_command_candle(cx, error);
                 self.failures(cx);
@@ -266,6 +374,13 @@ impl Venue for Paradex {
     ) {
         match pending {
             Pending::PublicTrades(read) => history::public_trades::failed(cx, read, error),
+            Pending::Identity(context) => self.identity_failed(cx, context, error),
+            Pending::Leverage(context, _) => self.leverage_failed(cx, &context, error),
+            Pending::History(request) => {
+                let error = self.account.read_error(error);
+                self.history.failed(cx, request, error);
+                self.failures(cx);
+            }
             Pending::Public(request) if request.is_command_candle() => {
                 self.command_candles_failed(cx, request, error);
                 self.failures(cx);
@@ -274,14 +389,20 @@ impl Venue for Paradex {
                 self.poll_candles_failed(cx, request, error);
                 self.failures(cx);
             }
-            other => self.on_request_failed(cx, other, &error.message),
+            other => {
+                self.account.positions_error = Some(error.clone());
+                self.on_request_failed(cx, other, &error.message);
+                self.account.positions_error = None;
+            }
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.account.handles_timer(timer) {
-            self.account.on_timer(cx, timer);
-        } else {
-            self.public_timer(cx, timer);
+        if !self.trading.on_timer(cx, &mut self.account, timer) {
+            if self.account.handles_timer(timer) {
+                self.account.on_timer(cx, timer);
+            } else {
+                self.public_timer(cx, timer);
+            }
         }
         self.failures(cx);
     }
@@ -326,6 +447,14 @@ impl Venue for Paradex {
 }
 
 impl Paradex {
+    fn leverage_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        context: &safe_cex_engine::request_context::Context,
+        error: safe_cex_engine::VenueError,
+    ) {
+        let _ = cx.fail_context(context, self.account.read_error(error));
+    }
     fn dispatch_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::BookQuery(context) => {
@@ -337,7 +466,14 @@ impl Paradex {
             Pending::PublicTrades(read) => {
                 history::public_trades::failed(cx, read, safe_cex_engine::VenueError::new(error))
             }
-            Pending::Identity(command) => self.identity_failed(cx, command, error),
+            Pending::Identity(context) => {
+                self.identity_failed(cx, context, safe_cex_engine::VenueError::new(error))
+            }
+            Pending::Leverage(context, _) => self.leverage_failed(
+                cx,
+                &context,
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network),
+            ),
             Pending::Public(request) => self.public_failed(cx, request, error),
             Pending::Account(request) => self.account.on_failed(cx, request, error),
             Pending::Trade(request) => {
@@ -357,10 +493,12 @@ impl Paradex {
                 match pending {
                     Pending::Trade(request) => {
                         self.trading
-                            .on_unsent(cx, &mut self.account, request, &error)
+                            .on_refused(cx, &mut self.account, request, error)
                     }
-                    Pending::History(request) => self.history.on_rejected(cx, request, &error),
-                    other => self.dispatch_failed(cx, other, &error),
+                    Pending::History(request) => self.history.rejected(cx, request, error),
+                    Pending::Identity(context) => self.identity_failed(cx, context, error),
+                    Pending::Leverage(context, _) => self.leverage_failed(cx, &context, error),
+                    other => self.dispatch_failed(cx, other, &error.message),
                 }
             }
         }
@@ -411,7 +549,7 @@ fn success(response: Response<'_>) -> Result<(), String> {
         return Err(if details.is_empty() {
             context
         } else {
-            let detail: String = details.join(": ").chars().take(512).collect();
+            let detail: String = details.join_with(": ").chars().take(512).collect();
             format!("{context}: {detail}")
         });
     }

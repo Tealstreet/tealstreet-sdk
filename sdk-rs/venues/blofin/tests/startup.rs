@@ -50,6 +50,8 @@ fn malformed_catalogue_neighbor_and_failed_ticker_do_not_block_account() {
             _ => None,
         })
         .unwrap();
+    // Skipped discovery rows log at Debug.
+    e.set_log_level(safe_cex_engine::Level::Debug);
     reply(
         &mut e,
         request,

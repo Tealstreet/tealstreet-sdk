@@ -12,6 +12,8 @@ use support::{INSTRUMENTS, TICKERS, jittered};
 
 type TestEngine = Engine<Cryptocom>;
 const SYMBOL: &str = "BTCUSD-PERP";
+/// Startup catalogue and ticker reads get the engine's discovery deadline, not the 20 s read bound.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 
 fn new() -> TestEngine {
     support::fixture::engine(Options {
@@ -85,11 +87,13 @@ fn pending(e: &mut TestEngine, path: &str, now: f64) -> (Preparation, HttpReques
             _ => None,
         })
         .expect("one genuine Public preparation");
-    assert_eq!(read.timeout_ms, Some(20_000));
+    assert_eq!(read.timeout_ms, Some(DISCOVERY_DEADLINE_MS as u32));
     let deadline = output
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms } if *at_ms == now + 20_000. => Some(*timer),
+            Action::SetTimer { timer, at_ms } if *at_ms == now + DISCOVERY_DEADLINE_MS => {
+                Some(*timer)
+            }
             _ => None,
         })
         .expect("deadline starts at issue, before route readiness");
@@ -192,12 +196,12 @@ fn parked_catalogue_expires_and_late_route_cannot_release() {
     let mut e = new();
     e.start(0.);
     let (preparation, read, deadline) = pending(&mut e, "/public/get-instruments", 0.);
-    e.handle(20_000., Event::TimerFired { timer: deadline });
+    e.handle(DISCOVERY_DEADLINE_MS, Event::TimerFired { timer: deadline });
     let output: Vec<_> = e.drain_actions().collect();
-    retry(&output, 20_000., 1000.);
+    retry(&output, DISCOVERY_DEADLINE_MS, 1000.);
     no_command_or_auth(&output);
     e.http_prepared(
-        20_001.,
+        DISCOVERY_DEADLINE_MS + 1.,
         preparation,
         Prepared {
             id: read.id.0,
@@ -208,7 +212,7 @@ fn parked_catalogue_expires_and_late_route_cannot_release() {
         !e.drain_actions()
             .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
     );
-    reply(&mut e, 20_002., &read, 200, INSTRUMENTS);
+    reply(&mut e, DISCOVERY_DEADLINE_MS + 2., &read, 200, INSTRUMENTS);
     assert!(!e.store().loaded().markets);
 }
 #[test]
@@ -234,7 +238,7 @@ fn preparation_refusal_preserves_native_retry_without_auth_evidence() {
 #[test]
 fn catalogue_at_deadline_cannot_publish_without_timer_ingress() {
     let (mut e, read) = markets();
-    reply(&mut e, 20_000., &read, 200, INSTRUMENTS);
+    reply(&mut e, DISCOVERY_DEADLINE_MS, &read, 200, INSTRUMENTS);
     assert!(!e.store().loaded().markets, "DATA expires at equality");
     let output: Vec<_> = e.drain_actions().collect();
     // Shared cancellation retires the released route; it grants no new I/O.
@@ -265,7 +269,7 @@ fn live_catalogue_prefix_followed_by_expired_stream_end_cannot_publish() {
     );
     assert!(!e.store().loaded().markets);
     e.drain_actions().for_each(drop);
-    e.handle(20_000., Event::HttpEnd { request: read.id });
+    e.handle(DISCOVERY_DEADLINE_MS, Event::HttpEnd { request: read.id });
     assert!(
         !e.store().loaded().markets,
         "a live streamed prefix cannot cross the expiry boundary"
@@ -285,10 +289,10 @@ fn catalogue_deadline_timer_then_response_cannot_publish() {
     e.start(0.);
     let (preparation, _, deadline) = pending(&mut e, "/public/get-instruments", 0.);
     let read = release(&mut e, 0., preparation);
-    e.handle(20_000., Event::TimerFired { timer: deadline });
+    e.handle(DISCOVERY_DEADLINE_MS, Event::TimerFired { timer: deadline });
     let output: Vec<_> = e.drain_actions().collect();
-    retry(&output, 20_000., 1000.);
-    reply(&mut e, 20_000., &read, 200, INSTRUMENTS);
+    retry(&output, DISCOVERY_DEADLINE_MS, 1000.);
+    reply(&mut e, DISCOVERY_DEADLINE_MS, &read, 200, INSTRUMENTS);
     assert!(!e.store().loaded().markets);
 }
 #[test]
@@ -301,7 +305,7 @@ fn expired_ticker_retains_cached_quotes_and_cannot_open_socket() {
             last: 333.,
             ..Default::default()
         }]);
-    reply(&mut e, 20_001., &read, 200, TICKERS);
+    reply(&mut e, DISCOVERY_DEADLINE_MS + 1., &read, 200, TICKERS);
     assert_eq!(e.store().tickers()[0].last, 333.);
     assert!(
         !e.drain_actions()
@@ -389,9 +393,9 @@ fn native_catalogue_transport_retries_keep_backoff_and_old_callbacks_inert() {
 #[test]
 fn sibling_issuance_cannot_suppress_expired_ticker_failure_recovery() {
     let (mut e, read) = tickers();
-    let sibling = peer(&mut e, 20_002., 900);
+    let sibling = peer(&mut e, DISCOVERY_DEADLINE_MS + 2., 900);
     e.handle(
-        20_003.,
+        DISCOVERY_DEADLINE_MS + 3.,
         Event::HttpFailed {
             request: read.id,
             error: "late host failure after sibling issuance",
@@ -399,7 +403,7 @@ fn sibling_issuance_cannot_suppress_expired_ticker_failure_recovery() {
     );
     let output: Vec<_> = e.drain_actions().collect();
     no_command_or_auth(&output);
-    let (timer, at) = retry(&output, 20_003., 1000.);
+    let (timer, at) = retry(&output, DISCOVERY_DEADLINE_MS + 3., 1000.);
     assert!(e.http_preparation_pending(sibling));
     e.handle(at, Event::TimerFired { timer });
     let fresh = packet(&actions(&mut e, at), "/public/get-tickers");

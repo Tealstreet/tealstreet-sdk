@@ -65,7 +65,7 @@ export const polymarket = {
   // Discovery may enumerate many pages; capture the full requested live window.
   recordAfterReady:true,
   publicOptions:{polymarket:{marketSlugs:['xi-jinping-out-before-2027','will-gavin-newsom-win-the-2028-democratic-presidential-nomination-568']}},
-  ts:{module:'../../packages/safe-cex/src/exchanges/polymarket/polymarket.exchange.ts',className:'PolymarketExchange',name:'polymarket'},
+  ts:{module:'../../packages/safe-cex/src/__tests__/reference/polymarket/polymarket.exchange.ts',className:'PolymarketExchange',name:'polymarket'},
   matchRequestBody:true,
   isWrite:(method,url)=>method!=='GET'&&!['/midpoints','/books'].includes(new URL(url).pathname),
   privateSocket:'/ws/user',

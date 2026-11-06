@@ -1,3 +1,4 @@
+import { requestFailureFields } from './request-failure.mjs';
 // Group resources are built and checked before the shared synchronous claim.
 export function bindGroup(manager, action, reason) {
   const { host } = manager;
@@ -22,10 +23,12 @@ export function bindGroup(manager, action, reason) {
       const member = members[i];
       const { resource } = entries[i];
       if (member.packet) {
-        resource.bound = resource.prepared.bind({ ...member.packet, headers: Object.fromEntries(member.packet.headers), signal: resource.controller.signal });
+        resource.diagnostic = requestFailureFields(member.packet);
+        resource.bound = resource.prepared.bind({ ...member.packet, readClass: resource.readClass, headers: Object.fromEntries(member.packet.headers), signal: resource.controller.signal });
         resource.phase = 'bound';
         resource.groupRequest = member.packet.request;
       }
+      if (resource.bound?.admitDispatch) { failGroup(manager, members, 'unsupported'); return; }
       if (!resource.bound || typeof resource.bound.ready !== 'function' || typeof resource.bound.dispatch !== 'function') throw new Error('Invalid bound HTTP group resource');
     }
   } catch (error) { const code = reason(error, 'invalid'); failGroup(manager, members, code === 'stale' ? 'invalid' : code); return; }

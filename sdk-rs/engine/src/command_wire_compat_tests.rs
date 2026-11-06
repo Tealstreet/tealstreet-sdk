@@ -1,16 +1,20 @@
 //! Wire compatibility for the host command decoder (RUST_COMMAND_DECODER.md).
-//! `legacy` is a byte-for-byte copy of the derive-based decoder as it stood
-//! before the borrowed-tag rewrite, kept only here as the oracle.
+//! `legacy` preserves the derive-based decoder's wire contract, with gated
+//! command additions mirrored explicitly, kept only here as the oracle.
 use super::*;
 
 #[allow(clippy::large_enum_variant)]
 mod legacy {
-    #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
+    #[cfg(any(
+        feature = "command-asterdex",
+        feature = "command-kucoinspot",
+        feature = "command-bitget"
+    ))]
     use crate::model::CancelOrderRef;
     #[cfg(feature = "command-asterdex")]
     use crate::model::StpMode;
     use crate::model::{Interval, PlaceOrderOpts, PositionSide};
-    use crate::{Command, Query};
+    use crate::{Command, Query, SubscriptionTopic};
     use serde::Deserialize;
 
     /// Commands shared by JavaScript and native WebSocket clients.
@@ -50,6 +54,9 @@ mod legacy {
         UnsubscribeCandles {
             symbol: String,
             interval: Interval,
+        },
+        RepairSubscription {
+            topic: SubscriptionTopic,
         },
         PlaceOrders {
             command: u32,
@@ -139,6 +146,27 @@ mod legacy {
             tier: String,
         },
         FetchBalanceInfo {
+            command: u32,
+        },
+        RefreshSettings {
+            command: u32,
+            #[serde(default)]
+            symbol: Option<String>,
+        },
+        RefreshOrders {
+            command: u32,
+            #[serde(default)]
+            symbols: Option<Vec<String>>,
+        },
+        #[cfg(feature = "command-bitget")]
+        RegisterCancelChecks {
+            command: u32,
+            orders: Vec<CancelOrderRef>,
+        },
+        ReadPositions {
+            command: u32,
+        },
+        CancelAccountOrders {
             command: u32,
         },
         FetchClosedPositions {
@@ -261,6 +289,7 @@ mod legacy {
                 CommandIn::UnsubscribeCandles { symbol, interval } => {
                     Self::UnsubscribeCandles { symbol, interval }
                 }
+                CommandIn::RepairSubscription { topic } => Self::RepairSubscription(topic),
                 CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
                 CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
                 #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
@@ -345,6 +374,27 @@ mod legacy {
                 CommandIn::FetchBalanceInfo { command } => Self::Venue {
                     command,
                     action: crate::VenueAction::FetchBalanceInfo,
+                },
+                CommandIn::RefreshSettings { command, symbol } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::RefreshSettings { symbol },
+                },
+                CommandIn::RefreshOrders { command, symbols } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::RefreshOrders { symbols },
+                },
+                #[cfg(feature = "command-bitget")]
+                CommandIn::RegisterCancelChecks { command, orders } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::RegisterCancelChecks { orders },
+                },
+                CommandIn::ReadPositions { command } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::ReadPositions,
+                },
+                CommandIn::CancelAccountOrders { command } => Self::Venue {
+                    command,
+                    action: crate::VenueAction::CancelAccountOrders,
                 },
                 CommandIn::FetchClosedPositions {
                     command,
@@ -485,6 +535,17 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
             ("interval", r#""1m""#),
         ],
         vec![
+            ("op", r#""repairSubscription""#),
+            (
+                "topic",
+                r#"{"kind":"candles","symbol":"BTCUSDT","interval":"1m"}"#,
+            ),
+        ],
+        vec![
+            ("op", r#""repairSubscription""#),
+            ("topic", r#"{"kind":"orderBook","symbol":"BTCUSDT"}"#),
+        ],
+        vec![
             ("op", r#""placeOrders""#),
             ("command", "2"),
             ("orders", Box::leak(format!("[{order}]").into_boxed_str())),
@@ -534,6 +595,19 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
             ("tier", r#""plus""#),
         ],
         vec![("op", r#""fetchBalanceInfo""#), ("command", "12")],
+        vec![
+            ("op", r#""refreshSettings""#),
+            ("command", "12"),
+            ("symbol", r#""BTCUSDT""#),
+        ],
+        vec![("op", r#""refreshOrders""#), ("command", "12")],
+        vec![
+            ("op", r#""refreshOrders""#),
+            ("command", "12"),
+            ("symbols", r#"["BTCUSDT"]"#),
+        ],
+        vec![("op", r#""readPositions""#), ("command", "12")],
+        vec![("op", r#""cancelAccountOrders""#), ("command", "12")],
         vec![
             ("op", r#""fetchClosedPositions""#),
             ("command", "13"),
@@ -641,6 +715,12 @@ fn examples() -> Vec<Vec<(&'static str, &'static str)>> {
         ("op", r#""scheduleCancel""#),
         ("command", "30"),
         ("time", "1700000000000"),
+    ]);
+    #[cfg(feature = "command-bitget")]
+    all.push(vec![
+        ("op", r#""registerCancelChecks""#),
+        ("command", "31"),
+        ("orders", r#"[{"id":"7","symbol":"BTCUSDT"}]"#),
     ]);
     all
 }

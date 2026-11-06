@@ -1,6 +1,11 @@
 //! Optional credentials for the TS secondary client's GET-only identity.
 use zeroize::Zeroize;
 
+/// The native invalid-read-identity error, for venues that validate a provider
+/// identity rather than raw `ReadCredentials`.
+pub const READ_CREDENTIALS_INVALID: &str =
+    "Secondary read credentials require a nonempty key and secret";
+
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadCredentials {
@@ -43,7 +48,7 @@ impl ReadCredentials {
         if valid {
             Ok(())
         } else {
-            Err("Secondary read credentials require a nonempty key and secret")
+            Err(READ_CREDENTIALS_INVALID)
         }
     }
 }

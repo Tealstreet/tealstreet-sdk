@@ -35,6 +35,12 @@ impl Owner {
         }
     }
 }
+pub struct Replay {
+    pub path: String,
+    pub payload: String,
+    pub streamed: bool,
+    pub retried: bool,
+}
 pub struct Deferred {
     pub method: Method,
     pub path: String,
@@ -115,6 +121,12 @@ impl MexcFutures {
             body: None,
             stream: streamed.then_some(ArrayAt::EnvelopeField("data")),
         };
+        let replay = Replay {
+            path: path.into(),
+            payload,
+            streamed,
+            retried: false,
+        };
         let window = self.options.recv_window;
         let recipe = move |identity: &safe_cex_engine::signing::Identity| -> Box<dyn safe_cex_engine::SignStep> {
             Box::new(sign::dispatch::Http::new(identity.clone(), method, recipe_path, recipe_payload, window))
@@ -150,6 +162,7 @@ impl MexcFutures {
             leg.queue(cx, request, recipe, |leg| Pending::Private {
                 owner: Owner::Caller { root, leg },
                 pending: Box::new(pending),
+                replay,
             })
         } else {
             let read = match SelectedRead::background(
@@ -158,7 +171,7 @@ impl MexcFutures {
                 ReadPolicy {
                     timeout_ms: 20_000,
                     pacing: None,
-                    retry: RetryPolicy::Never,
+                    retry: RetryPolicy::ReadFailure,
                 },
             ) {
                 Ok(read) => read,
@@ -182,7 +195,104 @@ impl MexcFutures {
             read.queue(cx, request, recipe, |read| Pending::Private {
                 owner: Owner::Background(read),
                 pending: Box::new(pending),
+                replay,
             })
+        };
+        if let Err((pending, error)) = result {
+            self.private_precommit_failed(cx, pending, error, error.venue_error());
+        }
+    }
+    pub(crate) fn read_refused(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: VenueError,
+    ) {
+        match pending {
+            Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Identity(_) => self.private_fail(cx, error, true),
+            Pending::History(request) => self.query_failed(cx, request, error),
+            pending => self.failure(cx, pending, &error.message),
+        }
+    }
+    pub(crate) fn replay_private(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: Owner,
+        replay: Replay,
+        pending: Box<Pending>,
+    ) {
+        use safe_cex_engine::request_context::RetryEvidence;
+        let owner = match owner {
+            Owner::Background(read) => match read.retry(cx, RetryEvidence::ReadFailure, ()) {
+                Ok((read, ())) => Owner::Background(read),
+                Err(failure) => {
+                    self.private_failed(
+                        cx,
+                        Pending::Private {
+                            owner: Owner::Background(failure.read),
+                            replay,
+                            pending,
+                        },
+                        failure.error.venue_error(),
+                    );
+                    return;
+                }
+            },
+            Owner::Caller { root, leg } => {
+                let next = match root.leg(
+                    cx,
+                    ReadLegPolicy {
+                        timeout_ms: 20_000,
+                        pacing: None,
+                    },
+                ) {
+                    Ok(next) => next,
+                    Err(error) => {
+                        self.private_failed(
+                            cx,
+                            Pending::Private {
+                                owner: Owner::Caller { root, leg },
+                                replay,
+                                pending,
+                            },
+                            error.venue_error(),
+                        );
+                        return;
+                    }
+                };
+                let _ = cx.finish_http_context(leg.context());
+                Owner::Caller { root, leg: next }
+            }
+        };
+        let url = if replay.payload.is_empty() {
+            format!("{}{}", crate::REST, replay.path)
+        } else {
+            format!("{}{}?{}", crate::REST, replay.path, replay.payload)
+        };
+        let request = ReadRequest {
+            method: Method::Get,
+            url,
+            body: None,
+            stream: replay.streamed.then_some(ArrayAt::EnvelopeField("data")),
+        };
+        let path = replay.path.clone();
+        let payload = replay.payload.clone();
+        let window = self.options.recv_window;
+        let recipe = move |identity: &safe_cex_engine::signing::Identity| -> Box<dyn safe_cex_engine::SignStep> {
+            Box::new(sign::dispatch::Http::new(identity.clone(), Method::Get, path, payload, window))
+        };
+        let result = match owner {
+            Owner::Background(read) => read.queue(cx, request, recipe, |read| Pending::Private {
+                owner: Owner::Background(read),
+                replay,
+                pending,
+            }),
+            Owner::Caller { root, leg } => leg.queue(cx, request, recipe, |leg| Pending::Private {
+                owner: Owner::Caller { root, leg },
+                replay,
+                pending,
+            }),
         };
         if let Err((pending, error)) = result {
             self.private_precommit_failed(cx, pending, error, error.venue_error());
@@ -270,7 +380,7 @@ impl MexcFutures {
         error: VenueError,
         recover: bool,
     ) {
-        let Pending::Private { owner, pending } = pending else {
+        let Pending::Private { owner, pending, .. } = pending else {
             self.failure(cx, pending, &error.message);
             return;
         };
@@ -287,7 +397,7 @@ impl MexcFutures {
         self.private_delivery = owner.root().cloned();
         self.defer_private = true;
         if recover {
-            self.failure(cx, *pending, &error.message);
+            self.read_refused(cx, *pending, error);
         } else {
             self.discard_private(*pending);
             if owner.root().is_some() {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createAPI } from '@tealstreet/safe-cex/src/exchanges/bybit/bybit.api';
+import { createAPI } from '@tealstreet/safe-cex/src/__tests__/reference/bybit/bybit.api';
 
 import { readConfig } from './config';
 
@@ -45,9 +45,14 @@ describe('readConfig', () => {
     expect(readConfig(signerEnv).options.enableOptionMarkets).toBe(false);
   });
 
-  it('turns options on for an exchange that trades only options, with or without EXCHANGE_OPTIONS', () => {
-    expect(readConfig({ EXCHANGE: 'binanceoptions' }).options.enableOptionMarkets).toBe(true);
-    expect(readConfig({ EXCHANGE: 'binanceoptions', EXCHANGE_OPTIONS: 'true' }).options.enableOptionMarkets).toBe(true);
+  it.each(['binanceoptions', 'hyrotrader'])('accepts the shipped beta venue %s', (exchange) => {
+    expect(readConfig({ EXCHANGE: exchange }).exchange).toBe(exchange);
+  });
+
+  it.each(['txflow'])('refuses OUT beta accounts before construction: %s', (exchange) => {
+    expect(() => readConfig({ EXCHANGE: exchange })).toThrowError(
+      expect.objectContaining({ kind: 'unsupported', outcome: 'notSent' }),
+    );
   });
 
   it('turns inverse on only when asked', () => {
@@ -69,15 +74,8 @@ describe('readConfig', () => {
     expect(readConfig({ EXCHANGE: 'bitunix' }).options.engine).toBeUndefined();
   });
 
-  it('accepts the registered TxFlow Rust testnet adapter', () => {
-    const config = readConfig({ EXCHANGE: 'txflow', EXCHANGE_ENGINE: 'rust', EXCHANGE_TESTNET: 'true' });
-    expect(config.exchange).toBe('txflow');
-    expect(config.options.engine).toBe('rust');
-    expect(config.options.testnet).toBe(true);
-  });
-
   it.each([
-    [{ EXCHANGE: 'nope' }, 'EXCHANGE must be one of'],
+    [{ EXCHANGE: 'nope' }, 'unsupported in this build'],
     [{ ...signerEnv, EXCHANGE_ENGINE: 'typo' }, 'EXCHANGE_ENGINE must be rust'],
     [{ ...signerEnv, EXCHANGE_SIGNER_SIGNATURE: '' }, 'must be set together'],
     [{ ...signerEnv, EXCHANGE_API_SECRET: 'secret' }, 'set one'],

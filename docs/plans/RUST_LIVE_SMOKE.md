@@ -148,3 +148,132 @@ native network primitives provide its transport. No engine shapes change.
   298.6/177.5 ms, steady CPU 175.2/96.3 ms, retained memory 16.3/3.3 MB.
   Merge review PASS; post the repaired-head evidence and wait for its full CI
   before merging PR #1332, then cut the fresh follow-up branch.
+
+
+## Hyperliquid Spot beta smoke
+
+Hyperliquid and Hyperliquid Spot share the HYPERLIQUID environment fields:
+SIGNER_ADDRESS is the agent (API) wallet address, PRIVATE_KEY is that agent's
+key, and ACCOUNT_ADDRESS is the funded account. Never provide the main wallet
+key. Equal signer/account addresses refuse; distinct addresses alone do not
+prove that an API wallet was authorized. The mainnet beta run must explicitly use --mainnet and a dedicated account
+with no open orders; use --symbol UBTC/USDC for Spot. Spot leverage is fixed at 1,
+so the harness never attempts a leverage change. Existing write caps, no-retry,
+post-only and fresh cleanup readback checks stay in effect.
+
+Spot sizing requires a successful spotMetaAndAssetCtxs reply that uniquely
+identifies the selected pair, its base lot precision and USDC quote token.
+The documented MinTradeSpotNtl floor is 10 quote tokens, distinct from the
+perpetual dollar floor: [official error contract](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/error-responses).
+Non-USDC quotes and missing or inconsistent metadata refuse before placement.
+Profile and scripted checks do not claim a successful credentialed live run.
+
+## Kraken Spot beta smoke
+
+Kraken Spot requires explicit `--mainnet`, a dedicated small-balance account
+with no open orders, and its own `RUST_LIVE_SMOKE_KRAKEN_SPOT_MAINNET_KEY` and
+`RUST_LIVE_SMOKE_KRAKEN_SPOT_MAINNET_SECRET` (Base64 API secret). Futures keys
+are never used as a fallback; its existing demo default remains unchanged.
+Credentials enter through the existing environment boundary; preserve them
+with `oneshot-secret peek` and never print or log their values.
+
+The profile permits only `https://api.kraken.com`, `wss://ws.kraken.com`, and
+`wss://ws-auth.kraken.com`. It keeps fixed 1x leverage and post-only writes.
+Sizing matches the unique native display symbol (for example `XBT/USD`),
+checks the selected normalized ID (`BTC/USD`), and excludes dark-pool rows.
+It uses `costmin`
+(quote units), `ordermin` (base units), and `lot_decimals` from a complete online
+unit-lot [AssetPairs response](https://docs.kraken.com/api-reference/market-data/get-tradable-asset-pairs).
+Missing, inconsistent or later failed catalog data refuses before placement.
+Existing dollar-quote restrictions, the $100 maximum, no write retry, and
+fresh cleanup/readback remain unchanged.
+
+`corepack yarn rust:live-smoke --venue krakenspot --mainnet --symbol XBT/USD --out /tmp/krakenspot-private-smoke.jsonl`
+
+This adds a reviewed harness profile, not credentialed live-success evidence.
+The probe uses the compiled Rust engine through JS `EngineHost`; native-only
+unit results do not establish browser beta readiness.
+
+## Funded beta smoke
+
+Covers the `BETA_VENUES` set in `packages/safe-cex/src/exchanges/rust/betaVenues.ts`.
+Every venue runs in its test environment (testnet or demo) where the engine
+supports one. Only `bitunix`, `bingx` and `krakenspot` run on mainnet. No
+credentialed run starts until Sam has supplied the keys and the overseer has
+approved the per-venue list.
+
+### Getting keys in
+
+- Each credential set is one `oneshot-secret` entry in scope
+  `tealstreet-beta-livesmoke`. The entry name is `FAMILY_MODE` (the harness
+  environment prefix, for example `BITUNIX_MAINNET`). Its value is one JSON
+  object whose keys are the field names below, for example `{"KEY": "...",
+  "SECRET": "..."}`.
+- Pipe the value straight into the runner. Read it with `recall`, which is
+  non-destructive and prompts for Sam's password, or with `peek` from the
+  handoff slot. Never use `get`. For example:
+  `oneshot-secret recall tealstreet-beta-livesmoke/BITUNIX_MAINNET | corepack yarn -s rust:live-smoke --venue bitunix --mainnet --credentials-stdin`
+- `--credentials-stdin` replaces the environment completely. The runner refuses
+  unknown fields, missing fields and anything that is not one object of strings,
+  and every error names the field, never its value. Values never reach argv, the
+  process environment, stdout, stderr or the private tape.
+- `corepack yarn -s rust:live-smoke --list-credentials` prints every set's entry
+  name, mode, venues, required and optional fields. It reads no values.
+
+### Dry run
+
+`--dry-run` runs everything up to the first signed request.
+- Supplied credentials go only to the engine constructor, which proves they
+  parse. The engine is never started with them.
+- A public-only engine then discovers markets on the selected environment's live
+  public endpoints, reads the book and sizes the exact order the live run would
+  place. It uses the same endpoint fence, pacing and $100 cap as a live run.
+- A transport guard refuses any outgoing URL, header, body or socket message
+  that contains supplied credential material.
+- The result names the symbol, the order plan (price, amount and, outside
+  mainnet, the amend price), the step sequence and `credentials: parsed|absent`.
+  Credentials are optional, so the dry run can run before keys exist.
+
+### Mainnet sequence
+
+A `--mainnet` run uses the minimal sequence:
+1. Place one minimum-size post-only order far from the market.
+2. Confirm it is open.
+3. Cancel it, then cancel the symbol.
+4. A fresh engine reads back no orders and no positions.
+
+Amend and both leverage writes are skipped and reported in `skipped`, never as
+passing. Test environments run the full sequence.
+
+### Credential sets
+
+Every key gets read and trade permission only: no withdrawal, no transfer and no
+sub-account management. The account must be dedicated: no open orders, no
+positions and one-way position mode, because cancel-all is intentional.
+
+| Entry | Fields | Venues | Notes |
+| --- | --- | --- | --- |
+| `BINANCE_TESTNET` | `KEY`, `SECRET` | binance (binanceinverse once profiled) | USD-M demo key from demo.binance.com |
+| `BINANCESPOT_TESTNET` | `KEY`, `SECRET` | binancespot | testnet.binance.vision key, separate from futures |
+| `BYBIT_TESTNET` | `KEY`, `SECRET` | bybit, bybitinverse, bybitspot | testnet unified account with testnet USDT and some BTC for inverse |
+| `BYBIT_DEMO` | `KEY`, `SECRET` | bybitdemo | Demo Trading key from a mainnet account |
+| `OKX_DEMO` | `KEY`, `SECRET`, `PASSPHRASE` | okx, okxdemo | global OKX Demo Trading key |
+| `OKX_EEA_DEMO` | `KEY`, `SECRET`, `PASSPHRASE` | okxeu, okxeudemo | EEA (my.okx.com) Demo Trading key |
+| `BITGET_TESTNET` | `KEY`, `SECRET`, `PASSPHRASE` | bitget, bitgetusdc | Demo Trading key; simulated SUSDT/SUSDC products |
+| `KRAKEN_DEMO` | `KEY`, `SECRET` | kraken | demo-futures.kraken.com key |
+| `HYPERLIQUID_TESTNET` | `SIGNER_ADDRESS`, `PRIVATE_KEY`, `ACCOUNT_ADDRESS` | hyperliquid, hyperliquidspot | agent wallet key only, distinct from the funded account; Spot needs USDC in spot |
+| `LIGHTER_TESTNET` | `PRIVATE_KEY`, `ACCOUNT_INDEX`, `API_KEY_INDEX` | lighter | API key slot 2 or higher |
+| `PARADEX_TESTNET` | `PRIVATE_KEY`, `ACCOUNT_ADDRESS`, `SUBKEY_ADDRESS` | paradex | subkey private key |
+| `PHEMEX_TESTNET` | `KEY`, `SECRET` | phemex | testnet.phemex.com, USDT-M contract trade |
+| `APEXOMNI_TESTNET` | `KEY`, `SECRET`, `PASSPHRASE`, `OMNI_KEY_SEED` | apexomni | |
+| `BLOFIN_DEMO` | `KEY`, `SECRET`, `PASSPHRASE` | blofin | Demo Trading key |
+| `CRYPTOCOM_TESTNET` | `KEY`, `SECRET` | cryptocom | UAT sandbox; access is by application to Crypto.com. Trading still refuses until its monetary floor can be established |
+| `ASTERDEX_TESTNET` | `KEY`, `SECRET`; optional `API_VERSION`, `USER_ADDRESS`, `SIGNER_ADDRESS`, `PRIVATE_KEY` | asterdex | v1 HMAC unless v3 fields are supplied |
+| `BITUNIX_MAINNET` | `KEY`, `SECRET` | bitunix | futures read and trade; BTCUSDT minimum 0.0001 BTC; fund 20 USDT |
+| `BINGX_MAINNET` | `KEY`, `SECRET` | bingx | perpetual read and trade; switch to one-way mode; BTC-USDT minimum 0.0001 BTC; fund 20 USDT |
+| `KRAKEN_SPOT_MAINNET` | `KEY`, `SECRET` (Base64) | krakenspot | Query Funds, Query Open Orders and Trades, Create and Modify Orders, Cancel/Close Orders; XBT/USD ordermin 0.00006, costmin 0.5 USD; fund 20 USD cash |
+
+`binancepm` has no test environment and no profile yet. Whether it runs on
+mainnet or stays unsmoked is an open decision. `binanceoptions` (European
+Options, #2356) has no reviewed profile either and refuses every mode. `binanceinverse` gets its profile
+in a follow-up.

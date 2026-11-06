@@ -14,6 +14,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MANIFEST = 'scripts/request-legacy-sites.json'
@@ -634,6 +635,24 @@ def use_items(stream):
     return result
 
 
+def without_own_crate_alias(stream, source_dir):
+    """`extern crate self as <this package>;` names only the crate itself and imports
+    no macro (`#[macro_use]` stays a hazard token), so it is no ancestor hazard."""
+    try:
+        package = tomllib.loads((source_dir.parent / 'Cargo.toml').read_text())['package']['name']
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return stream
+    alias = ['extern', 'crate', 'self', 'as', package.replace('-', '_'), ';']
+    kept, i = [], 0
+    while i < len(stream):
+        if stream[i:i + 6] == alias:
+            i += 6
+            continue
+        kept.append(stream[i])
+        i += 1
+    return kept
+
+
 def source_macro_hazard(stream, ancestor=False):
     if any(token in {'macro_rules', 'macro_use', 'macro_export', 'macro'} for token in stream):
         return True
@@ -798,7 +817,7 @@ class MacroImportProof:
         """An ancestor's top-level invocation may install textual macros, except a
         workspace macro proven to expand only to `impl` blocks, in a crate whose
         root proof shows `safe_cex_crypto` is the workspace dependency."""
-        stream = self.streams[parent]
+        stream = without_own_crate_alias(self.streams[parent], source_dir)
         if not source_macro_hazard(stream, True):
             return False
         if source_macro_hazard(stream):
@@ -1467,8 +1486,20 @@ def manifest(text):
     return value
 
 
-def subset(counts, baseline):
-    return all(count <= baseline.get(digest, 0) for digest, count in counts.items())
+# The one ruled growth allowance (ddi, 2026-10-27; owner m26ps4): Paradex PR-2's
+# interim sign_http helper. Paradex PR-3 removes that site and this tuple together;
+# while it lingers with the site gone, the check fails.
+RULED_GROWTH = (
+    ('venues/paradex/src/account.rs',
+     'de9d09faf6d835f5164746112b2915550e9364b218dcf7701191482bbc0b492e', 1),
+)
+
+
+def subset(counts, baseline, ceilings=None):
+    """`ceilings` are absolute: a ruled digest never exceeds its count."""
+    ceilings = ceilings or {}
+    return all(count <= max(baseline.get(digest, 0), ceilings.get(digest, 0))
+               for digest, count in counts.items())
 
 
 def maximum_manifest(manifests):
@@ -1481,13 +1512,18 @@ def maximum_manifest(manifests):
     return result
 
 
-def check(current, allowed, previous):
+def check(current, allowed, previous, ruled=()):
     failures = []
     if current != allowed:
         failures.append('current sites must exactly match the inventory (prune removals; no new sites)')
+    ceilings = {}
+    for path, digest, count in ruled:
+        ceilings.setdefault(path, {})[digest] = count
+        if digest not in allowed.get(path, {}):
+            failures.append(f'{path}: stale ruled allowance; delete it with its site')
     for label, baseline in previous:
         for path, counts in allowed.items():
-            if not subset(counts, baseline.get(path, {})):
+            if not subset(counts, baseline.get(path, {}), ceilings.get(path)):
                 failures.append(f'{path}: inventory grew against {label}')
     return failures
 
@@ -1499,7 +1535,7 @@ def git(*args):
 def previous_manifests(inventory=None, predecessor=None, merge_parents=False):
     """Request inventories may join parent bounds; other consumers keep per-ref bounds."""
     inventory = inventory or MANIFEST
-    base = os.environ.get('GITHUB_BASE_REF') or 'feat/rust-rewrite'
+    base = os.environ.get('GITHUB_BASE_REF') or 'master'
     parents = git('rev-list', '--parents', '-n', '1', 'HEAD').split()[1:]
     remote = f'refs/remotes/origin/{base}'
     refs = [('HEAD', ['HEAD'])]
@@ -1536,7 +1572,8 @@ def previous_manifests(inventory=None, predecessor=None, merge_parents=False):
 def main():
     try:
         prod, test = request_sites()
-        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests(merge_parents=True))
+        failures = check(prod, manifest((ROOT / MANIFEST).read_text()),
+                         previous_manifests(merge_parents=True), RULED_GROWTH)
         failures += ['test inventory: ' + failure for failure in check(
             test, manifest((ROOT / TEST_MANIFEST).read_text()),
             previous_manifests(TEST_MANIFEST, MANIFEST, merge_parents=True))]

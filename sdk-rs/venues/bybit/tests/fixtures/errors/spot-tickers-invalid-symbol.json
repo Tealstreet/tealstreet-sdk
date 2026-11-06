@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:03:07.313Z",
+  "endpoint": "/v5/market/tickers?category=spot&symbol=NOPEUSDT",
+  "http_status": 200,
+  "body": "{\"retCode\":10001,\"retMsg\":\"Not supported symbols\",\"result\":{},\"retExtInfo\":{},\"time\":1793152987328}",
+  "expect": {
+    "kind": "invalidInput",
+    "outcome": null,
+    "path": "read"
+  }
+}

@@ -14,6 +14,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, Min, MinMax, Precision, Ticker};
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, Venue,
 };
@@ -283,7 +284,7 @@ impl Backpack {
                         Pending::Daily { .. } => "ticker",
                         _ => "mark price",
                     },
-                    skipped.join(", ")
+                    skipped.join_with(", ")
                 ),
             );
         }
@@ -769,12 +770,23 @@ impl Backpack {
 }
 
 impl Venue for Backpack {
+    fn managed_sockets() -> bool {
+        true
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
 
     fn guard_order_mutations(&self) -> bool {
         true
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.trade_release_veto(store, pending, release)
     }
 
     type Pending = Pending;
@@ -815,6 +827,13 @@ impl Venue for Backpack {
         pending: Pending,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.released_socket_snapshots(cx, epoch, pending)
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn encode_socket_interests(
         &self,

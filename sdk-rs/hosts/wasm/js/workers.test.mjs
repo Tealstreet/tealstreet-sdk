@@ -622,7 +622,7 @@ test('Workers routes the native WEEX incomplete fixture only to its translated o
     ]));
     await Promise.all([first, second]);
     assert.deepEqual(messages[0].map((row) => row.op), ['event', 'done']);
-    assert.deepEqual(messages[0][0], { ...event, fields: { command: 77 } });
+    assert.deepEqual(messages[0][0], { ...event, fields: { ...event.fields, command: 77 } });
     assert.equal(messages[0][1].id, 77);
     assert.deepEqual(messages[0][1].result, [{ tranId: 'kept' }]);
     assert.equal(messages[0][1].error, undefined);
@@ -705,7 +705,7 @@ test('Workers routes the native WEEX empty-fill fixture before retained rows onl
     object.host.run(JSON.stringify([event, { op: 'done', command: 1, result: '[{"id":"good","price":69000,"qty":0.01}]' }, { op: 'done', command: 2, result: '[]' }]));
     await Promise.all([first, second]);
     assert.deepEqual(messages[0].map((row) => row.op), ['event', 'done']);
-    assert.deepEqual(messages[0][0], { ...event, fields: { command: 77 } });
+    assert.deepEqual(messages[0][0], { ...event, fields: { ...event.fields, command: 77 } });
     assert.deepEqual(messages[0][1], { op: 'done', id: 77, result: [{ id: 'good', price: 69000, qty: 0.01 }] });
     assert.deepEqual(messages[1], [{ op: 'done', id: 77, result: [] }]);
   } finally { for (const client of clients) object.leave(client); }

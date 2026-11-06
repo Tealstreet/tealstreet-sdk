@@ -1,7 +1,8 @@
 import type { ExchangeAccountConfig, ExchangeOptions } from './types';
 
-import { normalizeBybitSiteId } from './exchanges/bybit/bybit.site';
 import { getExchangeMetadata } from './exchangeMetadata';
+import { normalizeBybitSiteId } from './exchanges/bybit/bybit.site';
+import { assertBetaVenue } from './exchanges/rust/betaVenues';
 import { createExchange } from './index';
 import { getTransport } from './transport/registry';
 import { resolveAccountTransport } from './transport/tealstreet/transportResolution';
@@ -86,7 +87,11 @@ export function accountToExchangeOptions(
   const shouldForwardApiKeyIndex = metadata.requiresApiKeyIndex || isLighterExchange(account.exchange);
   const publicKucoinBrokerConfig = resolvePublicKucoinBrokerConfig(account.exchange);
   const hyrotraderMode =
-    account.exchange === 'hyrotrader' ? (account.hyrotraderDemo ? ('demo' as const) : ('production' as const)) : undefined;
+    account.exchange === 'hyrotrader'
+      ? account.hyrotraderDemo
+        ? ('demo' as const)
+        : ('production' as const)
+      : undefined;
   const extra = {
     ...(publicKucoinBrokerConfig ? { kucoinBroker: publicKucoinBrokerConfig } : {}),
     ...(hyrotraderMode ? { hyrotraderMode } : {}),
@@ -189,6 +194,7 @@ export function accountToExchangeOptions(
  * @returns Promise resolving to the exchange instance
  */
 export async function createExchangeFromAccount(account: ExchangeAccountConfig, overrides?: Partial<ExchangeOptions>) {
+  assertBetaVenue(account.exchange);
   const options = accountToExchangeOptions(account, overrides);
   return createExchange(account.exchange, options);
 }

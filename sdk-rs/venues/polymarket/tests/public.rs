@@ -424,6 +424,37 @@ fn returned_candle_points_respect_subsecond_inclusive_bounds() {
 }
 
 #[test]
+fn price_history_sorts_stably_and_the_later_duplicate_point_wins() {
+    let mut h = H::new();
+    h.load();
+    h.event(Event::Command(Command::FetchCandles {
+        command: 7,
+        symbol: "election-Yes".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+        limit: None,
+        from_ms: Some(100_000.0),
+        to_ms: None,
+    }));
+    h.response(
+        "/prices-history",
+        200,
+        r#"{"history":[{"t":102,"p":0.5},{"t":101,"p":0.4},{"t":102,"p":0.55},{"t":101,"p":0.45}]}"#,
+    );
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(h.done.last().unwrap().as_ref().unwrap()).unwrap();
+    let rows: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            (
+                row["timestamp"].as_f64().unwrap(),
+                row["close"].as_f64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(rows, [(101_000.0, 0.45), (102_000.0, 0.55)]);
+}
+
+#[test]
 fn price_history_requests_supply_a_valid_time_selector_and_reject_upper_only_bounds() {
     // Official /prices-history rejects a missing time selector and endTs alone.
     for (from, to, selector, expected) in [

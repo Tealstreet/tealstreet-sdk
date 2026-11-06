@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binancepm.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';

@@ -122,6 +122,7 @@ pub fn fixture_provider(
                 key: ExtraKey::ZklinkSeed,
                 field: ExtraFieldPolicy::Optional,
                 encoding: Some(KeyEncoding::Hex),
+                trim: false,
             }),
             ..Default::default()
         }),

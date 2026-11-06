@@ -16,6 +16,23 @@ The matching BaseExchange receiver restores it before resolving or notifying
 result observers; senders and receivers must upgrade together. Never infer a
 complete window from missing metadata or attach a notice to another request.
 
+## Nuke flatness proof reads
+
+A frame-fed page closes positions locally, then forwards `readPositions` to the
+worker's engine for a fresh `{ skipped, open }` proof, even when its mirrored store
+is empty. Keep that RPC in both `WORKER_OPTIONAL_METHODS` and `WORKER_READ_METHODS`:
+a failed read cannot confirm flatness and is never an interrupted write.
+Unknown or unimplemented RPCs return a serialized `unsupported`/`notSent` error
+naming the venue and method; a failed reply without a cause becomes `Error('undefined')`.
+
+## Write timing marks
+
+User-write `callMethod` requests carry optional `data.timing` (write stage
+marks, epoch ms), and their `callMethod:done` reply returns the merged marks.
+The handler hands them to the exchange with `runWithWriteTiming`; the
+main-thread caller emits the one `write.timing` event. See
+`docs/plans/callers/rust-write-timing.md`.
+
 ## Time synchronization
 
 The browser main thread owns public time polling. It synchronizes once per
@@ -55,15 +72,18 @@ name, and don't assume `accountName` is globally unique here. See
   instantiates `ExchangeWorker`.
 - `StoreWorkerPayload.ts` — the wire-format union of every `op`
   the bridge speaks in either direction.
-- `commandExecutor.ts` — parses and dispatches worker CLI commands;
-  `handlers/CommandHandler.ts` owns the `exec` wire operation.
+- `commandExecutor.ts` — the cli-core executor port tealstreet-next still
+  registers; the worker no longer calls it (`exec` runs in the Rust algos).
+- `handlers/CommandHandler.ts` owns the `exec` wire operation.
 - `TelgramWorker.ts` — legacy Telegram worker bridge (filename spelling is
   load-bearing).
 - `handlers/` — worker-operation handlers; there is no directory-local
   `CLAUDE.md` and no `commands/` directory.
 - `chaserOrder/`, `postProcessors/` — documented subsystems with their own
-  `CLAUDE.md` files.
-- `twap/` — TWAP instance and manager lifecycle.
+  `CLAUDE.md` files. The TS chaser runs only for in-process CLI callers
+  (cli-core, `apps/cli`), never in the worker.
+- `twap/` — the worker's Rust TWAP ownership (`RustTwapOwnership`, its lock,
+  restore-refusal and in-flight helpers) and the TS TWAP the CLI still runs.
 
 The main-thread worker fallback is
 `apps/web/src/utils/shim/worker/WorkerShim.ts`; it is not part of this
@@ -75,9 +95,8 @@ directory.
 exchange-server sessions receive frames from browser workers across reconnects
 and version skew, and a missing `payload.data` used to throw while reading
 `payload.data.reqId`, surfacing as a process-level unhandled rejection. Treat a
-bad command payload as an `exec-log` failure instead of throwing; safe-cex does
-not own the CLI layer and should not make malformed command frames page the
-service.
+bad command payload as an `exec-log` failure (and a failed `exec-result` for a
+`reqId`) instead of throwing, before it reaches the Rust algos.
 
 ## Ticker delta packing is browser-worker-only
 
@@ -180,10 +199,11 @@ fix at `_sanitizeForPostMessage` restores the invariant.
 
 ## Market-load subscription buffering telemetry
 
-`handlers/BaseHandler.ts` buffers orderbook/OHLCV subscriptions while
-`exchange.store.markets` is empty. If markets still have not loaded after 30 s,
-it drops the pending subscriptions and posts an `op: 'error'` payload with
-`sendToSentry: true`. This is intentionally still app-neutral: safe-cex does
+`handlers/BaseHandler.ts` buffers subscriptions while `exchange.store.markets`
+is empty, and applies them whenever markets load, however late. If markets still
+have not loaded after 30 s, it keeps the queue and posts an `op: 'error'` payload
+with `sendToSentry: true`. A repeat replaces its earlier copy, and the queue keeps
+the newest 200; a late apply is logged with its count and wait. This is intentionally still app-neutral: safe-cex does
 not import Sentry, it only sends structured data for the web app to sanitize.
 
 The wait-for-markets check is a self-rescheduling `setTimeout`, not
@@ -235,9 +255,13 @@ either one loses it; bybit calls `connectAndSubscribe()` INSIDE
 `socket.ws?.readyState === OPEN`, and a socket whose `connectAndSubscribe` never
 ran has no `ws`.
 
-**The 30 s `START_TIMEOUT_MS` race rejects into the same catch**, so a timeout is
-tagged `worker_error_phase: 'startup'` with `worker_error_family: 'timeout'`.
-That pairing is the point, not conflation.
+**The start timeout race rejects into the same catch** (30 s, Rust engine 120 s), so
+a timeout is tagged `worker_error_phase: 'startup'` with `worker_error_family:
+'timeout'`. That pairing is the point, not conflation. A Rust timeout then starts
+over on the same worker (`retryTimedOutStart`, 10/20/40/60 s, then final). The
+web controller's `startup_failed` latch stops only its own automatic reloads, not
+this; a successful load clears it. Every request after a failed start is answered
+`notSent` (`failedWorker`), because the page's own timer is 121 s.
 
 **The `try` deliberately spans the WHOLE of `start()`, not just
 `_exchange.start()`.** Half of startup runs before the exchange exists — the
@@ -329,8 +353,9 @@ cost is one boolean per outbound message.
 
 `engine-dead` is terminal for one native account. The worker owns recovery only
 once startup has completed: it invalidates the old callback generation, detaches
-its store listener, clears the trailing throttle/handlers, stops its own chasers
-and exact TWAP instances, and makes one fresh account/store after a 500 ms delay.
+its store listener, clears the trailing throttle/handlers, posts the dead
+engine's Rust TWAP state (its chasers and TWAPs died with it), and makes one
+fresh account/store after a 500 ms delay.
 A second panic or failed replacement stops recovery and warns the consumer.
 Every fatal event invalidates loaded flags and derived active-algorithm lists,
 including terminal shared-feed failures, while preserving last known main-thread
@@ -344,7 +369,7 @@ adds startup context as a warning log instead of reporting a duplicate error.
 Every generation fences frame callbacks, store notifications, event forwarding
 and handler state messages. A request already in flight may receive its one
 correlated result from the old generation, preserving known write IDs or typed
-unknown outcomes. A task fallback fails any interrupted executor that does not
+unknown outcomes. A task fallback fails any interrupted request that does not
 report, and later duplicate replies stay fenced. Fresh state resets the object/delta baselines
 and advances order/position freshness IDs; the adapter sends its native empty
 full snapshot before starting the replacement, clearing the main decoder's
@@ -366,10 +391,53 @@ direct public feeds or reusing the closed port. Shared-worker attachments during
 an existing recovery retain that owner and receive a failed startup acknowledgement
 and warning on the attaching port, without interrupting existing clients.
 
-TWAP instances are tracked by actual handler-created instance identity, never
-account name, so terminating one worker cannot stop another same-name account.
-`TwapInstance.start()` checks termination again after its awaited placement;
-otherwise a reply arriving after terminate could schedule another old slice.
+## Chasers, TWAPs and exec run only in the Rust algos
+
+Every worker account is a `RustEngineExchange`, and every shipped engine build
+(each family and the combined Node build) links the `algos` feature. The
+account's chaser, TWAP and `exec` ops (and Telegram `/cli`) run in the engine:
+`BaseHandler.runInRustAlgos` routes them through `RustEngineExchange.routeAlgoOp`.
+There is no TS fallback in the worker: a build without algos, an engine that
+stopped, or an account that is not a Rust engine refuses the op visibly (an
+`error` event; for `exec`, an `exec-log` plus a failed `exec-result`). An op that
+arrives before the engine host exists waits in the exchange (bounded) and is
+replayed in order once it starts; disposal reports any still waiting.
+Replies keep the worker's op names: `chaser:complete`, `error`, `warning`, `log`,
+`exec-log` and `exec-result` go through the exchange emitter, and the
+`activeChasers`/`activeTWAPs` rows land in the store from the engine. Disposal
+lets chases cancel their orders before the engine goes; a nuke stops every TWAP
+and chase through the engine's `algoStopAll`.
+
+The TS `ChaserOrderInstance`/`TwapInstance` and their managers remain only for
+in-process CLI callers (cli-core commands, `apps/cli`), whose nuke stops them
+through `stopAccountAlgos.ts`.
+
+## TWAP restore and the cross-tab owner lock
+
+`twap/RustTwapOwnership.ts`, owned by `TwapHandler`, keeps these rules for the
+Rust TWAPs: it takes each running TWAP's Web Lock, holds a restored row until it
+has the lock and has settled the row's `inFlight` slice, and posts
+`twap:stateUpdate` as the algos' rows plus restores still waiting. On engine
+death the worker posts `{}` for them before teardown.
+
+`twap:state` replays one tab's `sessionStorage['twaps']`, and a duplicated tab
+copies it, so its own dedicated worker would run the same TWAP a second time.
+Every TWAP holds the Web Locks owner lock `tealstreet-twap:<account>:<id>`
+(`twap/twapLock.ts`) until it completes or stops. A restore sends a row to the
+algos only once it holds the lock, and otherwise drops it and toasts "running in
+another tab". It keeps asking for `TWAP_RESTORE_LOCK_WAIT_MS` (5 s) first: a reloaded
+tab's previous worker holds its locks until the browser tears it down, and a
+refusal on the first try would end a TWAP that no tab then runs. The browser
+releases a dead worker's locks, so another tab can then restore it. `twapRestoreRefusal.ts` refuses finished, empty, inflated or
+foreign-account rows and running rows whose schedule lapsed, mirroring the
+exchange server. A runtime without Web Locks gets a no-op lock.
+
+The Rust TWAP persists a slice as `state.inFlight` (its size and, for market and
+limit slices, the `clientOrderId` sent on the order) before its order goes out,
+and clears it when it is counted. A restore settles it before resuming: found by
+client id counts it; a definitive miss puts the size back; anything else (an
+uncertain lookup, a chaser slice, a venue without client ids) counts it with an
+error toast, because placing it again could double it.
 
 ## Interrupted command replies
 
@@ -388,7 +456,8 @@ The fallback knows only the RPC method and its arguments: dispatched
 `WORKER_WRITE_METHODS` (leverage/margin/mode, `scheduleCancel`, and the
 main-thread trading methods) are interrupted writes and carry the caller client
 IDs in their placement arguments, while reads receive no write-outcome marker.
-It must not parse CLI text or invent native IDs. `exec-result.error` and
+It must not parse CLI text or invent native IDs; an interrupted `exec` gets the
+unknown-outcome message only. `exec-result.error` and
 `updatePositions:done.reason` remain strings; optional `errorDetails` carries the
 original structured failure when it is still available.
 
@@ -412,3 +481,12 @@ Rust `engine-event` diagnostics use the existing generation-guarded event bridge
 with `data: [EngineEvent]`. Legacy `error` options and the third `log` argument
 retain the event for callers migrating in place. Consumers must choose one
 channel per diagnostic to avoid double counting/toasting.
+
+History failures preserve the native closed `causeCode` alongside `kind` and the
+independent `venueCode` through `commandOutcome.ts`. Reporting code may use these
+classifications without forwarding the free-form message or a signed request.
+
+`__workerConfig.connectionVisibility` accepts only `hidden` or `visible` from
+the owning page. It supplies dedicated workers' timer-lateness diagnostics;
+it changes no reconnect, throttle or account policy. A callback delivered after
+the page is visible is not counted as a hidden callback.

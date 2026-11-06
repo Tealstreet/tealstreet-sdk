@@ -8,13 +8,13 @@ import {
   decodeWooV3CancelAllAfterResponse,
   WOO_V3_CANCEL_ALL_AFTER_LIMITS,
   WOO_V3_CANCEL_ALL_AFTER_PARITY,
-} from '../../exchanges/woo/woo.v3.cancel-all-after';
+} from '../reference/woo/woo.v3.cancel-all-after';
 import {
   WOO_V3_ENDPOINTS,
   WOO_V3_MIGRATION_GATES,
   WOO_V3_MIGRATION_ROUTES,
-} from '../../exchanges/woo/woo.v3.contracts';
-import { prepareWooV3Request } from '../../exchanges/woo/woo.v3.request';
+} from '../reference/woo/woo.v3.contracts';
+import { prepareWooV3Request } from '../reference/woo/woo.v3.request';
 import { wooV3CancelAllAfterFixtures } from './woo.v3-cancel-all-after.fixtures';
 
 const auth = {
@@ -122,7 +122,7 @@ describe('WooX V3 inert Cancel-All-After contract', () => {
   it('remains disconnected from every active Woo runtime and owns no transport or selector', () => {
     const runtimeFiles = ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-public.ts', 'woo.ws-private.ts'];
     for (const file of runtimeFiles) {
-      const source = readFileSync(join(__dirname, '../../exchanges/woo', file), 'utf8');
+      const source = readFileSync(join(__dirname, '../reference/woo', file), 'utf8');
       expect(source).not.toContain('woo.v3.cancel-all-after');
       expect(source).not.toContain('TRADE_CANCEL_ALL_AFTER');
       expect(source).not.toContain('cancelAllAfterDemoLifecycle');

@@ -68,7 +68,7 @@ describe('DefaultStore', () => {
 
   describe('initial state', () => {
     it('should initialize with default values', () => {
-      expect(store.latency).toBe(0);
+      expect(store.latency).toBeNull();
       expect(store.balance).toEqual({ used: 0, free: 0, total: 0, upnl: 0 });
       expect(store.markets).toEqual([]);
       expect(store.tickers).toEqual([]);
@@ -183,7 +183,7 @@ describe('DefaultStore', () => {
     it('should reset to default state', () => {
       store.update({ latency: 100 });
       store.reset();
-      expect(store.latency).toBe(0);
+      expect(store.latency).toBeNull();
     });
 
     it('should clear all maps', () => {

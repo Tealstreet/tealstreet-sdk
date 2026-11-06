@@ -22,7 +22,13 @@ const ORIGINAL_WS: &str = "GET/realtime1709209800000";
 fn families() -> Vec<&'static str> {
     let mut names = Vec::new();
     #[cfg(feature = "binance")]
-    names.extend(["binance", "binancepm", "binanceinverse", "binancespot"]);
+    names.extend([
+        "binance",
+        "binancepm",
+        "binanceinverse",
+        "binancespot",
+        "binanceoptions",
+    ]);
     #[cfg(feature = "bybit")]
     names.extend([
         "bybit",

@@ -4,6 +4,8 @@ import typescriptParser from '@typescript-eslint/parser';
 import react from 'eslint-plugin-react';
 import reactHooks from 'eslint-plugin-react-hooks';
 
+import networkPlugin from './packages/safe-cex/eslint-rules/require-fetch-signal.mjs';
+
 export default [
     // Ignore patterns
     {
@@ -170,5 +172,11 @@ export default [
                 },
             ],
         },
+    },
+    // Connection-critical: the HOW and relay sockets carry every proxied request.
+    {
+        files: ['packages/http-over-websocket/src/**/*.ts'],
+        plugins: { network: networkPlugin },
+        rules: { 'network/require-fetch-signal': 'error' },
     },
 ];

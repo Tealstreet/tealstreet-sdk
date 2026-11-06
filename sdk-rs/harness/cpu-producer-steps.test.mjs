@@ -316,6 +316,42 @@ test('refresh control: completed/null waits, while an unrelated skipped step is 
   assert.equal(value.calls.jobs, 2);
 });
 
+// Run 41856524698: the plan listed binance's producer seconds after it ended. Every step,
+// Complete job included, was terminal, yet the job record still read in_progress/null.
+const lagging = job => { job.status = 'in_progress'; job.conclusion = null; job.completed_at = null; };
+
+for (const [shape, lag] of [['in_progress/null', lagging], ['completed/null', job => { job.conclusion = null; }]])
+test(`refresh control: a ${shape} job record lagging its terminal steps waits for the same producer`, async t => {
+  const value = fixture([lag, () => {}]);
+  const result = await settle(t, value.read);
+  assert.ifError(result.error);
+  assert.equal(value.calls.jobs, 2, 'must refresh the lagging job record');
+  assert.deepEqual(result.value.job, value.jobs[1]);
+  assert.deepEqual(value.context.bindings[0].job, value.jobs[1]);
+});
+
+test('refresh control: a job record that never settles exhausts the shared bounded wait', async t => {
+  const value = fixture([lagging]);
+  const result = await settle(t, value.read);
+  assert.match(result.error?.message ?? '', /producer job not terminal after 20 refreshes: run 1000, job 100 .*\[in_progress\/null\]/);
+  assert.equal(value.calls.jobs, 21);
+  assert.equal(value.context.bindings.length, 0);
+});
+
+for (const conclusion of ['failure', 'cancelled', 'skipped', 'timed_out']) test(`working control: a completed ${conclusion} producer is refused without a refresh`, async () => {
+  const value = fixture([job => { job.conclusion = conclusion; }, () => {}]);
+  await assert.rejects(value.read, /measurement not successful original physical attempt1/);
+  assert.equal(value.calls.jobs, 1);
+  assert.equal(value.context.bindings.length, 0);
+});
+
+test('working control: a settled job record cannot change identity after its lag', async t => {
+  const value = fixture([lagging, job => { job.runner_id++; }]);
+  const result = await settle(t, value.read);
+  assert.match(result.error?.message ?? '', /physical identity changed/);
+  assert.equal(value.context.bindings.length, 0);
+});
+
 test('refresh control: all distinct raw API observations remain retained', async t => {
   const value = fixture([job => { job.steps[2] = pending(CPU_COHORT_STEPS.strict); }, () => {}]);
   const upstream = value.context.reader;

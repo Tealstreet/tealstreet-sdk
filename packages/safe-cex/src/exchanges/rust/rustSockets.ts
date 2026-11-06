@@ -16,6 +16,7 @@ export interface RustSocketHost {
   readonly dead: boolean;
   socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;
   reconnectSockets(channel?: EngineSocketChannel): number;
+  redialWaitingSockets(): void;
 }
 
 const emptyLog = { toArray: (): string[] => [] };
@@ -87,12 +88,13 @@ export class RustSocketHandle {
     this.owner.socketHost?.reconnectSockets(this.channel);
   };
 
-  /** Engine venues own their backoff; closing open sockets restarts it now. */
+  /** Close open sockets, then have the engine redial everything waiting out backoff. */
   recoverAfterOffline = (): boolean => {
     const host = this.owner.socketHost;
     // A dead or disposed engine cannot recover in place; the caller reloads the account.
     if (this.owner.isDisposed || host?.dead) return false;
     host?.reconnectSockets(this.channel);
+    host?.redialWaitingSockets();
     return true;
   };
 

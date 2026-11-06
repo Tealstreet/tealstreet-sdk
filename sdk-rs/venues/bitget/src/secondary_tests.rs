@@ -61,6 +61,7 @@ pub(crate) fn headers(
                             operation: Operation::Mutation,
                             timeout_ms: 20_000,
                             attempts: 1,
+                            pacing: None,
                         },
                         SerialPolicy {
                             credential: Some(credential),

@@ -1,0 +1,9 @@
+name: Fetch targeted Rust history
+description: Fetch complete tested-source and landing ancestry without unrelated branches or tags
+runs:
+  using: composite
+  steps:
+    - name: Fetch only tested source and landing history
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: python3 "$GITHUB_ACTION_PATH/fetch-history.py"

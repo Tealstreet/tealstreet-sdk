@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { WeexExchange } from '../exchanges/weex/weex.exchange';
+import { WeexExchange } from './reference/weex/weex.exchange';
 import {
   normalizeMarket,
   normalizePosition,
   normalizePublicTrade,
   normalizeTicker,
   normalizeTimestampToMs,
-} from '../exchanges/weex/weex.utils';
+} from './reference/weex/weex.utils';
 import { DefaultStore } from '../store/store.base';
 import {
   MarginType,

@@ -68,6 +68,32 @@ class RequestContextBan(unittest.TestCase):
             with self.subTest(source=source), self.assertRaises(ValueError):
                 ban.fingerprints(source)
 
+    def test_the_single_ruled_growth_allowance_is_exact_and_self_expiring(self):
+        self.assertEqual(ban.RULED_GROWTH, (
+            ('venues/paradex/src/account.rs',
+             'de9d09faf6d835f5164746112b2915550e9364b218dcf7701191482bbc0b492e', 1),))
+        path = 'venues/reference/src/lib.rs'
+        base = {path: dict(ban.fingerprints('cx.request(1);'))}
+        (ruled,) = ban.fingerprints('cx.sign_http(id, step);')
+        other = next(iter(ban.fingerprints('cx.request(2);')))
+        allowance = ((path, ruled, 1),)
+        previous = [('HEAD', base), ('merge parents', base), ('origin/master', base)]
+        grown = {path: {**base[path], ruled: 1}}
+        self.assertFalse(ban.check(grown, grown, previous, allowance))
+        self.assertTrue(ban.check(grown, grown, previous, ()))
+        twice = {path: {**base[path], ruled: 2}}
+        self.assertTrue(ban.check(twice, twice, previous, allowance))
+        # An absolute ceiling: a parent already holding one never admits two.
+        self.assertTrue(ban.check(twice, twice, [('HEAD', grown)], allowance))
+        foreign = {path: {**base[path], other: 1}}
+        self.assertTrue(ban.check(foreign, foreign, previous, allowance))
+        moved = {'venues/elsewhere/src/lib.rs': {ruled: 1}, **base}
+        self.assertTrue(ban.check(moved, moved, previous, allowance))
+        # Once the row is gone, the allowance itself fails until it is deleted;
+        # removing both together passes.
+        self.assertTrue(ban.check(base, base, [('HEAD', grown)], allowance))
+        self.assertFalse(ban.check(base, base, [('HEAD', grown)], ()))
+
     def test_exact_inventory_and_independent_shrink_ratchet(self):
         path = 'venues/reference/src/lib.rs'
         one = {path: dict(ban.fingerprints('cx.request(1);'))}
@@ -135,7 +161,7 @@ class RequestContextBan(unittest.TestCase):
             inventory.write_text(json.dumps(inherited))
             commit()
             tip = command('rev-parse', 'HEAD')
-            command('update-ref', 'refs/remotes/origin/feat/rust-rewrite', tip)
+            command('update-ref', 'refs/remotes/origin/master', tip)
             command('switch', 'topic')
             command('merge', '--no-ff', '--no-edit', 'master')
             event = repo / 'event.json'
@@ -146,7 +172,7 @@ class RequestContextBan(unittest.TestCase):
                 self.assertFalse(ban.check(inherited, inherited, previous))
                 self.assertIn(('merge parents', inherited), previous)
                 self.assertIn((tip, inherited), previous)
-                self.assertIn(('refs/remotes/origin/feat/rust-rewrite', inherited), previous)
+                self.assertIn(('refs/remotes/origin/master', inherited), previous)
                 # Current source must still match exactly; independent base
                 # limits and growth beyond every parent remain enforced.
                 self.assertTrue(ban.check(first, inherited, previous))
@@ -207,7 +233,7 @@ class RequestContextBan(unittest.TestCase):
                 first = ban.sites()
                 inventory.write_text(json.dumps(first))
                 commit()
-                command('update-ref', 'refs/remotes/origin/feat/rust-rewrite', 'HEAD')
+                command('update-ref', 'refs/remotes/origin/master', 'HEAD')
                 commit()
                 previous = ban.previous_manifests()
                 self.assertEqual(len(previous), 3)
@@ -920,6 +946,29 @@ class DataMacroModuleProvenance(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.assertTrue(self.inventory(root_source=prefix + 'mod wire; mod account;'))
 
+
+    PACKAGE = {'venues/reference/Cargo.toml': '[package]\nname = "safe-cex-venue-reference"\n'}
+
+    def test_an_own_crate_self_alias_in_an_ancestor_keeps_the_scope(self):  # Lighter lib.rs shape
+        for alias in ['extern crate self as safe_cex_venue_reference;',
+                      '#[cfg(test)] extern crate self as safe_cex_venue_reference;']:
+            with self.subTest(alias=alias):
+                self.assertEqual(self.inventory(root_source='mod wire; mod account;' + alias,
+                                                engine=self.PACKAGE), {})
+        for alias, engine in [
+                ('extern crate self as other_name;', self.PACKAGE),
+                ('extern crate self as safe_cex_engine;', self.PACKAGE),
+                ('extern crate external;', self.PACKAGE),
+                ('extern crate external as safe_cex_venue_reference;', self.PACKAGE),
+                ('#[macro_use] extern crate self as safe_cex_venue_reference;', self.PACKAGE),
+                ('extern crate self as safe_cex_venue_reference; extern crate external;', self.PACKAGE),
+                ('extern crate self as safe_cex_venue_reference;', {}),
+                ('extern crate self as safe_cex_venue_reference;',
+                 {'venues/reference/Cargo.toml': '[package]\nname = "safe-cex-venue-other"\n'}),
+                ('extern crate self as safe_cex_venue_reference;',
+                 {'venues/reference/Cargo.toml': '# [package]\n# name = "safe-cex-venue-reference"\n'})]:
+            with self.subTest(alias=alias, engine=engine):
+                self.assertTrue(self.inventory(root_source='mod wire; mod account;' + alias, engine=engine))
 
     def test_out_of_scope_globs_and_ordinary_ancestor_imports_do_not_reach_child(self):
         for prefix in ['use external::custom as matches;', 'use wire::*;']:

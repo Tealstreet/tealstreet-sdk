@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
+import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { DefaultStore } from '../store/store.base';
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseWooJson } from '../../exchanges/woo/woo.json';
+import { parseWooJson } from '../reference/woo/woo.json';
 
 describe('WOO exact integer response parsing', () => {
   it('preserves bare unsafe positive and negative IDs without rounding', () => {

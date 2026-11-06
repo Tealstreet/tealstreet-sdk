@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PolymarketAPI } from '../../exchanges/polymarket/polymarket.api';
-import { ENDPOINTS } from '../../exchanges/polymarket/polymarket.constants';
+import { PolymarketAPI } from '../reference/polymarket/polymarket.api';
+import { ENDPOINTS } from '../reference/polymarket/polymarket.constants';
 
 const credentials = { apiKey: 'api-key', secret: 'c2VjcmV0', passphrase: 'pass' };
 

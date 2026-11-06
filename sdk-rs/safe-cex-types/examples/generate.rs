@@ -456,7 +456,6 @@ mod tests {
             ("HTTPError", "HttpError"),
             ("rate__limit", "RateLimit"),
             ("lighter-robinhood", "LighterRobinhood"),
-            ("tealstreet-dex", "TealstreetDex"),
             ("in-process", "InProcess"),
             ("-rate__--limit_", "RateLimit"),
             // Keyword-shaped literals derive legal Pascal identifiers.

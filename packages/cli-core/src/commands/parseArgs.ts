@@ -80,6 +80,50 @@ export function parseArgs(input: string): ParsedArgs {
   return result;
 }
 
+const ORDER_COMMANDS = new Set([
+  'buy',
+  'sell',
+  'close',
+  'stop',
+  'be',
+  'trail',
+  'move',
+  'scale',
+  'bump',
+  'chase',
+  'twap',
+  'swarm',
+  'nuke',
+  'cancel',
+  'leverage',
+  'kill',
+]);
+/** A token parseArgs would drop, or that would make it drop the next one. */
+export function firstDashToken(input: string): string | undefined {
+  return tokenize(input).find((token) => token.length > 1 && token.startsWith('-'));
+}
+
+const BUMP_SIDE_FLAGS = new Set(['--buys', '-b', '--sells', '-s']);
+
+/**
+ * parseArgs drops a dash token and the token after it, so a command that can
+ * change an order refuses them rather than acting on what is left. Same forms
+ * as the Rust exec router.
+ */
+export function refusedOrderToken(commandName: string, input: string): string | undefined {
+  if (!ORDER_COMMANDS.has(commandName)) return undefined;
+  const tokens = tokenize(input);
+  const refused = tokens.find(
+    (token, index) =>
+      token.length > 1 &&
+      token.startsWith('-') &&
+      !(commandName === 'bump' && index === tokens.length - 1 && BUMP_SIDE_FLAGS.has(token)),
+  );
+  return refused === undefined
+    ? undefined
+    : `${commandName}: refusing "${refused}": flags and negative values are not supported, nothing was placed`;
+}
+
 /**
  * Tokenize input string, respecting quotes
  */

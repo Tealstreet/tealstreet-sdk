@@ -57,7 +57,7 @@ fn seeded_with_socket() -> (Engine<Bingx>, SocketId) {
     let mut socket = respond(
         &mut engine,
         1.,
-        r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0.0001","maxLongLeverage":125}]}"#,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0","tradeMinQuantity":"0.0001","maxLongLeverage":125}]}"#,
     );
     socket = socket.or(respond(
         &mut engine,
@@ -70,6 +70,11 @@ fn seeded_with_socket() -> (Engine<Bingx>, SocketId) {
         r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#,
     ));
     (engine, socket.expect("public socket"))
+}
+#[test]
+fn the_minimum_order_size_comes_from_trade_min_quantity() {
+    let engine = seeded();
+    assert_eq!(engine.store().markets()[0].limits.amount.min, 0.0001);
 }
 #[test]
 fn seeds_decimal_precision_and_merges_ticker_sources() {
@@ -412,4 +417,147 @@ fn suppressed_public_feed_is_not_supervised() {
         "no public connects or closes"
     );
     assert_eq!(fired, 0, "no supervision timers fire");
+}
+
+#[test]
+fn ticker_envelope_order_escaping_and_numeric_policy_stay_equivalent() {
+    let row = r#"{"symbol":"BTC-USDT","tradePrice":"90","fairPrice":"91","indexPrice":"92","fundingRate":"0.01","changePercentage":"-","volumeF":null,"valueF":"NaN"}"#;
+    for frame in [
+        format!(r#"{{"dataType":"market.contracts","data":{{"contracts":[{row}]}}}}"#),
+        format!(r#"{{"data":{{"contracts":[{row}]}},"dataType":"market.contracts"}}"#),
+        format!(r#"{{"data\u0054ype":"market.contracts","data":{{"contracts":[{row}]}}}}"#),
+    ] {
+        let (mut e, socket) = seeded_with_socket();
+        e.handle(4., Event::WsOpened { socket });
+        drain(&mut e, 4.).for_each(drop);
+        e.handle(
+            5.,
+            Event::WsMessage {
+                socket,
+                text: &frame,
+            },
+        );
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!((ticker.last, ticker.mark, ticker.index), (90., 91., 92.));
+        assert_eq!(
+            (ticker.percentage, ticker.volume, ticker.quote_volume),
+            (0., 0., 0.)
+        );
+    }
+}
+
+#[test]
+fn a_later_typed_error_keeps_the_valid_ticker_prefix_and_warns() {
+    for order in [false, true] {
+        let data = r#"{"contracts":[{"symbol":"BTC-USDT","tradePrice":"90","fairPrice":"91","indexPrice":"92","fundingRate":"0.01"},{"symbol":"BTC-USDT","tradePrice":"95","fairPrice":true,"indexPrice":"96","fundingRate":"0.01"}]}"#;
+        let frame = if order {
+            format!(r#"{{"data":{data},"dataType":"market.contracts"}}"#)
+        } else {
+            format!(r#"{{"dataType":"market.contracts","data":{data}}}"#)
+        };
+        let (mut e, socket) = seeded_with_socket();
+        e.handle(4., Event::WsOpened { socket });
+        drain(&mut e, 4.).for_each(drop);
+        e.handle(
+            5.,
+            Event::WsMessage {
+                socket,
+                text: &frame,
+            },
+        );
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 90.);
+        assert!(drain(&mut e, 5.).any(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event)) =>
+                event.code == safe_cex_engine::log::code::STREAM_MALFORMED,
+            _ => false,
+        }));
+    }
+}
+
+#[test]
+fn invalid_ticker_envelopes_never_apply_a_prefix_and_ping_wins() {
+    let row = r#"{"symbol":"BTC-USDT","tradePrice":"90","fairPrice":"91","indexPrice":"92","fundingRate":"0.01"}"#;
+    for frame in [
+        format!(r#"{{"dataType":"market.contracts","data":{{"contracts":[{row},]}}}}"#),
+        format!(
+            r#"{{"dataType":"market.contracts","data":{{"contracts":[{row}]}},"dataType":"market.contracts"}}"#
+        ),
+        format!(r#"{{"dataType":"market.contracts","data":{{"contracts":[{row}]}},"extra":}}"#),
+        format!(r#"{{"dataType":"market.contracts","data":{{"contracts":[{row}]}},"ping":1}}"#),
+        format!(r#"{{"dataType":"market.contracts","data":{{"contracts":[{row}]}},"pong":1}}"#),
+        r#"{"dataType":"market.contracts","data":null}"#.to_owned(),
+        r#"{"dataType":"market.contracts"}"#.to_owned(),
+        r#"{"dataType":"market.contracts","data":{}}"#.to_owned(),
+    ] {
+        let (mut e, socket) = seeded_with_socket();
+        e.handle(4., Event::WsOpened { socket });
+        drain(&mut e, 4.).for_each(drop);
+        e.handle(
+            5.,
+            Event::WsMessage {
+                socket,
+                text: &frame,
+            },
+        );
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 60000., "{frame}");
+        if frame.contains(r#""ping":1"#) {
+            assert!(drain(&mut e, 5.).any(|a| matches!(a,Action::WsSend{text,..} if text=="Pong")));
+        }
+    }
+}
+
+#[test]
+fn duplicate_contract_arrays_preserve_row_order_and_null_ping_is_absent() {
+    let row = |last| {
+        format!(
+            r#"{{"symbol":"BTC-USDT","tradePrice":"{last}","fairPrice":"91","indexPrice":"92","fundingRate":"0.01"}}"#
+        )
+    };
+    let frame = format!(
+        r#"{{"dataType":"market.contracts","data":{{"contracts":[{}],"contracts":[{}]}},"ping":null,"pong":null}}"#,
+        row(90),
+        row(95)
+    );
+    let (mut e, socket) = seeded_with_socket();
+    e.handle(4., Event::WsOpened { socket });
+    drain(&mut e, 4.).for_each(drop);
+    e.handle(
+        5.,
+        Event::WsMessage {
+            socket,
+            text: &frame,
+        },
+    );
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 95.);
+    assert!(!drain(&mut e, 5.).any(|a| matches!(a, Action::WsSend { text, .. } if text == "Pong")));
+}
+
+#[test]
+fn ticker_data_arrays_still_warn_instead_of_reading_as_struct_sequences() {
+    for data in [
+        "[]",
+        "[[]]",
+        r#"{"contracts":null}"#,
+        r#"{"contracts":{"0":{"symbol":"BTC-USDT"}}}"#,
+    ] {
+        let frame = format!(r#"{{"dataType":"market.contracts","data":{data}}}"#);
+        let (mut e, socket) = seeded_with_socket();
+        e.handle(4., Event::WsOpened { socket });
+        drain(&mut e, 4.).for_each(drop);
+        e.handle(
+            5.,
+            Event::WsMessage {
+                socket,
+                text: &frame,
+            },
+        );
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 60000.);
+        assert!(
+            drain(&mut e, 5.).any(|action| matches!(action,
+                Action::Notice(safe_cex_engine::Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::STREAM_MALFORMED
+            )),
+            "{frame}"
+        );
+    }
 }

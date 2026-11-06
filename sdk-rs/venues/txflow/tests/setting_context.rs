@@ -102,7 +102,6 @@ fn no_command_or_signing(a: &[Action]) {
     assert!(!a.iter().any(|a| matches!(
         a,
         Action::Sign { .. }
-            | Action::SignPayload { .. }
             | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
     )));
 }

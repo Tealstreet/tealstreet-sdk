@@ -1,9 +1,17 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions, OHLCVOptions, Order } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
 
 import { isRustVenue, RustEngineExchange, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -194,7 +202,7 @@ describe('Aster Rust wrapper account and typed command boundary', () => {
   it.each(['binance', 'binancepm', 'binancespot', 'binanceinverse', 'bybit', 'kucoin'] as const)(
     'rejects Aster-only STP intent on %s before any single or mixed-batch engine command',
     async (name) => {
-      const { exchange, commands } = fixture({}, name);
+      const { exchange, commands } = fixture(name === 'kucoin' ? { passphrase: 'fixture-passphrase' } : {}, name);
       await exchange.start();
       const order = { symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, amount: 1, price: 100 };
       const stpOrder = { ...order, stpMode: 'EXPIRE_BOTH' as const };

@@ -3,12 +3,12 @@ import type { ExchangeOptions } from '../types';
 import createHmac from 'create-hmac';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from '../exchanges/kucoin/kucoin.api';
-import { KucoinExchange } from '../exchanges/kucoin/kucoin.exchange';
-import { BROKER_ID, ENDPOINTS } from '../exchanges/kucoin/kucoin.types';
-import { createKucoinSpotAPI } from '../exchanges/kucoin/kucoinspot.api';
-import { KUCOIN_SPOT_ENDPOINTS } from '../exchanges/kucoin/kucoinspot.types';
-import { KucoinPublicWebsocket } from '../exchanges/kucoin/kucoin.ws-public';
+import { createAPI } from './reference/kucoin/kucoin.api';
+import { KucoinExchange } from './reference/kucoin/kucoin.exchange';
+import { BROKER_ID, ENDPOINTS } from './reference/kucoin/kucoin.types';
+import { createKucoinSpotAPI } from './reference/kucoin/kucoinspot.api';
+import { KUCOIN_SPOT_ENDPOINTS } from './reference/kucoin/kucoinspot.types';
+import { KucoinPublicWebsocket } from './reference/kucoin/kucoin.ws-public';
 import { DefaultStore } from '../store/store.base';
 import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
 import {

@@ -517,7 +517,7 @@ fn client_lookup_rejects_partial_or_failed_snapshots_without_definitive_misses()
     }
 }
 #[test]
-fn client_lookup_network_failure_falls_back_to_latest_cache_without_side_effects() {
+fn client_lookup_network_failure_never_answers_from_the_cache() {
     let mut e = engine();
     lookup(&mut e, SYMBOL, "caller-id");
     let order = fetched_order();
@@ -532,10 +532,23 @@ fn client_lookup_network_failure_falls_back_to_latest_cache_without_side_effects
             },
         );
     }
-    let found = lookup_result(&mut e);
-    assert!(found.found);
-    assert_eq!(found.order.unwrap().id, order.id);
+    let missing = lookup_result(&mut e);
+    assert!(!missing.found);
+    assert_eq!(missing.definitive, Some(false));
     assert_eq!(e.store().orders(), &[order]);
+}
+#[test]
+fn client_lookup_never_finds_a_creating_row() {
+    let mut e = engine();
+    let mut order = fetched_order();
+    order.status = safe_cex_engine::model::OrderStatus::Creating;
+    e.store_mut().upsert_order(order);
+    lookup(&mut e, SYMBOL, "caller-id");
+    let r = lookup_request(&mut e);
+    response(&mut e, r, r#"{"code":"0","data":[]}"#);
+    let missing = lookup_result(&mut e);
+    assert!(!missing.found);
+    assert_eq!(missing.definitive, Some(false));
 }
 #[test]
 fn client_lookup_without_private_credentials_never_asserts_definitive_absence() {
@@ -937,4 +950,39 @@ fn concurrent_single_page_owners_complete_independently_and_empty_is_valid() {
     let rows = owned_success(&mut e, 99);
     assert_eq!(rows.as_array().unwrap().len(), 1);
     assert_eq!(rows[0]["price"], 60000.0);
+}
+
+#[test]
+fn window_fills_with_no_limit_flag_a_full_page() {
+    let mut e = engine();
+    query(
+        &mut e,
+        Query::Fills {
+            symbol: Some(SYMBOL.into()),
+            order_id: None,
+            from_ms: Some(1_700_000_000_000.0),
+            to_ms: Some(1_700_000_001_000.0),
+            limit: None,
+        },
+    );
+    let r = request(&mut e);
+    assert!(r.url.contains("limit=1000"), "{}", r.url);
+    let rows = (0..1000)
+        .map(|n| {
+            ROW.replace(
+                "1558124009467904992",
+                &(1558124009467904992u64 + n).to_string(),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    response(&mut e, r, &format!(r#"{{"code":"0","data":[{rows}]}}"#));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions.iter().any(
+            |a| matches!(a, safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+        ),
+        "{actions:?}"
+    );
 }

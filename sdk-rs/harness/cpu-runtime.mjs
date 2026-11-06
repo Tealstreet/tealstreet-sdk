@@ -44,7 +44,7 @@ function ancestors(root, name) {
     if (state && (!state.isDirectory() || state.isSymbolicLink())) fail(`symlink/non-directory ancestor of ${name}`);
   }
 }
-function environmentIdentity(environment) {
+export function environmentIdentity(environment) {
   const value = environment ?? {
     ImageOS: process.env.ImageOS,
     ImageVersion: process.env.ImageVersion,
@@ -67,6 +67,10 @@ function environmentDifferences(expected, actual, prefix = '') {
     return canonical(before) === canonical(after) ? [] : [{ field,
       expected: before ?? '<missing>', actual: after ?? '<missing>' }];
   });
+}
+/** Field-level differences between a sealed environment and this (or a given) runner. */
+export function environmentMismatch(expected, environment) {
+  return environmentDifferences(environmentIdentity(expected), environmentIdentity(environment));
 }
 function selection(paths, cachePath) {
   relative(cachePath);

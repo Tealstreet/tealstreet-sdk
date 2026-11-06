@@ -36,6 +36,8 @@ impl Default for Probe {
                 controls: ControlPolicy::Native,
                 invalidation: Invalidation::None,
                 subscription_interval_ms: 0.,
+                close_floors: &[],
+                data_silence: None,
             },
             timing: Some(NativeTiming::default()),
             snapshot: false,
@@ -58,6 +60,9 @@ impl Probe {
     }
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         let result = if self.snapshot {
@@ -217,7 +222,7 @@ impl Harness {
     fn timeout(&self, timeout: Timeout) -> bool {
         self.engine.venue.events.iter().any(|event| {
             matches!(event,
-            LifecycleEvent::Retired { epoch, reason: RetireReason::Timeout(kind) }
+            LifecycleEvent::Retired { epoch, reason: RetireReason::Timeout(kind), .. }
             if *epoch == self.epoch && *kind == timeout)
         })
     }

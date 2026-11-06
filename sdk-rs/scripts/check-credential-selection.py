@@ -444,7 +444,7 @@ def git(*args):
 
 
 def previous_manifests():
-    base = os.environ.get('GITHUB_BASE_REF') or 'feat/rust-rewrite'
+    base = os.environ.get('GITHUB_BASE_REF') or 'master'
     ref = f'refs/remotes/origin/{base}'
     relative = git('rev-parse', '--show-prefix').strip() + MANIFEST
     git('rev-parse', '--verify', f'{ref}^{{commit}}')

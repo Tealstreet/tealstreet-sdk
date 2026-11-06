@@ -33,6 +33,10 @@ Unsigned reads/subscriptions use that account identity, never the agent's
 address. Private startup validates the account and local signing key before
 I/O. This connector does not approve agents, builders or fund accounts.
 
+TxFlow has no CEX-style API keys; the venue-side `key` field is unused. TxFlow never returns an agent private key. Tealstreet must generate the agent wallet locally, send only the agent address in `approveAgent`, and have the owner wallet sign that approval. TxFlow records the approved agent address for the account; day-to-day trading is signed with the locally stored agent private key.
+
+Private/trading support therefore requires a custom wallet + agent-key onboarding flow, not the generic API-key paste form. Do not expose a generic TxFlow API-key field unless TxFlow later ships a real venue-issued key model.
+
 The testnet EIP-712 domain is `TxFlow-Testnet`, version `1`, chain ID `2511`,
 zero verifying contract. Agent schema:
 `Agent(string txflowNetwork,uint32 chainId,uint32 apiVersion,bytes32 connectionId)`.

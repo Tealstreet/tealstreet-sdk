@@ -1,0 +1,21 @@
+[package]
+name = "safe-cex-exec"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+safe-cex-algos = { path = "../runtime", default-features = false }
+safe-cex-engine.workspace = true
+getrandom.workspace = true
+safe-cex-chaser = { path = "../chaser" }
+safe-cex-algo-twap = { path = "../twap" }
+serde_json.workspace = true
+
+[dev-dependencies]
+# Native tests run on the tokio executor.
+safe-cex-algos = { path = "../runtime" }
+tokio = { version = "1.53.3", features = ["rt", "macros", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true

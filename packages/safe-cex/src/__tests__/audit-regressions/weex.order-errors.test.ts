@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { WeexExchange } from '../../exchanges/weex/weex.exchange';
+import { WeexExchange } from '../reference/weex/weex.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 

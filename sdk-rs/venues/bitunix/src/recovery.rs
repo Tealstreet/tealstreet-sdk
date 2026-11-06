@@ -176,6 +176,8 @@ impl State {
 #[derive(serde::Deserialize)]
 struct Evidence {
     code: error::Code,
+    #[serde(default)]
+    msg: Option<String>,
 }
 pub(crate) fn native(response: &Response<'_>) -> Option<i64> {
     serde_json::from_str::<Evidence>(response.body)
@@ -202,30 +204,22 @@ pub(crate) fn pause(response: &Response<'_>) -> f64 {
 }
 pub(crate) fn failed(response: &Response<'_>) -> VenueError {
     let native = native(response);
-    let kind = if refused(response) {
-        if native == Some(10003) {
-            safe_cex_engine::ErrorKind::AuthInvalid
-        } else {
-            safe_cex_engine::ErrorKind::AuthPermission
-        }
-    } else if pause(response) > 0.0 {
-        safe_cex_engine::ErrorKind::RateLimited
-    } else if response.status >= 500 {
-        safe_cex_engine::ErrorKind::VenueUnavailable
-    } else if !(200..300).contains(&response.status) {
-        safe_cex_engine::ErrorKind::Network
-    } else {
-        match native {
-            Some(10001) => safe_cex_engine::ErrorKind::Network,
-            Some(10002 | 10007 | 10008 | 10010 | 10011) => safe_cex_engine::ErrorKind::InvalidInput,
-            Some(20001..=20016 | 30001..=30042 | 40001..=40008) => {
-                safe_cex_engine::ErrorKind::Rejected
-            }
-            _ => safe_cex_engine::ErrorKind::Internal,
-        }
-    };
+    // The shared table decides, as for writes: HTTP status classifies a
+    // non-2xx answer, and a native code (10007 included) classifies a 2xx.
+    let kind = crate::codes::read_failure(response, "")
+        .error
+        .kind
+        .unwrap_or(safe_cex_engine::ErrorKind::Internal);
     let message = if let Some(native) = native.filter(|code| response.status == 200 && *code != 0) {
-        format!("Bitunix account read failed: code {native}")
+        // The venue's own words only, never the body: it can carry account data.
+        let text = serde_json::from_str::<Evidence>(response.body)
+            .ok()
+            .and_then(|evidence| evidence.msg)
+            .filter(|msg| !msg.is_empty());
+        match text {
+            Some(text) => format!("Bitunix account read failed: code {native}: {text}"),
+            None => format!("Bitunix account read failed: code {native}"),
+        }
     } else if !(200..300).contains(&response.status) {
         format!("Bitunix account read HTTP {}", response.status)
     } else {
@@ -234,6 +228,9 @@ pub(crate) fn failed(response: &Response<'_>) -> VenueError {
     let mut error = VenueError::new(message).kind(kind);
     if let Some(native) = native {
         error = error.venue_code(native.to_string());
+    }
+    if native == Some(10004) {
+        error = error.ip_whitelist_refused();
     }
     let pause = pause(response);
     if pause > 0.0 {

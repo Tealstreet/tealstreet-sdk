@@ -244,15 +244,7 @@ fn orderly_private_accounts_need_an_application_id_and_base58_ed25519_keys() {
     // 31 zero bytes: valid base58, one byte short of an Ed25519 key.
     let key = "1111111111111111111111111111111";
     let valid = "11111111111111111111111111111111";
-    for venue in [
-        "orderly",
-        "tealstreet-dex",
-        "kodiakfi",
-        "mode",
-        "salsadex",
-        "what",
-        "woofi",
-    ] {
+    for venue in ["orderly", "kodiakfi", "mode", "what", "woofi"] {
         for application in [
             r#""#,
             r#","applicationId":"""#,
@@ -341,7 +333,13 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
             r#"{"remoteSigning":true,"key":"k"}"#,
             r#"{"remoteSigning":true,"key":"","secret":"s"}"#,
         ] {
-            assert_eq!(rejected(venue, options), message, "{venue} {options}");
+            let expected = if venue == "hyperliquidspot"
+                && options == r#"{"remoteSigning":true,"key":"","secret":"s"}"# {
+                "Invalid Hyperliquid local signer setup"
+            } else {
+                message
+            };
+            assert_eq!(rejected(venue, options), expected, "{venue} {options}");
         }
         // Incomplete credentials without a remote signer build a public account, as before
         // (Orderly's own rules still apply to its private accounts).
@@ -490,12 +488,13 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
         ),
         (false, true)
     );
+    // Lighter's remote signer signs its statements, so it is a signing credential.
     assert_eq!(
         resolve(
             "lighter",
             r#"{"publicMode":{"remoteSigner":true,"apiKeyIndexPresent":true}}"#
         ),
-        (false, false)
+        (true, false)
     );
     assert_eq!(
         resolve(
@@ -539,19 +538,31 @@ fn native_payload_refusal_preserves_classification_with_or_without_local_credent
             let error = construct(venue, &format!(r#"{{"key":"key","secret":"{local}","remoteSigning":true,"payloadSigner":true}}"#)).unwrap_err();
             assert_eq!(error.kind, Some(ErrorKind::Unsupported), "{venue}");
             assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue}");
-            let expected = if safe_cex_venues::remote_signing_policy(venue).enabled {
+            let policy = safe_cex_venues::remote_signing_policy(venue);
+            let expected = if policy.enabled && !policy.payload_supported {
+                format!("Rust {venue} has no REST-only PayloadSigner lifecycle")
+            } else if policy.enabled {
                 format!(
                     "Rust {venue} payloadSigner requires a configured injected signing provider"
                 )
             } else {
                 format!(
-                    "Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."
+                    "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
                 )
             };
             assert_eq!(error.message, expected);
         }
     }
-    construct("paradex", r#"{"key":"public-subkey","paradexAddress":"0x1","subkeyAddress":"0x2","payloadSigner":true}"#).unwrap();
+    // Hosted (device-key) Paradex has no Rust route in this release: refuse
+    // typed before any signing, never a legacy digest-only delegate.
+    let error = construct("paradex", r#"{"key":"public-subkey","paradexAddress":"0x1","subkeyAddress":"0x2","payloadSigner":true}"#).unwrap_err();
+    assert_eq!(error.kind, Some(ErrorKind::Unsupported));
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(
+        error.message,
+        "Rust paradex delegated signing is unsupported in this build; configure the account's local Stark key or remove payloadSigner"
+    );
+    construct("paradex", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
     construct("binance", r#"{"publicDataOnly":true,"payloadSigner":true}"#).unwrap();
     for venue in ["binance", "binancepm", "binanceinverse", "binancespot"] {
         // Explicit shared intent overrides the legacy boolean in either direction.
@@ -754,13 +765,26 @@ fn bitunix_secondary_reads_reach_the_native_signer() {
 
 #[test]
 fn opaque_signing_refs_are_rejected_until_a_family_uses_dispatch_signing() {
-    for venue in ["hyperliquid", "orderly"] {
+    for (venue, expected) in [
+        (
+            "hyperliquid",
+            "Hyperliquid requires its primary signing provider",
+        ),
+        (
+            "hyperliquidspot",
+            "Hyperliquid requires its primary signing provider",
+        ),
+        (
+            "orderly",
+            "Injected signing is not supported for this venue yet",
+        ),
+    ] {
         assert_eq!(
             rejected(
                 venue,
                 r#"{"signing":{"primary":{"credential":"primary.credential","signing":"primary.signing"}},"remoteSigning":true,"publicMode":{"requested":false}}"#
             ),
-            "Injected signing is not supported for this venue yet"
+            expected
         );
     }
 }
@@ -794,4 +818,60 @@ fn migrated_opaque_refs_require_an_injected_provider_before_construction() {
             "{venue}: {error}"
         );
     }
+}
+
+#[cfg(feature = "binance")]
+#[test]
+fn binance_options_raw_and_explicit_setups_start_eapi_with_the_binance_provider_contract() {
+    struct Inspect;
+    impl Visit for Inspect {
+        type Output = Vec<String>;
+        fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
+            assert!(engine.venue().capabilities().options);
+            engine.start(1000.);
+            safe_cex_engine::test_support::prepared_actions(&mut engine, 1000.)
+                .into_iter()
+                .filter_map(|action| match action {
+                    safe_cex_engine::Action::Http(request) => Some(request.url),
+                    safe_cex_engine::Action::WsConnect { .. } => panic!("Options is REST only"),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+    for options in [
+        r#"{"key":"fixture-key","secret":"fixture-secret"}"#,
+        r#"{"publicDataOnly":true}"#,
+    ] {
+        let urls = build(
+            "binanceoptions",
+            serde_json::from_str(options).unwrap(),
+            Some(safe_cex_engine::test_support::seeded_entropy(17)),
+            Inspect,
+        )
+        .unwrap();
+        assert_eq!(urls, vec!["https://eapi.binance.com/eapi/v1/exchangeInfo"]);
+    }
+    let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
+    let (provider, ids) = safe_cex_venues::local_signer_from_json_for_mode(
+        "binanceoptions",
+        r#"{"primary":{"key":"fixture-key","secret":"fixture-secret"}}"#.into(),
+        &options,
+    )
+    .unwrap();
+    options.signing = Some(ids);
+    let urls = safe_cex_venues::build_with_signer(
+        "binanceoptions",
+        options,
+        Some(safe_cex_engine::test_support::seeded_entropy(17)),
+        Some(provider),
+        Inspect,
+    )
+    .unwrap();
+    assert_eq!(urls, vec!["https://eapi.binance.com/eapi/v1/exchangeInfo"]);
+    #[cfg(feature = "hosted-signing")]
+    assert!(safe_cex_venues::hosted_signing::admitted(
+        "binanceoptions",
+        &serde_json::from_str("{}").unwrap()
+    ));
 }

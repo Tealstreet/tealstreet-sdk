@@ -3,6 +3,8 @@ use safe_cex_engine::request_context::{Error, HttpAction, Preparation, Prepared}
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Notice};
 use std::sync::{Arc, Mutex};
 
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
 const MARKETS: &str = r#"{"success":true,"data":{"rows":[{"symbol":"PERP_BTC_USDC","base_tick":0.001,"quote_tick":0.1,"base_min":0.001,"base_max":20,"base_imr":0.01}]}}"#;
 
 struct Probe {
@@ -167,10 +169,10 @@ fn released(e: &mut Driver, now: f64) -> Vec<HttpRequest> {
 }
 fn no_work(out: &[Action]) {
     assert!(!out.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
-    assert!(!out.iter().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. }
-    )));
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. }))
+    );
     assert!(!out.iter().any(|a| matches!(
         a,
         Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
@@ -286,7 +288,7 @@ fn streamed_item_then_exact_deadline_final_cannot_publish_and_recovers_once() {
     let r = released(&mut e, 0.).remove(0);
     let split = MARKETS.find("]}").unwrap();
     e.handle(
-        19_999.,
+        DISCOVERY_DEADLINE_MS - 1.,
         Event::HttpChunk {
             request: r.id,
             data: &MARKETS.as_bytes()[..split],
@@ -294,24 +296,24 @@ fn streamed_item_then_exact_deadline_final_cannot_publish_and_recovers_once() {
     );
     drain(&mut e);
     assert!(!e.store().loaded().markets);
-    respond(&mut e, 20_000., &r, "]}}");
+    respond(&mut e, DISCOVERY_DEADLINE_MS, &r, "]}}");
     assert!(!e.store().loaded().markets);
     assert!(e.store().markets().is_empty());
     let out = drain(&mut e);
-    let timer = retry(&out, 20_000.);
+    let timer = retry(&out, DISCOVERY_DEADLINE_MS);
     let seen = errors.lock().unwrap();
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].kind, Some(safe_cex_engine::ErrorKind::Timeout));
     assert_eq!(seen[0].outcome, None);
     drop(seen);
-    respond(&mut e, 20_001., &r, MARKETS);
+    respond(&mut e, DISCOVERY_DEADLINE_MS + 1., &r, MARKETS);
     no_work(&drain(&mut e));
-    e.handle(21_000., Event::TimerFired { timer });
-    let r2 = released(&mut e, 21_000.).remove(0);
+    e.handle(DISCOVERY_DEADLINE_MS + 1000., Event::TimerFired { timer });
+    let r2 = released(&mut e, DISCOVERY_DEADLINE_MS + 1000.).remove(0);
     assert_ne!(r.id, r2.id);
-    respond(&mut e, 21_001., &r2, MARKETS);
+    respond(&mut e, DISCOVERY_DEADLINE_MS + 1001., &r2, MARKETS);
     assert!(e.store().loaded().markets);
-    let tickers = released(&mut e, 21_001.);
+    let tickers = released(&mut e, DISCOVERY_DEADLINE_MS + 1001.);
     assert_eq!(tickers.len(), 1);
     assert!(tickers[0].url.ends_with("/v1/public/futures"));
 }
@@ -376,8 +378,9 @@ fn ticker_failure(mode: u8) {
             );
             (2., ticker.id)
         } else {
-            respond(&mut e, 20_001., &ticker, "{}");
-            (20_001., ticker.id)
+            // Issued at 1 ms, the ticker read's deadline is 1 ms past the market one's.
+            respond(&mut e, DISCOVERY_DEADLINE_MS + 1., &ticker, "{}");
+            (DISCOVERY_DEADLINE_MS + 1., ticker.id)
         }
     };
     let out = drain(&mut e);

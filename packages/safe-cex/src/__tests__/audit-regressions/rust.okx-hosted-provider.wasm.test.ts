@@ -3,6 +3,9 @@ import type { ExchangeOptions, RemoteSigner, RemoteSignerRequest } from '../../t
 import { createHmac } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 
+// These tests pin today's secondary read-key behaviour (secondaryReadKeys.ts bypasses it).
+vi.mock('../../secondaryReadKeys', () => ({ SECONDARY_READ_KEYS_ENABLED: true }));
+
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -138,7 +141,7 @@ it.each(aliases)('actual WASM %s native private/business login dispatch uses the
   const preimage = `${seconds}GET/users/self/verify`;
   for (const login of logins) {
     expect(JSON.parse(login.text)).toEqual({ op: 'login', args: [{ apiKey: 'owned-primary-public',
-      passphrase: 'fixture-primary-passphrase', timestamp: String(seconds), sign: mac(preimage) }] });
+      passphrase: 'fixture-primary-passphrase', timestamp: seconds, sign: mac(preimage) }] });
   }
   const wsRequests = sign.mock.calls.map(([request]) => request).filter((request) => request.wsAuth?.toSign === preimage);
   expect(wsRequests).toHaveLength(2);

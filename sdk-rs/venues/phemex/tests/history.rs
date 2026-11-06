@@ -657,6 +657,67 @@ fn income_uses_shared_span_walk_across_short_pages_and_both_settlements() {
         assert_eq!(e.store().balance().total, 0.);
     }
 }
+/// The live route wraps its list: `{"code":0,"msg":"OK","data":[]}` is a read with no rows.
+#[test]
+fn income_reads_the_venues_envelope_including_an_empty_list() {
+    for streamed in [false, true] {
+        let mut e = engine(true);
+        let row = ledger(1100, "-0.01", "99.99", "REALIZED_PNL", "USDT");
+        let a = query(&mut e, income(1000., 2000., None));
+        respond(
+            &mut e,
+            &a,
+            &format!(r#"{{"code":0,"msg":"OK","data":[{row}]}}"#),
+            streamed,
+        );
+        let mut result = None;
+        for _ in 0..100 {
+            let output = actions(&mut e);
+            if let Some(done) = output.iter().find_map(|a| match a {
+                Action::Notice(Notice::CommandDone { result, .. }) => Some(result.clone()),
+                _ => None,
+            }) {
+                result = Some(done);
+                break;
+            }
+            let next = output
+                .into_iter()
+                .find(|a| matches!(a, Action::Http(_)))
+                .expect("remaining span probe");
+            respond(
+                &mut e,
+                &next,
+                r#"{"code":0,"msg":"OK","data":[]}"#,
+                streamed,
+            );
+        }
+        let rows: serde_json::Value =
+            serde_json::from_str(&result.expect("query settles")).unwrap();
+        assert_eq!(
+            rows.as_array().map(Vec::len),
+            Some(1),
+            "streamed={streamed}"
+        );
+    }
+}
+/// A refusal in the same envelope is not an empty ledger.
+#[test]
+fn income_still_fails_a_venue_refusal() {
+    for streamed in [false, true] {
+        let mut e = engine(true);
+        let a = query(&mut e, income(1000., 2000., None));
+        respond(
+            &mut e,
+            &a,
+            r#"{"code":10500,"msg":"Refused","data":[]}"#,
+            streamed,
+        );
+        let failed = actions(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })));
+        assert!(failed, "streamed={streamed}");
+    }
+}
 #[test]
 fn income_keeps_distinct_equal_time_postings_and_filters_after_coverage() {
     let mut e = engine(true);
@@ -972,9 +1033,8 @@ mod owned_income {
         let notices = markers(output);
         assert_eq!(notices.len(), 1, "exactly one owned marker: {output:?}");
         assert_eq!(notices[0].level, Level::Warn);
-        assert_eq!(notices[0].fields.len(), 1);
         assert!(
-            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id))] if *id == f64::from(owner))
+            matches!(notices[0].fields.as_slice(), [("command", Value::Num(id)), ("reason", Value::Str(_))] if *id == f64::from(owner))
         );
         let index = output
             .iter()
@@ -1491,4 +1551,81 @@ mod owned_bounded {
             "Malformed or oversized Phemex history response"
         );
     }
+}
+#[test]
+fn client_id_lookup_says_placed_only_for_an_order_the_venue_took() {
+    for (native, expected) in [
+        ("Rejected", r#"{"found":false,"definitive":true}"#),
+        ("Expired", r#"{"found":false,"definitive":true}"#),
+        ("Canceled", r#"{"found":false,"definitive":false}"#),
+        ("Deactivated", r#"{"found":false,"definitive":false}"#),
+    ] {
+        let mut e = engine(true);
+        let a = query(&mut e, lookup("caller"));
+        let row = ORDER
+            .replace("Filled", native)
+            .replace(r#""cumQtyRq":"0.001""#, r#""cumQtyRq":"0""#)
+            .replace("\"symbol\"", "\"clOrdId\":\"caller\",\"symbol\"");
+        respond(&mut e, &a, &format!("[{row}]"), false);
+        assert_eq!(result(&mut e).unwrap(), expected, "{native}");
+    }
+}
+
+#[test]
+fn a_real_empty_rows_page_is_empty_not_an_error() {
+    for streamed in [true, false] {
+        let mut e = engine(true);
+        let a = query(&mut e, fills());
+        respond(
+            &mut e,
+            &a,
+            r#"{"code":0,"msg":"OK","data":{"rows":[]}}"#,
+            streamed,
+        );
+        assert_eq!(result(&mut e).unwrap(), "[]");
+    }
+}
+
+#[test]
+fn window_fills_with_no_limit_walk_the_offset_on_a_full_page() {
+    let mut e = engine(true);
+    let a = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(1_669_407_000_000.0),
+            to_ms: Some(1_669_408_000_000.0),
+            limit: None,
+        },
+    );
+    let Action::Http(first) = &a else {
+        panic!("HTTP")
+    };
+    assert!(first.url.contains("&offset=0&limit=200"), "{}", first.url);
+    let rows = (0..200)
+        .map(|n| FILL.replace("5c3d96e1", &format!("{n:08x}")))
+        .collect::<Vec<_>>()
+        .join(",");
+    respond(&mut e, &a, &format!("[{rows}]"), true);
+    let next = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .expect("second page");
+    let Action::Http(second) = &next else {
+        panic!("HTTP")
+    };
+    assert!(
+        second.url.contains("&offset=200&limit=200"),
+        "{}",
+        second.url
+    );
+    respond(
+        &mut e,
+        &next,
+        &format!("[{}]", FILL.replace("5c3d96e1", "ffffffff")),
+        true,
+    );
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+    assert_eq!(rows.len(), 201);
 }

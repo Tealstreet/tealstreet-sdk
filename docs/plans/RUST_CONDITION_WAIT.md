@@ -58,6 +58,17 @@ impl<P> Cx<'_, P> {
         bound_ms: Option<u32>,
     ) -> Result<ConditionWait, Error>;
 
+    /// Settle-only: from the same custody, settle the current call and park
+    /// with NO next entry, for proof that arrives only on a stream. Bounded
+    /// (`bound_ms > 0`) and one-shot; release readies `done_plan`, expiry fails.
+    pub fn serial_plan_settle_wait(
+        &mut self,
+        plan: &Plan,
+        slot: &Slot,
+        context: &Context,
+        bound_ms: u32,
+    ) -> Result<ConditionWait, Error>;
+
     /// From any callback, borrowed included. Grants nothing directly: it
     /// schedules the Plan's `on_http_plan_ready`, in this flush.
     pub fn release_condition_wait(&mut self, wait: &ConditionWait) -> Result<(), Error>;
@@ -292,6 +303,25 @@ non-placement commands.
   shared refusal never carried, so changing it would alter every venue that
   guards order mutations. The fixture fixes are RED11 (answer every prepared
   call in a batch) and RED14 (entry refusals counted apart from parks).
+
+## Settle-only waits
+
+`serial_plan_settle_wait` is for a venue that proves a write only from its
+stream and has no unsigned call to name as `next` (Lighter's grouped TP/SL:
+its only exact order listing is signed). It settles the current call under
+`finish_plan_call`'s checks, marks the Plan settled and parks it with no
+entry, so the schedule is complete and nothing can be issued. Release
+(`release_condition_wait`) readies the Plan once through
+`on_http_plan_ready`; the venue then calls `done_plan`. Expiry reaches
+`on_condition_wait_expired` once; the venue raises the Plan with
+`inherit_plan_uncertainty` and fails it, or a declining hook is sealed by the
+engine with the streamed IDs. While parked, `done_plan` is refused (State);
+after the settle, `continue_serial_plan`, `serial_plan_condition_wait`,
+`plan_leg_context` and a second settle are refused (Invalid), as is a settle
+on a non-serial (Read-policy) Plan. A release after expiry or completion is
+Revoked. The caller wait never completes it, as for other parked Plans.
+
+After a settle release, the venue's on_http_plan_ready must end the Plan (done_plan or fail_plan); a released settled Plan has no remaining bound.
 
 ## Feature gate (overseer ruling)
 

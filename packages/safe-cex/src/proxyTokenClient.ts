@@ -164,6 +164,16 @@ function scheduleRefresh(): void {
   }, delay);
 }
 
+/** One /api/proxykey request, body included, may take this long before it is aborted. */
+const PROXY_KEY_FETCH_TIMEOUT_MS = 10_000;
+
+// Why the latest /api/proxykey fetch produced no token (a lapsed session answers 401);
+// cleared by the next token. Status and failure class only, never a body.
+let lastFailure: string | undefined;
+
+/** The latest /api/proxykey failure, if no token has arrived since. */
+export const lastProxyKeyFailure = (): string | undefined => lastFailure;
+
 /**
  * Fetch proxy token from /api/proxykey
  */
@@ -183,20 +193,27 @@ async function fetchProxyToken(): Promise<string> {
   lastFetchAttempt = now;
 
   fetchPromise = (async () => {
+    // Every token caller shares this one request: a hang must not block them all.
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), PROXY_KEY_FETCH_TIMEOUT_MS);
     try {
       const res = await fetch(getProxyKeyApiUrl(), {
         credentials: 'include',
+        signal: abort.signal,
       });
 
       if (!res.ok) {
+        lastFailure = `/api/proxykey answered HTTP ${res.status}`;
         return cachedToken;
       }
 
       const data = (await res.json()) as { token?: string };
       if (!data.token) {
+        lastFailure = '/api/proxykey returned no token';
         return cachedToken;
       }
 
+      lastFailure = undefined;
       cachedToken = data.token;
       cachedExpiresAt = getTokenExpiration(cachedToken);
 
@@ -217,8 +234,12 @@ async function fetchProxyToken(): Promise<string> {
 
       return cachedToken;
     } catch {
+      lastFailure = abort.signal.aborted
+        ? `/api/proxykey timed out after ${PROXY_KEY_FETCH_TIMEOUT_MS / 1000} s`
+        : '/api/proxykey failed: network error';
       return cachedToken;
     } finally {
+      clearTimeout(timeout);
       isFetching = false;
       fetchPromise = null;
     }

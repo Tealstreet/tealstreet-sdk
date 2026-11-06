@@ -25,6 +25,9 @@ fn read_policy() -> Policy {
     }
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = ();
     fn start(&mut self, cx: &mut Cx<'_, ()>) {
         if let Some(callback) = self.outside {
@@ -796,6 +799,8 @@ mod managed_socket_activity {
             controls: ControlPolicy::None,
             invalidation: Invalidation::None,
             subscription_interval_ms: 0.,
+            close_floors: &[],
+            data_silence: None,
         }
     }
     fn feed(cx: &Cx<'_, ()>) -> FeedId {

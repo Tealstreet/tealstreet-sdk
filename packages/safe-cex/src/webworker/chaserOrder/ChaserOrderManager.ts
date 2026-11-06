@@ -946,6 +946,7 @@ export class ChaserOrderManager {
       filled: reconciledOverRest
         ? instance.filledSize
         : Math.max(instance.filledSize, this.bybitDemoPositionFill(instance)),
+      placed: orderIds.length > 0,
       stopReason,
     };
     try {
@@ -980,6 +981,24 @@ export class ChaserOrderManager {
       // cancellation await, so callers can dispose the exchange immediately.
       void this.cleanupInstance(instance);
     }
+  }
+
+  /**
+   * A nuke's first step: stop every running chase on `exchange` and wait until
+   * each has cancelled its resting order, so none places again behind the nuke.
+   * Returns the ids it stopped. The exchange stays up, so no disposal warning.
+   */
+  async stopForNuke(exchange: Exchange, reason = 'Stopped by nuke'): Promise<string[]> {
+    const instances = this._chaserOrderInstances.filter((instance) => instance.exchange === exchange);
+    const stopped: string[] = [];
+    for (const instance of instances) {
+      if (!instance.isStopped) {
+        instance.markComplete(reason);
+        stopped.push(instance.id);
+      }
+    }
+    for (const instance of instances) await this.cleanupInstance(instance);
+    return stopped;
   }
 
   remove(id: string) {

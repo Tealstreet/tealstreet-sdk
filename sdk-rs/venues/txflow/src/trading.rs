@@ -173,7 +173,9 @@ impl TxFlow {
                         symbol: o.symbol.clone(),
                     })
                     .collect::<Vec<_>>();
-                (command, self.cancel_steps(cx, &refs))
+                // A nuke sends every row: a stop left behind can still fire, and a refusal
+                // for one row must not keep the rest open.
+                (command, self.cancel_wires(&refs))
             }
             Command::AmendOrder {
                 command,
@@ -551,7 +553,6 @@ impl TxFlow {
         cx: &Cx<'_, Pending>,
         refs: &[CancelOrderRef],
     ) -> Result<VecDeque<Step>, String> {
-        let mut wires = Vec::with_capacity(refs.len());
         for r in refs {
             if cx
                 .store
@@ -560,6 +561,12 @@ impl TxFlow {
             {
                 return Err("TxFlow grouped cancellation requires native grouping metadata".into());
             }
+        }
+        self.cancel_wires(refs)
+    }
+    fn cancel_wires(&self, refs: &[CancelOrderRef]) -> Result<VecDeque<Step>, String> {
+        let mut wires = Vec::with_capacity(refs.len());
+        for r in refs {
             wires.push(CancelWire {
                 a: *self
                     .assets

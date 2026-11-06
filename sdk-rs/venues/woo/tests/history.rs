@@ -1241,7 +1241,7 @@ mod owned_history {
         assert_eq!(gaps.len(), 1, "one shared coverage marker: {output:?}");
         assert_eq!(gaps[0].level, Level::Warn);
         assert!(
-            matches!(gaps[0].fields.as_slice(), [("command", Value::Num(owner))] if *owner == 99.)
+            matches!(gaps[0].fields.as_slice(), [("command", Value::Num(owner)), ("reason", Value::Str(_))] if *owner == 99.)
         );
         let (terminal, result) = output
             .iter()
@@ -1757,4 +1757,37 @@ fn failed_streamed_fill_prefix_cannot_poison_the_same_identity_on_an_alternative
         ),
     );
     assert_eq!(result(&mut e).unwrap().matches("timestamp").count(), 1);
+}
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut e = ready();
+    let r = query(
+        &mut e,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(NOW - 1000.0),
+            to_ms: Some(NOW + 1000.0),
+            limit: None,
+        },
+    );
+    let rows = (1..=500)
+        .map(|n| fill(n, NOW, "BUY"))
+        .collect::<Vec<_>>()
+        .join(",");
+    response(
+        &mut e,
+        &r,
+        NOW + 2.0,
+        &format!(r#"{{"success":true,"data":{{"rows":[{rows}]}}}}"#),
+    );
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 2.0);
+    assert!(
+        !actions.iter().any(|a| matches!(
+            a,
+            safe_cex_engine::Action::Notice(safe_cex_engine::Notice::CommandDone { .. })
+        )),
+        "a full window page cannot finish the read: {actions:?}"
+    );
 }

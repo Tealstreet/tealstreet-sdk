@@ -1,11 +1,13 @@
 //! Cursor-owned rare reads. Failed pages never masquerade as complete history.
 use crate::{Lighter, Pending};
 use safe_cex_engine::de::number;
-use safe_cex_engine::history::{Completion, CursorHistory};
+use safe_cex_engine::history::{ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk};
-use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy};
+use safe_cex_engine::request_context::{
+    CommandEntryError, Context, Operation, Policy, RetryPolicy,
+};
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Outcome, Query, Response, VenueError};
 use serde::{Deserialize, Serialize};
@@ -15,8 +17,13 @@ use std::borrow::Cow;
 /// Pages per stage before a read that still has a cursor fails as incomplete.
 const MAX_PAGES: u32 = 1000;
 
+const IDENTITY_UNAVAILABLE: &str = "Lighter private account identity is unavailable";
+/// Reads parked behind the account index lookup; more refuse at once.
+const MAX_AWAITING_IDENTITY: usize = 8;
+
 pub struct Request {
-    owner: Box<CursorHistory<Row>>,
+    owner: Box<ReadCursorHistory<Row>>,
+    leg: Option<Context>,
     read: Read,
     stage: Stage,
     symbol: Option<String>,
@@ -348,14 +355,25 @@ impl Lighter {
             },
             None => None,
         };
+        let mut park = false;
         let account = if matches!(read, Read::Trades) {
             None
         } else {
             match self.account.account_index {
-                Some(a) if self.account.signer.is_some() => Some(a),
+                Some(a) if self.account.identity.is_some() => Some(a),
+                // The index lookup is still running: wait for it rather than refuse a
+                // read issued right after a (re)start. The root's own deadline bounds it.
+                None if self.account.identity.is_some()
+                    && !self.options.public_data_only
+                    && !self.account.lookup_abandoned
+                    && self.account.awaiting_identity.len() < MAX_AWAITING_IDENTITY =>
+                {
+                    park = true;
+                    None
+                }
                 _ => {
                     if self.options.public_data_only
-                        || self.options.secret.as_deref().is_none_or(str::is_empty)
+                        || (self.options.identity.is_none() && !self.options.remote_signer)
                         || self
                             .options
                             .api_key_index
@@ -374,18 +392,34 @@ impl Lighter {
                         };
                         let _ = cx.done_context(&context, "[]".into());
                     } else {
-                        cx.refuse_command(
-                            Operation::Read,
-                            "Lighter private account identity is unavailable",
-                        );
+                        cx.refuse_command(Operation::Read, IDENTITY_UNAVAILABLE);
                     }
                     return;
                 }
             }
         };
+        let credential = if park {
+            self.account.identity.as_ref()
+        } else {
+            account.and(self.account.identity.as_ref())
+        }
+        .map(crate::primary_credential);
+        let root = match cx.admit_caller_read_root(credential, None) {
+            Ok(root) => root,
+            Err(CommandEntryError::Rejected(_)) => return,
+            Err(CommandEntryError::Revoked) => {
+                let _ = cx.reject_expired_command(Operation::Read);
+                return;
+            }
+        };
+        let completion = match ReadCompletion::from_context(cx, command, root) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
         let request = Request {
-            owner: Box::new(CursorHistory::new(
-                Completion::new(command),
+            leg: None,
+            owner: Box::new(ReadCursorHistory::new(
+                completion,
                 CursorWalk::new(MAX_PAGES),
                 |_| "Lighter history cursor did not make progress".into(),
                 |rows| serde_json::to_string(rows).map_err(|e| VenueError::new(e.to_string())),
@@ -398,13 +432,44 @@ impl Lighter {
             order,
             from,
             to,
-            limit: limit.unwrap_or(100).clamp(1, 200) as usize,
+            // A window with no limit walks to its start; no default may stop it.
+            limit: match limit {
+                None if from.is_some() => usize::MAX,
+                limit => limit.unwrap_or(100).clamp(1, 200) as usize,
+            },
             stage_start: 0,
             count: 0,
             failed: None,
             past_window: false,
         };
+        if park {
+            self.account.awaiting_identity.push(request);
+            return;
+        }
         self.history_request(cx, request);
+    }
+
+    /// The account index arrived: send every read that waited for it.
+    pub(crate) fn release_awaiting_identity(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
+        for mut request in std::mem::take(&mut self.account.awaiting_identity) {
+            request.account = Some(account);
+            self.history_request(cx, request);
+        }
+    }
+
+    pub(crate) fn schedule_identity_refusal(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.awaiting_identity.is_empty() && self.account.identity_refusal.is_none() {
+            self.account.identity_refusal = Some(cx.set_timer(0.0));
+        }
+    }
+
+    /// The lookup gave up: the reads that waited for it are refused as before.
+    pub(crate) fn refuse_awaiting_identity(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Never sent, so no leg exists to finish through: the root itself carries the refusal.
+        for request in std::mem::take(&mut self.account.awaiting_identity) {
+            let root = request.owner.root().clone();
+            let _ = cx.fail_context(&root, VenueError::new(IDENTITY_UNAVAILABLE));
+        }
     }
 
     fn history_request(&self, cx: &mut Cx<'_, Pending>, mut request: Request) {
@@ -443,27 +508,65 @@ impl Lighter {
         if let Some(cursor) = request.owner.cursor() {
             url.push_str(&format!("&cursor={}", encode(cursor)));
         }
-        let mut headers = Vec::new();
-        if request.account.is_some() {
-            match self.account_auth(cx) {
-                Ok(auth) => headers.push(("authorization", auth)),
-                Err(error) => {
-                    request
-                        .owner
-                        .reject(cx, VenueError::new(error).outcome(Outcome::NotSent));
-                    return;
-                }
-            }
-        }
         let at = match request.stage {
             Stage::Trades => ArrayAt::Field("trades"),
             Stage::Orders => ArrayAt::Field("orders"),
             Stage::Funding => ArrayAt::Field("position_fundings"),
         };
-        cx.request_streamed(Method::Get, url, headers, at, Pending::History(request));
+        let credential = request.owner.root().credential().cloned();
+        let leg = match cx.http_leg_context(
+            request.owner.root(),
+            Policy {
+                operation: Operation::Read,
+                credential,
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: RetryPolicy::Never,
+            },
+        ) {
+            Ok(leg) => leg,
+            Err(error) => {
+                let _ = request.owner.reject(cx, error.venue_error());
+                return;
+            }
+        };
+        request.leg = Some(leg.clone());
+        let identity = request.account.and_then(|_| self.account.identity.clone());
+        let result = if let Some(identity) = identity {
+            match self.auth_recipe(identity, crate::sign::AuthPlacement::Header) {
+                Ok(recipe) => cx.request_signed_managed(
+                    leg,
+                    None,
+                    Method::Get,
+                    url,
+                    None,
+                    recipe,
+                    Pending::History(request),
+                ),
+                Err(error) => {
+                    let _ = cx.finish_http_context(&leg);
+                    let _ = request
+                        .owner
+                        .reject(cx, VenueError::new(error).outcome(Outcome::NotSent));
+                    return;
+                }
+            }
+        } else {
+            cx.request_managed(leg, None, Method::Get, url, None, Pending::History(request))
+        };
+        match result {
+            Ok(id) => cx.stream_response(id, at),
+            Err((Pending::History(request), error)) => {
+                let _ = request.owner.reject(cx, error.venue_error());
+            }
+            Err(_) => unreachable!(),
+        }
     }
 
     pub(crate) fn history_item(&self, cx: &Cx<'_, Pending>, request: &mut Request, text: &str) {
+        if !request.delivered(cx) {
+            return;
+        }
         request.count += 1;
         if request.failed.is_some() {
             return;
@@ -512,7 +615,12 @@ impl Lighter {
         if !within(request, timestamp) {
             return Ok(());
         }
-        if !request.owner.fresh(format!("trade:{}:{id}", t.market_id.0)) {
+        if !request
+            .owner
+            .admit(cx, request.leg.as_ref().unwrap())
+            .map_err(|e| e.venue_error().message)?
+            .fresh(format!("trade:{}:{id}", t.market_id.0))
+        {
             return Ok(());
         }
         let quote = t.usd_amount.as_ref().map_or(t.price.0 * t.size.0, |n| n.0);
@@ -520,19 +628,23 @@ impl Lighter {
             return Err("Invalid Lighter execution notional".into());
         }
         if matches!(request.read, Read::Trades) {
-            request.owner.stage(Row::Trade(Trade {
-                id: id.into(),
-                symbol: symbol.into(),
-                price: t.price.0,
-                qty: t.size.0,
-                quote_qty: quote,
-                timestamp,
-                side: if t.is_maker_ask {
-                    OrderSide::Buy
-                } else {
-                    OrderSide::Sell
-                },
-            }));
+            request
+                .owner
+                .admit(cx, request.leg.as_ref().unwrap())
+                .map_err(|e| e.venue_error().message)?
+                .stage(Row::Trade(Trade {
+                    id: id.into(),
+                    symbol: symbol.into(),
+                    price: t.price.0,
+                    qty: t.size.0,
+                    quote_qty: quote,
+                    timestamp,
+                    side: if t.is_maker_ask {
+                        OrderSide::Buy
+                    } else {
+                        OrderSide::Sell
+                    },
+                }));
             return Ok(());
         }
         let account = request.account.unwrap().to_string();
@@ -577,53 +689,65 @@ impl Lighter {
         .map(|n| n.0);
         let asset = cx.store.market(symbol).unwrap().quote.clone();
         match request.read {
-            Read::Fills => request.owner.stage(Row::Execution(Execution {
-                id: id.into(),
-                timestamp: timestamp / 1000.0,
-                symbol: symbol.into(),
-                order_id: order.into(),
-                price: t.price.0,
-                qty: t.size.0,
-                side,
-                commission: fee,
-                commission_asset: asset,
-                maker,
-                realized_pnl: pnl,
-            })),
+            Read::Fills => request
+                .owner
+                .admit(cx, request.leg.as_ref().unwrap())
+                .map_err(|e| e.venue_error().message)?
+                .stage(Row::Execution(Execution {
+                    id: id.into(),
+                    timestamp: timestamp / 1000.0,
+                    symbol: symbol.into(),
+                    order_id: order.into(),
+                    price: t.price.0,
+                    qty: t.size.0,
+                    side,
+                    commission: fee,
+                    commission_asset: asset,
+                    maker,
+                    realized_pnl: pnl,
+                })),
             Read::Income(kind) => {
                 if (kind == IncomeKind::All
                     || (kind == IncomeKind::Commission && fee > 0.0)
                     || (kind == IncomeKind::Rebate && fee < 0.0))
                     && fee != 0.0
                 {
-                    request.owner.stage(Row::Income(Income {
-                        symbol: symbol.into(),
-                        income_type: if fee < 0.0 {
-                            "COMMISSION_REBATE"
-                        } else {
-                            "COMMISSION"
-                        },
-                        income: -fee,
-                        asset: asset.clone(),
-                        timestamp,
-                        tran_id: format!("fee:{id}"),
-                        trade_id: Some(id.into()),
-                        category: if fee < 0.0 { "rebate" } else { "commission" },
-                    }));
+                    request
+                        .owner
+                        .admit(cx, request.leg.as_ref().unwrap())
+                        .map_err(|e| e.venue_error().message)?
+                        .stage(Row::Income(Income {
+                            symbol: symbol.into(),
+                            income_type: if fee < 0.0 {
+                                "COMMISSION_REBATE"
+                            } else {
+                                "COMMISSION"
+                            },
+                            income: -fee,
+                            asset: asset.clone(),
+                            timestamp,
+                            tran_id: format!("fee:{id}"),
+                            trade_id: Some(id.into()),
+                            category: if fee < 0.0 { "rebate" } else { "commission" },
+                        }));
                 }
                 if matches!(kind, IncomeKind::All | IncomeKind::Realized)
                     && let Some(pnl) = pnl.filter(|n| *n != 0.0)
                 {
-                    request.owner.stage(Row::Income(Income {
-                        symbol: symbol.into(),
-                        income_type: "REALIZED_PNL",
-                        income: pnl,
-                        asset,
-                        timestamp,
-                        tran_id: format!("pnl:{id}"),
-                        trade_id: Some(id.into()),
-                        category: "realized_pnl",
-                    }));
+                    request
+                        .owner
+                        .admit(cx, request.leg.as_ref().unwrap())
+                        .map_err(|e| e.venue_error().message)?
+                        .stage(Row::Income(Income {
+                            symbol: symbol.into(),
+                            income_type: "REALIZED_PNL",
+                            income: pnl,
+                            asset,
+                            timestamp,
+                            tran_id: format!("pnl:{id}"),
+                            trade_id: Some(id.into()),
+                            category: "realized_pnl",
+                        }));
                 }
             }
             _ => unreachable!(),
@@ -653,18 +777,24 @@ impl Lighter {
         if within(request, timestamp)
             && request
                 .owner
+                .admit(cx, request.leg.as_ref().unwrap())
+                .map_err(|e| e.venue_error().message)?
                 .fresh(format!("funding:{}:{}", f.market_id.0, f.funding_id.0))
         {
-            request.owner.stage(Row::Income(Income {
-                symbol: symbol.into(),
-                income_type: "FUNDING_FEE",
-                income: f.change.0,
-                asset: cx.store.market(symbol).unwrap().quote.clone(),
-                timestamp,
-                tran_id: f.funding_id.0.into_owned(),
-                trade_id: None,
-                category: "funding",
-            }));
+            request
+                .owner
+                .admit(cx, request.leg.as_ref().unwrap())
+                .map_err(|e| e.venue_error().message)?
+                .stage(Row::Income(Income {
+                    symbol: symbol.into(),
+                    income_type: "FUNDING_FEE",
+                    income: f.change.0,
+                    asset: cx.store.market(symbol).unwrap().quote.clone(),
+                    timestamp,
+                    tran_id: f.funding_id.0.into_owned(),
+                    trade_id: None,
+                    category: "funding",
+                }));
         }
         Ok(())
     }
@@ -695,6 +825,8 @@ impl Lighter {
         if !within(request, timestamp)
             || !request
                 .owner
+                .admit(cx, request.leg.as_ref().unwrap())
+                .map_err(|e| e.venue_error().message)?
                 .fresh(format!("order:{}:{}", order.symbol, order.id))
         {
             return Ok(());
@@ -703,20 +835,24 @@ impl Lighter {
             .filled_quote_amount
             .filter(|_| order.filled > 0.0)
             .map(|n| n.0 / order.filled);
-        request.owner.stage(Row::Order(HistoricalOrder {
-            id: order.id,
-            symbol: order.symbol,
-            side: order.side,
-            kind: order.kind,
-            status: order.status,
-            price: order.price,
-            average_price: average,
-            amount: order.amount,
-            filled: order.filled,
-            reduce_only: order.reduce_only,
-            created_time: created.unwrap_or(timestamp),
-            updated_time: updated,
-        }));
+        request
+            .owner
+            .admit(cx, request.leg.as_ref().unwrap())
+            .map_err(|e| e.venue_error().message)?
+            .stage(Row::Order(HistoricalOrder {
+                id: order.id,
+                symbol: order.symbol,
+                side: order.side,
+                kind: order.kind,
+                status: order.status,
+                price: order.price,
+                average_price: average,
+                amount: order.amount,
+                filled: order.filled,
+                reduce_only: order.reduce_only,
+                created_time: created.unwrap_or(timestamp),
+                updated_time: updated,
+            }));
         Ok(())
     }
 
@@ -726,11 +862,18 @@ impl Lighter {
         mut request: Request,
         response: Response<'_>,
     ) {
+        if !request.delivered(cx) {
+            return;
+        }
         let envelope = serde_json::from_str::<Envelope<'_>>(response.body);
         let envelope = match envelope {
             Ok(e) if response.status < 300 && e.code.0 == "200" => e,
             Ok(e) => {
                 self.history_failed(cx, request, &format!("{} {}", response.status, e.message));
+                return;
+            }
+            Err(_) if response.status >= 300 => {
+                self.history_failed(cx, request, &format!("HTTP {}", response.status));
                 return;
             }
             Err(e) => {
@@ -772,14 +915,21 @@ impl Lighter {
             fresh: request.count,
             want_more: !enough,
         };
-        match request.owner.advance(page) {
+        let step = match request.owner.admit(cx, request.leg.as_ref().unwrap()) {
+            Ok(mut admission) => admission.advance(page),
+            Err(_) => return,
+        };
+        if let Some(leg) = request.leg.take() {
+            let _ = cx.finish_http_context(&leg);
+        }
+        match step {
             CursorStep::More(_) => {
                 self.history_request(cx, request);
                 return;
             }
             CursorStep::Stalled(_) => {
                 // Native proof policy stays strict even with accepted rows.
-                request.owner.reject(
+                let _ = request.owner.reject(
                     cx,
                     VenueError::new("Lighter history cursor did not make progress"),
                 );
@@ -788,7 +938,7 @@ impl Lighter {
             CursorStep::Done => {}
         }
         if !enough && request.count >= 100 {
-            request.owner.reject(
+            let _ = request.owner.reject(
                 cx,
                 VenueError::new("Lighter history page saturated without a continuation cursor"),
             );
@@ -798,7 +948,7 @@ impl Lighter {
             request.stage = Stage::Funding;
             request.stage_start = request.owner.accepted_len();
             if !request.owner.restart_stage() {
-                request.owner.reject(
+                let _ = request.owner.reject(
                     cx,
                     VenueError::new("Lighter history stage did not complete"),
                 );
@@ -810,7 +960,19 @@ impl Lighter {
         }
         finish(cx, request, Ok(()));
     }
-    pub(crate) fn history_failed(&self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+    pub(crate) fn history_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        error: &str,
+    ) {
+        if !request.delivered(cx) {
+            return;
+        }
+        let _ = request.owner.discard_staged_page();
+        if let Some(leg) = request.leg.take() {
+            let _ = cx.finish_http_context(&leg);
+        }
         finish(
             cx,
             request,
@@ -835,9 +997,51 @@ fn within(request: &Request, time: f64) -> bool {
 
 fn finish(cx: &mut Cx<'_, Pending>, request: Request, result: Result<(), VenueError>) {
     let limit = request.limit;
-    request.owner.finish_with(cx, result, |mut rows| {
+    let _ = request.owner.finish_with(cx, result, |mut rows| {
         rows.sort_by(|a, b| b.time().total_cmp(&a.time()));
         rows.truncate(limit);
         serde_json::to_string(&rows).map_err(|e| VenueError::new(e.to_string()))
     });
+}
+
+impl Request {
+    fn delivered(&self, cx: &Cx<'_, Pending>) -> bool {
+        self.leg
+            .as_ref()
+            .is_some_and(|leg| self.owner.validate_delivery(cx, leg).is_ok())
+    }
+}
+
+impl Lighter {
+    pub(crate) fn history_rejected(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        error: VenueError,
+    ) {
+        if cx.validate_read_root_context(request.owner.root()).is_err() {
+            return;
+        }
+        let _ = request.owner.discard_staged_page();
+        if let Some(leg) = request.leg.take() {
+            let _ = cx.finish_http_context(&leg);
+        }
+        let _ = request.owner.reject(cx, error);
+    }
+
+    pub(crate) fn history_transport_failed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        mut request: Request,
+        error: VenueError,
+    ) {
+        if cx.validate_read_root_context(request.owner.root()).is_err() {
+            return;
+        }
+        let _ = request.owner.discard_staged_page();
+        if let Some(leg) = request.leg.take() {
+            let _ = cx.finish_http_context(&leg);
+        }
+        finish(cx, request, Err(error));
+    }
 }

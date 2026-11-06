@@ -289,10 +289,9 @@ fn malformed_seed_and_candles_do_not_commit_partial_results() {
 #[test]
 fn broker_tags_are_explicit_and_shared_where_expected() {
     for (b, tag) in [
-        (Broker::Tealstreet, "TEALSTREET"),
+        (Broker::Orderly, "TEALSTREET"),
         (Broker::KodiakFi, "TEALKODIAK"),
         (Broker::Mode, "TEALMODE"),
-        (Broker::SalsaDex, "TEALSALSA"),
         (Broker::What, "TEALWHAT"),
         (Broker::WooFi, "TEALSTREET"),
     ] {

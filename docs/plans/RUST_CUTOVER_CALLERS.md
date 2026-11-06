@@ -1,5 +1,9 @@
 # Phase 9: TypeScript caller inventory and deletion dependencies
 
+> **Closed to appends since 2026-10-27.** Record new caller obligations as one
+> file per change in [callers/](callers/README.md). Edit a section here only
+> when that obligation itself changes.
+
 Audited 2026-10-20 on the phase-9 readiness branch, against the repository's
 `packages/` and `apps/` source. This is an inventory and an ordered future
 migration plan. This change deletes no TypeScript venue. The authoritative
@@ -29,10 +33,10 @@ adopting this host version. tealstreet-next remains read-only in this lane.
 
 ## What is ready, and what is still a deletion blocker
 
-The SDK exposes **49 registered exchange names**. `RUST_VENUES` includes **48**.
-The two registries currently default **9 names** to `RustEngineExchange`:
-`coinbase`, `coinbasespot`, and Orderly's `tealstreet-dex`, `kodiakfi`, `mode`,
-`salsadex`, `what`, `woofi`, plus testnet-only `txflow`. They default the other **40 names** to TypeScript,
+The SDK exposes **47 registered exchange names**. `RUST_VENUES` includes **46**.
+The two registries currently default **7 names** to `RustEngineExchange`:
+`coinbase`, `coinbasespot`, and Orderly's `kodiakfi`, `mode`,
+`what`, `woofi`, plus testnet-only `txflow`. They default the other **40 names** to TypeScript,
 including **39 names with an available Rust adapter**. Registration in
 `RUST_VENUES` proves the adapter exists; it does not prove every optional product,
 credential mode, consumer, or live deployment is ready to delete.
@@ -49,7 +53,7 @@ of saved accounts.
 | Family / exact registered names | Rust adapter | Default registry / deletion condition |
 | --- | --- | --- |
 | Coinbase: `coinbase`, `coinbasespot` | Both | Rust default; active CFM/spot and saved spot-only. Legacy INTX fixtures remain compatibility coverage for retired Advanced Trade routes. Frozen TS reference remains a harness dependency. Inert Starbase code is not an enabled product. |
-| Orderly: `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | All six | Rust default; all are broker options of one Orderly crate. `woo` is WOO X, a separate family. Frozen TS reference remains a harness dependency. |
+| Orderly: `kodiakfi`, `mode`, `what`, `woofi` | All four | Rust default; all are broker options of one Orderly crate. `woo` is WOO X, a separate family. Frozen TS reference remains a harness dependency. |
 | `txflow` | Yes | Rust default, testnet USDC perpetuals only; mainnet rejects before I/O and production/preview availability stays disabled. Retain `__tests__/reference/txflow` for independent public/private replay and audits, plus the production `exchanges/txflow/txflow.client-id.ts` helper used by the Rust wrapper. The former Phase-0 scaffold has been replaced; preserve [exact signing, account, order/query scope and measurement gates](TXFLOW_RUST_PORT.md). |
 | Binance: `binance`, `binancepm` | Both | TS default; preserve USD-M and PM protocol/account/query scope and regression gates while switching both registries after consumer/routing/key-mode evidence. All four Binance Rust profiles now exist; shared TS implementation/reference files still have callers until each profile defaults/migrates. |
 | Binance Spot: `binancespot` | Yes | TS default; signed WebSocket API user-data subscription with ACK/subscription-ID/liveness checks, native per-asset currency balances and USD totals; no derivative positions/settings. Native client-order-ID identity and supported regular/protective/order-list paths retain whole-batch preflight and final-fill-aware cancel/replace; unsupported derivative flags/STP/trailing or conditional parameters reject. Private history/fills/income retain the existing TS empty-result contract; public-trades/client-lookup queries unsupported. Preserve exact scope, live public versus documented private evidence and USD-M/PM controls in [BINANCE_VARIANTS_PORT.md](BINANCE_VARIANTS_PORT.md). |
@@ -393,7 +397,7 @@ and renderer can keep stale book levels visible after disconnect.
 
 | Set | Names | Selection |
 | --- | --- | --- |
-| Rust by default (TS classes deleted) | `coinbase`, `coinbasespot`, `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi`, `txflow` (testnet only) | `registry.ts`, `registry.native.ts`; no opt-in, every factory/worker/server/CLI/MCP path |
+| Rust by default (TS classes deleted) | `coinbase`, `coinbasespot`, `kodiakfi`, `mode`, `what`, `woofi`, `txflow` (testnet only) | `registry.ts`, `registry.native.ts`; no opt-in, every factory/worker/server/CLI/MCP path |
 | Rust adapter, TS default | `apexomni`, `asterdex`, `backpack`, `binance`, `binancepm`, `binancespot`, `binanceinverse`, `bingx`, `bitget`, `bitgetusdc`, `bitgetinverse`, `bitrue`, `blofin`, `breakoutprop`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo`, `hyrotrader`, `cryptocom`, `grvt`, `hyperliquid`, `hyperliquidspot`, `kraken`, `krakenspot`, `kucoin`, `kucoinspot`, `lighter`, `lighter-robinhood`, `mexc`, `okx`, `okxeu`, `okxdemo`, `okxeudemo`, `paradex`, `phemex`, `polymarket`, `weex`, `woo`, `bitunix` | `ExchangeOptions.engine: 'rust'` in `createExchange`, `createExchangeFromAccount` overrides, `ExchangeWorker`; MCP `EXCHANGE_ENGINE=rust`. No tealstreet-next caller sets it today. No `'typescript'` value (Owner decision 4) |
 | TS only | `binanceoptions` (master-only, survives the merge) | |
 
@@ -1672,8 +1676,8 @@ updated) or retained deliberately when deleting the venue implementation:
 
 The worker's postprocessor registry also retains `DisplayedPositionsPostprocessor`,
 `DisplayedMarginPostprocessor`, `ChaserOrderEnrichmentPostprocessor`,
-`OrdersRiskProfilePostprocessor`, `ChaserOrderPostprocessor`, `TwapPostprocessor`
-and `MessageHandlerStatsPostprocessor`. None is replaced by deleting a venue:
+`OrdersRiskProfilePostprocessor` and `MessageHandlerStatsPostprocessor`
+(`activeChasers`/`activeTWAPs` now come from the engine's Rust algos). None is replaced by deleting a venue:
 keep derived display/store fields and sequencing while inputs become Rust frames.
 
 ## NX deep-import and method reachability recheck
@@ -2067,8 +2071,6 @@ These are all direct base/concrete-class/registry callers in test source at the 
 | `packages/safe-cex/src/__tests__/reference/coinbase/coinbasespot.exchange.ts` | `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/kodiakfi/kodiakfi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/mode/mode.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges/salsadex/salsadex.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/what/what.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/woofi/woofi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/orderly.ws-private.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
@@ -2335,9 +2337,7 @@ These are all direct base/concrete-class/registry callers in test source at the 
 | `packages/safe-cex/src/webworker/handlers/TwapHandler.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/handlers/UiStateHandler.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/handlers/UpdatePositionsHandler.test.ts` | `base` |
-| `packages/safe-cex/src/webworker/postProcessors/ChaserOrderPostprocessor.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/postProcessors/MessageHandlerStatsPostprocessor.test.ts` | `base` |
-| `packages/safe-cex/src/webworker/postProcessors/TwapPostprocessor.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/twap/TwapInstance.test.ts` | `base` |
 | `packages/safe-cex/src/webworker/twap/TwapInstance.timeout.test.ts` | `base` |
 
@@ -2398,8 +2398,6 @@ Coinbase reference, and socket type imports depend on that same class.
 | `packages/safe-cex/src/__tests__/reference/coinbase/coinbasespot.exchange.ts` | `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.exchange.ts`, `packages/safe-cex/src/__tests__/reference/coinbase/coinbase.types.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/kodiakfi/kodiakfi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/mode/mode.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges/salsadex/salsadex.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
-| `packages/safe-cex/src/__tests__/reference/orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/what/what.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/exchanges/woofi/woofi.exchange.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.exchange.ts` |
 | `packages/safe-cex/src/__tests__/reference/orderly/orderly.api.ts` | `packages/safe-cex/src/__tests__/reference/orderly/orderly.encryption.ts`, `packages/safe-cex/src/__tests__/reference/orderly/orderly.types.ts` |
@@ -2660,6 +2658,18 @@ subscription depth or replace streaming generation, ticker/account,
 metadata/settings or fill-completeness state. Existing TS internal snapshot
 seeding/gap repair is separate; the bounded NX/CLI/MCP audit established no
 direct default producer or new caller argument.
+
+### Hyperliquid mixed batch effects and accepted identities
+
+Rust retains every proven Resting/Filled order ID from a correctly correlated
+batch, even when another row refuses. The failure carries structured partial
+order IDs and Unknown for a mixed result; it never reports the whole batch as
+rejected or resends it. Accepted rows run the normal account reducer. A mixed
+cancel removes successful/terminal legs and restores only refused legs, so a
+cancelled order is never resurrected. All-refused batches retain Rejected with
+no accepted IDs. An accepted earlier physical call followed by a later refusal
+also retains its IDs and projects Unknown. This deliberately fixes the native early-error return; existing
+custody originals that described its dropped-ID behaviour now pin this contract.
 
 ### Hyperliquid signed cancellation scheduling (#1693)
 
@@ -9188,6 +9198,51 @@ Follow-up (engine owner, fe7lgm): a granted plan resend can only be
 released from plan custody. A venue whose resend must wait on a venue
 condition therefore needs a serial-plan condition wait, as AsterDEX does here.
 A custody-preserving parked resend would remove that need.
+## AsterDEX V3 nonces from the engine address domain
+
+AsterDEX V3 signing nonces now come from the engine's `asterdex-v3` address
+domain ([RUST_ADDRESS_NONCE_DOMAINS.md](RUST_ADDRESS_NONCE_DOMAINS.md)), keyed
+by the API wallet address that the installed signing key proves at trusted
+setup. The venue allocator (`NONCES`) is deleted in the same build.
+
+Unchanged:
+- The values: the calibrated protocol millisecond x1000, or the previous value
+  plus 1.
+- One sequence per API wallet across every engine, user and network in one
+  process or WASM memory, including an aliased read slot (`auth.privateKey`).
+- Nonces are not persisted. Activation is a cold whole-process or
+  WASM-instance replacement.
+- V1 HMAC accounts are claim-free and unchanged.
+
+The wire `signer` is now the EIP-55 form of the verified address rather than
+the configured string. The two are equal for every accepted configuration.
+
+**N1 (overseer ruling).** If a slot's configured V3 API wallet differs from
+the address its signing key proves, native signed and sent the configured
+wallet, and the venue rejected every request on that slot. That covers
+`auth.signerAddress`, else the API key, or the read key for the read slot. It
+includes an aliased read slot that names its read key while signing with the
+primary wallet.
+
+Rust now refuses that slot at startup with a `CONFIG_INVALID` notice, "Aster
+V3 API wallet address <configured> does not match the signing key's address
+<derived>":
+- Requests on that slot fail with the same message, not sent, before any nonce
+  is reserved.
+- Job validation reports it as `InvalidInput`, not an authentication failure,
+  so no auth health latches.
+- Public data and the other slot keep working.
+- The derived address is never substituted.
+
+Two admission tests that pinned such mismatched configurations now assert this
+refusal, and also cover a matching alias.
+
+V3 private work also requires host address setup before start. An engine
+started without it, or a custom signer without owned public-address setup,
+refuses V3 private requests as not sent. A signature completing after a newer
+nonce from the same wallet was released is prepared again with a fresh nonce,
+never sent stale.
+
 ## AsterDEX managed sockets
 
 Both AsterDEX streams are engine-managed
@@ -9285,6 +9340,20 @@ calls them until that cutover, which also flips `implemented(SchnorrDigest)` to
   non-canonical, zero or wrong-width scalar is refused at trusted setup
   (InvalidRequest), never reduced as legacy does. Inert for Lighter until its
   ref is declared at the cutover.
+
+## Scalar-only primary and signing-only authority (#2223)
+
+Shared prerequisite for the Hyperliquid cutover (consumer codex-zs5e83). No
+family declares `source: scalarOnly` yet.
+
+- **Declared asymmetric keys are never emitted.** `LocalSigner` refuses
+  `Present` and `PayloadPart::Credential` for any ref trusted policy declared
+  asymmetric (Ed25519, Es256, Secp256k1Digest, StarkDigest, SchnorrDigest),
+  whichever identity names it. Legacy would hand the raw scalar to such a
+  request. No current recipe does this; full family CI is the pin.
+- **PublicAddress in nonce-claimed work.** A nonce-claimed recipe may now name
+  `PublicAddress` on its claim's own signing ref, for every identity. It emits
+  only the public address.
 
 ## Bitrue reads and listen-key sessions leave the legacy funnel (B1, #2173)
 
@@ -9622,6 +9691,55 @@ unproven released send. Their resend freezes codec bytes while refreshing the
 bundle at Bind; Preflight signed calls repeat their existing provider work.
 No current venue enables a new auth mode in this engine slice.
 
+## Lighter managed remaining funnel
+
+Lighter and Lighter-Robinhood use the trusted installed Schnorr provider for
+transaction and auth recipes. The venue retains only public account/API indices,
+validated public L1 metadata and opaque issued identities. Secret-only private
+setup uses #2208's nonpresentable principal; original key presence remains
+unchanged, and a supplied nonblank key keeps its ordinary Present precedence.
+The principal is neither account proof nor a nonce subject. Public account lookup
+still validates the resolved account; private recipes bind that account and API
+index to the actual installed signing ref. Hosted recipe activation stays held.
+
+Every prerequisite and transaction waits for managed preparation. Approval and
+nextNonce reads retain the genuine command Preflight; successful handoff uses
+finish_preflight_call. Serial write DATA records facts before effects and never
+replays transport loss or an unproven result. One definitive current-call 21104
+may wait 150 ms, read a fresh nonce, and rebuild the same unresolved transaction
+once. The job retains its client indices and one-reseed budget through the walk.
+
+Position proof uses shared condition readiness, so its read can start immediately
+after an accepted step; a fill already observed at cancel ACK rejects amendment
+before the old pacing delay. These timing changes cannot authorize a replacement.
+Provider refusal diagnostics may use Rejected rather than RateLimited; definitive
+financial outcomes and native codes remain pinned. Unproven released responses
+stay Unknown without trusting the response body or retrying. Caller history keeps
+accepted prefixes plus incomplete coverage on transport failure, while preparation
+refusal and cursor proof failure reject strictly and discard provisional rows.
+
+Invalid local scalar/index/provider configurations refuse before startup instead
+of silently falling back to unsigned account snapshots. Valid remote-only setups
+retain unsigned account discovery, snapshots and public trades; no hosted signing
+capability is activated. Expired Background reads clear only their native
+inflight state via the engine failure callback, permitting a fresh poll without
+publishing expired DATA or issuing any command terminal.
+
+Lighter's tests/support/reference_signer.rs is a frozen compatibility codec,
+sharing transaction DTOs and cryptographic primitives with production. It is
+not an independent oracle: tests/signing.rs pins it to the TS and Go-WASM corpus.
+
+Retired writes apply nonce invalidation and setting uncertainty before any
+queued Preflight or Plan resumes. A consumed Submit nonce is discarded on
+NotSent as well as released failures, forcing the next job to read nextNonce.
+An explicit HTTP 2xx tier refusal is Rejected, never an unproven Unknown.
+
+Lighter setup keeps bridge-inferred public discovery when the API index is absent,
+while discarding its provider material and identities. Actual private intent
+without an API index refuses; empty or absent material stays public without authority. Unsupported PayloadSigner intent is refused
+before local scalar or setup-JSON validation. Standalone family builds enable
+the host dispatcher as well as the registry dispatcher.
+
 ### Primary key-permission verification reads
 
 `PrimaryReason::KeyPermissions` (`keyPermissions` in signMeta) names a primary
@@ -9703,6 +9821,214 @@ managed-HTTP recorder fix; no native-host run counts as browser readiness.
 
 No caller-visible change. Binance already signed every request through the provider. The remaining legacy signing code was a test-only HMAC oracle and fixtures, now replaced by provider-path proofs of the documented vector and of every configured receive window ([RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md)). Signing inventory for Binance: 27 → 4, the four being the dispatch recipe's own lines.
 
+### Per-call pacing on serial Plans
+
+`SerialCall.pacing` names the pacing a call's legs carry; `None` inherits the
+root. A release-domain member resolves through `domain_pacing` at admission and
+every continuation, so it names only what the domain admits; any other call,
+including a Read in a `Mutations` domain, stays unpaced and names only a
+zero-gap group. Legs are stamped from the call, not the root. Existing adopters
+pass `None` and are unchanged. Serial is deliberately stricter than Background:
+a non-member serial Read naming a positive-gap domain pacing is Invalid, while a
+Background Read naming it is admitted and kept out of the FIFO.
+
+### Binance COIN-M: per-coin currencies and coinMargined, as in TypeScript
+
+The COIN-M balance now carries a per-coin `currencies` row next to `coins`, in
+coin units: total = walletBalance, free = availableBalance, used =
+initialMargin, upnl = unrealizedProfit. `FetchBalanceInfo` answers
+`{"coinMargined":true}` with no I/O, so `getBalanceSlice` gives an inverse
+market its margin coin's balance and reads zero for a coin the account does
+not hold, instead of the USD total.
+
+### A CDN refusal is a block, not a bad key
+
+When a 401/403 carries no native code, the engine's last status fallback
+classifies it as `RateLimited` if the body has CloudFront's own error-page
+marker ("Generated by cloudfront (CloudFront)"). The request never reached the
+venue (Bybit's CDN refusing the egress address). A venue error that merely names
+a CloudFront host stays an auth kind. Native codes and a venue's own declared
+401/403 status rows take precedence, so a venue that declares those rows (OKX,
+Bitget, Bitunix) keeps a CDN page as auth. Move the check ahead of the status
+rows if such a venue is ever fronted by CloudFront.
+
+### Bitunix closed positions and journal on Rust
+
+Bitunix on the Rust engine now serves the journal (historical positions) and closed PnL from the venue's reported position history, mapped by TypeScript's own Bitunix mappers, as TypeScript does ([RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md)). The journal previously threw "no journal records path declared", and closed PnL was always empty. Capability records gain `positionHistory: "bitunix"` and `closedPositionFormat: "bitunix"`. A failed journal read throws, as on every other reported-closed venue; a failed closed-PnL read yields `[]`.
+
+### Bitunix account read classification (P1 #33)
+
+A failed Bitunix account read now takes its `kind` from the shared code table, as a write does. HTTP 401 is `authInvalid` and 403 `authPermission` (both were `network`), and a 2xx `10007` is `authInvalid` (it was `invalidInput`). An unlisted native code is `venueUnavailable` (it was `internal`). Messages, venue codes, Retry-After pauses and the account-auth decision are unchanged.
+
+### Binance Spot: reduceOnly and close are ignored, as in TypeScript
+
+Binance Spot placement no longer rejects `reduceOnly: true` or `close: true`.
+Spot has no position to reduce, so both flags are dropped and never sent; a
+sell beyond the balance fails at Binance. Spot `conditional` and trailing
+orders are still refused, exactly as TypeScript refuses them.
+
+### Binance request refusals: typed command terminals
+
+Binance's local pre-admission refusals (unsupported commands, Spot derivative settings, stop-limit amend, keyless trading, invalid plans, bad candle intervals or ranges) are now each the command's own typed engine terminal, with native text, kind and NotSent, and no I/O ([RUST_BINANCE_REQUEST_REFUSALS.md](RUST_BINANCE_REQUEST_REFUSALS.md)). An unsupported candle interval is now typed `Unsupported`; it was a bare message.
+
+### Orderly O1: provider-signed account reads, history and socket auth
+
+Orderly's private reads and its socket auth now sign through an installed Ed25519 provider; the venue holds only identity refs ([RUST_ORDERLY_PROVIDER_READS.md](RUST_ORDERLY_PROVIDER_READS.md)). Trading still signs locally with the seed until O2.
+- **Headers and frame.** Unchanged in names, order and bytes. Each stamp is the request's release time, which is native's own instant whenever nothing was queued.
+- **Account reads.** Bounded Background reads (20 s each). A delivery from a superseded read changes nothing. A failed or refused read is reported and retried exactly as a native failed read is, including the 5 s startup retry. A refused signature is never silent.
+- **History (better than TypeScript).**
+  - The caller's wait bounds the whole walk, including the funding spacing delays. An expired walk fails with the shared typed refusal instead of sending late pages.
+  - A lost page keeps its `Network` kind; it was `Internal`.
+  - A signing refusal fails the query outright, even after accepted pages, as before.
+- **Socket auth.** A provider refusal sends no frame and closes the socket. Without a Primary identity the socket closes without signing.
+- **Interim (until O2).** A protective placement that an account snapshot confirms completes one tick after that snapshot, rather than inside it. The result is unchanged.
+
+### ApeX Omni browser signer bootstrap
+
+The isolated ApeX WASM family enables `dispatch-signing`, matching its
+construction declaration and accepting the bridge's separate local signer setup.
+Raw compatibility and explicit setup both construct a real installed provider,
+retain private capability, and start managed discovery. Native constructor and
+compiled-family integration controls exercise both paths with the public zkLink
+seed corpus. The cross-venue construction feature guard is a separate follow-up.
+
+### Phemex credentialed smoke sizing
+
+The manual JS/WASM smoke runner reads the explicit monetary minimum
+`minOrderValueRv`, base-quantity step `qtyStepSize` and maximum `maxOrderQtyRq`
+from the matching listed PerpetualV2 row in `/public/products`. Quote and
+settlement must match the selected market; missing, malformed, duplicate,
+nonlinear or superseded limits refuse. It does not infer zero from quantity
+steps. The existing $100 notional cap, post-only placement, empty-account
+preconditions and independent cleanup readback remain unchanged. This enables
+only the credentialed test harness; production order sizing is unchanged.
+
+### Isolated WASM construction feature guard
+
+The construction guard checks every declared venue through its actual family
+alias and transitive local Cargo features. Setup mappings declare their required
+bootstrap features; AsterDEX additionally requires address setup and signing
+metadata. Combined default features cannot satisfy an isolated family's check.
+Negative controls pin missing features and reject unknown setup mappings.
+
+## Rust-only beta SDK admission
+
+SDK web/native registries, saved-account/public factories and worker startup
+select `RustEngineExchange` without an engine opt-in. The single SDK beta roster
+is `packages/safe-cex/src/exchanges/rust/betaVenues.ts`; names outside it refuse
+with typed `Unsupported` / `NotSent` before clock, runtime or transport work.
+Previously saved OUT accounts cannot start in this build. The `engine: 'rust'`
+input remains compatible but no longer selects between implementations.
+
+There is no TypeScript venue or hosted-signing venue fallback. An IN account
+using `remoteSigner` / `payloadSigner` without enabled Rust remote policy
+refuses with `Unsupported` / `NotSent`; Paradex beta supports local keys only.
+Enabled Rust provider paths retain their existing custody and wire contracts.
+Bitunix is hosted-enabled after #2262's declared remote policy landed. The SDK
+continues to derive eligibility from that policy, without a separate beta
+override.
+
+Metadata and standalone `*.signing.ts` codecs used by `rust/legacySigning.ts`
+remain runtime dependencies. Independent TS/native financial, transport and
+signing reference oracles remain test-only. Historical Rust adapter fixtures
+mock the beta admission layer explicitly; real SDK/worker refusal controls do
+not use that fixture. Retained oracle execution is not beta activation. R2 owns
+adapter relocation/deletion and retargets those test-only imports.
+
+### Uncertain-placement fence (Phase A)
+
+A placing scope that sealed Unknown marks its symbols uncertain until a fresh
+order read reconciles them. A venue that opts into
+`fence_uncertain_placements` now refuses a later `PlaceOrders` or amend on an
+uncertain symbol NotSent ("Placement outcome is uncertain; reconcile before
+placing or amending"), so a user retry cannot duplicate a possibly placed order.
+Cancel by ID stays admitted; cancel-all keeps each venue's existing
+`fence_uncertain_cancel_all` disposition (default refused until reconcile, Phemex
+admitted). A venue opts in only when `reconcile_uncertain` starts a fresh read
+(or joins one dispatched after the write); without that hook the fence could
+hang, which is why the default is off. While a symbol stays uncertain the engine
+re-asks the hook with backoff (1 s doubling to 30 s, restarted by a new seal)
+until a post-mark `orders_reconciled` clears it, so a failed reconcile read
+cannot leave the fence standing; hooks stay single-shot. `Cx::reconcile_reask()`
+is true on a backoff re-ask with no new uncertain write since the last ask: the
+hook must then join any read already running or owed, never start or owe
+another (a slow read would otherwise never complete and release). A venue may hold the fence to its
+native bound (Phemex: signing expiry + 5 s) but must never clear early. OKX
+opts in. AsterDEX opts in: its hook starts an open-orders read at once, or, when a
+read is already in flight (which predates the seal and cannot clear the fence),
+starts the fresh one as that read completes. It releases only on a clean read,
+so a persistently malformed order row keeps that venue's placements refused
+(cancels by ID stay admitted) until the row parses. Not covered yet (Phase B): an Unknown marker for venues with no
+placement scope (Binance x4, Bybit, Crypto.com, BingX, ApeX, Hyperliquid, Lighter
+until its opt-in) from managed, single-Context and legacy `cx.request` writes,
+and amend roots whose replacement places (zs5e83's audits,
+/tmp/codex-beta-plan-fence-audit/report.md and followup.md). Paradex's
+venue-local same-ID amend fence stays as is.
+
+Phase B (#2288) covers it: the fence no longer needs a lock scope. On an opted-in venue whose
+placements or amends hold no scope (guard flags off: Binance x4, Bybit,
+Crypto.com, BingX, ApeX, Hyperliquid, Paradex), entry still refuses a fenced
+symbol (cancel-all as its `fence_uncertain_cancel_all` declares), and every
+admitted placement or amend is marked with its symbols (all
+symbols for an amend whose symbol is unknown). An Unknown outcome on that
+command (managed, single-Context or legacy `cx.request`) fences them and queues
+their reconcile; any other end drops the mark. Amend roots are marked too, so an
+Unknown amend fences its symbol on scoped venues as well. Paradex's venue-local
+same-ID amend fence stays as is.
+
+Crypto.com opts in with no lock scope, through Phase B. Both Crypto.com and ApeX
+tell a new seal from an engine re-ask with `Cx::reconcile_reask`. A new seal demotes a read in flight, which may predate its
+mark, and owes a fresh read. A re-ask joins the read in flight, or starts a fresh
+one when none is. Crypto.com's fresh read is Orders+AdvancedOrders, started at
+once when no account read is in flight, and `orders_reconciled` follows only when
+both lists commit cleanly. The two legs carry their own tokens, so a write
+dispatched or ended between them (a venue-local counter stamped at the Orders
+leg) skips the release and owes a re-census wholly after it. Cancel-all: store-composed (`EachOpenSymbol`) and
+fenced while uncertain (default `fence_uncertain_cancel_all`), since a composed
+cancel-all cannot reach a placement the store has not seen. Control:
+`an_unknown_placement_fences_its_symbol_until_a_fresh_order_read` in
+`venues/cryptocom/tests/uncertain_placement_fence.rs`.
+
+ApeX opts in the same way. `reconcile_uncertain` owes one fresh open-orders
+read, starting it at once unless one is pending, and a read in flight when asked
+can no longer release. Release follows publication of a clean orders leg
+(rejected 0): on the heal path, and on the joint snapshot path only when the
+orders response completes the snapshot, so the release token certifies the
+orders read itself. The census is one unpaginated `/v3/open-orders` request, so
+no earlier page can sit behind the token the release is judged on. Cancel-all: store-composed and fenced, as for Crypto.com. Its control is the
+same-named test in `venues/apexomni/tests/trading.rs`.
+
+A census that pages under several contexts records `Cx::order_read_epoch()`
+before its first page and reports through `orders_reconciled_since`, so its
+last page cannot release a mark its first page never saw. OKX adopts it (its
+census already restarts on every mark's immediate reconcile); a venue whose
+census spans contexts should do the same.
+
+Paradex opts in: after an Unknown placement or amend it reads `/orders` and
+releases on a clean snapshot. Cancel-all keeps the engine default (refused
+until reconciled). If `/auth` has been refused (401/403), no order read can run,
+so the fence holds until the account is reconnected or re-keyed.
+
+## Lighter public beta data
+
+Market snapshots seed last price and start ticker hydration before socket Open.
+The existing single-flight guard prevents duplicate pending reads. Stats decode base and
+USD open interest independently, preferring the base field when both exist.
+REST depth sums are rounded to the market's declared amount precision to remove
+binary addition residue. Public close requests a recovery snapshot immediately
+when existing pacing permits; one inflight request per book remains the limit.
+A newer socket snapshot invalidates an older recovery reply. Grouped limit
+TP/SL remains a separately tested beta blocker, not part of this public slice.
+
+Before socket Open, the first ticker seed also publishes real exchangeStats
+daily volume, quote volume and percentage. TypeScript's REST fallback drops
+those fields. The overseer accepts this more complete bootstrap in readiness
+comparison; the raw replay still reports these differences without relaxed
+tolerances. Prices, books and later checkpoints must agree.
+The CI verifier declares only exact recorded bootstrap paths with TS zero and
+finite Rust values. Later checkpoints and other fields remain strict; existing
+private fill/order baseline declarations remain separate and unchanged.
+
 ### Restored candle-cache crates for the monorepo candle-server
 
 `sdk-rs/safe-cex-candle-cache`, `safe-cex-num` and `safe-cex-types` are restored
@@ -9714,6 +10040,424 @@ excludes them so those features never unify into the port. The native
 `candle-cache` check builds, lints and tests them alone, and
 `scripts/check-serde-json-features.py` fails if any port package resolves those
 features. Not run: master's TypeScript-oracle tests (they need an isolated TS
-install), four candle-cache source oracles that load the TypeScript compiler
-over TS venue sources, and one `safe-cex-types` audit of a crate the port deleted. No port
+install), the candle-cache `fix_audit` and `monthly_behavior` targets and two
+lib tests, which load the TypeScript compiler over TS venue sources, and one `safe-cex-types` audit of a crate the port deleted. No port
 crate may depend on these three.
+
+### One re-signed resend of a write signature rejection
+
+A write refused for its signature executed nothing, so it is re-signed and sent
+once more, writes included (TS 9db593a2338 parity). Binance `-1022` and OKX
+`50113` are `RefusedResend(AuthInvalid)` rows. Binance write legs use
+`RetryPolicy::DefinitiveRefusal` and resend through `http_resend_context`; OKX
+serial writes declare `attempts: 2` and resend through `plan_resend_context`.
+The journal refuses a second resend, so a second rejection fails as
+`AuthInvalid`/`Rejected` with no third send. Every other refusal is still never
+resent. Kraken spot already re-signs a trade once on `EAPI:Invalid signature`
+(`spot/account.rs` `private_response`), and Bitunix `10007` landed in #2207.
+
+### Kraken and KrakenSpot uncertain-placement opt-in
+
+Both products opt into the shared Phase B placement/amend fence. An Unknown
+terminal keeps accepted IDs and refuses a later overlapping placement or amend
+NotSent until a complete, clean open-orders read publishes and calls
+`orders_reconciled`. Cancel by ID remains admitted; store-composed cancel-all
+keeps the shared uncertainty guard. A pre-mark read cannot release a newer mark.
+
+The account hook uses `cx.reconcile_reask` to join a running or already-owed
+read. A new seal owes a follow-up behind an older read; engine backoff re-asks
+do not restart a fresh read or perpetually owe another one. Failed or
+malformed reads leave the fence in place until a clean retry. This is local-key
+beta safety; it does not enable hosted signing. Native engine controls prove
+retry/amend refusal, stale/fresh release, held reads across three engine re-asks,
+503 recovery and rejected-row refusal. Browser readiness remains a separate
+JS/WASM host gate.
+
+## Hyperliquid uncertain-placement reconciliation
+
+Hyperliquid and HyperliquidSpot reconcile uncertain placements through their
+existing complete `frontendOpenOrders` read. Repeated engine requests join the
+in-flight DEX scope and owe at most one successor read. After Store publication,
+only a clean snapshot with zero rejected rows reports that scope reconciled;
+duplicate or malformed rows cannot release it. The engine's dispatch token
+keeps a pre-write read from releasing a newer uncertainty fence.
+
+Both products opt into `fence_uncertain_placements` on the engine's generic
+legacy-write Phase B. An Unknown placement or amend refuses overlapping new
+placements and amends as NotSent until a fresh clean read reconciles them.
+Cancel by ID remains available. The perps and Spot four-step controls were RED
+at the retry assertion before Phase B and now execute through stale-read
+refusal, fresh Store publication and a successful retry. Duplicate rows keep
+the fence standing. This slice adds no venue retry loop or write resend.
+Multi-DEX reads release symbol-scoped marks only; an unknown-ID amend is refused
+NotSent before dispatch and cannot create an all-symbol mark on this venue.
+
+### Lighter grouped limit entry with TP/SL
+
+A Lighter limit order with `stopLoss`/`takeProfit` is now one grouped
+transaction (OTO or OTOCO), as in TS d94e9d744f1, so the protections no longer
+rest without a position. What callers see:
+- `placeOrders` completes only after the account stream (or a complete orders
+  snapshot) shows the parent and every protective leg, with the ids parent
+  first. Within the provisional 10 s bound this looks like ordinary placement.
+- If proof does not arrive in time, or the private stream drops, the command
+  fails Unknown carrying every accepted id; check open orders before retrying.
+  It is never resent. The next orders snapshot shows what actually landed.
+- A parent large enough to split into several native lots, or an invalid
+  trigger, is refused NotSent before anything is sent.
+- Cancelling or amending a leg of a group that is still being confirmed is
+  refused NotSent until the placement command finishes.
+
+### Lighter: an Unknown placement fences its symbol
+
+Lighter opts into `guard_pending_placements` and `fence_uncertain_placements`.
+After a placement whose outcome is Unknown (a lost or 5xx `sendTx`), on that
+symbol:
+- `placeOrders` and `amendOrder` fail NotSent with "Placement outcome is
+  uncertain; reconcile before placing or amending" and send nothing;
+- `cancelSymbolOrders` fails with "Placement outcome is uncertain; reconcile
+  before cancel-all" and sends nothing: Lighter composes cancel-all from known
+  ids, so it would miss the uncertain order. Cancelling a known order by id is
+  still admitted.
+The Unknown starts an active-orders read at once. The fence clears on the first
+complete orders snapshot requested after the write: a read already in flight
+when the write went out, a failed read, or a snapshot with an unmappable row
+does not clear it. If a read was in flight, another follows as soon as it
+settles, and a failed read is followed at once by a fresh one, so the fence
+normally lasts about one orders round trip. The engine's reconcile re-asks
+(1 s doubling to 30 s) join an outstanding read rather than restarting it.
+
+### Binance: an Unknown placement fences its symbol
+
+All four Binance products (USD-M, Portfolio Margin, Spot, COIN-M) opt into
+`fence_uncertain_placements` and link the engine `order-locks` feature. After a
+placement whose outcome is Unknown (a lost or 5xx order POST), on that symbol:
+- `placeOrders` and `amendOrder` fail NotSent with "Placement outcome is
+  uncertain; reconcile before placing or amending" and send nothing;
+- cancelling a known order by id is still admitted;
+- `cancelSymbolOrders` keeps the engine default `fence_uncertain_cancel_all`:
+  it is refused until reconcile. Binance's cancel-all is a native per-symbol
+  DELETE, but opting out would oblige the venue to cancel a late-landing order
+  itself once its fresh read proves it, which Binance does not do.
+The Unknown starts a fresh open-orders read at once (regular plus the variant's
+algo or conditional orders). The fence clears on the first clean, complete
+snapshot requested after the write: a snapshot already in flight when the write
+went out (another is owed behind it), a failed read, or one with an unmappable
+row does not clear it. Binance writes are single managed Contexts with no
+placement scope, so the mark comes from the Unknown write fact itself (engine
+Phase B); until Phase B lands the fence does not engage for Binance.
+
+### BloFin and Phemex uncertain-placement fences
+
+Both venues opt into the symbol fence from #2279: after an Unknown placement,
+a retry or amend is refused NotSent until a clean complete order read dispatched
+after the mark publishes and calls orders_reconciled. Older, incomplete or
+expired reads cannot release it. Cancel-by-ID admission is unchanged. BloFin
+keeps its default cancel-all fence; Phemex keeps its deliberate cancel-all opt-out.
+
+BloFin joins its existing Primary reconciliation snapshot, retaining the owed
+refresh and native backoff when an older snapshot is already in flight.
+Phemex settles retired trading custody, then joins its existing single read or
+scheduled reconciliation. Repeated hook calls preserve that scheduled timer.
+Its native signing-expiry plus five-second lower bound remains authoritative:
+an early empty snapshot cannot prove that a late placement will not arrive.
+The engine owns re-asking; the hooks add no retry loop or write resend.
+
+Four Phemex trading controls now pin the earlier symbol-level NotSent refusal
+instead of dispatching another placement while the first is Unknown. A refused
+retry cannot clear uncertainty or add a late-cancel subject; panic cancel-all
+still runs, and a foreign order is not canceled merely because that retry's
+client ID appeared in a later snapshot. The old two-unknown-origin entry
+sequence is prevented by the fence; no production repair grouping is changed.
+Relevant Phemex rows with an unknown status or type make reconciliation
+incomplete. They retain the bounded retry/abandon policy and cannot release
+the placement fence; only a later clean complete read can do that.
+
+### BingX uncertain-placement fence: Phase B
+
+BingX opts into the uncertain-placement fence and joins an already current
+Primary reconciliation read when the engine re-asks. Its four-step managed
+control is assertion-RED on #2279 Phase A and green on #2288 Phase B, which marks
+Unknown write facts independently of guard_pending_placements. This change
+does not enable that guard. A stale pre-mark read cannot release the fence.
+BingX keeps its default cancel-all fence for beta: an Unknown create can land
+after its native DELETE, and there is no automatic late-landing cancellation.
+Cancel-all is refused NotSent until a fresh read, rather than reporting an
+all-cancelled result while an unseen order can still appear. Phemex retains its
+opt-out because its existing late-landing cancellation covers that race.
+
+All three venues pin a slow held read across the engine's first two re-asks:
+the same census still publishes and releases, without restarting its floor or
+paid work. Phemex also pins re-asks while its native expiry-bound timer is owed.
+
+BloFin joins only an active census or its scheduled retry. After three failed
+attempts leave an idle owed flag, the next engine re-ask starts a fresh Primary
+census without depending on periodic polling; a clean complete census releases.
+
+The fence census freshness proof is single-context for BingX's whole Orders
+snapshot and single-context per symbol for Phemex's activeList; Phemex clears
+only that symbol. BloFin spans pages and three families: every page retains
+the census-start order revision and uncertainty generation. Only a new engine
+mark advances the generation; an ordinary re-ask does not.
+Either change blocks clearance and requires a new complete census. A real
+pre-mark first page/post-mark final family control is RED with both guards
+disabled, and green with them intact; ordinary re-asks still join the read.
+
+BingX's provider-refusal retry control distinguishes the engine's required
+reconciliation re-ask from another mutation attempt: its captured timer issues
+only a managed Orders GET, retains one caller terminal and no new identity,
+and preserves the engine's bounded backoff when that read signer also refuses.
+
+Phemex's late-repair fixtures release all concurrent placements before any
+Unknown outcome, then issue genuine cancel-all commands. A later same-symbol
+Place is NotSent and adds no owed subject. The renamed concurrent/repeated
+cancel-all control no longer claims separate grants: a clean reconciliation
+needed to admit a sequential placement also settles the older unspent subject.
+The existing core `two_cancel_all_origins_share_one_native_request` control
+continues to pin cross-entitlement authority. Venue controls retain exact bulk
+paths, IDs, position sides, ten-plus-singleton chunking, mixed-ack Store effects
+and independent-side FIFO/no-resend assertions. Concurrent setup necessarily
+changes observation timing; single-placement helpers retain their clocks.
+Incomplete reads now pin the fence's typed NotSent/uncertain refusal.
+
+Phemex's reconciliation hook settles retired placement custody immediately on
+Unknown, before the next command or stream callback. Two remaining-funnel
+fixtures pin the single native expiry-plus-five-second timer and cleanup at
+that delivery; later cancel-all/stream callbacks preserve it without duplicate
+warnings, timers or caller terminals. The old delayed-cleanup oracle is
+superseded; runtime cleanup and financial row handling are unchanged.
+
+### Engine: settle-only condition wait for stream-proven writes
+
+Venue authors gain `serial_plan_settle_wait(plan, slot, context, bound_ms)`
+(feature `condition-waits`). After a write's accepted DATA it settles the call
+and parks the serial Plan with no next call; the venue releases it on exact
+stream proof and calls `done_plan`, or on expiry calls
+`inherit_plan_uncertainty` then `fail_plan`, so the caller sees Unknown with
+every accepted order ID and the scope stays fenced. It is never Done without
+proof, and nothing is replayed. No existing venue changes behaviour; Lighter's
+grouped TP/SL is the first adopter ([RUST_CONDITION_WAIT.md](RUST_CONDITION_WAIT.md)).
+
+### BingX managed public and private sockets
+
+BingX registers both feeds with engine-owned epochs, deadlines, liveness and
+backoff. Duplicate/stale/nonfinite socket events cannot replay subscriptions,
+reset private keepalive, publish rows or retire a healthy sibling. Public
+subscriptions are canonical engine interests; private listen keys remain real
+managed Session HTTP operations, never replayable interests. Acquisition before
+any physical epoch uses the HTTP call's existing 20s bound and one 30s HTTP retry
+instead of a second socket supervisor's 10s watch. Socket retries remain solely
+engine-granted. Public retirement clears books before reconnect; asynchronous
+Capacity retains desired refs through native backoff, while invalid/permanent
+codec defects and inherited initial replay failures stop the affected feed.
+
+Order reads capture order_read_epoch at issuance and release through
+orders_reconciled_since only after clean current Store publication, preserving
+native revision/row guards. Real concurrent Unknown writes pin that an older
+Primary census cannot release a later mark. One catalogue fixture now delivers
+its actual first public Opened before live data; the key-timeout fixture resolves
+peer reads and drives the captured sole 20s HTTP deadline. Financial payloads
+and assertions are retained; that timeout observation is intentionally later.
+
+The two listen-key keepalive fixtures send timely genuine private Pongs during
+their 30-minute wait. A Pong delivered only after 30 minutes cannot rescue an
+already expired managed socket. Their original keepalive requests, header/body
+oracles and captured failure/retry deadlines remain unchanged.
+
+An invalid-clock delivery consumes the ordinary acquisition-retry timer but
+retains the owed retry and original finite not-before. A subsequent genuine
+finite account timer, lifecycle or live read callback rearms it once; the
+replacement wake still cannot send early. This avoids a permanently stranded
+private connection without scheduling nonfinite host timers or granting socket
+authority. Real NaN/both-infinity, finite-poll and duplicate-wake controls pin it.
+
+### Paradex JWT reads on the Session bearer
+
+Paradex is the first `session-bearer` adopter. Its account snapshots
+(margins, positions, balance, orders) and the `FetchAccount` identity read are
+managed Reads bound to the account's JWT Session; the engine copies
+`Authorization: Bearer <jwt>` only at prepare, before `Content-Type` and
+`Accept` as before. Caller-visible changes:
+- Each read has a 20 s window. A read still waiting for a late JWT, or never
+  answered, ends unsent at its window instead of holding the account cycle or
+  the command forever; the cycle moves on and the next poll reads again.
+- `FetchAccount` failures are typed: after a refused `/auth` (401/403) the
+  identity read fails `AuthInvalid`/`NotSent`, and the Session is retired.
+- A JWT that is not header-safe is never sent; reads wait for a valid one.
+Trading, history, leverage and `/auth` itself still use the legacy sender.
+
+### Hyperliquid managed discovery and account reads
+
+Both Hyperliquid products issue discovery and background account/fee info calls
+through unsigned managed Prepare, Bind and Claim. Account reads mint their
+Context after the native weight queue admits the physical call. Streamed rows
+and terminal publication validate that exact Background Read delivery; success
+and every failure retire it before another retry can reuse its capacity.
+Successful reducers publish while their Context is valid; successor info calls
+are submitted after its retirement, so a saturated registry can reuse that slot.
+The physical call has a fixed 20-second bound across preparation and transport;
+later rows are discarded, including a previously valid streamed prefix. Native
+discovery backoff and account reconciliation remain responsible for fresh reads.
+Fixture transport now drives real managed release. Cached-read capacity tests
+finish bootstrap before installing their cache; the long streamed-cancel test
+keeps its non-resurrection assertion and additionally forbids expired new rows.
+Bootstrap fixtures also fire the genuine socket-handoff wake before expecting
+portfolio collateral reads; their balance and holdings assertions stay intact.
+### Startup visibility: Bitget inverse and unconfigured HyroTrader
+
+Bitget inverse discovery with no contracts still terminates startup with
+`venueUnavailable`, and now emits the same cause through the standard classified
+error event. Contract/API selection and the terminal policy are unchanged.
+
+HyroTrader URLs remain SDK build-time configuration in `bybit.types.ts`, through
+`NEXT_PUBLIC_HYROTRADER_{PROD,SIMULATOR}_{REST,PUBLIC_WS,PRIVATE_WS}_URL`.
+Socket defaults remain derived from the configured REST origin. A missing URL
+for the selected mode/network, checked through the declared endpoint setup policy,
+now emits an `invalidInput/notSent` error and
+rejects before loading WASM or starting transport. Demo selection and the existing
+production-to-simulator fallback are unchanged; no destination is invented.
+
+### Phemex history symbol input
+
+Fills, order history and recent public trades resolve a unique listed market's
+symbol, normalized market ID or native symbol (ASCII case-insensitive aliases)
+before dispatch. Settlement products are never inferred: an inverse or delisted
+contract cannot silently become a USDT/USDC perpetual. Missing, unknown or
+ambiguous symbols fail locally with `invalidInput` and `venueCode: unknown-symbol`,
+with no HTTP or retry timer. The message asks the caller to select a listed
+USDT/USDC perpetual market. Client-order lookup retains its non-definitive
+not-found result for an unknown market. Private credential precedence and the
+original Read receipt bounds are unchanged.
+
+Phemex's income ledger has no symbol column, so it cannot prove an account-wide
+traded-symbol census. Callers must leave such fills/orders coverage incomplete;
+empty-symbol income rows are not evidence of an account with no trades. NX's
+companion stops non-retryable windows until the account/market inputs change.
+
+### Bybit batch cancel acknowledgements: identity matching and safe diagnostics
+
+`/v5/order/cancel-batch` (including one-order linear/demo batches) matches named
+response rows to the requested native `orderId`, rather than requiring the
+original request order. Each `retExtInfo.list` status remains paired with its
+response row, and the result is restored to request order before classification.
+A single unnamed remaining target is unambiguous; a sole-target empty result
+list follows the existing partial-stop cancel codec. Multiple ambiguous unnamed
+successes, foreign/duplicate IDs, missing/short/invalid statuses and malformed
+rows remain Unknown, keep live Store rows and never replay a cancel. A nonzero
+status still goes through the existing per-item refusal/absence classifier.
+
+The wire requests use native order IDs only. IDs remain opaque and case-sensitive;
+empty `orderLinkId` is harmless, and no client-ID alias or case folding is invented.
+Stock-token symbols use the same linear cancellation path. Cancel-all, single-cancel
+and partial-stop handling retain their own existing proof rules. Bybit's
+[batch cancel documentation](https://bybit-exchange.github.io/docs/v5/order/batch-cancel)
+describes separate identity and per-item status lists; it does not promise request-order echoes.
+An accepted acknowledgement retains the existing request-acceptance semantics,
+not a new guarantee of final asynchronous exchange execution.
+
+An unproven batch now asks the user to check open orders on Bybit before retrying.
+Its bounded diagnostic reports list presence/counts, order-ID/client-ID field
+presence and nonempty counts, target-match count, and success/refusal/invalid
+status counts. It never includes ID values, native messages or raw responses.
+The reported production events had no response body; the covered false-Unknown
+shapes are reproduced, while the specific live shape remains unconfirmed.
+
+
+### Binance and Bybit already-set margin acknowledgements
+
+Binance USD-M and COIN-M `SetMarginType` treat documented `-4046` as an
+already-applied setting, updating the requested stored margin type and completing
+once without an error or resend. The existing `-4059` position-mode success stays
+operation-specific. Ordinary leverage acknowledgements and the local already-at-
+requested-leverage shortcut remain successful. Binance `-4028` stays rejected:
+its documented meanings include invalid leverage as well as an already-existing
+value, so the numeric code alone does not prove the requested leverage.
+
+Bybit `110026` is admitted only by the margin-mode call's code table, selected
+before classification and fact recording. The general Bybit table rejects it:
+leverage, position mode and protective-order legs also use `Intent::Setting`,
+which alone is not proof of a margin change. Existing `110043` leverage and
+`110025` position-mode facts remain unchanged. Margin-mode no-ops use the same
+effects as normal success, including immediate account-wide settings/position
+updates and source frame holds. A contradictory `reasons` result remains unproven. HTTP gateway
+failures keep precedence over these codes, and non-setting writes cannot acquire
+setting-success authority.
+
+References: [Binance USD-M error codes](https://developers.binance.com/docs/derivatives/usds-margined-futures/error-code),
+[Binance COIN-M error codes](https://developers.binance.com/docs/derivatives/coin-margined-futures/error-code),
+[Bybit V5 error codes](https://bybit-exchange.github.io/docs/v5/error).
+
+
+### Bybit terminal-history lookup coverage (November 12, 2026)
+
+HyroTrader's Background reconciliation and caller Preflight lookup both read
+realtime, default history, then explicit Cancelled, Rejected and Deactivated
+history only while earlier axes are empty. A failed or unfinished axis never
+proves absence. Empty status results also prove nothing once the earliest
+possible send is 24 hours old, including a walk crossing that boundary; a later
+send never renews coverage. Expired coverage gives explicit Unknown guidance
+to check broker order/fill history. Positive terminal evidence may still resolve.
+The Background walk shares the original two 20 s windows;
+caller reads capture the genuine command_wait receipt at entry and cap every
+Read and final Plan admission to that lookup deadline. Expiry seals typed
+Timeout/Unknown. Shared execution/observer deadlines after admission stay native.
+Cancelled and Deactivated recover the original order ID without another create.
+A proven Rejected row retains the existing new-identity remint contract.
+
+Bybit's [announcement](https://t.me/Bybit_API_Announcements/464) does not exempt
+orderLinkId or orderId. The [endpoint documentation](https://bybit-exchange.github.io/docs/v5/order/order-list)
+limits these three terminal statuses to 24 hours; older missing orders cannot
+be recovered from this API. The historical-orders collection is a separate change.
+
+
+### Bybit historical-order terminal statuses (November 12, 2026)
+
+Historical orders read default history plus explicit Cancelled, Rejected and
+Deactivated axes for each enabled product category. Every axis retains the
+requested windows and independent cursor/page guards on the same caller Read
+root and signer. A dedicated engine Claim pacing group allows at most four
+physical order-history requests per second across all categories, cursors,
+statuses and concurrent commands; account reads do not share that clock.
+Limits apply to each axis before the combined
+result is sorted, deduplicated by symbol/order ID and truncated. A terminal-axis
+failure is typed with no collected rows, or explicitly incomplete with accepted
+rows retained; it cannot become an apparently complete default-only result.
+
+The [Bybit announcement](https://t.me/Bybit_API_Announcements/464) removes these
+statuses from default history. Explicit status calls retain the documented
+[24-hour availability](https://bybit-exchange.github.io/docs/v5/order/order-list);
+this change does not restore already expired terminal orders or claim longer
+retention. Hyro placement recovery is handled independently.
+
+### Bitrue protective replacement refusals
+
+Guarded stop edits recognize documented Futures placement refusals and may put
+back only one exact original order after proven cancellation. Ambiguous replies
+remain Unknown without a put-back; direct attached-leg edits refuse before any
+cancel. Ordinary amendments retain their master wire/error contract. See the
+[contract and regression controls](callers/bitrue-protective-refusals.md).
+
+### Paradex guarded cancel requires terminal proof before replacement
+
+A guarded trigger edit no longer treats `400 ORDER_ID_NOT_FOUND` or `204` as
+permission to create a replacement. The former proves no cancellation reason or
+fill quantity; the latter only queues cancellation under the documented
+[cancel contract](https://docs.paradex.trade/api/prod/orders/cancel).
+The edit now uses the authenticated [order-history endpoint](https://docs.paradex.trade/api/prod/orders/get-orders),
+filtered by market, CLOSED status and original client ID when present. At most
+three reads, one second apart, share one five-second deadline. Only one matching
+exchange ID with CLOSED / USER_CANCELED, the same original identity and parameters,
+and remaining quantity equal to the entire original size authorizes replacement.
+An empty, missing, duplicate, malformed, partially filled or conflicting target
+never proves cancellation; a cursor is not absence evidence. Exhaustion, read
+failure or deadline equality ends actionable Unknown, without create or put-back.
+A later proof or timer cannot revive the ended edit. Current fill/change/cancel
+observations and crossed or stale prices also withhold replacement.
+
+This is a live fix in Paradex's existing authenticated request lane; it does not
+introduce managed Plans or claim a new final-Claim veto. The existing pre-sign
+cancel guard remains. Ordinary placements, native limit amends and plain cancels
+retain their wire and outcomes, including plain-cancel not-found idempotency.
+Their full signed-request digest is pinned against master. Existing exact put-back
+controls now supply terminal cancellation proof before exercising replacement
+refusal; their original payload and protection-result assertions remain.

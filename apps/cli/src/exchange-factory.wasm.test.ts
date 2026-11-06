@@ -1,3 +1,11 @@
+vi.mock('../../../packages/safe-cex/src/exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../../../packages/safe-cex/src/__tests__/reference/retainedRustPolicy');
+  return retainedRustPolicy(
+    await importOriginal<typeof import('../../../packages/safe-cex/src/exchanges/rust/betaVenues')>(),
+    true,
+  );
+});
+
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { formatAccountMonitorOutput } from '@tealstreet/cli-core/src/commands/trading/MonitorCommand';

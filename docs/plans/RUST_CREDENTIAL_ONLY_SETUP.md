@@ -389,3 +389,62 @@ G3 and G6 are decided above (D3, D6).
   needs credential-only support; those boundaries stay (D2 refuses them). The
   hosted `LocalSetup` with an API key and no scalar is the intended
   credential-only path; caller-supplied external `Identities` JSON is not.
+
+## Scalar-only primary (`PrimarySource::ScalarOnly`, Hyperliquid)
+
+The mirror image of credential-only: a primary that signs with a declared
+secp256k1 scalar and has no credential at all. It is owned here (m26ps4) and
+consumed by the Hyperliquid lane (zs5e83). Lighter's principal (#2208) is
+separate and stays Lighter-only.
+
+- `IdentitySetupPolicy.source` is a trusted per-family declaration. The default
+  `Required` is unchanged and is never serialized. `ScalarOnly` is valid only on
+  the primary, with `signing_algorithm: Secp256k1Digest` and Required signing;
+  anything else refuses setup with `InvalidRequest`.
+- Only trusted local setup (`LocalSigner`, through
+  `CredentialSetupPolicy::install_scalar_only_primary`, which
+  `check-credential-only.py` bans elsewhere) marks a primary credential-absent.
+  It does so only when setup built no credential (key Absent or Empty, or Blank
+  under the family's trim) and installed a valid signing ref. A Nonblank key
+  takes the ordinary installed path.
+- `Identity::credential_ref()` is the ban-safe read of a present, valid
+  credential ref (`None` when absent or invalid); venues use it instead of
+  `validate_credential`.
+- `Identity::credential_absent()` is the typed state. `validate()` accepts it,
+  `owns()` never matches its credential, and the provider refuses to present
+  it. The marker is `serde(skip)`, so injected JSON, the registry's
+  `apply_to_identities`, and a transported copy can never produce it.
+- `SetupFacts` keep the original key presence. The account and nonce subject
+  come only from the engine-sealed `VerifiedAddress` (#2193, initialized at
+  host start, #2222), never from the identity.
+- Pinned in `sdk-rs/crypto/tests/scalar_only_primary.rs`.
+
+### Request authority of a scalar-only primary
+
+Reviewed by fe7lgm (core) and zs5e83 (consumer).
+
+- `Identity::authority_ref()` is the credential, or the signing ref of a
+  credential-absent primary. `Selection::authority(identity)` is the managed
+  request credential built from it. Nonce claims and selected reads use it, and
+  for every ordinary identity it is byte-identical to the credential.
+- `ClaimAuthority.signing_only` is a private bit copied from the trusted
+  identity's `credential_absent()`, never inferred from ref equality. A
+  signing-only claim allows `Sign` and same-ref `PublicAddress` only.
+- Dispatch prepare refuses, on every path (nonce or not, with or without
+  `dispatch-nonce`), any recipe that presents or interpolates the signing ref
+  of a credential-absent primary (`Identities::signing_only_ref`).
+- Setup refuses a scalar-only signing ref that equals another slot's
+  credential or signing ref, so the authority selects exactly one identity.
+- The absent credential never forms a request credential (`Credential::validate`
+  refuses the empty ref), so it cannot root a credential-bearing Session.
+- `LocalSigner` never presents or interpolates a policy-declared asymmetric
+  ref, whichever identity names it. Ordinary credential and MAC material are
+  unchanged.
+- Boundary: that provider refusal is `LocalSigner`'s. A hosted or injected
+  provider relies on the engine check, which covers only a credential-absent
+  primary's signing ref; any other refusal is that provider's own policy.
+- Pinned in `sdk-rs/engine/tests/scalar_only_authority.rs`: the genuine
+  WriteAfterReads serial-plan flow (engine address setup, sealed identity,
+  `select_with_nonce(HYPERLIQUID_AGENT)`, PublicAddress plus Secp256k1Digest,
+  Prepare, Bind, Claim, release) with an ordinary-identity control, plus the
+  refusals. Provider pins are in `sdk-rs/crypto/tests/scalar_only_primary.rs`.

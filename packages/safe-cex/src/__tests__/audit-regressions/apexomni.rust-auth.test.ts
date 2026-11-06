@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from '../../exchanges/apexomni/apexomni.api';
+import { createAPI } from '../reference/apexomni/apexomni.api';
 import { virtualClock } from '../../utils/virtualClock';
 
 const now = 1_700_000_000_123;

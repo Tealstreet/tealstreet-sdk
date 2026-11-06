@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
 
-import { actionHash } from '../../../exchanges/hyperliquid/hyperliquid.signing';
+import { actionHash } from '../hyperliquid/hyperliquid.signing';
 
-export { actionHash } from '../../../exchanges/hyperliquid/hyperliquid.signing';
+export { actionHash } from '../hyperliquid/hyperliquid.signing';
 
 export const TXFLOW_DOMAIN = {
   name: 'TxFlow-Testnet',

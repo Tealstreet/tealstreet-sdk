@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { coinbasePrivateTape } from './private-tape-coinbase.mjs';
 import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
-import { selectResponse } from './requests.mjs';
+import { requestKey, selectResponse } from './requests.mjs';
+import { Responses } from './responses.mjs';
 
 const root = 'https://api.coinbase.com/api/v3/brokerage';
 const market = {
@@ -372,6 +373,30 @@ test('command-owned replies cannot serve before the triggering command', () => {
       );
       assert.equal(selectResponse([r], Infinity, { write: r.method !== 'GET', commandIndex: r.afterCommand }), r);
     }
+  }
+});
+
+test('candle tape serves the exact half-open Rust bound and retains the original TS reply', () => {
+  for (const profile of ['intx', 'cfm', 'spot']) {
+    const { records } = coinbasePrivateTape({ profile });
+    const index = records.findIndex((row) => row.type === 'command' && row.op === 'fetchCandles');
+    const command = records[index];
+    const stage = records.slice(0, index + 1).filter((row) => row.type === 'command').length;
+    const path = `${root}/market/products/${command.symbol}/candles`;
+    const query = `granularity=ONE_MINUTE&start=${command.from / 1000}&end=${command.to / 1000}`;
+    const ts = new Responses(records, requestKey, undefined, undefined, true, 'ts');
+    const rust = new Responses(records, requestKey, undefined, undefined, true, 'rust');
+    const original = ts.respond('GET', `${path}?${query}&limit=2`, undefined, stage);
+    assert.equal(original.status, 200);
+    const url = `${path}?${query.replace(`end=${command.to / 1000}`, `end=${command.to / 1000 - 1}`)}&limit=2`;
+    assert.equal(rust.respond('GET', url, undefined, stage - 1).status, 599);
+    const bounded = rust.respond('GET', url, undefined, stage);
+    assert.equal(bounded.status, 200);
+    assert.deepEqual(JSON.parse(bounded.body), JSON.parse(original.body));
+    assert.equal(rust.served.impl, 'rust');
+    assert.equal(rust.respond('GET', `${path}?${query}&limit=2`, undefined, stage).status, 599);
+    assert.equal(ts.respond('GET', url, undefined, stage).status, 599);
+    assert.equal(rust.respond('GET', url.replace(`end=${command.to / 1000 - 1}`, `end=${command.to / 1000 - 2}`), undefined, stage).status, 599);
   }
 });
 

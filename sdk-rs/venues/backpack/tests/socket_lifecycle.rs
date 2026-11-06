@@ -426,6 +426,9 @@ fn full_denied_ingress(h: &mut Harness, socket: SocketId, now: f64, text: &str) 
                 }
                 _ => panic!("denied ingress creates managed physical work"),
             },
+            // The rig's public socket stays silent, so this notice is true here.
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
             _ => panic!("denied ingress emits work or native diagnostics: {action:?}"),
         }
     }

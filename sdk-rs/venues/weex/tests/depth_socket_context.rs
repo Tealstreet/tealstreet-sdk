@@ -610,6 +610,9 @@ struct Pressure {
     peers: Vec<Context>,
 }
 impl Venue for Pressure {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.inner.capabilities()
@@ -754,6 +757,9 @@ impl RetirementPressure {
     }
 }
 impl Venue for RetirementPressure {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.inner.capabilities()
@@ -772,6 +778,8 @@ impl Venue for RetirementPressure {
                 controls: ControlPolicy::Native,
                 invalidation: Invalidation::Required,
                 subscription_interval_ms: 0.,
+                close_floors: &[],
+                data_silence: None,
             })
             .expect("genuine foreign feed registration"),
         );
@@ -1140,6 +1148,9 @@ fn physical_depth_timeout(held: bool) {
             {
                 assert!(retry.replace((*timer, *at_ms)).is_none());
             }
+            // The rig's public socket stays silent, so this notice is true here.
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
             _ => panic!("unexpected physical-timeout effect: {action:?}"),
         }
     }

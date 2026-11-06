@@ -28,12 +28,11 @@ export class BumpCommand extends TradingBaseCommand {
   readonly aliases: string[] = [];
   readonly examples = [
     'bump +10',
-    'bump -5',
     'bump ETHUSDT +10',
     'bump buy +10',
-    'bump sell -5 ETHUSDT',
+    'bump sell +5 ETHUSDT',
     'bump top 3 +5',
-    'bump buy bottom 5 -2 ETHUSDT',
+    'bump buy bottom 5 +2 ETHUSDT',
     'bump 100 --buys',
   ];
   readonly requiresConnection = true;

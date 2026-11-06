@@ -1,3 +1,10 @@
+import { vi } from 'vitest';
+
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+});
+
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions } from '../types';
 
@@ -5,7 +12,7 @@ import { afterEach, expect, it } from 'vitest';
 
 import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE, resolveAsterDEXApiVersion } from '../exchanges/asterdex/asterdex.types';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
-import { deriveBridgeConstruction } from '../exchanges/rust/construction';
+import { deriveBridgeConstruction, deriveRemoteSigningPolicy } from '../exchanges/rust/construction';
 import { RUST_VENUES } from '../exchanges/rust/rust.exchange';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
@@ -66,14 +73,14 @@ it('Polymarket private accounts need a wallet private key', () =>
   startRejects('polymarket', { key: 'not-a-key' }, 'Polymarket requires a local 32-byte wallet private key'));
 
 it('Orderly private accounts need an application id', () =>
-  startRejects('tealstreet-dex', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
+  startRejects('woofi', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
 // Unadopted native families still refuse payload callbacks before I/O.
 it('unadopted private venues refuse a payload signer before any I/O', () =>
   startRejects(
     'coinbase',
     { key: 'key', payloadSigner: (async () => ({ signature: '' })) as unknown as ExchangeOptions['payloadSigner'] },
-    'Rust coinbase does not support payloadSigner',
+    'Rust coinbase delegated signing is unsupported in this build',
   ));
 
 it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo'] as const)(
@@ -163,7 +170,7 @@ it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
     }, 'Rust Paradex private accounts require a key, Paradex address and subkey address'),
 );
 
-it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
+it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
   'compiled native payload refusal on %s keeps startup and validation classification before I/O', async (name) => {
     setWasmEngineLoader(loadNodeEngine);
     const requests: string[] = [];
@@ -176,13 +183,28 @@ it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lig
     };
     setRustEngineTransport(() => transport);
     let signatures = 0;
-    for (const secret of name.startsWith('lighter') ? ['local'] : ['', 'local']) {
-      const exchange = new RustEngineExchange(name, {
+    // A venue with hosted remote signing but no payload signing refuses in the bridge, at construction.
+    const bridgeRefuses = deriveRemoteSigningPolicy(name)?.payloadSupported === false;
+    for (const secret of name.startsWith('lighter') || name === 'hyperliquidspot' ? ['local'] : ['', 'local']) {
+      const options = {
         key: 'key', secret, apiKeyIndex: '2', testnet: true,
         payloadSigner: async () => { signatures++; return { signature: 'unexpected' }; },
-      }, new DefaultStore());
+      };
+      if (bridgeRefuses) {
+        let failure: unknown;
+        try {
+          running.push(new RustEngineExchange(name, options, new DefaultStore()));
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toMatchObject({
+          message: 'This Rust account has no REST-only PayloadSigner lifecycle', kind: 'unsupported', outcome: 'notSent',
+        });
+        continue;
+      }
+      const exchange = new RustEngineExchange(name, options, new DefaultStore());
       running.push(exchange);
-      const message = `Rust ${name} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials.`;
+      const message = `Rust ${name} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
       await expect(exchange.start()).rejects.toMatchObject({ message, kind: 'unsupported', outcome: 'notSent' });
       await expect(exchange.validateAccount()).resolves.toMatchObject({ kind: 'unsupported', error: message });
     }
@@ -191,15 +213,24 @@ it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lig
   },
 );
 
-it('compiled construction retains public payload bypass and Paradex delegation without I/O', async () => {
+it('compiled construction retains the public payload bypass and refuses hosted Paradex without I/O', async () => {
   const { WasmEngine } = await loadNodeEngine();
-  for (const [venue, options] of [
-    ['binance', { publicDataOnly: true, payloadSigner: true }],
-    ['paradex', { key: 'public-subkey', paradexAddress: '0x1', subkeyAddress: '0x2', payloadSigner: true }],
-  ] as const) {
-    const engine = new WasmEngine(venue, JSON.stringify(options));
-    (engine as unknown as { free(): void }).free();
+  const engine = new WasmEngine('binance', JSON.stringify({ publicDataOnly: true, payloadSigner: true }));
+  (engine as unknown as { free(): void }).free();
+  let failure: unknown;
+  try {
+    new WasmEngine(
+      'paradex',
+      JSON.stringify({ key: 'public-subkey', paradexAddress: '0x1', subkeyAddress: '0x2', payloadSigner: true }),
+    );
+  } catch (error) {
+    failure = error;
   }
+  expect(failure).toBeInstanceOf(Error);
+  expect(JSON.parse((failure as { venueError: string }).venueError)).toMatchObject({
+    message: expect.stringContaining('Rust paradex delegated signing is unsupported in this build'),
+    kind: 'unsupported', outcome: 'notSent',
+  });
 });
 
 it('compiled constructor exposes structured native failure detail', async () => {

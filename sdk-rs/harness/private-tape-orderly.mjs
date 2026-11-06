@@ -1,4 +1,4 @@
-// Replay-only Orderly omnichain examples, shared by its six broker frontends.
+// Replay-only Orderly omnichain examples, shared by its four broker frontends.
 // Schemas: https://github.com/OrderlyNetwork/documentation-public/blob/main/orderly.openapi.yaml
 // Algo lifecycle: https://orderly.network/docs/build-on-omnichain/user-flows/algo-order-samples
 // No network requests or production exchange imports are used by this generator.
@@ -14,11 +14,9 @@ const { values } = parseArgs({ options: {
 } });
 const tags = {
   orderly: 'TEALSTREET',
-  'tealstreet-dex': 'TEALSTREET',
   kodiakfi: 'TEALKODIAK',
   woofi: 'TEALSTREET',
   mode: 'TEALMODE',
-  salsadex: 'TEALSALSA',
   what: 'TEALWHAT',
 };
 if (!Object.hasOwn(tags, values.venue)) throw new Error('Expected an Orderly broker venue');

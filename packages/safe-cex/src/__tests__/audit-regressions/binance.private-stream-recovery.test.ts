@@ -1,7 +1,7 @@
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
-import { BinancePrivateWebsocket } from '../../exchanges/binance/binance.ws-private';
-import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
-import { BinancePMPrivateWebsocket } from '../../exchanges/binance/binancepm.ws-private';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
+import { BinancePMPrivateWebsocket } from '../reference/binance/binancepm.ws-private';
 import { loop } from '../../utils/loop';
 
 vi.mock('../../utils/loop', () => ({ loop: vi.fn() }));

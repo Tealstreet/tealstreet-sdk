@@ -2,7 +2,7 @@ import type { Candle } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });

@@ -24,6 +24,9 @@ struct Probe {
     peers: Vec<Context>,
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> Capabilities {
         self.inner.capabilities()
@@ -209,10 +212,11 @@ fn preparation(actions: &[Action]) -> (Preparation, HttpRequest) {
         !actions.iter().any(|a| matches!(a, Action::Http(_))),
         "spot candles must wait for managed preparation"
     );
-    assert!(!actions.iter().any(|a| matches!(
-        a,
-        Action::Sign { .. } | Action::SignPayload { .. } | Action::SignedOutbound { .. }
-    )));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Sign { .. } | Action::SignedOutbound { .. }))
+    );
     let p: Vec<_> = actions
         .iter()
         .filter_map(|a| match a {

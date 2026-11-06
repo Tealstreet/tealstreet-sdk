@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { describe, expect, it, vi } from 'vitest';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { exchangeRegistry } from '../../exchanges/registry';
@@ -18,8 +23,8 @@ describe('TxFlow account identity at the worker seam', () => {
       expect(command).not.toHaveBeenCalled();
     } finally { exchange.dispose(); }
   });
-  it('loads Rust from the production registry', async () => {
-    expect(await exchangeRegistry.txflow()).toBe(RustEngineExchange);
+  it('refuses TxFlow in the production beta registry', async () => {
+    await expect(exchangeRegistry.txflow()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
   });
   it.each([TxFlowExchange, RustEngineExchange])('keeps agent-only credentials private without an API key', (Ctor) => {
     const exchange = new Ctor('txflow', options, new DefaultStore());

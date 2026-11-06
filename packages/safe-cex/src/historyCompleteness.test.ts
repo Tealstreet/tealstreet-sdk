@@ -60,3 +60,28 @@ it('restores a non-enumerable marker even on frozen or premarked arrays', () => 
       ?.enumerable,
   ).toBe(false);
 });
+
+it('carries the closed reason code across clone and JSON, non-enumerable on the restored rows', () => {
+  const rows = Object.defineProperty(Object.defineProperty([], 'incomplete', { value: true }), 'incompleteReason', {
+    value: 'pageFull',
+  });
+  const wire = JSON.parse(JSON.stringify({ rows, completeness: historyCompletenessOf(rows) }));
+  expect(wire.completeness).toEqual({ incomplete: true, reason: 'pageFull' });
+  const restored = withHistoryCompleteness(wire.rows, wire.completeness);
+  expect(restored).toHaveProperty('incompleteReason', 'pageFull');
+  expect(Object.getOwnPropertyDescriptor(restored, 'incompleteReason')?.enumerable).toBe(false);
+  expect(historyCompletenessOf(copyHistoryCompleteness(rows, ['mapped']))).toEqual({
+    incomplete: true,
+    reason: 'pageFull',
+  });
+});
+
+it('drops a reason that is not a short identifier, keeping the incompleteness', () => {
+  for (const reason of ['venue said: ip 1.2.3.4', '', 42, 'x'.repeat(41)]) {
+    const rows = Object.defineProperty(Object.defineProperty([], 'incomplete', { value: true }), 'incompleteReason', {
+      value: reason,
+    });
+    expect(historyCompletenessOf(rows)).toEqual({ incomplete: true });
+    expect(withHistoryCompleteness([], { incomplete: true, reason })).not.toHaveProperty('incompleteReason');
+  }
+});

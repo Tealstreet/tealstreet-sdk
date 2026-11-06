@@ -347,5 +347,28 @@ describe('TwapInstance', () => {
       expect(instance.state.startedAt).toBeLessThanOrEqual(afterStart);
       expect(instance.state.status).toBe(TwapStatus.Running);
     });
+
+    it('tracks returned order IDs for direct limit slices', async () => {
+      (mockExchange.store as any).tickers = [{ symbol: 'BTCUSDT', bid: 49_900, ask: 50_100, last: 50_000 }];
+      (mockExchange.placeOrder as any).mockResolvedValueOnce(['twap-order-1']);
+      const options: TwapOptions = {
+        accountName: 'test-account',
+        activeMarket: mockMarket,
+        size: 0.001,
+        duration: 10,
+        ordersCount: 2,
+        side: OrderSide.Buy,
+        chaserDelay: 1000,
+        reduceOnly: false,
+        randomnessPercentage: 0,
+        useLimitOrders: true,
+        useChaserOrders: false,
+      };
+      const instance = new TwapInstance(mockExchange, mockWorkerContext, options, vi.fn());
+
+      await instance.placeOrder(0.001);
+
+      expect(instance.currentOrderIds).toEqual(['twap-order-1']);
+    });
   });
 });

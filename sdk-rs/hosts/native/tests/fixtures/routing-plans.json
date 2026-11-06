@@ -14,10 +14,10 @@
       },
       "ws": {
         "public": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear"
         },
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private"
         },
         "business": {}
       },
@@ -58,13 +58,13 @@
         {
           "contains": "/v5/public/inverse",
           "route": {
-            "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse"
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/inverse"
           }
         },
         {
           "contains": "/v5/public/spot",
           "route": {
-            "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot"
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/spot"
           }
         },
         {
@@ -103,7 +103,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -113,7 +113,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -123,7 +123,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -133,7 +133,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -143,7 +143,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -162,7 +162,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/inverse",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -172,7 +172,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/inverse",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -182,7 +182,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/inverse",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -192,7 +192,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/inverse",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -202,7 +202,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/inverse",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -221,7 +221,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/spot",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -231,7 +231,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/spot",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -241,7 +241,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/spot",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -251,7 +251,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/spot",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -261,7 +261,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/spot",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -333,7 +333,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -387,7 +387,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -536,7 +536,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -590,7 +590,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -941,7 +941,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -995,7 +995,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -1144,7 +1144,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -1198,7 +1198,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -1549,7 +1549,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "readHeader": "KC-API-KEY",
       "readPublic": true,
@@ -1559,7 +1559,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -1613,7 +1613,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -1758,7 +1758,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -2198,7 +2198,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -2483,7 +2483,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "readHeader": "api-key",
       "readPublic": true,
@@ -2493,7 +2493,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {
@@ -2553,7 +2553,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       },
       {
@@ -2571,7 +2571,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -2734,7 +2734,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -3644,7 +3644,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Tealstreet-Authorization",
         "headers": {
@@ -3703,8 +3703,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://breakout.prosp.devexperts.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Tealstreet-Authorization",
@@ -3865,7 +3865,7 @@
         "authorize": false,
         "authorizationHeader": "Tealstreet-Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -3920,7 +3920,7 @@
           "authorize": false,
           "authorizationHeader": "Tealstreet-Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -4268,7 +4268,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -4286,7 +4286,7 @@
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F"
         },
         "business": {}
       },
@@ -4332,8 +4332,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.coinbase.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -4405,8 +4405,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4414,8 +4414,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4423,8 +4423,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4432,8 +4432,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4441,8 +4441,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4503,7 +4503,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -4521,7 +4521,7 @@
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F"
         },
         "business": {}
       },
@@ -4567,8 +4567,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.coinbase.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.coinbase.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -4640,8 +4640,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4649,8 +4649,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4658,8 +4658,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4667,8 +4667,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4676,8 +4676,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4742,12 +4742,12 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fadvanced-trade-ws-user.coinbase.com%2F"
         },
         "business": {}
       },
@@ -4799,7 +4799,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -4856,8 +4856,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4865,8 +4865,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4874,8 +4874,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4883,8 +4883,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -4892,8 +4892,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/coinbase/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://advanced-trade-ws-user.coinbase.com/",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -5903,7 +5903,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -5983,8 +5983,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.bybit.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -6153,7 +6153,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -6233,8 +6233,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.bybit.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.bybit.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -6403,7 +6403,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -6420,10 +6420,10 @@
           "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/public"
         },
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate"
         },
         "business": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/business"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness"
         }
       },
       "wsHeaders": {
@@ -6467,8 +6467,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://www.okx.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://www.okx.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -6543,8 +6543,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6552,8 +6552,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6561,8 +6561,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6570,8 +6570,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6579,8 +6579,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6597,8 +6597,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6606,8 +6606,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6615,8 +6615,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6624,8 +6624,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6633,8 +6633,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okx/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -6651,7 +6651,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Tealstreet-Authorization",
         "headers": {
@@ -6666,7 +6666,7 @@
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt"
         },
         "business": {}
       },
@@ -6711,8 +6711,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Tealstreet-Authorization",
@@ -6781,7 +6781,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -6790,7 +6790,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -6799,7 +6799,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -6808,7 +6808,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -6817,7 +6817,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -6879,7 +6879,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Tealstreet-Authorization",
         "headers": {
@@ -6894,7 +6894,7 @@
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt"
         },
         "business": {}
       },
@@ -6939,8 +6939,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy/https://trades.grvt.io/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz-tiny.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://trades.grvt.io/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Tealstreet-Authorization",
@@ -7009,7 +7009,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -7018,7 +7018,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -7027,7 +7027,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -7036,7 +7036,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -7045,7 +7045,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -7107,7 +7107,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -7165,8 +7165,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://openapi.blofin.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -7813,7 +7813,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {
@@ -7889,7 +7889,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -8050,7 +8050,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {
@@ -8126,7 +8126,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -8287,7 +8287,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {
@@ -8363,7 +8363,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -8524,7 +8524,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -8578,7 +8578,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -8925,7 +8925,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -8983,8 +8983,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://open-api.bingx.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -9141,7 +9141,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -9201,13 +9201,13 @@
     "http": [
       {
         "request": {
-          "url": "https://fapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://fapi.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://fapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://fapi.binance.com/fixture",
           "prefix": "",
           "mode": "direct",
           "authorize": false,
@@ -9225,8 +9225,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://fapi.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://fapi.binance.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -9387,7 +9387,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "publicHeader": "X-MBX-APIKEY",
       "publicHttp": {
@@ -9396,7 +9396,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -9438,19 +9438,19 @@
     "http": [
       {
         "request": {
-          "url": "https://fapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://fapi.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://fapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://fapi.binance.com/fixture",
           "prefix": "",
           "mode": "how",
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       },
       {
@@ -9468,7 +9468,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -9613,7 +9613,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -9628,7 +9628,7 @@
       "publicHeader": "X-MBX-APIKEY",
       "publicHttp": {
         "mode": "direct",
-        "prefix": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -9680,14 +9680,14 @@
     "http": [
       {
         "request": {
-          "url": "https://api.binance.com/fixture?signature=a%2Fb",
+          "url": "https://api.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://api.binance.com/fixture",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -9711,8 +9711,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.binance.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -9869,7 +9869,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -9929,13 +9929,13 @@
     "http": [
       {
         "request": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://dapi.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://dapi.binance.com/fixture",
           "prefix": "",
           "mode": "direct",
           "authorize": false,
@@ -9953,8 +9953,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://dapi.binance.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -10111,37 +10111,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
-        "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
-      },
-      "readHeader": "X-MBX-APIKEY",
-      "readPublic": true,
-      "readHttp": {
-        "mode": "direct",
-        "prefix": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
-        "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
-      },
-      "readPublicHttp": {
-        "mode": "direct",
-        "prefix": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -10156,7 +10126,7 @@
       "publicHeader": "X-MBX-APIKEY",
       "publicHttp": {
         "mode": "direct",
-        "prefix": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -10205,57 +10175,7 @@
         }
       ]
     },
-    "http": [
-      {
-        "request": {
-          "url": "https://api.binance.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json"
-          }
-        },
-        "expected": {
-          "url": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy",
-          "mode": "direct",
-          "authorize": true,
-          "authorizationHeader": "Authorization",
-          "headers": {
-            "Origin": "https://trade.tealstreet.io",
-            "Referer": "https://trade.tealstreet.io/",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "sec-fetch-dest": "empty"
-          },
-          "tunnelUrl": null
-        }
-      },
-      {
-        "request": {
-          "url": "https://api.binance.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json",
-            "x-mbx-apikey": "fixture-read-key"
-          }
-        },
-        "expected": {
-          "url": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://api.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy",
-          "mode": "direct",
-          "authorize": true,
-          "authorizationHeader": "Authorization",
-          "headers": {
-            "Origin": "https://trade.tealstreet.io",
-            "Referer": "https://trade.tealstreet.io/",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "sec-fetch-dest": "empty"
-          },
-          "tunnelUrl": null
-        }
-      }
-    ],
+    "http": [],
     "sockets": [
       {
         "channel": "public",
@@ -10397,23 +10317,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
-        "authorize": true,
-        "authorizationHeader": "Authorization",
-        "headers": {
-          "Origin": "https://trade.tealstreet.io",
-          "Referer": "https://trade.tealstreet.io/",
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "cross-site",
-          "sec-fetch-dest": "empty"
-        }
-      },
-      "readHeader": "X-MBX-APIKEY",
-      "readPublic": false,
-      "readHttp": {
-        "mode": "direct",
-        "prefix": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -10473,43 +10377,18 @@
     "http": [
       {
         "request": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://dapi.binance.com/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
+          "url": "https://dapi.binance.com/fixture",
           "prefix": "",
           "mode": "direct",
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": null
-        }
-      },
-      {
-        "request": {
-          "url": "https://dapi.binance.com/fixture?signature=a%2Fb",
-          "headers": {
-            "Content-Type": "application/json",
-            "x-mbx-apikey": "fixture-read-key"
-          }
-        },
-        "expected": {
-          "url": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy/https://dapi.binance.com/fixture?signature=a%2Fb",
-          "prefix": "https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy",
-          "mode": "direct",
-          "authorize": true,
-          "authorizationHeader": "Authorization",
-          "headers": {
-            "Origin": "https://trade.tealstreet.io",
-            "Referer": "https://trade.tealstreet.io/",
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "sec-fetch-dest": "empty"
-          },
           "tunnelUrl": null
         }
       }
@@ -10664,10 +10543,10 @@
       },
       "ws": {
         "public": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear"
         },
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private"
         },
         "business": {}
       },
@@ -10708,13 +10587,13 @@
         {
           "contains": "/v5/public/inverse",
           "route": {
-            "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/inverse"
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/inverse"
           }
         },
         {
           "contains": "/v5/public/spot",
           "route": {
-            "host": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/spot"
+            "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/spot"
           }
         },
         {
@@ -10753,7 +10632,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10763,7 +10642,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10773,7 +10652,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10783,7 +10662,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10793,7 +10672,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/public/linear",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/public/linear",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10812,7 +10691,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10822,7 +10701,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10832,7 +10711,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10842,7 +10721,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10852,7 +10731,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/v5/private",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/v5/private",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -10920,7 +10799,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -10935,10 +10814,10 @@
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/private"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwseea.okx.com%2Fws%2Fv5%2Fprivate"
         },
         "business": {
-          "host": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/business"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fwseea.okx.com%2Fws%2Fv5%2Fbusiness"
         }
       },
       "wsHeaders": {
@@ -10982,8 +10861,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -11052,8 +10931,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11061,8 +10940,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11070,8 +10949,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11079,8 +10958,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11088,8 +10967,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11106,8 +10985,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11115,8 +10994,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11124,8 +11003,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11133,8 +11012,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11142,8 +11021,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/okxeu/business",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://wseea.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -11160,7 +11039,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -11218,8 +11097,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://eea.okx.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://eea.okx.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -11384,7 +11263,7 @@
       "ws": {
         "public": {},
         "private": {
-          "host": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt"
         },
         "business": {}
       },
@@ -11492,7 +11371,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11501,7 +11380,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11510,7 +11389,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11519,7 +11398,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11528,7 +11407,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/grvt",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/grvt",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11590,17 +11469,17 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {}
       },
       "ws": {
         "public": {
-          "host": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream?readonly=true"
         },
         "private": {
-          "host": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream"
+          "host": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream"
         },
         "business": {}
       },
@@ -11639,14 +11518,14 @@
     "http": [
       {
         "request": {
-          "url": "https://mainnet.zklighter.elliot.ai/fixture?signature=a%2Fb",
+          "url": "https://mainnet.zklighter.elliot.ai/fixture",
           "headers": {
             "Content-Type": "application/json"
           }
         },
         "expected": {
-          "url": "https://mainnet.zklighter.elliot.ai/fixture?signature=a%2Fb",
-          "prefix": "",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy/https://mainnet.zklighter.elliot.ai/fixture",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy",
           "mode": "direct",
           "authorize": false,
           "authorizationHeader": "Authorization",
@@ -11664,7 +11543,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream?readonly=true",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11673,7 +11552,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream?readonly=true",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11682,7 +11561,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream?readonly=true",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11691,7 +11570,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream?readonly=true",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11700,7 +11579,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream?readonly=true",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11718,7 +11597,7 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11727,7 +11606,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11736,7 +11615,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11745,7 +11624,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11754,7 +11633,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream",
             "relay": null,
             "headers": {
               "X-Venue-Header": "keep",
@@ -11827,11 +11706,11 @@
         },
         "private": {
           "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/private",
-          "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate"
+          "relay": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fprivate"
         },
         "business": {
           "fallback": "wss://okx-proxy-ja.tealstreet.io/ws/v5/business",
-          "relay": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness"
+          "relay": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%2Fws%2Fv5%2Fbusiness"
         }
       },
       "wsHeaders": {
@@ -11958,7 +11837,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
             "relay": "wss://ws.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
@@ -11967,7 +11846,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
             "relay": "wss://ws.okx.com/ws/v5/private",
             "headers": {
               "X-Venue-Header": "keep",
@@ -12008,7 +11887,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
             "relay": "wss://ws.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
@@ -12017,7 +11896,7 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/tunnel",
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
             "relay": "wss://ws.okx.com/ws/v5/business",
             "headers": {
               "X-Venue-Header": "keep",
@@ -12044,7 +11923,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -12102,8 +11981,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api-contract.weex.com/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -12271,7 +12150,7 @@
           "initialSilentConnects": 1
         },
         "private": {
-          "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+          "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
@@ -12314,7 +12193,7 @@
         {
           "contains": "/v3/ws/private",
           "route": {
-            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
             ]
@@ -12529,8 +12408,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12538,8 +12417,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12547,8 +12426,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12556,8 +12435,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12585,7 +12464,7 @@
           "initialSilentConnects": 1
         },
         "private": {
-          "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+          "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
@@ -12628,7 +12507,7 @@
         {
           "contains": "/v3/ws/private",
           "route": {
-            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
             ]
@@ -12668,8 +12547,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v3/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12681,8 +12560,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v3/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12690,8 +12569,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v3/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12699,8 +12578,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v3/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12708,8 +12587,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v3/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12737,7 +12616,7 @@
           "initialSilentConnects": 1
         },
         "private": {
-          "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+          "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
@@ -12780,7 +12659,7 @@
         {
           "contains": "/v3/ws/private",
           "route": {
-            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
             ]
@@ -12828,8 +12707,8 @@
             "message": "pong"
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12838,8 +12717,8 @@
             "message": "pong"
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12848,8 +12727,8 @@
             "message": "pong"
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12858,8 +12737,8 @@
             "message": "pong"
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -12888,7 +12767,7 @@
           "initialSilentConnects": 1
         },
         "private": {
-          "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+          "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
@@ -12931,7 +12810,7 @@
         {
           "contains": "/v3/ws/private",
           "route": {
-            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
             ]
@@ -13031,7 +12910,7 @@
           "initialSilentConnects": 1
         },
         "private": {
-          "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
+          "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv2%2Fws%2Fprivate",
           "initialSilentConnects": 1,
           "ignoredMessages": [
             "pong"
@@ -13074,7 +12953,7 @@
         {
           "contains": "/v3/ws/private",
           "route": {
-            "fallback": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private",
+            "fallback": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.bitget.com%2Fv3%2Fws%2Fprivate",
             "ignoredMessages": [
               "pong"
             ]
@@ -13114,8 +12993,8 @@
         },
         "attempts": [
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -13127,8 +13006,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -13136,8 +13015,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -13145,8 +13024,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -13154,8 +13033,8 @@
             }
           },
           {
-            "url": "wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private",
-            "relay": null,
+            "url": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel",
+            "relay": "wss://ws.bitget.com/v2/ws/private",
             "headers": {
               "X-Venue-Header": "keep",
               "Origin": "https://preview.tealstreet.io",
@@ -13295,7 +13174,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -13349,7 +13228,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -13498,7 +13377,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -13552,7 +13431,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -13701,7 +13580,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -13755,7 +13634,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -13904,7 +13783,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -13958,7 +13837,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -14107,7 +13986,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -14161,7 +14040,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -14310,7 +14189,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -14364,7 +14243,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -15119,7 +14998,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -15173,7 +15052,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -15322,7 +15201,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -15376,7 +15255,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -15525,7 +15404,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -15579,7 +15458,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -15728,7 +15607,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -15782,7 +15661,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -16129,7 +16008,7 @@
     "plan": {
       "http": {
         "mode": "how",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -16140,7 +16019,7 @@
           "sec-fetch-site": "cross-site",
           "sec-fetch-dest": "empty"
         },
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -16188,8 +16067,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "how",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -16201,7 +16080,7 @@
             "sec-fetch-site": "cross-site",
             "sec-fetch-dest": "empty"
           },
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],
@@ -16346,7 +16225,7 @@
     "plan": {
       "http": {
         "mode": "direct",
-        "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+        "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
         "authorize": true,
         "authorizationHeader": "Authorization",
         "headers": {
@@ -16404,8 +16283,8 @@
           }
         },
         "expected": {
-          "url": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz/fixture?signature=a%2Fb",
-          "prefix": "https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy",
+          "url": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy/https://api.hyperliquid.xyz/fixture?signature=a%2Fb",
+          "prefix": "https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy",
           "mode": "direct",
           "authorize": true,
           "authorizationHeader": "Authorization",
@@ -16566,7 +16445,7 @@
         "authorize": false,
         "authorizationHeader": "Authorization",
         "headers": {},
-        "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+        "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
       },
       "ws": {
         "public": {},
@@ -16620,7 +16499,7 @@
           "authorize": false,
           "authorizationHeader": "Authorization",
           "headers": {},
-          "tunnelUrl": "wss://fsjnpy143pbz.jp.tealstreet.io/tunnel"
+          "tunnelUrl": "wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel"
         }
       }
     ],

@@ -1,25 +1,29 @@
 // Workflow orchestration: original reports remain strict; only the final job
 // can certify an authenticated canonical cohort. There is no rerun API here.
 import { spawnSync } from 'node:child_process';
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { expectedGateCases, gateCaseKey } from './ci-gate-suites.mjs';
-import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateArtifactMetadata, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
+import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateArtifactMetadata, authenticateBitgetOracleRefusalArtifact, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
 import { readArtifactZip } from './cpu-artifacts.mjs';
 import { captureCache, verifyCache } from './cpu-cache.mjs';
 import { assessGateReport } from './known-failure-policy.mjs';
-import { assessEligibility, decideRemeasurement } from './cpu-remeasure.mjs';
+import { assessEligibility, decideRemeasurement, validatePublicEvidence } from './cpu-remeasure.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
-import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint } from './cpu-runtime.mjs';
+import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint, environmentIdentity, environmentMismatch } from './cpu-runtime.mjs';
 import { loadGateLedger } from './verify-gates.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { selectBitgetPair } from './bitget-paired-ci.mjs';
-import { assessBitgetPairedSteady, pairedSteadyAssessment, bitgetAnchorAuthority,
-  combineBitgetPairedCertificates } from './bitget-paired-steady.mjs';
+import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
+import { pairedSteadyAssessment, readBitgetSteadyCertificate, assessBitgetPairedSteady, bitgetAnchorAuthority } from './bitget-paired-steady.mjs';
+import { readBitgetOracleRefusal, isBitgetOracleRefusal } from './bitget-oracle-refusal.mjs';
+
+import { collectFamilyIdentity, familyComparisonAuthority, readFamilyIdentity, readFamilyIdentityDirectory, familyCpuAssessment, familyCpuMiss } from './cpu-family-identity.mjs';
 
 import { CPU_REMEASURE_SUITES, requireCpuRemeasureSuite } from './cpu-rollout.mjs';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -27,14 +31,29 @@ const insist = (ok, message) => { if (!ok) throw new Error(`CPU certification: $
 const same = isDeepStrictEqual;
 const json = (path) => parseCohortJson(readFileSync(path));
 const write = (path, value) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(value, null, 2) + '\n'); };
-const publicCases = (suite) => expectedGateCases(suite).filter((item) => item.tape.endsWith('-public.jsonl.gz'));
+// The collection's roster: every non-private case, including public tapes the
+// workflow generates (Binance Options), not only tracked public fixtures.
+export const publicCases = (suite) => expectedGateCases(suite).filter((item) => !item.tape.endsWith('-private.jsonl'));
 const artifactRef = ({ meta }) => ({ artifactId: meta.id, name: meta.name, digest: meta.digest, bytes: meta.size_in_bytes });
 const fullCase = (report) => Object.fromEntries(['venue', 'tape', 'tapeSha256', 'books', 'private', 'correctnessRuns', 'runs'].map((key) => [key, report[key]]));
 const manifest = () => json(new URL('./known-gate-failures.json', import.meta.url));
 
-export function classifyInitialCase(evidence, declarations, paired) {
+export function classifyInitialCase(evidence, declarations, paired, family, refusal) {
+  if (refusal !== undefined) {
+    insist(isBitgetOracleRefusal(refusal) && evidence.report?.venue === 'bitget' && evidence.report.private === false &&
+      evidence.execution?.measuredCheckoutSha === refusal.authority.candidate, 'unissued or mismatched Bitget oracle refusal');
+    const errors = validatePublicEvidence(evidence);
+    insist(!errors.length, errors.join('\n'));
+    classifyInitialCase(evidence, declarations, paired, family);
+    return { decision: 'not-certified' };
+  }
   const assessment = pairedSteadyAssessment(assessGateReport(evidence.report, declarations), evidence.report, paired, evidence.execution?.measuredCheckoutSha);
   if (!assessment.errors.length) return { decision: 'first', assessment };
+  if (family && familyCpuMiss(evidence, assessment)) {
+    const identityAssessment = familyCpuAssessment(assessment, evidence.report, family, evidence.execution?.measuredCheckoutSha);
+    insist(!identityAssessment.errors.length, identityAssessment.errors.join('\n'));
+    return { decision: 'first', assessment: identityAssessment, unchanged: true };
+  }
   const eligible = assessEligibility(evidence, paired);
   insist(eligible.eligible, [...assessment.errors, ...eligible.errors].join('\n'));
   return { decision: 'second', assessment };
@@ -154,10 +173,10 @@ async function authenticateCase(context, evidence, producer, suite, role = 'firs
 }
 
 export async function currentPhysical(context, name) {
-  const { run, jobs } = context.inventory ? await evidenceInventory(context) :
-    { run: await context.reader.getRun(context.runId), jobs: await context.reader.listJobs(context.runId) };
-  const selected = jobs.filter((job) => job.name === name);
-  insist(run.run_attempt === 1 && selected.length === 1 && selected[0].run_attempt === 1 && selected[0].runner_id > 0, 'missing unique original physical job');
+  const { run, selected } = await relistPhysicalJob(async refresh => context.inventory ? evidenceInventory(context, refresh) :
+    { run: await context.reader.getRun(context.runId), jobs: await context.reader.listJobs(context.runId) }, name, { sleep: context.sleep });
+  insist(run.run_attempt === 1 && selected.length === 1 && selected[0].run_attempt === 1 && selected[0].runner_id > 0,
+    `missing unique original physical job; candidates ${physicalCandidateRows(selected)}`);
   return { run, job: selected[0] };
 }
 
@@ -168,16 +187,32 @@ const producerIdentity = job => Object.fromEntries(['id', 'run_id', 'run_attempt
 const workflowIdentity = run => Object.fromEntries(['id', 'run_number', 'run_attempt', 'workflow_id',
   'path', 'head_sha', 'head_branch', 'event'].map(key => [key, run[key]]));
 
-async function terminalProducer(context, jobName, stepName) {
-  let inventory = await evidenceInventory(context), originalJob, originalRun;
+async function terminalProducer(context, jobName, stepName, bitgetRefusal = false) {
+  let inventory = await evidenceInventory(context), originalJob, originalRun, physical;
   for (;;) {
     const { run, jobs } = inventory, selected = jobs.filter(job => job.name === jobName);
     insist(run.id === context.runId && run.run_attempt === 1 && selected.length === 1,
       'missing unique artifact physical producer in original workflow attempt1');
     const job = selected[0];
     insist(Number.isSafeInteger(job.id) && job.id > 0 && Number.isSafeInteger(job.runner_id) && job.runner_id > 0 &&
-      job.run_id === run.id && job.run_attempt === 1 && job.head_sha === run.head_sha && job.head_branch === run.head_branch &&
-      job.status === 'completed' && job.conclusion === 'success', 'measurement not successful original physical attempt1');
+      job.run_id === run.id && job.run_attempt === 1 && job.head_sha === run.head_sha && job.head_branch === run.head_branch,
+      'measurement not successful original physical attempt1');
+    const { status, conclusion, ...observed } = producerIdentity(job);
+    physical ??= observed;
+    insist(same(observed, physical), 'producer physical identity changed during step metadata refresh');
+    // The job record can trail its own terminal steps; only a settled record is judged.
+    if (status !== 'completed' || conclusion == null) {
+      context.producerStepRefreshes ??= 0;
+      insist(context.producerStepRefreshes < PRODUCER_STEP_REFRESH_LIMIT,
+        `producer job not terminal after ${PRODUCER_STEP_REFRESH_LIMIT} refreshes: run ${run.id}, job ${job.id} ${job.name} ` +
+        `[${status}/${conclusion}]`);
+      context.producerStepRefreshes++;
+      await new Promise(resolve => setTimeout(resolve, PRODUCER_STEP_REFRESH_MS));
+      inventory = await evidenceInventory(context, true);
+      continue;
+    }
+    insist(job.conclusion === 'success' || (bitgetRefusal && jobName === 'Rust / Bitget counterbalanced steady CPU' &&
+      job.conclusion === 'failure'), 'measurement not successful original physical attempt1');
     const identity = producerIdentity(job), workflow = workflowIdentity(run);
     originalJob ??= identity; originalRun ??= workflow;
     insist(same(identity, originalJob) && same(workflow, originalRun), 'producer physical identity changed during step metadata refresh');
@@ -224,33 +259,65 @@ export async function authenticatedBundle(context, runId, name, jobName, stepNam
 
 async function loadBitgetPaired(context) {
   context.bitgetPaired ??= (async () => {
-    const bundle = await authenticatedBundle(context, context.runId, 'bitget-paired-steady',
-      'Rust / Bitget counterbalanced steady CPU', 'Retain counterbalanced Bitget steady evidence', context.checkoutSha);
+    const bundle = await authenticatedBitgetPairedBundle(context);
     const directory = resolve(context.env.RUNNER_TEMP, 'authenticated-bitget-paired');
     artifactEntriesToDirectory(bundle.entries, directory);
     const authority = await selectBitgetPair({ reader: context.reader, runId: context.runId, root: context.root });
-    const measured = {};
-    for (const [name, selected] of Object.entries({ tip: authority, anchor: bitgetAnchorAuthority(authority) })) {
-      const evidence = readBitgetPairedEvidence(resolve(directory, name, 'records'));
-      for (const [index, cohort] of evidence.cohorts.entries()) {
-        const key = sha256(`bitget-paired:${name}:${index + 1}`);
-        insist(cohort.before.measurementKey === key, 'paired cohort measurement key differs');
-        authenticateMeasurementWindow({ key, job: bundle.job, logBytes: bundle.logBytes,
-          execution: { runId: authority.runId, jobId: authority.jobId, runnerId: authority.runnerId,
-            attempt: 1, measuredCheckoutSha: context.checkoutSha,
-            startedAt: cohort.before.startedAt, completedAt: cohort.finishedAt } });
-        restorePairedRawOutputs(context.root, cohort.evidence);
-        revalidateRecordedEvidence(cohort.evidence, { root: context.root });
+    if (bundle.job.conclusion === 'failure') {
+      const result = jsonMember(bundle.entries, 'steady-assessment.json');
+      insist(['tip', 'anchor'].includes(result.oracle?.witness), 'unknown refusal witness');
+      const selected = result.oracle.witness === 'anchor' ? bitgetAnchorAuthority(authority) : authority;
+      const sourceTrees = {};
+      for (const source of new Set([selected.baseline, selected.candidate])) {
+        const commit = await context.reader.getCommit(source);
+        insist(commit.sha === source, 'oracle API source differs');
+        sourceTrees[source] = commit.tree?.sha;
       }
-      const result = assessBitgetPairedSteady({ authority: selected, evidence, manifest: manifest() });
-      insist(result.valid, result.errors.join('\n'));
-      measured[name] = result.certificate;
+      const refusal = readBitgetOracleRefusal({ entries: bundle.entries, authority, sourceTrees,
+        tapeSha256: sha256(readFileSync(resolve(context.root, 'sdk-rs/harness/fixtures/bitget-public.jsonl.gz'))) });
+      if (refusal.witness === 'anchor') {
+        const evidence = readBitgetPairedEvidence(resolve(directory, 'tip', 'records'));
+        for (const cohort of evidence.cohorts) {
+          restorePairedRawOutputs(context.root, cohort.evidence);
+          revalidateRecordedEvidence(cohort.evidence, { root: context.root });
+        }
+        const tip = assessBitgetPairedSteady({ authority, evidence, manifest: manifest() });
+        insist(tip.valid, tip.errors.join('\n'));
+      }
+      return { refusal, bundle };
     }
-    const certificate = combineBitgetPairedCertificates(measured.tip, measured.anchor);
+    const certificate = await readBitgetSteadyCertificate({ authority, manifest: manifest(),
+      readEvidence: async (name, selected) => {
+        const evidence = readBitgetPairedEvidence(resolve(directory, name, 'records'));
+        for (const [index, cohort] of evidence.cohorts.entries()) {
+          const key = sha256(`bitget-paired:${name}:${index + 1}`);
+          insist(cohort.before.measurementKey === key, 'paired cohort measurement key differs');
+          authenticateMeasurementWindow({ key, job: bundle.job, logBytes: bundle.logBytes,
+            execution: { runId: selected.runId, jobId: selected.jobId, runnerId: selected.runnerId,
+              attempt: 1, measuredCheckoutSha: context.checkoutSha,
+              startedAt: cohort.before.startedAt, completedAt: cohort.finishedAt } });
+          restorePairedRawOutputs(context.root, cohort.evidence);
+          revalidateRecordedEvidence(cohort.evidence, { root: context.root });
+        }
+        return evidence;
+      } });
     insist(certificate.steadyAccepted, 'tip or cumulative anchor steady regression');
     return { certificate, bundle };
   })();
   return context.bitgetPaired;
+}
+
+export async function authenticatedBitgetPairedBundle(context) {
+  const jobName = 'Rust / Bitget counterbalanced steady CPU', stepName = 'Retain counterbalanced Bitget steady evidence';
+  const { run, job } = await terminalProducer(context, jobName, stepName, true);
+  if (job.conclusion === 'success') return authenticatedBundle(context, context.runId, 'bitget-paired-steady',
+    jobName, stepName, context.checkoutSha);
+  const bundle = await artifact(context, context.runId, 'bitget-paired-steady');
+  const logBytes = await context.reader.getLog(job.id);
+  const receipt = authenticateBitgetOracleRefusalArtifact({ artifact: bundle.meta, artifactBytes: bundle.bytes,
+    run, job, logBytes, expectedCheckoutSha: context.checkoutSha });
+  context.bindings?.push({ artifact: bundle.meta, job });
+  return { ...bundle, receipt, job, logBytes };
 }
 
 export function restorePairedRawOutputs(root, evidence) {
@@ -266,7 +333,7 @@ export function restorePairedRawOutputs(root, evidence) {
 }
 
 export function pairedCertificateForRuntime(paired, state, entries) {
-  if (!paired || state.mode !== 'family') return undefined;
+  if (!paired || state.mode !== 'family' || isBitgetOracleRefusal(paired.refusal)) return undefined;
   const recorded = jsonMember(entries, 'manifest.json');
   for (const [name, digest] of Object.entries(paired.certificate.moduleHashes)) {
     const path = `sdk-rs/hosts/wasm/pkg/node/${name}`;
@@ -289,15 +356,30 @@ async function prepareMeasurement(context, suite, destination, mode) {
   return state;
 }
 
-function collectMeasurement(context, suite) {
+async function collectMeasurement(context, suite) {
   requireCpuRemeasureSuite(suite);
   const entries = loadGateLedger({ root: context.root, includeRaw: true });
-  const result = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect' });
-  insist(result.errors.length === 0, result.errors.join('\n'));
+  let result = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect' });
   const state = json(resolve(context.root, 'sdk-rs/harness/out/cpu-collection/state.json'));
   insist(!state.active && state.records.length === publicCases(suite).length, 'missing completed public measurements');
-  if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `has_eligible=${result.pending.length > 0}\n`, { flag: 'a' });
-  console.log(`${result.pending.length} CPU cases remain unresolved; this collection is not final certification`);
+  let unchanged = false;
+  const probes = entries.map(entry => ({ entry, assessment: assessGateReport(entry.report, manifest()) }))
+    .filter(({ entry, assessment }) => familyCpuMiss(entry, assessment));
+  if (state.mode === 'family' && probes.length) {
+    const cpuErrors = new Set(probes.flatMap(({ assessment }) => assessment.errors));
+    const residual = result.errors.filter(error => !cpuErrors.has(error));
+    insist(!residual.length, residual.join('\n'));
+    const authority = await collectFamilyIdentity(context, suite);
+    const runtimeManifest = json(resolve(context.root, 'sdk-rs/harness/out/cpu-collection/cohort/manifest.json'));
+    const family = readFamilyIdentityDirectory({ directory: resolve(context.root, 'sdk-rs/harness/out/cpu-family'),
+      authority, state, runtimeManifest });
+    unchanged = Boolean(family);
+    result = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect', family, sourceHead: state.sourceHead });
+    if (unchanged) console.log(`${suite}: unchanged bytes, not measured`);
+  }
+  insist(!result.errors.length, result.errors.join('\n'));
+  if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `has_eligible=${result.pending.length > 0 && !unchanged}\n`, { flag: 'a' });
+  console.log(`${unchanged ? 0 : result.pending.length} CPU cases remain unresolved; this collection is not final certification`);
   return result;
 }
 
@@ -345,6 +427,36 @@ export function validateFirstBindings({ state, evidence, cohortEntries, actualMa
   return { schema: 1, runtimeSha256: fingerprint, manifestSha256: sha256(manifestBytes), nodeSha256: recordedManifest.node.sha256 };
 }
 
+const IMAGE_FIELDS = new Set(['ImageOS', 'ImageVersion']);
+const IMAGE_ROLLED = 'cpu-second/image-rolled.json';
+const MEASURED_MEMBERS = /^(?:second\.json|manifest\.json|cpu-second\/(?:cases|cache|reports)\/.*|cpu-second\/results\.json)$/;
+const imageRollMessage = (suite, receipt) =>
+  `${suite} not certified: runner image rolled ${receipt.expected.ImageVersion}→${receipt.actual.ImageVersion}; fresh run required`;
+
+/** A runner image rollover between first and second jobs cannot form a pair: the
+ * second job records it unmeasured. Every other environment change stays a hard refusal. */
+export function imageRollReceipt({ suite, expected, environment, runId, firstJobId }) {
+  const differences = environmentMismatch(expected, environment);
+  if (!differences.length) return null;
+  insist(differences.every(({ field }) => IMAGE_FIELDS.has(field)), `environment identity mismatch: ${JSON.stringify(differences)}`);
+  return { schema: 1, suite, status: 'image-rolled', measured: false, runId, firstJobId,
+    expected: environmentIdentity(expected), actual: environmentIdentity(environment), differences };
+}
+
+/** The typed per-suite refusal for an authentic unmeasured receipt; never a certificate. */
+export function imageRolledRefusal({ suite, entries, expected, logBytes, runId, firstJobId }) {
+  if (!entries.has(IMAGE_ROLLED)) return null;
+  const receipt = jsonMember(entries, IMAGE_ROLLED);
+  let differences;
+  try { differences = environmentMismatch(expected, receipt.actual); } catch { differences = []; }
+  insist(receipt.schema === 1 && receipt.suite === suite && receipt.status === 'image-rolled' && receipt.measured === false &&
+    receipt.runId === runId && receipt.firstJobId === firstJobId && same(receipt.expected, environmentIdentity(expected)) &&
+    differences.length > 0 && differences.every(({ field }) => IMAGE_FIELDS.has(field)) && same(receipt.differences, differences) &&
+    ![...entries.keys()].some((name) => MEASURED_MEMBERS.test(name)) && !Buffer.from(logBytes).includes('CPU_CASE_BEGIN '),
+  'invalid image-rolled receipt');
+  return imageRollMessage(suite, receipt);
+}
+
 async function secondMeasurement(context, suite, destination) {
   requireCpuRemeasureSuite(suite);
   insist(context.env.GITHUB_RUN_ATTEMPT === '1', 'no third measurement via a job retry');
@@ -358,11 +470,21 @@ async function secondMeasurement(context, suite, destination) {
   insist(firstBundle.meta.id === row.firstArtifactId && firstBundle.meta.digest === row.firstArtifactDigest, 'first artifact changed after planning');
   const firsts = selected.map(({ key, case: item }) => firstEvidence(firstBundle.entries, key, item));
   const state = jsonMember(firstBundle.entries, 'cpu-collection/state.json');
-  const capsule = await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
-    `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha);
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
-  insist(tiny.job.id === firstBundle.job.id && capsule.job.id === firstBundle.job.id, 'first uploads have different physical producers');
+  insist(tiny.job.id === firstBundle.job.id, 'first uploads have different physical producers');
+  const sealedEnvironment = jsonMember(tiny.entries, 'manifest.json').environment;
+  insist(same(state.environment, sealedEnvironment), 'first state environment differs from sealed manifest');
+  const rolled = imageRollReceipt({ suite, expected: sealedEnvironment, runId: context.runId, firstJobId: firstBundle.job.id });
+  if (rolled) {
+    rmSync(resolve(context.root, 'sdk-rs/harness/out'), { recursive: true, force: true });
+    write(resolve(context.root, 'sdk-rs/harness/out', IMAGE_ROLLED), rolled);
+    console.log(`::error::${imageRollMessage(suite, rolled)} (not measured)`);
+    return [];
+  }
+  const capsule = await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
+    `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha);
+  insist(capsule.job.id === firstBundle.job.id, 'first uploads have different physical producers');
   const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
   for (const first of firsts) {
     await authenticateCase(context, first, firstBundle.job, suite);
@@ -396,7 +518,7 @@ async function secondMeasurement(context, suite, destination) {
     mkdirSync(dirname(reportPath), { recursive: true });
     const item = first.claim.case;
     const child = spawnSync(runtime.nodePath, [resolve(context.root, 'sdk-rs/harness/gate.mjs'),
-      '--venue', item.venue, '--tape', item.tape, '--books', item.books, '--runs', '9',
+      '--venue', item.venue, '--tape', item.tape, '--books', item.books, '--runs', String(PUBLIC_REPLAY_PAIRS),
       '--runtime-capsule', destination, '--report', reportPath], {
       cwd: context.root, env: { ...process.env, ...reset.env, CPU_COLLECTION_STATE: '' }, stdio: 'inherit',
     });
@@ -471,8 +593,13 @@ export function validatePlannedCases(plan) {
     insist(Number.isSafeInteger(row.firstArtifactId) && /^sha256:[a-f0-9]{64}$/.test(row.firstArtifactDigest ?? '') &&
       Array.isArray(row.cases) && same(row.cases.map(value => gateCaseKey(value.case)).sort(), publicCases(row.suite).map(gateCaseKey).sort()), 'missing/duplicate/substituted complete public roster');
     insist(new Set(row.cases.map(value => value.key)).size === row.cases.length, 'duplicate case key');
-    for (const value of row.cases) insist(['first', 'second'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
-      value.case.private === false && value.case.runs === 9 && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
+    const refused = row.cases.some(value => value.decision === 'not-certified');
+    insist(refused ? row.suite === 'bitget' && row.cases.every(value => value.decision === 'not-certified') &&
+      row.oracleRefusal?.name === 'bitget-paired-steady' && Number.isSafeInteger(row.oracleRefusal.artifactId) && row.oracleRefusal.artifactId > 0 &&
+      /^sha256:[a-f0-9]{64}$/.test(row.oracleRefusal.digest ?? '') && Number.isSafeInteger(row.oracleRefusal.bytes) && row.oracleRefusal.bytes > 0
+      : row.oracleRefusal === undefined, 'invalid Bitget-only refusal plan authority');
+    for (const value of row.cases) insist(['first', 'second', 'not-certified'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
+      value.case.private === false && value.case.runs === PUBLIC_REPLAY_PAIRS && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
   }
   return plan;
 }
@@ -493,23 +620,37 @@ export function requireSecondState(dispositions, jobs) {
   return true;
 }
 
+async function familyIdentityForSuite(context, suite, strict, state, tiny, required = false) {
+  if (state.mode !== 'family') return undefined;
+  if (!strict.entries.has('cpu-family/proof.json')) {
+    insist(!required, 'missing family comparison for unresolved CPU case');
+    return undefined;
+  }
+  const authority = await familyComparisonAuthority({ ...context, suite });
+  return readFamilyIdentity({ entries: strict.entries, authority, state, runtimeManifest: jsonMember(tiny.entries, 'manifest.json') });
+}
+
 async function gatherSuite(context, suite) {
   requireCpuRemeasureSuite(suite);
   const pairedBundle = suite === 'bitget' ? await loadBitgetPaired(context) : undefined;
   const strict = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
   restoreOriginalOutputs(context, strict.entries);
-  const assessed = verifyGateSuite({ suite, entries: suiteEntries(strict.entries), manifest: manifest(), mode: 'collect' });
-  insist(assessed.errors.length === 0, assessed.errors.join('\n'));
+  const entries = suiteEntries(strict.entries);
+  const needsComparison = entries.some(entry => familyCpuMiss(entry, assessGateReport(entry.report, manifest())));
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
   insist(tiny.job.id === strict.job.id, 'first uploads have different physical producers');
   const bundle = jsonMember(tiny.entries, 'cohort.json'), state = jsonMember(strict.entries, 'cpu-collection/state.json');
   const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
+  const family = await familyIdentityForSuite(context, suite, strict, state, tiny, needsComparison);
+  const assessed = verifyGateSuite({ suite, entries, manifest: manifest(), mode: 'collect', family, sourceHead: state.sourceHead });
+  insist(!assessed.errors.length, assessed.errors.join('\n'));
   insist(bundle.suite === suite && Array.isArray(bundle.claims) && bundle.claims.length === publicCases(suite).length, 'incomplete first claims');
   const { readSourceTree } = await import('./cpu-collection.mjs');
   insist(readSourceTree(context.root).inputsSha256 === state.inputsSha256 && state.sourceHead === context.checkoutSha, 'first measured inputs differ from current source');
   const row = { suite, firstArtifactId: strict.meta.id, firstArtifactDigest: strict.meta.digest, cases: [] };
+  if (pairedBundle?.refusal) row.oracleRefusal = artifactRef(pairedBundle.bundle);
   for (const item of publicCases(suite)) {
     const matches = bundle.claims.filter(value => gateCaseKey(value.case) === gateCaseKey(item));
     insist(matches.length === 1, 'missing/duplicate exact first claim');
@@ -518,7 +659,8 @@ async function gatherSuite(context, suite) {
     validateRetainedCache({ entries: strict.entries, evidence: first, state });
     await authenticateCase(context, first, strict.job, suite);
     revalidateRecordedEvidence(first, { root: context.root });
-    row.cases.push({ key: first.key, case: claim.case, decision: classifyInitialCase(first, manifest(), paired).decision });
+    row.cases.push({ key: first.key, case: claim.case,
+      decision: classifyInitialCase(first, manifest(), paired, family, pairedBundle?.refusal).decision });
   }
   return row;
 }
@@ -557,14 +699,29 @@ async function certifySuite(context, suite, destination) {
   const hasSecond = requireSecondState(row.cases, allJobs.filter(job => job.name === `Rust / CPU remeasurement (${suite})`));
   context.secondDispositions ??= new Map();
   context.secondDispositions.set(suite, row.cases);
+  if (row.oracleRefusal) {
+    insist(isBitgetOracleRefusal(pairedBundle?.refusal), 'missing authenticated Bitget refusal');
+    write(resolve(destination, 'refusal.json'), { schema: 1, suite, runId: context.runId,
+      checkoutSha: context.checkoutSha, disposition: 'NOT-CERTIFIED', certified: false,
+      reason: pairedBundle.refusal.reason, pairedArtifact: row.oracleRefusal });
+    const error = new Error(pairedBundle.refusal.reason);
+    error.oracleRefusal = pairedBundle.refusal;
+    throw error;
+  }
   const strict = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
   const state = jsonMember(strict.entries, 'cpu-collection/state.json');
   const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
+  const family = await familyIdentityForSuite(context, suite, strict, state, tiny);
   const second = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-second-${suite}`,
     `Rust / CPU remeasurement (${suite})`, 'Retain CPU remeasurement results', context.checkoutSha) : null;
+  if (second) {
+    const rolled = imageRolledRefusal({ suite, entries: second.entries, expected: jsonMember(tiny.entries, 'manifest.json').environment,
+      logBytes: second.logBytes, runId: context.runId, firstJobId: strict.job.id });
+    insist(!rolled, rolled);
+  }
   const capsule = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha, true) : null;
   if (capsule) {
@@ -580,9 +737,10 @@ async function certifySuite(context, suite, destination) {
     restoreOriginalOutputs(context, strict.entries);
     revalidateRecordedEvidence(first, { root: context.root });
     if (value.decision === 'first') {
-      insist(!pairedSteadyAssessment(assessGateReport(first.report, manifest()), first.report, paired, first.execution?.measuredCheckoutSha).errors.length,
-        'first result fails strict policy and authenticated steady supplement');
-      cases.push({ key: value.key, case: value.case, decision: { accepted: true, rule: first.report.status === 'PASS' ? 'strict-first-pass' : 'strict-declared-diagnostic', receipt: null } });
+      const initial = classifyInitialCase(first, manifest(), paired, family);
+      insist(initial.decision === 'first',
+        'first result fails strict policy and authenticated byte/steady supplement');
+      cases.push({ key: value.key, case: value.case, decision: { accepted: true, rule: first.report.status === 'PASS' ? 'strict-first-pass' : initial.unchanged ? 'unchanged bytes, not measured' : 'strict-declared-diagnostic', receipt: null } });
     } else {
       const evidence = jsonMember(second.entries, `cpu-second/cases/${value.key}.json`);
       insist(evidence.key === first.key && same(evidence.claim, first.claim), 'second case/first claim differs');
@@ -598,6 +756,7 @@ async function certifySuite(context, suite, destination) {
   }
   const certificate = { schema: 1, suite, runId: context.runId, checkoutSha: context.checkoutSha,
     plan: artifactRef(planBundle), first: artifactRef(strict), runtime: capsule ? artifactRef(capsule) : null, second: second ? artifactRef(second) : null, cases,
+    ...(family ? { familyIdentity: family } : {}),
     ...(paired ? { pairedSteady: { artifact: artifactRef(pairedBundle.bundle), certificate: paired } } : {}) };
   write(resolve(destination, 'certificate.json'), certificate);
   return certificate;
@@ -616,23 +775,45 @@ export async function evidenceEndCheck(context) {
   }
 }
 
+/** One refused suite fails only its own replay gate; overall certification stays false. */
+export async function certifySuites(suites, certifyOne) {
+  const certificates = {}, results = { certified: true, suites: {}, reasons: {} };
+  for (const suite of suites) {
+    try {
+      certificates[suite] = await certifyOne(suite);
+      results.suites[suite] = true;
+    } catch (error) {
+      results.certified = false;
+      results.suites[suite] = false;
+      results.reasons[suite] = String(error?.message ?? error).slice(0, 2000);
+    }
+  }
+  return { results, certificates };
+}
+
 async function certifyAll(context, destination) {
-  const certificates = {};
-  for (const suite of CPU_REMEASURE_SUITES) certificates[suite] = await certifySuite(context, suite, resolve(destination, suite));
+  const { results: outcome, certificates } = await certifySuites(CPU_REMEASURE_SUITES, async (suite) => {
+    try { return await certifySuite(context, suite, resolve(destination, suite)); }
+    catch (error) { if (!isBitgetOracleRefusal(error.oracleRefusal)) context.secondDispositions?.delete(suite); throw error; }
+  });
   await evidenceEndCheck(context);
-  const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha,
-    suites: Object.fromEntries(CPU_REMEASURE_SUITES.map(suite => [suite, true])) };
+  const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, ...outcome };
   write(resolve(destination, 'results.json'), results);
   if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `results=${JSON.stringify(results)}\n`, { flag: 'a' });
+  for (const reason of Object.values(outcome.reasons)) console.log(`::error::${reason.replaceAll('\n', ' | ')}`);
   return certificates;
 }
 
 export function requireCertifiedSuite({ suite, results, result, runId, checkoutSha }) {
   requireCpuRemeasureSuite(suite);
+  const suites = results?.suites, refused = suites ? Object.keys(suites).filter(name => suites[name] !== true).sort() : [];
   insist(result === 'success' && results?.schema === 1 && results.runId === runId && results.checkoutSha === checkoutSha &&
-    results.suites && same(Object.keys(results.suites).sort(), [...CPU_REMEASURE_SUITES].sort()) &&
-    Object.values(results.suites).every(value => value === true), 'missing/failed/incomplete shared CPU certification');
-  return results.suites[suite];
+    suites && same(Object.keys(suites).sort(), [...CPU_REMEASURE_SUITES].sort()) &&
+    Object.values(suites).every(value => typeof value === 'boolean') && results.certified === !refused.length &&
+    results.reasons && same(Object.keys(results.reasons).sort(), refused) &&
+    refused.every(name => typeof results.reasons[name] === 'string' && results.reasons[name]), 'missing/failed/incomplete shared CPU certification');
+  if (!suites[suite]) throw new Error(results.reasons[suite]);
+  return true;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -640,7 +821,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (!['plan', 'certify'].includes(values.command)) requireCpuRemeasureSuite(values.suite);
   if (values.command === 'status') {
     if (process.env.CPU_CERT_RESULT !== 'success') {
-      console.error(`shared CPU certification did not complete (result=${process.env.CPU_CERT_RESULT || 'missing'}); non-blocking`);
+      console.error(`shared CPU certification did not complete (result=${process.env.CPU_CERT_RESULT || 'missing'}); certification not accepted`);
       process.exit(1);
     }
     const checkout = spawnSync('git', ['rev-parse', '--verify', 'HEAD'], { encoding: 'utf8' });
@@ -653,7 +834,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const context = { ...makeContext(), suite: values.suite, bindings: [] };
   try {
     if (values.command === 'prepare') await prepareMeasurement(context, values.suite, resolve(values.out), values.mode);
-    else if (values.command === 'collect') collectMeasurement(context, values.suite);
+    else if (values.command === 'collect') await collectMeasurement(context, values.suite);
     else if (values.command === 'plan') { await planMeasurements(context, resolve(values.out)); await evidenceEndCheck(context); }
     else if (values.command === 'second') { await secondMeasurement(context, values.suite, resolve(values.out)); await evidenceEndCheck(context); }
     else if (values.command === 'certify') await certifyAll(context, resolve(values.out));

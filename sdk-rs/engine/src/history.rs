@@ -11,6 +11,70 @@ mod plan;
 #[cfg(feature = "http-plans")]
 pub use plan::{PlanFailureAdmission, PlanHistoryRows, PlanReadCompletion, PlanRowsAdmission};
 
+/// Why a history result is not the whole window: a closed code the host carries on
+/// the result, where the message (which may quote the venue) stays in the engine log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IncompleteReason {
+    /// One page was read and it was full: more rows may exist.
+    PageFull,
+    /// A cursor repeated, or a page held no rows or no new ones, before the walk ended.
+    CursorStalled,
+    /// The page budget ran out with a cursor still pending.
+    PageBudget,
+    /// The request budget for the whole range ran out.
+    RequestBudget,
+    /// A later page failed after earlier pages were accepted.
+    LaterPageFailed,
+    /// Part of the range was not covered by any accepted page.
+    CoverageGap,
+    /// The venue keeps less history than the range asked for.
+    RetentionLimit,
+    /// The adapter has no native read for this history.
+    NoNativeRead,
+}
+
+impl IncompleteReason {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::PageFull => "pageFull",
+            Self::CursorStalled => "cursorStalled",
+            Self::PageBudget => "pageBudget",
+            Self::RequestBudget => "requestBudget",
+            Self::LaterPageFailed => "laterPageFailed",
+            Self::CoverageGap => "coverageGap",
+            Self::RetentionLimit => "retentionLimit",
+            Self::NoNativeRead => "noNativeRead",
+        }
+    }
+}
+
+impl From<Stall> for IncompleteReason {
+    fn from(stall: Stall) -> Self {
+        if stall == Stall::PageBudget {
+            Self::PageBudget
+        } else {
+            Self::CursorStalled
+        }
+    }
+}
+
+fn incomplete_event<P>(
+    cx: &mut Cx<'_, P>,
+    command: CommandId,
+    reason: IncompleteReason,
+    message: String,
+) {
+    cx.event(
+        Level::Warn,
+        code::HISTORY_INCOMPLETE,
+        message,
+        vec![
+            ("command", Value::Num(f64::from(command))),
+            ("reason", Value::Str(reason.code().into())),
+        ],
+    );
+}
+
 /// Missing coverage in automatic account reconciliation, not a user query.
 /// Severity is an engine policy; venues report the native coverage fact.
 #[derive(Clone, Copy, Debug)]
@@ -64,7 +128,7 @@ pub trait HistoryAuthority: authority_sealed::Sealed {
         self,
         cx: &mut Cx<'_, P>,
         command: CommandId,
-        incomplete: Option<String>,
+        incomplete: Option<(IncompleteReason, String)>,
         result: Result<String, VenueError>,
     ) -> Self::Terminal;
 }
@@ -80,18 +144,13 @@ impl HistoryAuthority for LegacyAuthority {
         self,
         cx: &mut Cx<'_, P>,
         command: CommandId,
-        incomplete: Option<String>,
+        incomplete: Option<(IncompleteReason, String)>,
         result: Result<String, VenueError>,
     ) {
         match result {
             Ok(result) => {
-                if let Some(message) = incomplete {
-                    cx.event(
-                        Level::Warn,
-                        code::HISTORY_INCOMPLETE,
-                        message,
-                        vec![("command", Value::Num(f64::from(command)))],
-                    );
+                if let Some((reason, message)) = incomplete {
+                    incomplete_event(cx, command, reason, message);
                 }
                 cx.done(command, result);
             }
@@ -147,7 +206,7 @@ impl HistoryAuthority for ReadAuthority {
         self,
         cx: &mut Cx<'_, P>,
         command: CommandId,
-        incomplete: Option<String>,
+        incomplete: Option<(IncompleteReason, String)>,
         result: Result<String, VenueError>,
     ) -> Self::Terminal {
         // Both success and failure need the read companion check. Generic
@@ -155,13 +214,8 @@ impl HistoryAuthority for ReadAuthority {
         self.validate(cx)?;
         match result {
             Ok(result) => {
-                if let Some(message) = incomplete {
-                    cx.event(
-                        Level::Warn,
-                        code::HISTORY_INCOMPLETE,
-                        message,
-                        vec![("command", Value::Num(f64::from(command)))],
-                    );
+                if let Some((reason, message)) = incomplete {
+                    incomplete_event(cx, command, reason, message);
                 }
                 cx.done_context(&self.root, result)
             }
@@ -217,6 +271,7 @@ pub type ReadRangeHistory<T> = RangeHistory<T, ReadAuthority>;
 pub struct Completion<A = LegacyAuthority> {
     command: CommandId,
     incomplete: Option<String>,
+    incomplete_reason: Option<IncompleteReason>,
     authority: A,
 }
 
@@ -225,6 +280,7 @@ impl Completion<LegacyAuthority> {
         Self {
             command,
             incomplete: None,
+            incomplete_reason: None,
             authority: LegacyAuthority { _private: () },
         }
     }
@@ -237,17 +293,22 @@ impl<A: HistoryAuthority> Completion<A> {
 
     /// Retain the first missing-coverage cause across later successful pages.
     /// Nothing is published on terminal rejection or failed serialization.
-    pub fn incomplete(&mut self, message: impl Into<String>) {
+    pub fn incomplete(&mut self, reason: IncompleteReason, message: impl Into<String>) {
         if self.incomplete.is_none() {
             self.incomplete = Some(message.into());
+            self.incomplete_reason = Some(reason);
         }
     }
 
     /// Serialization failures belong in `result` too, so they cannot publish
     /// retained rows or claim successful completion.
     pub fn finish<P>(self, cx: &mut Cx<'_, P>, result: Result<String, VenueError>) -> A::Terminal {
-        self.authority
-            .finish(cx, self.command, self.incomplete, result)
+        self.authority.finish(
+            cx,
+            self.command,
+            self.incomplete_reason.zip(self.incomplete),
+            result,
+        )
     }
 }
 
@@ -354,8 +415,10 @@ impl<T, A: HistoryAuthority> HistoryRows<T, A> {
             if self.accepted.is_empty() {
                 return self.completion.finish(cx, Err(error));
             }
-            self.completion
-                .incomplete(format!("history is INCOMPLETE: {}", error.message));
+            self.completion.incomplete(
+                IncompleteReason::LaterPageFailed,
+                format!("history is INCOMPLETE: {}", error.message),
+            );
         } else if !self.pending.is_empty() {
             return self.completion.finish(
                 cx,
@@ -486,7 +549,7 @@ impl<T, A: HistoryAuthority> CursorHistory<T, A> {
         {
             self.rows
                 .completion
-                .incomplete((self.stall_message)(reason));
+                .incomplete(reason.into(), (self.stall_message)(reason));
         }
         step
     }
@@ -501,7 +564,9 @@ impl<T, A: HistoryAuthority> CursorHistory<T, A> {
             return CursorStep::Done;
         }
         if let Some(message) = gap {
-            self.rows.completion.incomplete(message);
+            self.rows
+                .completion
+                .incomplete(IncompleteReason::CoverageGap, message);
         }
         self.advance_page(page)
     }
@@ -628,9 +693,10 @@ impl<T, A: HistoryAuthority> RangeHistory<T, A> {
     fn record_range_gap(&mut self) {
         let gaps = self.walk.incomplete_chunks();
         if gaps > 0 {
-            self.rows
-                .completion
-                .incomplete((self.incomplete_message)(gaps));
+            self.rows.completion.incomplete(
+                IncompleteReason::CoverageGap,
+                (self.incomplete_message)(gaps),
+            );
         }
     }
 
@@ -681,7 +747,9 @@ impl<T, A: HistoryAuthority> RangeHistory<T, A> {
             return;
         }
         if let Some(message) = gap {
-            self.rows.completion.incomplete(message);
+            self.rows
+                .completion
+                .incomplete(IncompleteReason::CoverageGap, message);
             self.walk.failed();
         }
         let (from, to) = self.active.take().expect("active checked");
@@ -714,7 +782,9 @@ impl<T, A: HistoryAuthority> RangeHistory<T, A> {
                 .saturating_add(u64::from(self.walk.requests))
                 > u64::from(*budget)
         {
-            self.rows.completion.incomplete(message.clone());
+            self.rows
+                .completion
+                .incomplete(IncompleteReason::RequestBudget, message.clone());
             self.finished = true;
             return Step::Finished;
         }
@@ -823,6 +893,7 @@ impl ReadCompletion {
         Ok(Self {
             command,
             incomplete: None,
+            incomplete_reason: None,
             authority: ReadAuthority {
                 root: Box::new(root),
                 page: None,
@@ -971,7 +1042,9 @@ impl<T, P> RowsAdmission<'_, '_, T, P> {
     pub fn accept_page_with_coverage(&mut self, gap: Option<String>) {
         self.owner.completion.bind_page(self.leg, self.attempt);
         if let Some(message) = gap {
-            self.owner.completion.incomplete(message);
+            self.owner
+                .completion
+                .incomplete(IncompleteReason::CoverageGap, message);
         }
         self.owner.accept_page_inner();
     }
@@ -1209,7 +1282,10 @@ mod range_stage_tests {
                 identity: "pending".into(),
             },
         );
-        history.rows.completion.incomplete("existing gap");
+        history
+            .rows
+            .completion
+            .incomplete(IncompleteReason::CoverageGap, "existing gap");
         assert!(!history.restart_stage(RangeWalk::new(100., 200., 100., 1)));
         assert_eq!(history.active, Some((0., 10.)));
         assert_eq!(history.rows.pending, ["pending"]);

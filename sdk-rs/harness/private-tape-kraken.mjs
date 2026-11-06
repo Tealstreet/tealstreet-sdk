@@ -43,8 +43,10 @@ command(700,'amendOrder',{id:'201',price:91});
 http('POST','/derivatives/api/v3/editorder',ok({editStatus:{status:'edited',orderId:'201'}}),{},{orderId:'201',limitPrice:91});
 orders=orders.map(o=>o.order_id==='201'?{...o,limit_price:91,last_update_time:EPOCH+750}:o);ws(750,{feed:'open_orders',order:orders.find(o=>o.order_id==='201')});snapshot();
 command(900,'amendOrder',{id:'202',price:81});
-http('POST','/derivatives/api/v3/cancelorder',cancel('202'),{},{order_id:'202'});
-http('POST','/derivatives/api/v3/sendorder',placement('204'),{},{...broker,orderType:'stp',side:'sell',size:1,stopPrice:81,reduceOnly:true,triggerSignal:'mark'});
+// Rust moves a stop with the native edit; TS cancels and replaces it.
+http('POST','/derivatives/api/v3/editorder',ok({editStatus:{status:'edited',orderId:'202'}}),{},{orderId:'202',stopPrice:81},{impl:'rust'});
+http('POST','/derivatives/api/v3/cancelorder',cancel('202'),{},{order_id:'202'},{impl:'ts'});
+http('POST','/derivatives/api/v3/sendorder',placement('204'),{},{...broker,orderType:'stp',side:'sell',size:1,stopPrice:81,reduceOnly:true,triggerSignal:'mark'},{impl:'ts'});
 orders=orders.filter(o=>o.order_id!=='202');orders.push(row('204','stop',0,1,{direction:1,stop_price:81,reduce_only:true,triggerSignal:'mark',last_update_time:EPOCH+950}));ws(950,{feed:'open_orders',is_cancel:true,order_id:'202'});ws(960,{feed:'open_orders',order:orders.find(o=>o.order_id==='204')});snapshot();
 command(1200,'placeOrders',{orders:[{symbol:'PF_XBTUSD',type:'trailing_stop_market',side:'sell',amount:1,price:95,slTriggerType:'mark_price'}]});
 http('POST','/derivatives/api/v3/sendorder',placement('205'),{},{...broker,orderType:'trailing_stop',side:'sell',size:1,trailingStopMaxDeviation:5,trailingStopDeviationUnit:'QUOTE_CURRENCY',reduceOnly:true,triggerSignal:'mark'});
@@ -59,6 +61,8 @@ command(2300,'setPositionMode',{hedged:false});
 ws(2400,{feed:'open_orders_snapshot',orders});
 command(2500,'cancelSymbolOrders',{symbol:'PF_XBTUSD'});
 http('POST','/derivatives/api/v3/batchorder',ok({batchStatus:orders.map(o=>({status:'cancelled',order_id:o.order_id}))}),{},'json='+encodeURIComponent(JSON.stringify({batchOrder:orders.map(o=>({order:'cancel',order_id:o.order_id}))})));
+// Rust-only: the symbol cancel then sweeps the venue for orders the store has not seen (#2831).
+http('POST','/derivatives/api/v3/cancelallorders',ok({cancelStatus:{receivedTime:new Date(EPOCH+2500).toISOString(),cancelOnly:'PF_XBTUSD',status:'cancelled',cancelledOrders:[],orderEvents:[]},serverTime:new Date(EPOCH+2500).toISOString()}),{},{symbol:'PF_XBTUSD'},{impl:'rust'});
 for(const o of orders)ws(2550,{feed:'open_orders',is_cancel:true,order_id:o.order_id});orders=[];snapshot();
 ws(2700,{feed:'open_orders_snapshot',orders:[]});ws(2750,{feed:'open_positions',positions:[]});
 command(3000,'fetchFills',{from:EPOCH-1000,to:EPOCH+3500,limit:100});http('GET','/derivatives/api/v3/fills',ok({fills:[{fill_id:'fill-1',order_id:'100',symbol:'PF_XBTUSD',side:'buy',size:0.5,price:90,fillTime:new Date(EPOCH+100).toISOString(),fillType:'taker',realized_pnl:0,realized_funding:0}]}),{},undefined,stage());

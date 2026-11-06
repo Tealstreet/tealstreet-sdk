@@ -1,5 +1,6 @@
 //! Scripted info reads only: no transport, credentials or real trading account.
 use super::*;
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Engine, Event, HttpRequest};
 
 const UNIVERSE: &str = r#"{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"ETH","szDecimals":4,"maxLeverage":20}]}"#;
@@ -10,7 +11,7 @@ const SPOT_META: &str = r#"{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{
 fn tuple(meta: &str, contexts: &str) -> String {
     format!("[{meta},{contexts}]")
 }
-fn reply(e: &mut Engine<Hyperliquid>, req: &HttpRequest, at: f64, body: &str) {
+fn reply<V: Venue>(e: &mut Engine<V>, req: &HttpRequest, at: f64, body: &str) {
     e.handle(
         at,
         Event::HttpResponse {
@@ -41,6 +42,38 @@ fn http(actions: &[Action], kind: &str) -> HttpRequest {
         })
         .unwrap_or_else(|| panic!("missing request {kind}"))
 }
+// These position fixtures hold their State/Orders/Mode replies explicitly.
+// Complete unrelated fee and builder reads so bounded issuance can progress.
+fn settle_ancillary(e: &mut Engine<Hyperliquid>, at: f64, mut actions: Vec<Action>) -> Vec<Action> {
+    let mut retained = Vec::new();
+    for _ in 0..20 {
+        if actions.is_empty() {
+            return retained;
+        }
+        for action in actions {
+            if let Action::Http(request) = &action {
+                #[derive(serde::Deserialize)]
+                struct Kind<'a> {
+                    r#type: &'a str,
+                }
+                let kind: Kind<'_> =
+                    serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+                let answer = match kind.r#type {
+                    "userFees" => Some(r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#),
+                    "maxBuilderFee" => Some("30"),
+                    _ => None,
+                };
+                if let Some(answer) = answer {
+                    reply(e, request, at, answer);
+                    continue;
+                }
+            }
+            retained.push(action);
+        }
+        actions = prepared_now(e);
+    }
+    panic!("ancillary reads did not settle");
+}
 /// The retry timer armed at `sent` plus the engine's jittered `[0.75, 1.0] * nominal`.
 fn retry_timer(actions: &[Action], sent: f64, nominal: f64) -> Option<TimerId> {
     actions.iter().find_map(|a| match a {
@@ -56,21 +89,35 @@ fn retry(actions: &[Action], sent: f64, nominal: f64) -> TimerId {
     retry_timer(actions, sent, nominal).expect("public context backoff")
 }
 fn connect(spot: bool, private: bool) -> Engine<Hyperliquid> {
+    connect_venue(spot, private, |venue| venue)
+}
+fn connect_venue<V: Venue>(
+    spot: bool,
+    private: bool,
+    wrap: impl FnOnce(Hyperliquid) -> V,
+) -> Engine<V> {
+    let policy = serde_json::from_str(r#"{"primary":{"source":"scalarOnly","signingAlgorithm":"secp256k1Digest","secretEncoding":"hex"}}"#).unwrap();
+    let (provider, identities, _) = safe_cex_crypto::signer::LocalSigner::from_json_with_facts(
+        if private { r#"{"primary":{"secret":"0123456789012345678901234567890123456789012345678901234567890123"}}"# } else { "{}" }.into(), policy, false,
+    ).unwrap();
     let options = Options {
         testnet: true,
         public_data_only: !private,
         // Well-known scripted test key; no account transport exists.
         key: private.then(|| "0x14791697260e4c9a71f18484c9f997b308e59325".into()),
-        secret: private
-            .then(|| "0x0123456789012345678901234567890123456789012345678901234567890123".into()),
+        credentials: identities.primary.clone(),
         application_id: private.then(|| "0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         ..Default::default()
     };
-    let mut e = safe_cex_engine::test_support::seeded_engine(if spot {
+    let mut e = safe_cex_engine::test_support::seeded_engine(wrap(if spot {
         Hyperliquid::new_spot(options)
     } else {
         Hyperliquid::new(options)
-    });
+    }));
+    e.set_signer(Some(std::sync::Arc::new(provider))).unwrap();
+    e.set_identities(identities).unwrap();
+    e.initialize_address_nonce(999.).unwrap();
+    assert!(e.address_nonce_setup_ready());
     e.start(1000.0);
     e
 }
@@ -89,14 +136,14 @@ fn all_unusable_contexts_retry_without_claiming_an_empty_catalogue() {
             "metaAndAssetCtxs"
         };
         let meta = if spot { SPOT_META } else { UNIVERSE };
-        let req = http(&e.drain_actions().collect::<Vec<_>>(), kind);
+        let req = http(&prepared_now(&mut e).into_iter().collect::<Vec<_>>(), kind);
         reply(
             &mut e,
             &req,
             1000.0,
             &tuple(meta, r#"[{"midPx":"bad"},{"midPx":"bad"}]"#),
         );
-        let actions = e.drain_actions().collect::<Vec<_>>();
+        let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
         let timer = retry(&actions, 1000.0, 1000.0);
         assert!(!e.store().loaded().markets);
         assert!(!e.store().loaded().tickers);
@@ -106,7 +153,7 @@ fn all_unusable_contexts_retry_without_claiming_an_empty_catalogue() {
                 .any(|a| matches!(a, Action::Http(_) | Action::WsConnect { .. }))
         );
         e.handle(2000.0, Event::TimerFired { timer });
-        let req = http(&e.drain_actions().collect::<Vec<_>>(), kind);
+        let req = http(&prepared_now(&mut e).into_iter().collect::<Vec<_>>(), kind);
         reply(&mut e, &req, 2000.0, &tuple(meta, GOOD));
         assert_eq!(e.store().markets().len(), 2);
         assert_eq!(e.store().tickers().len(), 2);
@@ -123,14 +170,15 @@ fn recovering_a_missing_context_preserves_quotes_received_while_the_read_was_pen
             "metaAndAssetCtxs"
         };
         let meta = if spot { SPOT_META } else { UNIVERSE };
-        let req = http(&e.drain_actions().collect::<Vec<_>>(), kind);
+        let req = http(&prepared_now(&mut e).into_iter().collect::<Vec<_>>(), kind);
         reply(&mut e, &req, 1000.0, &tuple(meta, ETH_BAD));
-        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        let mut actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
         let timer = retry(&actions, 1000.0, 1000.0);
         if !spot {
+            // The socket opens with the main catalogue, before perpDexs answers.
             let req = http(&actions, "perpDexs");
             reply(&mut e, &req, 1000.0, "[null]");
-            actions = e.drain_actions().collect();
+            actions.extend(prepared_now(&mut e));
         }
         let socket = actions
             .iter()
@@ -140,9 +188,9 @@ fn recovering_a_missing_context_preserves_quotes_received_while_the_read_was_pen
             })
             .unwrap();
         e.handle(1000.0, Event::WsOpened { socket });
-        e.drain_actions().for_each(drop);
+        prepared_now(&mut e).into_iter().for_each(drop);
         e.handle(2000.0, Event::TimerFired { timer });
-        let req = http(&e.drain_actions().collect::<Vec<_>>(), kind);
+        let req = http(&prepared_now(&mut e).into_iter().collect::<Vec<_>>(), kind);
         let text = if spot {
             r#"{"channel":"allMids","data":{"mids":{"@4":"240"}}}"#
         } else {
@@ -160,25 +208,41 @@ fn recovering_a_missing_context_preserves_quotes_received_while_the_read_was_pen
 #[test]
 fn partial_perp_context_retries_upserts_and_preserves_known_rails_and_native_indices() {
     let mut e = connect(false, false);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let first = retry(&actions, 1000.0, 1000.0);
     let dexs = http(&actions, "perpDexs");
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::WsConnect { .. }))
+            .count(),
+        1,
+        "the socket opens with the main catalogue, before perpDexs answers"
+    );
     let btc = e.store().market("BTC-PERP").unwrap().clone();
     assert_eq!(e.venue().assets["BTC-PERP"], 0);
     assert!(!e.venue().assets.contains_key("ETH-PERP"));
     reply(&mut e, &dexs, 1000.0, "[null]");
     assert_eq!(
-        e.drain_actions()
+        prepared_now(&mut e)
+            .into_iter()
             .filter(|a| matches!(a, Action::WsConnect { .. }))
             .count(),
-        1
+        0,
+        "discovery completing opens no second socket"
     );
     e.handle(2000.0, Event::TimerFired { timer: first });
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 2000.0, &tuple(UNIVERSE, BTC_BAD));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let second = retry(&actions, 2000.0, 2000.0);
     assert!(
         !actions
@@ -191,11 +255,14 @@ fn partial_perp_context_retries_upserts_and_preserves_known_rails_and_native_ind
     assert_eq!(e.store().markets().len(), 2);
     assert_eq!(e.store().tickers().len(), 2);
     e.handle(4000.0, Event::TimerFired { timer: second });
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 4000.0, &tuple(UNIVERSE, GOOD));
     assert_eq!(e.store().markets().len(), 2);
     assert_eq!(e.store().tickers().len(), 2);
-    assert!(e.drain_actions().all(|a| !matches!(
+    assert!(prepared_now(&mut e).into_iter().all(|a| !matches!(
         a,
         Action::Http(_) | Action::SetTimer { .. } | Action::WsConnect { .. }
     )));
@@ -203,42 +270,60 @@ fn partial_perp_context_retries_upserts_and_preserves_known_rails_and_native_ind
 #[test]
 fn partial_hip3_context_keeps_dex_offset_and_does_not_advance_discovery_twice() {
     let mut e = connect(false, false);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, r#"[{"universe":[]},[]]"#);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "perpDexs",
+    );
     reply(&mut e, &req, 1000.0, r#"[null,{"name":"xyz"}]"#);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let timer = retry(&actions, 1000.0, 1000.0);
     assert_eq!(e.venue().assets["XYZ|BTC-PERP"], 110000);
     assert_eq!(e.venue().coins["xyz:btc"], "XYZ|BTC-PERP");
     e.handle(2000.0, Event::TimerFired { timer });
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 2000.0, &tuple(UNIVERSE, GOOD));
     assert_eq!(e.venue().assets["XYZ|ETH-PERP"], 110001);
     assert_eq!(e.store().markets().len(), 2);
     assert_eq!(e.store().tickers().len(), 2);
     assert!(
-        !e.drain_actions()
+        !prepared_now(&mut e)
+            .into_iter()
             .any(|a| matches!(a, Action::WsConnect { .. }))
     );
 }
 #[test]
 fn unmapped_owned_position_rejects_authoritative_snapshot_and_recovers_without_stamping_bad_time() {
     let mut e = connect(false, true);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let timer = retry(&actions, 1000.0, 1000.0);
     let req = http(&actions, "perpDexs");
+    let opened = actions.clone();
     reply(&mut e, &req, 1000.0, "[null]");
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let state = http(&actions, "clearinghouseState");
     assert!(!e.store().loaded().positions);
     assert!(!e.store().loaded().orders);
     assert!(!e.store().loaded().balance);
-    let socket = actions
+    // The socket opened with the main catalogue, before perpDexs answered.
+    let socket = opened
         .iter()
         .find_map(|a| match a {
             Action::WsConnect { socket, .. } => Some(*socket),
@@ -247,22 +332,33 @@ fn unmapped_owned_position_rejects_authoritative_snapshot_and_recovers_without_s
         .unwrap();
     let known = r#"{"assetPositions":[{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"200","unrealizedPnl":"0","marginUsed":"20","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"20"},"time":1000}"#;
     reply(&mut e, &state, 1000.0, known);
+    let actions = prepared_now(&mut e);
+    settle_ancillary(&mut e, 1000.0, actions);
     let before = e.store().positions().to_vec();
     let balance = e.store().balance().clone();
     e.handle(1000.0, Event::WsOpened { socket });
-    let state = http(&e.drain_actions().collect::<Vec<_>>(), "clearinghouseState");
+    let state = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "clearinghouseState",
+    );
     let unknown = r#"{"assetPositions":[{"position":{"coin":"ETH","szi":"3","entryPx":"200","positionValue":"600","unrealizedPnl":"0","marginUsed":"60","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"999999","totalMarginUsed":"60"},"time":999999}"#;
     reply(&mut e, &state, 1500.0, unknown);
     assert_eq!(e.store().positions(), before);
     assert_eq!(*e.store().balance(), balance);
     assert!(notice(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "owned position has unavailable market metadata"
     ));
     e.handle(2000.0, Event::TimerFired { timer });
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 2000.0, &tuple(UNIVERSE, GOOD));
-    let state = http(&e.drain_actions().collect::<Vec<_>>(), "clearinghouseState");
+    let state = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "clearinghouseState",
+    );
     reply(&mut e, &state, 2000.0, &unknown.replace("999999", "2000"));
     assert_eq!(e.store().positions().len(), 1);
     assert_eq!(e.store().position("ETH-PERP").unwrap().contracts, 3.0);
@@ -272,16 +368,16 @@ fn unmapped_owned_position_rejects_authoritative_snapshot_and_recovers_without_s
 fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_balance() {
     let mut e = connect(true, true);
     let req = http(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "spotMetaAndAssetCtxs",
     );
     reply(&mut e, &req, 1000.0, &tuple(SPOT_META, ETH_BAD));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let timer = retry(&actions, 1000.0, 1000.0);
     let req = http(&actions, "spotClearinghouseState");
     assert!(!e.store().loaded().balance);
     assert!(e.store().loaded().positions);
-    assert!(e.store().loaded().orders);
+    assert!(!e.store().loaded().orders, "only a real read loads orders");
     let socket = actions
         .iter()
         .find_map(|a| match a {
@@ -303,12 +399,12 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
     assert_eq!(*e.store().balance(), balance);
     assert_eq!(e.store().coin_balances().unwrap(), coins);
     assert!(notice(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "owned spot balance has unavailable valuation"
     ));
     e.handle(2000.0, Event::TimerFired { timer });
     let req = http(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "spotMetaAndAssetCtxs",
     );
     e.handle(2000.0, Event::WsMessage { socket, text: r#"{"channel":"spotState","data":{"spotState":{"balances":[{"coin":"ETH","token":2,"total":"3","hold":"0"}]}}}"# });
@@ -324,7 +420,7 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
     assert_eq!(e.venue().spot_tokens[&2], "ETH/USDC");
     assert_eq!(e.store().markets().len(), 2);
     assert_eq!(e.store().tickers().len(), 2);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let timer = retry(&actions, 2000.0, 2000.0);
     assert!(
         !actions
@@ -336,7 +432,7 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
     assert_eq!(e.store().coin_balances().unwrap()[0].amount, 3.0);
     e.handle(4000.0, Event::TimerFired { timer });
     let req = http(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "spotMetaAndAssetCtxs",
     );
     reply(&mut e, &req, 4000.0, &tuple(SPOT_META, GOOD));
@@ -352,12 +448,15 @@ fn partial_spot_context_preserves_known_rows_retries_and_rejects_unpriced_owned_
 #[test]
 fn partial_catalogue_unknown_open_order_does_not_claim_a_loaded_empty_snapshot() {
     let mut e = connect(false, true);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let req = http(&actions, "perpDexs");
     reply(&mut e, &req, 1000.0, "[null]");
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let req = http(&actions, "frontendOpenOrders");
     reply(
         &mut e,
@@ -367,7 +466,7 @@ fn partial_catalogue_unknown_open_order_does_not_claim_a_loaded_empty_snapshot()
     );
     assert!(!e.store().loaded().orders);
     assert!(notice(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "owned order has unavailable market metadata"
     ));
 }
@@ -377,9 +476,12 @@ fn delisted_and_unquoted_core_perps_complete_discovery_without_retry() {
     let universe = r#"{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":40},{"name":"MATIC","szDecimals":1,"maxLeverage":20,"isDelisted":true,"onlyIsolated":true},{"name":"ETH","szDecimals":4,"maxLeverage":25}]}"#;
     let contexts = r#"[{"funding":"0.0000125","openInterest":"9812.5","prevDayPx":"99","dayNtlVlm":"1000","premium":"0.0","oraclePx":"100","markPx":"100","midPx":"100","impactPxs":["99.9","100.1"],"dayBaseVlm":"10"},{"funding":"0.0","openInterest":"0.0","prevDayPx":"0.37","dayNtlVlm":"0.0","premium":null,"oraclePx":"0.37","markPx":"0.37","midPx":null,"impactPxs":null,"dayBaseVlm":"0.0"},{"funding":"0.0","openInterest":"0.0","prevDayPx":"200","dayNtlVlm":"0.0","premium":null,"oraclePx":"200","markPx":"200","midPx":null,"impactPxs":null,"dayBaseVlm":"0.0"}]"#;
     let mut e = connect(false, false);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(universe, contexts));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     assert!(
         retry_timer(&actions, 1000.0, 1000.0).is_none(),
         "well-formed unquoted rows are not a discovery failure"
@@ -401,11 +503,11 @@ fn unquoted_spot_contexts_complete_discovery_and_publish_owned_native_balance() 
     let contexts = r#"[{"prevDayPx":"100","dayNtlVlm":"10","markPx":"100","midPx":"100","circulatingSupply":"21000000","coin":"@4","totalSupply":"21000000","dayBaseVlm":"0.1"},{"prevDayPx":"0.0009","dayNtlVlm":"0.0","markPx":"0.0009","midPx":null,"circulatingSupply":"1000000000","coin":"@9","totalSupply":"1000000000","dayBaseVlm":"0.0"}]"#;
     let mut e = connect(true, true);
     let req = http(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "spotMetaAndAssetCtxs",
     );
     reply(&mut e, &req, 1000.0, &tuple(meta, contexts));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     assert!(retry_timer(&actions, 1000.0, 1000.0).is_none());
     assert!(!e.venue().core_discovery_incomplete);
     let req = http(&actions, "spotClearinghouseState");
@@ -432,14 +534,23 @@ const UNQUOTED_ETH: &str =
 #[test]
 fn owned_position_on_unquoted_market_is_hidden_without_freezing_the_account() {
     let mut e = connect(false, true);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, UNQUOTED_ETH));
     assert!(!e.venue().core_discovery_incomplete);
     assert!(e.store().market("ETH-PERP").is_none());
     assert!(e.store().ticker("ETH-PERP").is_none());
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "perpDexs",
+    );
     reply(&mut e, &req, 1000.0, "[null]");
-    let state = http(&e.drain_actions().collect::<Vec<_>>(), "clearinghouseState");
+    let state = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "clearinghouseState",
+    );
     reply(
         &mut e,
         &state,
@@ -447,7 +558,7 @@ fn owned_position_on_unquoted_market_is_hidden_without_freezing_the_account() {
         r#"{"assetPositions":[{"position":{"coin":"ETH","szi":"3","entryPx":"200","positionValue":"600","unrealizedPnl":"0","marginUsed":"60","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"60"},"time":1000}"#,
     );
     assert!(!notice(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "owned position has unavailable market metadata"
     ));
     // Applied, not frozen; the excluded row stays hidden as in TS.
@@ -458,11 +569,20 @@ fn owned_position_on_unquoted_market_is_hidden_without_freezing_the_account() {
 #[test]
 fn owned_order_on_unquoted_market_is_hidden_without_freezing_orders() {
     let mut e = connect(false, true);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, UNQUOTED_ETH));
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "perpDexs",
+    );
     reply(&mut e, &req, 1000.0, "[null]");
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "frontendOpenOrders");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "frontendOpenOrders",
+    );
     reply(
         &mut e,
         &req,
@@ -470,7 +590,7 @@ fn owned_order_on_unquoted_market_is_hidden_without_freezing_orders() {
         r#"[{"coin":"ETH","oid":99,"side":"B","limitPx":"200","origSz":"2","sz":"2"},{"coin":"BTC","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
     );
     assert!(!notice(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "owned order has unavailable market metadata"
     ));
     assert!(e.store().loaded().orders);
@@ -488,17 +608,30 @@ fn owned_position_on_delisted_hip3_market_is_hidden_without_freezing_the_dex() {
     let universe = r#"{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"OLD","szDecimals":1,"maxLeverage":10,"isDelisted":true}]}"#;
     let contexts = r#"[{"midPx":"100","markPx":"100"},{"midPx":null,"markPx":"5","oraclePx":"5"}]"#;
     let mut e = connect(false, true);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, r#"[{"universe":[]},[]]"#);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "perpDexs",
+    );
     reply(&mut e, &req, 1000.0, r#"[null,{"name":"xyz"}]"#);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(universe, contexts));
     assert!(e.store().market("XYZ|BTC-PERP").is_some());
     assert!(e.store().market("XYZ|OLD-PERP").is_none());
     assert!(e.store().ticker("XYZ|OLD-PERP").is_none());
-    let state = e
-        .drain_actions()
+    let actions = prepared_now(&mut e);
+    let core_orders = http(&actions, "frontendOpenOrders");
+    reply(&mut e, &core_orders, 1000.0, "[]");
+    let actions = prepared_now(&mut e);
+    let state = settle_ancillary(&mut e, 1000.0, actions)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r)
                 if r.body
@@ -517,7 +650,7 @@ fn owned_position_on_delisted_hip3_market_is_hidden_without_freezing_the_dex() {
         r#"{"assetPositions":[{"position":{"coin":"xyz:OLD","szi":"4","entryPx":"5","positionValue":"20","unrealizedPnl":"0","marginUsed":"2","leverage":{"type":"isolated","value":10}}},{"position":{"coin":"xyz:BTC","szi":"1","entryPx":"100","positionValue":"100","unrealizedPnl":"0","marginUsed":"10","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"100","totalMarginUsed":"12"},"time":1000}"#,
     );
     assert!(!notice(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "owned position has unavailable market metadata"
     ));
     // The dex snapshot applies: its listed position lands, the delisted one is hidden.
@@ -532,18 +665,27 @@ fn order_ids(e: &Engine<Hyperliquid>) -> Vec<&str> {
 #[test]
 fn perp_order_snapshot_skips_spot_rows_and_commits_perp_orders() {
     let mut e = connect(false, true);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, GOOD));
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "perpDexs",
+    );
     reply(&mut e, &req, 1000.0, "[null]");
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "frontendOpenOrders");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "frontendOpenOrders",
+    );
     reply(
         &mut e,
         &req,
         1000.0,
         r#"[{"coin":"@107","oid":99,"side":"B","limitPx":"1","origSz":"2","sz":"2"},{"coin":"BTC","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     assert!(!notice(&actions, "unavailable market metadata"));
     assert!(!notice(&actions, "skipped"));
     assert!(e.store().loaded().orders);
@@ -554,18 +696,21 @@ fn perp_order_snapshot_skips_spot_rows_and_commits_perp_orders() {
 fn spot_order_snapshot_skips_perp_rows_and_commits_spot_orders() {
     let mut e = connect(true, true);
     let req = http(
-        &e.drain_actions().collect::<Vec<_>>(),
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
         "spotMetaAndAssetCtxs",
     );
     reply(&mut e, &req, 1000.0, &tuple(SPOT_META, GOOD));
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "frontendOpenOrders");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "frontendOpenOrders",
+    );
     reply(
         &mut e,
         &req,
         1000.0,
         r#"[{"coin":"BTC","oid":99,"side":"B","limitPx":"90","origSz":"1","sz":"1"},{"coin":"@4","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     assert!(!notice(&actions, "unavailable market metadata"));
     assert!(!notice(&actions, "skipped"));
     assert!(e.store().loaded().orders);
@@ -575,11 +720,17 @@ fn spot_order_snapshot_skips_perp_rows_and_commits_spot_orders() {
 #[test]
 fn settled_discovery_skips_unknown_market_rows_and_commits_the_rest() {
     let mut e = connect(false, true);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, GOOD));
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "perpDexs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "perpDexs",
+    );
     reply(&mut e, &req, 1000.0, "[null]");
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let state = http(&actions, "clearinghouseState");
     let orders = http(&actions, "frontendOpenOrders");
     reply(
@@ -594,7 +745,7 @@ fn settled_discovery_skips_unknown_market_rows_and_commits_the_rest() {
         1000.0,
         r#"[{"coin":"SOL","oid":99,"side":"B","limitPx":"20","origSz":"2","sz":"2"},{"coin":"BTC","oid":100,"side":"B","limitPx":"90","origSz":"1","sz":"1"}]"#,
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     assert!(notice(
         &actions,
         "Hyperliquid skipped position sol on an unknown market"
@@ -614,18 +765,97 @@ fn settled_discovery_skips_unknown_market_rows_and_commits_the_rest() {
 #[test]
 fn market_found_by_a_discovery_retry_gets_a_seeded_setting() {
     let mut e = connect(false, true);
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 1000.0, &tuple(UNIVERSE, ETH_BAD));
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let timer = retry(&actions, 1000.0, 1000.0);
     let req = http(&actions, "perpDexs");
     reply(&mut e, &req, 1000.0, "[null]");
     assert!(e.store().setting("BTC-PERP").is_some());
     assert!(e.store().setting("ETH-PERP").is_none());
     e.handle(2000.0, Event::TimerFired { timer });
-    let req = http(&e.drain_actions().collect::<Vec<_>>(), "metaAndAssetCtxs");
+    let req = http(
+        &prepared_now(&mut e).into_iter().collect::<Vec<_>>(),
+        "metaAndAssetCtxs",
+    );
     reply(&mut e, &req, 2000.0, &tuple(UNIVERSE, GOOD));
     let setting = e.store().setting("ETH-PERP").expect("seeded setting");
     assert_eq!(setting.leverage, 20.0);
     assert_eq!(setting.margin_type, Some(MarginType::Cross));
+}
+
+#[path = "order_read_epoch_tests.rs"]
+mod order_read_epoch;
+
+#[test]
+fn scheduled_cancel_is_terminal() {
+    assert!(crate::account::terminal("scheduledCancel"));
+}
+
+#[test]
+fn a_failed_startup_orders_read_stays_unloaded_and_retries() {
+    let mut e = connect(false, true);
+    let mut orders = None;
+    for _ in 0..12 {
+        let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            if let Action::Http(r) = action {
+                let body = r.body.clone().unwrap_or_default();
+                if body.contains("frontendOpenOrders") {
+                    orders = Some(r);
+                    continue;
+                }
+                let answer = if body.contains("metaAndAssetCtxs") {
+                    tuple(UNIVERSE, GOOD)
+                } else if body.contains("perpDexs") {
+                    "[null]".to_owned()
+                } else if body.contains("userAbstraction") {
+                    "\"disabled\"".to_owned()
+                } else if body.contains("maxBuilderFee") {
+                    "30".to_owned()
+                } else if body.contains("userFees") {
+                    r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#.to_owned()
+                } else {
+                    continue;
+                };
+                reply(&mut e, &r, 1000.0, &answer);
+            }
+        }
+    }
+    let read = orders.expect("orders read");
+    assert!(!e.store().loaded().orders, "no read has answered yet");
+    e.handle(
+        1000.0,
+        Event::HttpResponse {
+            request: read.id,
+            response: Response {
+                status: 500,
+                headers: "",
+                body: "down",
+            },
+        },
+    );
+    assert!(!e.store().loaded().orders, "a failed read proves nothing");
+    let timer = prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 6000.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .expect("a retry timer");
+    e.handle(6000.0, Event::TimerFired { timer });
+    assert!(
+        prepared_now(&mut e)
+            .into_iter()
+            .any(|a| matches!(a, Action::Http(r) if r.body.as_deref().is_some_and(|b| b.contains("frontendOpenOrders"))))
+    );
 }

@@ -2,7 +2,7 @@ import type { Axios } from 'axios';
 
 import { expect, it, vi } from 'vitest';
 
-import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
+import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 // KuCoin's documented procedure replays every cached delta after the snapshot.

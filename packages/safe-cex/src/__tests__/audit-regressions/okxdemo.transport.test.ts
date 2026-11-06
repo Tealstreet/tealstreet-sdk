@@ -3,12 +3,13 @@ import type { ExchangeOptions } from '../../types';
 import { describe, expect, it } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { OKXDemoExchange } from '../../exchanges/okx/okxdemo.exchange';
-import { OKXEUDemoExchange } from '../../exchanges/okx/okxeudemo.exchange';
 import { BASE_URLS, BASE_WS_URLS } from '../../exchanges/okx/okx.types';
+import { OKXDemoExchange } from '../reference/okx/okxdemo.exchange';
+import { OKXEUDemoExchange } from '../reference/okx/okxeudemo.exchange';
 import { exchangeRegistry } from '../../exchanges/registry';
-import { resolveExchangeRouting } from '../../transport/tealstreet/routing/resolveExchangeRouting';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { resolveExchangeRouting } from '../../transport/tealstreet/routing/resolveExchangeRouting';
 
 const options: ExchangeOptions = {
   key: 'test-key',
@@ -74,7 +75,7 @@ describe('OKX Demo transport and metadata', () => {
   });
 
   it('is registered as a REST-proxied, WS-direct separate exchange variant', async () => {
-    await expect(exchangeRegistry.okxdemo()).resolves.toBe(OKXDemoExchange);
+    await expect(exchangeRegistry.okxdemo()).resolves.toBe(RustEngineExchange);
 
     expect(exchangeMetadata.okxdemo).toMatchObject({
       exchangeName: 'okxdemo',
@@ -86,15 +87,16 @@ describe('OKX Demo transport and metadata', () => {
       latencyDomain: 'openapi.okx.com',
     });
 
+    // Was fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e.
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).restProxyHost).toBe(
-      'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+      'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy',
     );
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsPrivate).toEqual({ tunnelled: false });
     expect(resolveExchangeRouting('okxdemo', { tealstreetProxy: true }).wsBusiness).toEqual({ tunnelled: false });
   });
 
   it('registers OKX EU Demo as REST-proxied and WS-direct', async () => {
-    await expect(exchangeRegistry.okxeudemo()).resolves.toBe(OKXEUDemoExchange);
+    await expect(exchangeRegistry.okxeudemo()).resolves.toBe(RustEngineExchange);
 
     expect(exchangeMetadata.okxeudemo).toMatchObject({
       exchangeName: 'okxeudemo',
@@ -107,7 +109,7 @@ describe('OKX Demo transport and metadata', () => {
     });
 
     expect(resolveExchangeRouting('okxeudemo', { tealstreetProxy: true }).restProxyHost).toBe(
-      'https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy',
+      'https://fsjnpy143pbz-tyo.tealstreet.io/api/exchange_proxy',
     );
     expect(resolveExchangeRouting('okxeudemo', { tealstreetProxy: true }).wsPrivate).toEqual({ tunnelled: false });
     expect(resolveExchangeRouting('okxeudemo', { tealstreetProxy: true }).wsBusiness).toEqual({ tunnelled: false });

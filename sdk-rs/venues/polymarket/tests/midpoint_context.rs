@@ -5,7 +5,9 @@ use safe_cex_venue_polymarket::{Options, Polymarket};
 
 type Driver = Engine<Polymarket>;
 const ADMITTED: f64 = 10.;
-const DEADLINE: f64 = ADMITTED + 20_000.;
+// Startup discovery reads carry the engine's 60 s read plus 30 s readiness deadline.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
+const DEADLINE: f64 = ADMITTED + DISCOVERY_DEADLINE_MS;
 
 fn catalogue(tokens: usize) -> Driver {
     let mut engine = safe_cex_engine::test_support::seeded_engine(Polymarket::new(Options {
@@ -52,7 +54,6 @@ fn no_command_or_signing(a: &[Action]) {
         a,
         Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
             | Action::Sign { .. }
-            | Action::SignPayload { .. }
     )));
 }
 fn midpoint(a: Vec<Action>) -> HttpRequest {

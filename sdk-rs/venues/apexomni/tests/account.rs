@@ -1,6 +1,8 @@
 mod support;
 use safe_cex_engine::model::{MarginType, OrderStatus, OrderType, PositionSide};
-use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, SocketChannel, SocketId};
+use safe_cex_engine::{
+    Action, Command, ErrorKind, Event, HttpRequest, Notice, SocketChannel, SocketId,
+};
 use safe_cex_venue_apexomni::Options;
 use support::*;
 
@@ -1180,6 +1182,10 @@ fn rest_and_stream_remaining_preserve_native_decimal_precision() {
             let row = serde_json::json!({"id":"decimal","symbol":"BTC-USDT","status":"OPEN","type":"LIMIT","side":"BUY","size":amount.to_string(),"price":"100","cumSuccessFillSize":filled.to_string()});
             let body = serde_json::json!({"code":0,"data":[row.clone()]}).to_string();
             let (mut e, socket, reads) = seeded();
+            if streamed {
+                e.handle(20.0, Event::WsOpened { socket });
+                e.prepared(20.0).for_each(drop);
+            }
             for request in reads {
                 let data = if request.url.ends_with("/v3/account") {
                     ACCOUNT
@@ -1200,4 +1206,130 @@ fn rest_and_stream_remaining_preserve_native_decimal_precision() {
             );
         }
     }
+}
+
+#[test]
+fn a_refused_key_ends_the_start_and_deactivates() {
+    let (mut e, _, http) = seeded();
+    let (mut failures, mut deactivated) = (0, false);
+    let refused = r#"{"code":10002,"msg":"rpc error: code = InvalidArgument desc = Api credential is invalid [apiKey=K]!","timeCost":3308}"#;
+    for r in http {
+        response(&mut e, &r, 20.0, refused);
+        for action in e.prepared(20.0) {
+            match action {
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. }) => failures += 1,
+                Action::Notice(safe_cex_engine::Notice::Deactivate) => deactivated = true,
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(failures, 1);
+    assert!(deactivated);
+}
+
+// No ApeX whitelist answer is documented, so every shape a gateway or the venue could use:
+// the IP-bound user's start ran to its timeout looking like a slow connection. ApeX's own
+// 403 (its JSON envelope) is a refused key; a bare or HTML 403 is an edge block on the path,
+// which ends the start as a failure and keeps the status and the body's start in its text.
+#[test]
+fn an_answered_key_refusal_ends_the_start() {
+    let html = format!(
+        "<html><head><title>403 Forbidden</title></head><body>{}</body></html>",
+        "x".repeat(200)
+    );
+    for (status, body, kind, text) in [
+        (
+            403,
+            "Forbidden",
+            ErrorKind::Rejected,
+            "ApeX Omni request blocked [403]: Forbidden",
+        ),
+        (
+            403,
+            html.as_str(),
+            ErrorKind::Rejected,
+            "ApeX Omni request blocked [403]: <html><head><title>403 Forbidden</title>",
+        ),
+        (401, "Unauthorized", ErrorKind::AuthInvalid, "[401]"),
+        (
+            403,
+            r#"{"code":403,"msg":"IP not allowed"}"#,
+            ErrorKind::AuthPermission,
+            "IP not allowed",
+        ),
+    ] {
+        let (mut e, _, http) = seeded();
+        let mut failures = Vec::new();
+        for r in http {
+            e.handle(
+                20.0,
+                Event::HttpResponse {
+                    request: r.id,
+                    response: safe_cex_engine::Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            for action in e.prepared(20.0) {
+                if let Action::Notice(safe_cex_engine::Notice::StartupFailed { error, .. }) = action
+                {
+                    failures.push(error);
+                }
+            }
+        }
+        assert_eq!(failures.len(), 1, "{status} {body}");
+        assert_eq!(failures[0].kind, Some(kind), "{status} {body}");
+        assert!(
+            failures[0].message.contains(text),
+            "{}",
+            failures[0].message
+        );
+        assert!(
+            failures[0].message.chars().count() < 200,
+            "{}",
+            failures[0].message
+        );
+    }
+}
+
+/// After start, one 10002 on a background read is retried as legacy did; only a start ends.
+#[test]
+fn a_refusal_on_a_later_read_does_not_switch_the_account_off() {
+    let (mut e, socket) = ready();
+    let heal = begin_position_heal(&mut e, socket, 1000.0);
+    let refused = r#"{"code":10002,"msg":"rpc error: code = InvalidArgument desc = Api credential is invalid","timeCost":3308}"#;
+    response(&mut e, &heal, 2100.0, refused);
+    let deactivated = e
+        .prepared(2100.0)
+        .any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Deactivate)));
+    assert!(!deactivated);
+}
+
+/// ApeX documents the login refusal without an op field.
+#[test]
+fn a_documented_login_refusal_ends_the_socket_as_a_refused_key() {
+    let (mut e, socket, _) = seeded();
+    e.handle(20.0, Event::WsOpened { socket });
+    e.prepared(20.0).for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        25.0,
+        r#"{"success":false,"ret_msg":"login authority err","conn_id":"c1"}"#,
+    );
+    let actions: Vec<_> = e.prepared(25.0).collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s, .. } if *s == socket)),
+        "{actions:?}"
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| format!("{a:?}").contains("auth.rejected")),
+        "{actions:?}"
+    );
 }

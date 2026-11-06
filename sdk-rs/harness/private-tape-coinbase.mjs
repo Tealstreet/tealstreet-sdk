@@ -146,8 +146,8 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
     breakdown: {
       portfolio,
       spot_positions: [
-        { asset: 'BTC', total_balance_crypto: 1.5, available_to_trade_crypto: 1, total_balance_fiat: 165 },
-        { asset: 'USD', total_balance_crypto: 1000, available_to_trade_crypto: 900, total_balance_fiat: 1000 },
+        { account_type: 'ACCOUNT_TYPE_WALLET', asset: 'BTC', total_balance_crypto: 1.5, available_to_trade_crypto: 1, total_balance_fiat: 165 },
+        { account_type: 'ACCOUNT_TYPE_FIAT', asset: 'USD', total_balance_crypto: 1000, available_to_trade_crypto: 900, total_balance_fiat: 1000 },
       ],
       portfolio_balances: { total_balance: { value: '1165', currency: 'USD' } },
     },
@@ -555,15 +555,23 @@ export function coinbasePrivateTape({ profile = 'intx', algorithm = 'EdDSA', ven
       `${root}${route}?granularity=ONE_MINUTE&start=${epoch / 1000 - 120}&end=${epoch / 1000}&limit=2`,
       candles,
       undefined,
-      { afterCommand: candleCommand },
+      { afterCommand: candleCommand, impl: 'ts' },
     );
+  // Rust's bounded pages exclude the next page's first second; TS keeps its route.
+  http(
+    'GET',
+    `${root}/market/products/${main}/candles?granularity=ONE_MINUTE&start=${epoch / 1000 - 120}&end=${epoch / 1000 - 1}&limit=2`,
+    candles,
+    undefined,
+    { afterCommand: candleCommand, impl: 'rust' },
+  );
   // TS sends the limit only in its range calculation.
   http(
     'GET',
     `${root}/products/${main}/candles?granularity=ONE_MINUTE&start=${epoch / 1000 - 120}&end=${epoch / 1000}`,
     candles,
     undefined,
-    { afterCommand: candleCommand },
+    { afterCommand: candleCommand, impl: 'ts' },
   );
   user('snapshot', active.map(wsOrder));
   heartbeat();

@@ -2,9 +2,9 @@ import type { Axios } from 'axios';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from '../../exchanges/kraken/krakenspot.api';
-import { KrakenSpotExchange } from '../../exchanges/kraken/krakenspot.exchange';
-import { ENDPOINTS } from '../../exchanges/kraken/krakenspot.types';
+import { createAPI } from '../reference/kraken/krakenspot.api';
+import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
+import { ENDPOINTS } from '../reference/kraken/krakenspot.types';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, Market, Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType } from '../../types';
 

@@ -1,5 +1,6 @@
 // Same-workflow physical evidence only. No lifetime history scan or retry API.
 import { createHash } from 'node:crypto';
+import { PUBLIC_REPLAY_PAIRS } from './performance-policy.mjs';
 export const CPU_COHORT_STEPS = Object.freeze({ first: 'Retain CPU runtime capsule', second: 'Retain CPU remeasurement results', plan: 'Retain CPU remeasurement plan', final: 'Retain CPU certificate', strict: 'Retain strict gate reports and artifact budgets', runtime: 'Retain the eligible original runtime bytes' });
 const CPU_WORKFLOW_ID = 386369161;
 const WORKFLOW_PATH = '.github/workflows/rust.yml';
@@ -52,7 +53,7 @@ function caseIdentity(value) {
   check(value && !Array.isArray(value) && typeof value === 'object', 'invalid public case');
   const keys = ['venue', 'tape', 'tapeSha256', 'books', 'private', 'correctnessRuns', 'runs'];
   check(Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)), 'incomplete/extra case fields');
-  check(typeof value.venue === 'string' && /^[a-z0-9-]+$/.test(value.venue) && safePath(value.tape) && hash(value.tapeSha256) && typeof value.books === 'string' && value.private === false && value.correctnessRuns === 1 && value.runs === 9, 'invalid public case identity');
+  check(typeof value.venue === 'string' && /^[a-z0-9-]+$/.test(value.venue) && safePath(value.tape) && hash(value.tapeSha256) && typeof value.books === 'string' && value.private === false && value.correctnessRuns === 1 && value.runs === PUBLIC_REPLAY_PAIRS, 'invalid public case identity');
   return Object.fromEntries(keys.map((key) => [key, value[key]]));
 }
 
@@ -193,6 +194,34 @@ export function authenticateArtifactExecution(input) {
   return receipt;
 }
 
+/** This failure-only upload proves an oracle refusal, never a CPU certificate. */
+export function authenticateBitgetOracleRefusalArtifact({ artifact, artifactBytes, run, job, logBytes, expectedCheckoutSha }) {
+  const name = 'Rust / Bitget counterbalanced steady CPU';
+  const stepName = 'Retain counterbalanced Bitget steady evidence';
+  validateRun(run, CPU_WORKFLOW_ID);
+  validateJob(job, run, name);
+  check(run.run_attempt === 1 && job.run_attempt === 1 && job.conclusion === 'failure', 'oracle refusal requires failed original Bitget job');
+  artifactIdentity(artifact, run, 'bitget-paired-steady');
+  uploaded(artifact, job, logBytes, stepName);
+  const failed = job.steps?.filter(step => step.conclusion === 'failure');
+  const measured = job.steps?.filter(step => step.name === 'Public counterbalanced Bitget steady CPU');
+  check(failed?.length === 1 && measured?.length === 1 && failed[0] === measured[0] &&
+    job.steps.every(step => step.status === 'completed' && ['success', 'failure', 'skipped'].includes(step.conclusion)),
+  'oracle refusal must be the only failed terminal step');
+  const start = instant(failed[0].started_at), end = instant(failed[0].completed_at) + 1000;
+  check(instant(job.started_at) <= start && start < end && end <= instant(job.completed_at) + 1000, 'refusal step outside physical job');
+  const message = 'NOT-CERTIFIED: Bitget TS oracle output changed between baseline and candidate; arm-matched correctness is not available';
+  const lines = logLines(logBytes).filter(line => line.text === message);
+  check(lines.length === 1 && lines[0].at !== null && lines[0].at >= start && lines[0].at < end, 'missing exact refusal inside failed step');
+  const checkout = loggedCheckout(job, logBytes);
+  check(gitId(expectedCheckoutSha) && checkout === expectedCheckoutSha &&
+    (run.event === 'pull_request' || checkout === run.head_sha), 'oracle refusal checkout differs');
+  const raw = bytes(artifactBytes);
+  check(raw.length === artifact.size_in_bytes && `sha256:${sha(raw)}` === artifact.digest, 'oracle refusal ZIP digest/length mismatch');
+  return { schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id,
+    attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha: checkout, logSha256: sha(bytes(logBytes)) };
+}
+
 export function formatMeasurementMarker(kind, key, at) {
   check(['BEGIN', 'END'].includes(kind) && hash(key) && key.length === 64, 'invalid physical measurement marker');
   check(at === new Date(instant(at)).toISOString(), 'invalid physical marker timestamp');
@@ -211,7 +240,9 @@ export function authenticateMeasurementWindow({ execution, key, job, logBytes })
   // Also reject extra markers for this key with a substituted payload clock.
   check(lines.filter((line) => line.text.startsWith(`CPU_CASE_BEGIN ${key} `) || line.text.startsWith(`CPU_CASE_END ${key} `)).length === 2, 'substituted/duplicate case marker payload');
   const begin = markers[0][0], finish = markers[1][0];
-  check(begin.index < finish.index && begin.at !== null && finish.at !== null && start <= begin.at && begin.at <= end && end <= finish.at, 'public case marker ordering/time differs');
+  // Actions may buffer BEGIN until after execution ends; receipt clocks bound
+  // delivery, while the exact payload timestamps above order the execution.
+  check(begin.index < finish.index && begin.at !== null && finish.at !== null && start <= begin.at && begin.at <= finish.at && end <= finish.at, 'public case marker ordering/time differs');
   const candidates = (job.steps ?? []).filter((step) => /public/i.test(step.name ?? '') && step.status === 'completed' && step.conclusion === 'success').filter((step) => {
     const window = successfulStep(job, step.name);
     return [start, end, begin.at, finish.at].every((at) => at >= window.start && at < window.end);
@@ -227,6 +258,7 @@ export function requireGithubResponseSize(length, kind = 'metadata') {
 }
 
 const GITHUB_TRANSPORT_ATTEMPTS = 3;
+const PAGINATION_PASSES = 3;
 const NETWORK_CODES = new Set(['EPIPE', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN',
   'ENOTFOUND', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT',
   'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']);
@@ -287,19 +319,27 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
     if (immutable) immutableResponses.set(path, Buffer.from(raw));
     return binary ? raw : parseCohortJson(raw);
   };
+  // A live run can still add jobs (runtime matrices) between page reads, so a
+  // changed total discards the pass and re-lists from page 1, at most three passes.
   const list = async (base, field, extra = '', maxPages = 128) => {
-    const result = [], seen = new Set(); let total;
-    for (let page = 1; page <= maxPages; page++) {
-      const data = await get(`${base}?${extra}per_page=100&page=${page}`);
-      check(Number.isSafeInteger(data.total_count) && data.total_count >= 0 && Array.isArray(data[field]) && data[field].length <= 100, 'invalid paginated response');
-      if (total === undefined) total = data.total_count;
-      check(total === data.total_count && total <= maxPages * 100, 'pagination changed/exceeds hard limit');
-      for (const row of data[field]) { check(integer(row.id) && !seen.has(row.id), 'duplicate paginated identity'); seen.add(row.id); result.push(row); }
-      check(result.length <= total, 'pagination count mismatch');
-      if (result.length === total) return result;
-      check(data[field].length === 100, 'truncated pagination');
+    for (let pass = 1; pass <= PAGINATION_PASSES; pass++) {
+      if (pass > 1) await sleep((pass - 1) * 2000);
+      const result = [], seen = new Set(); let total, changed = false;
+      for (let page = 1; page <= maxPages && !changed; page++) {
+        const data = await get(`${base}?${extra}per_page=100&page=${page}`);
+        check(Number.isSafeInteger(data.total_count) && data.total_count >= 0 && Array.isArray(data[field]) && data[field].length <= 100, 'invalid paginated response');
+        if (total === undefined) total = data.total_count;
+        check(data.total_count <= maxPages * 100, 'pagination exceeds hard limit');
+        if (total !== data.total_count) { changed = true; break; }
+        for (const row of data[field]) { check(integer(row.id) && !seen.has(row.id), 'duplicate paginated identity'); seen.add(row.id); result.push(row); }
+        check(result.length <= total, 'pagination count mismatch');
+        if (result.length === total) return result;
+        check(data[field].length === 100, 'truncated pagination');
+      }
+      if (!changed) throw new Error('CPU cohort: pagination hard limit');
+      if (pass < PAGINATION_PASSES) console.warn(`Re-listing ${base} from page 1 (pass ${pass + 1}/${PAGINATION_PASSES}): its total changed between pages`);
     }
-    throw new Error('CPU cohort: pagination hard limit');
+    throw new Error(`CPU cohort: pagination unstable after ${PAGINATION_PASSES} passes`);
   };
   const noteJobs = (jobs) => {
     for (const job of jobs) {
@@ -321,7 +361,7 @@ export function createGithubReader({ repository, token, fetch: fetchImpl = globa
     getCommit: (commit) => { check(gitId(commit), 'invalid commit identity'); return get(`git/commits/${commit}`, false, true); },
     getRustLanding: () => {
       check(repository === 'Tealstreet/tealstreet-sdk', 'Rust landing ref requires the base repository');
-      return get('git/ref/heads/feat/rust-rewrite');
+      return get('git/ref/heads/master');
     },
     getPullBaseOid: async (number) => {
       check(repository === 'Tealstreet/tealstreet-sdk', 'Rust pull metadata requires the base repository');

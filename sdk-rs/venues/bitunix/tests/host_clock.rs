@@ -5,7 +5,17 @@ use safe_cex_venue_bitunix::{BitunixFutures, Options};
 #[test]
 fn bitunix_uses_the_shared_engine_clock_without_a_capability_opt_in() {
     let venue = BitunixFutures::new(Options::default());
-    assert_eq!(venue.capabilities(), safe_cex_engine::Capabilities::BASE);
+    // Only the reported closed-position axis and fresh reads differ from the base record.
+    assert_eq!(
+        venue.capabilities(),
+        safe_cex_engine::Capabilities {
+            closed_positions: true,
+            position_history: safe_cex_engine::PositionHistory::Bitunix,
+            closed_position_format: safe_cex_engine::ClosedPositionFormat::Bitunix,
+            fresh_positions: true,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    );
 }
 
 #[test]
@@ -81,5 +91,5 @@ fn first_authenticated_rest_and_private_login_use_the_supplied_engine_time() {
         })
         .expect("private open signs login immediately");
     let value: serde_json::Value = serde_json::from_str(&login).unwrap();
-    assert_eq!(value["args"][0]["timestamp"], "1760000009876");
+    assert_eq!(value["args"][0]["timestamp"], 1760000009876u64);
 }

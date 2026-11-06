@@ -2,8 +2,8 @@ import type { SignRequest } from '@tealstreet/safe-cex-wasm/host';
 import type { RemoteSigner, RemoteSignerRequest } from '../../types';
 
 import { afterEach, expect, it, vi } from 'vitest';
-import { BybitPrivateWebsocket } from '../../exchanges/bybit/bybit.ws-private';
-import { BinancePrivateWebsocket } from '../../exchanges/binance/binancespot.ws-private';
+import { BybitPrivateWebsocket } from '../reference/bybit/bybit.ws-private';
+import { BinancePrivateWebsocket } from '../reference/binance/binancespot.ws-private';
 import { createRemoteSignerProvider } from '../../exchanges/rust/remoteSignerProvider';
 import { virtualClock } from '../../utils/virtualClock';
 

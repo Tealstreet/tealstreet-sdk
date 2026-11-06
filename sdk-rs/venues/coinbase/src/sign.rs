@@ -10,6 +10,10 @@ const KEY_ERROR: &str = "Coinbase API key must be organizations/{org_id}/apiKeys
 const SECRET_ERROR: &str =
     "Coinbase secret must be a P-256 private-key PEM or base64 Ed25519 seed/keypair";
 
+fn credential_whitespace(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
+}
+
 pub struct Credentials {
     key: String,
     signer: Signer,
@@ -58,8 +62,8 @@ struct DownloadedKey {
 
 impl DownloadedKey {
     fn parse(value: &str) -> Option<Self> {
+        let value = value.trim_matches(credential_whitespace);
         value
-            .trim()
             .starts_with('{')
             .then(|| serde_json::from_str(value).ok())
             .flatten()
@@ -110,7 +114,7 @@ impl Credentials {
             .and_then(|json| json.name.as_ref())
             .and_then(CredentialField::text)
             .unwrap_or(key)
-            .trim();
+            .trim_matches(credential_whitespace);
         let mut parts = key.split('/');
         if parts.next() != Some("organizations")
             || !parts.next().is_some_and(|part| !part.is_empty())
@@ -128,7 +132,7 @@ impl Credentials {
             .or_else(|| key_json.as_ref().and_then(DownloadedKey::secret))
             .unwrap_or(secret);
         let secret = Zeroizing::new(secret.replace("\\n", "\n"));
-        let secret = secret.trim();
+        let secret = secret.trim_matches(credential_whitespace);
         let signer = if secret.starts_with("-----BEGIN ") {
             Signer::Es256(import_pem(secret)?)
         } else {
@@ -521,7 +525,7 @@ fn decode_base64(value: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     let normalized = Zeroizing::new(
         value
             .chars()
-            .filter(|c| !c.is_whitespace())
+            .filter(|c| !credential_whitespace(*c))
             .map(|c| match c {
                 '+' => '-',
                 '/' => '_',

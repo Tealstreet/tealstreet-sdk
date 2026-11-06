@@ -53,14 +53,43 @@ impl Options {
         }
     }
     pub fn build(self) -> (AsterDex, safe_cex_engine::signing::Provider) {
-        self.try_build().expect("valid fixture setup")
+        let (venue, provider, _) = self.try_build_installed().expect("valid fixture setup");
+        (venue, provider)
+    }
+
+    /// The venue, its provider and the identities trusted setup installs on
+    /// the engine, as the registry does.
+    #[allow(dead_code)] // Integration-test entry point.
+    pub fn build_installed(
+        self,
+    ) -> (
+        AsterDex,
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ) {
+        self.try_build_installed().expect("valid fixture setup")
     }
 
     /// Setup refuses material the resolved version cannot sign with.
+    #[allow(dead_code)] // Integration-test entry point.
     pub fn try_build(
         self,
     ) -> Result<(AsterDex, safe_cex_engine::signing::Provider), safe_cex_engine::signing::SignError>
     {
+        self.try_build_installed()
+            .map(|(venue, provider, _)| (venue, provider))
+    }
+
+    fn try_build_installed(
+        self,
+    ) -> Result<
+        (
+            AsterDex,
+            safe_cex_engine::signing::Provider,
+            safe_cex_engine::signing::Identities,
+        ),
+        safe_cex_engine::signing::SignError,
+    > {
         let user = nonempty(&self.auth_user_address).or(nonempty(&self.application_id));
         let signer = nonempty(&self.auth_signer_address).or(nonempty(&self.key));
         let wallet = nonempty(&self.auth_private_key).or(nonempty(&self.secret));
@@ -103,6 +132,7 @@ impl Options {
         };
         let (provider, identities) =
             LocalSigner::from_setup_with_policy(LocalSetup { primary, secondary }, policy)?;
+        let installed = identities.clone();
         let venue = AsterDex::new(VenueOptions {
             testnet: self.testnet,
             public_data_only: self.public_data_only,
@@ -118,6 +148,6 @@ impl Options {
             builder_fee_rate_maker: self.builder_fee_rate_maker,
             builder_fee_rate_taker: self.builder_fee_rate_taker,
         });
-        Ok((venue, std::sync::Arc::new(provider)))
+        Ok((venue, std::sync::Arc::new(provider), installed))
     }
 }

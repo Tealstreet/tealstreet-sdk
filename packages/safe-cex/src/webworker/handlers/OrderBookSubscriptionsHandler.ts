@@ -86,6 +86,7 @@ export class OrderBookSubscriptionsHandler extends BaseHandler {
       }
       case 'unsubscribeOrderBook': {
         const subId = payload.data.subId;
+        this.cancelPending(subId);
 
         // Find which symbol this subId belongs to
         for (const [symbol, sub] of this._subsBySymbol) {

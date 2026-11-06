@@ -1,8 +1,8 @@
+import type { Exchange } from '../../exchanges/base';
+import type { ExchangeName } from '../../types';
 import type { AppSettingsWorkerType } from '../AppSettingsWorkerType';
 import type { ExchangeMetadataWorkerType } from '../ExchangeMetadataWorkerType';
-import type { Exchange } from '../../exchanges/base';
 import type { StoreWorkerPayload } from '../StoreWorkerPayload';
-import type { ExchangeName } from '../../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -243,6 +243,18 @@ describe('OrderBookSubscriptionsHandler', () => {
 
         handler.handle({ op: 'unsubscribeOrderBook', data: { subId: 'sub-b' } } as StoreWorkerPayload);
         expect(mockUnsubscribe).toHaveBeenCalled();
+      });
+
+      it('an unsubscribe while the subscription waits for markets cancels it', () => {
+        vi.useFakeTimers();
+        const markets = mockStore.markets;
+        mockStore.markets = [];
+        handler.handle({ op: 'subscribeOrderBook', data: { symbol: 'BTCUSDT', subId: 'sub-1' } } as StoreWorkerPayload);
+        handler.handle({ op: 'unsubscribeOrderBook', data: { subId: 'sub-1' } } as StoreWorkerPayload);
+        mockStore.markets = markets;
+        vi.advanceTimersByTime(500);
+        expect(mockListenOrderBook).not.toHaveBeenCalled();
+        vi.useRealTimers();
       });
 
       it('should handle unsubscribe for non-existent subscription', () => {

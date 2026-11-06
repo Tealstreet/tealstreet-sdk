@@ -2,9 +2,9 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
-import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { BROKER_ID as OKX_BROKER_ID } from '../../exchanges/okx/okx.types';
 import { DefaultStore } from '../../store/store.base';
 import {

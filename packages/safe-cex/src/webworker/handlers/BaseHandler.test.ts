@@ -320,7 +320,8 @@ describe('BaseHandler', () => {
       (mockExchange.store as any).loaded = { markets: true };
       vi.advanceTimersByTime(500);
 
-      expect(handler.handleCallCount).toBe(1);
+      // The first subscription waited through the report and is applied too.
+      expect(handler.handleCallCount).toBe(2);
 
       (mockExchange.store as any).markets = [];
       (mockExchange.store as any).loaded = { markets: false };
@@ -383,6 +384,54 @@ describe('BaseHandler', () => {
           ]),
         }),
       );
+    });
+
+    it('keeps pending subscriptions past the report and applies them when markets load', () => {
+      const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const handler = new TestHandler(
+        'my-account',
+        'bybit' as ExchangeName,
+        mockExchange,
+        mockCtx,
+        mockSettings,
+        mockMetadata,
+      );
+      expect(handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: 'BTCUSDT' } })).toBe(true);
+      expect(handler.buffer({ op: 'subscribeTicker' as any, data: { symbol: 'ETHUSDT' } })).toBe(true);
+      vi.advanceTimersByTime(30_000);
+      expect(mockCtx.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [expect.stringContaining('keeping 2 pending subscriptions'), expect.anything()],
+        }),
+      );
+      vi.advanceTimersByTime(60_000);
+      expect(handler.handleCallCount).toBe(0);
+      (mockExchange.store as any).markets = [{ symbol: 'BTCUSDT' }];
+      (mockExchange.store as any).loaded = { markets: true };
+      vi.advanceTimersByTime(500);
+      expect(handler.handleCallCount).toBe(2);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('applied 2 pending subscriptions after 90s'));
+    });
+
+    it('collapses repeated subscriptions and bounds the pending queue', () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'info').mockImplementation(() => {});
+      const handler = new TestHandler(
+        'my-account',
+        'bybit' as ExchangeName,
+        mockExchange,
+        mockCtx,
+        mockSettings,
+        mockMetadata,
+      );
+      for (let i = 0; i < 3; i += 1) handler.buffer({ op: 'subscribeTicker' as any, data: { symbol: 'BTCUSDT' } });
+      for (let i = 0; i < 250; i += 1) handler.buffer({ op: 'subscribeOrderBook' as any, data: { symbol: `S${i}` } });
+      (mockExchange.store as any).markets = [{ symbol: 'BTCUSDT' }];
+      (mockExchange.store as any).loaded = { markets: true };
+      vi.advanceTimersByTime(500);
+      expect(handler.handleCallCount).toBe(200);
+      expect(handler.lastPayload).toEqual({ op: 'subscribeOrderBook', data: { symbol: 'S249' } });
     });
 
     it('does not run pending market checks after dispose', () => {

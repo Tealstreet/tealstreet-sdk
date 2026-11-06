@@ -1,10 +1,10 @@
-import type { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
-import type { OKXExchange } from '../../exchanges/okx/okx.exchange';
-import type { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import type { BybitExchange } from '../reference/bybit/bybit.exchange';
+import type { OKXExchange } from '../reference/okx/okx.exchange';
+import type { BitgetExchange } from '../reference/bitget/bitget.exchange';
 
-import { BitgetPrivateWebsocket } from '../../exchanges/bitget/bitget.ws-private';
-import { BybitPrivateWebsocket } from '../../exchanges/bybit/bybit.ws-private';
-import { OKXPrivateWebsocket } from '../../exchanges/okx/okx.ws-private';
+import { BitgetPrivateWebsocket } from '../reference/bitget/bitget.ws-private';
+import { BybitPrivateWebsocket } from '../reference/bybit/bybit.ws-private';
+import { OKXPrivateWebsocket } from '../reference/okx/okx.ws-private';
 import { virtualClock } from '../../utils/virtualClock';
 
 const NOW_MS = 1_750_000_000_000;

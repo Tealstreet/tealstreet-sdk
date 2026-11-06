@@ -2,7 +2,7 @@ import type { BybitTransactionRecord } from '../../exchanges/bybit/bybit.types';
 
 import { describe, expect, it } from 'vitest';
 
-import { mapBybitTransactionToIncomeRecords } from '../../exchanges/bybit/bybit.income';
+import { mapBybitTransactionToIncomeRecords } from '../reference/bybit/bybit.income';
 
 /**
  * Bybit's income mapper read ONLY `cashFlow`. `record.fee` was never referenced, so every

@@ -12,8 +12,8 @@ name = "request_context_trading"
 required-features = ["private-adoption-originals"]
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["order-locks", "underlying-tokens", "command-schedule-cancel", "managed-sockets"] }
-safe-cex-crypto.workspace = true
+safe-cex-engine = { workspace = true, features = ["order-locks", "underlying-tokens", "command-schedule-cancel", "managed-sockets", "address-nonce", "release-domains", "condition-waits"] }
+safe-cex-crypto = { workspace = true, features = ["address-nonce"] }
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 base64.workspace = true

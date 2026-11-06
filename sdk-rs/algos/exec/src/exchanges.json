@@ -1,0 +1,328 @@
+[
+  {
+    "name": "asterdex",
+    "displayName": "Aster",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "backpack",
+    "displayName": "Backpack",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "bybit",
+    "displayName": "Bybit",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "bybitdemo",
+    "displayName": "Bybit Demo",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "bybitspot",
+    "displayName": "Bybit Spot",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "bybitinverse",
+    "displayName": "Bybit Inverse",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "binance",
+    "displayName": "Binance",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "binanceinverse",
+    "displayName": "Binance Inverse",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "binancepm",
+    "displayName": "Binance Portfolio Margin",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "binancespot",
+    "displayName": "Binance Spot",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "bitget",
+    "displayName": "Bitget",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase"
+    ]
+  },
+  {
+    "name": "bitgetusdc",
+    "displayName": "Bitget USDC",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase"
+    ]
+  },
+  {
+    "name": "bitunix",
+    "displayName": "Bitunix",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "mexc",
+    "displayName": "MEXC",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "coinbase",
+    "displayName": "Coinbase",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "cryptocom",
+    "displayName": "Crypto.com",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "grvt",
+    "displayName": "Grvt",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "grvtSignerAddress",
+      "grvtTradingAccountId"
+    ]
+  },
+  {
+    "name": "phemex",
+    "displayName": "Phemex",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "bingx",
+    "displayName": "BingX",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "blofin",
+    "displayName": "BloFin",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase"
+    ]
+  },
+  {
+    "name": "lighter",
+    "displayName": "Lighter",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "applicationId",
+      "apiKeyIndex"
+    ]
+  },
+  {
+    "name": "okx",
+    "displayName": "OKX",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase"
+    ]
+  },
+  {
+    "name": "okxdemo",
+    "displayName": "OKX Demo",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase"
+    ]
+  },
+  {
+    "name": "okxeu",
+    "displayName": "OKX EU",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase"
+    ]
+  },
+  {
+    "name": "okxeudemo",
+    "displayName": "OKX EU Demo",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase"
+    ]
+  },
+  {
+    "name": "woo",
+    "displayName": "WOO X",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "applicationId"
+    ]
+  },
+  {
+    "name": "woofi",
+    "displayName": "WOOFi",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "applicationId"
+    ]
+  },
+  {
+    "name": "coinbasespot",
+    "displayName": "Coinbase Spot",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "kodiakfi",
+    "displayName": "Kodiak",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "applicationId"
+    ]
+  },
+  {
+    "name": "mode",
+    "displayName": "Mode",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "applicationId"
+    ]
+  },
+  {
+    "name": "what",
+    "displayName": "What",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "applicationId"
+    ]
+  },
+  {
+    "name": "hyperliquid",
+    "displayName": "Hyperliquid",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "applicationId"
+    ]
+  },
+  {
+    "name": "apexomni",
+    "displayName": "ApeX Omni",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase",
+      "omniKeySeed"
+    ]
+  },
+  {
+    "name": "kucoin",
+    "displayName": "Kucoin",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase"
+    ]
+  },
+  {
+    "name": "kucoinspot",
+    "displayName": "Kucoin Spot",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret",
+      "passphrase"
+    ]
+  },
+  {
+    "name": "kraken",
+    "displayName": "Kraken Futures",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "krakenspot",
+    "displayName": "Kraken Spot",
+    "requiredFields": [
+      "apiKey",
+      "apiSecret"
+    ]
+  },
+  {
+    "name": "paradex",
+    "displayName": "Paradex",
+    "requiredFields": [
+      "apiKey",
+      "paradexAddress",
+      "subkeyAddress"
+    ]
+  }
+]

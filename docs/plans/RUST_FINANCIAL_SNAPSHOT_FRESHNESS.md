@@ -259,6 +259,9 @@ inventory rehashes if a changed pending field changes a site hash. No new site,
 site kind, request recipe/header or map growth is allowed; independent full-map
 comparison records any old-to-new hashes. Existing queue order is unchanged.
 
+The Store's broad `orders_revision` and selective `order_snapshot_epoch` are
+separate domains; see [RUST_ORDER_FENCE_DOMAINS.md](RUST_ORDER_FENCE_DOMAINS.md).
+
 1. Backpack replaces only Account.orders_revision and Request::Orders.revision
    with an owned OrderSnapshotToken. Its native read-start increment also
    supersedes earlier reads: explicitly invalidate then capture, not stamp alone.

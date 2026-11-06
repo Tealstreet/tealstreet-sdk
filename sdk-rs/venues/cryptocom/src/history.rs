@@ -295,7 +295,10 @@ impl Cryptocom {
             let _ = cx.fail_context(&context, "History time range exceeds nanosecond bounds");
             return;
         };
-        let limit = if matches!(kind, Kind::Income) && from_ms.is_some() && to_ms.is_some() {
+        // A window with no limit walks to its start; no default may stop it.
+        let limit = if matches!(kind, Kind::Income) && from_ms.is_some() && to_ms.is_some()
+            || from_ms.is_some() && limit.is_none()
+        {
             usize::MAX
         } else {
             limit.unwrap_or(100) as usize

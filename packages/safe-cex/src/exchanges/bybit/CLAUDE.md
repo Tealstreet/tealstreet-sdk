@@ -106,7 +106,7 @@ Bybit Brazil accounts use the normal global Bybit REST/WS hosts, but Bybit requi
 Current status for beta:
 
 - Functionally implemented in account shape, account creation/editing, sync/runtime fingerprints, REST headers, and Bybit WS connection options.
-- Brazil-marked WS connections now resolve through the CTO-provided header-injecting route at `wss://fsjnpy143pbz.asia.tealstreet.io/bybitbra/...`:
+- Brazil-marked WS connections now resolve through the CTO-provided header-injecting route at `wss://fsjnpy143pbz-tyo.tealstreet.io/bybitbra/...` (a container on the Vultr tunnel hosts, AWS_EXIT step 5b; the hosted exchange server dials the same host):
   - private: `/bybitbra/v5/private`
   - public linear: `/bybitbra/v5/public/linear`
   - public inverse: `/bybitbra/v5/public/inverse`
@@ -173,6 +173,20 @@ grep for `[WS]subscribe:Request not authorized`.
 to the LINEAR socket only, so hosted bybit USDT worked and hosted BTCUSD did
 not — reported as "impossible to use Tealstreet on Bybit's inverse market"
 (2026-10-01) and fixed for inverse and spot the same day.
+
+**Fast Execution timestamp precision change** (Bybit announcement: 2026-11-05
+02:30 UTC): Bybit's `execution.fast` private WS topic changes `creationTime`
+and item `execTime` from millisecond to microsecond precision without changing
+field names or types. The retained TS Bybit sockets do NOT subscribe to
+`execution.fast` today: linear/demo and inverse subscribe to `order` +
+`position`, and spot subscribes to `order` only. So the announcement does not
+change the current private WS fill path. Still, any execution-row mapper or
+future `execution.fast` consumer must normalize timestamps through
+`normalizeBybitExecutionTimestampMs` / `normalizeBybitExecutionTimestampSeconds`
+so 10-digit seconds, 13-digit milliseconds and 16-digit microseconds all land in
+the same internal seconds/ms units. Demo inherits the linear mapper; inverse has
+its own mapper; spot currently has no historical-fill mapper in the retained TS
+adapter.
 
 **On a failed auth the socket sends NOTHING and reconnects** — it does not
 subscribe. Subscribing anyway was tried and is worse: bybit answers a ping on an
@@ -2066,3 +2080,18 @@ Rust release code generation for the Bybit crate uses `opt-level = "z"` for
 family WASM size. CI still requires the public CPU/memory gates and complete raw replay
 outputs, including caller identities; the source parsers, handlers and financial
 calculations retain their existing behavior.
+
+## Bounded Rust private startup
+
+After account metadata and catalogue readiness start the private snapshot phase,
+Rust Bybit allows 60 seconds for balance, orders and positions to load. Fresh
+public frames do not extend this bound. A missing section emits one typed
+Timeout startup failure naming the missing sections and the last read failure;
+empty wallet lists never become a fabricated zero balance. Valid zero-valued
+wallet rows and empty orders/positions remain successful snapshots.
+Definitive required-read authentication/permission refusals surface immediately;
+read-permission failures do not deactivate an otherwise usable trading key.
+HyroTrader retains its separate private readiness policy. Suspended browsers
+cannot run timers: an expired bound is observed when the host resumes execution.
+Demo uses `api-demo.bybit.com` and `stream-demo.bybit.com/v5/private`; its public
+stream remains on the ordinary mainnet endpoint.

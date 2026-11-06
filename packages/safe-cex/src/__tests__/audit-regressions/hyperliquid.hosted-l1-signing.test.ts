@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createExchangeAPI } from '../../exchanges/hyperliquid/hyperliquid.api';
+import { createExchangeAPI } from '../reference/hyperliquid/hyperliquid.api';
 import { createWalletFromPrivateKey } from '../../utils/ethereum/createWalletFromPrivateKey';
 
 // Any 32-byte key works; the assertions never depend on the address.

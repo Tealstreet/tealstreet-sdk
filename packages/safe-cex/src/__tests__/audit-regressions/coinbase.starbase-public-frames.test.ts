@@ -3,16 +3,16 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { CoinbaseStarbaseProtocolError } from '../../exchanges/coinbase/coinbase.starbase';
+import { CoinbaseStarbaseProtocolError } from '../reference/coinbase/coinbase.starbase';
 import {
   buildCoinbaseStarbaseTickerChannel,
   normalizeCoinbaseStarbaseTickerPayload,
-} from '../../exchanges/coinbase/coinbase.starbase-public';
+} from '../reference/coinbase/coinbase.starbase-public';
 import {
   classifyCoinbaseStarbasePublicWebsocketFrame,
   COINBASE_STARBASE_PUBLIC_FRAME_CAPTURE_SHA256,
   COINBASE_STARBASE_PUBLIC_FRAME_CLASSIFIER_ACTIVATION_ENABLED,
-} from '../../exchanges/coinbase/coinbase.starbase-public-frames';
+} from '../reference/coinbase/coinbase.starbase-public-frames';
 import {
   STARBASE_CAPTURE_DERIVED_HEARTBEAT_FRAME,
   STARBASE_CAPTURE_DERIVED_PUBLIC_NOTIFICATION_FRAME,

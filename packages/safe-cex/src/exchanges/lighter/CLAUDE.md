@@ -209,6 +209,7 @@ Topics are tracked per channel and re-subscribed on reconnect.
 **Orderbook fallback behavior**:
 
 - On subscribe, primes orderbook immediately through `OrderApi.getOrderBookOrders()` (before waiting for first WS snapshot). The SDK maps the current official `/api/v1/orderBookOrders` route and normalizes its `{ bids, asks, remaining_base_amount }` response.
+- On public WS reconnects, active orderbook topics are primed through the same REST route, and public close events keep active books on REST fallback until live WS book frames resume. Do not make reconnect recovery wait only on the long stale-orderbook timer; DOM/depth/orderbook panels need a near-term book after account reloads or route changes.
 - That endpoint returns raw orders, so the public socket coalesces equal-price orders per side before sorting and calculating cumulative depth totals.
 - If initial WS snapshot does not arrive quickly, enables periodic REST orderbook fallback.
 - If WS orderbook goes stale, attempts recovery with re-subscribe first, then reconnect on repeated failure.
@@ -535,7 +536,7 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 - `candleApiCountLimit`: `500`
 - `disconnectWarningThreshold`: `60000` ms
 - `recvWindow`: `20000` ms
-- `TP/SL trigger types`: `LastPrice`, `MarkPrice`
+- `TP/SL trigger types`: `MarkPrice`
 - `supportsTrailingStopLoss`: `false`
 
 ## Testnet / Demo
@@ -556,9 +557,10 @@ As of 2026-05-23, Lighter should not be modeled as hedged in Tealstreet. Signed 
 - **Direct Private (Livenet)**: `wss://mainnet.zklighter.elliot.ai/stream`
 - **Direct Private (Testnet)**: `wss://testnet.zklighter.elliot.ai/stream`
 - **Direct Private (Robinhood)**: `wss://api.rh.lighter.xyz/stream`
-- **Proxy Public**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream?readonly=true`
-- **Proxy Private**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter/stream`
-- **Proxy Public/Private (Robinhood)**: `wss://fsjnpy143pbz.jp.tealstreet.io/lighter-rh/stream` (`tealstreet-ws-lighter-rh` deployment, Tokyo EKS)
+- **Proxy Public**: `wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream?readonly=true`
+- **Proxy Private**: `wss://fsjnpy143pbz-tyo.tealstreet.io/lighter/stream`
+- **Proxy Public/Private (Robinhood)**: `wss://fsjnpy143pbz-tyo.tealstreet.io/lighter-rh/stream`
+- These are containers on the Vultr tunnel hosts (AWS_EXIT step 5b); the hosted exchange server dials the same paths.
 
 When `tealstreetWsRoute` is enabled, both public and private Lighter WebSockets start on the Tealstreet proxy route. Public ticker/orderbook priming must not wait for direct-route failure promotion, because the order form and ticks chart depend on those public streams even when private connectivity is proxied. Keep rare fallbacks available for proxy-infra development: public ticker REST fallback should run while proxy WS is slow/down, and direct public WS should only be probed after repeated proxy-route failures before returning to proxy if that probe also fails.
 
@@ -589,7 +591,7 @@ When `tealstreetWsRoute` is enabled, both public and private Lighter WebSockets 
 
 6. **Both CANCELLED and CANCELED spellings**: The code handles both `CANCELLED` and `CANCELED` status strings and both `USER_CANCELLED` and `USER_CANCELED` cancel reasons.
 
-7. **Market and stop-order slippage**: Market orders are executed as slippage-bounded orders. Use a positive live reference price before applying 2% slippage; `mark` may lag initial ticker/orderbook data after startup, so fall back to side BBO, last, index, midpoint, or opposite-side BBO rather than signing price `0`. Lighter stop-loss/take-profit orders also require a `price` guard: official docs state that this price is the allowed slippage/worst acceptable execution price after the trigger. The web Margin module exposes `lighterStopSlippagePct` (default 1%, max 50%) and `lighter.exchange.ts` converts it into the conditional order `price`.
+7. **Market and stop-order slippage**: Market orders are executed as slippage-bounded orders. Use a positive live reference price before applying 2% slippage; `mark` may lag initial ticker/orderbook data after startup, so fall back to side BBO, last, index, midpoint, or opposite-side BBO rather than signing price `0`. Lighter stop-loss/take-profit orders trigger against mark price; the signed create-order payload has no trigger-source field. Lighter stop-loss/take-profit orders also require a `price` guard: official docs state that this price is the allowed slippage/worst acceptable execution price after the trigger. The web Margin module exposes `lighterStopSlippagePct` (default 1%, max 50%) and `lighter.exchange.ts` converts it into the conditional order `price`.
 
 8. **CORS forbidden**: The exchange metadata sets `forbidCors: true` and all REST traffic is routed through the Tealstreet exchange proxy.
 

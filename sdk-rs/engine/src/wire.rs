@@ -48,10 +48,19 @@ pub mod section {
     pub const UNDERLYING_TOKENS: u16 = 20;
     /// Current account read, not a new streaming observation.
     pub const ACCOUNT_READ: u16 = 21;
+    /// A venue's private state for frame-fed engines (`Venue::export_venue_state`):
+    /// a u32 length, then the venue's own bytes, padded.
+    pub const VENUE_STATE: u16 = 22;
+    /// Directly after ORDERS, once a read has proven a cover: how fresh the
+    /// order rows are (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.2). Revision 1:
+    /// u32 count, pad, f64 account cover (NaN when none), count u32 symbol
+    /// refs, pad, count f64 symbol covers, on the writer's clock.
+    pub const ORDERS_READ: u16 = 23;
 }
 
 pub mod status_flag {
     pub const HEDGED: u32 = 1;
+    pub const LATENCY_MEASURED: u32 = 2;
 }
 
 pub mod market_flag {
@@ -208,6 +217,14 @@ impl<'a> FrameWriter<'a> {
         }
     }
 
+    /// A `VENUE_STATE` section: the venue's own bytes behind a u32 length.
+    pub fn venue_state(&mut self, state: &[u8]) {
+        self.begin(section::VENUE_STATE);
+        self.u32(state.len() as u32);
+        self.buf.extend_from_slice(state);
+        self.end();
+    }
+
     pub fn f64(&mut self, value: f64) {
         self.buf.extend_from_slice(&value.to_le_bytes());
     }
@@ -276,6 +293,92 @@ pub fn sections(frame: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
         at += 8 + length;
         Some((kind, payload))
     })
+}
+
+/// The executions a frame's `FILLS` section carries (revisions 1 and 2), as
+/// `FrameApplier.fills` reads them. `None` for a malformed frame or section.
+pub fn fills(frame: &[u8]) -> Option<Vec<crate::engine::Fill>> {
+    let u32_at = |at: usize| {
+        frame
+            .get(at..at.checked_add(4)?)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+    };
+    let f64_at = |at: usize| {
+        frame
+            .get(at..at.checked_add(8)?)
+            .map(|bytes| f64::from_le_bytes(bytes.try_into().unwrap()))
+    };
+    if frame.len() < 16 || frame[..4] != MAGIC || u16::from_le_bytes([frame[4], frame[5]]) != FORMAT
+    {
+        return None;
+    }
+    let mut strings = None;
+    let mut section = None;
+    let mut at = 16;
+    for _ in 0..u16::from_le_bytes([frame[6], frame[7]]) {
+        let header = frame.get(at..at + 8)?;
+        let kind = u16::from_le_bytes([header[0], header[1]]);
+        let revision = u16::from_le_bytes([header[2], header[3]]);
+        let length = u32::from_le_bytes(header[4..8].try_into().ok()?) as usize;
+        let payload = at + 8;
+        frame.get(payload..payload.checked_add(length)?)?;
+        if kind == section::STRINGS {
+            strings = Some((payload, length));
+        } else if kind == section::FILLS && section.is_none() {
+            section = Some((payload, length, revision));
+        }
+        at = payload + length;
+    }
+    let Some((offset, length, revision)) = section else {
+        return Some(Vec::new());
+    };
+    if revision == 0 || revision > 2 {
+        return None;
+    }
+    let string = |index: u32| -> Option<Option<String>> {
+        if index == NONE {
+            return Some(None);
+        }
+        let (table, table_length) = strings?;
+        let count = u32_at(table)? as usize;
+        let bytes = table + 4 + 4 * (count + 1);
+        if (index as usize) >= count || bytes > table + table_length {
+            return None;
+        }
+        let start = u32_at(table + 4 + 4 * index as usize)? as usize;
+        let end = u32_at(table + 8 + 4 * index as usize)? as usize;
+        let text = frame.get(bytes + start..bytes + end)?;
+        Some(Some(std::str::from_utf8(text).ok()?.to_owned()))
+    };
+    let align8 = |n: usize| n.div_ceil(8) * 8;
+    let count = u32_at(offset)? as usize;
+    let data = align8(offset + 4 + count * 12);
+    let symbols = data + count * 16;
+    let ids = symbols + count * 4;
+    if ids + if revision == 2 { count * 4 } else { 0 } > offset + length {
+        return None;
+    }
+    (0..count)
+        .map(|i| {
+            let side = match u32_at(offset + 4 + (2 * count + i) * 4)? {
+                0 => crate::model::OrderSide::Buy,
+                1 => crate::model::OrderSide::Sell,
+                _ => return None,
+            };
+            Some(crate::engine::Fill {
+                id: if revision == 2 {
+                    string(u32_at(ids + i * 4)?)?
+                } else {
+                    None
+                },
+                order_id: string(u32_at(offset + 4 + i * 4)?)??,
+                symbol: string(u32_at(symbols + i * 4)?)??,
+                side,
+                price: f64_at(data + i * 16)?,
+                amount: f64_at(data + i * 16 + 8)?,
+            })
+        })
+        .collect()
 }
 
 /// A `BOOK` section's market and best bid and ask, if both sides have levels.

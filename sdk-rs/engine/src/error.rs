@@ -5,10 +5,12 @@ use serde::Serialize;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "test-support"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorKind {
     Rejected,
     InvalidInput,
+    InsufficientBalance,
     AuthInvalid,
     AuthExpired,
     AuthPermission,
@@ -25,6 +27,7 @@ impl ErrorKind {
         match self {
             Self::Rejected => "rejected",
             Self::InvalidInput => "invalidInput",
+            Self::InsufficientBalance => "insufficientBalance",
             Self::AuthInvalid => "authInvalid",
             Self::AuthExpired => "authExpired",
             Self::AuthPermission => "authPermission",
@@ -41,6 +44,7 @@ impl ErrorKind {
 /// Whether a write reached the venue. `None` on [`VenueError`] means the site
 /// has not classified it, never that it is safe to resend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "test-support"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum Outcome {
     NotSent,
@@ -79,6 +83,68 @@ pub struct BuilderAuthorization {
     pub authorized_raw: Option<u32>,
 }
 
+/// Closed history failure classifications; no raw venue text enters this field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ErrorCause {
+    HistoryRateLimited,
+    HistoryAuthInvalid,
+    HistoryAuthPermission,
+    HistoryInvalidParams,
+    HistoryVenueError,
+    HistoryHttpError,
+    HistoryDecode,
+    HistoryCursorStalled,
+    HistoryPageLimit,
+    HistoryWindowMismatch,
+    HistoryNetwork,
+    HistoryTimeout,
+}
+
+/// Closed native row schemas; never includes a symbol, identity or response text.
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistorySchema {
+    BitgetClassicFills,
+    BitgetUtaFills,
+    BitgetClassicOrders,
+    BitgetUtaOrders,
+    BitgetClassicIncome,
+    BitgetUtaIncome,
+    BitgetPublicTrades,
+    KrakenFills,
+    KrakenOrders,
+    KrakenIncome,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HistoryDecodeReason {
+    RowShape,
+    Identity,
+    Symbol,
+    Quantity,
+    FilledQuantity,
+    Timestamp,
+    TimestampOrder,
+    Side,
+    OrderStatus,
+    OrderType,
+    Fee,
+    Market,
+    Economics,
+}
+
+#[cfg(feature = "history-row-diagnostics")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryDecode {
+    pub schema: HistorySchema,
+    pub reason: HistoryDecodeReason,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VenueError {
@@ -89,6 +155,12 @@ pub struct VenueError {
     pub outcome: Option<Outcome>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub venue_code: Option<String>,
+    /// Closed, SDK-owned diagnostic classification, distinct from the venue's code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause_code: Option<ErrorCause>,
+    #[cfg(feature = "history-row-diagnostics")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_decode: Option<HistoryDecode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub venue_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,6 +169,24 @@ pub struct VenueError {
     pub partial: Option<Box<Partial>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub builder_authorization: Option<Box<BuilderAuthorization>>,
+    /// A stop or take-profit edit whose replacement was refused after its cancel landed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protection: Option<Protection>,
+    /// A command's fallback whose words describe its outcome better than its first
+    /// failed leg, without claiming `protection` (a put-back of unknown outcome).
+    #[serde(skip)]
+    pub presents: bool,
+}
+
+/// What a refused protective replacement left the position with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "test-support"), derive(serde::Deserialize))]
+#[serde(rename_all = "camelCase")]
+pub enum Protection {
+    /// The old order was placed again, unchanged; only its id differs.
+    Restored,
+    /// Placing the old order again failed too: the position has no such order.
+    Unprotected,
 }
 
 impl VenueError {
@@ -130,6 +220,19 @@ impl VenueError {
 
     pub fn venue_code(mut self, code: impl Into<String>) -> Self {
         self.venue_code = Some(code.into());
+        self
+    }
+
+    pub fn cause_code(mut self, code: ErrorCause) -> Self {
+        self.cause_code = Some(code);
+        self
+    }
+
+    #[cfg(feature = "history-row-diagnostics")]
+    pub fn history_decode(mut self, schema: HistorySchema, reason: HistoryDecodeReason) -> Self {
+        self.kind = Some(ErrorKind::Internal);
+        self.cause_code = Some(ErrorCause::HistoryDecode);
+        self.history_decode = Some(HistoryDecode { schema, reason });
         self
     }
 
@@ -258,6 +361,98 @@ impl From<&String> for VenueError {
     }
 }
 
+/// What a refusal naming the API key's IP whitelist tells the user to do.
+pub const IP_WHITELIST_HINT: &str = "The API key's IP whitelist does not include this server: add the new Tealstreet IPs to the key on the exchange";
+/// For a key refusal whose text leaves the cause open (bad key, IP or permissions).
+pub const IP_WHITELIST_MAYBE_HINT: &str =
+    "If the API key has an IP whitelist, add the new Tealstreet IPs to it";
+const IP_WHITELIST_WORDS: [&str; 10] = [
+    "whitelist",
+    "white list",
+    "allowlist",
+    "allow list",
+    "bound ip",
+    "unmatched ip",
+    "ip not allowed",
+    "ip is not allowed",
+    "ip restriction",
+    "invalid ip",
+];
+
+/// How plainly `text` blames the API key's IP whitelist, if it does.
+fn ip_whitelist_refusal(text: &str, auth_kind: bool) -> Option<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    // The site already says it (Bybit's own hint, GRVT, Bitget's WS login).
+    if lower.contains("tealstreet ip") {
+        return None;
+    }
+    if !lower
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| word == "ip")
+    {
+        return None;
+    }
+    let named = IP_WHITELIST_WORDS.iter().any(|word| lower.contains(word));
+    // "Bad API key, API secret or incorrect IP whitelist" names no single cause.
+    if named && !lower.contains(" or ") {
+        Some(IP_WHITELIST_HINT)
+    } else if named || auth_kind {
+        Some(IP_WHITELIST_MAYBE_HINT)
+    } else {
+        None
+    }
+}
+
+fn is_auth(kind: Option<ErrorKind>) -> bool {
+    matches!(
+        kind,
+        Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+    )
+}
+
+fn with_hint(message: &str, hint: &str) -> String {
+    let message = message.trim_end().trim_end_matches('.');
+    format!("{message}. {hint}")
+}
+
+/// `message` with the IP whitelist hint when it blames the key's IP whitelist,
+/// and whether it names that as the cause, for a notice that has only text.
+pub fn ip_whitelist_text(message: &str, kind: Option<ErrorKind>) -> Option<(String, bool)> {
+    let hint = ip_whitelist_refusal(message, is_auth(kind))?;
+    Some((with_hint(message, hint), hint == IP_WHITELIST_HINT))
+}
+
+impl VenueError {
+    /// The venue's code for an IP the key's whitelist excludes, whatever its text says.
+    pub fn ip_whitelist_refused(mut self) -> Self {
+        self.kind = Some(ErrorKind::AuthPermission);
+        if !self.message.to_ascii_lowercase().contains("tealstreet ip") {
+            self.message = with_hint(&self.message, IP_WHITELIST_HINT);
+        }
+        self
+    }
+
+    /// A refusal blaming the key's IP whitelist says to add the new IPs, and
+    /// one that names it as the cause is an auth permission refusal, whatever
+    /// the site classified: retrying cannot pass it.
+    pub fn with_ip_whitelist_hint(mut self) -> Self {
+        let auth = is_auth(self.kind);
+        let hint = ip_whitelist_refusal(&self.message, auth).or_else(|| {
+            self.venue_message
+                .as_deref()
+                .and_then(|venue| ip_whitelist_refusal(venue, auth))
+                .filter(|_| !self.message.to_ascii_lowercase().contains("tealstreet ip"))
+        });
+        if let Some(hint) = hint {
+            if hint == IP_WHITELIST_HINT && !auth {
+                self.kind = Some(ErrorKind::AuthPermission);
+            }
+            self.message = with_hint(&self.message, hint);
+        }
+        self
+    }
+}
+
 impl fmt::Display for VenueError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)
@@ -266,9 +461,138 @@ impl fmt::Display for VenueError {
 
 impl std::error::Error for VenueError {}
 
+/// What a non-stop order's edit cost: its cancel landed and nothing replaced it.
+pub fn order_gone_text(symbol: &str, unknown: bool) -> String {
+    if unknown {
+        format!(
+            "Your {symbol} order may be gone: it was canceled and its replacement's outcome is unknown. Check Open Orders"
+        )
+    } else {
+        format!("Your {symbol} order is gone: it was canceled and its replacement refused")
+    }
+}
+
+/// What a stop's edit cost: its cancel landed and nothing replaced it. One text for
+/// every venue, because a vanished stop is what the user must act on.
+pub fn stop_gone_text(
+    symbol: &str,
+    side: crate::model::OrderSide,
+    kind: crate::model::OrderType,
+    unknown: bool,
+) -> String {
+    use crate::model::{OrderSide, OrderType};
+    let position = match side {
+        OrderSide::Sell => "long",
+        OrderSide::Buy => "short",
+    };
+    let order = if kind == OrderType::TakeProfit {
+        "take profit"
+    } else {
+        "stop"
+    };
+    if unknown {
+        format!(
+            "Your {symbol} {position} position may have no {order}: the old {order} was canceled and its replacement's outcome is unknown. Check Open Orders"
+        )
+    } else {
+        format!(
+            "Your {symbol} {position} position has no {order}: the old {order} was canceled and its replacement refused"
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Venue refusals naming the key's IP whitelist, as the venues word them.
+    const NAMED: [&str; 9] = [
+        "Unmatched IP, please check your API key's bound IP addresses.",
+        "Your IP is not included in your API key's IP whitelist",
+        "Current IP does not match the bound IP",
+        "Invalid IP",
+        "Ip not in whitelist",
+        "Request IP is not whitelisted",
+        "The IP address is not in the API whitelist",
+        "IP_ILLEGAL: IP address not whitelisted",
+        "403 IP is not whitelisted",
+    ];
+
+    #[test]
+    fn a_refusal_naming_the_ip_whitelist_says_to_add_the_new_ips() {
+        for text in NAMED {
+            let error = VenueError::new(format!("Venue rejected the order: {text}"))
+                .kind(ErrorKind::Rejected)
+                .with_ip_whitelist_hint();
+            assert!(
+                error.message.ends_with(IP_WHITELIST_HINT),
+                "{}",
+                error.message
+            );
+            assert!(
+                error.message.contains(text.trim_end_matches('.')),
+                "{}",
+                error.message
+            );
+            assert_eq!(error.kind, Some(ErrorKind::AuthPermission), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_key_refusal_that_leaves_the_cause_open_only_suggests_the_whitelist() {
+        for text in [
+            "Invalid API-key, IP, or permissions for action.",
+            "Bad API key, API secret or incorrect IP whitelist.",
+        ] {
+            let error = VenueError::new(text)
+                .kind(ErrorKind::AuthInvalid)
+                .with_ip_whitelist_hint();
+            assert!(
+                error.message.ends_with(IP_WHITELIST_MAYBE_HINT),
+                "{}",
+                error.message
+            );
+            assert_eq!(error.kind, Some(ErrorKind::AuthInvalid), "{text}");
+        }
+    }
+
+    #[test]
+    fn other_failures_and_a_site_that_already_says_it_are_left_alone() {
+        for (text, kind) in [
+            (
+                "Way too much request weight used; IP banned until 1700000000000",
+                ErrorKind::RateLimited,
+            ),
+            ("Too many requests from this IP", ErrorKind::RateLimited),
+            ("Order price 10010.5 out of range", ErrorKind::Rejected),
+            ("API key is invalid.", ErrorKind::AuthInvalid),
+            (
+                "Bybit refused this API key from this IP address: the key is restricted to other IPs. Add the current Tealstreet IPs to the key's IP allowlist on Bybit, or create a new key",
+                ErrorKind::AuthPermission,
+            ),
+        ] {
+            let error = VenueError::new(text).kind(kind).with_ip_whitelist_hint();
+            assert_eq!(error.message, text);
+            assert_eq!(error.kind, Some(kind));
+        }
+    }
+
+    #[test]
+    fn the_venue_message_counts_and_the_hint_is_added_once() {
+        let error = VenueError::new("Bitunix account read failed: code 10004")
+            .venue_message("The current ip is not in the apikey ip whitelist")
+            .with_ip_whitelist_hint();
+        assert!(
+            error.message.ends_with(IP_WHITELIST_HINT),
+            "{}",
+            error.message
+        );
+        assert_eq!(error.clone().with_ip_whitelist_hint(), error);
+        let coded = VenueError::new("KuCoin rejected the order (400006)").ip_whitelist_refused();
+        assert_eq!(coded.kind, Some(ErrorKind::AuthPermission));
+        assert_eq!(coded.clone().ip_whitelist_refused(), coded);
+        assert_eq!(coded.clone().with_ip_whitelist_hint(), coded);
+    }
 
     #[test]
     fn builder_approval_details_are_optional_and_keep_the_legacy_text() {
@@ -398,6 +722,40 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&error).unwrap(),
             r#"{"message":"Too many requests","kind":"rateLimited","outcome":"notSent","venueCode":"10006","venueMessage":"Too many visits","retryAfterMs":1000.0}"#
+        );
+    }
+
+    #[test]
+    fn a_closed_cause_serializes_separately_from_the_venue_code() {
+        let error = VenueError::new("read refused")
+            .kind(ErrorKind::RateLimited)
+            .cause_code(ErrorCause::HistoryRateLimited)
+            .venue_code("100410");
+        let json = serde_json::to_value(error).unwrap();
+        assert_eq!(json["causeCode"], "HISTORY_RATE_LIMITED");
+        assert_eq!(json["venueCode"], "100410");
+        assert!(std::mem::size_of::<VenueError>() < 128);
+    }
+
+    #[test]
+    fn a_vanished_order_names_its_symbol() {
+        assert_eq!(
+            super::order_gone_text("BTCUSDT", false),
+            "Your BTCUSDT order is gone: it was canceled and its replacement refused"
+        );
+        assert!(super::order_gone_text("ETHUSDT", true).contains("Your ETHUSDT order may be gone"));
+    }
+
+    #[test]
+    fn a_vanished_stop_names_its_symbol_and_position() {
+        use crate::model::{OrderSide, OrderType};
+        assert_eq!(
+            super::stop_gone_text("BTCUSDT", OrderSide::Sell, OrderType::StopLoss, false),
+            "Your BTCUSDT long position has no stop: the old stop was canceled and its replacement refused"
+        );
+        assert!(
+            super::stop_gone_text("ETHUSDT", OrderSide::Buy, OrderType::TakeProfit, true)
+                .starts_with("Your ETHUSDT short position may have no take profit")
         );
     }
 }

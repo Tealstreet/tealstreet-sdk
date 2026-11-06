@@ -169,6 +169,60 @@ fn complete(e: &mut Engine<Okx>, mut requests: Vec<Action>, orders: &str, at: f6
     }
 }
 
+/// Answers only reads already out; a later re-read, a fresh venue read, stays unanswered.
+fn complete_inflight(
+    e: &mut Engine<Okx>,
+    requests: Vec<Action>,
+    orders: &str,
+    at: f64,
+) -> Vec<Action> {
+    let mut later = Vec::new();
+    let mut requests = requests;
+    while let Some(a) = requests.pop() {
+        let Action::Http(r) = &a else {
+            continue;
+        };
+        let paged = r.url.contains("account-position-risk")
+            || r.url.contains("/positions?")
+            || r.url.contains("orders-pending");
+        if !paged {
+            continue;
+        }
+        let body = if r.url.contains("account-position-risk") {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else if r.url.contains("/positions?") {
+            envelope(POSITION)
+        } else {
+            envelope(orders)
+        };
+        reply(e, &a, &body, at);
+        later.extend(prepared(e, at));
+    }
+    later
+}
+
+// A startup read running when the stream subscribed may have missed what it delivered.
+#[test]
+fn a_startup_read_in_flight_at_the_subscribe_is_read_again() {
+    let (mut e, _, _, pending) = startup();
+    let mut requests = pending;
+    let mut reads = 0;
+    while let Some(a) = requests.pop() {
+        let Action::Http(r) = &a else {
+            continue;
+        };
+        reads += usize::from(r.url.contains("/positions?"));
+        let body = if r.url.contains("/positions?") {
+            envelope(POSITION)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &a, &body, 5.0);
+        requests.extend(prepared(&mut e, 5.0));
+    }
+    assert_eq!(reads, 2);
+}
+
 #[test]
 fn authenticates_two_sockets_and_maps_contract_units_and_balance() {
     let (mut e, _, _, pending) = startup();
@@ -202,7 +256,7 @@ fn terminal_push_wins_over_delayed_snapshot_and_fills_dedupe() {
     let frame = format!(r#"{{"arg":{{"channel":"orders"}},"data":[{filled}]}}"#);
     ws(&mut e, private, &frame);
     ws(&mut e, private, &frame);
-    complete(&mut e, pending, ORDER, 5.0);
+    complete_inflight(&mut e, pending, ORDER, 5.0);
     assert_eq!(e.store().orders().len(), 1);
     assert_eq!(
         e.store().orders()[0].status,
@@ -237,7 +291,7 @@ fn position_tombstone_and_new_equity_win_over_inflight_rest() {
         private,
         r#"{"arg":{"channel":"account"},"data":[{"totalEq":"6000"}]}"#,
     );
-    complete(&mut e, pending, "", 5.0);
+    complete_inflight(&mut e, pending, "", 5.0);
     assert!(e.store().positions().is_empty());
     assert_eq!(e.store().balance().total, 6000.0);
 }
@@ -1098,4 +1152,67 @@ fn market_maker_and_liquidity_program_orders_keep_their_ord_id() {
         assert_eq!(o.filled, 0.01, "{kind}");
         assert_eq!(o.client_order_id.as_deref(), Some("caller123"), "{kind}");
     }
+}
+
+// Real order: the parent's effective arrives first on the business socket.
+#[test]
+fn triggered_order_row_survives_its_parent_algo_going_effective() {
+    let (mut e, private, business, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    ws(
+        &mut e,
+        business,
+        r#"{"arg":{"channel":"orders-algo"},"data":[{"instId":"BTC-USDT-SWAP","algoId":"algo9","ordId":"900","ordType":"trigger","state":"effective","side":"buy","sz":"4","triggerPx":"39000","triggerPxType":"last","ordPx":"39000"}]}"#,
+    );
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"900","algoId":"algo9","ordType":"limit","state":"live","side":"buy","sz":"4","accFillSz":"0","px":"39000"}]}"#,
+    );
+    assert!(e.store().order("900").is_some());
+}
+
+#[test]
+fn a_failed_algo_is_reported_once_and_ends() {
+    for state in ["order_failed", "partially_failed"] {
+        let (mut e, _, business, pending) = startup();
+        complete(&mut e, pending, "", 5.0);
+        let row = r#"{"instId":"BTC-USDT-SWAP","algoId":"algo5","ordType":"conditional","state":"live","side":"sell","sz":"4","slTriggerPx":"36000","slOrdPx":"-1","reduceOnly":"true"}"#;
+        let frame = |row: &str| format!(r#"{{"arg":{{"channel":"orders-algo"}},"data":[{row}]}}"#);
+        ws(&mut e, business, &frame(row));
+        actions(&mut e);
+        let failed = row.replace("\"live\"", &format!("\"{state}\""));
+        ws(&mut e, business, &frame(&failed));
+        ws(&mut e, business, &frame(&failed));
+        let notices = actions(&mut e)
+            .iter()
+            .filter(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.level == Level::Error && event.message.contains("algo5")))
+            .count();
+        assert_eq!(notices, 1, "{state}");
+        assert_eq!(
+            e.store().order("algo5_sl").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Canceled,
+            "{state}"
+        );
+    }
+}
+
+// Whether OKX sends these is unknown; one such field must not hide a row.
+#[test]
+fn a_null_number_or_escape_in_a_row_keeps_it() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, "", 5.0);
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT-SWAP","ordId":"501","ordType":"limit","state":"live","side":"buy","sz":4,"accFillSz":"0","px":"38000","lever":null,"reduceOnly":null,"clOrdId":"a\/b"}]}"#,
+    );
+    let order = e.store().order("501").expect("row kept");
+    assert_eq!(order.client_order_id.as_deref(), Some("a/b"));
+    ws(
+        &mut e,
+        private,
+        r#"{"arg":{"channel":"positions"},"data":[{"instId":"BTC-USDT-SWAP","instType":"SWAP","pos":"2","posSide":"net","avgPx":"38000","markPx":"38000","lever":null,"upl":"0","liqPx":"","mgnMode":"cross","imr":null,"mmr":"1","ccy":"USDT"}]}"#,
+    );
+    assert!(e.store().positions().iter().any(|p| p.contracts != 0.0));
 }

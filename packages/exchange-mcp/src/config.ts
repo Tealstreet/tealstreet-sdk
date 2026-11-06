@@ -2,7 +2,7 @@ import type { ExchangeName, ExchangeOptions, PayloadSigner } from '@tealstreet/s
 
 import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { getRegisteredExchangeNames } from '@tealstreet/safe-cex/src/exchanges/registry';
-import { isRustVenue } from '@tealstreet/safe-cex/src/exchanges/rust/rust.exchange';
+import { assertBetaVenue } from '@tealstreet/safe-cex/src/exchanges/rust/betaVenues';
 
 export type ServerConfig = {
   exchange: ExchangeName;
@@ -27,9 +27,10 @@ const optional = (env: NodeJS.ProcessEnv, name: string): string | undefined => e
 export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
   const exchange = optional(env, 'EXCHANGE');
   const names = getRegisteredExchangeNames();
-  if (!exchange || !names.includes(exchange as ExchangeName)) {
+  if (!exchange) {
     throw new Error(`EXCHANGE must be one of: ${names.join(', ')}`);
   }
+  assertBetaVenue(exchange);
 
   const testnet = optional(env, 'EXCHANGE_TESTNET');
   if (testnet !== undefined && testnet !== 'true' && testnet !== 'false') {
@@ -39,9 +40,6 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
   const engine = optional(env, 'EXCHANGE_ENGINE');
   if (engine !== undefined && engine !== 'rust') {
     throw new Error('EXCHANGE_ENGINE must be rust (or unset for the venue default)');
-  }
-  if (engine === 'rust' && !isRustVenue(exchange as ExchangeName)) {
-    throw new Error(`EXCHANGE_ENGINE=rust is not available on ${exchange}`);
   }
 
   const metadata = getExchangeMetadata(exchange as ExchangeName);

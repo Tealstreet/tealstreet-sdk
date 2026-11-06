@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PolymarketExchange } from '../../exchanges/polymarket/polymarket.exchange';
+import { PolymarketExchange } from '../reference/polymarket/polymarket.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 describe('Polymarket price history uses raw API minutes and caller milliseconds', () => {

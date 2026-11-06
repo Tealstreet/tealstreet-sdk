@@ -523,7 +523,7 @@ and the reserved word `static`, reducing 31 fallbacks to four.
 Round 2 passed eight wire tests, six generator tests, the same nine Node tests,
 all local parity/build/lint gates, and the full 105-file TypeScript byte check.
 
-Round 3 derives `LighterRobinhood`, `TealstreetDex`, `InProcess`, and `Static`,
+Round 3 derives `LighterRobinhood`, `InProcess`, and `Static`,
 leaving **zero** positional fallback variants in the current production model.
 Negative controls still cover genuine reserved `Self`, separator/camel collisions,
 unsupported punctuation and invalid identifier results. The case-sensitive

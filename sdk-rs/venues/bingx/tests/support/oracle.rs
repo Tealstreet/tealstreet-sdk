@@ -12,13 +12,25 @@ pub struct Credentials {
     pub secret: String,
 }
 
-#[derive(Clone, Serialize)]
-#[serde(untagged)]
+#[derive(Clone)]
 enum Param {
     Text(String),
     Number(f64),
     Integer(u64),
     Boolean(bool),
+}
+
+impl Serialize for Param {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Text(text) => serializer.serialize_str(text),
+            Self::Number(_) => serde_json::value::RawValue::from_string(self.text())
+                .map_err(serde::ser::Error::custom)?
+                .serialize(serializer),
+            Self::Integer(value) => serializer.serialize_u64(*value),
+            Self::Boolean(value) => serializer.serialize_bool(*value),
+        }
+    }
 }
 
 impl Param {
@@ -84,6 +96,7 @@ impl Params {
         now: f64,
     ) -> RequestParts {
         let mut headers = vec![("X-SOURCE-KEY", "Tealstreet".into())];
+        let mut signed = None;
         if let Some(c) = credentials {
             let read = c.read.as_ref().filter(|_| method == Method::Get);
             let key = read.map_or(c.key.as_str(), |r| &r.key);
@@ -93,18 +106,29 @@ impl Params {
                 self = self.num("timestamp", safe_cex_engine::time::wire_stamp_ms(now));
                 let signature =
                     hmac_sha256(secret.as_bytes(), self.query().as_bytes(), Encoding::Hex);
-                self = self.str("signature", &signature);
+                signed = Some(signature);
             }
         }
         let url = format!("{}{path}", crate::paths::REST);
         if method == Method::Post {
             headers.push(("Content-Type", "application/json".into()));
-            let body = (!self.0.is_empty())
-                .then(|| serde_json::to_string(&self.0).expect("finite request parameters"));
+            let body = (!self.0.is_empty()).then(|| {
+                let json = serde_json::to_string(&self.0).expect("finite request parameters");
+                match &signed {
+                    Some(signature) => format!(
+                        r#"{},"signature":"{signature}"}}"#,
+                        json.strip_suffix('}').unwrap_or(&json)
+                    ),
+                    None => json,
+                }
+            });
             (url, headers, body)
         } else {
             headers.push(("Content-Type", "application/json, charset=utf-8".into()));
-            let query = self.query();
+            let mut query = self.query();
+            if let Some(signature) = &signed {
+                query = format!("{query}&signature={signature}");
+            }
             (
                 if query.is_empty() {
                     url

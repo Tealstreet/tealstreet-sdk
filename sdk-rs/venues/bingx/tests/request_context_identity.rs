@@ -574,7 +574,7 @@ fn real_local_provider_preserves_primary_secondary_wire_and_exact_codec() {
             )
         };
         assert_eq!(request.method, Method::Get);
-        assert_eq!(request.url, format!("{URL}?signature={mac}&timestamp=1000"));
+        assert_eq!(request.url, format!("{URL}?timestamp=1000&signature={mac}"));
         assert_eq!(
             request.headers,
             vec![

@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { liveSmokeProfile, LIVE_SMOKE_VENUES } from './live-smoke-venues.mjs';
+import { liveSmokeCredentialSets, liveSmokeProfile, LIVE_SMOKE_VENUES } from './live-smoke-venues.mjs';
 
-const env = new Proxy({}, { get: (_, key) => key.endsWith('SIGNER_TYPE') ? '0' :
+const env = new Proxy({}, { get: (_, key) => key.includes('_HYPERLIQUID_') && key.endsWith('SIGNER_ADDRESS') ? '0x' + '11'.repeat(20) :
+  key.includes('_HYPERLIQUID_') && key.endsWith('ACCOUNT_ADDRESS') ? '0x' + '33'.repeat(20) :
+  key.endsWith('SIGNER_TYPE') ? '0' :
   key.endsWith('API_VERSION') ? 'v3' : 'fake-credential' });
 
 test('OKX smoke profiles use default TLS on the exact live/demo entity host', () => {
@@ -23,7 +25,7 @@ test('OKX smoke profiles use default TLS on the exact live/demo entity host', ()
 test('every registry name has an explicitly reviewed environment or fails closed', () => {
   for (const venue of LIVE_SMOKE_VENUES) {
     // KuCoin Spot needs a separate host and sizing review.
-    if (['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'].includes(venue)) {
+    if (['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binanceoptions', 'kucoinspot', 'txflow', 'lighter-robinhood'].includes(venue)) {
       assert.throws(() => liveSmokeProfile(venue, 'mainnet', env), /no reviewed/);
       continue;
     }
@@ -41,14 +43,14 @@ test('every registry name has an explicitly reviewed environment or fails closed
 
 test('unreviewed profiles refuse all modes before credential access', () => {
   const env = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
-  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'bitunix', 'binancepm', 'binanceinverse', 'binancespot', 'kucoinspot', 'txflow', 'lighter-robinhood', 'hyperliquidspot', 'krakenspot'])
+  for (const venue of ['hyrotrader', 'grvt', 'breakoutprop', 'binancepm', 'binanceinverse', 'binanceoptions', 'kucoinspot', 'txflow', 'lighter-robinhood'])
     for (const mode of [undefined, 'testnet', 'demo', 'mainnet'])
       assert.throws(() => liveSmokeProfile(venue, mode, env), /no reviewed/);
 });
 
 test('production-only modes refuse before credentials can be read', () => {
   const poisonedEnv = new Proxy({}, { get: () => { throw new Error('credentials accessed'); } });
-  for (const venue of ['kucoin', 'coinbase', 'coinbasespot', 'backpack', 'mexc', 'bingx', 'weex', 'bitrue', 'polymarket']) {
+  for (const venue of ['kucoin', 'coinbase', 'coinbasespot', 'backpack', 'mexc', 'bingx', 'weex', 'bitrue', 'bitunix', 'polymarket', 'krakenspot']) {
     assert.throws(() => liveSmokeProfile(venue, undefined, poisonedEnv), /explicit --mainnet/);
     assert.throws(() => liveSmokeProfile(venue, 'testnet', poisonedEnv), /unsupported/);
     assert.throws(() => liveSmokeProfile(venue, 'demo', poisonedEnv), /unsupported/);
@@ -195,4 +197,153 @@ test('reviewed venue profiles enable post-only whenever the engine supports it',
     catch { try { profile = liveSmokeProfile(venue, 'mainnet', env); } catch { continue; } }
     assert.equal(profile.postOnly, !['bitrue', 'polymarket'].includes(venue), venue);
   }
+});
+
+test('Binance Spot defaults to its testnet and allows exactly its own hosts', () => {
+  const spot = liveSmokeProfile('binancespot', undefined, env);
+  assert.equal(spot.mode, 'testnet');
+  assert.equal(spot.options.testnet, true);
+  assert.equal(spot.leverage, 'fixed');
+  assert.equal(spot.allowUrl('https://testnet.binance.vision/api/v3/order'), true);
+  assert.equal(spot.allowUrl('wss://ws-api.testnet.binance.vision/ws-api/v3', 'ws'), true);
+  assert.equal(spot.allowUrl('https://api.binance.com/api/v3/order'), false);
+  assert.equal(spot.allowUrl('https://demo-fapi.binance.com/fapi/v1/order'), false);
+  const mainnet = liveSmokeProfile('binancespot', 'mainnet', env);
+  assert.equal(mainnet.options.testnet, false);
+  assert.equal(mainnet.allowUrl('wss://ws-api.binance.com:443/ws-api/v3', 'ws'), true);
+  assert.equal(mainnet.allowUrl('wss://stream.binance.com:9443/ws', 'ws'), true);
+  assert.equal(mainnet.allowUrl('wss://stream.binance.com/ws', 'ws'), false);
+  assert.equal(mainnet.allowUrl('https://fapi.binance.com/fapi/v1/order'), false);
+  assert.throws(() => liveSmokeProfile('binancespot', 'mainnet', {}),
+    /^Error: Missing environment variable RUST_LIVE_SMOKE_BINANCESPOT_MAINNET_KEY$/);
+});
+
+test('Hyperliquid Spot uses the same agent and account fields with fixed leverage', () => {
+  const prefix = 'RUST_LIVE_SMOKE_HYPERLIQUID_MAINNET_';
+  const values = { [prefix + 'SIGNER_ADDRESS']: '0x' + '11'.repeat(20),
+    [prefix + 'PRIVATE_KEY']: '0x' + '22'.repeat(32),
+    [prefix + 'ACCOUNT_ADDRESS']: '0x' + '33'.repeat(20) };
+  const perps = liveSmokeProfile('hyperliquid', 'mainnet', values);
+  const spot = liveSmokeProfile('hyperliquidspot', 'mainnet', values);
+  assert.deepEqual(spot.credentialEnv, perps.credentialEnv);
+  assert.deepEqual(spot.options, perps.options);
+  assert.notEqual(spot.options.key, spot.options.applicationId);
+  assert.equal(spot.leverage, 'fixed');
+  assert.equal(spot.postOnly, true);
+  assert.equal(spot.options.publicDataOnly, false);
+  spot.validateRequest({ method: 'POST', url: 'https://api.hyperliquid.xyz/exchange' });
+  spot.validateSocket('wss://api-ui.hyperliquid.xyz/ws');
+  for (const url of ['https://api.hyperliquid-testnet.xyz/info',
+    'https://api.hyperliquid.xyz.evil.example/exchange', 'https://api.hyperliquid.xyz:123/exchange'])
+    assert.throws(() => spot.validateRequest({ method: 'POST', url }), /outside/);
+  assert.throws(() => spot.validateSocket('wss://api.hyperliquid-testnet.xyz/ws'), /outside/);
+  const poisoned = new Proxy({}, { get: () => { throw Error('credentials accessed'); } });
+  assert.throws(() => liveSmokeProfile('hyperliquidspot', 'demo', poisoned), /unsupported/);
+  assert.throws(() => liveSmokeProfile('hyperliquidspot', 'mainnet', {}), /SIGNER_ADDRESS/);
+  const testnet = liveSmokeProfile('hyperliquidspot', undefined, env);
+  assert.equal(testnet.mode, 'testnet');
+  assert.equal(testnet.allowUrl('https://api.hyperliquid.xyz/info'), false);
+});
+
+
+test('Hyperliquid smoke refuses an account wallet supplied as the agent', () => {
+  const prefix = 'RUST_LIVE_SMOKE_HYPERLIQUID_MAINNET_';
+  const values = { [prefix + 'SIGNER_ADDRESS']: '0x' + 'aa'.repeat(20),
+    [prefix + 'PRIVATE_KEY']: 'fixture-agent-secret', [prefix + 'ACCOUNT_ADDRESS']: '0x' + 'AA'.repeat(20) };
+  for (const venue of ['hyperliquid', 'hyperliquidspot'])
+    assert.throws(() => liveSmokeProfile(venue, 'mainnet', values), /^Error: Hyperliquid smoke requires an agent wallet distinct from the account$/);
+});
+
+test('Kraken Spot requires explicit mainnet before touching its separate credentials', () => {
+  const poisoned = new Proxy({}, { get() { throw new Error('credentials accessed'); } });
+  assert.throws(() => liveSmokeProfile('krakenspot', undefined, poisoned), /explicit --mainnet/);
+  for (const mode of ['testnet', 'demo'])
+    assert.throws(() => liveSmokeProfile('krakenspot', mode, poisoned), /unsupported/);
+  const profile = liveSmokeProfile('krakenspot', 'mainnet', env);
+  assert.equal(profile.credentialEnv.key, 'RUST_LIVE_SMOKE_KRAKEN_SPOT_MAINNET_KEY');
+  assert.equal(profile.credentialEnv.secret, 'RUST_LIVE_SMOKE_KRAKEN_SPOT_MAINNET_SECRET');
+  assert.equal(profile.leverage, 'fixed');
+  assert.equal(profile.postOnly, true);
+  assert.equal(profile.options.testnet, false);
+  assert.equal(profile.options.publicDataOnly, false);
+});
+
+test('Kraken Spot endpoint fences exclude Futures, beta, impostor hosts and alternate ports', () => {
+  const profile = liveSmokeProfile('krakenspot', 'mainnet', env);
+  profile.validateRequest({ method: 'POST', url: 'https://api.kraken.com/0/private/AddOrder' });
+  profile.validateSocket('wss://ws.kraken.com/v2');
+  profile.validateSocket('wss://ws-auth.kraken.com/v2');
+  for (const url of ['https://futures.kraken.com/derivatives/api/v3/sendorder',
+    'https://demo-futures.kraken.com/derivatives/api/v3/sendorder',
+    new URL('/0/private/AddOrder', ['https://api.kraken.com', 'evil.example'].join('.')).href,
+    new URL('/0/private/AddOrder', 'https://api.kraken.com:8443').href])
+    assert.throws(() => profile.validateRequest({ method: 'POST', url }), /outside/);
+  for (const url of ['wss://beta-ws.kraken.com/v2', 'wss://beta-ws-auth.kraken.com/v2',
+    'wss://futures.kraken.com/ws/v1', 'wss://ws-auth.kraken.com:8443/v2'])
+    assert.throws(() => profile.validateSocket(url), /outside/);
+});
+
+test('Kraken Spot never borrows Futures keys and the Futures default stays demo', () => {
+  const futuresOnly = { RUST_LIVE_SMOKE_KRAKEN_MAINNET_KEY: 'fixture-key',
+    RUST_LIVE_SMOKE_KRAKEN_MAINNET_SECRET: 'fixture-secret' };
+  assert.throws(() => liveSmokeProfile('krakenspot', 'mainnet', futuresOnly), /KRAKEN_SPOT_MAINNET_KEY/);
+  assert.equal(liveSmokeProfile('kraken', undefined, env).mode, 'demo');
+});
+
+test('stdin credentials replace the environment and refuse unknown or missing fields by name only', () => {
+  const environment = { RUST_LIVE_SMOKE_BITUNIX_MAINNET_KEY: 'env-key-not-used', RUST_LIVE_SMOKE_BITUNIX_MAINNET_SECRET: 'env-secret-not-used' };
+  const profile = liveSmokeProfile('bitunix', 'mainnet', environment, { credentials: { KEY: 'stdin-key', SECRET: 'stdin-secret' } });
+  assert.equal(profile.options.key, 'stdin-key');
+  assert.equal(profile.options.secret, 'stdin-secret');
+  assert.deepEqual(profile.secretValues.sort(), ['stdin-key', 'stdin-secret']);
+  assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', environment, { credentials: { KEY: 'stdin-key' } }),
+    /^Error: Missing credential field SECRET$/);
+  assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', {}, { credentials: { KEY: 'stdin-key', SECRET: 'stdin-secret', PASSWORD: 'value-must-not-appear' } }),
+    (error) => error.message === 'Unknown credential field PASSWORD');
+  assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', {}, { credentials: { 'inverted-secret-value': 'KEY', SECRET: 'stdin-secret' } }),
+    (error) => error.message === 'Unknown credential field');
+  assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', {}, { credentials: { KEY: 'stdin-key', SECRET: 'abc' } }),
+    (error) => error.message.includes('at least four') && !error.message.includes('abc'));
+  for (const credentials of [null, [], 'text']) assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', {}, { credentials }), /one JSON object/);
+});
+
+test('a dry run may resolve a profile without credentials', () => {
+  const profile = liveSmokeProfile('bitunix', 'mainnet', {}, { allowMissing: true });
+  assert.deepEqual(profile.secrets, {});
+  assert.equal(profile.minimal, true);
+  assert.equal(liveSmokeProfile('hyperliquid', 'testnet', {}, { allowMissing: true }).mode, 'testnet');
+  assert.throws(() => liveSmokeProfile('bitunix', 'mainnet', {}), /Missing environment variable RUST_LIVE_SMOKE_BITUNIX_MAINNET_KEY/);
+});
+
+test('only mainnet runs use the minimal sequence', () => {
+  assert.equal(liveSmokeProfile('binance', 'testnet', env).minimal, false);
+  assert.equal(liveSmokeProfile('okx', 'demo', env).minimal, false);
+  assert.equal(liveSmokeProfile('krakenspot', 'mainnet', env).minimal, true);
+});
+
+test('OKX EEA keys are a separate credential family from global OKX', () => {
+  assert.equal(liveSmokeProfile('okx', 'demo', env).credentialEnv.key, 'RUST_LIVE_SMOKE_OKX_DEMO_KEY');
+  assert.equal(liveSmokeProfile('okxdemo', 'demo', env).credentialEnv.key, 'RUST_LIVE_SMOKE_OKX_DEMO_KEY');
+  assert.equal(liveSmokeProfile('okxeu', 'demo', env).credentialEnv.key, 'RUST_LIVE_SMOKE_OKX_EEA_DEMO_KEY');
+  assert.equal(liveSmokeProfile('okxeudemo', 'demo', env).credentialEnv.passphrase, 'RUST_LIVE_SMOKE_OKX_EEA_DEMO_PASSPHRASE');
+});
+
+test('credential sets use the test environment where one exists and mainnet only otherwise', () => {
+  const sets = Object.fromEntries(liveSmokeCredentialSets().map((set) => [set.entry, set]));
+  const entryOf = (venue) => Object.values(sets).find((set) => set.venues.includes(venue))?.entry;
+  assert.deepEqual(Object.fromEntries(['binance', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'okx', 'okxdemo',
+    'okxeu', 'okxeudemo', 'bitget', 'bitgetusdc', 'kraken', 'krakenspot', 'hyperliquid', 'hyperliquidspot', 'lighter', 'paradex',
+    'bitunix', 'phemex', 'bingx', 'apexomni', 'blofin', 'cryptocom', 'asterdex'].map((venue) => [venue, entryOf(venue)])), {
+    binance: 'BINANCE_TESTNET', binancespot: 'BINANCESPOT_TESTNET', bybit: 'BYBIT_TESTNET', bybitinverse: 'BYBIT_TESTNET',
+    bybitspot: 'BYBIT_TESTNET', bybitdemo: 'BYBIT_DEMO', okx: 'OKX_DEMO', okxdemo: 'OKX_DEMO', okxeu: 'OKX_EEA_DEMO',
+    okxeudemo: 'OKX_EEA_DEMO', bitget: 'BITGET_TESTNET', bitgetusdc: 'BITGET_TESTNET', kraken: 'KRAKEN_DEMO',
+    krakenspot: 'KRAKEN_SPOT_MAINNET', hyperliquid: 'HYPERLIQUID_TESTNET', hyperliquidspot: 'HYPERLIQUID_TESTNET',
+    lighter: 'LIGHTER_TESTNET', paradex: 'PARADEX_TESTNET', bitunix: 'BITUNIX_MAINNET', phemex: 'PHEMEX_TESTNET',
+    bingx: 'BINGX_MAINNET', apexomni: 'APEXOMNI_TESTNET', blofin: 'BLOFIN_DEMO', cryptocom: 'CRYPTOCOM_TESTNET',
+    asterdex: 'ASTERDEX_TESTNET',
+  });
+  assert.deepEqual(sets.HYPERLIQUID_TESTNET.fields, ['SIGNER_ADDRESS', 'PRIVATE_KEY', 'ACCOUNT_ADDRESS']);
+  assert.deepEqual(sets.OKX_EEA_DEMO.fields, ['KEY', 'SECRET', 'PASSPHRASE']);
+  assert.ok(sets.ASTERDEX_TESTNET.optionalFields.includes('API_VERSION'));
+  assert.throws(() => liveSmokeCredentialSets(['binancepm']), /no reviewed live-smoke endpoint profile/);
 });

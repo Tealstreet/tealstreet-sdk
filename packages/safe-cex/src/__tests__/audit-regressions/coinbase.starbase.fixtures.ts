@@ -4,7 +4,7 @@ import type {
   CoinbaseStarbaseJsonRpcRequest,
   CoinbaseStarbaseJsonRpcSuccess,
   CoinbaseStarbaseTestResult,
-} from '../../exchanges/coinbase/coinbase.starbase';
+} from '../reference/coinbase/coinbase.starbase';
 
 export const STARBASE_AUTH_REQUEST: CoinbaseStarbaseJsonRpcRequest<{
   grant_type: 'coinbase_cdp';

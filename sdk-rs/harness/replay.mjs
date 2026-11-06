@@ -831,6 +831,7 @@ async function runTs() {
       await (accountReady || venue.polling ? Promise.all([started, subscribed]) : subscribed);
       await venue.prepareTsReady?.(exchange, { isPrivate });
       await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
+      if (venue.tsBooksBeforeStart) await until(() => bookSymbols.every((symbol) => finalBooks[symbol]), 'TS first books');
       const loaded = () =>
         accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
       await until(() => !(isPrivate || venue.polling) || loaded(), `TS account startup (${JSON.stringify(store.loaded)})`);

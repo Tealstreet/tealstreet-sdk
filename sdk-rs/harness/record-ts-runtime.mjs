@@ -22,7 +22,9 @@ const safeFields = (value) => {
 
 export function validateTsRecording({ name, venue = venueOf(name), options = {}, books, seconds, env = process.env }) {
   safeFields(options);
-  assert(!venue.recordSession && !venue.ts?.module.includes('__tests__'), 'Session/reference TS recording is unsupported');
+  // The frozen oracle (__tests__/reference/<venue>/*.exchange.ts) is the only TS adapter; any other test path is refused.
+  const oracleAdapter = /\/__tests__\/reference\/[a-z]+\/[\w.-]+\.exchange\.ts$/.test(venue.ts?.module ?? '');
+  assert(!venue.recordSession && (oracleAdapter || !venue.ts?.module.includes('__tests__')), 'Session/reference TS recording is unsupported');
   assert(name === 'binance', 'TS recorder supports audited Binance USD-M public traffic only');
   assert(Object.keys(options).every((key) => key === 'testnet') &&
     (options.testnet === undefined || typeof options.testnet === 'boolean'), 'Custom TS recording options/routing are unsupported');

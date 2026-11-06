@@ -3,8 +3,8 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
-import { prepareWooV3Request } from '../../exchanges/woo/woo.v3.request';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
+import { prepareWooV3Request } from '../reference/woo/woo.v3.request';
 import {
   WOO_V3_WS_BLOCKERS,
   WOO_V3_WS_CHANNELS,
@@ -29,7 +29,7 @@ import {
   parseWooV3WsTopic,
   planWooV3WsResubscribe,
   reconnectWooV3WsSubscription,
-} from '../../exchanges/woo/woo.v3.websocket';
+} from '../reference/woo/woo.v3.websocket';
 
 const auth = {
   apiKey: 'fixture-key',
@@ -596,7 +596,7 @@ describe('WOO V3 inert websocket contracts', () => {
     expect(WOO_V3_WS_BLOCKERS['listen-key-rotation-overlap-undocumented']).toMatchObject({
       requires: 'credentialed-demo',
     });
-    const wooDirectory = join(__dirname, '../../exchanges/woo');
+    const wooDirectory = join(__dirname, '../reference/woo');
     for (const runtimeFile of ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-private.ts', 'woo.ws-public.ts']) {
       expect(readFileSync(join(wooDirectory, runtimeFile), 'utf8')).not.toContain('woo.v3.websocket');
     }

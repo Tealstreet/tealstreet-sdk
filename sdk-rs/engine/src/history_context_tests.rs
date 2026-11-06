@@ -57,6 +57,7 @@ fn first_root_owner(command: u32, root: Context) -> ReadCompletion {
     Completion {
         command,
         incomplete: None,
+        incomplete_reason: None,
         authority: ReadAuthority {
             root: Box::new(root),
             page: None,
@@ -165,7 +166,10 @@ impl Venue for Fixture {
                 ReadCompletion::from_context(cx, command, retired.root().clone()).is_err(),
                 "constructor cannot bind an old generation to the reused command"
             );
-            retired.incomplete("old generation must stay silent");
+            retired.incomplete(
+                IncompleteReason::CoverageGap,
+                "old generation must stay silent",
+            );
             assert!(retired.finish(cx, Ok("[999]".into())).is_err());
         }
         if kind.as_deref() == Some("capture-root") {
@@ -523,7 +527,7 @@ impl Venue for Fixture {
             if pending.profile == "reuse" {
                 self.retired = Some(duplicate);
             } else {
-                duplicate.incomplete("duplicate must stay silent");
+                duplicate.incomplete(IncompleteReason::CoverageGap, "duplicate must stay silent");
                 assert!(duplicate.finish(cx, Ok("[999]".into())).is_err());
             }
         }
@@ -649,7 +653,7 @@ fn genuine_two_page_delivery_returns_only_accepted_rows() {
     assert!(
         matches!(&notices[0], Notice::Event(event) if event.code == code::HISTORY_INCOMPLETE && event.level == Level::Warn
                 && event.message.contains("later page failed")
-                && event.fields == vec![("command", Value::Num(7.))])
+                && event.fields.first() == Some(&("command", Value::Num(7.))) && event.fields.get(1).is_some_and(|field| field.0 == "reason"))
     );
     assert_done(&notices);
 }

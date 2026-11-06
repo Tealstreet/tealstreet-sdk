@@ -351,24 +351,19 @@ fn a_cancel_straight_after_a_retired_write_is_admitted_before_the_refresh() {
     h.reply(first.id, 408, "");
     assert_eq!(terminals(&h, 1).len(), 1, "the place ends once");
     assert_eq!(failure(&h, 1).outcome, Some(Outcome::Unknown));
+    // reconcile_uncertain issues the owed refresh outside any command entry.
+    assert!(
+        count(&h, "/orders-pending") >= 1,
+        "the owed order refresh is issued at the seal"
+    );
     h.requests.clear();
     h.command(Command::CancelOrders {
         command: 2,
         ids: vec!["1".into()],
     });
-    let cancel = h
-        .requests
-        .iter()
-        .position(|r| r.url.contains("cancel"))
-        .expect("the cancel is admitted and sent");
-    let refresh = h
-        .requests
-        .iter()
-        .position(|r| r.url.contains("/orders-pending"))
-        .expect("the owed order refresh is issued");
     assert!(
-        cancel < refresh,
-        "the refresh follows the command's admission"
+        h.requests.iter().any(|r| r.url.contains("cancel")),
+        "the cancel is admitted and sent"
     );
     assert_eq!(
         terminals(&h, 1).len(),
@@ -476,4 +471,17 @@ fn ambiguous_codes_are_unknown_and_never_resent() {
         assert_eq!(count(&h, PLACE), 0, "{code}: no resend");
         assert_eq!(failure(&h, 1).outcome, Some(Outcome::Unknown), "{code}");
     }
+}
+
+#[test]
+fn an_order_the_store_has_lost_is_cancelled_by_its_id_and_symbol() {
+    let mut h = Harness::classic();
+    h.command(Command::CancelOrdersWithSymbols {
+        command: 1,
+        orders: vec![safe_cex_engine::model::CancelOrderRef {
+            id: "77".into(),
+            symbol: "BTCUSDT".into(),
+        }],
+    });
+    assert_eq!(count(&h, "cancel"), 1, "{:?}", h.done);
 }

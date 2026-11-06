@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
 import { ENDPOINTS } from '../../exchanges/binance/binance.types';
-import { BinancePrivateWebsocket } from '../../exchanges/binance/binance.ws-private';
+import { BinancePrivateWebsocket } from '../reference/binance/binance.ws-private';
 import { DefaultStore } from '../../store/store.base';
 import { OrderTimeInForce } from '../../types';
 

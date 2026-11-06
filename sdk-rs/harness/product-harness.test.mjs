@@ -53,6 +53,23 @@ test('private tape generators retain OKX inverse/EEA native startup surface', ()
   try {
     for (const name of ['okx', 'okxdemo', 'okxeu', 'okxeudemo']) {
       const records = generate('rust:private-tape-okx', ['--venue', name], name);
+      const amends = records.filter((r) => r.type === 'http' && r.url.endsWith('/api/v5/trade/amend-algos'));
+      assert.equal(amends.length, 1);
+      const amend = amends[0];
+      const legacy = { instId: 'ETH-USDC-SWAP', algoId: '302', newTriggerPx: '3150', newOrdPx: '-1', newTriggerPxType: 'last', newSz: '3' };
+      assert.deepEqual(amend.tsRequestBody, legacy, 'TS retains the exact original implicit-false body');
+      assert.deepEqual(amend.requestBody, { ...legacy, cxlOnFail: false }, 'Rust explicitly retains protection on refusal');
+      for (const impl of ['rust', 'ts']) {
+        const tape = new Tape([amend], venueOf(name), true, 30000, impl);
+        const body = impl === 'rust' ? amend.requestBody : legacy;
+        assert.deepEqual(tape.records[0].requestBody, body);
+        const sent = tape.keyFor('POST', amend.url, body);
+        assert.equal(tape.wireAliases.get(sent) ?? sent, tape.expectedWrites[0]);
+        for (const other of [{ ...body, cxlOnFail: true }, { ...body, newSz: '4' }]) {
+          const wrong = tape.keyFor('POST', amend.url, other);
+          assert.notEqual(tape.wireAliases.get(wrong) ?? wrong, tape.expectedWrites[0], 'unsafe flag or changed size cannot borrow the ACK');
+        }
+      }
       const catalogs = records.filter((r) => r.type === 'http' && r.url.includes('/instruments?'));
       const rows = catalogs.flatMap((r) => JSON.parse(r.body).data);
       assert(rows.some((r) => r.instId === 'BTC-USD-SWAP' && r.ctType === 'inverse' && r.ctVal === '100'));

@@ -2,7 +2,7 @@ import type { ExchangeOptions, Market, OrderBook } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { SequencedDeltaOrderBook } from '../../utils/sequencedDeltaOrderBook';
 

@@ -3,9 +3,9 @@ import type { Market } from '../../types';
 import { describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { BlofinExchange } from '../../exchanges/blofin/blofin.exchange';
+import { BlofinExchange } from '../reference/blofin/blofin.exchange';
 import { BASE_URL, BASE_WS_URL, ENDPOINTS } from '../../exchanges/blofin/blofin.types';
-import { BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES, buildBlofinSubscribeFrames } from '../../exchanges/blofin/blofin.ws-public';
+import { BLOFIN_MAX_SUBSCRIBE_FRAME_BYTES, buildBlofinSubscribeFrames } from '../reference/blofin/blofin.ws-public';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode } from '../../types';
 

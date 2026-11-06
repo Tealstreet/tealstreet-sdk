@@ -92,7 +92,7 @@ http(
   'GET',
   '/api/v1/asset/balances',
   'accountType=futures',
-  ok([{ currency: 'USDT', available: '1000', frozen: '10' }]),
+  ok([{ currency: 'USDT', balance: '1010', available: '1000', frozen: '10' }]),
 );
 const normal = (id, patch = {}) => ({
   instId: 'BTC-USDT',

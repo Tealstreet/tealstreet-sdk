@@ -35,7 +35,7 @@ race behavior belongs to the separate order-races lane and is unchanged here.
 | KuCoin spot: `kucoinspot` | Explicit missing-symbol error; symbol-aware variant sends native request | `kucoin/src/spot/trading.rs` `CancelOrders` |
 | Lighter: `lighter`, `lighter-robinhood` | Explicit invalid-index or missing-order error | `lighter/src/trading.rs` `CancelOrders` |
 | MEXC: `mexc` | Explicit `MEXC order … not found` error | `mexc/src/trading.rs` `cancel_steps` |
-| Orderly: `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | Explicit reconciled-order error unless a stored child proves its native parent | `orderly/src/trading.rs` `plan_cancel` |
+| Orderly: `kodiakfi`, `mode`, `what`, `woofi` | Explicit reconciled-order error unless a stored child proves its native parent | `orderly/src/trading.rs` `plan_cancel` |
 | Paradex: `paradex` | Sends supplied nonempty unique IDs to single/batch DELETE | `paradex/src/trading.rs` `CancelOrders` |
 | Phemex: `phemex` | Explicit cached-order error; native ID may resolve from a stored virtual leg | `phemex/src/trading.rs` `cancel_plan` |
 | Polymarket: `polymarket` | Sends supplied nonempty deduplicated IDs to `DELETE /orders` | `polymarket/src/trading.rs` `CancelOrders` |

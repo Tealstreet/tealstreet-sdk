@@ -488,28 +488,6 @@
       "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
     },
     {
-      "alias": "salsadex",
-      "family": "orderly",
-      "rustRegistered": true,
-      "registryDefault": "rust",
-      "familyLegacyHttpSites": 29,
-      "dispatchSigningDeclared": false,
-      "socketCore": "not-landed-at-pin",
-      "liveAccountShapes": [],
-      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
-    },
-    {
-      "alias": "tealstreet-dex",
-      "family": "orderly",
-      "rustRegistered": true,
-      "registryDefault": "rust",
-      "familyLegacyHttpSites": 29,
-      "dispatchSigningDeclared": false,
-      "socketCore": "not-landed-at-pin",
-      "liveAccountShapes": [],
-      "blockers": ["live-evidence-not-certified", "frozen-artifact-compatibility-unverified"]
-    },
-    {
       "alias": "txflow",
       "family": "txflow",
       "rustRegistered": true,

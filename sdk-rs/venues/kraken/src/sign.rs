@@ -5,6 +5,7 @@ pub mod setup;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
+use safe_cex_engine::text::JoinWith;
 use sha2::{Digest, Sha256, Sha512};
 use zeroize::Zeroizing;
 
@@ -29,7 +30,7 @@ pub fn form(params: &[(&str, String)]) -> String {
         .into_iter()
         .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 pub struct Signer {
     secret: Zeroizing<Vec<u8>>,
@@ -38,7 +39,8 @@ pub struct Signer {
 impl Signer {
     pub fn new(secret: &str) -> Result<Self, String> {
         let bytes = STANDARD
-            .decode(secret)
+            // As legacy's Buffer.from: a saved value's surrounding whitespace is not part of it.
+            .decode(secret.trim())
             .map_err(|_| "Kraken secret is not valid base64")?;
         if bytes.is_empty() {
             return Err("Kraken secret is empty".into());

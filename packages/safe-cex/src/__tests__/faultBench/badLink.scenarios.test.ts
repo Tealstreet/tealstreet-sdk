@@ -2,7 +2,7 @@ import type { Market, Order, PlaceOrderOpts } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType, PositionMode } from '../../types';
 import { deferred } from './deferred';

@@ -36,7 +36,7 @@ export async function prepareApexReplay({ isPrivate } = {}) {
 export async function prepareApexTs(exchange) {
   if (exchange.isPublicDataOnly) return;
   await prepareApexReplay({ isPrivate: true });
-  const { initSdk, sdk: tsSdk } = await import('../../packages/safe-cex/src/exchanges/apexomni/zklink/signer/utils.ts');
+  const { initSdk, sdk: tsSdk } = await import('../../packages/safe-cex/src/__tests__/reference/apexomni/zklink/signer/utils.ts');
   // tsx's CJS view and this ESM oracle can own separate package instances.
   const init = typeof tsSdk.default === 'function' ? tsSdk.default : tsSdk.default.default;
   await init(readFileSync(require.resolve('zklink-web-sdk-alpha/zklink-sdk-web_bg.wasm')));

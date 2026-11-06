@@ -37,6 +37,9 @@ compile_error!(
     "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
+#[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+mod kucoin_setup;
+
 #[cfg(feature = "kraken")]
 pub use safe_cex_venue_kraken::sign::dispatch::Selected as kraken_selected;
 #[cfg(feature = "kraken")]
@@ -44,8 +47,16 @@ pub use safe_cex_venue_kraken::sign::hosted as kraken_hosted;
 #[cfg(feature = "asterdex")]
 mod asterdex_setup;
 mod construction;
-#[cfg(feature = "dispatch-signing")]
+#[cfg(feature = "hosted-signing")]
 pub mod hosted_signing;
+#[cfg(feature = "hosted-wallet")]
+pub mod hosted_wallet;
+#[cfg(feature = "hyperliquid")]
+mod hyperliquid_setup;
+#[cfg(feature = "lighter")]
+mod lighter_setup;
+#[cfg(feature = "paradex")]
+mod paradex_setup;
 pub use construction::{
     BridgeConstruction, PublicMode, remote_signing_policy, signer_setup_policy,
     signer_setup_public_data_only,
@@ -131,6 +142,9 @@ pub struct Construction {
     pub public_data_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asterdex_api_version: Option<&'static str>,
+    /// Requested frame-fed (`EngineOptions::frame_fed`); omitted when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub frame_fed: bool,
 }
 
 impl EngineOptions {
@@ -171,6 +185,7 @@ impl EngineOptions {
             asterdex_api_version,
             can_sign: mode.as_ref().map(|mode| mode.can_sign),
             public_data_only: mode.map(|mode| mode.public_data_only),
+            frame_fed: self.frame_fed,
         }
     }
 
@@ -213,6 +228,7 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
 #[derive(Clone, Copy)]
 struct Startup {
     account: bool,
+    frame_fed: bool,
     log_level: Level,
     private_feed: safe_cex_engine::signing_policy::PrivateFeedPolicy,
 }
@@ -226,6 +242,9 @@ fn finish<T: Visit, V: Venue + 'static>(
     engine.set_public_feed_policy(policy).map_err(invalid)?;
     engine.set_private_feed_policy(startup.private_feed)?;
     engine.set_account_startup(startup.account);
+    if startup.frame_fed {
+        engine.set_frame_fed().map_err(invalid)?;
+    }
     engine.set_log_level(startup.log_level);
     Ok(visitor.visit(engine))
 }
@@ -410,11 +429,11 @@ fn backpack_provider(options: &EngineOptions) -> Result<BackpackSignerSetup, Ven
     })
 }
 
-/// BloFin's one provider setup from the configured strings. Every private
-/// request and the socket login sign through it; the venue holds only refs.
-/// Passphrase refs keep native inheritance exactly.
-#[cfg(feature = "blofin")]
-fn blofin_signer(
+/// Orderly's one provider setup: the Ed25519 seed is installed as declared
+/// base58 and signs every private read and the socket auth. The presented key
+/// is native's `ed25519:`-prefixed public key; either string may carry the prefix.
+#[cfg(feature = "orderly")]
+fn orderly_signer(
     options: &EngineOptions,
 ) -> Result<
     (
@@ -424,37 +443,36 @@ fn blofin_signer(
     VenueError,
 > {
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, LocalSigner, Secret};
-    let present = |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
-    if options.public_data_only || !present(&options.key) || !present(&options.secret) {
+    use safe_cex_engine::signing::{
+        Algorithm, CredentialSetupPolicy, IdentitySetupPolicy, KeyEncoding,
+    };
+    let unprefixed = |value: &Option<String>| {
+        let value = value.as_deref().unwrap_or_default();
+        value.strip_prefix("ed25519:").unwrap_or(value).to_owned()
+    };
+    let key = unprefixed(&options.key);
+    if options.public_data_only || key.is_empty() {
         return Ok((None, Default::default()));
     }
-    // Native: no Primary passphrase refuses any slot; an absent Secondary
-    // passphrase inherits Primary's; an empty effective one (including an
-    // explicit empty Secondary, which never falls back) is refused.
-    let passphrase = |read: Option<&String>| {
-        options
-            .passphrase
-            .as_ref()
-            .map(|primary| read.unwrap_or(primary).clone())
-            .filter(|value| !value.is_empty())
-            .map(Secret::new)
-    };
-    let setup = LocalSetup {
-        primary: Some(LocalIdentity {
-            key: Secret::new(options.key.clone().unwrap_or_default()),
-            secret: Secret::new(options.secret.clone().unwrap_or_default()),
-            passphrase: passphrase(None),
-            ..Default::default()
-        }),
-        secondary: options.read_credentials.as_ref().map(|read| LocalIdentity {
-            key: Secret::new(read.key.clone()),
-            secret: Secret::new(read.secret.clone()),
-            passphrase: passphrase(read.passphrase.as_ref()),
-            ..Default::default()
-        }),
-    };
-    let (signer, identities) =
-        LocalSigner::from_setup(setup).map_err(|_| invalid("Invalid BloFin signer setup"))?;
+    let (signer, identities) = LocalSigner::from_setup_with_policy(
+        LocalSetup {
+            primary: Some(LocalIdentity {
+                key: Secret::new(format!("ed25519:{key}")),
+                secret: Secret::new(unprefixed(&options.secret)),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+        CredentialSetupPolicy {
+            primary: Some(IdentitySetupPolicy {
+                secret_encoding: Some(KeyEncoding::Base58),
+                signing_algorithm: Some(Algorithm::Ed25519),
+                ..Default::default()
+            }),
+            secondary: None,
+        },
+    )
+    .map_err(|_| invalid("Invalid Orderly signer setup"))?;
     Ok((Some(std::sync::Arc::new(signer)), identities))
 }
 
@@ -482,7 +500,7 @@ pub fn supported(venue: &str) -> bool {
         #[cfg(feature = "asterdex")]
         "asterdex" => true,
         #[cfg(feature = "orderly")]
-        "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => true,
+        "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => true,
         #[cfg(feature = "lighter")]
         "lighter" | "lighter-robinhood" => true,
         #[cfg(feature = "bitrue")]
@@ -498,7 +516,7 @@ pub fn supported(venue: &str) -> bool {
         #[cfg(feature = "phemex")]
         "phemex" => true,
         #[cfg(feature = "binance")]
-        "binance" | "binancepm" | "binancespot" | "binanceinverse" => true,
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" | "binanceoptions" => true,
         #[cfg(feature = "kucoinspot")]
         "kucoinspot" => true,
         #[cfg(feature = "kucoin")]
@@ -674,6 +692,14 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "hyperliquid")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
+        return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
+    }
+    #[cfg(feature = "paradex")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
+        return paradex_setup::native(venue, options, signer_setup_policy_for(venue, options));
+    }
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::raw(options);
@@ -691,6 +717,11 @@ pub fn prepare_local_signer_for(
         let policy = signer_setup_policy_for(venue, options);
         let (provider, identities) = local_signer_from_setup(setup, policy, public_data_only)?;
         return apexomni_admit(provider, identities);
+    }
+    #[cfg(feature = "lighter")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
+        payload_signing_rules(venue, options, false)?;
+        return lighter_setup::native(options, signer_setup_policy_for(venue, options));
     }
     let policy = signer_setup_policy_for(venue, options);
     let read_policy = construction::read_credentials_policy(venue);
@@ -842,7 +873,11 @@ fn prepare_local_signer_with_policy(
     VenueError,
 > {
     use safe_cex_crypto::signer::{LocalIdentity, LocalSetup, Secret};
-    let primary =
+    #[cfg_attr(
+        not(any(feature = "kucoin", feature = "kucoinspot")),
+        allow(unused_mut)
+    )]
+    let mut primary =
         if options.key.is_some() || options.secret.is_some() || options.passphrase.is_some() {
             Some(LocalIdentity {
                 key: Secret::new(options.key.take().unwrap_or_default()),
@@ -853,6 +888,14 @@ fn prepare_local_signer_with_policy(
         } else {
             None
         };
+    #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
+    if policy
+        .primary
+        .and_then(|rule| rule.extra)
+        .is_some_and(|extra| extra.key == safe_cex_engine::signing::ExtraKey::KucoinBroker)
+    {
+        kucoin_setup::take_broker(options, primary.as_mut());
+    }
     use construction::ReadCredentialsPolicy;
     // A public-only PublicRead provider holds no primary, so only Read roles select.
     let primary = primary.filter(|_| !public_read_excludes_primary(read_policy, public_data_only));
@@ -975,6 +1018,28 @@ fn admit_json_setup(
     Ok((provider, identities))
 }
 
+/// Separate setup that may record its resolved facts on the account options,
+/// as Paradex's key form; every host's private-capsule path uses this.
+#[cfg(feature = "dispatch-signing")]
+pub fn local_signer_from_capsule(
+    venue: &str,
+    input: String,
+    options: &mut EngineOptions,
+) -> Result<
+    (
+        safe_cex_engine::signing::Provider,
+        safe_cex_engine::signing::Identities,
+    ),
+    VenueError,
+> {
+    #[cfg(feature = "paradex")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
+        let policy = signer_setup_policy_for(venue, options);
+        return paradex_setup::json(venue, input, policy, options);
+    }
+    local_signer_from_json_for_mode(venue, input, options)
+}
+
 /// Separate setup with the parsed account options: their public/private
 /// intent, before option stripping, and resolved setup facts such as AsterDEX's
 /// explicit API version.
@@ -990,6 +1055,33 @@ pub fn local_signer_from_json_for_mode(
     ),
     VenueError,
 > {
+    // Paradex records its key form on the options: `local_signer_from_capsule`.
+    #[cfg(feature = "paradex")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
+        drop(zeroize::Zeroizing::new(input));
+        return Err(invalid("Invalid Paradex local signer setup"));
+    }
+    #[cfg(feature = "hyperliquid")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
+        return hyperliquid_setup::json(
+            venue,
+            input,
+            signer_setup_policy_for(venue, options),
+            options,
+        );
+    }
+    #[cfg(feature = "lighter")]
+    if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Lighter) {
+        let mut input = zeroize::Zeroizing::new(input);
+        let public = lighter_setup::setup_public_mode(options);
+        payload_signing_rules_in_mode(venue, options, false, public)?;
+        return lighter_setup::json(
+            std::mem::take(&mut *input),
+            signer_setup_policy_for(venue, options),
+            options,
+        );
+    }
+
     #[cfg(feature = "mexc")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Mexc) {
         return mexc_setup::json(input, construction::signer_setup_public_data_only(options));
@@ -1060,8 +1152,26 @@ fn payload_signing_rules(
 ) -> Result<(), VenueError> {
     let public = construction::resolve(venue, options)
         .map_or(options.public_data_only, |mode| mode.public_data_only);
-    if !options.payload_signer || public || venue == "paradex" || !supported(venue) {
+    payload_signing_rules_in_mode(venue, options, provider_ready, public)
+}
+
+fn payload_signing_rules_in_mode(
+    venue: &str,
+    options: &EngineOptions,
+    provider_ready: bool,
+    public: bool,
+) -> Result<(), VenueError> {
+    if !options.payload_signer || public || !supported(venue) {
         return Ok(());
+    }
+    // Hosted (device-key) Paradex has no Rust route in this release; its legacy
+    // digest-only delegate is never constructed.
+    if venue == "paradex" {
+        return Err(VenueError::new(
+            "Rust paradex delegated signing is unsupported in this build; configure the account's local Stark key or remove payloadSigner",
+        )
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent));
     }
     let policy = remote_signing_policy(venue);
     let identity_ready = options
@@ -1081,7 +1191,7 @@ fn payload_signing_rules(
         format!("Rust {venue} payloadSigner requires a configured injected signing provider")
     } else {
         format!(
-            "Rust {venue} does not support payloadSigner; remote signing is unsupported. Use the TS venue, or remove payloadSigner and configure local signing credentials."
+            "Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."
         )
     };
     Err(VenueError::new(message)
@@ -1196,6 +1306,39 @@ fn read_key_options(
     Ok(())
 }
 
+/// Venues converted for frame-fed engines (`safe_cex_engine::frame_fed`): their
+/// startup honours `Cx::frame_fed` and their write paths read only the store
+/// and the VENUE_STATE they export. Others are refused at construction.
+pub const FRAME_FED_VENUES: &[&str] = &[
+    "binance",
+    "binanceinverse",
+    "binancepm",
+    "binancespot",
+    "bingx",
+    "bitget",
+    "bitgetinverse",
+    "bitgetusdc",
+    "blofin",
+    "bybit",
+    "bybitinverse",
+    "bybitspot",
+    "bybitdemo",
+    "hyperliquid",
+    "hyperliquidspot",
+    "lighter",
+    "lighter-robinhood",
+    "okx",
+    "okxeu",
+    "okxdemo",
+    "okxeudemo",
+    "paradex",
+    "phemex",
+];
+
+pub fn frame_fed_supported(venue: &str) -> bool {
+    FRAME_FED_VENUES.contains(&venue)
+}
+
 /// Generic options contain opaque references; provider owns all credentials.
 pub fn build_with_signer<T: Visit>(
     venue: &str,
@@ -1288,8 +1431,17 @@ pub fn build_with_signer<T: Visit>(
     if options.private_only && policy == PublicFeedPolicy::Direct {
         return Err(invalid("privateOnly cannot use direct public feeds"));
     }
+    if options.frame_fed {
+        if !frame_fed_supported(venue) {
+            return Err(invalid(format!("frameFed is not supported for {venue}")));
+        }
+        if options.public_data_only {
+            return Err(invalid("frameFed needs an account that can sign"));
+        }
+    }
     let startup = Startup {
-        account: options.account_startup,
+        account: options.account_startup && !options.frame_fed,
+        frame_fed: options.frame_fed,
         private_feed: remote_signing_policy(venue).private_feed(options.payload_signer),
         log_level: match options.log_level.as_deref() {
             None => Level::Info,
@@ -1381,22 +1533,30 @@ pub fn build_with_signer<T: Visit>(
             )
         }
         #[cfg(feature = "paradex")]
-        "paradex" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "paradex" => {
+            if options.key.is_some() || options.secret.is_some() || options.passphrase.is_some() {
+                return Err(invalid("Paradex signing material belongs in signer setup"));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() || identities.primary.is_some() && signer.is_none() {
+                return Err(invalid("Paradex requires its primary signing provider"));
+            }
+            let registered = identities.clone();
+            let mut engine = Engine::new(
                 Paradex::new(ParadexOptions {
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
                     paradex_address: options.paradex_address.take(),
                     subkey_address: options.subkey_address.take(),
-                    payload_signer: options.payload_signer,
+                    credentials: identities.primary,
+                    ethereum_key: options.paradex_ethereum_key,
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "apexomni")]
         "apexomni" => {
             // Injected refs need their provider and never travel beside raw
@@ -1517,6 +1677,7 @@ pub fn build_with_signer<T: Visit>(
             {
                 return Err(invalid("Engine signing provider is required"));
             }
+            let installed = identities.clone();
             let mut engine = Engine::new(
                 AsterDex::new(AsterOptions {
                     testnet: options.testnet,
@@ -1539,61 +1700,88 @@ pub fn build_with_signer<T: Visit>(
                 entropy,
             )?;
             engine.set_signer(signer)?;
+            // V3 address setup proves each slot's wallet from these identities.
+            engine.set_identities(installed)?;
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "orderly")]
-        "orderly" | "tealstreet-dex" | "kodiakfi" | "mode" | "salsadex" | "what" | "woofi" => {
+        "orderly" | "kodiakfi" | "mode" | "what" | "woofi" => {
             orderly_rules(&options)?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    Orderly::new(OrderlyOptions {
-                        broker: match venue {
-                            "kodiakfi" => OrderlyBroker::KodiakFi,
-                            "mode" => OrderlyBroker::Mode,
-                            "salsadex" => OrderlyBroker::SalsaDex,
-                            "what" => OrderlyBroker::What,
-                            "woofi" => OrderlyBroker::WooFi,
-                            _ => OrderlyBroker::Tealstreet,
-                        },
-                        public_data_only: options.public_data_only,
-                        testnet: options.testnet,
-                        key: options.key.take(),
-                        secret: options.secret.take(),
-                        application_id: options.application_id.take(),
-                        tick_interval: options
-                            .tick_interval
-                            .take()
-                            .map(safe_cex_engine::engine::bounded_tick_interval),
-                    }),
-                    entropy,
-                )?,
-            )
+            let (provider, identities) = orderly_signer(&options)?;
+            let mut engine = Engine::new(
+                Orderly::new(OrderlyOptions {
+                    broker: match venue {
+                        "kodiakfi" => OrderlyBroker::KodiakFi,
+                        "mode" => OrderlyBroker::Mode,
+                        "what" => OrderlyBroker::What,
+                        "woofi" => OrderlyBroker::WooFi,
+                        _ => OrderlyBroker::Orderly,
+                    },
+                    public_data_only: options.public_data_only,
+                    testnet: options.testnet,
+                    key: options.key.take(),
+                    secret: options.secret.take(),
+                    application_id: options.application_id.take(),
+                    tick_interval: options
+                        .tick_interval
+                        .take()
+                        .map(safe_cex_engine::engine::bounded_tick_interval),
+                    identities: identities.clone(),
+                }),
+                entropy,
+            )?;
+            engine.set_signer(provider)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "lighter")]
-        "lighter" | "lighter-robinhood" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
+        "lighter" | "lighter-robinhood" => {
+            lighter_setup::capture_lookup(&mut options);
+            if options
+                .lighter_l1_address
+                .as_deref()
+                .is_some_and(|address| {
+                    address.len() != 42
+                        || !address.starts_with("0x")
+                        || !address[2..].bytes().all(|b| b.is_ascii_hexdigit())
+                })
+            {
+                return Err(invalid("Invalid Lighter public L1 lookup address"));
+            }
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Lighter credentials belong in trusted signer setup",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() || (identities.primary.is_some() && signer.is_none())
+            {
+                return Err(invalid("Lighter requires its installed primary signer"));
+            }
+            let mut engine = Engine::new(
                 Lighter::new(LighterOptions {
                     robinhood: venue == "lighter-robinhood",
                     remote_signer: options.lighter_remote_signer,
                     signer_provider: options.lighter_signer_provider.take(),
                     testnet: options.testnet,
                     public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
+                    identity: identities.primary.clone(),
+                    l1_address: options.lighter_l1_address.take(),
                     application_id: options.application_id.take(),
                     api_key_index: options.api_key_index.take(),
                     integrator_account_index: options.lighter_integrator_account_index.take(),
                     stop_slippage_pct: options.lighter_stop_slippage_pct.take().unwrap_or(1.0),
+                    ws_routed: options.lighter_ws_route,
                 }),
                 entropy,
-            )?,
-        ),
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bitrue")]
         "bitrue" => {
             if options.key.is_some()
@@ -1704,7 +1892,24 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "blofin")]
         "blofin" => {
-            let (provider, identities) = blofin_signer(&options)?;
+            if [&options.key, &options.secret]
+                .iter()
+                .any(|value| value.as_ref().is_some_and(|s| !s.is_empty()))
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "BloFin credentials belong in signer setup, not engine options",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if let Some(read) = &identities.secondary {
+                read.validate().map_err(invalid)?;
+            }
+            if (identities.primary.is_some() || identities.secondary.is_some()) && signer.is_none()
+            {
+                return Err(invalid("Engine signing provider is required"));
+            }
             let mut engine = Engine::new(
                 Blofin::new(BlofinOptions {
                     broker_attribution: options.broker_attribution,
@@ -1714,7 +1919,7 @@ pub fn build_with_signer<T: Visit>(
                 }),
                 entropy,
             )?;
-            engine.set_signer(provider)?;
+            engine.set_signer(signer)?;
             engine.set_identities(identities)?;
             finish(visitor, policy, startup, engine)
         }
@@ -1777,7 +1982,7 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "binance")]
-        "binance" | "binancepm" | "binancespot" | "binanceinverse" => {
+        "binance" | "binancepm" | "binancespot" | "binanceinverse" | "binanceoptions" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
                 || options.secret.as_ref().is_some_and(|s| !s.is_empty())
                 || options.read_credentials.is_some()
@@ -1808,6 +2013,7 @@ pub fn build_with_signer<T: Visit>(
                         "binancepm" => BinanceVariant::PortfolioMargin,
                         "binancespot" => BinanceVariant::Spot,
                         "binanceinverse" => BinanceVariant::CoinM,
+                        "binanceoptions" => BinanceVariant::Options,
                         _ => BinanceVariant::UsdM,
                     },
                 }),
@@ -1818,41 +2024,21 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "kucoinspot")]
-        "kucoinspot" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                KucoinSpot::new(KucoinOptions {
-                    read_credentials: options.read_credentials.take(),
-                    broker: options.extra.take().and_then(|e| e.kucoin_broker),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
-                }),
-                entropy,
-            )?,
-        ),
+        "kucoinspot" => {
+            let (venue, identities) = kucoin_setup::venue_options(&mut options, signer.is_some())?;
+            let mut engine = Engine::new(KucoinSpot::new(venue), entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "kucoin")]
-        "kucoin" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Kucoin::new(KucoinOptions {
-                    read_credentials: options.read_credentials.take(),
-                    broker: options.extra.take().and_then(|e| e.kucoin_broker),
-                    testnet: options.testnet,
-                    public_data_only: options.public_data_only,
-                    key: options.key.take(),
-                    secret: options.secret.take(),
-                    passphrase: options.passphrase.take(),
-                }),
-                entropy,
-            )?,
-        ),
+        "kucoin" => {
+            let (venue, identities) = kucoin_setup::venue_options(&mut options, signer.is_some())?;
+            let mut engine = Engine::new(Kucoin::new(venue), entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "bingx")]
         "bingx" => {
             if options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -2054,11 +2240,24 @@ pub fn build_with_signer<T: Visit>(
         }
         #[cfg(feature = "hyperliquid")]
         "hyperliquid" | "hyperliquidspot" => {
+            if options.secret.is_some()
+                || options.passphrase.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid(
+                    "Hyperliquid signing material belongs in signer setup",
+                ));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            if identities.secondary.is_some() || identities.primary.is_some() && signer.is_none() {
+                return Err(invalid("Hyperliquid requires its primary signing provider"));
+            }
+            let registered = identities.clone();
             let config = HyperliquidOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key.take(),
-                secret: options.secret.take(),
+                credentials: identities.primary,
                 application_id: options.application_id.take(),
                 vault: options.vault.take(),
                 builder: options.hyperliquid_builder.take().map(|b| Builder {
@@ -2066,20 +2265,19 @@ pub fn build_with_signer<T: Visit>(
                     f: b.fee_tenths_bps,
                 }),
                 enable_spot_markets: venue == "hyperliquid" && options.enable_spot_markets,
+                fast_book: venue == "hyperliquid" && options.hyperliquid_fast_book,
             };
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    if venue == "hyperliquidspot" {
-                        Hyperliquid::new_spot(config)
-                    } else {
-                        Hyperliquid::new(config)
-                    },
-                    entropy,
-                )?,
-            )
+            let mut engine = Engine::new(
+                if venue == "hyperliquidspot" {
+                    Hyperliquid::new_spot(config)
+                } else {
+                    Hyperliquid::new(config)
+                },
+                entropy,
+            )?;
+            engine.set_signer(signer)?;
+            engine.set_identities(registered)?;
+            finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "okx")]
         "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
@@ -2128,7 +2326,7 @@ pub struct PublicFeedOptions {
 #[serde(rename_all = "camelCase")]
 pub struct KucoinExtra {
     #[serde(default)]
-    pub kucoin_broker: Option<safe_cex_venue_kucoin::sign::BrokerOptions>,
+    pub kucoin_broker: Option<kucoin_setup::BrokerInput>,
 }
 
 #[cfg(any(
@@ -2170,6 +2368,10 @@ pub struct EngineOptions {
     pub signing: Option<safe_cex_engine::signing::Identities>,
     #[serde(default)]
     pub private_only: bool,
+    /// The browser's main-thread engine, fed by a data source's frames
+    /// (`safe_cex_engine::frame_fed`), for the venues in [`FRAME_FED_VENUES`].
+    #[serde(default)]
+    pub frame_fed: bool,
     /// The SDK sets this when the account can sign (not public-data-only).
     #[serde(default)]
     pub account_startup: bool,
@@ -2213,9 +2415,14 @@ pub struct EngineOptions {
     #[cfg(feature = "lighter")]
     #[serde(default)]
     pub lighter_stop_slippage_pct: Option<f64>,
+    /// The account's sockets go through Tealstreet's WS route (`tealstreetWsRoute`).
+    #[serde(default)]
+    pub lighter_ws_route: bool,
     #[cfg(feature = "lighter")]
     #[serde(default)]
     pub lighter_remote_signer: bool,
+    #[cfg(feature = "lighter")]
+    pub lighter_l1_address: Option<String>,
     #[cfg(feature = "lighter")]
     pub lighter_signer_provider: Option<String>,
     #[cfg(any(
@@ -2288,6 +2495,11 @@ pub struct EngineOptions {
     pub subkey_address: Option<String>,
     #[serde(default)]
     pub payload_signer: bool,
+    /// Set only by trusted Paradex setup: its Stark key was derived from an
+    /// Ethereum key. Never parsed, so a caller cannot claim it.
+    #[cfg(feature = "paradex")]
+    #[serde(skip)]
+    pub(crate) paradex_ethereum_key: bool,
     #[cfg(any(
         feature = "backpack",
         feature = "bitrue",
@@ -2320,6 +2532,9 @@ pub struct EngineOptions {
     #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     pub hyperliquid_builder: Option<HyperliquidBuilder>,
+    #[cfg(feature = "hyperliquid")]
+    #[serde(default)]
+    pub hyperliquid_fast_book: bool,
     #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     pub enable_spot_markets: bool,

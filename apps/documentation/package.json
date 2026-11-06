@@ -24,7 +24,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@algolia/client-search": "^5.59.0",
+    "@algolia/client-search": "^5.60.0",
     "@docusaurus/core": "^3.10.2",
     "@docusaurus/faster": "^3.10.2",
     "@docusaurus/plugin-client-redirects": "^3.10.2",

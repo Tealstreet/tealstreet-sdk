@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
-import { decodeParadexMessage } from '../../exchanges/paradex/paradex.sbe';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
+import { decodeParadexMessage } from '../reference/paradex/paradex.sbe';
 import { DefaultStore } from '../../store/store.base';
 import { OrderStatus } from '../../types';
 import fixture from '../fixtures/paradex-sbe.json';

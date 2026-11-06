@@ -3,7 +3,7 @@ import type { ExchangeOptions } from '../../types';
 import createHmac from 'create-hmac';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from '../../exchanges/okx/okx.api';
+import { createAPI } from '../reference/okx/okx.api';
 import { ENDPOINTS } from '../../exchanges/okx/okx.types';
 import { virtualClock } from '../../utils/virtualClock';
 

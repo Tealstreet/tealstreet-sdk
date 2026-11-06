@@ -851,3 +851,162 @@ async fn trusted_native_host_provider_updates_private_account_frames() {
         fixture.stop().await;
     }).await;
 }
+
+#[tokio::test]
+async fn in_process_account_handle_snapshots_commands_and_disposes() {
+    LocalSet::new().run_until(async {
+        let tape = Tape::default();
+        let mut book = Book::default();
+        book.apply(BookSide::Bids, 99., 1.);
+        let engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
+            label: "a",
+            book,
+            observed: Rc::default(),
+            pending: Vec::new(),
+            received: Rc::default(),
+            started: Rc::default(),
+            poll_scales: Rc::default(),
+            poll_intervals: Rc::default(),
+            poll_timer: None,
+        });
+        let (handle, task) = safe_cex_native::spawn_account(Host::new(engine, tape.clone()), config()).unwrap();
+        async fn next(link: &mut safe_cex_native::ClientLink) -> safe_cex_native::Outgoing {
+            tokio::time::timeout(DEADLINE, link.outgoing.recv()).await.unwrap().unwrap()
+        }
+        let mut first = handle.join(1, false).await.unwrap();
+        let safe_cex_native::Outgoing::Frame(snapshot) = next(&mut first).await else { panic!("snapshot first") };
+        assert!(sections(&snapshot).any(|(kind, _)| kind == section::MARKETS));
+        assert!(handle.input(1, "not json").is_err(), "malformed input returns a notice");
+        assert!(handle.input(1, r#"{"op":"fetchAccount","command":7}"#).unwrap());
+        let done = loop {
+            if let safe_cex_native::Outgoing::Text(text) = next(&mut first).await { break text; }
+        };
+        assert!(matches!(serde_json::from_str::<Reply>(&done).unwrap(), Reply::Done { command: 7, result: Some(result), error: None } if result == "\"a\""));
+        let markets = handle.read(|store| store.markets().len()).await;
+        assert_eq!(markets, Some(1), "reads run against the engine store");
+        // A second in-process client on the same account gets its own snapshot.
+        let mut second = handle.join(2, false).await.unwrap();
+        assert!(matches!(next(&mut second).await, safe_cex_native::Outgoing::Frame(_)));
+        assert!(handle.join(2, false).await.is_err(), "duplicate client IDs are refused");
+        handle.dispose();
+        tokio::time::timeout(DEADLINE, task).await.unwrap().unwrap().unwrap();
+        assert!(*first.canceled.borrow(), "dispose cancels clients");
+        assert!(tape.0.borrow().as_ref().unwrap().is_closed(), "dispose drops the account transport");
+        assert!(handle.join(3, false).await.is_err(), "a disposed account refuses joins");
+    }).await;
+}
+
+#[tokio::test]
+async fn a_deep_in_process_queue_survives_a_burst_the_default_peer_cannot() {
+    LocalSet::new()
+        .run_until(async {
+            let tape = Tape::default();
+            let mut book = Book::default();
+            book.apply(BookSide::Bids, 99., 1.);
+            let engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
+                label: "a",
+                book,
+                observed: Rc::default(),
+                pending: Vec::new(),
+                received: Rc::default(),
+                started: Rc::default(),
+                poll_scales: Rc::default(),
+                poll_intervals: Rc::default(),
+                poll_timer: None,
+            });
+            let config = ServerConfig {
+                flush_every: Duration::from_millis(1),
+                ..config()
+            };
+            let (handle, _task) =
+                safe_cex_native::spawn_account(Host::new(engine, tape.clone()), config).unwrap();
+            let shallow = handle.join(1, false).await.unwrap();
+            let deep = handle.join_with_capacity(2, false, 4096).await.unwrap();
+            // Neither client reads while 40 book changes each flush a frame.
+            for amount in 2..42 {
+                tape.message(&amount.to_string());
+                tokio::time::sleep(Duration::from_millis(3)).await;
+            }
+            assert!(
+                *shallow.canceled.borrow(),
+                "a 32-deep peer is dropped as slow"
+            );
+            assert!(
+                !*deep.canceled.borrow(),
+                "the deep in-process client is kept"
+            );
+            assert!(
+                deep.outgoing.len() > 32,
+                "every frame is still queued: {}",
+                deep.outgoing.len()
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn an_account_handle_reads_books_and_takes_a_trusted_public_feed() {
+    LocalSet::new().run_until(async {
+        let mut book = Book::default();
+        book.apply(BookSide::Bids, 99., 1.);
+        book.apply(BookSide::Asks, 101., 2.);
+        let mut engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
+            label: "a",
+            book,
+            observed: Rc::default(),
+            pending: Vec::new(),
+            received: Rc::default(),
+            started: Rc::default(),
+            poll_scales: Rc::default(),
+            poll_intervals: Rc::default(),
+            poll_timer: None,
+        });
+        engine.set_public_feed_policy(safe_cex_engine::PublicFeedPolicy::Shared).unwrap();
+        let (handle, _task) = safe_cex_native::spawn_account(Host::new(engine, Tape::default()), config()).unwrap();
+        let books = handle.books(vec!["BTCUSDT".into(), "UNKNOWN".into()]).await.unwrap();
+        assert!(books.is_empty(), "a shared-feed account has no book until the provider sends one");
+        let safe_cex_engine::command::HostInput::PublicFeedUpdate(update) =
+            safe_cex_engine::command::decode_host_input(r#"{"op":"publicFeedUpdate","books":[{"symbol":"BTCUSDT","bids":[[88,2]],"asks":[[90,3]]}]}"#).unwrap() else { panic!("update") };
+        assert!(handle.public_feed(update));
+        let mut fed = Vec::new();
+        for _ in 0..50 {
+            fed = handle.books(vec!["BTCUSDT".into()]).await.unwrap();
+            if fed.first().is_some_and(|book| book.1 == vec![(88., 2.)]) { break; }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        assert_eq!(fed, vec![("BTCUSDT".to_owned(), vec![(88., 2.)], vec![(90., 3.)])], "the shared feed set the book");
+    }).await;
+}
+
+#[tokio::test]
+async fn a_direct_account_handle_reads_its_venue_books() {
+    LocalSet::new()
+        .run_until(async {
+            let mut book = Book::default();
+            book.apply(BookSide::Bids, 99., 1.);
+            book.apply(BookSide::Asks, 101., 2.);
+            let engine = safe_cex_engine::test_support::seeded_engine(TestVenue {
+                label: "a",
+                book,
+                observed: Rc::default(),
+                pending: Vec::new(),
+                received: Rc::default(),
+                started: Rc::default(),
+                poll_scales: Rc::default(),
+                poll_intervals: Rc::default(),
+                poll_timer: None,
+            });
+            let (handle, _task) =
+                safe_cex_native::spawn_account(Host::new(engine, Tape::default()), config())
+                    .unwrap();
+            let books = handle
+                .books(vec!["BTCUSDT".into(), "UNKNOWN".into()])
+                .await
+                .unwrap();
+            assert_eq!(
+                books,
+                vec![("BTCUSDT".to_owned(), vec![(99., 1.)], vec![(101., 2.)])]
+            );
+        })
+        .await;
+}

@@ -2,7 +2,7 @@
 mod support;
 use safe_cex_engine::{Action, Engine, Event, SocketChannel, SocketId};
 use safe_cex_venue_lighter::Lighter;
-use support::{ACCOUNT, META, NOW, OPEN, options, reply, reply_at, requests};
+use support::{ACCOUNT, META, NOW, OPEN, options, reopen, reply, reply_at, requests_at};
 
 fn account(pnl: Option<f64>) -> String {
     let mut body: serde_json::Value = serde_json::from_str(ACCOUNT).unwrap();
@@ -20,7 +20,7 @@ fn before_quotes(
     pnl: Option<f64>,
     price: f64,
 ) -> (Engine<Lighter>, SocketId, SocketId, Vec<String>) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(options()));
+    let mut engine = support::engine(options());
     engine.start(NOW);
     let mut private = None;
     let mut public = None;
@@ -41,6 +41,13 @@ fn before_quotes(
                             ticker.last = price;
                             ticker.mark = price;
                         });
+                    } else if request.url.ends_with("/api/v1/exchangeStats") {
+                        reply(
+                            &mut engine,
+                            &request,
+                            200,
+                            r#"{"code":200,"order_book_stats":[]}"#,
+                        );
                     } else if request.url.contains("/account?") {
                         reply(&mut engine, &request, 200, &account(pnl));
                     } else if request.url.contains("accountActiveOrders") {
@@ -69,13 +76,26 @@ fn before_quotes(
     }
     (engine, private.unwrap(), public.unwrap(), logs)
 }
-fn refresh(engine: &mut Engine<Lighter>, socket: SocketId, body: &str) -> Vec<String> {
-    engine.handle(NOW + 10., Event::WsOpened { socket });
-    let request = requests(engine)
+/// The first refresh opens the private socket; the next is a real reconnect.
+fn refresh(
+    engine: &mut Engine<Lighter>,
+    socket: &mut SocketId,
+    first: bool,
+    body: &str,
+) -> Vec<String> {
+    let at = if first {
+        engine.handle(NOW + 10., Event::WsOpened { socket: *socket });
+        NOW + 10.
+    } else {
+        let (next, at) = reopen(engine, *socket, NOW + 60_000.);
+        *socket = next;
+        at
+    };
+    let request = requests_at(engine, at)
         .into_iter()
         .find(|request| request.url.contains("/account?"))
         .unwrap();
-    reply_at(engine, NOW + 11., &request, 200, body);
+    reply_at(engine, at + 1., &request, 200, body);
     engine
         .drain_actions()
         .filter_map(|action| match action {
@@ -91,8 +111,8 @@ fn refresh(engine: &mut Engine<Lighter>, socket: SocketId, body: &str) -> Vec<St
 fn reported_private_pnl_and_notional_do_not_depend_on_zero_nonfinite_or_conflicting_quotes() {
     for price in [0., -1., f64::NAN, f64::INFINITY, 900.] {
         let (engine, _, _, _) = before_quotes(Some(4.), price);
-        // The venue's catalogue creates ticker scaffolding; no quote transport
-        // was opened, so only the injected zero/invalid/conflicting row exists.
+        // The catalogue creates ticker scaffolding; the empty bootstrap stats
+        // supply no quotes, so only the injected zero/invalid/conflicting row exists.
         let position = &engine.store().positions()[0];
         assert_eq!(
             (
@@ -112,8 +132,8 @@ fn reported_private_pnl_and_notional_do_not_depend_on_zero_nonfinite_or_conflict
 }
 #[test]
 fn missing_private_pnl_retains_prior_side_valuation_and_warns_without_borrowing_realized_pnl() {
-    let (mut engine, private, _, _) = before_quotes(Some(4.), 0.);
-    let logs = refresh(&mut engine, private, &account(None));
+    let (mut engine, mut private, _, _) = before_quotes(Some(4.), 0.);
+    let logs = refresh(&mut engine, &mut private, true, &account(None));
     assert_eq!(engine.store().positions()[0].unrealized_pnl, 4.);
     assert_eq!(engine.store().balance().upnl, 4.);
     assert!(
@@ -121,13 +141,13 @@ fn missing_private_pnl_retains_prior_side_valuation_and_warns_without_borrowing_
             .any(|message| message.contains("PnL unavailable"))
     );
     let opposite = account(None).replace("\"sign\":1", "\"sign\":-1");
-    refresh(&mut engine, private, &opposite);
+    refresh(&mut engine, &mut private, false, &opposite);
     assert_eq!(engine.store().positions()[0].unrealized_pnl, 0.);
     assert_eq!(engine.store().balance().upnl, 0.);
 }
 #[test]
 fn new_unpriced_exposure_is_visible_and_actual_quotes_recover_valuation() {
-    let (mut engine, private, public, logs) = before_quotes(None, 0.);
+    let (mut engine, mut private, public, logs) = before_quotes(None, 0.);
     assert_eq!(engine.store().positions()[0].contracts, 2.);
     assert_eq!(engine.store().balance().upnl, 0.);
     assert_eq!(engine.store().balance().total, 1000.);
@@ -140,10 +160,10 @@ fn new_unpriced_exposure_is_visible_and_actual_quotes_recover_valuation() {
     engine.handle(NOW + 2., Event::WsMessage { socket: public,
         text: r#"{"channel":"ticker:1","ticker":{"last_trade_price":"110","mark_price":"110"}}"# });
     assert_eq!(engine.store().positions()[0].unrealized_pnl, 20.);
-    refresh(&mut engine, private, &account(None));
+    refresh(&mut engine, &mut private, true, &account(None));
     assert_eq!(engine.store().balance().upnl, 20.);
     assert_eq!(engine.store().balance().total, 980.);
-    refresh(&mut engine, private, &account(Some(5.)));
+    refresh(&mut engine, &mut private, false, &account(Some(5.)));
     assert_eq!(engine.store().positions()[0].unrealized_pnl, 5.);
     assert_eq!(engine.store().balance().upnl, 5.);
     assert_eq!(engine.store().balance().total, 995.);

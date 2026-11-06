@@ -75,8 +75,6 @@ isolated leverage metadata; ignored side parameters do not imply independence.
 | paradex                       | no               | Coupled/fixed/unsupported; no TS side argument              | Global or unsupported; no new remote scope |
 | phemex                        | yes              | Long/short signed leverage, preserve opposite; omitted both | Required market                            |
 | polymarket                    | no               | Coupled/fixed/unsupported; no TS side argument              | Global or unsupported; no new remote scope |
-| salsadex                      | no               | Coupled/fixed/unsupported; no TS side argument              | Global or unsupported; no new remote scope |
-| tealstreet-dex                | no               | Coupled/fixed/unsupported; no TS side argument              | Global or unsupported; no new remote scope |
 | txflow                        | no               | Coupled/fixed/unsupported; no TS side argument              | Global or unsupported; no new remote scope |
 | weex                          | yes              | Isolated long/short preserve opposite; cross coupled        | Optional market; omitted existing scope    |
 | what                          | no               | Coupled/fixed/unsupported; no TS side argument              | Global or unsupported; no new remote scope |

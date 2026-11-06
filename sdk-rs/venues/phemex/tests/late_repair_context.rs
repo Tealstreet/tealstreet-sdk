@@ -3,7 +3,8 @@ mod support;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Claim, HttpAction, Prepared, RoutingIntent};
 use safe_cex_engine::{
-    Action, Command, Event, HttpRequest, Level, Method, Notice, Response, SocketId, TimerId,
+    Action, Command, Event, HttpRequest, Level, Method, Notice, Outcome, Response, SocketId,
+    TimerId,
 };
 use safe_cex_venue_phemex::PhemexPerpetuals;
 use serde_json::{Value, json};
@@ -175,7 +176,7 @@ impl Harness {
         let id = self.command;
         (id, self.event(Event::Command(command(id))))
     }
-    fn lose(&mut self, client: &str, side: OrderSide) -> (u32, HttpRequest) {
+    fn place_pending(&mut self, client: &str, side: OrderSide) -> (u32, HttpRequest) {
         let mut order = opts(client);
         order.side = side;
         let (id, a) = self.query_command(|command| Command::PlaceOrders {
@@ -186,12 +187,23 @@ impl Harness {
             .into_iter()
             .find(|r| r.url.contains("/g-orders/create"))
             .expect("genuine released placement");
+        (id, r)
+    }
+    fn lose_pending(&mut self, id: u32, r: &HttpRequest) {
         let a = self.event(Event::HttpFailed {
             request: r.id,
             error: "native network loss",
         });
         assert_eq!(terminals(&a, id).len(), 1, "lost placement ends once");
         assert!(terminals(&a, id)[0].is_err());
+        assert!(a.iter().any(|action| matches!(action,
+            Action::Notice(Notice::CommandFailed { command, error })
+                if *command == id && error.outcome == Some(Outcome::Unknown)
+        )));
+    }
+    fn lose(&mut self, client: &str, side: OrderSide) -> (u32, HttpRequest) {
+        let (id, r) = self.place_pending(client, side);
+        self.lose_pending(id, &r);
         (id, r)
     }
     fn cancel_all(&mut self) -> (u32, Vec<Action>) {
@@ -209,6 +221,17 @@ impl Harness {
             "empty immediate cancel completes natively"
         );
         (id, r)
+    }
+    fn owe_concurrent(&mut self, clients: &[(&str, OrderSide)]) {
+        let pending: Vec<_> = clients
+            .iter()
+            .map(|(client, side)| self.place_pending(client, *side))
+            .collect();
+        for (id, request) in pending {
+            self.lose_pending(id, &request);
+        }
+        let (id, actions) = self.cancel_all();
+        assert_eq!(terminals(&actions, id), vec![Ok("[]".into())]);
     }
     fn stream(&mut self, mut rows: Vec<Value>, raw: bool) -> Vec<Action> {
         let stamp = ((self.now + 1.) * 1e6) as u64;
@@ -583,30 +606,53 @@ fn native_duplicate_stream_observation_never_resends_a_late_cancel() {
     assert!(deletes(&h.stream(vec![row], false)).is_empty());
 }
 #[test]
-fn native_cross_origin_same_side_late_orders_share_one_bulk_request() {
+fn concurrent_lost_placements_share_one_bulk_request_after_repeated_cancel_all() {
     let mut h = boot("Hedged", true, false);
-    h.owe("owed-a", OrderSide::Buy);
-    h.owe("owed-b", OrderSide::Buy);
+    h.owe_concurrent(&[("owed-a", OrderSide::Buy), ("owed-b", OrderSide::Buy)]);
+    let (id, again) = h.cancel_all();
+    assert_eq!(terminals(&again, id), vec![Ok("[]".into())]);
+    assert!(deletes(&again).is_empty());
+    let (id, refused) = h.query_command(|command| Command::PlaceOrders {
+        command,
+        orders: vec![opts("fenced-c")],
+    });
+    assert!(requests(&refused).iter().all(|r| r.method != Method::Post));
+    assert_eq!(terminals(&refused, id).len(), 1);
+    assert!(refused.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command, error })
+            if *command == id && error.outcome == Some(Outcome::NotSent)
+                && error.message.contains("uncertain")
+    )));
     let mut a = live_row("native-a");
     a["clOrdID"] = json!("owed-a");
     a["posSide"] = json!("Long");
     let mut b = live_row("native-b");
     b["clOrdID"] = json!("owed-b");
     b["posSide"] = json!("Long");
-    let out = h.stream(vec![a, b], false);
+    let mut foreign = live_row("native-c");
+    foreign["clOrdID"] = json!("fenced-c");
+    foreign["posSide"] = json!("Long");
+    let observed = vec![a, b, foreign];
+    let out = h.stream(observed.clone(), false);
     let sent = deletes(&out);
     assert_eq!(sent.len(), 1);
     assert!(sent[0].url.contains("/g-orders?"));
     assert_eq!(p(&sent[0], "orderID").as_deref(), Some("native-a,native-b"));
     assert_eq!(p(&sent[0], "posSide").as_deref(), Some("Long"));
+    assert!(deletes(&h.stream(observed, false)).is_empty());
 }
 #[test]
 fn native_multi_order_group_keeps_bulk_path_for_its_singleton_tail() {
     let mut h = boot("OneWay", true, false);
     let mut observed = Vec::new();
+    let clients: Vec<_> = (0..11).map(|i| format!("owed-{i}")).collect();
+    let pending: Vec<_> = clients
+        .iter()
+        .map(|client| (client.as_str(), OrderSide::Buy))
+        .collect();
+    h.owe_concurrent(&pending);
     for i in 0..11 {
         let client = format!("owed-{i}");
-        h.owe(&client, OrderSide::Buy);
         let mut row = live_row(&format!("native-{i}"));
         row["clOrdID"] = json!(client);
         observed.push(row);
@@ -624,8 +670,10 @@ fn native_multi_order_group_keeps_bulk_path_for_its_singleton_tail() {
 #[test]
 fn native_independent_groups_continue_after_a_network_failure_without_resend() {
     let mut h = boot("Hedged", true, false);
-    h.owe("owed-long", OrderSide::Buy);
-    h.owe("owed-short", OrderSide::Sell);
+    h.owe_concurrent(&[
+        ("owed-long", OrderSide::Buy),
+        ("owed-short", OrderSide::Sell),
+    ]);
     let mut long = live_row("native-long");
     long["clOrdID"] = json!("owed-long");
     long["posSide"] = json!("Long");
@@ -655,8 +703,7 @@ fn native_independent_groups_continue_after_a_network_failure_without_resend() {
 #[test]
 fn native_mixed_cancel_ack_keeps_accepted_effect_and_restores_only_the_other_row() {
     let mut h = boot("OneWay", true, false);
-    h.owe("owed-a", OrderSide::Buy);
-    h.owe("owed-b", OrderSide::Buy);
+    h.owe_concurrent(&[("owed-a", OrderSide::Buy), ("owed-b", OrderSide::Buy)]);
     let mut a = live_row("native-a");
     a["clOrdID"] = json!("owed-a");
     let mut b = live_row("native-b");
@@ -758,8 +805,13 @@ fn native_incomplete_read_preserves_the_unresolved_generation() {
         terminals(&a, id)[0]
             .as_ref()
             .unwrap_err()
-            .contains("unknown outcome")
+            .contains("uncertain")
     );
+    assert_eq!(terminals(&a, id).len(), 1);
+    assert!(a.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { command, error })
+            if *command == id && error.outcome == Some(Outcome::NotSent)
+    )));
 }
 #[test]
 fn native_early_reconciliation_does_not_mark_orders_loaded() {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { OKXExchange } from '../../packages/safe-cex/src/exchanges/okx/okx.exchange.ts';
+import { OKXExchange } from '../../packages/safe-cex/src/__tests__/reference/okx/okx.exchange.ts';
 import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
 import { venueOf } from './venues.mjs';
 const linear = { id: 'BTC-USDT-SWAP', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true, precision: { amount: 1, price: 0.1 },

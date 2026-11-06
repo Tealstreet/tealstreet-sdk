@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:05:15.185Z",
+  "endpoint": "/v5/order/create",
+  "http_status": 200,
+  "body": "{\"retCode\":10003,\"retMsg\":\"API key is invalid.\",\"result\":{},\"retExtInfo\":{},\"time\":1793153115196}",
+  "expect": {
+    "kind": "authInvalid",
+    "outcome": "rejected",
+    "path": "write"
+  }
+}

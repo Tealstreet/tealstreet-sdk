@@ -1,10 +1,10 @@
 import type { Market, Ticker } from '../../types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HyperliquidSpotExchange } from '../../exchanges/hyperliquid/hyperliquidspot.exchange';
-import { KrakenSpotExchange } from '../../exchanges/kraken/krakenspot.exchange';
-import { KrakenSpotPublicWebsocket } from '../../exchanges/kraken/krakenspot.ws-public';
-import { KrakenSpotPrivateWebsocket } from '../../exchanges/kraken/krakenspot.ws-private';
-import { normalizeAsset } from '../../exchanges/kraken/krakenspot.types';
+import { HyperliquidSpotExchange } from '../reference/hyperliquid/hyperliquidspot.exchange';
+import { KrakenSpotExchange } from '../reference/kraken/krakenspot.exchange';
+import { KrakenSpotPublicWebsocket } from '../reference/kraken/krakenspot.ws-public';
+import { KrakenSpotPrivateWebsocket } from '../reference/kraken/krakenspot.ws-private';
+import { normalizeAsset } from '../reference/kraken/krakenspot.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 

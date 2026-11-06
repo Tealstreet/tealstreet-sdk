@@ -16,15 +16,18 @@ const SYMBOL: &str = "BTC /&-USD-PERP";
 const ROW: &str = r#"{"id":"trade-a","market":"BTC /&-USD-PERP","side":"BUY","price":"30000.12","size":"0.5","created_at":1681375176910}"#;
 
 fn engine(testnet: bool, private: bool) -> Engine<Paradex> {
-    let mut h = Harness::empty(Options {
+    let options = Options {
         testnet,
         public_data_only: !private,
-        // Existing delegated-signing fixture identifiers; no signing is needed here.
-        key: private.then(|| "opaque-public-subkey".into()),
         paradex_address: private.then(|| "0x123".into()),
         subkey_address: private.then(|| "0x456".into()),
-        payload_signer: private,
-    });
+        ..Options::default()
+    };
+    let mut h = if private {
+        Harness::keyed(options, support::STARK_KEY)
+    } else {
+        Harness::empty(options)
+    };
     h.reply("/markets", &MARKETS.replace("BTC-USD-PERP", SYMBOL));
     h.reply("summary", &TICKERS.replace("BTC-USD-PERP", SYMBOL));
     h.e.take_frame(NOW);
@@ -53,10 +56,9 @@ fn ask(
 
 fn preparation(actions: &[Action]) -> (Preparation, HttpRequest) {
     assert!(
-        !actions.iter().any(|a| matches!(
-            a,
-            Action::Http(_) | Action::SignPayload { .. } | Action::Sign { .. }
-        )),
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(_) | Action::Sign { .. })),
         "public history must await managed preparation without legacy HTTP or signing"
     );
     actions
@@ -143,7 +145,7 @@ fn results(actions: &[Action], owner: u32) -> Vec<Result<String, VenueError>> {
 fn only_retirement(actions: &[Action], token: Preparation) {
     for action in actions {
         match action {
-            Action::Http(_) | Action::Sign { .. } | Action::SignPayload { .. } => {
+            Action::Http(_) | Action::Sign { .. } => {
                 panic!("single public page cannot send or sign another request")
             }
             Action::ManagedHttp(action) => assert!(
@@ -404,7 +406,6 @@ fn initial_capacity_denial_also_precedes_missing_market_empty_completion() {
                 | Action::ManagedHttp(_)
                 | Action::SetTimer { .. }
                 | Action::Sign { .. }
-                | Action::SignPayload { .. }
         )));
         no_marker(&actions);
     }

@@ -32,7 +32,7 @@ commands.
    put CLI commands in **Message**:
 
    ```text
-   buy $250 SOLUSDT at -0.5%
+   buy $250 SOLUSDT at 150
    ```
 
 When the alert fires, the CLI prints the run as `[webhook] …` and records the

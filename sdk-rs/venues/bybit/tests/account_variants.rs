@@ -1021,3 +1021,96 @@ fn a_dropped_snapshot_releases_its_in_flight_page_legs() {
         "the dropped positions page leg must not hold capacity"
     );
 }
+
+// https://bybit-exchange.github.io/docs/v5/order/open-order
+/// A fresh engine against a spot account that already rests a limit, a
+/// conditional and a TP/SL order shows all three across pages, and keeps them
+/// through the private feed and the reconcile polls.
+#[test]
+fn spot_restart_shows_resting_orders_across_pages_and_polls() {
+    let mut h = startup(Variant::Spot);
+    let first = h.take("/v5/order/realtime");
+    assert!(
+        first.url.contains("category=spot&limit=50&cursor="),
+        "{}",
+        first.url
+    );
+    let (limit, rest) = SPOT_OPEN_ORDERS.split_once("},{").unwrap();
+    let paged = format!(r#"{limit}}}],"nextPageCursor":"page-2"}}}}"#);
+    h.reply(first.id, 200, &paged);
+    let second = h.take("/v5/order/realtime");
+    assert!(second.url.contains("cursor=page-2"), "{}", second.url);
+    h.reply(
+        second.id,
+        200,
+        &format!(r#"{{"retCode":0,"retMsg":"OK","result":{{"category":"spot","list":[{{{rest}"#),
+    );
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    authenticate(&mut h);
+    for _ in 0..10 {
+        let ids: Vec<_> = h
+            .engine
+            .store()
+            .orders()
+            .iter()
+            .map(|o| o.id.clone())
+            .collect();
+        assert_eq!(
+            ids,
+            ["spot-limit", "spot-stop", "spot-tpsl"],
+            "{:?}",
+            h.paths()
+        );
+        h.advance(30_000.0);
+        while h.has_request("/v5/order/realtime") {
+            h.respond("/v5/order/realtime", 200, SPOT_OPEN_ORDERS);
+        }
+        while h.has_request("/v5/account/wallet-balance") {
+            h.respond("/v5/account/wallet-balance", 200, WALLET);
+        }
+    }
+    let store = h.engine.store();
+    assert!(store.loaded().orders);
+    assert_eq!(
+        store.order("spot-limit").unwrap().kind,
+        safe_cex_engine::model::OrderType::Limit
+    );
+    assert_eq!(
+        store.order("spot-stop").unwrap().kind,
+        safe_cex_engine::model::OrderType::Conditional
+    );
+    assert_eq!(
+        store.order("spot-tpsl").unwrap().kind,
+        safe_cex_engine::model::OrderType::StopLoss
+    );
+}
+
+/// A reloaded page's frame-fed spot engine shows the worker's resting orders
+/// from the worker's snapshot frame.
+#[test]
+fn spot_page_mirror_shows_the_sources_resting_orders() {
+    let mut source = startup(Variant::Spot);
+    source.respond("/v5/order/realtime", 200, SPOT_OPEN_ORDERS);
+    source.respond("/v5/account/wallet-balance", 200, WALLET);
+    let frame = source.engine.snapshot_frame(source.now).to_vec();
+    let mut engine = support::engine(options(Variant::Spot));
+    engine.set_frame_fed().unwrap();
+    let mut page = Harness::started_engine(engine);
+    if page.has_request("status=PreLaunch") {
+        page.respond("status=PreLaunch", 200, EMPTY);
+    }
+    page.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
+    page.engine.apply_frame(page.now, &frame, true).unwrap();
+    page.collect();
+    let ids: Vec<_> = page
+        .engine
+        .store()
+        .orders()
+        .iter()
+        .map(|o| o.id.clone())
+        .collect();
+    assert_eq!(ids, ["spot-limit", "spot-stop", "spot-tpsl"]);
+    assert!(page.engine.store().loaded().orders);
+}
+
+const SPOT_OPEN_ORDERS: &str = r#"{"retCode":0,"retMsg":"OK","result":{"category":"spot","list":[{"orderId":"spot-limit","orderLinkId":"tealstreet-1","blockTradeId":"","symbol":"BTCUSDT","price":"60000","qty":"0.001","side":"Buy","isLeverage":"0","positionIdx":0,"orderStatus":"New","createType":"","cancelType":"UNKNOWN","rejectReason":"EC_NoError","avgPrice":"","leavesQty":"0.001","leavesValue":"60","cumExecQty":"0","cumExecValue":"0","cumExecFee":"0","timeInForce":"GTC","orderType":"Limit","stopOrderType":"","orderIv":"","marketUnit":"","triggerPrice":"0.00","takeProfit":"0.00","stopLoss":"0.00","tpslMode":"","ocoTriggerBy":"","tpLimitPrice":"","slLimitPrice":"","tpTriggerBy":"","slTriggerBy":"","triggerDirection":0,"triggerBy":"","lastPriceOnCreated":"","reduceOnly":false,"closeOnTrigger":false,"placeType":"","smpType":"None","smpGroup":0,"smpOrderId":"","createdTime":"1760880000000","updatedTime":"1760880000000"},{"orderId":"spot-stop","orderLinkId":"","blockTradeId":"","symbol":"BTCUSDT","price":"0","qty":"0.001","side":"Buy","isLeverage":"0","positionIdx":0,"orderStatus":"Untriggered","createType":"","cancelType":"UNKNOWN","rejectReason":"EC_NoError","avgPrice":"","leavesQty":"0.001","leavesValue":"0","cumExecQty":"0","cumExecValue":"0","cumExecFee":"0","timeInForce":"IOC","orderType":"Market","stopOrderType":"StopOrder","orderIv":"","marketUnit":"baseCoin","triggerPrice":"70000","takeProfit":"0.00","stopLoss":"0.00","tpslMode":"","ocoTriggerBy":"","tpLimitPrice":"","slLimitPrice":"","tpTriggerBy":"","slTriggerBy":"","triggerDirection":1,"triggerBy":"LastPrice","lastPriceOnCreated":"66666.6","reduceOnly":false,"closeOnTrigger":false,"placeType":"","smpType":"None","smpGroup":0,"smpOrderId":"","createdTime":"1760880000000","updatedTime":"1760880000000"},{"orderId":"spot-tpsl","orderLinkId":"","blockTradeId":"","symbol":"BTCUSDT","price":"0","qty":"0.001","side":"Sell","isLeverage":"0","positionIdx":0,"orderStatus":"Untriggered","createType":"","cancelType":"UNKNOWN","rejectReason":"EC_NoError","avgPrice":"","leavesQty":"0.001","leavesValue":"0","cumExecQty":"0","cumExecValue":"0","cumExecFee":"0","timeInForce":"IOC","orderType":"Market","stopOrderType":"tpslOrder","orderIv":"","marketUnit":"baseCoin","triggerPrice":"60000","takeProfit":"0.00","stopLoss":"0.00","tpslMode":"","ocoTriggerBy":"","tpLimitPrice":"","slLimitPrice":"","tpTriggerBy":"","slTriggerBy":"","triggerDirection":2,"triggerBy":"LastPrice","lastPriceOnCreated":"66666.6","reduceOnly":false,"closeOnTrigger":false,"placeType":"","smpType":"None","smpGroup":0,"smpOrderId":"","createdTime":"1760880000000","updatedTime":"1760880000000"}],"nextPageCursor":""}}"#;

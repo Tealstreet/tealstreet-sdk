@@ -74,6 +74,22 @@ fn definitive_key_rejections_fail_startup_and_deactivate() {
         );
         assert!(h.deactivated, "{code}");
         assert!(h.logs.contains(&failure.message), "{code}: {:?}", h.logs);
+        let notice = h
+            .notices
+            .iter()
+            .find_map(|notice| match notice {
+                safe_cex_engine::Notice::Event(event) if event.message == failure.message => {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .expect("startup auth notice");
+        assert!(
+            notice
+                .fields
+                .contains(&("venueCode", code.to_string().into())),
+            "{notice:?}"
+        );
     }
 }
 
@@ -520,4 +536,306 @@ fn environment_probe_never_runs_for_excluded_networks_products_or_signing_contex
         }
         assert!(!h.has_request("/v5/user/query-api"));
     }
+}
+
+/// Every error-level event's (code, message).
+fn errors(h: &Harness) -> Vec<(&'static str, String)> {
+    h.notices
+        .iter()
+        .filter_map(|notice| match notice {
+            safe_cex_engine::Notice::Event(event)
+                if event.level == safe_cex_engine::Level::Error =>
+            {
+                Some((event.code, event.message.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+const UNMATCHED_IP: &str = "Unmatched IP, please check your API key's bound IP addresses.";
+
+#[test]
+fn an_account_info_ip_refusal_fails_startup_visibly_with_the_allowlist_hint() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 200, &rejection(10010, UNMATCHED_IP));
+    let [failure] = h.startup_failures.as_slice() else {
+        panic!(
+            "one startup failure expected: {:?}; logs {:?}",
+            h.startup_failures, h.logs
+        );
+    };
+    assert_eq!(failure.kind, Some(ErrorKind::AuthPermission));
+    assert!(
+        failure.message.contains("IP allowlist"),
+        "{}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains(UNMATCHED_IP),
+        "{}",
+        failure.message
+    );
+    assert!(
+        errors(&h)
+            .iter()
+            .any(|(code, message)| *code == "auth.rejected" && message == &failure.message),
+        "an error-level auth.rejected event is required: {:?}",
+        errors(&h)
+    );
+    // An IP mismatch is not a dead key.
+    assert!(!h.deactivated);
+}
+
+// A deployed report: a relay timeout during start read as a refused key, beside
+// "market data is ready" with markets still outstanding.
+#[test]
+fn a_relay_timeout_on_account_info_says_so_and_claims_no_refusal() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    let request = h.take("/v5/account/info").id;
+    h.event(Event::HttpFailed {
+        request,
+        error: "Relay or network request timed out",
+    });
+    let logged = errors(&h);
+    let (_, message) = logged
+        .iter()
+        .find(|(_, message)| message.contains("could not read this account"))
+        .unwrap_or_else(|| panic!("{:?}", h.logs));
+    assert!(message.contains("timed out"), "{message}");
+    for false_claim in ["rejected", "trading is unavailable", "market data is ready"] {
+        assert!(!message.contains(false_claim), "{message}");
+    }
+}
+
+const CLASSIC_ISOLATED: &str = r#"{"retCode":0,"retMsg":"OK","result":{"marginMode":"ISOLATED_MARGIN","unifiedMarginStatus":1}}"#;
+
+/// Started on an assumed mode because the account info read got no answer.
+fn started_after_a_relay_timeout() -> Harness {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.load_public();
+    let request = h.take("/v5/account/info").id;
+    h.event(Event::HttpFailed {
+        request,
+        error: "Relay or network request timed out",
+    });
+    h
+}
+
+#[test]
+fn account_info_lost_to_a_relay_timeout_is_read_again_and_corrects_the_mode() {
+    let mut h = started_after_a_relay_timeout();
+    let unified = h.take("/v5/account/wallet-balance");
+    assert!(
+        unified.url.contains("accountType=UNIFIED"),
+        "{}",
+        unified.url
+    );
+    h.reply(
+        unified.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[]}}"#,
+    );
+    assert!(!h.has_request("/v5/account/info"));
+    h.advance(5_000.0);
+    assert!(h.has_request("/v5/account/info"), "{:?}", h.paths());
+    h.respond("/v5/account/info", 200, CLASSIC_ISOLATED);
+    // The tick's read went out on the assumed mode just before the answer came.
+    let assumed = h.take("/v5/account/wallet-balance");
+    assert!(
+        assumed.url.contains("accountType=UNIFIED"),
+        "{}",
+        assumed.url
+    );
+    h.reply(
+        assumed.id,
+        200,
+        r#"{"retCode":0,"retMsg":"OK","result":{"list":[]}}"#,
+    );
+    let wallet = h.take("/v5/account/wallet-balance");
+    assert!(
+        wallet.url.contains("accountType=CONTRACT"),
+        "{}",
+        wallet.url
+    );
+    let mut coins = Vec::new();
+    while h.has_request("/v5/position/list") {
+        let read = h.take("/v5/position/list");
+        coins.push(read.url.clone());
+        h.reply(
+            read.id,
+            200,
+            r#"{"retCode":0,"retMsg":"OK","result":{"list":[],"nextPageCursor":""}}"#,
+        );
+    }
+    let last = coins.last().expect("positions read");
+    assert!(last.contains("settleCoin=USDT"), "{coins:?}");
+}
+
+#[test]
+fn account_info_read_again_keeps_trying_until_answered() {
+    let mut h = started_after_a_relay_timeout();
+    h.advance(5_000.0);
+    let request = h.take("/v5/account/info").id;
+    h.event(Event::HttpFailed {
+        request,
+        error: "Relay or network request timed out",
+    });
+    h.advance(10_000.0);
+    assert!(h.has_request("/v5/account/info"), "{:?}", h.paths());
+}
+
+#[test]
+fn an_answered_account_info_failure_is_not_read_again() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 503, "Service Unavailable");
+    h.advance(60_000.0);
+    assert!(!h.has_request("/v5/account/info"), "{:?}", h.paths());
+}
+
+#[test]
+fn a_refused_account_info_does_not_call_market_data_ready_while_markets_are_out() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 503, "Service Unavailable");
+    assert!(
+        errors(&h)
+            .iter()
+            .all(|(_, message)| !message.contains("market data is ready")),
+        "{:?}",
+        h.logs
+    );
+}
+
+#[test]
+fn any_other_account_info_failure_is_an_error_not_a_warning() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 503, "Service Unavailable");
+    assert!(h.startup_failures.is_empty());
+    assert!(
+        errors(&h)
+            .iter()
+            .any(|(_, message)| message.contains("the private API was rejected")),
+        "{:?}",
+        h.logs
+    );
+}
+
+#[test]
+fn an_account_read_refused_for_the_key_is_an_auth_rejected_error() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 200, support::ACCOUNT_INFO);
+    h.load_public();
+    h.respond(
+        "/v5/account/wallet-balance",
+        200,
+        &rejection(10010, UNMATCHED_IP),
+    );
+    assert!(
+        errors(&h)
+            .iter()
+            .any(|(code, message)| *code == "auth.rejected" && message.contains(UNMATCHED_IP)),
+        "{:?}",
+        errors(&h)
+    );
+}
+
+#[test]
+fn a_refused_key_is_never_used_for_private_reads_or_the_private_feed() {
+    let mut h = private();
+    h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    h.respond("/v5/account/info", 200, &rejection(10010, UNMATCHED_IP));
+    h.load_public();
+    h.advance(60_000.0);
+    for path in [
+        "/v5/order/realtime",
+        "/v5/position/list",
+        "/v5/account/wallet-balance",
+    ] {
+        assert!(!h.has_request(path), "{path}: {:?}", h.paths());
+    }
+    assert!(
+        h.sockets
+            .iter()
+            .all(|(_, url)| !url.contains("/v5/private")),
+        "{:?}",
+        h.sockets
+    );
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (200, rejection(10010, UNMATCHED_IP)),
+        (401, rejection(10010, UNMATCHED_IP)),
+        (403, rejection(10003, "API key is invalid.")),
+    ] {
+        let mut h = private();
+        h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+        h.respond("/v5/account/info", status, &body);
+        assert_eq!(h.startup_failures.len(), 1, "{status} {body}");
+    }
+}
+
+/// Wave Bybit tunnel account: the startup markets and fee reads were lost to the
+/// tunnel; once the link is back, the retried reads must load markets.
+#[test]
+fn startup_reads_lost_to_the_tunnel_load_markets_once_retried() {
+    let mut h = private();
+    for path in [
+        "/v5/account/fee-rate",
+        "status=PreLaunch",
+        "/v5/market/instruments-info",
+    ] {
+        if let Some(request) = h
+            .requests
+            .iter()
+            .find(|r| r.url.contains(path))
+            .map(|r| r.id)
+        {
+            h.event(Event::HttpFailed {
+                request,
+                error: "TradeTunnel connection lost",
+            });
+        }
+    }
+    h.requests.retain(|r| {
+        !r.url.contains("/v5/market/instruments-info") && !r.url.contains("/v5/account/fee-rate")
+    });
+    for _ in 0..12 {
+        h.advance(60_000.0);
+        if h.has_request("/v5/market/instruments-info") {
+            break;
+        }
+    }
+    assert!(
+        h.has_request("/v5/market/instruments-info"),
+        "{:?}",
+        h.paths()
+    );
+    if h.has_request("/v5/account/fee-rate") {
+        h.respond("/v5/account/fee-rate", 200, support::FEE_RATES);
+    }
+    for _ in 0..12 {
+        for (path, body) in [
+            ("/v5/market/instruments-info", support::INSTRUMENTS),
+            ("status=PreLaunch", support::PRELAUNCH),
+            ("/v5/account/fee-rate", support::FEE_RATES),
+        ] {
+            while h.has_request(path) {
+                h.respond(path, 200, body);
+            }
+        }
+        if h.engine.store().loaded().markets {
+            break;
+        }
+        h.advance(60_000.0);
+    }
+    assert!(h.engine.store().loaded().markets, "{:?}", h.paths());
 }

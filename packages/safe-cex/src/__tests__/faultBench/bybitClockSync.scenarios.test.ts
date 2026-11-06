@@ -2,8 +2,8 @@ import type { Market } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { parseBybitServerTimestamp } from '../../exchanges/bybit/bybit.api';
-import { BybitExchange } from '../../exchanges/bybit/bybit.exchange';
+import { parseBybitServerTimestamp } from '../reference/bybit/bybit.api';
+import { BybitExchange } from '../reference/bybit/bybit.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { virtualClock } from '../../utils/virtualClock';
 import { createFakeVenue } from './fakeVenue';

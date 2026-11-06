@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
-import { ENDPOINTS } from '../../exchanges/mexc/mexc.types';
-import { normalizeMarket, normalizeOrder } from '../../exchanges/mexc/mexc.utils';
+import { MexcExchange } from '../reference/mexc/mexc.exchange';
+import { ENDPOINTS } from '../reference/mexc/mexc.types';
+import { normalizeMarket, normalizeOrder } from '../reference/mexc/mexc.utils';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PlaceOrderOpts } from '../../types';
 

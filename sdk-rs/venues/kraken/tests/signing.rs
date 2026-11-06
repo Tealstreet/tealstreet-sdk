@@ -70,3 +70,11 @@ fn batch_special_encoding_matches_encode_uri_component() {
     assert_eq!(encode_component("a b()!'*+"), "a%20b()!'*%2B");
     assert_eq!(form(&[("s", "a b()!'*+".into())]), "s=a+b()%21%27%2A%2B");
 }
+
+/// Legacy decoded a stored value with surrounding whitespace; a saved account must still load.
+#[test]
+fn a_stored_value_with_surrounding_whitespace_still_loads() {
+    for stored in ["c2VjcmV0\n", " c2VjcmV0 ", "c2VjcmV0\r\n"] {
+        assert!(Signer::new(stored).is_ok(), "{stored:?}");
+    }
+}

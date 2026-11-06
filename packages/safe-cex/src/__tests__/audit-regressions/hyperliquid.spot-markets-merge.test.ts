@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { SPOT_ASSET_INDEX_OFFSET } from '../../exchanges/hyperliquid/hyperliquid.constants';
-import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { ExchangeOptions, OrderSide, OrderType } from '../../types';
 

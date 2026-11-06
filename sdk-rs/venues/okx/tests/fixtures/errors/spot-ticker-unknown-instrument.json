@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:19:12.406Z",
+  "endpoint": "/api/v5/market/ticker?instId=NOPE-USDT",
+  "http_status": 200,
+  "body": "{\"code\":\"51001\",\"data\":[],\"msg\":\"Instrument ID, Instrument ID code, or Spread ID doesn't exist.\"}",
+  "expect": {
+    "kind": null,
+    "outcome": null,
+    "path": "read"
+  }
+}

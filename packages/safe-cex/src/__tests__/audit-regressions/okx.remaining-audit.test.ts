@@ -2,7 +2,7 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { ENDPOINTS } from '../../exchanges/okx/okx.types';
 import { DefaultStore } from '../../store/store.base';
 

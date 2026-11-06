@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHmac } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { BybitExchange } from '../../packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts';
+import { BybitExchange } from '../../packages/safe-cex/src/__tests__/reference/bybit/bybit.exchange.ts';
 import { DefaultStore } from '../../packages/safe-cex/src/store/store.base.ts';
 import { FrameApplier } from '../../packages/safe-cex/src/store/frameApplier.ts';
 import { Frame } from '../hosts/wasm/js/wire.mjs';

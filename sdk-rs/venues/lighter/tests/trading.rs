@@ -24,7 +24,10 @@ fn place(e: &mut Engine<Lighter>, orders: Vec<PlaceOrderOpts>) {
     );
 }
 fn http(e: &mut Engine<Lighter>, path: &str) -> HttpRequest {
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    http_at(e, NOW, path)
+}
+fn http_at(e: &mut Engine<Lighter>, now: f64, path: &str) -> HttpRequest {
+    let actions = safe_cex_engine::test_support::prepared_actions(e, now);
     let debug = format!("{actions:?}");
     actions
         .into_iter()
@@ -68,10 +71,20 @@ fn begin(e: &mut Engine<Lighter>, orders: Vec<PlaceOrderOpts>) -> HttpRequest {
     http(e, "sendTx")
 }
 fn ack(e: &mut Engine<Lighter>, r: &HttpRequest) {
-    reply(e, r, 200, r#"{"code":200,"tx_hash":"transaction-hash"}"#);
+    ack_at(e, NOW, r);
+}
+fn ack_at(e: &mut Engine<Lighter>, now: f64, r: &HttpRequest) {
+    reply_at(
+        e,
+        now,
+        r,
+        200,
+        r#"{"code":200,"tx_hash":"transaction-hash"}"#,
+    );
 }
 fn timer(e: &mut Engine<Lighter>) -> TimerId {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::SetTimer { timer, at_ms } if at_ms < NOW + 500.0 => Some(timer),
             _ => None,
@@ -79,7 +92,8 @@ fn timer(e: &mut Engine<Lighter>) -> TimerId {
         .expect("submission pace")
 }
 fn failure(e: &mut Engine<Lighter>) -> String {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(error.message),
             _ => None,
@@ -93,7 +107,9 @@ fn caller_id_on_later_batch_item_rejects_before_any_read_or_write() {
     let mut bad = limit();
     bad.client_order_id = Some("caller".into());
     place(&mut e, vec![limit(), bad]);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     assert!(
         actions
@@ -102,12 +118,58 @@ fn caller_id_on_later_batch_item_rejects_before_any_read_or_write() {
     );
 }
 
+#[test]
+fn native_stop_limit_edit_never_converts_to_a_market_stop() {
+    for kind in [3, 5] {
+        let (mut e, socket) = ready_unattributed();
+        message(
+            &mut e,
+            socket,
+            NOW + 1.0,
+            &json!({
+                "channel":"account_all_orders", "type":"update/account_all_orders", "orders":[{
+                    "order_index":"42", "market_id":1, "status":"open", "type":kind,
+                    "is_ask":true, "reduce_only":true, "initial_base_amount":"2",
+                    "filled_base_amount":"0", "remaining_base_amount":"2",
+                    "trigger_price":"80", "price":"79", "time_in_force":1
+                }]
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            e.store()
+                .order("42")
+                .unwrap()
+                .extra
+                .as_ref()
+                .unwrap()
+                .conditional_order_price,
+            Some(79.0)
+        );
+        e.handle(
+            NOW + 1.0,
+            Event::Command(Command::AmendOrder {
+                command: 8,
+                id: "42".into(),
+                price: Some(81.0),
+                amount: None,
+            }),
+        );
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 1.0);
+        assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error, ..}) if error.outcome == Some(Outcome::NotSent))), "{out:?}");
+        assert!(e.store().order("42").is_some());
+    }
+}
+
 fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
     let (mut e, _) = ready_unattributed();
     let before = e.snapshot_frame(NOW).to_vec();
     e.take_frame(NOW);
     place(&mut e, vec![limit(), bad]);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         actions.iter().all(|action| matches!(
             action,
@@ -156,7 +218,7 @@ fn placement_scales_market_metadata_and_returns_native_index() {
     let id = tx["ClientOrderIndex"].as_u64().unwrap().to_string();
     assert!(e.store().order(&id).is_some());
     assert!(e.store().order(&id).unwrap().client_order_id.is_none());
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:ref ids,.. }) if ids==&format!("[\"{id}\"]"))));
+    assert!(safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:ref ids,.. }) if ids==&format!("[\"{id}\"]"))));
 }
 
 #[test]
@@ -176,7 +238,9 @@ fn market_uses_side_bbo_before_mark_and_conditional_is_ioc_with_slippage_overrid
     assert_eq!(wire(&r)["TimeInForce"], 0);
     assert_eq!(wire(&r)["OrderExpiry"], 0);
     ack(&mut e, &r);
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .for_each(drop);
     place(
         &mut e,
         vec![order(
@@ -214,7 +278,9 @@ fn generated_client_order_indices_are_receipted_before_the_signed_batch() {
     place(&mut e, vec![limit(), limit()]);
     let nonce = http(&mut e, "nextNonce");
     reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let (progress_at, receipts) = actions
         .iter()
         .enumerate()
@@ -251,31 +317,35 @@ fn generated_client_order_indices_are_receipted_before_the_signed_batch() {
 
 #[test]
 fn bracket_waits_for_each_ack_and_gives_siblings_their_own_indexes() {
+    // Market entries keep separate protective transactions; a limit entry with
+    // protections is one grouped transaction (tests/grouped_tpsl.rs).
     let (mut e, _) = ready_unattributed();
     let mut opts = limit();
+    opts.kind = OrderType::Market;
+    opts.price = None;
     opts.stop_loss = Some(95.0);
     opts.take_profit = Some(110.0);
     let first = begin(&mut e, vec![opts]);
     let entry = wire(&first);
-    assert_eq!(entry["Type"], 0);
+    assert_eq!(entry["Type"], 1);
     ack(&mut e, &first);
     let t = timer(&mut e);
     e.handle(NOW + 100.0, Event::TimerFired { timer: t });
-    let stop = http(&mut e, "sendTx");
+    let stop = http_at(&mut e, NOW + 100.0, "sendTx");
     let sl = wire(&stop);
     assert_eq!(sl["Type"], 2);
     assert_eq!(sl["IsAsk"], 1);
     assert_eq!(sl["ReduceOnly"], 1);
     assert_ne!(entry["ClientOrderIndex"], sl["ClientOrderIndex"]);
-    ack(&mut e, &stop);
+    ack_at(&mut e, NOW + 100.0, &stop);
     let t = timer(&mut e);
     e.handle(NOW + 200.0, Event::TimerFired { timer: t });
-    let take = http(&mut e, "sendTx");
+    let take = http_at(&mut e, NOW + 200.0, "sendTx");
     let tp = wire(&take);
     assert_eq!(tp["Type"], 4);
     assert_ne!(sl["ClientOrderIndex"], tp["ClientOrderIndex"]);
-    ack(&mut e, &take);
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:ref ids,.. }) if serde_json::from_str::<Vec<String>>(ids).unwrap().len()==3)));
+    ack_at(&mut e, NOW + 200.0, &take);
+    assert!(safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone { result:ref ids,.. }) if serde_json::from_str::<Vec<String>>(ids).unwrap().len()==3)));
 }
 
 #[test]
@@ -289,7 +359,9 @@ fn lost_write_response_never_replays_and_next_command_refreshes_nonce() {
             error: "response lost",
         },
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         !actions
             .iter()
@@ -297,8 +369,15 @@ fn lost_write_response_never_replays_and_next_command_refreshes_nonce() {
     );
     assert!(actions.iter().any(
         |a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
-        if error.message.contains("Uncertain") && error.outcome == Some(Outcome::Unknown))
+        if error.outcome == Some(Outcome::Unknown))
     ));
+    // The Unknown fences its symbol until the reconcile's orders read lands.
+    for read in actions.iter().filter_map(|a| match a {
+        Action::Http(r) if r.url.contains("accountActiveOrders") => Some(r.clone()),
+        _ => None,
+    }) {
+        reply(&mut e, &read, 200, OPEN);
+    }
     place(&mut e, vec![limit()]);
     assert!(http(&mut e, "nextNonce").url.contains("api_key_index=1"));
 }
@@ -315,9 +394,15 @@ fn known_invalid_nonce_rejection_allows_only_one_fresh_nonce_retry() {
     );
     let t = timer(&mut e);
     e.handle(NOW + 150.0, Event::TimerFired { timer: t });
-    let nonce = http(&mut e, "nextNonce");
-    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":20}"#);
-    let retry = http(&mut e, "sendTx");
+    let nonce = http_at(&mut e, NOW + 150.0, "nextNonce");
+    reply_at(
+        &mut e,
+        NOW + 150.0,
+        &nonce,
+        200,
+        r#"{"code":200,"nonce":20}"#,
+    );
+    let retry = http_at(&mut e, NOW + 150.0, "sendTx");
     assert_eq!(wire(&retry)["Nonce"], 20);
     assert_eq!(
         wire(&retry)["ClientOrderIndex"],
@@ -376,12 +461,65 @@ fn successful_amend_uses_fresh_generated_index() {
     ack(&mut e, &cancel);
     let t = timer(&mut e);
     e.handle(NOW + 100.0, Event::TimerFired { timer: t });
-    let replacement = http(&mut e, "sendTx");
+    let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
     let tx = wire(&replacement);
     assert_ne!(tx["ClientOrderIndex"], 42);
     assert_eq!(tx["Price"], 9200);
-    ack(&mut e, &replacement);
+    ack_at(&mut e, NOW + 100.0, &replacement);
     assert!(e.store().order("42").is_none());
+}
+
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let (mut e, _) = ready_unattributed();
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 8,
+            id: "42".into(),
+            price: Some(92.0),
+            amount: None,
+        }),
+    );
+    let nonce = http(&mut e, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let cancel = http(&mut e, "sendTx");
+    ack(&mut e, &cancel);
+    let t = timer(&mut e);
+    e.handle(NOW + 100.0, Event::TimerFired { timer: t });
+    let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
+    reply_at(
+        &mut e,
+        NOW + 100.0,
+        &replacement,
+        200,
+        r#"{"code":21702,"message":"replacement refused"}"#,
+    );
+    let error = failure(&mut e);
+    assert!(error.contains("order is gone"), "{error}");
+}
+
+#[test]
+fn a_stop_without_native_provenance_is_refused_before_cancel() {
+    let (mut e, _) = ready_unattributed();
+    e.store_mut().update_order("42", |o| {
+        o.kind = OrderType::StopLoss;
+        o.side = OrderSide::Sell;
+        o.reduce_only = true;
+    });
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 8,
+            id: "42".into(),
+            price: Some(92.0),
+            amount: None,
+        }),
+    );
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error,..}) if error.outcome == Some(Outcome::NotSent) && error.message.contains("original unavailable"))));
+    assert!(e.store().order("42").is_some());
 }
 
 #[test]
@@ -404,8 +542,6 @@ fn fill_overtaking_cancel_ack_aborts_amendment() {
         o.remaining = 1.0;
     });
     ack(&mut e, &cancel);
-    let t = timer(&mut e);
-    e.handle(NOW + 100.0, Event::TimerFired { timer: t });
     assert!(failure(&mut e).contains("filled during amendment"));
 }
 
@@ -474,7 +610,9 @@ fn uncertain_settings_write_fences_queued_composition_until_fresh_snapshot() {
             error: "lost",
         },
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let nonce = actions
         .into_iter()
         .find_map(|a| match a {
@@ -583,17 +721,20 @@ fn account_snapshot_started_during_settings_write_cannot_undo_acknowledgement() 
             MarginType::Isolated,
         ),
     ] {
-        let (mut e, socket) = ready_unattributed();
+        // The private socket's first open is the resync this race needs.
+        let mut opts = options();
+        opts.testnet = true;
+        let (mut e, socket) = ready_unopened_meta(opts, META);
         e.handle(NOW, Event::Command(command));
         let nonce = http(&mut e, "nextNonce");
         reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
         let write = http(&mut e, "sendTx");
         e.handle(NOW + 1.0, Event::WsOpened { socket });
-        let held = requests(&mut e)
+        let held = requests_at(&mut e, NOW + 1.0)
             .into_iter()
             .find(|r| r.url.contains("/account?"))
             .unwrap();
-        ack(&mut e, &write);
+        ack_at(&mut e, NOW + 1.0, &write);
         assert_eq!(e.store().positions()[0].leverage, leverage);
         assert_eq!(e.store().positions()[0].margin_type, Some(margin));
         let snapshot = ACCOUNT.replace(r#""position":"2""#, r#""position":"3""#);
@@ -661,7 +802,9 @@ fn an_omitted_flat_market_does_not_clear_uncertain_settings_barrier() {
     );
     let read = http(&mut e, "/account?");
     reply(&mut e, &read, 200, ACCOUNT);
-    e.drain_actions().for_each(drop);
+    safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .for_each(drop);
     e.handle(
         NOW,
         Event::Command(Command::SetMarginType {
@@ -686,15 +829,15 @@ fn signed_perp_market_indexes_above_legacy_sentinel_are_supported() {
 }
 
 #[test]
-fn amend_infers_protection_from_requested_price() {
-    for (side, old_price, new_price, conditional) in [
-        (OrderSide::Sell, 110.0, 95.0, true),
-        (OrderSide::Buy, 90.0, 105.0, true),
-        (OrderSide::Sell, 95.0, 110.0, false),
-        (OrderSide::Buy, 105.0, 90.0, false),
-        (OrderSide::Buy, 90.0, 100.0, true),
+fn closing_limit_edit_preserves_native_limit_type() {
+    for (side, old_price, new_price) in [
+        (OrderSide::Sell, 110.0, 95.0),
+        (OrderSide::Buy, 90.0, 105.0),
+        (OrderSide::Sell, 95.0, 110.0),
+        (OrderSide::Buy, 105.0, 90.0),
+        (OrderSide::Buy, 90.0, 100.0),
     ] {
-        let (mut e, _) = ready_unattributed();
+        let (mut e, socket) = ready_unattributed();
         e.store_mut().update_order("42", |o| {
             o.side = side;
             o.price = old_price;
@@ -707,6 +850,17 @@ fn amend_infers_protection_from_requested_price() {
                 PositionSide::Long
             };
         });
+        let source = json!({"order_index":"42","client_order_index":"123","market_id":1,"status":"open","type":0,"time_in_force":1,
+            "is_ask":side==OrderSide::Sell,"reduce_only":true,"initial_base_amount":"2","filled_base_amount":"0","remaining_base_amount":"2",
+            "price":old_price.to_string(),"trigger_price":"0","order_expiry":NOW as u64+1_000_000,"trigger_status":"na",
+            "parent_order_index":0,"parent_order_id":"0","to_trigger_order_id_0":"0","to_trigger_order_id_1":"0","to_cancel_order_id_0":"0","order_flags":0});
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &json!({"channel":"account_all_orders","orders":[source.clone()]}).to_string(),
+        );
+        assert_eq!(e.store().order("42").unwrap().kind, OrderType::Limit);
         e.handle(
             NOW,
             Event::Command(Command::AmendOrder {
@@ -722,26 +876,26 @@ fn amend_infers_protection_from_requested_price() {
         ack(&mut e, &cancel);
         let t = timer(&mut e);
         e.handle(NOW + 100.0, Event::TimerFired { timer: t });
-        let replacement = http(&mut e, "sendTx");
+        let proof = http_at(&mut e, NOW + 100.0, "accountOrders");
+        let mut canceled = source;
+        canceled["status"] = json!("canceled");
+        reply_at(
+            &mut e,
+            NOW + 100.0,
+            &proof,
+            200,
+            &json!({"code":200,"orders":[canceled]}).to_string(),
+        );
+        let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
         let tx = wire(&replacement);
-        assert_eq!(
-            tx["Type"],
-            if conditional { 2 } else { 0 },
-            "{side:?}: {old_price} -> {new_price}"
-        );
-        assert_eq!(
-            tx["TriggerPrice"],
-            if conditional {
-                (new_price * 100.0) as u64
-            } else {
-                0
-            }
-        );
+        assert_eq!(tx["Type"], 0, "{side:?}: {old_price} -> {new_price}");
+        assert_eq!(tx["TriggerPrice"], 0);
     }
 }
 
 fn completion(e: &mut Engine<Lighter>) -> (String, Option<Outcome>) {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .find_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => {
                 Some((error.message, error.outcome))
@@ -782,11 +936,11 @@ fn trailing_stop_is_rejected_instead_of_placing_a_market_order() {
             json!({"symbol":"ETH","type":"trailing_stop_market","side":"sell","amount":0.2,"price":95,"reduceOnly":true}),
         )],
     );
-    let actions = e.drain_actions().collect::<Vec<_>>();
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::SignPayload { .. })),
+        !actions.iter().any(|a| matches!(a, Action::Http(_))),
         "{actions:?}"
     );
     assert!(actions.iter().any(|a| matches!(
@@ -800,7 +954,8 @@ fn trailing_stop_is_rejected_instead_of_placing_a_market_order() {
 fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::ErrorKind;
     let failures = |e: &mut Engine<Lighter>| {
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_actions(e, NOW)
+            .into_iter()
             .filter_map(|a| match a {
                 Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
                 _ => None,
@@ -862,7 +1017,9 @@ fn reduce_buy() -> PlaceOrderOpts {
 fn reduce_only_waits_for_slow_account_completion_instead_of_a_fixed_delay() {
     let (mut e, _) = ready_unattributed();
     place(&mut e, vec![reduce_buy()]);
-    let out = e.drain_actions().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let account = out
         .iter()
         .find_map(|a| match a {
@@ -890,7 +1047,7 @@ fn reduce_only_waits_for_slow_account_completion_instead_of_a_fixed_delay() {
         200,
         &ACCOUNT.replace("\"sign\":1", "\"sign\":-1"),
     );
-    let nonce = http(&mut e, "nextNonce");
+    let nonce = http_at(&mut e, NOW + 3000.0, "nextNonce");
     reply_at(
         &mut e,
         NOW + 3000.0,
@@ -898,18 +1055,23 @@ fn reduce_only_waits_for_slow_account_completion_instead_of_a_fixed_delay() {
         200,
         r#"{"code":200,"nonce":10}"#,
     );
-    let submit = http(&mut e, "sendTx");
+    let submit = http_at(&mut e, NOW + 3000.0, "sendTx");
     assert_eq!(wire(&submit)["ReduceOnly"], 1);
-    ack(&mut e, &submit);
+    ack_at(&mut e, NOW + 3000.0, &submit);
     assert!(
-        e.drain_actions()
+        safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
             .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
     );
     e.handle(NOW + 11000.0, Event::TimerFired { timer: timer.0 });
-    assert!(!e.drain_actions().any(|a| matches!(
-        a,
-        Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
-    )));
+    assert!(
+        !safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .any(|a| matches!(
+                a,
+                Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+            ))
+    );
 }
 #[test]
 fn explicit_invalid_margin_rejection_refreshes_account_without_resubmitting() {
@@ -921,7 +1083,9 @@ fn explicit_invalid_margin_rejection_refreshes_account_without_resubmitting() {
         400,
         r#"{"code":21613,"message":"invalid margin mode"}"#,
     );
-    let out = e.drain_actions().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         out.iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.contains("/account?")))
@@ -932,7 +1096,7 @@ fn explicit_invalid_margin_rejection_refreshes_account_without_resubmitting() {
     assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:7,error}) if error.venue_code.as_deref()==Some("21613")&&error.outcome==Some(Outcome::Rejected))));
 }
 #[test]
-fn both_documented_rate_limit_statuses_keep_native_reason_and_write_outcome() {
+fn proven_rate_limit_refusals_keep_rejected_and_never_replay() {
     use safe_cex_engine::ErrorKind;
     for status in [405, 429] {
         let (mut e, _) = ready_unattributed();
@@ -943,8 +1107,14 @@ fn both_documented_rate_limit_statuses_keep_native_reason_and_write_outcome() {
             status,
             r#"{"code":23000,"message":"native throttle"}"#,
         );
-        let out = e.drain_actions().collect::<Vec<_>>();
-        assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:7,error}) if error.kind==Some(ErrorKind::RateLimited)&&error.outcome==Some(Outcome::Rejected)&&error.venue_code.as_deref()==Some("23000")&&error.message.contains("native throttle")&&error.message.contains("wait"))));
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .collect::<Vec<_>>();
+        assert_eq!(out.iter().filter(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { command: 7, error })
+                if error.kind == Some(ErrorKind::Rejected) && error.outcome == Some(Outcome::Rejected)
+                    && error.venue_code.as_deref() == Some("23000") && error.message.contains("native throttle")
+        )).count(), 1, "definitive native refusal never resends: {out:?}");
         assert!(!out.iter().any(
             |a| matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))
         ));
@@ -953,7 +1123,9 @@ fn both_documented_rate_limit_statuses_keep_native_reason_and_write_outcome() {
 
 fn position_wait(e: &mut Engine<Lighter>) -> (HttpRequest, TimerId) {
     place(e, vec![reduce_buy()]);
-    let out = e.drain_actions().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let account = out
         .iter()
         .find_map(|a| match a {
@@ -974,7 +1146,9 @@ fn position_wait(e: &mut Engine<Lighter>) -> (HttpRequest, TimerId) {
     (account, timer)
 }
 fn assert_position_read_refused(e: &mut Engine<Lighter>) {
-    let out = e.drain_actions().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     let failures=out.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:7,error}) if error.outcome==Some(Outcome::NotSent))).count();
     assert_eq!(failures, 1, "{out:?}");
     assert!(!out.iter().any(
@@ -1001,10 +1175,14 @@ fn incomplete_empty_rejected_and_failed_position_reads_never_authorize_placement
         reply_at(&mut e, NOW + 500.0, &account, status, body);
         assert_position_read_refused(&mut e);
         e.handle(NOW + 11000.0, Event::TimerFired { timer });
-        assert!(!e.drain_actions().any(|a| matches!(
-            a,
-            Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
-        )));
+        assert!(
+            !safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+                .into_iter()
+                .any(|a| matches!(
+                    a,
+                    Action::Http(_) | Action::Notice(Notice::CommandFailed { .. })
+                ))
+        );
     }
     let (mut e, _) = ready_unattributed();
     let (account, _) = position_wait(&mut e);
@@ -1031,7 +1209,9 @@ fn settings_only_or_malformed_target_cannot_confirm_retained_exposure() {
             NOW + 100.0,
             r#"{"type":"update/account_all","channel":"account_all:718895","positions":{"1":{"market_id":1,"position":"2","sign":-1,"avg_entry_price":"100"}}}"#,
         );
-        let out = e.drain_actions().collect::<Vec<_>>();
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert!(!out.iter().any(
             |a| matches!(a,Action::Http(r) if r.url.contains("nextNonce")||r.url.contains("sendTx"))
         ));
@@ -1052,9 +1232,15 @@ fn timed_out_position_snapshot_cannot_release_a_queued_order() {
             orders: vec![reduce_buy()],
         }),
     );
-    assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+    assert!(
+        !safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+            .into_iter()
+            .any(|a| matches!(a, Action::Http(_)))
+    );
     e.handle(NOW + 10000.0, Event::TimerFired { timer });
-    let out = e.drain_actions().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     for command in [7, 8] {
         assert_eq!(out.iter().filter(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:id,error}) if *id==command&&error.outcome==Some(Outcome::NotSent))).count(),1,"{out:?}");
     }
@@ -1066,7 +1252,7 @@ fn timed_out_position_snapshot_cannot_release_a_queued_order() {
         200,
         &ACCOUNT.replace("\"sign\":1", "\"sign\":-1"),
     );
-    assert!(!e.drain_actions().any(
+    assert!(!safe_cex_engine::test_support::prepared_actions(&mut e, NOW).into_iter().any(
         |a| matches!(a,Action::Http(r) if r.url.contains("nextNonce")||r.url.contains("sendTx"))
     ));
 }
@@ -1083,12 +1269,8 @@ fn rate_limit_without_rejection_proof_keeps_unknown_outcome() {
         let submit = begin(&mut e, vec![limit()]);
         reply(&mut e, &submit, status, body);
         let [error] = typed_failures(&mut e).try_into().unwrap();
-        assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+        assert_eq!(error.kind, Some(ErrorKind::Internal));
         assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert!(error.message.contains("wait"));
-        if body.contains("native") {
-            assert!(error.venue_message.as_deref().unwrap().contains("native"));
-        }
     }
     let (mut e, _) = ready_unattributed();
     let submit = begin(&mut e, vec![limit(), limit()]);
@@ -1099,13 +1281,13 @@ fn rate_limit_without_rejection_proof_keeps_unknown_outcome() {
         r#"{"code":23000,"message":"native throttle"}"#,
     );
     let [error] = typed_failures(&mut e).try_into().unwrap();
-    assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+    assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert_eq!(error.venue_code.as_deref(), Some("23000"));
 }
 
 fn typed_failures(e: &mut Engine<Lighter>) -> Vec<safe_cex_engine::VenueError> {
-    e.drain_actions()
+    safe_cex_engine::test_support::prepared_actions(e, NOW)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
             _ => None,
@@ -1118,8 +1300,6 @@ fn position_read_failure_after_an_accepted_leg_does_not_claim_whole_command_not_
     let (mut e, _) = ready_unattributed();
     let submit = begin(&mut e, vec![limit(), reduce_buy()]);
     ack(&mut e, &submit);
-    let pace = timer(&mut e);
-    e.handle(NOW + 100.0, Event::TimerFired { timer: pace });
     let account = http(&mut e, "/account?");
     e.handle(
         NOW + 200.0,
@@ -1143,12 +1323,14 @@ fn rate_limits_do_not_enter_nonce_retry_and_failed_prerequisites_are_not_sent() 
         405,
         r#"{"code":21104,"message":"invalid nonce"}"#,
     );
-    let out = e.drain_actions().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         !out.iter()
             .any(|a| matches!(a,Action::SetTimer {at_ms,..} if *at_ms < NOW+500.0))
     );
-    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {error,..}) if error.kind==Some(ErrorKind::RateLimited))));
+    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {error,..}) if error.kind==Some(ErrorKind::Rejected)&&error.outcome==Some(Outcome::Rejected))), "{out:?}");
     for status in [405, 429] {
         let (mut e, _) = ready_unattributed();
         place(&mut e, vec![limit()]);
@@ -1190,8 +1372,10 @@ fn bare_rate_code_fences_dependent_settings_until_reconciliation() {
         }),
     );
     reply(&mut e, &write, 405, r#"{"code":23000}"#);
-    let out = e.drain_actions().collect::<Vec<_>>();
-    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:8,error}) if error.outcome==Some(Outcome::Unknown)&&error.venue_code.as_deref()==Some("23000"))));
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
+    assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed {command:8,error}) if error.outcome==Some(Outcome::Unknown))));
     let nonce = out
         .into_iter()
         .find_map(|a| match a {
@@ -1200,7 +1384,9 @@ fn bare_rate_code_fences_dependent_settings_until_reconciliation() {
         })
         .unwrap();
     reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":20}"#);
-    let out = e.drain_actions().collect::<Vec<_>>();
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(
         !out.iter()
             .any(|a| matches!(a,Action::Http(r) if r.url.contains("sendTx")))
@@ -1244,5 +1430,104 @@ fn robinhood_attribution_uses_47296_or_the_explicit_override_on_both_networks() 
                 json!({"1":expected,"2":250,"3":0})
             );
         }
+    }
+}
+
+#[test]
+fn documented_codes_in_a_200_refuse_a_placement_and_leave_no_fence() {
+    for code in [21120, 21301, 21508, 21601, 21702, 21739] {
+        let (mut e, _) = ready_unattributed();
+        let r = begin(&mut e, vec![limit()]);
+        let body = format!(r#"{{"code":{code},"message":"native"}}"#);
+        reply(&mut e, &r, 200, &body);
+        let (_, outcome) = completion(&mut e);
+        assert_eq!(outcome, Some(Outcome::Rejected), "{code}");
+        place(&mut e, vec![limit()]);
+        http(&mut e, "nextNonce");
+    }
+}
+
+#[test]
+fn an_unlisted_code_in_a_200_stays_unknown_and_clears_on_the_next_read() {
+    // 21728 is documented, but a duplicate says the first send may be live.
+    for code in [29500, 21728, 99999] {
+        let (mut e, _) = ready_unattributed();
+        let r = begin(&mut e, vec![limit()]);
+        let body = format!(r#"{{"code":{code},"message":"native"}}"#);
+        reply(&mut e, &r, 200, &body);
+        let settled = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        assert!(
+            settled.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { error, .. })
+                if error.outcome == Some(Outcome::Unknown))),
+            "{code}: {settled:?}"
+        );
+        let reads: Vec<_> = settled
+            .iter()
+            .filter_map(|a| match a {
+                Action::Http(r) if r.url.contains("accountActiveOrders") => Some(r.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(!reads.is_empty(), "{code}: the read starts with the answer");
+        place(&mut e, vec![limit()]);
+        let fenced = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        assert!(
+            fenced.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandFailed { error, .. })
+                if error.message.contains("uncertain"))),
+            "{code}: {fenced:?}"
+        );
+        for read in &reads {
+            reply(&mut e, read, 200, OPEN);
+        }
+        place(&mut e, vec![limit()]);
+        http(&mut e, "nextNonce");
+    }
+}
+
+#[test]
+fn a_refused_batch_in_a_200_keeps_its_unknown_handling() {
+    let (mut e, _) = ready_unattributed();
+    let r = begin(&mut e, vec![limit(), limit()]);
+    assert!(r.url.contains("sendTxBatch"));
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"code":21301,"message":"not enough collateral"}"#,
+    );
+    let (_, outcome) = completion(&mut e);
+    assert_eq!(outcome, Some(Outcome::Unknown));
+}
+
+#[test]
+fn a_maker_only_key_refusal_says_what_the_key_allows() {
+    // The user's sendTx text; the numeric code was not captured, so both shapes are covered.
+    for body in [
+        r#"{"code":21800,"message":"maker-only api key can only send 0ms delay transactions"}"#,
+        r#"{"message":"maker-only api key can only send 0ms delay transactions"}"#,
+    ] {
+        let (mut e, _) = ready_unattributed();
+        e.handle(
+            NOW,
+            Event::Command(Command::SetLeverage {
+                command: 8,
+                symbol: "ETH".into(),
+                leverage: 5.0,
+                side: None,
+            }),
+        );
+        let nonce = http(&mut e, "nextNonce");
+        reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+        let write = http(&mut e, "sendTx");
+        reply(&mut e, &write, 400, body);
+        assert_eq!(
+            failure(&mut e),
+            "This Lighter API key is maker-only, which allows only post-only orders and cancels; \
+             change leverage or place market and stop orders from a key that is not maker-only: \
+             maker-only api key can only send 0ms delay transactions",
+            "{body}"
+        );
     }
 }

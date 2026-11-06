@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["command-order-book", "http-plans"] }
+safe-cex-engine = { workspace = true, features = ["command-order-book", "http-plans", "order-locks"] }
 safe-cex-crypto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -14,4 +14,5 @@ serde_json.workspace = true
 workspace = true
 
 [dev-dependencies]
-safe-cex-engine = { workspace = true, features = ["test-support"] }
+# The shipped build unifies these on; the status-exempt refusal hook needs them.
+safe-cex-engine = { workspace = true, features = ["test-support", "serial-plans", "session-bearer"] }

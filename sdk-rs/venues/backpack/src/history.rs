@@ -15,6 +15,7 @@ use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy};
 use safe_cex_engine::selected_read::{
     LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, CommandWait, Cx, ErrorKind, Method, Query, Response, VenueError};
 use serde::Serialize;
 
@@ -224,6 +225,23 @@ impl Backpack {
         command: CommandId,
         query: Query,
     ) {
+        // A window with no limit walks to its start; no default may stop it.
+        let open_window = matches!(
+            &query,
+            Query::Fills {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | Query::OrderHistory {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            } | Query::Income {
+                from_ms: Some(_),
+                limit: None,
+                ..
+            }
+        );
         let (kind, symbol, order_id, from, to, limit) = match query {
             Query::OrderByClientId { .. } => {
                 Self::reject_history_query(cx, "Backpack client-order-ID lookup is unsupported");
@@ -372,13 +390,18 @@ impl Backpack {
                 return;
             }
         };
-        let limit = limit.clamp(1, 1000) as usize;
-        let page_size =
-            if matches!(kind, Kind::Orders | Kind::Funding) && (from.is_some() || to.is_some()) {
-                1000
-            } else {
-                limit
-            };
+        let limit = if open_window {
+            usize::MAX
+        } else {
+            limit.clamp(1, 1000) as usize
+        };
+        let page_size = if open_window
+            || matches!(kind, Kind::Orders | Kind::Funding) && (from.is_some() || to.is_some())
+        {
+            1000
+        } else {
+            limit
+        };
         self.history_request(
             cx,
             Request {
@@ -770,7 +793,7 @@ impl Backpack {
                 format!(
                     "Skipped {} malformed Backpack fill rows: {}",
                     r.skipped_fills.len(),
-                    r.skipped_fills.join(", ")
+                    r.skipped_fills.join_with(", ")
                 ),
             );
         }

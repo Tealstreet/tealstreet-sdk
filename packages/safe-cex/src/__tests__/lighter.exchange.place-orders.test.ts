@@ -6,12 +6,13 @@ import {
   LIGHTER_INTEGRATOR_MAKER_FEE_VALUE,
   LIGHTER_INTEGRATOR_TAKER_FEE_VALUE,
 } from '../exchanges/lighter/lighter.builder-fee';
-import { LighterExchange } from '../exchanges/lighter/lighter.exchange';
+import { LighterExchange } from './reference/lighter/lighter.exchange';
 import { DefaultStore } from '../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../types';
 
-const { cancelOrderMock, createOrderMock, createOrdersMock } = vi.hoisted(() => ({
+const { cancelOrderMock, createGroupedOrdersMock, createOrderMock, createOrdersMock } = vi.hoisted(() => ({
   cancelOrderMock: vi.fn(),
+  createGroupedOrdersMock: vi.fn(),
   createOrderMock: vi.fn(),
   createOrdersMock: vi.fn(),
 }));
@@ -28,7 +29,7 @@ vi.mock('@tealstreet/lighter-sdk', () => ({
   CandlestickApi: class {},
 }));
 
-vi.mock('../exchanges/lighter/lighter.api', () => ({
+vi.mock('./reference/lighter/lighter.api', () => ({
   createLighterSDKClient: vi.fn(() => ({
     get: vi.fn(),
     sendRawTx: vi.fn(),
@@ -36,7 +37,7 @@ vi.mock('../exchanges/lighter/lighter.api', () => ({
   })),
 }));
 
-vi.mock('../exchanges/lighter/lighter.ws-public', () => ({
+vi.mock('./reference/lighter/lighter.ws-public', () => ({
   LighterPublicWebsocket: class {
     connectAndSubscribe = vi.fn();
     listenOHLCV = vi.fn();
@@ -45,7 +46,7 @@ vi.mock('../exchanges/lighter/lighter.ws-public', () => ({
   },
 }));
 
-vi.mock('../exchanges/lighter/lighter.ws-private', () => ({
+vi.mock('./reference/lighter/lighter.ws-private', () => ({
   LighterPrivateWebsocket: class {
     connectAndSubscribe = vi.fn();
     throttleFetchOrders = vi.fn();
@@ -107,6 +108,7 @@ describe('LighterExchange batched placeOrders', () => {
 
     (exchange as any).ensureSignerAdapter = vi.fn().mockResolvedValue({
       cancelOrder: cancelOrderMock,
+      createGroupedOrders: createGroupedOrdersMock,
       createOrder: createOrderMock,
       createOrders: createOrdersMock,
     });
@@ -116,6 +118,7 @@ describe('LighterExchange batched placeOrders', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     cancelOrderMock.mockResolvedValue('cancel-tx-hash');
+    createGroupedOrdersMock.mockResolvedValue('grouped-tx-hash');
     createOrderMock.mockResolvedValue('single-tx-hash');
     createOrdersMock.mockResolvedValue(['batch-tx-1', 'batch-tx-2']);
   });
@@ -397,6 +400,101 @@ describe('LighterExchange batched placeOrders', () => {
 
     expect(createOrdersMock).not.toHaveBeenCalled();
     expect(createOrderMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses grouped OTOCO for limit orders with attached stop-loss and take-profit', async () => {
+    const exchange = createExchange();
+
+    const result = await exchange.placeOrder({
+      symbol: 'BTC/USDT',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 0.1,
+      price: 100,
+      stopLoss: 90,
+      takeProfit: 110,
+      timeInForce: OrderTimeInForce.GoodTillCancel,
+    });
+
+    expect(createOrderMock).not.toHaveBeenCalled();
+    expect(createGroupedOrdersMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(
+      (createGroupedOrdersMock.mock.calls[0][0].orders as Array<{ orderId: bigint }>).map(({ orderId }) =>
+        orderId.toString(),
+      ),
+    );
+    expect(createGroupedOrdersMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupingType: 3,
+        orders: [
+          expect.objectContaining({
+            isBuy: true,
+            amount: 100n,
+            price: 1000n,
+            orderType: 'limit',
+            reduceOnly: false,
+          }),
+          expect.objectContaining({
+            isBuy: false,
+            amount: 0n,
+            price: 891n,
+            triggerPrice: 900n,
+            orderType: 'stop_loss',
+            reduceOnly: true,
+            timeInForce: OrderTimeInForce.ImmediateOrCancel,
+          }),
+          expect.objectContaining({
+            isBuy: false,
+            amount: 0n,
+            price: 1089n,
+            triggerPrice: 1100n,
+            orderType: 'take_profit',
+            reduceOnly: true,
+            timeInForce: OrderTimeInForce.ImmediateOrCancel,
+          }),
+        ],
+      }),
+    );
+    expect(exchange.privateWebsocket.throttleFetchOrders).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses grouped OTO for a limit order with one attached protective child', async () => {
+    const exchange = createExchange();
+
+    await exchange.placeOrder({
+      symbol: 'BTC/USDT',
+      type: OrderType.Limit,
+      side: OrderSide.Sell,
+      amount: 0.1,
+      price: 100,
+      stopLoss: 110,
+      timeInForce: OrderTimeInForce.PostOnly,
+    });
+
+    expect(createOrderMock).not.toHaveBeenCalled();
+    expect(createGroupedOrdersMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupingType: 1,
+        orders: [
+          expect.objectContaining({
+            isBuy: false,
+            amount: 100n,
+            price: 1000n,
+            orderType: 'limit',
+            postOnly: true,
+            reduceOnly: false,
+          }),
+          expect.objectContaining({
+            isBuy: true,
+            amount: 0n,
+            price: 1111n,
+            triggerPrice: 1100n,
+            orderType: 'stop_loss',
+            reduceOnly: true,
+          }),
+        ],
+      }),
+    );
   });
 
   it('surfaces batch errors and clears remembered hints', async () => {

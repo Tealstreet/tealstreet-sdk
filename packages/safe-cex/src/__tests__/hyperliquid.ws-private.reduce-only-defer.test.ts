@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidPrivateWebSocket } from '../exchanges/hyperliquid/hyperliquid.ws-private';
+import { HyperliquidPrivateWebSocket } from './reference/hyperliquid/hyperliquid.ws-private';
 import { OrderSide, OrderStatus, OrderType } from '../types';
 
-vi.mock('../exchanges/hyperliquid/hyperliquid.cross-cache', () => ({
+vi.mock('./reference/hyperliquid/hyperliquid.cross-cache', () => ({
   hasSeenFill: vi.fn(),
   markFillSeen: vi.fn(),
 }));

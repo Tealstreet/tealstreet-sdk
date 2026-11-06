@@ -16,7 +16,7 @@ pub fn integer<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
         Integer::Text(s) => s.parse().map_err(serde::de::Error::custom),
     }
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Context {
     pub mode: PositionMode,
     pub margin_type: MarginType,

@@ -103,7 +103,7 @@ tealstreet                 # opens the prompt on your default account
 > switch BTCUSDT           # focus a symbol
 > status                   # confirm account and symbol
 > sim on                   # orders are simulated, nothing reaches the exchange
-> buy $100 stop -1%        # $100 market buy, stop 1% below the current price
+> buy $100 stop $last -1%  # $100 market buy, stop 1% below the current price
 > ps                       # positions
 > o                        # open orders
 > close                    # close the position
@@ -115,7 +115,7 @@ output needs CLI 0.10.18 or newer; `tealstreet update` gets it). Keep the
 command in **single quotes** so your shell leaves `$100` alone:
 
 ```bash
-tealstreet exec -a mybybit -s BTCUSDT 'buy $100 stop -1%'
+tealstreet exec -a mybybit -s BTCUSDT 'buy $100 stop $last -1%'
 ```
 
 More recipes: [Quickstart](./quickstart.md).

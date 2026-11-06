@@ -12,6 +12,9 @@ struct Probe {
     samples: Vec<(f64, f64)>,
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> Capabilities {
         self.inner.capabilities()

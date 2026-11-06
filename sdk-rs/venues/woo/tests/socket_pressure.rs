@@ -26,6 +26,9 @@ struct Observed {
 }
 
 impl Venue for Observed {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn guard_order_mutations(&self) -> bool {
         self.native.guard_order_mutations()

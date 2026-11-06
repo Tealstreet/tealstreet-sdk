@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T01:18:54.866Z",
+  "endpoint": "/fapi/v2/account?timestamp=1793150329917&signature=<redacted>",
+  "http_status": 401,
+  "body": "{\"code\":-2014,\"msg\":\"API-key format invalid.\"}",
+  "expect": {
+    "kind": "authInvalid",
+    "outcome": null,
+    "path": "read"
+  }
+}

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
+import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderStopTriggerType } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 
 vi.mock('zklink-web-sdk-alpha', () => ({}));
-vi.mock('../../exchanges/apexomni/zklink/signer/utils', () => ({ initSdk: vi.fn() }));
+vi.mock('../reference/apexomni/zklink/signer/utils', () => ({ initSdk: vi.fn() }));
 
 const NOW = 1_700_000_000_123;
 const row = (filled = 6, status = 'OPEN', updatedAt = NOW) => ({

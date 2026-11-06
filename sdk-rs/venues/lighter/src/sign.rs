@@ -1,12 +1,17 @@
 //! Native Lighter transaction envelopes and ECgFp5 signing.
-use safe_cex_crypto::lighter::{SchnorrNonce, poseidon2_hash_fp5, schnorr_sign};
+use safe_cex_crypto::lighter::poseidon2_hash_fp5;
+#[cfg(test)]
+use safe_cex_crypto::lighter::schnorr_sign;
 use safe_cex_engine::signing::{
     Algorithm, Context, Identity, Operation, PayloadPart, SignError, SignReceipt, SignRequest,
     SignResult,
 };
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep};
-use serde::Serialize;
-use zeroize::{Zeroize, Zeroizing};
+use serde::{Deserialize, Serialize};
+#[path = "sign/statement.rs"]
+pub mod statement;
+#[cfg(test)]
+use zeroize::Zeroizing;
 
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 const MAX_ACCOUNT: u64 = (1 << 48) - 2;
@@ -14,6 +19,9 @@ const MAX_ORDER_VALUE: u64 = (1 << 48) - 1;
 const MAX_ORDER_INDEX: u64 = (1 << 60) - 1;
 const TX_TTL: u64 = 10 * 60 * 1_000;
 const ORDER_TTL: u64 = 28 * 24 * 60 * 60 * 1_000;
+/// A request is one statement commitment and one signature per transaction,
+/// inside the signing request's 32-operation bound.
+const MAX_BATCH: usize = 31;
 
 #[derive(Clone, Debug)]
 pub struct Order {
@@ -29,6 +37,16 @@ pub struct Order {
     pub order_expiry: Option<u64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase", deny_unknown_fields)]
+pub struct Modify {
+    pub market_index: u32,
+    pub index: u64,
+    pub base_amount: u64,
+    pub price: u32,
+    pub trigger_price: u32,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Builder {
     pub account_index: u64,
@@ -38,6 +56,7 @@ pub struct Builder {
 
 #[derive(Clone, Debug)]
 pub enum Transaction {
+    Modify(Modify),
     Create {
         order: Order,
         builder: Option<Builder>,
@@ -51,6 +70,13 @@ pub enum Transaction {
         leverage: f64,
         margin_mode: u8,
     },
+    /// One create_grouped_orders transaction: OTO (1, parent then child), OCO (2,
+    /// two children) or OTOCO (3, parent then stop loss then take profit).
+    Grouped {
+        grouping: u8,
+        orders: Vec<Order>,
+        builder: Option<Builder>,
+    },
 }
 
 pub struct SignedTransaction {
@@ -59,6 +85,15 @@ pub struct SignedTransaction {
     /// Raw transaction fields before optional L2 attribute aggregation.
     pub data: Vec<u8>,
     pub signature: String,
+}
+
+/// The signing chain for a deployment.
+pub fn chain_id(robinhood: bool, testnet: bool) -> u32 {
+    match (robinhood, testnet) {
+        (_, true) => 300,
+        (true, false) => 466_324,
+        (false, false) => 304,
+    }
 }
 
 /// The public signing scope: chain, account and API key slot.
@@ -82,13 +117,8 @@ impl Account {
     }
 }
 
-pub struct Signer {
-    key: Zeroizing<[u8; 40]>,
-    account: Account,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "PascalCase")]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase", deny_unknown_fields)]
 struct OrderInfo {
     market_index: u32,
     client_order_index: u64,
@@ -103,7 +133,8 @@ struct OrderInfo {
     order_expiry: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Attributes {
     #[serde(rename = "1")]
     account_index: u64,
@@ -129,11 +160,37 @@ struct CreateInfo<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
+struct GroupedInfo<'a> {
+    account_index: u64,
+    api_key_index: u8,
+    grouping_type: u8,
+    orders: &'a [OrderInfo],
+    expired_at: u64,
+    nonce: u64,
+    sig: &'a str,
+    #[serde(rename = "L2TxAttributes", skip_serializing_if = "Option::is_none")]
+    attributes: Option<Attributes>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
 struct CancelInfo<'a> {
     account_index: u64,
     api_key_index: u8,
     market_index: u32,
     index: u64,
+    expired_at: u64,
+    nonce: u64,
+    sig: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ModifyInfo<'a> {
+    account_index: u64,
+    api_key_index: u8,
+    #[serde(flatten)]
+    modify: &'a Modify,
     expired_at: u64,
     nonce: u64,
     sig: &'a str,
@@ -172,6 +229,7 @@ fn append_words(bytes: &mut Vec<u8>, words: &[u64]) {
     }
 }
 
+#[cfg(test)]
 fn hedged_sign_with_entropy(
     input: &[u8],
     key: &[u8],
@@ -213,6 +271,25 @@ impl OrderInfo {
             trigger_price: order.trigger_price,
             order_expiry,
         })
+    }
+
+    /// Every bound `new` establishes, rechecked for fields read from a statement.
+    fn validate(&self) -> Result<(), String> {
+        if !valid_market(self.market_index)
+            || self.order_type > 5
+            || self.time_in_force > 2
+            || self.is_ask > 1
+            || self.reduce_only > 1
+        {
+            return Err("Invalid Lighter order market, type or time in force".into());
+        }
+        bounded(
+            self.client_order_index,
+            MAX_ORDER_VALUE,
+            "client order index",
+        )?;
+        bounded(self.base_amount, MAX_ORDER_VALUE, "base amount")?;
+        safe_integer(self.order_expiry, "order expiry")
     }
 
     fn append(&self, bytes: &mut Vec<u8>) {
@@ -272,102 +349,11 @@ fn signing_preimage(data: &[u8], attributes: Option<&Attributes>) -> Result<Vec<
     Ok(preimage)
 }
 
-impl Signer {
-    pub fn new(
-        secret: &str,
-        chain_id: u32,
-        account_index: u64,
-        api_key_index: u8,
-    ) -> Result<Self, String> {
-        let account = Account::new(chain_id, account_index, api_key_index)?;
-        let secret = secret.strip_prefix("0x").unwrap_or(secret);
-        if secret.len() != 80 {
-            return Err("Lighter private key must contain exactly 40 bytes".into());
-        }
-        let mut key = Zeroizing::new([0u8; 40]);
-        for (byte, pair) in key.iter_mut().zip(secret.as_bytes().as_chunks::<2>().0) {
-            let pair = std::str::from_utf8(pair).map_err(|_| "Invalid Lighter private key hex")?;
-            *byte = u8::from_str_radix(pair, 16).map_err(|_| "Invalid Lighter private key hex")?;
-        }
-        // Scalar reduction belongs to the shared crypto primitive, as in the venue signer.
-        if safe_cex_crypto::lighter::public_key(key.as_ref())? == [0; 40] {
-            key.zeroize();
-            return Err("Lighter private key must not reduce to zero".into());
-        }
-        Ok(Self { key, account })
-    }
-
-    pub fn auth_token(
-        &self,
-        deadline_seconds: u64,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
-    ) -> Result<String, String> {
-        self.auth_token_inner(deadline_seconds, None, fill)
-    }
-
-    /// The supplied nonce must come from fresh CSPRNG entropy and must never be reused.
-    pub fn auth_token_with_nonce(
-        &self,
-        deadline_seconds: u64,
-        schnorr_nonce: SchnorrNonce,
-    ) -> Result<String, String> {
-        self.auth_token_inner(deadline_seconds, Some(schnorr_nonce), |_| Err(()))
-    }
-
-    fn auth_token_inner(
-        &self,
-        deadline_seconds: u64,
-        schnorr_nonce: Option<SchnorrNonce>,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
-    ) -> Result<String, String> {
-        let (message, data) = auth_message(&self.account, deadline_seconds)?;
-        let signature = match schnorr_nonce {
-            Some(nonce) => schnorr_sign(&data, self.key.as_ref(), nonce)?,
-            None => hedged_sign_with_entropy(&data, self.key.as_ref(), fill)?,
-        };
-        Ok(format!("{message}:{}", safe_cex_crypto::hex(&signature)))
-    }
-
-    pub fn sign(
-        &self,
-        tx: &Transaction,
-        nonce: u64,
-        now_ms: u64,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
-    ) -> Result<SignedTransaction, String> {
-        self.sign_inner(tx, nonce, now_ms, None, fill)
-    }
-
-    /// The supplied nonce must come from fresh CSPRNG entropy and must never be reused.
-    pub fn sign_with_nonce(
-        &self,
-        tx: &Transaction,
-        nonce: u64,
-        now_ms: u64,
-        schnorr_nonce: SchnorrNonce,
-    ) -> Result<SignedTransaction, String> {
-        self.sign_inner(tx, nonce, now_ms, Some(schnorr_nonce), |_| Err(()))
-    }
-
-    fn sign_inner(
-        &self,
-        tx: &Transaction,
-        nonce: u64,
-        now_ms: u64,
-        schnorr_nonce: Option<SchnorrNonce>,
-        fill: impl FnOnce(&mut [u8]) -> Result<(), ()>,
-    ) -> Result<SignedTransaction, String> {
-        let input = tx_input(&self.account, tx, nonce, now_ms)?;
-        let signature = match schnorr_nonce {
-            Some(nonce) => schnorr_sign(&input.preimage, self.key.as_ref(), nonce)?,
-            None => hedged_sign_with_entropy(&input.preimage, self.key.as_ref(), fill)?,
-        };
-        input.finish(&signature)
-    }
-}
-
+#[derive(Clone)]
 enum Fields {
+    Modify(Modify),
     Create(OrderInfo, Option<Attributes>),
+    Grouped(u8, Vec<OrderInfo>, Option<Attributes>),
     Cancel {
         market_id: u32,
         order_id: u64,
@@ -377,6 +363,18 @@ enum Fields {
         fraction: u32,
         margin_mode: u8,
     },
+}
+
+impl Fields {
+    fn tx_type(&self) -> u8 {
+        match self {
+            Self::Create(..) => 14,
+            Self::Cancel { .. } => 15,
+            Self::Modify(..) => 17,
+            Self::Leverage { .. } => 20,
+            Self::Grouped(..) => 28,
+        }
+    }
 }
 
 /// One transaction canonicalized for signing. The legacy `Signer` and
@@ -397,16 +395,63 @@ fn tx_input(
     nonce: u64,
     now_ms: u64,
 ) -> Result<TxInput, String> {
-    safe_integer(nonce, "transaction nonce")?;
     let expired_at = now_ms
         .checked_add(TX_TTL)
         .ok_or("Lighter expiry overflow")?;
-    bounded(expired_at, MAX_ORDER_VALUE, "transaction expiry")?;
-    let tx_type = match tx {
-        Transaction::Create { .. } => 14,
-        Transaction::Cancel { .. } => 15,
-        Transaction::Leverage { .. } => 20,
+    let fields = match tx {
+        Transaction::Modify(order) => Fields::Modify(order.clone()),
+        Transaction::Create { order, builder } => {
+            Fields::Create(OrderInfo::new(order, now_ms)?, attributes(*builder)?)
+        }
+        Transaction::Grouped {
+            grouping,
+            orders,
+            builder,
+        } => Fields::Grouped(
+            *grouping,
+            orders
+                .iter()
+                .map(|order| OrderInfo::new(order, now_ms))
+                .collect::<Result<Vec<_>, _>>()?,
+            attributes(*builder)?,
+        ),
+        Transaction::Cancel {
+            market_id,
+            order_id,
+        } => Fields::Cancel {
+            market_id: *market_id,
+            order_id: *order_id,
+        },
+        Transaction::Leverage {
+            market_id,
+            leverage,
+            margin_mode,
+        } => {
+            let fraction = (10_000.0 / leverage).floor();
+            if !leverage.is_finite() || *leverage <= 0.0 || !(1.0..=10_000.0).contains(&fraction) {
+                return Err("Invalid Lighter leverage or margin mode".into());
+            }
+            Fields::Leverage {
+                market_id: *market_id,
+                fraction: fraction as u32,
+                margin_mode: *margin_mode,
+            }
+        }
     };
+    encode(account, nonce, expired_at, fields)
+}
+
+/// The signed words for resolved fields, shared by local issue and by a remote
+/// signer re-deriving them from a statement, so both validate and sign alike.
+fn encode(
+    account: &Account,
+    nonce: u64,
+    expired_at: u64,
+    fields: Fields,
+) -> Result<TxInput, String> {
+    safe_integer(nonce, "transaction nonce")?;
+    bounded(expired_at, MAX_ORDER_VALUE, "transaction expiry")?;
+    let tx_type = fields.tx_type();
     let mut data = Vec::with_capacity(128);
     append_words(
         &mut data,
@@ -419,13 +464,51 @@ fn tx_input(
             account.api_key_index.into(),
         ],
     );
-    let fields = match tx {
-        Transaction::Create { order, builder } => {
-            let order = OrderInfo::new(order, now_ms)?;
-            order.append(&mut data);
-            Fields::Create(order, attributes(*builder)?)
+    match &fields {
+        Fields::Modify(order) => {
+            if !valid_market(order.market_index)
+                || order.index == 0
+                || order.index > MAX_ORDER_INDEX
+                || order.base_amount == 0
+                || order.base_amount > MAX_ORDER_VALUE
+                || order.price == 0
+                || order.trigger_price == 0
+            {
+                return Err("Invalid Lighter protective modification".into());
+            }
+            append_words(
+                &mut data,
+                &[
+                    order.market_index.into(),
+                    order.index,
+                    order.base_amount,
+                    order.price.into(),
+                    order.trigger_price.into(),
+                ],
+            );
         }
-        Transaction::Cancel {
+        Fields::Create(order, _) => {
+            order.validate()?;
+            order.append(&mut data);
+        }
+        Fields::Grouped(grouping, orders, _) => {
+            let expected = match grouping {
+                1 | 2 => 2,
+                3 => 3,
+                _ => return Err("Invalid Lighter order grouping type".into()),
+            };
+            if orders.len() != expected {
+                return Err("Lighter grouped orders do not match their grouping type".into());
+            }
+            let mut words = Vec::with_capacity(orders.len() * 80);
+            for order in orders {
+                order.validate()?;
+                order.append(&mut words);
+            }
+            append_words(&mut data, &[(*grouping).into()]);
+            data.extend_from_slice(&safe_cex_crypto::lighter::grouped_orders_digest(&words)?);
+        }
+        Fields::Cancel {
             market_id,
             order_id,
         } => {
@@ -433,39 +516,34 @@ fn tx_input(
                 return Err("Invalid Lighter cancellation market or order index".into());
             }
             append_words(&mut data, &[(*market_id).into(), *order_id]);
-            Fields::Cancel {
-                market_id: *market_id,
-                order_id: *order_id,
-            }
         }
-        Transaction::Leverage {
+        Fields::Leverage {
             market_id,
-            leverage,
+            fraction,
             margin_mode,
         } => {
-            let fraction = (10_000.0 / leverage).floor();
-            if !valid_market(*market_id)
-                || !leverage.is_finite()
-                || *leverage <= 0.0
-                || *margin_mode > 1
-                || !(1.0..=10_000.0).contains(&fraction)
-            {
+            if !valid_market(*market_id) || *margin_mode > 1 || !(1..=10_000).contains(fraction) {
                 return Err("Invalid Lighter leverage or margin mode".into());
             }
-            let fraction = fraction as u32;
             append_words(
                 &mut data,
-                &[(*market_id).into(), fraction.into(), (*margin_mode).into()],
+                &[
+                    (*market_id).into(),
+                    (*fraction).into(),
+                    (*margin_mode).into(),
+                ],
             );
-            Fields::Leverage {
-                market_id: *market_id,
-                fraction,
-                margin_mode: *margin_mode,
-            }
         }
-    };
+    }
+    if let Fields::Create(_, Some(attributes)) | Fields::Grouped(_, _, Some(attributes)) = &fields {
+        bounded(
+            attributes.account_index,
+            MAX_ACCOUNT,
+            "integrator account index",
+        )?;
+    }
     let attrs = match &fields {
-        Fields::Create(_, attributes) => attributes.as_ref(),
+        Fields::Create(_, attributes) | Fields::Grouped(_, _, attributes) => attributes.as_ref(),
         _ => None,
     };
     let preimage = signing_preimage(&data, attrs)?;
@@ -493,10 +571,28 @@ impl TxInput {
         } = self;
         let encoded = safe_cex_crypto::encode(signature_bytes, safe_cex_crypto::Encoding::Base64);
         let tx_info = match fields {
+            Fields::Modify(order) => serde_json::to_string(&ModifyInfo {
+                account_index: account.account_index,
+                api_key_index: account.api_key_index,
+                modify: &order,
+                expired_at,
+                nonce,
+                sig: &encoded,
+            }),
             Fields::Create(order, attributes) => serde_json::to_string(&CreateInfo {
                 account_index: account.account_index,
                 api_key_index: account.api_key_index,
                 order: &order,
+                expired_at,
+                nonce,
+                sig: &encoded,
+                attributes,
+            }),
+            Fields::Grouped(grouping, orders, attributes) => serde_json::to_string(&GroupedInfo {
+                account_index: account.account_index,
+                api_key_index: account.api_key_index,
+                grouping_type: grouping,
+                orders: &orders,
                 expired_at,
                 nonce,
                 sig: &encoded,
@@ -574,6 +670,7 @@ pub struct TxRecipe {
     account: Account,
     txs: Vec<(Transaction, u64)>,
     prepared: Vec<TxInput>,
+    commitment: Option<[u8; 32]>,
 }
 impl TxRecipe {
     pub fn new(
@@ -581,15 +678,15 @@ impl TxRecipe {
         account: Account,
         txs: Vec<(Transaction, u64)>,
     ) -> Result<Self, String> {
-        // The signing request bounds operations at 32.
-        if txs.is_empty() || txs.len() > 32 {
-            return Err("Lighter transaction batch must hold 1..=32 transactions".into());
+        if txs.is_empty() || txs.len() > MAX_BATCH {
+            return Err("Lighter transaction batch must hold 1..=31 transactions".into());
         }
         Ok(Self {
             identity,
             account,
             txs,
             prepared: Vec::new(),
+            commitment: None,
         })
     }
     fn path(&self) -> &'static str {
@@ -622,7 +719,8 @@ impl SignStep for TxRecipe {
         let stamp = dispatch.stamp_ms();
         let now_ms = stamp as u64;
         self.prepared.clear();
-        let mut operations = Vec::with_capacity(self.txs.len());
+        self.commitment = None;
+        let mut operations = Vec::with_capacity(self.txs.len() + 1);
         for (tx, nonce) in &self.txs {
             let input = tx_input(&self.account, tx, *nonce, now_ms)
                 .map_err(|_| SignError::InvalidRequest)?;
@@ -638,6 +736,18 @@ impl SignStep for TxRecipe {
             });
             self.prepared.push(input);
         }
+        // A remote signer reads and re-derives the statement; the commitment
+        // binds what it read to these signatures.
+        let statement = statement::txs(&self.account, &self.prepared);
+        self.commitment = Some(safe_cex_crypto::sha256(statement.as_bytes()));
+        operations.insert(
+            0,
+            Operation::Sha256 {
+                payload: vec![PayloadPart::Bytes {
+                    bytes: statement.into_bytes(),
+                }],
+            },
+        );
         Ok(SignRequest {
             receipt: SignReceipt {
                 nonce: None,
@@ -658,15 +768,19 @@ impl SignStep for TxRecipe {
             return Err(SignError::InvalidRequest);
         };
         let prepared = std::mem::take(&mut self.prepared);
-        if prepared.is_empty() {
+        let commitment = self.commitment.take();
+        let (Some(commitment), false) = (commitment, prepared.is_empty()) else {
             return Err(SignError::InvalidRequest);
-        }
-        if result.values.len() != prepared.len() {
+        };
+        let [digest, signatures @ ..] = result.values.as_slice() else {
+            return Err(SignError::InvalidResult);
+        };
+        if digest.as_slice() != commitment || signatures.len() != prepared.len() {
             return Err(SignError::InvalidResult);
         }
         let signed = prepared
             .into_iter()
-            .zip(&result.values)
+            .zip(signatures)
             .map(|(input, signature)| {
                 if signature.len() != 80 {
                     return Err(SignError::InvalidResult);
@@ -721,6 +835,7 @@ pub struct AuthRecipe {
     placement: AuthPlacement,
     message: Option<String>,
     unsigned: Option<String>,
+    commitment: Option<[u8; 32]>,
 }
 impl AuthRecipe {
     pub fn new(
@@ -736,6 +851,7 @@ impl AuthRecipe {
             placement,
             message: None,
             unsigned: None,
+            commitment: None,
         }
     }
     /// The outbound this recipe is bound to: an HTTP request under this
@@ -826,17 +942,26 @@ impl SignStep for AuthRecipe {
         payload.extend_from_slice(&data);
         self.message = Some(message);
         self.unsigned = Some(Self::unsigned(outbound));
+        let statement = statement::auth(&self.account, deadline);
+        self.commitment = Some(safe_cex_crypto::sha256(statement.as_bytes()));
         Ok(SignRequest {
             receipt: SignReceipt {
                 nonce: None,
                 stamp_ms: Some(stamp),
                 expiry_ms: Some(deadline as f64 * 1000.),
             },
-            operations: vec![Operation::Sign {
-                algorithm: Algorithm::SchnorrDigest,
-                key: self.identity.signing_ref()?.clone(),
-                payload: vec![PayloadPart::Bytes { bytes: payload }],
-            }],
+            operations: vec![
+                Operation::Sha256 {
+                    payload: vec![PayloadPart::Bytes {
+                        bytes: statement.into_bytes(),
+                    }],
+                },
+                Operation::Sign {
+                    algorithm: Algorithm::SchnorrDigest,
+                    key: self.identity.signing_ref()?.clone(),
+                    payload: vec![PayloadPart::Bytes { bytes: payload }],
+                },
+            ],
             context: Context {
                 venue: "lighter".into(),
                 method,
@@ -848,13 +973,14 @@ impl SignStep for AuthRecipe {
     fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
         self.target(outbound)?;
         let message = self.message.take().ok_or(SignError::InvalidResult)?;
+        let commitment = self.commitment.take().ok_or(SignError::InvalidResult)?;
         if self.unsigned.take().as_deref() != Some(Self::unsigned(outbound).as_str()) {
             return Err(SignError::InvalidRequest);
         }
-        let [signature] = result.values.as_slice() else {
+        let [digest, signature] = result.values.as_slice() else {
             return Err(SignError::InvalidResult);
         };
-        if signature.len() != 80 {
+        if digest.as_slice() != commitment || signature.len() != 80 {
             return Err(SignError::InvalidResult);
         }
         let token = format!("{message}:{}", safe_cex_crypto::hex(signature));
@@ -889,6 +1015,32 @@ impl SignStep for AuthRecipe {
     }
 }
 
+/// A tier POST has the native form header before the recipe binds its unsigned bytes.
+pub(crate) struct FormRecipe<T>(pub T);
+impl<T: SignStep> SignStep for FormRecipe<T> {
+    fn prepare(
+        &mut self,
+        outbound: &mut Action,
+        dispatch: &DispatchContext<'_>,
+    ) -> Result<SignRequest, SignError> {
+        if let Action::Http(http) = outbound
+            && http.method == Method::Post
+        {
+            http.headers
+                .retain(|(name, _)| !name.eq_ignore_ascii_case("content-type"));
+            http.headers
+                .push(("Content-Type", "application/x-www-form-urlencoded".into()));
+        }
+        self.0.prepare(outbound, dispatch)
+    }
+    fn apply(&mut self, outbound: &mut Action, result: &SignResult) -> Result<(), SignError> {
+        self.0.apply(outbound, result)
+    }
+    fn freshness_ms(&self) -> f64 {
+        self.0.freshness_ms()
+    }
+}
+
 #[cfg(test)]
 mod security_hedging {
     use super::*;
@@ -918,3 +1070,62 @@ mod security_hedging {
         assert!(safe_cex_crypto::lighter::schnorr_verify(&[2; 8], &public, &second).unwrap());
     }
 }
+
+#[cfg(test)]
+mod grouped_shape_tests {
+    use super::*;
+
+    fn leg(order_id: u64, order_type: u8) -> Order {
+        // Protection legs are always reduce-only in our construction (trading.rs).
+        Order {
+            order_id,
+            market_id: 1,
+            is_buy: order_type == 0,
+            price: 310_000,
+            amount: if order_type == 0 { 1_000 } else { 0 },
+            order_type,
+            time_in_force: if order_type == 0 { 1 } else { 0 },
+            reduce_only: order_type != 0,
+            trigger_price: if order_type == 0 { 0 } else { 300_000 },
+            order_expiry: None,
+        }
+    }
+
+    fn grouped(grouping: u8, orders: Vec<Order>) -> Result<TxInput, String> {
+        let account = Account::new(304, 42, 3).unwrap();
+        let tx = Transaction::Grouped {
+            grouping,
+            orders,
+            builder: None,
+        };
+        tx_input(&account, &tx, 7, 1_700_000_000_000)
+    }
+
+    #[test]
+    fn grouped_shapes_outside_oto_oco_otoco_are_refused_before_signing() {
+        assert!(
+            grouped(2, vec![leg(1, 0), leg(2, 2), leg(3, 4)]).is_err(),
+            "OCO carries two orders"
+        );
+        assert!(
+            grouped(4, vec![leg(1, 0), leg(2, 2)]).is_err(),
+            "grouping 4 is undefined"
+        );
+        assert!(
+            grouped(0, vec![leg(1, 0), leg(2, 2)]).is_err(),
+            "grouping 0 is undefined"
+        );
+        assert!(
+            grouped(1, vec![leg(1, 0), leg(2, 2)]).is_ok(),
+            "control: OTO"
+        );
+        assert!(
+            grouped(3, vec![leg(1, 0), leg(2, 2), leg(3, 4)]).is_ok(),
+            "control: OTOCO"
+        );
+    }
+}
+
+#[cfg(test)]
+#[path = "../tests/support/modify_signing.rs"]
+mod modify_tests;

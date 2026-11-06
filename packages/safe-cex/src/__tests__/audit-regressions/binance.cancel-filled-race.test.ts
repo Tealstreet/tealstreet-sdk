@@ -3,8 +3,8 @@ import type { Order } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinanceExchange } from '../../exchanges/binance/binance.exchange';
-import { BinancePMExchange } from '../../exchanges/binance/binancepm.exchange';
+import { BinanceExchange } from '../reference/binance/binance.exchange';
+import { BinancePMExchange } from '../reference/binance/binancepm.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 

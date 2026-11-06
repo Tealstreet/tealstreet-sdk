@@ -11,6 +11,7 @@ use safe_cex_engine::request_context::{
     Context as HttpContext, Egress, Operation, Policy, RetryPolicy, Scope,
 };
 use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, Fill, Response, TimerId, Venue, json};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
@@ -788,9 +789,9 @@ impl TxFlow {
                         log_skip(
                             cx,
                             &mut self.account.skip_logged,
-                            keys.join(", "),
+                            keys.join_with(", "),
                             skip_level(stored || !owned),
-                            format!("TxFlow skipped malformed position {}", keys.join(", ")),
+                            format!("TxFlow skipped malformed position {}", keys.join_with(", ")),
                         );
                         for key in keys {
                             positions.reject(Some(key));

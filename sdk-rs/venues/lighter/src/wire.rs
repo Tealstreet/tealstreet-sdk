@@ -69,6 +69,8 @@ pub struct Instrument<'a> {
     pub maintenance_margin_fraction: f64,
     #[serde(default)]
     pub market_config: Option<MarketConfig>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub last_trade_price: Option<f64>,
 }
 #[derive(Deserialize)]
 pub struct MarketConfig {
@@ -204,11 +206,15 @@ pub struct Stats<'a> {
         default,
         alias = "openInterest",
         alias = "oi",
-        alias = "openInterestUsd",
-        alias = "open_interest_usd",
         deserialize_with = "optional_number"
     )]
     pub open_interest: Option<f64>,
+    #[serde(
+        default,
+        alias = "openInterestUsd",
+        deserialize_with = "optional_number"
+    )]
+    pub open_interest_usd: Option<f64>,
     #[serde(
         default,
         alias = "fundingRate",

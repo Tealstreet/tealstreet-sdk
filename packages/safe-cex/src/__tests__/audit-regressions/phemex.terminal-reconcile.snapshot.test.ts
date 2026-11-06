@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BinancePrivateWebsocket } from '../../exchanges/phemex/phemex.ws-private';
+import { BinancePrivateWebsocket } from '../reference/phemex/phemex.ws-private';
 import { MarginType, PositionMode, PositionSide } from '../../types';
 
 const position = (contracts: number, side = PositionSide.Long, positionMode = PositionMode.Hedged) => ({

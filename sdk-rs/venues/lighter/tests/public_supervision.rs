@@ -1,6 +1,7 @@
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, PublicFeedPolicy, SocketChannel, SocketId};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
+use support::Options;
 use support::*;
 
 struct Rig {
@@ -43,10 +44,16 @@ impl Rig {
         Self::with_policy(PublicFeedPolicy::Direct).0
     }
     fn with_policy(policy: PublicFeedPolicy) -> (Self, Vec<Action>) {
-        let mut engine = safe_cex_engine::test_support::seeded_engine(Lighter::new(Options {
-            public_data_only: true,
-            ..Options::default()
-        }));
+        Self::with_options(
+            policy,
+            Options {
+                public_data_only: true,
+                ..Options::default()
+            },
+        )
+    }
+    fn with_options(policy: PublicFeedPolicy, options: Options) -> (Self, Vec<Action>) {
+        let mut engine = support::engine(options);
         engine.set_public_feed_policy(policy).unwrap();
         engine.start(NOW);
         let mut timers = Timers::new();
@@ -61,15 +68,29 @@ impl Rig {
             })
             .unwrap();
         reply(&mut engine, &meta, 200, META);
-        let actions = drain(&mut engine, &mut timers);
+        let mut actions = drain(&mut engine, &mut timers);
         let socket = connected(&actions).unwrap_or(SocketId(0));
-        let rig = Self {
+        let mut rig = Self {
             engine,
             timers,
             socket,
             now: NOW,
             fired: 0,
         };
+        for action in &actions {
+            if let Action::Http(request) = action
+                && request.url.ends_with("exchangeStats")
+            {
+                reply_at(
+                    &mut rig.engine,
+                    NOW,
+                    request,
+                    200,
+                    r#"{"code":200,"order_book_stats":[]}"#,
+                );
+            }
+        }
+        actions.extend(rig.drain());
         (rig, actions)
     }
     fn handle(&mut self, event: Event<'_>) -> Vec<Action> {
@@ -274,4 +295,105 @@ fn suppressed_public_feed_is_not_supervised() {
         assert!(connected(&actions).is_none());
         assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
     }
+}
+
+#[test]
+fn paced_ticker_subscribes_reach_every_market_and_a_displayed_symbol_goes_next() {
+    let mut meta: serde_json::Value = serde_json::from_str(META).unwrap();
+    let template = meta["order_book_details"][0].clone();
+    let rows = meta["order_book_details"].as_array_mut().unwrap();
+    rows.clear();
+    for id in 0..9 {
+        let mut row = template.clone();
+        row["market_id"] = id.into();
+        row["symbol"] = format!("M{id}").into();
+        rows.push(row);
+    }
+    let (mut e, _, mut timers) = ready_tracked_meta(
+        Options {
+            public_data_only: true,
+            ..Options::default()
+        },
+        &meta.to_string(),
+    );
+    let tickers = |actions: &[Action]| {
+        actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } if text.contains("ticker/") => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    // Whatever went out at open, the rest follow on the timer.
+    e.handle(
+        NOW,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "M8".into(),
+        }),
+    );
+    let mut seen = tickers(&drain_at(&mut e, &mut timers, NOW));
+    seen.extend(tickers(&advance(&mut e, &mut timers, NOW + 1_000.0)));
+    // The next paced pair carries it; the engine orders a pair's frames by key.
+    assert!(seen[..2].iter().any(|t| t.contains("ticker/8")), "{seen:?}");
+    seen.extend(tickers(&advance(&mut e, &mut timers, NOW + 10_000.0)));
+    assert_eq!(seen.len(), 7, "{seen:?}");
+}
+
+fn public_url(actions: &[Action]) -> Option<String> {
+    actions.iter().find_map(|a| match a {
+        Action::WsConnect {
+            url,
+            channel: Some(SocketChannel::Public),
+            ..
+        } => Some(url.clone()),
+        _ => None,
+    })
+}
+
+impl Rig {
+    /// Closes the public socket before it opens and returns the reconnect's URL.
+    fn public_fails(&mut self, code: u16) -> String {
+        let socket = self.socket;
+        self.handle(Event::WsClosed { socket, code });
+        let actions = self.advance(self.now + 20_000.0);
+        self.socket = connected(&actions).expect("public reconnect");
+        public_url(&actions).unwrap()
+    }
+}
+
+/// Legacy lighter.ws-public.ts: two failed direct-route connects move it to readonly.
+#[test]
+fn two_failed_direct_connects_reconnect_the_public_socket_read_only() {
+    let mut rig = Rig::new();
+    assert!(!rig.public_fails(1006).contains("readonly"));
+    let url = rig.public_fails(1006);
+    assert!(url.ends_with("/stream?readonly=true"), "{url}");
+}
+
+#[test]
+fn a_routed_public_socket_never_goes_read_only() {
+    let (mut rig, _) = Rig::with_options(
+        PublicFeedPolicy::Direct,
+        Options {
+            public_data_only: true,
+            ws_routed: true,
+            ..Options::default()
+        },
+    );
+    for _ in 0..4 {
+        assert!(!rig.public_fails(1006).contains("readonly"));
+    }
+}
+
+#[test]
+fn a_clean_close_resets_the_public_count() {
+    let mut rig = Rig::new();
+    rig.public_fails(1006);
+    rig.open();
+    let socket = rig.socket;
+    rig.message(socket, r#"{"type":"connected"}"#);
+    rig.advance(rig.now + 15_000.0);
+    assert!(!rig.public_fails(1000).contains("readonly"));
+    assert!(!rig.public_fails(1006).contains("readonly"));
 }

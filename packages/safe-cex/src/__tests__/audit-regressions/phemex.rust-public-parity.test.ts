@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
-import { BinancePublicWebsocket } from '../../exchanges/phemex/phemex.ws-public';
+import type { PhemexExchange } from '../reference/phemex/phemex.exchange';
+import { BinancePublicWebsocket } from '../reference/phemex/phemex.ws-public';
 
 // Official USDⓈ-M docs specify [symbol, false, 0] for full depth at 20 ms.
 // Snapshot sequence belongs to the outer frame, alongside type and depth.

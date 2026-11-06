@@ -2,8 +2,8 @@ import type { ExchangeOptions } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
-import { ENDPOINTS } from '../../exchanges/bitunix/bitunix.types';
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
+import { ENDPOINTS } from '../reference/bitunix/bitunix.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, PositionMode, PositionSide } from '../../types';
 

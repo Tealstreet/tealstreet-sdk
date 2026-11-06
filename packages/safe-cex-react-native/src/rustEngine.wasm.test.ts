@@ -1,3 +1,11 @@
+vi.mock('@tealstreet/safe-cex/src/exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('@tealstreet/safe-cex/src/__tests__/reference/retainedRustPolicy');
+  return retainedRustPolicy(
+    await importOriginal<typeof import('@tealstreet/safe-cex/src/exchanges/rust/betaVenues')>(),
+    true,
+  );
+});
+
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
@@ -64,5 +72,5 @@ it('resolves the actual native registry and starts its Rust class through the mo
     timeout: 30000,
     encoding: 'utf8',
   });
-  expect(output).toContain('mobile-native-registry: Coinbase aliases loaded a native catalog');
+  expect(output).toContain('mobile-native-registry: Binance aliases loaded a native catalog');
 }, 35000);

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { privateProxyIpsSingapore, privateProxyIpsTokyo } from '@tealstreet/proxy-ips-lists/src';
-import { createAPI, formatCryptocomApiError } from '../../exchanges/cryptocom/cryptocom.api';
-import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
-import { generateSignature } from '../../exchanges/cryptocom/cryptocom.signing';
-import { ENDPOINTS } from '../../exchanges/cryptocom/cryptocom.types';
+import { privateProxyIpsVultrTokyo } from '@tealstreet/proxy-ips-lists/src';
+import { createAPI, formatCryptocomApiError } from '../reference/cryptocom/cryptocom.api';
+import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
+import { generateSignature } from '../reference/cryptocom/cryptocom.signing';
+import { ENDPOINTS } from '../reference/cryptocom/cryptocom.types';
 import { getExchangeMetadata } from '../../exchangeMetadata';
 import { DefaultStore } from '../../store/store.base';
 import {
@@ -42,10 +42,12 @@ describe('audit regression: Crypto.com order writes', () => {
   it('declares explicit proxy regions for production REST routing', () => {
     const metadata = getExchangeMetadata('cryptocom');
 
-    expect(metadata.privateProxyIps).toEqual(privateProxyIpsTokyo);
+    // Both regions were their own AWS pool until AWS_EXIT.md step 3e put every
+    // private path on the Vultr Tokyo fleet; the region keys still pick the default.
+    expect(metadata.privateProxyIps).toEqual(privateProxyIpsVultrTokyo);
     expect(Object.keys(metadata.privateProxyRegions)).toEqual(['JA', 'SG']);
-    expect(metadata.privateProxyRegions.JA).toEqual(privateProxyIpsTokyo);
-    expect(metadata.privateProxyRegions.SG).toEqual(privateProxyIpsSingapore);
+    expect(metadata.privateProxyRegions.JA).toEqual(privateProxyIpsVultrTokyo);
+    expect(metadata.privateProxyRegions.SG).toEqual(privateProxyIpsVultrTokyo);
   });
 
   it('keeps proxy transport failures distinct from credential errors', () => {

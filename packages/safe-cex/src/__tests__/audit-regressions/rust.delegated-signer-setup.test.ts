@@ -66,6 +66,13 @@ describe('trusted delegated signer setup capsule', () => {
     },
   );
 
+  it('advertises per-venue signer algorithms: sha256SecretSuffix for Bitunix only', () => {
+    expect(new DelegatedSignerSetup('bitunix', options({ remoteSigner: remote() })).signerAlgorithms).toEqual(['sha256SecretSuffix']);
+    for (const venue of ['bybit', 'binance', 'okx', 'bitget'] as ExchangeName[]) {
+      expect(new DelegatedSignerSetup(venue, options({ remoteSigner: remote() })).signerAlgorithms, venue).toEqual(['hmacSha256']);
+    }
+  });
+
   it('allocates independent opaque references per setup without using key fingerprints or inventing stable IDs', () => {
     const input = options({ localSigner: { primary: { stableId: 'caller/account' }, secondary: { stableId: 'caller/read' } } });
     const first = new DelegatedSignerSetup('binance', input);

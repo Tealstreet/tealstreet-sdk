@@ -7,7 +7,7 @@ use safe_cex_venue_bitget::{BitgetFutures, Options as NativeOptions, Product};
 type Options = FixtureOptions;
 
 // Bitget Classic contracts/tickers examples, reduced to the fields we consume.
-pub const CONTRACTS: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","symbolStatus":"normal","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"}]}"#;
+pub const CONTRACTS: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","baseCoin":"BTC","quoteCoin":"USDT","symbolStatus":"normal","minTradeUSDT":"5","pricePlace":"1","priceEndStep":"1","sizeMultiplier":"0.001","minTradeNum":"0.001","maxOrderQty":"120","maxLever":"125"}]}"#;
 pub const TICKERS: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","bidPr":"99.9","askPr":"100.1","lastPr":"100","indexPrice":"99","changeUtc24h":"0.01","baseVolume":"1000","quoteVolume":"100000","fundingRate":"0.0001"}]}"#;
 
 pub struct Harness {
@@ -22,6 +22,8 @@ pub struct Harness {
     pub done: Vec<(u32, Result<String, String>)>,
     pub failures: Vec<safe_cex_engine::VenueError>,
     pub logs: Vec<String>,
+    /// Every engine event, with its fields.
+    pub events: Vec<safe_cex_engine::log::LogEvent>,
     pub command_errors: Vec<(u32, String)>,
     pub command_notices: Vec<(u32, &'static str)>,
     pub progress: Vec<(u32, Vec<safe_cex_engine::OrderIdentityReceipt>)>,
@@ -57,6 +59,7 @@ impl Harness {
             done: vec![],
             failures: vec![],
             logs: vec![],
+            events: vec![],
             command_errors: vec![],
             command_notices: vec![],
             progress: vec![],
@@ -99,9 +102,7 @@ impl Harness {
                 Action::RetireAddressSetup { .. } => {
                     panic!("unexpected address setup retirement")
                 }
-                Action::Sign { .. }
-                | Action::SignedOutbound { .. }
-                | Action::SignPayload { .. } => {
+                Action::Sign { .. } | Action::SignedOutbound { .. } => {
                     panic!("delegated signing is unsupported in the bitget test harness")
                 }
                 Action::Http(r) => {
@@ -138,14 +139,17 @@ impl Harness {
                     self.done.push((command, Err(error.legacy_text())));
                     self.failures.push(error);
                 }
-                Action::Notice(Notice::StartupFailed { error }) => {
+                Action::Notice(Notice::StartupFailed { error, .. }) => {
                     assert!(
                         self.expect_startup_failure,
                         "unexpected Bitget startup failure: {error}"
                     );
                     self.startup_failures.push(error);
                 }
-                Action::Notice(Notice::Event(event)) => self.logs.push(event.message),
+                Action::Notice(Notice::Event(event)) => {
+                    self.logs.push(event.message.clone());
+                    self.events.push(event);
+                }
                 Action::Notice(Notice::Deactivate) => {
                     assert!(
                         self.expect_startup_failure,

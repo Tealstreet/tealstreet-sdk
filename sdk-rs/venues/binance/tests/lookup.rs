@@ -243,6 +243,21 @@ fn lookup_routes_signed_primary_usdm_and_pm_and_keeps_native_identity() {
     }
 }
 #[test]
+fn a_refused_or_unfilled_expired_order_is_definitively_not_placed() {
+    for native in ["REJECTED", "EXPIRED", "EXPIRED_IN_MATCH"] {
+        let mut h = ready(false);
+        query(&mut h, "BTCUSDT", "caller:/1");
+        let r = h.requests.pop().unwrap();
+        let row = ROW
+            .replace("PARTIALLY_FILLED", native)
+            .replace(r#""executedQty":"0.5""#, r#""executedQty":"0""#);
+        h.reply(r.id, 200, "", &row);
+        let lookup = result(&mut h).unwrap();
+        assert!(!lookup.found, "{native}");
+        assert_eq!(lookup.definitive, Some(true), "{native}");
+    }
+}
+#[test]
 fn lookup_keeps_open_filled_and_all_native_cancellation_statuses() {
     for (native, expected) in [
         ("NEW", "open"),
@@ -251,7 +266,6 @@ fn lookup_keeps_open_filled_and_all_native_cancellation_statuses() {
         ("CANCELED", "canceled"),
         ("EXPIRED", "canceled"),
         ("EXPIRED_IN_MATCH", "canceled"),
-        ("REJECTED", "canceled"),
     ] {
         let mut h = ready(false);
         query(&mut h, "BTCUSDT", "caller:/1");
@@ -444,4 +458,21 @@ fn primary_lookup_signs_the_configured_recv_window_without_using_read_keys() {
             assert!(result(&mut h).unwrap().found);
         }
     }
+}
+#[test]
+fn a_creating_row_never_answers_from_the_cache() {
+    let mut h = Harness::started(Options {
+        key: Some("lookup-key".into()),
+        secret: Some("lookup-secret".into()),
+        ..Options::default()
+    });
+    h.load_public();
+    h.requests.clear();
+    h.done.clear();
+    let mut creating = cached_order("creating:1:0", "caller:/1");
+    creating.status = safe_cex_engine::model::OrderStatus::Creating;
+    h.engine.store_mut().set_orders(vec![creating]);
+    query(&mut h, "BTCUSDT", "caller:/1");
+    assert!(h.done.is_empty(), "answered from the cache");
+    assert_eq!(h.requests.len(), 1, "asks the venue");
 }

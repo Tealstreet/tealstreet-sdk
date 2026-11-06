@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:03:04.274Z",
+  "endpoint": "/v5/market/orderbook?category=linear&symbol=NOPEUSDT",
+  "http_status": 200,
+  "body": "{\"retCode\":10001,\"retMsg\":\"params error: symbol invalid\",\"result\":{},\"retExtInfo\":{},\"time\":1793152984283}",
+  "expect": {
+    "kind": "invalidInput",
+    "outcome": null,
+    "path": "read"
+  }
+}

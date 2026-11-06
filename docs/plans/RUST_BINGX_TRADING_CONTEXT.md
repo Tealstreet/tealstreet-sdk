@@ -302,3 +302,17 @@ The exact shrink is trading.rs 7 fingerprints/7 occurrences to 2/2: five removed
 The two remaining conservative fingerprints are native data-field references,
 not physical request or numeric completion calls. Other BingX paths and shared
 staging funnels keep their exact inventory until their own callers migrate.
+
+## Post-beta: cancel-all late-landing protection
+
+Keep the default uncertain cancel-all fence for beta. An Unknown create can
+land after DELETE /openApi/swap/v2/trade/allOpenOrders, so that DELETE alone
+cannot justify reporting every order cancelled. The final maintainer and
+auditor ruling requires a fresh complete Primary read before another cancel-all.
+
+The queued follow-up is automatic late-landing cancellation for placements
+owed by a genuine cancel-all. It must preserve the exact client identities and
+generations, cancel only proven matching live orders, retain per-order outcomes,
+and keep unrelated orders safe. Prove the late-arrival race and failure cleanup
+before considering a cancel-all fence opt-out; no write retry or fake Command
+authority is permitted by this plan note.

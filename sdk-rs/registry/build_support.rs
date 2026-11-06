@@ -44,6 +44,9 @@ enum SetupMapping {
     Asterdex,
     #[serde(rename = "apexomni")]
     ApexOmni,
+    Lighter,
+    Hyperliquid,
+    Paradex,
 }
 
 #[derive(Default, Deserialize)]
@@ -64,6 +67,8 @@ enum SignatureEncoding {
     #[default]
     Hex,
     Base64,
+    #[serde(rename = "hex-base64")]
+    Base64Hex,
 }
 
 #[derive(Deserialize)]
@@ -115,6 +120,16 @@ struct IdentitySetupPolicy {
     extra: Option<ExtraKeyPolicy>,
     signing_algorithm: Option<SigningAlgorithm>,
     signing: SigningPolicy,
+    source: PrimarySource,
+}
+
+/// Scalar-only primary acceptance; `required` is today's behaviour.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum PrimarySource {
+    #[default]
+    Required,
+    ScalarOnly,
 }
 
 /// Credential-only acceptance; `required` is today's behaviour.
@@ -157,6 +172,8 @@ struct ExtraKeyPolicy {
     field: ExtraFieldPolicy,
     #[serde(default)]
     encoding: Option<KeyEncoding>,
+    #[serde(default)]
+    trim: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -165,6 +182,7 @@ enum ExtraFieldPolicy {
     #[default]
     Optional,
     RequiredForPrivate,
+    AliasPrimary,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,6 +190,7 @@ enum ExtraFieldPolicy {
 enum ExtraKey {
     ZklinkSeed,
     L1Wallet,
+    KucoinBroker,
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,8 +294,8 @@ fn rule(value: &Rule) -> String {
                         |encoding| format!("Some(safe_cex_engine::signing::KeyEncoding::{encoding:?})"),
                     );
                     format!(
-                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: safe_cex_engine::signing::ExtraFieldPolicy::{:?}, encoding: {encoding} }})",
-                        extra.key, extra.field
+                        "Some(safe_cex_engine::signing::ExtraKeyPolicy {{ key: safe_cex_engine::signing::ExtraKey::{:?}, field: safe_cex_engine::signing::ExtraFieldPolicy::{:?}, encoding: {encoding}, trim: {} }})",
+                        extra.key, extra.field, extra.trim
                     )
                 },
             );
@@ -285,8 +304,8 @@ fn rule(value: &Rule) -> String {
                 |algorithm| format!("Some(safe_cex_engine::signing::Algorithm::{algorithm:?})"),
             );
             format!(
-                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, trim_signing: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm}, signing: safe_cex_engine::signing::SigningPolicy::{:?} }})",
-                value.trim_credential, value.trim_signing, value.signing
+                "Some(IdentitySetupPolicy {{ trim_credential: {:?}, trim_signing: {:?}, passphrase: {passphrase}, secret_encoding: {secret_encoding}, extra: {extra}, signing_algorithm: {signing_algorithm}, signing: safe_cex_engine::signing::SigningPolicy::{:?}, source: safe_cex_engine::signing::PrimarySource::{:?} }})",
+                value.trim_credential, value.trim_signing, value.signing, value.source
             )
         }
         None => "None".into(),
@@ -421,9 +440,9 @@ mod tests {
                 "evm":{"signerSetup":{"primary":{"signingAlgorithm":"secp256k1Digest"}}}
             }
         }"#).unwrap();
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }) }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: None }"));
-        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest), signing: safe_cex_engine::signing::SigningPolicy::Required }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: Some(true), trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required, source: safe_cex_engine::signing::PrimarySource::Required }), secondary: Some(IdentitySetupPolicy { trim_credential: Some(false), trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required, source: safe_cex_engine::signing::PrimarySource::Required }) }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required, source: safe_cex_engine::signing::PrimarySource::Required }), secondary: None }"));
+        assert!(output.contains("CredentialSetupPolicy { primary: Some(IdentitySetupPolicy { trim_credential: None, trim_signing: None, passphrase: None, secret_encoding: None, extra: None, signing_algorithm: Some(safe_cex_engine::signing::Algorithm::Secp256k1Digest), signing: safe_cex_engine::signing::SigningPolicy::Required, source: safe_cex_engine::signing::PrimarySource::Required }), secondary: None }"));
         // Lighter's Schnorr key is declarable for Sign typing.
         assert!(generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"signingAlgorithm":"schnorrDigest"}}}}}"#).unwrap().contains("Algorithm::SchnorrDigest"));
         // MAC algorithms are never declarable.
@@ -458,7 +477,7 @@ mod tests {
         let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
             "p":{"signerSetup":{"primary":{"extra":{"key":"l1Wallet","field":"requiredForPrivate","encoding":"hex"}}}}
         }}"#).unwrap();
-        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
+        assert!(output.contains("extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::L1Wallet, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex), trim: false })"));
     }
 
     #[test]
@@ -467,8 +486,8 @@ mod tests {
             "v":{"signerSetup":{"primary":{"secretEncoding":"base64Text","extra":{"key":"zklinkSeed","field":"requiredForPrivate","encoding":"hex"}}}},
             "o":{"signerSetup":{"primary":{"extra":{"key":"zklinkSeed"}}}}
         }}"#).unwrap();
-        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex) })"));
-        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None })"));
+        assert!(output.contains("secret_encoding: Some(safe_cex_engine::signing::KeyEncoding::Base64Text), extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::RequiredForPrivate, encoding: Some(safe_cex_engine::signing::KeyEncoding::Hex), trim: false })"));
+        assert!(output.contains("secret_encoding: None, extra: Some(safe_cex_engine::signing::ExtraKeyPolicy { key: safe_cex_engine::signing::ExtraKey::ZklinkSeed, field: safe_cex_engine::signing::ExtraFieldPolicy::Optional, encoding: None, trim: false })"));
         let base58 = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"secretEncoding":"base58"}}}}}"#;
         assert!(generate(base58).unwrap().contains("KeyEncoding::Base58"));
         let url = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"secretEncoding":"base64Url"}}}}}"#;
@@ -515,7 +534,7 @@ mod tests {
         let output = generate(r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{
             "bitunix":{"signerSetup":{"primary":{"trimCredential":true,"trimSigning":true},"secondary":{"trimCredential":true,"trimSigning":true}}}
         }}"#).unwrap();
-        assert!(output.contains("IdentitySetupPolicy { trim_credential: Some(true), trim_signing: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required }"));
+        assert!(output.contains("IdentitySetupPolicy { trim_credential: Some(true), trim_signing: Some(true), passphrase: None, secret_encoding: None, extra: None, signing_algorithm: None, signing: safe_cex_engine::signing::SigningPolicy::Required, source: safe_cex_engine::signing::PrimarySource::Required }"));
         let rules = r#"{"default":{"canSign":[],"privateEligible":[]},"venues":{"v":{"signerSetup":{"primary":{"trimSigning":"yes"}}}}}"#;
         assert!(generate(rules).is_err());
     }

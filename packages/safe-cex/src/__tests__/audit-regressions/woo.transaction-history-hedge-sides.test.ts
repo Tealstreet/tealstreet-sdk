@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapWooHedgeTransactionSide } from '../../exchanges/woo/woo.utils';
+import { mapWooHedgeTransactionSide } from '../reference/woo/woo.utils';
 
 // `/v3/trade/transactionHistory` reports `side` in two vocabularies depending
 // on the account's position mode. Captured verbatim from a live WOO account

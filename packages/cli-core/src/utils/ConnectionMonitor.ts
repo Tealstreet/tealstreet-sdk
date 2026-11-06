@@ -107,7 +107,7 @@ export class ConnectionMonitor {
       private: privateStatus,
       futures: futuresStatus,
       business: businessStatus,
-      latency: this.exchange.store?.latency,
+      latency: this.exchange.store?.latency ?? undefined,
     };
   }
 

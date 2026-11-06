@@ -20,6 +20,7 @@ import {
 import { isTokenExpired } from './proxyTokenExpiry';
 
 export { isTokenExpired } from './proxyTokenExpiry';
+export { lastProxyKeyFailure } from './proxyTokenClient';
 
 /**
  * A contextual proxy-token provider was installed but could not produce a

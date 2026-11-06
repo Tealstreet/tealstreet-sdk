@@ -1,5 +1,5 @@
-import { OKXBusinessWebsocket } from '../../exchanges/okx/okx.ws-business';
-import { OKXPrivateWebsocket } from '../../exchanges/okx/okx.ws-private';
+import { OKXBusinessWebsocket } from '../reference/okx/okx.ws-business';
+import { OKXPrivateWebsocket } from '../reference/okx/okx.ws-private';
 
 /**
  * OKX's private and business sockets used to call `this.auth()` without awaiting

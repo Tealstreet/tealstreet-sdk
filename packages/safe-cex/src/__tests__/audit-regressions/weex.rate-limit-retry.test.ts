@@ -2,8 +2,8 @@ import type { AxiosError } from 'axios';
 
 import { describe, expect, it } from 'vitest';
 
-import { getWeexRateLimitRetryDelayMs, shouldRetryWeexRequest, WEEX_RETRY_CONFIG } from '../../exchanges/weex/weex.api';
-import { ENDPOINTS } from '../../exchanges/weex/weex.types';
+import { getWeexRateLimitRetryDelayMs, shouldRetryWeexRequest, WEEX_RETRY_CONFIG } from '../reference/weex/weex.api';
+import { ENDPOINTS } from '../reference/weex/weex.types';
 
 const createError = ({
   method = 'get',

@@ -6,7 +6,7 @@ const privateTopics = ['/spotMarket/tradeOrdersV2', '/account/balance'];
 export const kucoinspot = {
   rust: 'kucoinspot',
   virtualPrivateClock: true,
-  ts: { module: '../../packages/safe-cex/src/exchanges/kucoin/kucoinspot.exchange.ts', className: 'KucoinSpotExchange', name: 'kucoinspot' },
+  ts: { module: '../../packages/safe-cex/src/__tests__/reference/kucoin/kucoinspot.exchange.ts', className: 'KucoinSpotExchange', name: 'kucoinspot' },
   startupMessage: (record) => { try { return JSON.parse(record.text).type === 'welcome'; } catch { return false; } },
   volatileQueryFields: ['connectId'],
   matchRequestBody: true,

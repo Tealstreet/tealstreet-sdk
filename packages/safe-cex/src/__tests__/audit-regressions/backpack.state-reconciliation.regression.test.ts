@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
+import { BackpackExchange } from '../reference/backpack/backpack.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { Balance, ExchangeOptions, MarginType, PositionMode, PositionSide } from '../../types';
 import { createPositionId } from '../../utils/createPositionId';

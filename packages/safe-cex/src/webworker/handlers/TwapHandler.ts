@@ -1,69 +1,49 @@
 import { StoreWorkerPayload } from '../StoreWorkerPayload';
-import { TwapInstance } from '../twap/TwapInstance';
-import { twapManager } from '../twap/TwapManager';
-import { TwapOptions } from '../twap/TwapOptions';
-import { TwapState } from '../twap/TwapState';
-import { BaseHandler } from './BaseHandler';
+import { RustTwapOwnership } from '../twap/RustTwapOwnership';
+import { BaseHandler, rustAlgoExchange } from './BaseHandler';
 
+const TWAP_OPS = new Set<StoreWorkerPayload['op']>([
+  'twap:start',
+  'twap:resume',
+  'twap:cleanup',
+  'twap:pause',
+  'twap:stop',
+  'twap:state',
+]);
+
+/** TWAPs run in the account engine's Rust algos, under `RustTwapOwnership`'s lock and restore rules. */
 export class TwapHandler extends BaseHandler {
+  private readonly rustTwaps?: RustTwapOwnership;
+
+  constructor(...args: ConstructorParameters<typeof BaseHandler>) {
+    super(...args);
+    const exchange = rustAlgoExchange(this._exchange);
+    if (!exchange) return;
+    this.rustTwaps = new RustTwapOwnership(
+      this._exchange,
+      (op, data) => exchange.algoOp(op, data),
+      (rows) => this._ctx.postMessage({ op: 'twap:stateUpdate', data: rows }),
+    );
+    // Exec's `twap` command starts them too, so listen before any op arrives.
+    this._exchange.on('twap:stateUpdate', this.rustTwaps.receive);
+  }
+
   handle(payload: StoreWorkerPayload): void {
-    switch (payload.op) {
-      case 'twap:start':
-        const options = payload.data;
-        const instance = new TwapInstance(
-          this._exchange,
-          this._ctx,
-          options,
-          () => {
-            console.log('[TWAP] twap state updated');
-          },
-          /* state= */ undefined,
-        );
-        twapManager.add(instance);
-        instance.start();
-        break;
-      case 'twap:resume':
-        twapManager.getById(payload.data)?.resume();
-        break;
-      case 'twap:cleanup':
-        twapManager.getById(payload.data)?.cleanup();
-        break;
-      case 'twap:pause':
-        twapManager.getById(payload.data)?.pause();
-        break;
-      case 'twap:stop':
-        twapManager.getById(payload.data)?.terminate();
-        break;
-      case 'twap:state':
-        try {
-          const persistedTwapStates = payload.data as {
-            id: string;
-            options: TwapOptions;
-            state: TwapState;
-          }[];
-          for (const value of persistedTwapStates) {
-            const { id, options, state } = value;
-            if (twapManager.runningTwaps.has(id)) continue;
-            const instance = new TwapInstance(
-              this._exchange,
-              this._ctx,
-              options,
-              () => {
-                console.log('[TWAP] twap state updated');
-              },
-              state,
-              id,
-            );
-            twapManager.add(instance);
-            if (state.status === 'running') {
-              instance.pause();
-              instance.resume();
-            }
-          }
-        } catch (e) {
-          console.error(e);
-        }
-        break;
+    if (!TWAP_OPS.has(payload.op)) return;
+    const rustTwaps = this.rustTwaps;
+    this.runInRustAlgos(payload, rustTwaps && (() => rustTwaps.handle(payload.op, payload.data)));
+  }
+
+  /** The engine died: post its TWAPs' final state while this handler's context is current. */
+  finishRustTwaps() {
+    this.rustTwaps?.finish();
+  }
+
+  override dispose() {
+    if (this.rustTwaps) {
+      this._exchange.off('twap:stateUpdate', this.rustTwaps.receive);
+      this.rustTwaps.dispose();
     }
+    super.dispose();
   }
 }

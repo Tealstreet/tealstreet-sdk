@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { decodeHyperliquidFastAssetCtxs } from '../../exchanges/hyperliquid/hyperliquid.fast-asset-ctxs';
-import { HyperliquidPublicWebSocket } from '../../exchanges/hyperliquid/hyperliquid.ws-public';
+import { decodeHyperliquidFastAssetCtxs } from '../reference/hyperliquid/hyperliquid.fast-asset-ctxs';
+import { HyperliquidPublicWebSocket } from '../reference/hyperliquid/hyperliquid.ws-public';
 
 // Raw-DEFLATE + base64 fixture matching the live fastAssetCtxs wire format.
 const FAST_ASSET_CTXS_FIXTURE =

@@ -64,6 +64,10 @@ fn spot_and_inverse_history_report_unsupported_before_auth_without_io() {
                     limit: None,
                 },
             ] {
+                // COIN-M reads fills; see inverse_fills_read_the_coin_m_trade_list.
+                if variant == Variant::CoinM && matches!(query, Query::Fills { .. }) {
+                    continue;
+                }
                 h.event(Event::Command(Command::Query { command: 1, query }));
                 let result = &h.done.last().unwrap().1;
                 assert!(
@@ -170,9 +174,13 @@ fn first_history_failure_rejects_typed_without_capturing_background_logs() {
     );
     assert!(h.command_errors.is_empty());
     assert_eq!(h.failures.len(), 1);
+    // A 5xx proves nothing (rule 3); the native code stays as evidence.
     assert_eq!(
-        h.failures[0].1.kind,
-        Some(safe_cex_engine::ErrorKind::Internal)
+        (h.failures[0].1.kind, h.failures[0].1.venue_code.as_deref()),
+        (
+            Some(safe_cex_engine::ErrorKind::VenueUnavailable),
+            Some("-1")
+        )
     );
     assert_eq!(h.command_notices, [(91, "failed")]);
 }

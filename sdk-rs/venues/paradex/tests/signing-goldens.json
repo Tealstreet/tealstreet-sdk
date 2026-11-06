@@ -1,0 +1,816 @@
+{
+  "cases": [
+    {
+      "form": "stark",
+      "network": "prod",
+      "now": 1700000000000.0,
+      "requests": [
+        {
+          "body": null,
+          "headers": [
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-STARKNET-ACCOUNT",
+              "0x0123"
+            ],
+            [
+              "PARADEX-STARKNET-SIGNATURE",
+              "[\"3489740279743126464271767533683444471033657673172475033763612220456814815426\",\"2479350413871572017281402132433296011009058074129258290125413033345174462355\"]"
+            ],
+            [
+              "PARADEX-TIMESTAMP",
+              "1700000000"
+            ],
+            [
+              "PARADEX-SIGNATURE-EXPIRATION",
+              "1700000300"
+            ]
+          ],
+          "method": "Post",
+          "name": "auth",
+          "url": "https://api.prod.paradex.trade/v1/auth/0x456"
+        },
+        {
+          "body": "[{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1255523924292137933184870623393882345927222422024390091321346416510687591605\\\",\\\"1610084810741936050048283244372202852867022747503524984718595076775884473921\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"one\"}]",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "batch-one",
+          "url": "https://api.prod.paradex.trade/v1/orders/batch"
+        },
+        {
+          "body": "[{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1255523924292137933184870623393882345927222422024390091321346416510687591605\\\",\\\"1610084810741936050048283244372202852867022747503524984718595076775884473921\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"a\"},{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1255523924292137933184870623393882345927222422024390091321346416510687591605\\\",\\\"1610084810741936050048283244372202852867022747503524984718595076775884473921\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"b\"},{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1255523924292137933184870623393882345927222422024390091321346416510687591605\\\",\\\"1610084810741936050048283244372202852867022747503524984718595076775884473921\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"c\"}]",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "batch-three",
+          "url": "https://api.prod.paradex.trade/v1/orders/batch"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"size\":\"1.5\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"2153142376428994777095686490638083266110208139215544095942263090252028622625\\\",\\\"2117951012412157871990992123394340709597918705160409998809316638237019024945\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"market\"}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "market",
+          "url": "https://api.prod.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1255523924292137933184870623393882345927222422024390091321346416510687591605\\\",\\\"1610084810741936050048283244372202852867022747503524984718595076775884473921\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"ts_pqV3rlMxg4abZkEOJ6Sr\"}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-entry",
+          "url": "https://api.prod.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"TAKE_PROFIT_MARKET\",\"size\":\"1.5\",\"trigger_price\":\"110\",\"instruction\":\"GTC\",\"flags\":[\"REDUCE_ONLY\"],\"signature\":\"[\\\"1678309024608466738800851867452789024602346718931776052723054639881874102295\\\",\\\"3186697633340662062464847520320633642001904012482691600930784911068024746398\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-take-profit",
+          "url": "https://api.prod.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"STOP_LOSS_MARKET\",\"size\":\"1.5\",\"trigger_price\":\"90\",\"instruction\":\"GTC\",\"flags\":[\"REDUCE_ONLY\"],\"signature\":\"[\\\"1386152229065939031261883149864352915558094926772212635400938857229759696090\\\",\\\"194770972196454012580027964057286113806982227227333065808271366514514212313\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-stop-loss",
+          "url": "https://api.prod.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"id\":\"123\",\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"size\":\"3\",\"price\":\"121.5\",\"signature\":\"[\\\"902516314709824254109686959336041387380508286818040270670808416958321752145\\\",\\\"725909378550505112309747800097555829168631843454971512372241496802099631122\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ]
+          ],
+          "method": "Put",
+          "name": "amend",
+          "url": "https://api.prod.paradex.trade/v1/orders/123"
+        }
+      ]
+    },
+    {
+      "form": "ethereum",
+      "network": "prod",
+      "now": 1700000000000.0,
+      "requests": [
+        {
+          "body": null,
+          "headers": [
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-STARKNET-ACCOUNT",
+              "0x164f1d17c7a66fea8cb5b0716ec5f36e61bb9d56aa42b3e562bb64f9ede55c8"
+            ],
+            [
+              "PARADEX-STARKNET-SIGNATURE",
+              "[\"1302247061862138645820586389384840652630795200007183509092085099697755710604\",\"2604807524998931084198225726588291378572029778218341828189932784797090601699\"]"
+            ],
+            [
+              "PARADEX-TIMESTAMP",
+              "1700000000"
+            ],
+            [
+              "PARADEX-SIGNATURE-EXPIRATION",
+              "1700000300"
+            ]
+          ],
+          "method": "Post",
+          "name": "auth",
+          "url": "https://api.prod.paradex.trade/v1/auth/0x456"
+        },
+        {
+          "body": "[{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1436612191525595205833039221796114458874396971253086237733012102529959276724\\\",\\\"3130202035496146345968402732199914073834172672247441374705390953365540859367\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"one\"}]",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "batch-one",
+          "url": "https://api.prod.paradex.trade/v1/orders/batch"
+        },
+        {
+          "body": "[{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1436612191525595205833039221796114458874396971253086237733012102529959276724\\\",\\\"3130202035496146345968402732199914073834172672247441374705390953365540859367\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"a\"},{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1436612191525595205833039221796114458874396971253086237733012102529959276724\\\",\\\"3130202035496146345968402732199914073834172672247441374705390953365540859367\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"b\"},{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1436612191525595205833039221796114458874396971253086237733012102529959276724\\\",\\\"3130202035496146345968402732199914073834172672247441374705390953365540859367\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"c\"}]",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "batch-three",
+          "url": "https://api.prod.paradex.trade/v1/orders/batch"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"size\":\"1.5\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"212223568089702150593323206505312760218951637050865917927741313982684775561\\\",\\\"2964710910759040551141522101365946411762127816459716386746601260290527350726\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"market\"}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "market",
+          "url": "https://api.prod.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"1436612191525595205833039221796114458874396971253086237733012102529959276724\\\",\\\"3130202035496146345968402732199914073834172672247441374705390953365540859367\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"ts_pqV3rlMxg4abZkEOJ6Sr\"}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-entry",
+          "url": "https://api.prod.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"TAKE_PROFIT_MARKET\",\"size\":\"1.5\",\"trigger_price\":\"110\",\"instruction\":\"GTC\",\"flags\":[\"REDUCE_ONLY\"],\"signature\":\"[\\\"634352703435071743776232741960428747816478367608328167641226076559467060037\\\",\\\"2034239823185152041853944911063049885181711981579944539269030516711388607623\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-take-profit",
+          "url": "https://api.prod.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"STOP_LOSS_MARKET\",\"size\":\"1.5\",\"trigger_price\":\"90\",\"instruction\":\"GTC\",\"flags\":[\"REDUCE_ONLY\"],\"signature\":\"[\\\"3535510405074773097564514790670470934810642197391195132584171903031821273218\\\",\\\"3447686075486914708176529438273634574045986163908257703401768167747399438520\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-stop-loss",
+          "url": "https://api.prod.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"id\":\"123\",\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"size\":\"3\",\"price\":\"121.5\",\"signature\":\"[\\\"3204999034087885851981804663271046000684674965361733472898295952175329864843\\\",\\\"2150624311307168873416039514511710915047050985587775991616468633612546095813\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ]
+          ],
+          "method": "Put",
+          "name": "amend",
+          "url": "https://api.prod.paradex.trade/v1/orders/123"
+        }
+      ]
+    },
+    {
+      "form": "stark",
+      "network": "testnet",
+      "now": 1700000000000.0,
+      "requests": [
+        {
+          "body": null,
+          "headers": [
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-STARKNET-ACCOUNT",
+              "0x0123"
+            ],
+            [
+              "PARADEX-STARKNET-SIGNATURE",
+              "[\"2719139296958352225035789773495381878408102339303621180021815111408073954110\",\"2642760592969254288741398740313590786817825727655795132895081501289486862798\"]"
+            ],
+            [
+              "PARADEX-TIMESTAMP",
+              "1700000000"
+            ],
+            [
+              "PARADEX-SIGNATURE-EXPIRATION",
+              "1700000300"
+            ]
+          ],
+          "method": "Post",
+          "name": "auth",
+          "url": "https://api.testnet.paradex.trade/v1/auth/0x456"
+        },
+        {
+          "body": "[{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"298365731721830691097937399638400758995422703373359523780859517830015156011\\\",\\\"2881740052844683612529756877113161308527163073381003084432673494956150424547\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"one\"}]",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "batch-one",
+          "url": "https://api.testnet.paradex.trade/v1/orders/batch"
+        },
+        {
+          "body": "[{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"298365731721830691097937399638400758995422703373359523780859517830015156011\\\",\\\"2881740052844683612529756877113161308527163073381003084432673494956150424547\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"a\"},{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"298365731721830691097937399638400758995422703373359523780859517830015156011\\\",\\\"2881740052844683612529756877113161308527163073381003084432673494956150424547\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"b\"},{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"298365731721830691097937399638400758995422703373359523780859517830015156011\\\",\\\"2881740052844683612529756877113161308527163073381003084432673494956150424547\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"c\"}]",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "batch-three",
+          "url": "https://api.testnet.paradex.trade/v1/orders/batch"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"size\":\"1.5\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"2848828150567205801935797993084860343607577626598082822426458190694136382408\\\",\\\"3199743635015259632945212656957876394695636997441611421116551181286522897244\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"market\"}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "market",
+          "url": "https://api.testnet.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"298365731721830691097937399638400758995422703373359523780859517830015156011\\\",\\\"2881740052844683612529756877113161308527163073381003084432673494956150424547\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"ts_pqV3rlMxg4abZkEOJ6Sr\"}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-entry",
+          "url": "https://api.testnet.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"TAKE_PROFIT_MARKET\",\"size\":\"1.5\",\"trigger_price\":\"110\",\"instruction\":\"GTC\",\"flags\":[\"REDUCE_ONLY\"],\"signature\":\"[\\\"2964230483528724328716039048671932345371969495403665763967028002999872515961\\\",\\\"748677641219505923257621862693873346812512194048465321462448043071510010586\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-take-profit",
+          "url": "https://api.testnet.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"STOP_LOSS_MARKET\",\"size\":\"1.5\",\"trigger_price\":\"90\",\"instruction\":\"GTC\",\"flags\":[\"REDUCE_ONLY\"],\"signature\":\"[\\\"1174953925261855762891981751308322683868875347128244249331591300980705608593\\\",\\\"1378582472470412964973934281132275741277674374657899924392321931864550334751\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-stop-loss",
+          "url": "https://api.testnet.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"id\":\"123\",\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"size\":\"3\",\"price\":\"121.5\",\"signature\":\"[\\\"2183134097878127590234270899783046037797594846825852352228372409718153249886\\\",\\\"926854702124487548867614698818188955034820740857880505005190282316746740802\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ]
+          ],
+          "method": "Put",
+          "name": "amend",
+          "url": "https://api.testnet.paradex.trade/v1/orders/123"
+        }
+      ]
+    },
+    {
+      "form": "ethereum",
+      "network": "testnet",
+      "now": 1700000000000.0,
+      "requests": [
+        {
+          "body": null,
+          "headers": [
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-STARKNET-ACCOUNT",
+              "0x41dec1cfae735052bb70f160f76d27ae515bc6f966e6071157b755bb5ae9723"
+            ],
+            [
+              "PARADEX-STARKNET-SIGNATURE",
+              "[\"3249700167450742689044636149338522315756680694346718116741290925085606053070\",\"2214913964902445848040327714315366539379120790267985275721630769709650466853\"]"
+            ],
+            [
+              "PARADEX-TIMESTAMP",
+              "1700000000"
+            ],
+            [
+              "PARADEX-SIGNATURE-EXPIRATION",
+              "1700000300"
+            ]
+          ],
+          "method": "Post",
+          "name": "auth",
+          "url": "https://api.testnet.paradex.trade/v1/auth/0x456"
+        },
+        {
+          "body": "[{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"294194309953871667842373642894331284455013763118752258433806868354415200488\\\",\\\"2432366460249857683481085626924011985530400793845859915207508053895052931144\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"one\"}]",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "batch-one",
+          "url": "https://api.testnet.paradex.trade/v1/orders/batch"
+        },
+        {
+          "body": "[{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"294194309953871667842373642894331284455013763118752258433806868354415200488\\\",\\\"2432366460249857683481085626924011985530400793845859915207508053895052931144\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"a\"},{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"294194309953871667842373642894331284455013763118752258433806868354415200488\\\",\\\"2432366460249857683481085626924011985530400793845859915207508053895052931144\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"b\"},{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"294194309953871667842373642894331284455013763118752258433806868354415200488\\\",\\\"2432366460249857683481085626924011985530400793845859915207508053895052931144\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"c\"}]",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "batch-three",
+          "url": "https://api.testnet.paradex.trade/v1/orders/batch"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"MARKET\",\"size\":\"1.5\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"725186564846159452162490380993660541923371251992806978236305614019046554235\\\",\\\"1791507519245800828599541962276883727331284417868099414870752117641775286514\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"market\"}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "market",
+          "url": "https://api.testnet.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"BUY\",\"type\":\"LIMIT\",\"size\":\"1.5\",\"price\":\"100.1\",\"instruction\":\"GTC\",\"stp\":\"EXPIRE_TAKER\",\"signature\":\"[\\\"294194309953871667842373642894331284455013763118752258433806868354415200488\\\",\\\"2432366460249857683481085626924011985530400793845859915207508053895052931144\\\"]\",\"signature_timestamp\":1700000000000,\"client_id\":\"ts_pqV3rlMxg4abZkEOJ6Sr\"}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-entry",
+          "url": "https://api.testnet.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"TAKE_PROFIT_MARKET\",\"size\":\"1.5\",\"trigger_price\":\"110\",\"instruction\":\"GTC\",\"flags\":[\"REDUCE_ONLY\"],\"signature\":\"[\\\"3051976773390876353211125653809107403466159957177175866347211461812442783428\\\",\\\"1452405235614316985476210513685716067719364674524622588022921586473533683241\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-take-profit",
+          "url": "https://api.testnet.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"STOP_LOSS_MARKET\",\"size\":\"1.5\",\"trigger_price\":\"90\",\"instruction\":\"GTC\",\"flags\":[\"REDUCE_ONLY\"],\"signature\":\"[\\\"2597447625078279257130344342950316992800015868196406060682928779192703985292\\\",\\\"819224259879596097943124120812841555572344924767657703008487609067211501072\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ],
+            [
+              "PARADEX-PARTNER",
+              "TEALSTREET"
+            ]
+          ],
+          "method": "Post",
+          "name": "bracket-stop-loss",
+          "url": "https://api.testnet.paradex.trade/v1/orders"
+        },
+        {
+          "body": "{\"id\":\"123\",\"market\":\"BTC-USD-PERP\",\"side\":\"SELL\",\"type\":\"LIMIT\",\"size\":\"3\",\"price\":\"121.5\",\"signature\":\"[\\\"1793087012657065548371313266450098452072702987552750692613018394231254683562\\\",\\\"1734197524562376887400207878915510999488018052369328199332860551521543025229\\\"]\",\"signature_timestamp\":1700000000000}",
+          "headers": [
+            [
+              "Authorization",
+              "Bearer jwt"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ],
+            [
+              "Accept",
+              "application/json"
+            ]
+          ],
+          "method": "Put",
+          "name": "amend",
+          "url": "https://api.testnet.paradex.trade/v1/orders/123"
+        }
+      ]
+    }
+  ]
+}

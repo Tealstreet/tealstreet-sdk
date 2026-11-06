@@ -473,12 +473,21 @@ impl<P> Cx<'_, P> {
                 ),
                 policy,
             };
-            self.admit_plan_root(preflight, prepared, physical, None)
+            self.core()
+                .admit_plan_root(preflight, prepared, physical, None)
         }
         #[cfg(not(feature = "serial-plans"))]
-        self.admit_plan_root(preflight, declaration, physical)
+        self.core()
+            .admit_plan_root(preflight, declaration, physical)
     }
 
+    #[inline]
+    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
+        self.core_ref().plan_slots(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// A serial Plan shares the whole declared admission transaction, with its
     /// own unbounded root and streamed journal.
     fn admit_plan_root(
@@ -827,13 +836,6 @@ impl<P> Cx<'_, P> {
         Ok((handle, execution))
     }
 
-    #[inline]
-    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
-        self.core_ref().plan_slots(plan)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     // Only some feature combinations call this.
     #[cfg_attr(feature = "http-plans", allow(dead_code))]
     #[inline]
@@ -1168,6 +1170,10 @@ impl<P> Cx<'_, P> {
             .core
             .request_contexts
             .validate_plan(plan, self.now)?;
+        #[cfg(feature = "condition-waits")]
+        if body.serial.as_ref().is_some_and(|serial| serial.settled) {
+            return Err(Error::Invalid);
+        }
         let index = body.schedule.ordinal(slot)?;
         let entry = &body.entries[index];
         if entry.credit != Credit::Unissued
@@ -1195,17 +1201,22 @@ impl<P> Cx<'_, P> {
         );
         // A domain Plan's calls are members by their own operation: a Read call
         // in a Mutations domain is not paced.
+        // A serial call carries its own resolved pacing.
         #[cfg(feature = "release-domains")]
-        let pacing = if self.io.core.domain_paces(body.policy.pacing) {
-            self.io
+        let pacing = match body.serial.as_ref() {
+            Some(serial) => serial.pacing(),
+            None if self.io.core.domain_paces(body.policy.pacing) => self
+                .io
                 .core
                 .domain_member(operation)
-                .and(body.policy.pacing)
-        } else {
-            body.policy.pacing
+                .and(body.policy.pacing),
+            None => body.policy.pacing,
         };
         #[cfg(all(feature = "serial-plans", not(feature = "release-domains")))]
-        let pacing = body.policy.pacing;
+        let pacing = body
+            .serial
+            .as_ref()
+            .map_or(body.policy.pacing, |serial| serial.pacing());
         #[cfg(feature = "serial-plans")]
         let mut context = Context::new(
             plan.owner(),
@@ -1456,6 +1467,14 @@ impl<P> Cx<'_, P> {
             .request_contexts
             .validate_plan(plan, self.now)?;
         if !body.schedule.is_complete() {
+            return Err(Error::State);
+        }
+        #[cfg(feature = "condition-waits")]
+        if body
+            .serial
+            .as_ref()
+            .is_some_and(|serial| serial.condition.is_some())
+        {
             return Err(Error::State);
         }
         self.seal_plan(plan, Some(result), None, None)
@@ -1844,6 +1863,11 @@ impl Body {
             .filter(|entry| entry.credit == Credit::Unissued && !entry.notified && !entry.parked)
             .filter_map(|entry| entry.eligible_at)
             .fold(self.handle.deadline(), f64::min);
+        let wake = self
+            .serial
+            .as_ref()
+            .and_then(|serial| serial.settle_ready)
+            .map_or(wake, |at| wake.min(at));
         self.serial
             .as_ref()
             .and_then(|serial| serial.condition_deadline())
@@ -2028,6 +2052,13 @@ impl ContextRegistry {
             if now >= body.handle.deadline() {
                 return Some(body.handle.clone());
             }
+            #[cfg(feature = "condition-waits")]
+            if let Some(serial) = body.serial.as_mut()
+                && serial.settle_ready.is_some_and(|at| at <= now)
+            {
+                serial.settle_ready = None;
+                return Some(body.handle.clone());
+            }
             let mut due = false;
             for entry in &mut body.entries {
                 if entry.credit == Credit::Unissued
@@ -2201,6 +2232,34 @@ impl<P> Cx<'_, P> {
             .inherit_uncertain();
         owner.inherited_uncertain = true;
         Ok(())
+    }
+
+    /// Words for a live Mutation Plan's failure when its terminal brings no
+    /// presented text of its own, as when the engine seals an unproven reply
+    /// the venue never sees. Only the message: outcome and protection stay
+    /// projected. The latest call replaces any earlier words.
+    pub fn present_plan_failure(
+        &mut self,
+        plan: &Plan,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.io
+            .core
+            .request_contexts
+            .owner_entry_mut(plan.owner())
+            .ok_or(Error::Revoked)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .present_failure(message.into())
     }
 
     /// Retire the current unissued call of an independent complete Plan that

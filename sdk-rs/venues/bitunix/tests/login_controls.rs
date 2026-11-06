@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Event, Level, Notice, TimerId, log::code};
+use safe_cex_engine::{Action, Event, Level, Notice, SocketId, TimerId, log::code};
 use support::*;
 
 fn message(
@@ -240,5 +240,73 @@ fn an_entropy_failure_sends_no_login_and_the_reconnect_re_signs() {
     assert_eq!(
         logins_with, 1,
         "the reconnect re-signs once entropy returns"
+    );
+}
+
+fn recorded_startup() -> (TestEngine, SocketId, Vec<String>, Vec<(TimerId, f64)>) {
+    let e = engine(Options {
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+        ..Options::default()
+    });
+    startup_recording(e, PAIRS, TICKERS)
+}
+
+// Live: the string form got no reply and a close at 23 s; the number form logged in at 0.6 s.
+#[test]
+fn the_login_timestamp_is_a_json_number() {
+    let (_, _, sent, _) = recorded_startup();
+    let login = sent.iter().find(|text| text.contains("\"login\"")).unwrap();
+    let body: serde_json::Value = serde_json::from_str(login).unwrap();
+    assert!(body["args"][0]["timestamp"].is_u64(), "{login}");
+}
+
+fn run_to(e: &mut TestEngine, armed: &mut Vec<(TimerId, f64)>, until: f64) -> Vec<Action> {
+    let mut seen = Vec::new();
+    armed.sort_by(|a, b| a.1.total_cmp(&b.1));
+    while let Some(index) = armed.iter().position(|(_, at)| *at <= until) {
+        let (timer, at) = armed.remove(index);
+        e.handle(at, Event::TimerFired { timer });
+        for action in safe_cex_engine::test_support::prepared_actions(e, at) {
+            match &action {
+                Action::SetTimer { timer, at_ms } => armed.push((*timer, *at_ms)),
+                Action::ClearTimer { timer } => armed.retain(|(pending, _)| pending != timer),
+                _ => (),
+            }
+            seen.push(action);
+        }
+    }
+    seen
+}
+
+#[test]
+fn an_unanswered_login_is_named_and_the_socket_closes() {
+    let (mut e, socket, _, mut armed) = recorded_startup();
+    let seen = run_to(&mut e, &mut armed, 12_000.0);
+    assert!(
+        seen.iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Event(event))
+        if event.message.contains("did not answer the private socket login")))
+    );
+    assert!(
+        seen.iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+}
+
+#[test]
+fn an_answered_login_keeps_the_socket() {
+    let (mut e, socket, _, mut armed) = recorded_startup();
+    message(
+        &mut e,
+        socket,
+        1.0,
+        r#"{"op":"login","data":{"nonce":"24db0133527640dea45c9903bfc9d2c9","result":true}}"#,
+    );
+    let seen = run_to(&mut e, &mut armed, 12_000.0);
+    assert!(
+        !seen
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
     );
 }

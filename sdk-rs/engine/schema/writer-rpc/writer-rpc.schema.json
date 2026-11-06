@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tealstreet.io/schema/writer-rpc.schema.json",
+  "title": "Writer RPC",
+  "description": "One venue write per request, sent to a writesOnly engine wherever it is hosted. The writer keeps no venue state between requests: every write carries the store context it needs. See README.md for the runtimes that host it.",
+  "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/reply" }],
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["kind", "id", "account", "command", "context"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "writerRequest" },
+        "id": { "type": "string", "minLength": 1 },
+        "account": { "type": "string", "minLength": 1 },
+        "command": { "$ref": "#/$defs/command" },
+        "context": { "$ref": "#/$defs/context" },
+        "marks": { "$ref": "#/$defs/marks" }
+      }
+    },
+    "reply": {
+      "type": "object",
+      "required": ["kind", "id", "ok"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "writerReply" },
+        "id": { "type": "string", "minLength": 1 },
+        "ok": { "type": "boolean" },
+        "result": {},
+        "error": { "$ref": "#/$defs/error" },
+        "marks": { "$ref": "#/$defs/marks" }
+      },
+      "if": { "properties": { "ok": { "const": false } } },
+      "then": { "required": ["error"], "not": { "required": ["result"] } },
+      "else": { "required": ["result"], "not": { "required": ["error"] } }
+    },
+    "command": {
+      "description": "An engine host command, decoded by safe_cex_engine::command::decode_host_input. Only these ops are writer ops.",
+      "type": "object",
+      "required": ["op"],
+      "properties": {
+        "op": {
+          "enum": [
+            "placeOrders",
+            "amendOrder",
+            "amendOrderWithSymbol",
+            "cancelOrders",
+            "cancelOrdersWithSymbols",
+            "cancelSymbolOrders",
+            "setLeverage",
+            "setMarginType",
+            "setPositionMode",
+            "setStpMode",
+            "setAccountTier",
+            "scheduleCancel",
+            "refreshMarkets"
+          ]
+        },
+        "context": false
+      }
+    },
+    "context": {
+      "description": "The store fields this write reads, in command units. Built by the caller from its store; the writer applies it to a scratch store for this command only.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "orders": { "type": "array", "items": { "$ref": "#/$defs/contextOrder" } },
+        "positions": { "type": "array", "items": { "$ref": "#/$defs/contextPosition" } },
+        "settings": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/symbolSettings" }
+        }
+      }
+    },
+    "contextOrder": {
+      "type": "object",
+      "required": ["id", "symbol", "side", "type", "price", "amount", "remaining", "reduceOnly"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "side": { "enum": ["buy", "sell"] },
+        "type": {
+          "enum": ["market", "limit", "conditional", "stop_market", "take_profit_market", "trailing_stop_market"]
+        },
+        "price": { "type": "number" },
+        "amount": { "type": "number" },
+        "remaining": { "type": "number" },
+        "reduceOnly": { "type": "boolean" },
+        "clientOrderId": { "type": "string" },
+        "triggerPrice": { "type": "number" }
+      }
+    },
+    "contextPosition": {
+      "type": "object",
+      "required": ["symbol", "side", "contracts"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": { "type": "string" },
+        "side": { "enum": ["long", "short"] },
+        "contracts": { "type": "number" }
+      }
+    },
+    "symbolSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hedged": { "type": "boolean" },
+        "positionIdx": { "type": "integer" },
+        "marginMode": { "enum": ["isolated", "cross"] }
+      }
+    },
+    "marks": {
+      "description": "write.timing stage stamps (epoch ms), first-wins per stage.",
+      "type": "object",
+      "propertyNames": {
+        "enum": ["called", "received", "accepted", "signed", "sent", "response", "reply", "resolved"]
+      },
+      "additionalProperties": { "type": "number" }
+    },
+    "error": {
+      "description": "safe-cex SerializedCommandError. outcome 'unknown' means the write may have executed.",
+      "type": "object",
+      "required": ["message"],
+      "properties": {
+        "message": { "type": "string" },
+        "name": { "type": "string" },
+        "kind": { "type": "string" },
+        "outcome": { "enum": ["notSent", "rejected", "unknown"] },
+        "venueCode": { "type": "string" },
+        "clientOrderIds": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

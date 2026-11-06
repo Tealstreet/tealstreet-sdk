@@ -20,7 +20,7 @@ it('runs the embedded Rust engine from a standalone CLI executable outside the r
       encoding: 'utf8',
       env: { ...process.env, NODE_PATH: '' },
     });
-    expect(output).toContain('rust-smoke: native Coinbase market loaded');
+    expect(output).toContain('rust-smoke: native Binance Spot market loaded');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

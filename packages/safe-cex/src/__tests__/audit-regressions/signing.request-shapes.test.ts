@@ -5,7 +5,7 @@ import { AxiosHeaders } from 'axios';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createBinanceRequestInterceptor, finishBinanceRequest, prepareBinanceRequest, signBinanceRequest } from '../../exchanges/binance/binance.signing';
-import { createAPI } from '../../exchanges/bybit/bybit.api';
+import { createAPI } from '../reference/bybit/bybit.api';
 import { createBybitRequestInterceptor, finishBybitRequest, prepareBybitRequest, withBybitRequestId } from '../../exchanges/bybit/bybit.signing';
 import { ENDPOINTS } from '../../exchanges/bybit/bybit.types';
 import { virtualClock } from '../../utils/virtualClock';

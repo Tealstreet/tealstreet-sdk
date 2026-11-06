@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { memoryMetricErrors } from './memory.mjs';
 import { compareSnapshots, snapshotCoverageErrors } from './snapshot-compare.mjs';
 import { sameCommandResults } from './tape.mjs';
-import { CPU_FIELDS, performanceFailures, performanceMetricErrors, performanceObjectives, performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, CPU_FIELDS, performanceFailures, performanceMetricErrors, performanceObjectives, performanceOrder } from './performance-policy.mjs';
 import { hasPairedBitgetSteady } from './bitget-paired-steady.mjs';
 
 export const CPU_REMEASURE_RULE = 'all-objective-normalized-two-run-mean-v1';
@@ -13,7 +13,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const slotKey = (value) => JSON.stringify([value?.impl, value?.mode, value?.run]);
 const expectedSlots = () => [
   ...['ts', 'rust'].map((impl) => ({ impl, mode: 'correctness', run: 0 })),
-  ...Array.from({ length: 9 }, (_, run) => performanceOrder(run).map((impl) => ({ impl, mode: 'performance', run }))).flat(),
+  ...Array.from({ length: PUBLIC_REPLAY_PAIRS }, (_, run) => performanceOrder(run).map((impl) => ({ impl, mode: 'performance', run }))).flat(),
 ];
 const positiveId = (value) => typeof value === 'string' && /^[1-9]\d*$/.test(value);
 const digest = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -27,7 +27,7 @@ const objectives = (report, paired, source) => performanceObjectives(report.samp
 function validatePublicEvidenceContent(value) {
   const errors = [];
   const report = value?.report;
-  if (!report || report.schema !== 1 || report.private !== false || report.runs !== 9 || report.correctnessRuns !== 1 ||
+  if (!report || report.schema !== 1 || report.private !== false || report.runs !== PUBLIC_REPLAY_PAIRS || report.correctnessRuns !== 1 ||
       report.requiredImprovement !== 0.10 || !['PASS', 'FAIL'].includes(report.status) ||
       !Array.isArray(report.failures) || report.failures.some((item) => typeof item !== 'string') ||
       (report.status === 'PASS') !== (report.failures.length === 0) || report.replayFailure ||
@@ -36,8 +36,8 @@ function validatePublicEvidenceContent(value) {
     return ['invalid complete public strict report'];
   if (value.reportBytes !== undefined && (typeof value.reportBytes !== 'string' || !same(JSON.parse(value.reportBytes), report)))
     return ['original strict report bytes disagree with parsed content'];
-  if (!Array.isArray(value.raw) || value.raw.length !== 20 || !Array.isArray(report.artifacts) || report.artifacts.length !== 20)
-    return ['missing complete audited/nine-pair raw inventory'];
+  if (!Array.isArray(value.raw) || value.raw.length !== (2 + 2 * PUBLIC_REPLAY_PAIRS) || !Array.isArray(report.artifacts) || report.artifacts.length !== (2 + 2 * PUBLIC_REPLAY_PAIRS))
+    return ['missing complete audited/fixed-pair raw inventory'];
   const paths = report.artifacts.map((slot) => slot?.path);
   if (paths.some((path) => typeof path !== 'string' || !path) || new Set(paths).size !== paths.length)
     return ['raw artifact paths are missing or duplicated'];
@@ -78,8 +78,8 @@ function validatePublicEvidenceContent(value) {
   if (audited.ts && audited.rust) {
     if (audited.ts.frames !== audited.rust.frames) errors.push('audited frame counts differ');
   }
-  for (const impl of ['ts', 'rust']) if (!Array.isArray(report.samples?.[impl]) || report.samples[impl].length !== 9)
-    errors.push(`${impl}: missing nine complete samples`);
+  for (const impl of ['ts', 'rust']) if (!Array.isArray(report.samples?.[impl]) || report.samples[impl].length !== PUBLIC_REPLAY_PAIRS)
+    errors.push(`${impl}: missing complete fixed samples`);
   return errors;
 }
 

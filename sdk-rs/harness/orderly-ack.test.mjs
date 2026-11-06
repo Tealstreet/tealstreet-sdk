@@ -20,10 +20,6 @@ const originalHashes = {
     "304f45018c6754cdf51fcc61b5b45c68344f91337eb809e7f0d21e76f80b73cf",
     "3f1cba9a44276f72767bd070cfef94c4da2c5600f45d00aed3d2ec5528f762da"
   ],
-  "tealstreet-dex": [
-    "526c0b117ef5d4b72dee6ca45459b2e1fa9b2c1a65f80fe8927f0a896defa2fb",
-    "54797276ee70e1093e7efc8694b4674d5ec00b45b8dff9d6d2ef7ebd369d1d7b"
-  ],
   "kodiakfi": [
     "ea06c5c3af055adc8ba6ff099107e6bd9b7dadc79356ecde6a38cf7ae141cd7f",
     "5e9854daf8ee4fddd032a666e9714333c9255975de80b3cc7d10fd2e509738a3"
@@ -35,10 +31,6 @@ const originalHashes = {
   "mode": [
     "b5b32fedb8b488daf757c2e4d03bb815fe8ddfe0931ffb6913428e7d7c7a3824",
     "aa448a77a7c389c763da9650ef3975afd2d216c03adfadf02da15eebb73ab4d0"
-  ],
-  "salsadex": [
-    "ba075afaff5d773083faa9b35ac4775edd3d695e4adb1a186c703b696c0021a1",
-    "825088146aafbc97564c0265a347e37b751076e26cf02fecc93957d67a64b310"
   ],
   "what": [
     "eb272f24e6f6fa4584522379e3b78425f8473c01346a6324b7a399fda60229da",

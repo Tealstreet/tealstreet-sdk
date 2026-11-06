@@ -133,6 +133,19 @@ pub fn private_started_with_retry(
     safe_cex_engine::TimerId,
     Option<safe_cex_engine::TimerId>,
 ) {
+    let (e, socket, reads, timer, retry, _) = private_started_with_public(markets);
+    (e, socket, reads, timer, retry)
+}
+pub fn private_started_with_public(
+    markets: &str,
+) -> (
+    TestEngine,
+    SocketId,
+    Vec<HttpRequest>,
+    safe_cex_engine::TimerId,
+    Option<safe_cex_engine::TimerId>,
+    Option<SocketId>,
+) {
     let mut e = configured(Options {
         recv_window: None,
         read_credentials: None,
@@ -157,6 +170,14 @@ pub fn private_started_with_retry(
         .unwrap();
     response(&mut e, &ticker, TICKERS);
     actions.extend(prepared(&mut e, 100.));
+    let public_socket = actions.iter().find_map(|a| match a {
+        Action::WsConnect {
+            socket,
+            channel: Some(safe_cex_engine::SocketChannel::Public),
+            ..
+        } => Some(*socket),
+        _ => None,
+    });
     let private_socket = actions
         .iter()
         .find_map(|a| match a {
@@ -209,7 +230,7 @@ pub fn private_started_with_retry(
         },
     );
     e.prepare_dispatch(100.);
-    (e, private_socket, reads, timer, retry)
+    (e, private_socket, reads, timer, retry, public_socket)
 }
 
 /// A failed-read retry delay lies in the engine's jittered `[0.75, 1.0] * nominal`.

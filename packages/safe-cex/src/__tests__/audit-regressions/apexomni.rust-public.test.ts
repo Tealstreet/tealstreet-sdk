@@ -2,7 +2,7 @@ import type { OrderBook } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniPublicWebsocket } from '../../exchanges/apexomni/apexomni.ws-public';
+import { ApexOmniPublicWebsocket } from '../reference/apexomni/apexomni.ws-public';
 
 const topic = 'orderBook200.H.BTCUSDT';
 const fixture = () => {

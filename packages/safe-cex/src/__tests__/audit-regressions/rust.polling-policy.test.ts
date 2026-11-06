@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, ExchangeOptions, Market, Ticker } from '../../types';
@@ -20,7 +25,7 @@ vi.mock('../../exchanges/bybit/bybit.types', async (original) => ({
   },
 }));
 
-// Scales are the resolved tick over the metadata tick (binance 500ms, tealstreet-dex 2s).
+// Scales are the resolved tick over the metadata tick (binance 500ms, woofi 2s).
 type Control = { op: string; scale?: number | null; ceiling?: number };
 const accounts: RustEngineExchange[] = [];
 
@@ -145,7 +150,7 @@ describe('Rust periodic polling policy propagation', () => {
   );
 
   it('pauses with explicit null and resumes after effective options change at the existing flush cadence', async () => {
-    const r = fixture('tealstreet-dex', { extra: { tickInterval: Infinity } });
+    const r = fixture('woofi', { extra: { tickInterval: Infinity } });
     await r.start();
     expect(r.controls()).toEqual([{ op: 'setPollScale', scale: null }]);
     r.exchange.options.extra!.tickInterval = 4000;

@@ -6,6 +6,13 @@ use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 fn ready(variant: Variant) -> Harness {
+    let mut h = ready_keeping_reads(variant);
+    h.requests.clear();
+    h
+}
+
+/// Markets loaded; the private startup reads are still pending.
+fn ready_keeping_reads(variant: Variant) -> Harness {
     let mut h = Harness::started(Options {
         variant,
         key: Some("key".into()),
@@ -35,7 +42,6 @@ fn ready(variant: Variant) -> Harness {
         );
         h.respond(&format!("{prefix}/premiumIndex"),200,r#"[{"symbol":"BTCUSD_PERP","markPrice":"100","indexPrice":"100","lastFundingRate":"0","nextFundingTime":1}]"#);
     }
-    h.requests.clear();
     h
 }
 fn order(variant: Variant, fields: &str) -> PlaceOrderOpts {
@@ -78,11 +84,22 @@ fn spot_post_only_and_native_identity() {
     );
 }
 #[test]
+fn spot_drops_reduce_only_and_close_like_typescript() {
+    for fields in [r#""reduceOnly":true"#, r#""close":true"#] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, vec![order(Variant::Spot, fields)]);
+        let r = h.take("/api/v3/order");
+        assert!(r.url.contains("type=LIMIT"), "{fields}");
+        assert!(!r.url.contains("reduceOnly"), "{fields}");
+        assert!(!r.url.contains("closePosition"), "{fields}");
+        h.reply(r.id, 200, "", r#"{"orderId":123}"#);
+        assert!(h.result(77).unwrap().is_ok(), "{fields}");
+    }
+}
+#[test]
 fn invalid_second_spot_order_rejects_whole_batch_before_writes() {
     for fields in [
         r#""type":"trailing_stop_loss""#,
-        r#""reduceOnly":true"#,
-        r#""close":true"#,
         r#""clientOrderId":"illegal.dot""#,
         r#""type":"stop_loss","price":0"#,
     ] {
@@ -93,8 +110,6 @@ fn invalid_second_spot_order_rejects_whole_batch_before_writes() {
             r#""type":"trailing_stop_loss""# => {
                 bad.kind = safe_cex_engine::model::OrderType::TrailingStopLoss
             }
-            r#""reduceOnly":true"# => bad.reduce_only = Some(true),
-            r#""close":true"# => bad.close = Some(true),
             r#""clientOrderId":"illegal.dot""# => bad.client_order_id = Some("illegal.dot".into()),
             _ => {
                 bad.kind = safe_cex_engine::model::OrderType::StopLoss;
@@ -646,11 +661,16 @@ fn spot_market_take_profit_still_amends_while_spot_take_profit_limit_refuses() {
             price: Some(125.0),
             amount: None,
         }));
-        let failed = h
-            .failures
-            .iter()
-            .any(|(c, e)| *c == 88 && e.kind == Some(safe_cex_engine::ErrorKind::Unsupported));
-        assert_eq!(failed, refused, "{native}");
+        let failures: Vec<_> = h.failures.iter().filter(|(c, _)| *c == 88).collect();
+        assert_eq!(failures.len(), usize::from(refused), "{native}");
+        if let Some((_, error)) = failures.first() {
+            assert_eq!(
+                error.message,
+                "Binance stop-limit orders cannot be amended; cancel and place a new one"
+            );
+            assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        }
         assert_eq!(h.requests.is_empty(), refused, "{native}");
     }
 }
@@ -711,5 +731,184 @@ fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
     }
     for (variant, body, ids, expected) in observations {
         assert_eq!(ids, expected, "variant={variant:?} body={body}");
+    }
+}
+
+const SIGNATURE_REJECTED: &str =
+    r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#;
+
+#[test]
+fn a_signature_rejected_write_is_re_signed_and_resent_once() {
+    let mut h = ready(Variant::Spot);
+    place(
+        &mut h,
+        vec![order(Variant::Spot, r#""clientOrderId":"caller_1""#)],
+    );
+    let first = h.take("/api/v3/order");
+    h.now += 5.0;
+    h.reply(first.id, 400, "", SIGNATURE_REJECTED);
+    let second = h.take("/api/v3/order");
+    assert!(h.requests.is_empty(), "exactly one resend");
+    assert_ne!(second.id, first.id);
+    assert!(h.done.is_empty(), "the resend decides the outcome");
+    assert!(second.url.contains("newClientOrderId=caller_1"));
+    // The same order: every parameter but the timestamp and signature is identical.
+    let order_params = |url: &str| {
+        let mut params: Vec<_> = url
+            .split_once('?')
+            .map_or("", |(_, query)| query)
+            .split('&')
+            .filter(|param| !param.starts_with("timestamp=") && !param.starts_with("signature="))
+            .map(str::to_owned)
+            .collect();
+        params.sort();
+        params
+    };
+    assert_eq!(order_params(&second.url), order_params(&first.url));
+    assert_ne!(
+        second.url, first.url,
+        "the resend is re-signed at its own timestamp"
+    );
+    h.reply(second.id, 200, "", r#"{"orderId":123}"#);
+    assert_eq!(
+        h.done.last().unwrap().1.as_ref().unwrap(),
+        r#"["caller_1"]"#
+    );
+}
+
+#[test]
+fn a_second_signature_rejection_fails_without_a_third_send() {
+    let mut h = ready(Variant::Spot);
+    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    let first = h.take("/api/v3/order");
+    h.reply(first.id, 400, "", SIGNATURE_REJECTED);
+    let second = h.take("/api/v3/order");
+    h.reply(second.id, 400, "", SIGNATURE_REJECTED);
+    assert!(h.requests.is_empty(), "no third send");
+    let (_, error) = h.failures.last().expect("the write fails");
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::AuthInvalid));
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Rejected));
+}
+
+#[test]
+fn other_write_refusals_are_never_resent() {
+    let mut h = ready(Variant::Spot);
+    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    let first = h.take("/api/v3/order");
+    h.reply(first.id, 400, "", r#"{"code":-2010,"msg":"rejected"}"#);
+    assert!(h.requests.is_empty());
+    assert!(h.done.last().unwrap().1.is_err());
+}
+
+#[test]
+fn a_signature_code_on_an_unproven_status_is_never_resent() {
+    // A 5xx proves nothing about the write, so -1022 in its body is no refusal.
+    let mut h = ready(Variant::Spot);
+    place(&mut h, vec![order(Variant::Spot, r#""reduceOnly":false"#)]);
+    let first = h.take("/api/v3/order");
+    h.reply(first.id, 503, "", SIGNATURE_REJECTED);
+    assert!(h.requests.is_empty(), "no resend of an unproven write");
+    let (_, error) = h.failures.last().expect("the write fails");
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+
+/// COIN-M refuses a trailing level past its 10% callback ceiling, or one that rounds to
+/// 0%, instead of clamping it.
+#[test]
+fn coin_m_trailing_outside_the_callback_range_is_refused_not_clamped() {
+    for (price, rate) in [(85.0, None), (99.96, None), (98.0, Some("2"))] {
+        let mut h = ready(Variant::CoinM);
+        let mut trailing = order(Variant::CoinM, r#""reduceOnly":true"#);
+        trailing.kind = safe_cex_engine::model::OrderType::TrailingStopLoss;
+        trailing.side = safe_cex_engine::model::OrderSide::Sell;
+        trailing.price = Some(price);
+        place(&mut h, vec![trailing]);
+        let sent = h.requests.iter().find(|r| r.url.contains("/dapi/v1/order"));
+        match rate {
+            Some(rate) => {
+                let sent = sent.expect("an in-range trailing stop is placed");
+                assert_eq!(param(&sent.url, "callbackRate").as_deref(), Some(rate));
+            }
+            None => {
+                assert!(sent.is_none(), "{price}: {:?}", h.paths());
+                let refused = h.result(77).unwrap().as_ref().unwrap_err();
+                assert!(refused.contains("0.1%-10% callback range"), "{refused}");
+            }
+        }
+    }
+}
+
+/// COIN-M lists trailing stops in its regular snapshot with their native rate: an
+/// in-range amend still cancels and replaces, as on master.
+#[test]
+fn coin_m_trailing_stop_from_the_snapshot_can_be_amended() {
+    let mut h = ready_keeping_reads(Variant::CoinM);
+    h.respond(
+        "/dapi/v1/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/dapi/v1/openOrders",200,r#"[{"avgPrice":"0","clientOrderId":"coin-trail","cumBase":"0","executedQty":"0","orderId":77,"origQty":"2","origType":"TRAILING_STOP_MARKET","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","status":"NEW","stopPrice":"98","closePosition":false,"symbol":"BTCUSD_PERP","time":1,"timeInForce":"GTC","type":"TRAILING_STOP_MARKET","updateTime":1,"workingType":"CONTRACT_PRICE","priceProtect":false,"priceRate":"1.5","activatePrice":"103"}]"#);
+    h.requests.clear();
+    assert!(h.engine.store().order("77").is_some());
+    h.event(Event::Command(Command::AmendOrder {
+        command: 72,
+        id: "77".into(),
+        price: Some(97.0),
+        amount: None,
+    }));
+    let cancel = h.take("/dapi/v1/order");
+    assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+}
+
+/// COIN-M ignores stopPrice for trailing stops, so a native row may list it as 0: after
+/// a refused replacement the put-back still restores the captured rate and activation.
+#[test]
+fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
+    for stop in ["98", "0"] {
+        let mut h = ready_keeping_reads(Variant::CoinM);
+        h.respond(
+            "/dapi/v1/positionSide/dual",
+            200,
+            r#"{"dualSidePosition":false}"#,
+        );
+        let row = r#"[{"avgPrice":"0","clientOrderId":"coin-trail","cumBase":"0","executedQty":"0","orderId":77,"origQty":"2","origType":"TRAILING_STOP_MARKET","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","status":"NEW","stopPrice":"98","closePosition":false,"symbol":"BTCUSD_PERP","time":1,"timeInForce":"GTC","type":"TRAILING_STOP_MARKET","updateTime":1,"workingType":"CONTRACT_PRICE","priceProtect":false,"priceRate":"1.5","activatePrice":"103"}]"#;
+        h.respond(
+            "/dapi/v1/openOrders",
+            200,
+            &row.replace(r#""stopPrice":"98""#, &format!(r#""stopPrice":"{stop}""#)),
+        );
+        h.requests.clear();
+        h.event(Event::Command(Command::AmendOrder {
+            command: 72,
+            id: "77".into(),
+            price: Some(97.0),
+            amount: None,
+        }));
+        let cancel = h.take("/dapi/v1/order");
+        assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+        h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":77,"clientOrderId":"coin-trail","status":"CANCELED","origQty":"2","executedQty":"0"}"#);
+        let replacement = h.take("/dapi/v1/order");
+        assert_eq!(
+            param(&replacement.url, "callbackRate").as_deref(),
+            Some("3")
+        );
+        h.reply(
+            replacement.id,
+            400,
+            "",
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let put_back = h.take("/dapi/v1/order");
+        assert_eq!(
+            put_back.method,
+            safe_cex_engine::Method::Post,
+            "stopPrice {stop}"
+        );
+        assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+        assert_eq!(
+            param(&put_back.url, "activationPrice").as_deref(),
+            Some("103")
+        );
     }
 }

@@ -111,8 +111,8 @@ test('native TS execution identities survive capture and normalization without p
 test('real Hyperliquid perp and spot fill events retain transaction IDs through the replay capture path', () => {
   const script = `
     import assert from 'node:assert/strict';
-    import { HyperliquidPrivateWebSocket } from './packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.ws-private.ts';
-    import { HyperliquidSpotPrivateWebSocket } from './packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.ws-private.ts';
+    import { HyperliquidPrivateWebSocket } from './packages/safe-cex/src/__tests__/reference/hyperliquid/hyperliquid.ws-private.ts';
+    import { HyperliquidSpotPrivateWebSocket } from './packages/safe-cex/src/__tests__/reference/hyperliquid/hyperliquidspot.ws-private.ts';
     import { captureTsFill, captureCheckpoint, normalizeAccount } from './sdk-rs/harness/comparison-policy.mjs';
     for (const [name, Socket] of [['hyperliquid', HyperliquidPrivateWebSocket], ['hyperliquidspot', HyperliquidSpotPrivateWebSocket]]) {
       const executions = [];

@@ -23,7 +23,7 @@ function released(engine, wire, now = 1000) {
   while (queue.length) {
     assert.ok(++count <= 65_536, 'Entropy fixture action loop exceeded its bound');
     const action = queue.shift();
-    assert.ok(action.op !== 'sign' && action.op !== 'signPayload', 'Entropy fixture requires a local signer');
+    assert.ok(action.op !== 'sign', 'Entropy fixture requires a local signer');
     if (action.op !== 'managedHttp') { result.push(action); continue; }
     if (action.phase === 'prepare') {
       const preparation = tokenFields(action.preparation, 'p1', 3);

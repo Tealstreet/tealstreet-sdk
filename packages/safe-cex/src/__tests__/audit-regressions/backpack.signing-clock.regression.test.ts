@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { generateAuthHeaders, generateWsAuthSignature } from '../../exchanges/backpack/backpack.signing';
+import { generateAuthHeaders, generateWsAuthSignature } from '../reference/backpack/backpack.signing';
 import { virtualClock } from '../../utils/virtualClock';
 
 const privateKey = Buffer.alloc(32, 7).toString('base64');

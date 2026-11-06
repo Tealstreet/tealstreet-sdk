@@ -7,6 +7,9 @@ import { readFileSync, statSync } from 'node:fs';
 import { venueFamilies, venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { wasmBudgetError } from './wasm-budget.mjs';
 import { checkAdvertisedCommands, constructionProfiles } from './capability-conformance.mjs';
+import { checkHyperliquidLocalSigning } from './hyperliquid-local-signing.mjs';
+import { checkParadexLocalSigning } from './paradex-local-signing.mjs';
+import { checkLighterModifySigning } from './lighter-modify-signing.mjs';
 
 const pkg = new URL('../hosts/wasm/pkg/', import.meta.url);
 const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.url), 'utf8')
@@ -14,7 +17,8 @@ const venues = readFileSync(new URL('../hosts/wasm/js/venues.mjs', import.meta.u
   .map((line) => line.trim().split(':')[0].replaceAll("'", ''));
 
 test('the venue list is read from the family map', () => {
-  assert.equal(venues.length, 50);
+  // Two retired broker aliases were deleted; live Orderly family names remain.
+  assert.equal(venues.length, 49);
   for (const venue of venues) assert.doesNotThrow(() => venueFamily(venue), venue);
 });
 
@@ -30,6 +34,32 @@ for (const family of selectedFamilies) {
     }
     const engine = await import(new URL(`web/${family}/safe_cex_wasm.js`, pkg));
     await engine.default({ module_or_path: readFileSync(new URL(`web/${family}/safe_cex_wasm_bg.wasm`, pkg)) });
+    if (family === 'hyperliquid') {
+      await checkHyperliquidLocalSigning(engine.WasmEngine, false);
+      await checkHyperliquidLocalSigning(engine.WasmEngine, true);
+    }
+    if (family === 'paradex') await checkParadexLocalSigning(engine.WasmEngine);
+    if (family === 'lighter') await checkLighterModifySigning(engine.WasmEngine);
+    if (family === 'apexomni') {
+      const corpus = JSON.parse(readFileSync(new URL('../crypto/tests/fixtures/zklink/npm-wasm.json', import.meta.url)));
+      const seed = corpus.cases[0].seed;
+      const primary = { key: 'api-key', secret: 'bXlzZWNyZXQ=', passphrase: 'pass' };
+      for (const [options, setup] of [
+        [{ ...primary, omniKeySeed: seed, publicMode: { requested: false } }, undefined],
+        [{ publicMode: { requested: false } }, JSON.stringify({ primary: { ...primary, extra: { zklinkSeed: { value: seed, encoding: 'hex' } } } })],
+      ]) {
+        const instance = new engine.WasmEngine('apexomni', JSON.stringify(options), setup);
+        try {
+          const construction = JSON.parse(instance.construction());
+          assert.equal(construction.canSign, true);
+          assert.equal(construction.publicDataOnly, false);
+          assert.equal(instance.requiresExternalSigner(), false);
+          assert(JSON.parse(instance.start(1000)).some(action => action.op === 'managedHttp'));
+        } finally {
+          instance.free();
+        }
+      }
+    }
     for (const venue of venues) {
       if (venueFamily(venue) === family) {
         for (const [profile, options] of constructionProfiles(venue).entries()) {

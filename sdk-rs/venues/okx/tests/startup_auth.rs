@@ -34,7 +34,7 @@ impl Rig {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::StartupFailed { error }) => self.failures.push(error),
+                Action::Notice(Notice::StartupFailed { error, .. }) => self.failures.push(error),
                 Action::Notice(Notice::Deactivate) => self.deactivated += 1,
                 other => rest.push(other),
             }
@@ -339,6 +339,32 @@ fn rejected_read_only_key_fails_startup_without_deactivating() {
 }
 
 #[test]
+fn an_ip_outside_the_key_whitelist_fails_startup_saying_to_add_the_new_ips() {
+    let mut engine = crate::support::engine(keyed());
+    let mut rig = Rig::default();
+    let config = to_config(&mut engine, &mut rig);
+    respond(
+        &mut engine,
+        &config,
+        200,
+        r#"{"code":"50110","msg":"Your IP 203.0.113.7 is not included in your API key's IP whitelist.","data":[]}"#,
+        2.,
+    );
+    rig.take(&mut engine, 2.);
+    rig.run(&mut engine, 600_000.);
+    assert_eq!(rig.failures.len(), 1);
+    assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthPermission));
+    assert!(
+        rig.failures[0]
+            .message
+            .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT),
+        "{}",
+        rig.failures[0].message
+    );
+    assert_eq!(rig.deactivated, 0);
+}
+
+#[test]
 fn invalid_read_only_credentials_fail_startup() {
     let mut engine = crate::support::engine(Options {
         read_credentials: Some(ReadCredentials {
@@ -484,5 +510,79 @@ fn only_current_documented_key_or_passphrase_socket_codes_end_startup() {
         );
         assert!(rig.failures.is_empty(), "{code}");
         assert_eq!(rig.deactivated, 0);
+    }
+}
+
+fn to_account_reads(engine: &mut Engine<Okx>, rig: &mut Rig) -> Vec<Action> {
+    let config = to_config(engine, rig);
+    respond(
+        engine,
+        &config,
+        200,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        2.,
+    );
+    rig.take(engine, 2.)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade")))
+        .collect()
+}
+
+#[test]
+fn a_key_refused_the_risk_read_fails_startup_instead_of_polling() {
+    let mut engine = crate::support::engine(keyed());
+    let mut rig = Rig::default();
+    let risk = to_account_reads(&mut engine, &mut rig)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(r) if r.url.contains("account-position-risk")))
+        .expect("the risk read");
+    respond(
+        &mut engine,
+        &risk,
+        200,
+        r#"{"code":"50110","msg":"Your IP is not included in your API key's whitelist","data":[]}"#,
+        3.,
+    );
+    rig.take(&mut engine, 3.);
+    assert_eq!(rig.failures.len(), 1, "{:?}", rig.failures);
+}
+
+#[test]
+fn an_empty_risk_read_does_not_hang_startup() {
+    let mut engine = crate::support::engine(keyed());
+    let mut rig = Rig::default();
+    let mut pending = to_account_reads(&mut engine, &mut rig);
+    while let Some(a) = pending.pop() {
+        reply(&mut engine, &a, &envelope(""), 3.);
+        pending.extend(rig.take(&mut engine, 3.).into_iter().filter(|a| {
+            matches!(a, Action::Http(r) if r.url.contains("/api/v5/account") || r.url.contains("/api/v5/trade"))
+        }));
+    }
+    assert!(engine.store().loaded().balance);
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            401,
+            r#"{"code":"50110","msg":"Your IP is not on the API key's IP allowlist","data":[]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"50110","msg":"Your IP is not on the API key's IP allowlist","data":[]}"#,
+        ),
+        (
+            401,
+            r#"{"code":"50111","msg":"Invalid OK-ACCESS-KEY","data":[]}"#,
+        ),
+    ] {
+        let mut engine = crate::support::engine(keyed());
+        let mut rig = Rig::default();
+        let config = to_config(&mut engine, &mut rig);
+        respond(&mut engine, &config, status, body, 2.);
+        rig.take(&mut engine, 2.);
+        rig.run(&mut engine, 120_000.);
+        assert_eq!(rig.failures.len(), 1, "{status} {body}");
     }
 }

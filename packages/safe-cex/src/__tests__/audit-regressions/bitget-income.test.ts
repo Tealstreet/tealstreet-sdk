@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapBitgetBill, mapBitgetBills } from '../../exchanges/bitget/bitget.income';
+import { mapBitgetBill, mapBitgetBills } from '../reference/bitget/bitget.income';
 
 /**
  * Oracles are the exact rows measured live on sheet row 36 (819 rows / 90 days), not

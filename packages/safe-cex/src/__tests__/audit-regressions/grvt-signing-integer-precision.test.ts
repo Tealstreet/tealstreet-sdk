@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { Signer as GrvtSigner } from '@tealstreet/grvt-ts-sdk';
-import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
-import { grvtNanoseconds, grvtScaledUint64, grvtUint64 } from '../../exchanges/grvt/grvt.integer';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
+import { grvtNanoseconds, grvtScaledUint64, grvtUint64 } from '../reference/grvt/grvt.integer';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 

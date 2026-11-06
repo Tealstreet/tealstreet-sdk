@@ -178,6 +178,36 @@ fn candles() -> Command {
     }
 }
 
+// Aster answers -1023 to startTime == endTime; the page's cache asks for one missing candle so.
+#[test]
+fn a_one_candle_window_asks_through_that_candle() {
+    let (mut engine, _) = public();
+    let now = START;
+    engine.handle(
+        now,
+        Event::Command(Command::FetchCandles {
+            command: COMMAND,
+            symbol: "BTCUSDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: Some(1),
+            from_ms: Some(1_800_000_000_000.),
+            to_ms: Some(1_800_000_000_000.),
+        }),
+    );
+    let request = drain(&mut engine, now)
+        .requests
+        .into_iter()
+        .find(|r| r.url.contains("/klines"))
+        .expect("klines read");
+    assert!(
+        request
+            .url
+            .contains("&startTime=1800000000000&endTime=1800000059999"),
+        "{}",
+        request.url
+    );
+}
+
 fn depth() -> Command {
     Command::FetchOrderBook {
         command: COMMAND,

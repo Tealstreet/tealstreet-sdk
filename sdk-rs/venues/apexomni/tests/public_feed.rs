@@ -264,3 +264,26 @@ fn invalid_or_overflowing_public_reference_retains_native_position_pnl() {
             .all(|position| position.unrealized_pnl.is_finite())
     );
 }
+
+/// A delta row restating unchanged prices still observes them, so a quiet
+/// market does not read as a stale stop reference.
+#[test]
+fn an_unchanged_ticker_row_keeps_its_prices_fresh() {
+    use safe_cex_engine::model::StopTriggerType;
+    use safe_cex_engine::protective_amend::fresh_reference;
+    let (mut engine, _, public, http) = pending(PublicFeedPolicy::Direct);
+    private_seed(&mut engine, http);
+    let row = r#"{"topic":"instrumentInfo.all","data":[{"s":"BTCUSDT","p":"108","mp":"110","xp":"109"}]}"#;
+    ws(&mut engine, public.unwrap(), 50., row);
+    ws(&mut engine, public.unwrap(), 9_000., row);
+    for (reference, price) in [
+        (StopTriggerType::LastPrice, 108.),
+        (StopTriggerType::MarkPrice, 110.),
+        (StopTriggerType::IndexPrice, 109.),
+    ] {
+        assert_eq!(
+            fresh_reference(engine.store(), "BTCUSDT", reference, 10_000.),
+            Some(price)
+        );
+    }
+}

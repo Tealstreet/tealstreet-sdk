@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { WOO_V3_MIGRATION_GATES } from '../../exchanges/woo/woo.v3.contracts';
+import { WOO_V3_MIGRATION_GATES } from '../reference/woo/woo.v3.contracts';
 import {
   decodeWooV3Futures,
   decodeWooV3Instruments,
@@ -15,10 +15,10 @@ import {
   mapWooV3FuturesStats,
   mapWooV3Markets,
   mapWooV3OrderBook,
-} from '../../exchanges/woo/woo.v3.public';
-import { composeWooV3AuthoritativeTicker } from '../../exchanges/woo/woo.v3.ticker';
-import type { WooV3WsBbo, WooV3WsTrade } from '../../exchanges/woo/woo.v3.websocket';
-import { decodeWooV3WsDataFrame } from '../../exchanges/woo/woo.v3.websocket';
+} from '../reference/woo/woo.v3.public';
+import { composeWooV3AuthoritativeTicker } from '../reference/woo/woo.v3.ticker';
+import type { WooV3WsBbo, WooV3WsTrade } from '../reference/woo/woo.v3.websocket';
+import { decodeWooV3WsDataFrame } from '../reference/woo/woo.v3.websocket';
 
 const envelope = <T>(data: T) => ({ success: true, timestamp: 1_725_000_000_000, data });
 const publicFrame = (topic: string, data: unknown) => ({ topic, ts: 1_725_000_000_000, data });
@@ -401,7 +401,7 @@ describe('WooX namespaced V3 public REST parity foundation', () => {
 
     const runtimeFiles = ['woo.api.ts', 'woo.exchange.ts', 'woo.ws-public.ts', 'woo.ws-private.ts'];
     for (const runtimeFile of runtimeFiles) {
-      const source = readFileSync(join(process.cwd(), 'src/exchanges/woo', runtimeFile), 'utf8');
+      const source = readFileSync(join(process.cwd(), 'src/__tests__/reference/woo', runtimeFile), 'utf8');
       expect(source).not.toContain('woo.v3.public');
       expect(source).not.toContain('woo.v3.ticker');
     }

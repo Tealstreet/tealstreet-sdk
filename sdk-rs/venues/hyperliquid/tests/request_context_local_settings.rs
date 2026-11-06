@@ -19,6 +19,9 @@ struct Probe {
     validated: usize,
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> Capabilities {
         self.inner.capabilities()
@@ -300,7 +303,6 @@ fn no_io(actions: &[Action]) {
             | Action::SignedOutbound { .. }
             | Action::Sign { .. }
             | Action::ManagedHttp(_)
-            | Action::SignPayload { .. }
             | Action::WsSend { .. }
             | Action::WsConnect { .. }
     )));

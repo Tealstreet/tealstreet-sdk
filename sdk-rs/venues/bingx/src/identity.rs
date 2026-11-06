@@ -48,6 +48,15 @@ fn parse(response: Response<'_>) -> Result<Identity, String> {
     if !(200..300).contains(&response.status) {
         return Err(format!("BingX account identity HTTP {}", response.status));
     }
+    if let Ok(envelope) = serde_json::from_str::<crate::wire::Rejection<'_>>(response.body)
+        && let Some(code) = envelope.code.filter(|code| *code != 0)
+    {
+        return Err(if envelope.msg.is_empty() {
+            format!("BingX account identity code {code}")
+        } else {
+            envelope.msg.into_owned()
+        });
+    }
     let body: Body = serde_json::from_str(response.body)
         .map_err(|_| "BingX account identity response is invalid")?;
     if body.code != 0 {
@@ -128,6 +137,10 @@ impl Bingx {
             .validate_read_http_delivery(read.context(), read.context())
             .is_err()
         {
+            return;
+        }
+        if let Some(error) = crate::read_rate_limit(&response, cx.now) {
+            self.identity_failed(cx, read, error);
             return;
         }
         match parse(response).and_then(|identity| {

@@ -237,7 +237,7 @@ pub fn candle_history(
             .candle()?,
         );
     }
-    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+    safe_cex_engine::model::sort_candles_by_time(&mut rows);
     if rows
         .windows(2)
         .any(|pair| pair[0].timestamp == pair[1].timestamp)

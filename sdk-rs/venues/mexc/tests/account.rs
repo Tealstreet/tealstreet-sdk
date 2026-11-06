@@ -1319,7 +1319,7 @@ fn mode_read(body: &str, status: u16) -> (support::TestEngine, Vec<Action>) {
 
 fn startup_failure(actions: &[Action]) -> Option<&safe_cex_engine::error::VenueError> {
     actions.iter().find_map(|a| match a {
-        Action::Notice(Notice::StartupFailed { error }) => Some(error),
+        Action::Notice(Notice::StartupFailed { error, .. }) => Some(error),
         _ => None,
     })
 }

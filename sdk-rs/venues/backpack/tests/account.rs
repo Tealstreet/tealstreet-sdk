@@ -1369,3 +1369,46 @@ fn snapshot_exhaustion_keeps_writes_and_recurring_account_continuation() {
         (timer, at) = next.expect("continuation schedules the next native poll");
     }
 }
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let mut e = configured_account(safe_cex_venue_backpack::Options {
+        identity: None,
+        read_identity: None,
+        read_credentials_status: None,
+        read_credentials: None,
+        public_data_only: false,
+        key: Some("test-public-key".into()),
+        secret: Some(STANDARD.encode([7u8; 32])),
+        recv_window: None,
+    });
+    e.start(1000.0);
+    let r = seed_requests(&mut e, 1000.0).pop().unwrap();
+    reply(&mut e, &r, 200, MARKETS);
+    let mut failed = 0;
+    for action in safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0) {
+        if let safe_cex_engine::Action::Http(r) = action
+            && r.url.ends_with("/account")
+        {
+            reply(
+                &mut e,
+                &r,
+                401,
+                r#"{"code":"UNAUTHORIZED","message":"bad key"}"#,
+            );
+            failed += safe_cex_engine::test_support::prepared_actions(&mut e, 1000.0)
+                .into_iter()
+                .filter(|a| {
+                    matches!(
+                        a,
+                        safe_cex_engine::Action::Notice(
+                            safe_cex_engine::Notice::StartupFailed { .. }
+                        )
+                    )
+                })
+                .count();
+        }
+    }
+    assert_eq!(failed, 1);
+}

@@ -4,7 +4,7 @@ import '../transport/registerTealstreetTransport';
 
 import { WS_MIN_RECONNECTION_DELAY } from '../config/config';
 import { resolveLighterDeploymentProfile } from '../exchanges/lighter/lighter.types';
-import { LighterPrivateWebsocket } from '../exchanges/lighter/lighter.ws-private';
+import { LighterPrivateWebsocket } from './reference/lighter/lighter.ws-private';
 import { resolveExchangeRouting } from '../transport/tealstreet/routing/resolveExchangeRouting';
 
 const OPEN_STATE = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;

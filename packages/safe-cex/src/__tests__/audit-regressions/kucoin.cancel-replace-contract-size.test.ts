@@ -1,6 +1,6 @@
 import type { Axios } from 'axios';
 
-import { KucoinExchange } from '../../exchanges/kucoin/kucoin.exchange';
+import { KucoinExchange } from '../reference/kucoin/kucoin.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { Market, Order, OrderType } from '../../types';
 

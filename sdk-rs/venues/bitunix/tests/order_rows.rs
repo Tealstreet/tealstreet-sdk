@@ -267,10 +267,11 @@ fn retained_tpsl_family_keeps_native_cancel_and_amend_execution_metadata() {
             .into_iter()
             .for_each(drop);
         let command = if amend {
+            // The MARKET take profit: moving the LIMIT stop's trigger is refused.
             Command::AmendOrder {
                 command: 91,
-                id: "P__position-1__sl".into(),
-                price: Some(140.0),
+                id: "P__position-1__tp".into(),
+                price: Some(91.0),
                 amount: None,
             }
         } else {
@@ -286,8 +287,8 @@ fn retained_tpsl_family_keeps_native_cancel_and_amend_execution_metadata() {
         if amend {
             assert!(r.url.ends_with("/tpsl/modify_order"));
             for field in [
-                r#""slPrice":"140""#,
-                r#""tpPrice":"90""#,
+                r#""slPrice":"110""#,
+                r#""tpPrice":"91""#,
                 r#""slOrderType":"LIMIT""#,
                 r#""slOrderPrice":"123""#,
                 r#""tpQty":"0.01""#,
@@ -581,4 +582,44 @@ fn held_bad_raw_does_not_consume_fill_baseline_while_healthy_peer_baseline_advan
         e.handle(now, Event::WsMessage { socket, text });
         assert_eq!(fill_quantities(&mut e, now), [1.0]);
     }
+}
+
+// A LIMIT-executed stop rests its limit at the old trigger: moving the trigger re-sent that
+// stale limit, so the stop would fire and then rest unfilled. Refused, nothing sent.
+#[test]
+fn moving_a_limit_executed_stop_is_refused_before_any_write() {
+    let (mut e, socket) = seeded();
+    refresh(
+        &mut e,
+        socket,
+        3000.0,
+        &regular_seed(),
+        &[protection("P", 90, true), protection("Q", 75, false)],
+    );
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
+    e.handle(
+        4200.0,
+        Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 92,
+            id: "P__position-1__sl".into(),
+            price: Some(140.0),
+            amount: None,
+        }),
+    );
+    let actions: Vec<_> = safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let error = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 92, error }) => {
+                Some(error.legacy_text())
+            }
+            _ => None,
+        })
+        .expect("command failure");
+    assert!(error.contains("LIMIT execution"), "{error}");
 }

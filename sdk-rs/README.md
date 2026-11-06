@@ -28,6 +28,27 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 
 CI runs all of these (`.github/workflows/rust.yml`).
 
+## Browser request-failure diagnostics
+
+The JS host emits `http.request_failed` at Debug for failed managed HTTP work,
+including engine deadline refusals during preparation or after release. The native
+notice carries only its exact opaque request ID; the JS host joins the original
+resource before cancellation, without inferring a timeout from elapsed time.
+Facts contain only a closed HTTP method, phase, failure kind and a path template:
+fixed API vocabulary survives, all other segments become `:segment`, at most eight
+segments plus `:more`. Origins, queries, fragments, bodies and headers are excluded.
+The SDK adds the actual venue; consumers may retain a bounded recent breadcrumb.
+These diagnostics neither retry requests nor add a second user-facing error.
+
+## Startup discovery deadlines
+
+Before both markets and tickers load, credential-free Background Reads using the
+standard 20 s policy receive a 90 s total deadline: 60 s for discovery plus a
+30 s transport-readiness allowance. The host caps readiness within that original
+deadline; it never resets the clock after readiness. Credentialed reads, caller
+commands, writes, explicit venue timeouts and reads after discovery keep their
+existing bounds.
+
 ## Host entropy
 
 Core construction is explicit: `Engine::new(venue, Some(entropy))` returns a

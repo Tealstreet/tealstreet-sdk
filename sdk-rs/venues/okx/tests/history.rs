@@ -52,9 +52,10 @@ fn owned_incomplete(out: &[Action]) {
         .expect("owned semantic history warning");
     assert_eq!(event.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(991.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(991.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     let done = out
         .iter()
         .position(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 991, .. })))
@@ -584,4 +585,41 @@ fn fills_apply_bounds_to_native_milliseconds_before_output_seconds_are_truncated
         assert_eq!(rows[0].id, "200");
         assert_eq!(rows[0].timestamp, 1_710_000_001.0);
     }
+}
+
+fn open_window_fills(symbol: Option<&str>) -> Query {
+    Query::Fills {
+        symbol: symbol.map(str::to_owned),
+        order_id: None,
+        from_ms: Some(1_709_000_000_000.0),
+        to_ms: Some(1_711_000_000_000.0),
+        limit: None,
+    }
+}
+
+fn history_incomplete(out: &[Action]) -> bool {
+    out.iter().any(|a| {
+        matches!(a, Action::Notice(Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)
+    })
+}
+
+#[test]
+fn window_fills_with_no_limit_flag_a_full_page_and_keep_every_row() {
+    let mut e = trading_engine();
+    let a = query(&mut e, open_window_fills(Some("BTCUSDT")));
+    assert!(url(&a).ends_with("limit=100"));
+    let rows = (0..100)
+        .map(|n| FILL.replace("\"200\"", &format!("\"{}\"", 1000 + n)))
+        .collect::<Vec<_>>()
+        .join(",");
+    reply(&mut e, &a, &envelope(&rows), 10.0);
+    let out = prepared(&mut e, 10.0);
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(history_incomplete(&out));
+    assert!(out.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { result, .. })
+            if serde_json::from_str::<Vec<Execution>>(result).unwrap().len() == 100
+    )));
 }

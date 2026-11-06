@@ -44,6 +44,7 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
         .filter_map(|action| match action {
             Action::WsConnect {
                 binary,
+                public_topics,
                 socket,
                 url,
                 channel,
@@ -52,6 +53,7 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             } => {
                 assert!(headers.is_empty(), "Bitunix feeds send no upgrade headers");
                 assert!(!binary, "Bitunix feeds use the text protocol");
+                assert!(!public_topics, "Bitunix uses separate public feeds");
                 Some((socket, url, channel.unwrap(), context.unwrap()))
             }
             _ => None,
@@ -74,6 +76,7 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
             .filter_map(|action| match action {
                 Action::WsConnect {
                     binary,
+                    public_topics,
                     socket,
                     url,
                     channel,
@@ -82,6 +85,7 @@ fn socket_roles_and_shard_identity_survive_reconnects_and_watchdog_recovery() {
                 } => {
                     assert!(headers.is_empty(), "Bitunix feeds send no upgrade headers");
                     assert!(!binary, "Bitunix feeds use the text protocol");
+                    assert!(!public_topics, "Bitunix uses separate public feeds");
                     Some((socket, url, channel.unwrap(), context.unwrap()))
                 }
                 _ => None,

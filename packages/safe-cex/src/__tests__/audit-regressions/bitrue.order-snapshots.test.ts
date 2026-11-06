@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { BitrueExchange } from '../../exchanges/bitrue/bitrue.exchange';
+import { BitrueExchange } from '../reference/bitrue/bitrue.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType } from '../../types';
 

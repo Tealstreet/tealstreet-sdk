@@ -329,7 +329,7 @@ fn selected_accepted_rows_only_enable_actual_later_page_recovery() {
     }
     let notices = run("later-failure");
     assert!(
-        matches!(notices.as_slice(), [Notice::Event(event), Notice::CommandDone { command: 91, result }] if result == "[1]" && event.code == code::HISTORY_INCOMPLETE && event.message.contains("actual page failed") && event.fields == [("command", Value::Num(91.0))])
+        matches!(notices.as_slice(), [Notice::Event(event), Notice::CommandDone { command: 91, result }] if result == "[1]" && event.code == code::HISTORY_INCOMPLETE && event.message.contains("actual page failed") && event.fields == [("command", Value::Num(91.0)), ("reason", Value::Str("laterPageFailed".into()))])
     );
 }
 #[test]
@@ -337,7 +337,7 @@ fn current_chunk_gap_survives_failure_before_rollover_and_is_not_double_counted_
     for scenario in ["gap-failure", "gap-finished"] {
         let notices = run(scenario);
         assert!(
-            matches!(notices.as_slice(), [Notice::Event(event), Notice::CommandDone { command: 91, result }] if result == "[1,2]" && event.message == "1 known range gap(s)" && event.level == Level::Warn && event.fields == [("command", Value::Num(91.0))]),
+            matches!(notices.as_slice(), [Notice::Event(event), Notice::CommandDone { command: 91, result }] if result == "[1,2]" && event.message == "1 known range gap(s)" && event.level == Level::Warn && event.fields == [("command", Value::Num(91.0)), ("reason", Value::Str("coverageGap".into()))]),
             "{scenario}: {notices:?}"
         );
     }
@@ -384,7 +384,13 @@ fn actual_range_page_budget_retains_selected_rows_with_one_owned_gap() {
     };
     assert_eq!(event.code, code::HISTORY_INCOMPLETE);
     assert_eq!(event.message, "1 known range gap(s)");
-    assert_eq!(event.fields, [("command", Value::Num(91.0))]);
+    assert_eq!(
+        event.fields,
+        [
+            ("command", Value::Num(91.0)),
+            ("reason", Value::Str("coverageGap".into()))
+        ]
+    );
     let rows: Vec<u32> = serde_json::from_str(result).unwrap();
     assert_eq!(rows, (1..=100).collect::<Vec<_>>());
 }

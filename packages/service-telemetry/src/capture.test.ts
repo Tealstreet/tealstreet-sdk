@@ -160,7 +160,7 @@ describe('init hardening', () => {
       named('BunHttpServer'),
       named('LocalVariables'),
     ]);
-    expect(kept.map((i: { name: string }) => i.name)).toEqual(['LocalVariables']);
+    expect(kept.map((i: { name: string }) => i.name)).toEqual(['ServiceBoxIdentity', 'LocalVariables']);
   });
 
   /**
@@ -172,7 +172,7 @@ describe('init hardening', () => {
   it('drops the global handlers, which would bypass the throttle entirely', () => {
     const named = (name: string) => ({ name, setupOnce: () => {} });
     const kept = initOptions().integrations([named('OnUncaughtException'), named('OnUnhandledRejection')]);
-    expect(kept).toEqual([]);
+    expect(kept.map((integration: { name: string }) => integration.name)).toEqual(['ServiceBoxIdentity']);
   });
 
   it('sends no PII, rich request context, or traces', () => {

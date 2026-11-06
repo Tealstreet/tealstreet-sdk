@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
+import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderStopTriggerType, OrderType, PositionMode } from '../../types';

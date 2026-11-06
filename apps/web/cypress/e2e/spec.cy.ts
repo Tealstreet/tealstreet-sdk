@@ -98,7 +98,8 @@ const getAccount = () => {
   return {
     ...account,
     extra: exchangeConfig.accountExtra ? { ...account.extra, ...exchangeConfig.accountExtra } : account.extra,
-    name: 'test',
+    // Hosted leases use (login user, account name), so matrix venues must differ.
+    name: `e2e-${account.exchange}`,
   };
 };
 

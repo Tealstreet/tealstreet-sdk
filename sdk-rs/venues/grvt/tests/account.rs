@@ -7,6 +7,8 @@ use safe_cex_venue_grvt::{Grvt, Options};
 
 /// Native cadence of the venue's recurring account poll; policy scales it.
 const POLL_MS: f64 = 60_000.0;
+/// Engine deadline for the unsigned startup catalog read.
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.0;
 
 const NOW: f64 = 1_700_000_000_000.;
 const CATALOG: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}]}"#;
@@ -187,7 +189,9 @@ fn shared_quotes_match_direct_private_pnl_and_survive_native_summary_and_catalog
             .iter()
             .find_map(|action| match action {
                 Action::SetTimer { timer, at_ms }
-                    if *at_ms > NOW + 59_000. && *at_ms < NOW + 61_000. =>
+                    if *at_ms > NOW + 59_000. && *at_ms < NOW + 61_000.
+                        // The startup catalog read's discovery deadline also lands here.
+                        && *at_ms != NOW + DISCOVERY_DEADLINE_MS =>
                 {
                     Some((*timer, *at_ms))
                 }
@@ -1678,8 +1682,39 @@ fn ip_whitelist_rejection_keeps_its_actionable_message() {
         a,
         Action::Notice(safe_cex_engine::Notice::Event(event))
             if event.level == safe_cex_engine::Level::Error
-                && event.message.starts_with("GRVT IP is not whitelisted")
+                && event.message == "GRVT IP is not whitelisted. Please re-add your API key and whitelist every Tealstreet IP listed in the API key form."
     )));
+}
+
+#[test]
+fn a_login_refused_for_its_ip_names_the_whitelist() {
+    let mut h = Harness::new(true);
+    let login = h.take("login");
+    h.now += 1.;
+    // GRVT's documented 1008 answer (reference/grvt/docs/trading_streams.md).
+    h.engine.handle(
+        h.now,
+        Event::HttpResponse {
+            request: login.id,
+            response: Response {
+                status: 401,
+                headers: "",
+                body: r#"{"code":1008,"message":"Your IP has not been whitelisted for access","status":401}"#,
+            },
+        },
+    );
+    h.collect();
+    assert!(
+        h.actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "auth.rejected"
+                    && event.level == safe_cex_engine::Level::Error
+                    && event.message.contains("whitelist every Tealstreet IP")
+        )),
+        "{:?}",
+        h.actions
+    );
 }
 
 fn reporter_summary(h: &mut Harness, coins: &str) {

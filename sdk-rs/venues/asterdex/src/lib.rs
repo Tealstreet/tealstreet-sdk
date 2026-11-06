@@ -14,7 +14,7 @@ mod wire;
 use Options as VenueOptions;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
-use safe_cex_engine::credential_selection::{CredentialRole, SlotPolicy, Slots};
+use safe_cex_engine::credential_selection::{CredentialRole, Selection, SlotPolicy, Slots};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Candle, Interval, Limits, Market, MinMax, Precision, Ticker};
@@ -26,15 +26,29 @@ use safe_cex_engine::socket_lifecycle::{
     Interest as SocketInterest, Invalidation, LifecycleEvent, MAX_FRAME_BYTES, SocketCapabilities,
     SocketError, TrafficPolicy,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
-    Command, Cx, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue, VenueError,
-    json, num,
+    Command, CredentialSlot, Cx, ErrorKind, PublicFeedPolicy, Response, SocketChannel, SocketId,
+    SubscriptionTopic, TimerId, Venue, VenueError, json, num,
 };
 use serde_json::value::RawValue;
 use sign::Version;
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use wire::*;
+
+/// Aster refuses a klines limit outside 1..=1500 (-1130).
+const MAX_KLINES: u32 = 1500;
+
+/// The REST depth sizes Aster accepts; any other value is refused (-1130 or -4021).
+/// A request rounds up to the next size, and anything larger asks for the deepest.
+fn depth_limit(requested: u32) -> u32 {
+    const SIZES: [u32; 7] = [5, 10, 20, 50, 100, 500, 1000];
+    SIZES
+        .into_iter()
+        .find(|size| *size >= requested)
+        .unwrap_or(1000)
+}
 
 const INTEREST_MS: f64 = 15_000.0;
 
@@ -95,6 +109,17 @@ impl Urls {
 pub struct MarketRule {
     pub tick_size: f64,
     pub max_algo_orders: Option<u32>,
+    pub min_notional: f64,
+    /// MARKET_LOT_SIZE, which governs MARKET orders in place of LOT_SIZE.
+    pub market_lot: MarketLot,
+}
+
+/// A zero `max` or `min` is a filter Aster did not send.
+#[derive(Clone, Copy)]
+pub struct MarketLot {
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
 }
 
 pub enum Pending {
@@ -148,6 +173,8 @@ fn feed_policy(role: SocketChannel, backoff_base_ms: f64) -> FeedPolicy {
         controls: ControlPolicy::None,
         invalidation: Invalidation::Required,
         subscription_interval_ms: 0.0,
+        close_floors: &[],
+        data_silence: None,
     }
 }
 
@@ -175,17 +202,15 @@ struct BookState {
     last_id: Option<u64>,
 }
 
-/// One slot's provider refs and the V3 API wallet that signs for it.
-#[derive(Clone)]
-struct Slot {
-    identity: Identity,
-    signer: Option<String>,
-}
-
 pub struct AsterDex {
     options: Options,
     version: Version,
-    credentials: Slots<Slot>,
+    credentials: Slots<Identity>,
+    /// N1: a slot whose configured V3 wallet differs from the address its
+    /// signing key proved at setup is refused, never silently re-addressed.
+    signer_mismatch: [Option<String>; 2],
+    /// `start` latched the V3 slots from the engine's sealed identities.
+    signing_sealed: bool,
     account: account::AccountState,
     trading: trading::TradingState,
     history: history::HistoryState,
@@ -201,30 +226,52 @@ pub struct AsterDex {
     interest_fallback: VecDeque<String>,
 }
 
+fn book_topic(symbol: &str) -> String {
+    format!("{}@depth20@100ms", symbol.to_ascii_lowercase())
+}
+
+fn candle_topic(symbol: &str, interval: Interval) -> String {
+    format!("{}@kline_{interval}", symbol.to_ascii_lowercase())
+}
+
+fn slot_index(slot: CredentialSlot) -> usize {
+    match slot {
+        CredentialSlot::Primary => 0,
+        CredentialSlot::Secondary => 1,
+    }
+}
+
 fn nonempty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 impl AsterDex {
-    pub fn new(options: Options) -> Self {
-        let slot = |identity: &Option<Identity>, signer: &Option<String>| {
-            // An incomplete identity cannot sign, as before setup moved here.
-            identity
-                .clone()
-                .filter(|id| id.validate().is_ok())
-                .map(|identity| Slot {
-                    identity,
-                    signer: nonempty(signer.as_deref()).map(str::to_owned),
-                })
-        };
-        // A read key keeps signing reads even for public-data-only accounts.
-        let credentials = Slots::new(
-            slot(&options.credentials, &options.signer_address)
-                .filter(|_| !options.public_data_only),
-            slot(&options.read_credentials, &options.read_signer_address),
+    /// Signing slots with today's filters: an incomplete identity cannot
+    /// sign, and a read key keeps signing reads for public-data-only accounts.
+    fn slots(
+        options: &Options,
+        primary: Option<Identity>,
+        secondary: Option<Identity>,
+    ) -> Slots<Identity> {
+        let valid = |identity: Option<Identity>| identity.filter(|id| id.validate().is_ok());
+        Slots::new(
+            valid(primary).filter(|_| !options.public_data_only),
+            valid(secondary),
             SlotPolicy::default(),
+        )
+    }
+
+    pub fn new(options: Options) -> Self {
+        // Construction clones answer presence only; V3 signs with the
+        // engine's sealed identities, installed at start.
+        let credentials = Self::slots(
+            &options,
+            options.credentials.clone(),
+            options.read_credentials.clone(),
         );
         Self {
+            signer_mismatch: [None, None],
+            signing_sealed: false,
             urls: Urls::new(options.testnet),
             version: options.api_version.unwrap_or_default(),
             options,
@@ -253,26 +300,118 @@ impl AsterDex {
         if self.options.api_version.is_none() {
             return Some("Aster signing requires a resolved API version".into());
         }
-        let (_, primary) = self.credentials.select(CredentialRole::Mutation).ok()?;
-        self.auth(primary).err()
+        let (selection, _) = self.credentials.select(CredentialRole::Mutation).ok()?;
+        self.v3_fields(selection.slot()).err()
     }
 
-    /// The recipe contract for one selected slot.
-    fn auth(&self, slot: &Slot) -> Result<sign::Auth, String> {
+    fn configured_signer(&self, slot: CredentialSlot) -> Option<&str> {
+        nonempty(match slot {
+            CredentialSlot::Primary => self.options.signer_address.as_deref(),
+            CredentialSlot::Secondary => self.options.read_signer_address.as_deref(),
+        })
+    }
+
+    /// The V3 main wallet, after checking the slot's configured wallet fields.
+    fn v3_fields(&self, slot: CredentialSlot) -> Result<String, String> {
         if self.version == Version::V1 {
-            return Ok(sign::Auth::V1);
+            return Ok(String::new());
         }
         let user = nonempty(self.options.user_address.as_deref());
-        let (Some(user), Some(signer)) = (user, slot.signer.as_deref()) else {
+        let (Some(user), Some(signer)) = (user, self.configured_signer(slot)) else {
             return Err("Missing required Aster v3 auth fields: Main Wallet Address, API Wallet Address, and Generated Private Key".into());
         };
         safe_cex_crypto::ethereum::get_address(user)?;
         safe_cex_crypto::ethereum::get_address(signer)?;
-        Ok(sign::Auth::V3 {
-            user: user.into(),
-            signer: signer.into(),
-            nonce: sign::interim_nonce(),
-        })
+        Ok(user.into())
+    }
+
+    /// Checks a role's signing contract without reserving a nonce. A mismatch
+    /// is a configuration refusal, never an authentication failure.
+    fn check_signing(&self, role: CredentialRole) -> Result<(), (String, ErrorKind)> {
+        let (selection, _) = self.credentials.select(role).map_err(|_| {
+            (
+                "Missing required Aster credentials".to_owned(),
+                ErrorKind::AuthInvalid,
+            )
+        })?;
+        if let Some(error) = &self.signer_mismatch[slot_index(selection.slot())] {
+            return Err((error.clone(), ErrorKind::InvalidInput));
+        }
+        self.v3_fields(selection.slot())
+            .map(drop)
+            .map_err(|error| (error, ErrorKind::AuthInvalid))
+    }
+
+    /// The selected identity and its recipe contract. V3 mints a nonce claim
+    /// against the wallet address the slot's signing key proved at setup.
+    fn signing(&self, role: CredentialRole) -> Result<(Selection, Identity, sign::Auth), String> {
+        self.check_signing(role).map_err(|(error, _)| error)?;
+        let (selection, identity) = self
+            .credentials
+            .select(role)
+            .map_err(|_| "Missing required Aster credentials".to_owned())?;
+        if self.version == Version::V1 {
+            return Ok((selection, identity.clone(), sign::Auth::V1));
+        }
+        let user = self.v3_fields(selection.slot())?;
+        let (selection, identity, claim) = self
+            .credentials
+            .select_with_nonce(role, &safe_cex_engine::nonce::ASTERDEX_V3)
+            .map_err(|error| error.sign_error().to_string())?;
+        Ok((selection, identity.clone(), sign::Auth::V3 { user, claim }))
+    }
+
+    /// Rebuilds V3 slots from the sealed identities and records any slot
+    /// whose configured wallet differs from the address its key proved.
+    /// Before start, setup may still be initialized or reinitialized, so each
+    /// call reads the engine's current identities; only `start` latches them.
+    fn seal_signing(&mut self, cx: &mut Cx<'_, Pending>, at_start: bool) {
+        if self.version != Version::V3 || self.signing_sealed {
+            return;
+        }
+        self.signing_sealed = at_start;
+        self.signer_mismatch = [None, None];
+        let sealed = cx.address_nonce_identities().clone();
+        self.credentials = Self::slots(
+            &self.options,
+            sealed.primary.clone(),
+            sealed.secondary.clone(),
+        );
+        for (slot, identity) in [
+            (CredentialSlot::Primary, &sealed.primary),
+            (CredentialSlot::Secondary, &sealed.secondary),
+        ] {
+            let (Some(identity), Some(configured)) = (identity, self.configured_signer(slot))
+            else {
+                continue;
+            };
+            let (Ok(configured), Ok(proved)) = (
+                safe_cex_crypto::ethereum::get_address(configured),
+                identity.verified_signing_address(),
+            ) else {
+                continue;
+            };
+            let Ok(proved) = safe_cex_crypto::ethereum::get_address(&format!(
+                "0x{}",
+                safe_cex_crypto::hex(&proved)
+            )) else {
+                continue;
+            };
+            if configured != proved {
+                let error = format!(
+                    "Aster V3 API wallet address {configured} does not match the signing key's address {proved}"
+                );
+                if at_start {
+                    cx.notice(Level::Error, code::CONFIG_INVALID, error.clone());
+                    // Every signed read would only retry: end the start so public data takes over.
+                    cx.startup_failed(
+                        safe_cex_engine::VenueError::new(error.clone())
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                    );
+                }
+                self.signer_mismatch[slot_index(slot)] = Some(error);
+            }
+        }
     }
 
     pub fn is_private(&self) -> bool {
@@ -356,20 +495,27 @@ impl AsterDex {
     /// encodes only the deltas while connected.
     fn public_interests(&self) -> Vec<SocketInterest> {
         let mut topics = vec!["!ticker@arr".to_owned(), "!markPrice@arr@1s".to_owned()];
+        topics.extend(self.books.keys().map(|symbol| book_topic(symbol)));
         topics.extend(
-            self.books
+            self.candles
                 .keys()
-                .map(|symbol| format!("{}@depth20@100ms", symbol.to_ascii_lowercase())),
-        );
-        topics.extend(
-            self.candles.keys().map(|(symbol, interval)| {
-                format!("{}@kline_{interval}", symbol.to_ascii_lowercase())
-            }),
+                .map(|(symbol, interval)| candle_topic(symbol, *interval)),
         );
         topics
             .into_iter()
             .map(SocketInterest::from_wire_args)
             .collect()
+    }
+
+    /// The public feed and interest key `topic` streams on.
+    fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => book_topic(symbol),
+            SubscriptionTopic::Candles { symbol, interval } => {
+                supported(*interval).then(|| candle_topic(symbol, *interval))?
+            }
+        };
+        Some((self.public.feed?, key))
     }
 
     fn sync_public_interests(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -485,6 +631,22 @@ impl AsterDex {
             let _ = json::each::<&RawValue>(text, |item| self.on_public_frame(cx, item.get()));
             return;
         }
+        if let Some(frame) = FastAggregate::decode(text) {
+            match frame {
+                FastAggregate::Tickers(rows) => {
+                    for row in rows {
+                        update_ticker(cx, row);
+                    }
+                }
+                FastAggregate::Marks(rows) => {
+                    for row in rows {
+                        update_mark(cx, row);
+                    }
+                }
+            }
+            return;
+        }
+        // General decoding preserves reordered frames and valid prefixes before a typed-row error.
         let Ok(envelope) = serde_json::from_str::<Envelope>(text) else {
             return;
         };
@@ -538,6 +700,9 @@ impl AsterDex {
             let price = num::parse(&event.p);
             cx.store
                 .update_ticker(&event.s, |ticker| ticker.last = price);
+            if price.is_finite() && price > 0.0 {
+                cx.store.observe_ticker_fields(&event.s, 1 << 2);
+            }
         }
     }
 
@@ -617,6 +782,11 @@ fn is_partial_stream(stream: &str) -> bool {
 }
 
 fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
+    let observed = event
+        .c
+        .as_deref()
+        .and_then(num::parse_decimal)
+        .is_some_and(|p| p > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
         if let Some(value) = event.c.as_deref().filter(|s| !s.is_empty()) {
             ticker.last = num::parse(value);
@@ -631,9 +801,17 @@ fn update_ticker(cx: &mut Cx<'_, Pending>, event: TickerEvent<'_>) {
             ticker.quote_volume = num::parse(value);
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 2);
+    }
 }
 
 fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
+    let observed = event
+        .p
+        .as_deref()
+        .and_then(num::parse_decimal)
+        .is_some_and(|p| p > 0.0);
     cx.store.update_ticker(&event.s, |ticker| {
         if let Some(value) = event.p.as_deref().filter(|s| !s.is_empty()) {
             ticker.mark = num::parse(value);
@@ -648,6 +826,9 @@ fn update_mark(cx: &mut Cx<'_, Pending>, event: MarkEvent<'_>) {
             ticker.funding_time = value;
         }
     });
+    if observed {
+        cx.store.observe_ticker_fields(&event.s, 1 << 3);
+    }
 }
 
 fn collect_interest(body: &str, output: &mut HashMap<String, f64>) {
@@ -690,16 +871,35 @@ fn candle(time: f64, o: &str, h: &str, l: &str, c: &str, v: &str) -> Candle {
     }
 }
 
+fn qty(text: Option<&str>) -> f64 {
+    text.map_or(0.0, num::parse)
+}
+
 fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
     let find = |kind: &str| row.filters.iter().find(|filter| filter.filter_type == kind);
     let lot = find("LOT_SIZE");
+    let market_lot = find("MARKET_LOT_SIZE");
+    // Aster: quantityPrecision "please do not use it as stepSize".
+    let step = Some(qty(lot.and_then(|f| f.step_size.as_deref())))
+        .filter(|step| *step > 0.0)
+        .unwrap_or(10f64.powi(-row.quantity_precision));
     let price = 10f64.powi(-row.price_precision);
     let rule = MarketRule {
+        min_notional: find("MIN_NOTIONAL")
+            .and_then(|filter| filter.notional.as_deref())
+            .map_or(0.0, num::parse),
         tick_size: find("PRICE_FILTER")
             .and_then(|filter| filter.tick_size.as_deref())
             .map(num::parse)
             .unwrap_or(price),
         max_algo_orders: find("MAX_NUM_ALGO_ORDERS").and_then(|filter| filter.limit),
+        market_lot: MarketLot {
+            min: qty(market_lot.and_then(|f| f.min_qty.as_deref())),
+            max: qty(market_lot.and_then(|f| f.max_qty.as_deref())),
+            step: Some(qty(market_lot.and_then(|f| f.step_size.as_deref())))
+                .filter(|step| *step > 0.0)
+                .unwrap_or(step),
+        },
     };
     let market = Market {
         id: row.symbol.to_string(),
@@ -710,7 +910,7 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
         active: true,
         precision: Precision {
             price,
-            amount: 10f64.powi(-row.quantity_precision),
+            amount: step,
         },
         limits: Limits {
             amount: MinMax {
@@ -742,12 +942,41 @@ fn market_from_wire(row: SymbolInfo<'_>) -> (Market, MarketRule) {
 }
 
 impl Venue for AsterDex {
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.stop_release_veto(store, pending, release)
+    }
+
+    #[inline]
+    fn managed_sockets() -> bool {
+        true
+    }
+
     fn guard_pending_placements(&self) -> bool {
         true
     }
 
     fn guard_order_mutations(&self) -> bool {
         true
+    }
+
+    // reconcile_uncertain starts a fresh open-orders read at once.
+    fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
+
+    /// The engine asks at each uncertain seal and re-asks with backoff while
+    /// fenced; a call starts one read or joins the owed requery, and the clean
+    /// accepted read reports through `orders_reconciled`.
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.reconcile_orders(cx);
     }
 
     type Pending = Pending;
@@ -760,15 +989,59 @@ impl Venue for AsterDex {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             cancel_with_symbols: true,
             order_book_query: true,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
+    }
+
+    fn address_nonce_domain(&self) -> Option<&'static safe_cex_engine::nonce::NonceDomain> {
+        (self.version == Version::V3).then_some(&safe_cex_engine::nonce::ASTERDEX_V3)
+    }
+
+    /// Only slots that sign V3 gain address setup; a public-data-only
+    /// primary never signs.
+    fn public_address_slots(&self) -> safe_cex_engine::AddressSetupSlots {
+        use safe_cex_engine::AddressSetupSlots;
+        match (self.version, self.options.public_data_only) {
+            (Version::V1, _) => AddressSetupSlots::None,
+            (Version::V3, true) => AddressSetupSlots::Secondary,
+            (Version::V3, false) => AddressSetupSlots::Both,
+        }
+    }
+
+    fn dispatch_nonce() -> bool {
+        true
+    }
+
+    fn http_release() -> safe_cex_engine::HttpRelease<Self> {
+        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, _, _| Ok(()))
+    }
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Configured fields are checked first; sealing then binds the slots.
         if let Some(error) = self.signing_config_error() {
             cx.notice(Level::Error, code::CONFIG_INVALID, error);
             return;
         }
+        self.seal_signing(cx, true);
         self.start_requests(cx);
     }
 
@@ -816,6 +1089,14 @@ impl Venue for AsterDex {
         } else {
             Err(SocketError::Stale)
         }
+    }
+
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
     }
 
     /// One `{"method","params","id"}` frame per batch, split only to stay under
@@ -1149,7 +1430,11 @@ impl Venue for AsterDex {
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
             Pending::Signed(req) => self.on_signed_failed(cx, req, error),
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
 
@@ -1301,11 +1586,19 @@ impl Venue for AsterDex {
                 let mut path = format!(
                     "{}?symbol={symbol}&interval={interval}&limit={}",
                     self.path("klines"),
-                    limit.unwrap_or(500)
+                    limit.unwrap_or(500).clamp(1, MAX_KLINES)
                 );
                 if let Some(from) = from_ms {
                     path.push_str(&format!("&startTime={}", num::format(from)));
                 }
+                // Aster refuses startTime == endTime (-1023), so one candle asks through its close.
+                let to_ms = to_ms.map(|to| {
+                    if from_ms == Some(to) {
+                        to + interval.ms() - 1.
+                    } else {
+                        to
+                    }
+                });
                 if let Some(to) = to_ms {
                     path.push_str(&format!("&endTime={}", num::format(to)));
                 }
@@ -1333,7 +1626,7 @@ impl Venue for AsterDex {
                     self.path("depth"),
                     sign::Query::new()
                         .str("symbol", &symbol)
-                        .num("limit", f64::from(limit.unwrap_or(100)))
+                        .num("limit", f64::from(depth_limit(limit.unwrap_or(100))))
                         .as_str()
                 );
                 let Ok(context) = cx.admit_http_command(request::public_read_policy()) else {
@@ -1381,7 +1674,7 @@ fn log_skipped_rows(cx: &mut Cx<'_, Pending>, kind: &str, skipped: &[String]) {
             format!(
                 "Aster skipped {} malformed {kind} row(s): {}",
                 skipped.len(),
-                skipped.join(", ")
+                skipped.join_with(", ")
             ),
         );
     }
@@ -1409,7 +1702,11 @@ impl AsterDex {
             }) => {
                 let _ = cx.fail_context(&root, error);
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
 }

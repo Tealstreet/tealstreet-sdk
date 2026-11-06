@@ -655,6 +655,9 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn managed_sockets() -> bool {
+        true
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }
@@ -699,6 +702,13 @@ impl Venue for TxFlow {
             self.account_refresh(cx);
         }
         Ok(())
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn encode_socket_interests(
         &self,

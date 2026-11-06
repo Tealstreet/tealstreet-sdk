@@ -50,7 +50,8 @@ import {
 } from './kraken-protocol.mjs';
 let krakenRequestAudit;
 
-const root = '../../packages/safe-cex/src/exchanges';
+// TS oracle adapters: test-only, never reachable from the safe-cex runtime.
+const root = '../../packages/safe-cex/src/__tests__/reference';
 
 const lighter = (name) => {
   let verifier;
@@ -86,6 +87,7 @@ const lighter = (name) => {
     verifySubscribe: (message) => verifier?.subscribe(message) ?? false,
     validateMatchedRequest: (record, request) => verifier?.matched(record, request),
     commandResult: (result, command, index) => verifier?.commandResult(result, command, index) ?? result,
+    frameText: (text) => verifier?.echoCreated(text) ?? text,
     compareFillPrices: true,
     compareWriteOrder: true,
   };
@@ -198,18 +200,14 @@ export const ORDERLY_REPLAY = {
   publicApplicationId: 'OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY',
 };
 export const ORDERLY_BROKERS = {
-  'tealstreet-dex': 'TEALSTREET',
   kodiakfi: 'TEALKODIAK',
   mode: 'TEALMODE',
-  salsadex: 'TEALSALSA',
   what: 'TEALWHAT',
   woofi: 'TEALSTREET',
 };
 const orderlyClasses = {
-  'tealstreet-dex': 'TealstreetDEXExchange',
   kodiakfi: 'KodiakFIExchange',
   mode: 'MODEExchange',
-  salsadex: 'SalsaDEXExchange',
   what: 'WhatExchange',
   woofi: 'WoofiExchange',
 };
@@ -263,7 +261,7 @@ const orderlyAuth = (message) => {
   );
 };
 const orderly = (alias) => {
-  const name = alias === 'orderly' ? 'tealstreet-dex' : alias;
+  const name = alias === 'orderly' ? 'woofi' : alias;
   return {
     family: 'orderly',
     virtualPrivateClock: true,
@@ -276,7 +274,7 @@ const orderly = (alias) => {
     },
     rust: alias,
     ts: {
-      module: `${root}/../__tests__/reference/orderly/exchanges/${name}/${name}.exchange.ts`,
+      module: `${root}/orderly/exchanges/${name}/${name}.exchange.ts`,
       className: orderlyClasses[name],
       name,
     },
@@ -770,7 +768,7 @@ const coinbase = (name) => ({
   currencyBalances: true,
   rust: name,
   ts: {
-    module: `${root}/../__tests__/reference/coinbase/${name}.exchange.ts`,
+    module: `${root}/coinbase/${name}.exchange.ts`,
     className: name === 'coinbasespot' ? 'CoinbaseSpotExchange' : 'CoinbaseExchange',
     name,
   },
@@ -836,7 +834,7 @@ export const VENUES = {
     virtualPrivateClock: true,
     recordPublicCorsDirect: true,
     recordAfterReady: true,
-    ts: { module: `${root}/../__tests__/reference/txflow/txflow.exchange.ts`, className: 'TxFlowExchange', name: 'txflow' },
+    ts: { module: `${root}/txflow/txflow.exchange.ts`, className: 'TxFlowExchange', name: 'txflow' },
     requestKey: typedRequest,
     requestBodies: true,
     matchRequestBody: true,
@@ -2009,6 +2007,14 @@ export const VENUES = {
       prepareTs: prepareBinanceSpot,
     } : {}),
   }])),
+  binanceoptions: {
+    rust: 'binanceoptions', virtualPrivateClock: true, polling: true,
+    tsBooksSubscribed: (_exchange, count) => count === 0,
+    requestKey: typedRequest, validateRequest: validateBinanceRequest,
+    ts: { module: `${root}/binance/binanceoptions.exchange.ts`, className: 'BinanceOptionsExchange', name: 'binanceoptions' },
+    volatileBodyFields: true,
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
+  },
   polymarket,
   kucoin: {
     ...kucoin,

@@ -11,6 +11,12 @@ pub(crate) struct OrderLocks {
     waiting: Vec<(CommandId, String, bool, Option<u64>)>,
     uncertain: HashMap<String, u64>,
     epoch: u64,
+    /// The venue reconciles an Unknown placement at once, so a later placement
+    /// or amend on its symbol may wait for that read (`fence_uncertain_placements`).
+    fence_placements: bool,
+    /// Admitted placements and amends with their symbols (`None`: unknown), so
+    /// an Unknown outcome fences them whether or not a lock scope holds them.
+    marks: Vec<(CommandId, Option<Vec<String>>)>,
     /// Scopes held by repair roots, keyed by root rather than any CommandId.
     #[cfg(feature = "repair-mutations")]
     repairs: Vec<(u64, Scope)>,
@@ -46,6 +52,83 @@ fn native(id: &str) -> &str {
     .iter()
     .find_map(|suffix| id.strip_suffix(suffix))
     .unwrap_or(id)
+}
+
+fn mutates(scope: &Scope) -> bool {
+    scope.placing || !scope.cancel_only && !scope.ids.is_empty()
+}
+
+/// The lock scope a placement, amend or cancel would hold.
+fn scope_of(command: &Command, store: &Store) -> Option<(CommandId, Scope)> {
+    let mut scope = Scope {
+        ids: Vec::new(),
+        symbols: Vec::new(),
+        all_symbol: None,
+        placing: false,
+        cancel_only: false,
+        sent: false,
+        managed: false,
+        unknown_symbol: false,
+        absent: false,
+    };
+    let input = command;
+    let command = match command {
+        Command::PlaceOrders { command, orders } => {
+            scope.placing = true;
+            scope
+                .symbols
+                .extend(orders.iter().map(|o| o.symbol.clone()));
+            *command
+        }
+        Command::AmendOrderWithSymbol {
+            command,
+            id,
+            symbol,
+            ..
+        } => {
+            scope.ids.push(id.clone());
+            scope.symbols.push(symbol.clone());
+            *command
+        }
+        Command::AmendOrder { command, id, .. } => {
+            scope.ids.push(id.clone());
+            *command
+        }
+        Command::CancelOrders { command, ids } => {
+            scope.cancel_only = true;
+            scope.ids.clone_from(ids);
+            *command
+        }
+        Command::CancelOrdersWithSymbols { command, orders } => {
+            scope.cancel_only = true;
+            scope.ids.extend(orders.iter().map(|o| o.id.clone()));
+            scope
+                .symbols
+                .extend(orders.iter().map(|o| o.symbol.clone()));
+            *command
+        }
+        Command::CancelSymbolOrders { command, symbol } => {
+            scope.cancel_only = true;
+            scope.all_symbol = Some(symbol.clone());
+            *command
+        }
+        _ => return None,
+    };
+    for id in &mut scope.ids {
+        let normalized = native(id);
+        let order = store.order(id).or_else(|| store.order(normalized));
+        if let Some(order) = order {
+            scope.symbols.push(order.symbol.clone());
+            *id = native(order.parent_id.as_deref().unwrap_or(&order.id)).to_owned();
+        } else {
+            let routed = matches!(input, Command::CancelOrdersWithSymbols { orders, .. }
+                    if orders.iter().any(|order| &order.id == id && !order.symbol.is_empty()))
+                || matches!(input, Command::AmendOrderWithSymbol { symbol, .. } if !symbol.is_empty());
+            scope.unknown_symbol |= !routed;
+            *id = normalized.to_owned();
+        }
+    }
+    Some((command, scope))
 }
 
 /// Whether `scope` and `held` touch the same order or symbol, as `acquire`
@@ -87,88 +170,118 @@ pub(crate) const CAPACITY_REACHED: &str =
 pub(crate) enum Refusal {
     Conflict(CommandId),
     Capacity(CommandId),
+    /// A placement or amend on a symbol whose earlier placement is Unknown.
+    Uncertain(CommandId),
 }
 
 impl OrderLocks {
+    pub fn fencing_placements(fence_placements: bool) -> Self {
+        Self {
+            fence_placements,
+            ..Self::default()
+        }
+    }
+
+    /// The fresh read an opted-in fence still waits for: `None` when nothing is
+    /// fenced, `Some(None)` for every symbol, else the uncertain symbols.
+    pub fn fence_reread(&self) -> Option<Option<Vec<String>>> {
+        if !self.fence_placements || self.uncertain.is_empty() {
+            return None;
+        }
+        if self.uncertain.contains_key("") {
+            return Some(None);
+        }
+        Some(Some(self.uncertain.keys().cloned().collect()))
+    }
+
     pub fn contains(&self, command: CommandId) -> bool {
         self.active.iter().any(|(id, _)| *id == command)
             || self.waiting.iter().any(|(id, ..)| *id == command)
     }
 
+    /// Admission for a command that holds no lock scope: a placement or amend
+    /// is refused (with its ID) while its symbols are uncertain, else marked for
+    /// an Unknown outcome; a cancel-all on an uncertain symbol is refused when
+    /// the venue fences it. It holds nothing, so it cannot conflict or fill capacity.
+    pub fn admit_unscoped(
+        &mut self,
+        command: &Command,
+        store: &Store,
+        fence_cancel_all: bool,
+        enforced_close: bool,
+    ) -> Result<(), CommandId> {
+        let Some((command, scope)) = scope_of(command, store) else {
+            return Ok(());
+        };
+        let cancel_all = |symbol: &String| fence_cancel_all && self.uncertain(symbol);
+        if !enforced_close && self.fenced(&scope)
+            || scope.all_symbol.as_ref().is_some_and(cancel_all)
+        {
+            return Err(command);
+        }
+        self.mark(command, &scope);
+        Ok(())
+    }
+
+    // Until a fresh order read resolves an Unknown placement, another
+    // placement or amend on its symbol could duplicate it. Cancels stay
+    // admitted: they cannot place (cancel-all is the venue's own opt-in).
+    fn fenced(&self, scope: &Scope) -> bool {
+        self.fence_placements
+            && mutates(scope)
+            && (scope.unknown_symbol && !self.uncertain.is_empty()
+                || scope.symbols.iter().any(|symbol| self.uncertain(symbol)))
+    }
+
+    fn mark(&mut self, command: CommandId, scope: &Scope) {
+        if self.fence_placements && mutates(scope) {
+            let symbols = (!scope.unknown_symbol).then(|| scope.symbols.clone());
+            self.marks.push((command, symbols));
+        }
+    }
+
+    #[cfg(test)]
+    pub fn marked(&self) -> usize {
+        self.marks.len()
+    }
+
+    /// Settles an admitted placement or amend's mark: an Unknown outcome fences
+    /// its symbols and returns them for the reconcile read.
+    pub fn settle_mark(
+        &mut self,
+        command: CommandId,
+        unknown: bool,
+    ) -> Option<Option<Vec<String>>> {
+        let index = self.marks.iter().position(|(id, _)| *id == command)?;
+        let (_, symbols) = self.marks.swap_remove(index);
+        unknown.then(|| {
+            self.fence(symbols.as_deref());
+            symbols
+        })
+    }
+
+    #[cfg(test)]
     pub fn acquire(
         &mut self,
         command: &Command,
         store: &Store,
         fence_uncertain: bool,
     ) -> Result<(), Refusal> {
-        let mut scope = Scope {
-            ids: Vec::new(),
-            symbols: Vec::new(),
-            all_symbol: None,
-            placing: false,
-            cancel_only: false,
-            sent: false,
-            managed: false,
-            unknown_symbol: false,
-            absent: false,
+        self.acquire_admitting(command, store, fence_uncertain, false)
+    }
+
+    /// `acquire`, with `enforced_close` passing the placement fence: the venue
+    /// enforces reduce-only, so the order cannot open a position.
+    pub fn acquire_admitting(
+        &mut self,
+        command: &Command,
+        store: &Store,
+        fence_uncertain: bool,
+        enforced_close: bool,
+    ) -> Result<(), Refusal> {
+        let Some((command, scope)) = scope_of(command, store) else {
+            return Ok(());
         };
-        let input = command;
-        let command = match command {
-            Command::PlaceOrders { command, orders } => {
-                scope.placing = true;
-                scope
-                    .symbols
-                    .extend(orders.iter().map(|o| o.symbol.clone()));
-                *command
-            }
-            Command::AmendOrderWithSymbol {
-                command,
-                id,
-                symbol,
-                ..
-            } => {
-                scope.ids.push(id.clone());
-                scope.symbols.push(symbol.clone());
-                *command
-            }
-            Command::AmendOrder { command, id, .. } => {
-                scope.ids.push(id.clone());
-                *command
-            }
-            Command::CancelOrders { command, ids } => {
-                scope.cancel_only = true;
-                scope.ids.clone_from(ids);
-                *command
-            }
-            Command::CancelOrdersWithSymbols { command, orders } => {
-                scope.cancel_only = true;
-                scope.ids.extend(orders.iter().map(|o| o.id.clone()));
-                scope
-                    .symbols
-                    .extend(orders.iter().map(|o| o.symbol.clone()));
-                *command
-            }
-            Command::CancelSymbolOrders { command, symbol } => {
-                scope.cancel_only = true;
-                scope.all_symbol = Some(symbol.clone());
-                *command
-            }
-            _ => return Ok(()),
-        };
-        for id in &mut scope.ids {
-            let normalized = native(id);
-            let order = store.order(id).or_else(|| store.order(normalized));
-            if let Some(order) = order {
-                scope.symbols.push(order.symbol.clone());
-                *id = native(order.parent_id.as_deref().unwrap_or(&order.id)).to_owned();
-            } else {
-                let routed = matches!(input, Command::CancelOrdersWithSymbols { orders, .. }
-                    if orders.iter().any(|order| &order.id == id && !order.symbol.is_empty()))
-                    || matches!(input, Command::AmendOrderWithSymbol { symbol, .. } if !symbol.is_empty());
-                scope.unknown_symbol |= !routed;
-                *id = normalized.to_owned();
-            }
-        }
         let overlaps_symbol = |all: &str, other: &Scope| {
             all.is_empty()
                 || other.unknown_symbol
@@ -178,6 +291,9 @@ impl OrderLocks {
                     .as_ref()
                     .is_some_and(|s| s.is_empty() || s == all)
         };
+        if !enforced_close && self.fenced(&scope) {
+            return Err(Refusal::Uncertain(command));
+        }
         if fence_uncertain
             && scope
                 .all_symbol
@@ -208,6 +324,7 @@ impl OrderLocks {
         if self.held_scopes() >= ACTIVE_SCOPES {
             return Err(Refusal::Capacity(command));
         }
+        self.mark(command, &scope);
         self.active.push((command, scope));
         Ok(())
     }
@@ -388,6 +505,7 @@ impl OrderLocks {
             }
         }
         self.active.retain(|(id, _)| *id != command);
+        self.marks.retain(|(id, _)| *id != command);
         marked
     }
     /// Fence symbols (`None`: every symbol) until a fresh order read clears
@@ -508,6 +626,40 @@ impl OrderLocks {
         self.epoch
     }
 
+    /// Start a new epoch with nothing sealed: reads released from now on are
+    /// newer than any already out.
+    pub fn advance(&mut self) -> u64 {
+        self.epoch = self.epoch.saturating_add(1);
+        self.epoch
+    }
+
+    /// Each uncertain symbol (`""`: every symbol) with the epoch that sealed it.
+    pub fn uncertain_epochs(&self) -> impl Iterator<Item = (&str, u64)> {
+        self.uncertain
+            .iter()
+            .map(|(symbol, epoch)| (symbol.as_str(), *epoch))
+    }
+
+    /// A whole-account read cleared every fence up to `token` but `unproven`
+    /// symbols; an empty symbol there means any fence may be its row's.
+    pub fn reconciled_except(&mut self, unproven: &[String], token: u64) {
+        if unproven.iter().any(String::is_empty) {
+            return;
+        }
+        if unproven.is_empty() {
+            return self.reconciled(None, token);
+        }
+        let symbols: Vec<String> = self
+            .uncertain
+            .keys()
+            .filter(|symbol| !symbol.is_empty() && !unproven.contains(symbol))
+            .cloned()
+            .collect();
+        for symbol in symbols {
+            self.reconciled(Some(&symbol), token);
+        }
+    }
+
     pub fn reconciled(&mut self, symbol: Option<&str>, token: u64) {
         if self.repair_placing_cfg(symbol.unwrap_or("")) {
             return;
@@ -540,6 +692,22 @@ impl OrderLocks {
 #[cfg(test)]
 mod managed_tests {
     use super::*;
+
+    /// A rejected row naming no market could be any uncertain write: the read's
+    /// coverage says so with "", and no fence clears from that read.
+    #[test]
+    fn a_rejection_without_a_market_clears_no_fence() {
+        let mut locks = OrderLocks::default();
+        locks.fence(Some(&["BTCUSDT".into(), "ETHUSDT".into()]));
+        let mut coverage = crate::coverage::RowAdmission::<String>::default();
+        coverage.reject(None);
+        assert_eq!(coverage.unproven(), [String::new()]);
+        locks.reconciled_except(coverage.unproven(), locks.token());
+        assert!(locks.uncertain("BTCUSDT") && locks.uncertain("ETHUSDT"));
+        // The control: a clean read of the same epoch clears both.
+        locks.reconciled_except(&[], locks.token());
+        assert!(!locks.uncertain("BTCUSDT") && !locks.uncertain("ETHUSDT"));
+    }
 
     #[test]
     fn a_double_underscore_leg_locks_its_parent_order() {
@@ -719,6 +887,39 @@ mod repair_cancel_overlap_tests {
         assert_eq!(
             repair(&mut locks, 11, "x", false),
             Err(Refusal::Conflict(0))
+        );
+    }
+
+    #[test]
+    fn a_read_keeps_only_the_unproven_fences() {
+        let mut locks = OrderLocks::fencing_placements(true);
+        locks.fence(Some(&["A".to_owned(), "B".to_owned()]));
+        locks.reconciled_except(&[String::new()], locks.token());
+        assert!(locks.uncertain("A") && locks.uncertain("B"));
+        locks.reconciled_except(&["A".to_owned()], locks.token());
+        assert!(locks.uncertain("A") && !locks.uncertain("B"));
+        locks.reconciled_except(&[], locks.token());
+        assert!(!locks.uncertain("A"));
+    }
+
+    #[test]
+    fn only_an_enforced_close_passes_the_fence() {
+        let close = Command::PlaceOrders {
+            command: 1,
+            orders: vec![
+                serde_json::from_value(serde_json::json!({
+                    "symbol": "A", "type": "market", "side": "sell", "amount": 1, "reduceOnly": true
+                }))
+                .unwrap(),
+            ],
+        };
+        let mut locks = OrderLocks::fencing_placements(true);
+        locks.fence(Some(&["A".to_owned()]));
+        assert!(locks.acquire(&close, &Store::default(), false).is_err());
+        assert!(
+            locks
+                .acquire_admitting(&close, &Store::default(), false, true)
+                .is_ok()
         );
     }
 }

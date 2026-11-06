@@ -15,7 +15,7 @@ try {
     encoding: 'utf8',
     env: { ...process.env, NODE_PATH: '' },
   });
-  if (result.error || result.status !== 0 || !result.stdout.includes('rust-smoke: native Coinbase market loaded')) {
+  if (result.error || result.status !== 0 || !result.stdout.includes('rust-smoke: native Binance Spot market loaded')) {
     throw new Error(`Isolated Rust artifact failed: ${result.error ?? result.stderr ?? result.stdout}`);
   }
   console.log(result.stdout.trim());

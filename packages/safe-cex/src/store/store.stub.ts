@@ -136,7 +136,7 @@ const stubOrderRiskProfile: OrderRiskProfile = {
  * the StoreData type at compile time.
  */
 export const stubStore: StoreData = {
-  latency: 0,
+  latency: null,
   balance: stubBalance,
   markets: [stubMarket],
   tickers: [stubTicker],

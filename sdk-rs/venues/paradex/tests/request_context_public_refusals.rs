@@ -419,3 +419,32 @@ fn saturated_remote_candles_require_capacity_and_preserve_recovered_wire() {
         assert!(r.body.is_none());
     }
 }
+
+// A restarted engine answers the chart before /markets does; the market is only unknown once they load.
+#[test]
+fn a_candle_fetch_before_markets_load_reads_the_venue() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Paradex::new(
+        safe_cex_venue_paradex::Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+    ));
+    e.start(NOW);
+    let _: Vec<_> = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    e.handle(
+        NOW,
+        Event::Command(Command::FetchCandles {
+            command: 9,
+            symbol: "NEAR-USD-PERP".into(),
+            interval: Interval::M30,
+            from_ms: Some(0.),
+            to_ms: Some(NOW),
+            limit: None,
+        }),
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(terminal(&actions, 9).is_empty(), "no refusal");
+    assert!(actions.iter().any(
+        |a| matches!(a, Action::Http(r) if r.url.contains("/markets/klines?symbol=NEAR-USD-PERP"))
+    ));
+}

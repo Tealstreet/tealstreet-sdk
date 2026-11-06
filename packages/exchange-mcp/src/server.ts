@@ -17,12 +17,6 @@ export const createServer = async ({ exchange: name, options }: ServerConfig, ve
       next.dispose();
       throw new Error('Rust MCP accounts require local credentials; EXCHANGE_SIGNER_HEADER is unsupported');
     }
-    // Native reads return current engine state; its public feed keeps quotes
-    // fresh. TS adapters instead fetch on demand without their public sockets.
-    if (!(next instanceof RustEngineExchange)) {
-      next.options = { ...next.options, extra: { tickInterval: Number.POSITIVE_INFINITY, ...next.options.extra } };
-      next.disablePublicWebsockets();
-    }
     return next;
   };
   let exchange = await instantiate();

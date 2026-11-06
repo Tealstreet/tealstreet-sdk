@@ -86,9 +86,7 @@ impl Rig {
                     Action::RetireAddressSetup { .. } => {
                         panic!("unexpected address setup retirement")
                     }
-                    Action::Sign { .. }
-                    | Action::SignedOutbound { .. }
-                    | Action::SignPayload { .. } => {
+                    Action::Sign { .. } | Action::SignedOutbound { .. } => {
                         panic!("unexpected delegated signing request")
                     }
                 }

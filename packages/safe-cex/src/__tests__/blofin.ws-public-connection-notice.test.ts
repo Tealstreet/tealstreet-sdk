@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BlofinPublicWebsocket } from '../exchanges/blofin/blofin.ws-public';
+import { BlofinPublicWebsocket } from './reference/blofin/blofin.ws-public';
 
 const CONNECTION_FAILURE_NOTICE_DELAY_MS = 20_000;
 

@@ -1,3 +1,4 @@
+import { setConnectionVisibility } from '@tealstreet/http-over-websocket/src/connectionDiagnostics';
 import { ExchangeName } from '../types';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { virtualClock } from '../utils/virtualClock';
@@ -185,12 +186,19 @@ const start = (ctx: Worker, shared = false) => {
   const getMyExchangeWorker = () =>
     accountName ? exchangeWorkers[accountName] : anonymousExchangeWorkers[exchangeName];
 
+  let failedWorker: ExchangeWorker | undefined;
+
   const deleteMyExchangeWorker = () => {
     if (accountName) {
       delete exchangeWorkers[accountName];
     } else {
       delete anonymousExchangeWorkers[exchangeName];
     }
+  };
+
+  const startTelegramWorker = (worker: ExchangeWorker, payload: StoreWorkerPayload) => {
+    if (!payload.data.telegramBotToken) return;
+    new TelegramWorker(() => worker.exchange!, payload.data.telegramBotToken).start();
   };
 
   const initExchangeWorker = async (payload: StoreWorkerPayload) => {
@@ -292,15 +300,24 @@ const start = (ctx: Worker, shared = false) => {
     // markets/tickers on top. Seeding AFTER start() would race and could wipe
     // freshly-loaded markets when the main-thread store is empty (cold load,
     // no IndexedDB cache, default-demo, etc.).
-    exchangeWorker.store.update(payload.data.store);
+    // A fresh worker runs no algos: chase and TWAP rows in the seed belong to
+    // algos that died with the worker before it, and would show as running.
+    const { activeChasers: _deadChasers, activeTWAPs: _deadTwaps, ...seed } = payload.data.store ?? {};
+    exchangeWorker.store.update(seed);
 
+    failedWorker = undefined;
     const started = await exchangeWorker.start();
     if (!started) {
+      if (exchangeWorker.retryTimedOutStart()) {
+        exchangeWorker.onStartRetrySucceeded = () => startTelegramWorker(exchangeWorker, payload);
+        return;
+      }
       // Startup was cancelled (e.g. dispose mid-flight) or failed. Drop the
       // worker from the map so a subsequent init creates a fresh one instead
       // of reusing a half-initialized instance.
       if (getMyExchangeWorker() === exchangeWorker) {
         deleteMyExchangeWorker();
+        failedWorker = exchangeWorker;
       }
       exchangeWorker.dispose();
       return;
@@ -330,6 +347,9 @@ const start = (ctx: Worker, shared = false) => {
     // and pushes them once, before any 'init', so safe-cex resolves the right hosts from
     // the start. Applied via typed setters — safe-cex never sees flag names.
     if (payload?.op === '__workerConfig') {
+      if (payload.data?.connectionVisibility === 'hidden' || payload.data?.connectionVisibility === 'visible') {
+        setConnectionVisibility(payload.data.connectionVisibility);
+      }
       const cfg = (payload.data ?? {}) as WorkerConfig;
       if ('tickIntervalMultipliers' in cfg) setTickIntervalMultipliers(cfg.tickIntervalMultipliers);
       if ('wsDiagnosticsEnabled' in cfg) setWsDiagnosticsEnabled(cfg.wsDiagnosticsEnabled === true);
@@ -403,15 +423,8 @@ const start = (ctx: Worker, shared = false) => {
         // re-get exchangeWorker after init
         exchangeWorker = getMyExchangeWorker();
 
-        if (
-          exchangeWorker?.exchange &&
-          !exchangeWorker.exchange.isDisposed &&
-          payload.data.telegramBotToken &&
-          payload.data.telegramBotToken !== ''
-        ) {
-          const telegramWorker = new TelegramWorker(() => exchangeWorker!.exchange!, payload.data.telegramBotToken);
-          telegramWorker.start();
-        }
+        if (exchangeWorker?.exchange && !exchangeWorker.exchange.isDisposed)
+          startTelegramWorker(exchangeWorker, payload);
         break;
       case 'dispose':
         if (shared) {
@@ -472,6 +485,9 @@ const start = (ctx: Worker, shared = false) => {
             portsBySubId[payload.data.subId] = ctx;
           }
           exchangeWorker.handlePayload(payload);
+        } else {
+          // A caller waits on its own long timer: a failed start still answers until the next init.
+          failedWorker?.handlePayload(payload);
         }
         break;
     }

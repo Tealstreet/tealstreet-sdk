@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getBybitMarketsFailureTelemetry, describeBybitMarketsFailure } from '../exchanges/bybit/bybit.exchange';
+import { getBybitMarketsFailureTelemetry, describeBybitMarketsFailure } from './reference/bybit/bybit.exchange';
 
 describe('describeBybitMarketsFailure', () => {
   it('names a rate limit from the retMsg', () => {

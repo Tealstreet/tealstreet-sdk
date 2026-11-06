@@ -15,7 +15,7 @@ import ProfileDropdownApi from '/img/connect/backpack/v3/profile-dropdown-api.pn
 import TealApi1 from '/img/connect/backpack/v3/teal-api1.png';
 import TealApi2 from '/img/connect/backpack/v3/teal-api2.png';
 import TealApi3 from '/img/connect/backpack/v3/teal-api3.png';
-import ApiWhitelist from '/img/connect/backpack/v3/api-whitelist.png';
+import ProxyFleetIps from '@site/src/components/ProxyFleetIps';
 import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
 import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
 
@@ -102,9 +102,7 @@ Lastly we will need to setup IP Whitelisting. After the key is created you will 
 
 You can find these IP's in the Tealstreet API page we left open earlier.
 
-<div class="text--center">
-    <img src={ApiWhitelist} alt="Tealstreet Whitelist IP's" style={{ width: 600 }} />
-</div>
+<ProxyFleetIps exchange="backpack" />
 
 :::warning
 At this time Backpack does not support pasting the IP addresses in one single block. You will need to paste the IP addresses in one by one.

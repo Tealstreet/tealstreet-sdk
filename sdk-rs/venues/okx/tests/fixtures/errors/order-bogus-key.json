@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:19:18.845Z",
+  "endpoint": "/api/v5/trade/order",
+  "http_status": 401,
+  "body": "{\"msg\":\"Invalid OK-ACCESS-KEY\",\"code\":\"50111\"}",
+  "expect": {
+    "kind": "authInvalid",
+    "outcome": "rejected",
+    "path": "write"
+  }
+}

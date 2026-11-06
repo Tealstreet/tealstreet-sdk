@@ -11,6 +11,9 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| BloFin managed public/private sockets | Plan and production-binding originals; one venue PR | Before changing authenticated login custody, public interest recovery or full order-census epoch | [RUST_BLOFIN_MANAGED_SOCKETS.md](RUST_BLOFIN_MANAGED_SOCKETS.md) |
+| Frame-fed fence read covers and bounded refresh ask | Design for review; supersedes parked #2990; no source | Before changing how a frame-fed page lifts an uncertain-write fence, the ORDERS_READ section, or source refresh reads | [RUST_FRAME_FED_READ_COVER.md](RUST_FRAME_FED_READ_COVER.md) |
+| Legacy to stable-subject nonce handoff | Engine-only plan GO; no consumer activation | Before transferring an owned legacy nonce issuer into managed NonceClaim custody. | [RUST_NONCE_DOMAIN_HANDOFF.md](RUST_NONCE_DOMAIN_HANDOFF.md) |
 | Address-keyed dispatch nonce domains | Plan directions CLEAR; local originals checkpoint | Before extending #2093 claims to verified Aster V3 signer and Hyperliquid agent subjects; no non-adopter growth or consumer activation implied | [RUST_ADDRESS_NONCE_DOMAINS.md](RUST_ADDRESS_NONCE_DOMAINS.md) |
 | Per-venue engine feature gating | Plan; Phase 1 managed-sockets, Phase 2 barriers; no source | Before adding a per-venue engine feature, or changing how Engine<V> reaches managed-socket or barrier code. | [RUST_ENGINE_FEATURE_GATING.md](RUST_ENGINE_FEATURE_GATING.md) |
 | WEEX depth and socket custody | Plan/native/API CLEAR; first19 originals13RED/6GREEN local; source held | Remaining Depth observations and both native socket lifecycles; truthful inventory residue disposition and fixed size gates | [RUST_WEEX_DEPTH_SOCKET_CONTEXT.md](RUST_WEEX_DEPTH_SOCKET_CONTEXT.md) |
@@ -147,7 +150,8 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Credentials and attribution | Retained plan/evidence | Changing credential selection, auth evidence, identity or broker routing. | [RUST_IDENTITY_ROUTING.md](RUST_IDENTITY_ROUTING.md) |
 | Crypto.com Rust port | Retained plan/evidence | Before changing this venue or the behavior documented in this plan. | [venue-ports/CRYPTOCOM.md](venue-ports/CRYPTOCOM.md) |
 | Cutover tail | Scoped evidence ledger | Checking SDK-owned cutover repairs versus remaining caller-owned work. | [RUST_CUTOVER_TAIL_AUDIT.md](RUST_CUTOVER_TAIL_AUDIT.md) |
-| Downstream contracts | Current caller obligations | SDK/NX caller migration, deployment ordering and deletion prerequisites. | [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALLERS.md) |
+| TS safe-cex runtime deletion inventory | Prep inventory and a post-processor placement proposal; no deletion | Before deleting the forward-to-worker write path, the worker TS store, algos or post-processors, or moving post-processor outputs | [TS_RUNTIME_DELETION_INVENTORY.md](TS_RUNTIME_DELETION_INVENTORY.md) |
+| Downstream contracts | Current caller obligations | SDK/NX caller migration, deployment ordering and deletion prerequisites. | [RUST_CUTOVER_CALLERS.md](RUST_CUTOVER_CALLERS.md) (before 2026-10-27) and [callers/](callers/README.md) (one file per change since) |
 | Execution and command state | Retained plan/evidence | Changing fill attribution, command outcomes or uncertain-order lifecycle. | [RUST_COMMAND_IDENTITIES.md](RUST_COMMAND_IDENTITIES.md) |
 | Execution and command state | Retained plan/evidence | Changing fill attribution, command outcomes or uncertain-order lifecycle. | [RUST_FILL_EXECUTION_ID.md](RUST_FILL_EXECUTION_ID.md) |
 | Execution and command state | Retained plan/evidence | Changing signed dead-man controls, UTC deadlines or uncertain-write ownership. | [RUST_HYPERLIQUID_SCHEDULE_CANCEL.md](RUST_HYPERLIQUID_SCHEDULE_CANCEL.md) |
@@ -284,6 +288,10 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | BloFin credential cutover | Plan in review; WebSocket login onto dispatch, raw options retired | Before changing BloFin's private login, credential options or its credential/signing inventories. | [RUST_BLOFIN_CREDENTIAL_CUTOVER.md](RUST_BLOFIN_CREDENTIAL_CUTOVER.md) |
 | Binance signing residue | In review | Before changing Binance's signing tests, fixtures or its signing inventory. | [RUST_BINANCE_SIGNING_RESIDUE.md](RUST_BINANCE_SIGNING_RESIDUE.md) |
+| Bitunix hosted signing (P7) | Source in review | Before changing Bitunix remote or hosted signing, its remoteSigning row or the remote signer provider shapes. | [RUST_BITUNIX_HOSTED_SIGNING.md](RUST_BITUNIX_HOSTED_SIGNING.md) |
+| Bitunix closed positions | Source in review | Before changing Bitunix journal, closed PnL, its position-history read or the Bitunix capability enums. | [RUST_BITUNIX_CLOSED_POSITIONS.md](RUST_BITUNIX_CLOSED_POSITIONS.md) |
+| Binance request refusals | In review | Before changing Binance's local command refusals or its request inventory. | [RUST_BINANCE_REQUEST_REFUSALS.md](RUST_BINANCE_REQUEST_REFUSALS.md) |
+| Orderly provider-signed reads | O1 in review; O2 trading writes outlined | Before changing Orderly's signer setup, private account reads, history legs, socket auth or its request/signing inventories. | [RUST_ORDERLY_PROVIDER_READS.md](RUST_ORDERLY_PROVIDER_READS.md) |
 | Lighter RequestContext adoption | Inventory and phased plan | Before migrating Lighter or Robinhood HTTP/completion sites; single-request candles first, shared multi-request/signing prerequisites later. | [RUST_LIGHTER_REQUEST_CONTEXT.md](RUST_LIGHTER_REQUEST_CONTEXT.md) |
 | Paradex startup Read Contexts | Planned | Independent public catalog/ticker GET adoption and proof | [RUST_PARADEX_SEED_CONTEXT.md](RUST_PARADEX_SEED_CONTEXT.md) |
 | BloFin candle command entry | Focused adoption plan | Before removing the candle pre-Context numeric refusal or changing initial command ownership. | [RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md](RUST_BLOFIN_CANDLE_ENTRY_CONTEXT.md) |
@@ -492,6 +500,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 - [KuCoin request and signing funnel](RUST_KUCOIN_FUNNEL.md): predecessor preservation, native refusal resend and compiling custody originals; production adoption remains local.
 | Retire an unissued independent Plan call | Plan/originals CLEAR (dazzy3, 4yjlw0); source review pending | Before a venue skips a declared complete-Plan call it decides not to send (Bitrue B2 cancel batches). | [RUST_PLAN_RETIRE_UNISSUED.md](RUST_PLAN_RETIRE_UNISSUED.md) |
+| Per-call pacing on serial Plans | Plan/originals/source in one engine PR; review pending | Before a serial Plan mixes request kinds with different pacing (WOO trade FIFO, MEXC submit jobs). | [RUST_SERIAL_CALL_PACING.md](RUST_SERIAL_CALL_PACING.md) |
 
 | WOO unsigned public-seed read custody | Local source/fixtures CLEAR;264PASS, sizes fit; unpushed, CI pending | Before converting Markets, Tickers or Funding to independent Background Read observations. | [RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md](RUST_WOO_PUBLIC_SEED_READ_CUSTODY.md) |
 
@@ -508,3 +517,6 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 | Explicit serial call authentication | Plan; originals and source pending | Before mixing unsigned Session calls and provider-signed calls under one serial root. | [RUST_SERIAL_CALL_AUTH.md](RUST_SERIAL_CALL_AUTH.md) |
 
 | MEXC installed signing and private custody | Signing/private-read PR; trading custody follows separately | Before changing MEXC credential setup, identity mapping, REST/WS signing or private request owners. | [RUST_MEXC_INSTALLED_SIGNING.md](RUST_MEXC_INSTALLED_SIGNING.md) |
+| Lighter remaining request and signing funnel | Source reviewed; composed correctness qualification in progress | Before changing private reads, tier mutation, transaction admission, nonce retry or eager signing. | [RUST_LIGHTER_REMAINING_FUNNEL.md](RUST_LIGHTER_REMAINING_FUNNEL.md) |
+
+| BingX managed public/private sockets | Venue-only implementation and production-binding qualification | Before changing BingX socket epochs, listen-key recovery, interests or order-read epoch publication. | [RUST_BINGX_MANAGED_SOCKETS.md](RUST_BINGX_MANAGED_SOCKETS.md) |

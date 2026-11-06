@@ -158,6 +158,7 @@ fn newer_ws_families_survive_stale_rest_while_healthy_peers_advance() {
                 safe_cex_engine::test_support::prepared_now(&mut e)
                     .into_iter()
                     .for_each(drop);
+                // Moving the LIMIT-executed stop would keep its old limit: refused, nothing sent.
                 e.handle(
                     4600.0,
                     Event::Command(safe_cex_engine::Command::AmendOrder {
@@ -167,10 +168,21 @@ fn newer_ws_families_survive_stale_rest_while_healthy_peers_advance() {
                         amount: None,
                     }),
                 );
+                assert!(requests(&mut e).is_empty());
+                // The MARKET take profit moves; the untouched stop keeps its reconciled limit.
+                e.handle(
+                    4600.0,
+                    Event::Command(safe_cex_engine::Command::AmendOrder {
+                        command: 502,
+                        id: "P__position-1__tp".into(),
+                        price: Some(96.0),
+                        amount: None,
+                    }),
+                );
                 let r = requests(&mut e).remove(0);
                 let bytes = r.body.unwrap();
                 for field in [
-                    r#""tpPrice":"95""#,
+                    r#""tpPrice":"96""#,
                     r#""slOrderType":"LIMIT""#,
                     r#""slOrderPrice":"321""#,
                 ] {

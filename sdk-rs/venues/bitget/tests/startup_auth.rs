@@ -158,6 +158,15 @@ fn rejected_key_fails_startup_once_and_stops_retrying() {
     assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
     assert_eq!(error.venue_code.as_deref(), Some("40006"));
     assert!(error.message.contains("Bitget rejected the API key"));
+    let notice = h
+        .events
+        .iter()
+        .find(|event| event.code == safe_cex_engine::log::code::AUTH_REJECTED)
+        .unwrap();
+    assert!(
+        notice.fields.contains(&("venueCode", "40006".into())),
+        "{notice:?}"
+    );
     assert_eq!(h.deactivations, 1);
 }
 
@@ -207,6 +216,22 @@ fn rejected_read_only_ip_fails_startup_without_deactivating() {
     assert_eq!(h.startup_failures.len(), 1);
     assert_eq!(h.startup_failures[0].kind, Some(ErrorKind::AuthPermission));
     assert!(h.startup_failures[0].message.contains("read-only API key"));
+    assert!(
+        h.startup_failures[0]
+            .message
+            .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT),
+        "{}",
+        h.startup_failures[0].message
+    );
+    let notice = h
+        .events
+        .iter()
+        .find(|event| event.code == safe_cex_engine::log::code::AUTH_REJECTED)
+        .unwrap();
+    assert!(
+        notice.fields.contains(&("venueCode", "40018".into())),
+        "{notice:?}"
+    );
     assert_eq!(h.deactivations, 0);
 }
 
@@ -394,5 +419,22 @@ fn fractional_socket_codes_that_round_to_terminal_codes_still_reconnect() {
                 assert_eq!(h.deactivations, 0, "{event} {encoded}");
             }
         }
+    }
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (400, r#"{"code":"40018","msg":"Invalid IP","data":null}"#),
+        (200, r#"{"code":"40018","msg":"Invalid IP","data":null}"#),
+        (
+            401,
+            r#"{"code":"40006","msg":"Invalid ACCESS_KEY","data":null}"#,
+        ),
+    ] {
+        let mut h = expecting(keyed());
+        h.respond(SETTINGS, status, body);
+        run_for(&mut h, 120_000.);
+        assert_eq!(h.startup_failures.len(), 1, "{status} {body}");
     }
 }

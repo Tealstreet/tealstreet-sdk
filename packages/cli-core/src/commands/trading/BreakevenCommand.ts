@@ -24,7 +24,7 @@ export class BreakevenCommand extends TradingBaseCommand {
   readonly description = 'Move the stop loss to break-even';
   readonly category = CommandCategory.Trading;
   readonly aliases = ['breakeven'];
-  readonly examples = ['be', 'be +3%', 'be -0.5%', 'be +100', 'be ETHUSDT'];
+  readonly examples = ['be', 'be +3%', 'be +100', 'be ETHUSDT'];
   readonly requiresConnection = true;
 
   async execute(ctx: CommandContext): Promise<CommandResult> {

@@ -2,8 +2,8 @@ import type { OrderBook } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
-import { normalizeMarket } from '../../exchanges/mexc/mexc.utils';
+import { MexcExchange } from '../reference/mexc/mexc.exchange';
+import { normalizeMarket } from '../reference/mexc/mexc.utils';
 import { DefaultStore } from '../../store/store.base';
 
 type Snapshot = OrderBook & { lastUpdateId?: string };

@@ -22,6 +22,9 @@ pub struct RowAdmission<K> {
     unidentified: bool,
     overflowed: bool,
     rejected: u32,
+    /// Markets of rejected rows, each of which could be an uncertain write;
+    /// "" is a row naming no market.
+    unproven: Vec<String>,
 }
 
 /// Compatibility name for existing snapshot consumers during admission migration.
@@ -34,6 +37,7 @@ impl<K> Default for RowAdmission<K> {
             unidentified: false,
             overflowed: false,
             rejected: 0,
+            unproven: Vec::new(),
         }
     }
 }
@@ -42,8 +46,26 @@ impl<K: Eq + Hash> RowAdmission<K> {
     /// Records coverage only, without reporting a second event when a rejection
     /// or a newer valid update is propagated into an in-flight read.
     pub fn reject(&mut self, key: Option<K>) {
+        self.reject_in(key, "");
+    }
+
+    /// `reject` for a row known to name `symbol`: an uncertain write's fence
+    /// stays on that market alone, not on every market.
+    pub fn reject_in(&mut self, key: Option<K>, symbol: &str) {
         self.rejected = self.rejected.saturating_add(1);
+        self.note_unproven(symbol);
         self.protect(key);
+    }
+
+    fn note_unproven(&mut self, symbol: &str) {
+        if !self.unproven.iter().any(|known| known == symbol) {
+            self.unproven.push(symbol.to_owned());
+        }
+    }
+
+    /// For `Cx::orders_reconciled_except`.
+    pub fn unproven(&self) -> &[String] {
+        &self.unproven
     }
 
     fn protect(&mut self, key: Option<K>) {
@@ -72,6 +94,19 @@ impl<K: Eq + Hash> RowAdmission<K> {
         row_skipped(cx, level, message);
     }
 
+    /// `skip` for a row known to name `symbol`.
+    pub fn skip_in<P>(
+        &mut self,
+        cx: &mut Cx<'_, P>,
+        key: Option<K>,
+        symbol: &str,
+        level: Level,
+        message: impl Into<String>,
+    ) {
+        self.reject_in(key, symbol);
+        row_skipped(cx, level, message);
+    }
+
     /// Admit a mapped REST or WS row; mapping/identity recovery stays with the
     /// venue. A rejected row does not become a default/zero row or a fill.
     pub fn admit<T, P>(
@@ -96,6 +131,9 @@ impl<K: Eq + Hash> RowAdmission<K> {
         self.unidentified |= other.unidentified;
         self.overflowed |= other.overflowed;
         self.rejected = self.rejected.saturating_add(other.rejected);
+        for symbol in &other.unproven {
+            self.note_unproven(symbol);
+        }
         for key in other.protected {
             self.protect(Some(key));
         }
@@ -429,6 +467,15 @@ impl<K: Eq + Hash, T> SnapshotBuilder<K, T> {
         }
     }
 
+    /// `reject` for a row known to name `symbol`.
+    pub fn reject_in(&mut self, key: Option<K>, symbol: &str) {
+        self.coverage.reject_in(key, symbol);
+    }
+
+    pub fn unproven(&self) -> &[String] {
+        self.coverage.unproven()
+    }
+
     pub fn rows(&self) -> &[T] {
         &self.rows
     }
@@ -454,6 +501,17 @@ impl<K: Eq + Hash, T> SnapshotBuilder<K, T> {
     }
 }
 
+/// The store's name for a row's native market, for `reject_in`. A row naming no
+/// market gives "", which keeps every fence.
+pub fn fence_symbol(store: &crate::Store, native: Option<&str>) -> String {
+    let Some(native) = native.filter(|native| !native.is_empty()) else {
+        return String::new();
+    };
+    store
+        .market_by_id(native)
+        .map_or_else(|| native.to_owned(), |market| market.symbol.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -462,6 +520,19 @@ mod tests {
     };
     use crate::book::Book;
     use crate::{Action, Command, Cx, Level, Notice, Response, SocketId, TimerId, Venue};
+
+    #[test]
+    fn rejections_name_their_markets_and_a_plain_one_names_none() {
+        let mut named = SnapshotCoverage::default();
+        named.reject_in(Some("a"), "BTCUSDT");
+        named.reject_in(Some("b"), "BTCUSDT");
+        assert_eq!(named.unproven(), ["BTCUSDT".to_string()]);
+        assert!(!named.allows_absence(&"a"));
+        let mut plain = SnapshotCoverage::default();
+        plain.reject(Some("c"));
+        named.extend(plain);
+        assert_eq!(named.unproven(), ["BTCUSDT".to_string(), String::new()]);
+    }
 
     #[test]
     fn identified_rejection_protects_only_its_identity() {

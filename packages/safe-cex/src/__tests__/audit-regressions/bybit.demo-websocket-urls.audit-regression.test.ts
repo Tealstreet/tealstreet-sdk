@@ -4,7 +4,7 @@ import { BASE_WS_URL, DEMO_WS_URL } from '../../exchanges/bybit/bybit.types';
 import {
   BASE_WS_URL as SPOT_BASE_WS_URL,
   DEMO_WS_URL as SPOT_DEMO_WS_URL,
-} from '../../exchanges/bybit/bybitspot.types';
+} from '../reference/bybit/bybitspot.types';
 
 describe('Bybit demo WebSocket URL audit regression', () => {
   it('keeps demo-only URLs private and public market data on mainnet', () => {

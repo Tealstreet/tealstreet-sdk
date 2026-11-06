@@ -291,5 +291,9 @@ fn queued_cancel_does_not_mark_an_already_filled_order_canceling() {
         r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
     );
     assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Closed);
-    assert_eq!(done(&mut e, 7).unwrap(), "[]");
+    // Only the TP leg was asked for: the shared order's SL goes back on its own.
+    let kept = requests(&mut e).remove(0);
+    assert!(kept.url.ends_with("/tpsl/place_order"), "{}", kept.url);
+    reply(&mut e, kept.id, r#"{"code":0,"data":{"orderId":"kept"}}"#);
+    assert_eq!(done(&mut e, 7).unwrap(), r#"["kept"]"#);
 }

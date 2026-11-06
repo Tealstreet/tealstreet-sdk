@@ -687,15 +687,22 @@ fn owned_first_actual_failures_are_typed_and_never_empty_success() {
             }
             let a = owned_actions(&mut e, 91);
             assert_eq!(a.len(), 1);
-            if matches!(q, Query::PublicTrades { .. }) && failure == 0 {
+            // History now retains transport/venue classification instead of projecting everything to Internal.
+            let expected = match failure {
+                0 => safe_cex_engine::ErrorKind::Network,
+                1 if !matches!(q, Query::PublicTrades { .. }) => {
+                    safe_cex_engine::ErrorKind::VenueUnavailable
+                }
+                _ => safe_cex_engine::ErrorKind::Internal,
+            };
+            assert!(
+                matches!(&a[0], Action::Notice(Notice::CommandFailed { command: 91, error })
+                if error.kind == Some(expected))
+            );
+            if failure == 0 {
                 assert!(
-                    matches!(&a[0], Action::Notice(Notice::CommandFailed { command: 91, error })
-                    if error.kind == Some(safe_cex_engine::ErrorKind::Network)
-                    && error.message == "Kraken history failed: lost before acceptance")
-                );
-            } else {
-                assert!(
-                    matches!(&a[0],Action::Notice(Notice::CommandFailed{command:91,error}) if error.kind==Some(safe_cex_engine::ErrorKind::Internal))
+                    matches!(&a[0], Action::Notice(Notice::CommandFailed { error, .. })
+                    if error.message == "Kraken history failed: lost before acceptance")
                 );
             }
         }
@@ -783,7 +790,7 @@ fn owned_filtered_pages_cannot_authorize_failure_recovery() {
     let a = owned_actions(&mut e, 91);
     assert_eq!(a.len(), 1);
     assert!(
-        matches!(&a[0],Action::Notice(Notice::CommandFailed{error,..}) if error.kind==Some(safe_cex_engine::ErrorKind::Internal))
+        matches!(&a[0],Action::Notice(Notice::CommandFailed{error,..}) if error.kind==Some(safe_cex_engine::ErrorKind::Network))
     );
 }
 #[test]
@@ -1048,5 +1055,108 @@ fn owned_interrupted_stream_discards_valid_unfinished_prefix_after_accepted_page
         if mode == 2 {
             assert_eq!(rows[0]["updatedTime"], NOW - 10.0);
         }
+    }
+}
+
+#[test]
+fn history_refusals_keep_typed_kind_closed_cause_and_native_code() {
+    use safe_cex_engine::{ErrorCause, ErrorKind};
+    for (status, code, kind, cause) in [
+        (
+            200,
+            "apiLimitExceeded",
+            ErrorKind::RateLimited,
+            "HISTORY_RATE_LIMITED",
+        ),
+        (
+            200,
+            "authenticationError",
+            ErrorKind::AuthInvalid,
+            "HISTORY_AUTH_INVALID",
+        ),
+        (
+            403,
+            "unauthorized",
+            ErrorKind::AuthPermission,
+            "HISTORY_AUTH_PERMISSION",
+        ),
+        (
+            200,
+            "invalidArgument",
+            ErrorKind::InvalidInput,
+            "HISTORY_INVALID_PARAMS",
+        ),
+        (
+            200,
+            "newVenueError",
+            ErrorKind::Rejected,
+            "HISTORY_VENUE_ERROR",
+        ),
+        (
+            503,
+            "authenticationError",
+            ErrorKind::VenueUnavailable,
+            "HISTORY_VENUE_ERROR",
+        ),
+    ] {
+        let (mut e, _) = ready();
+        let request = query(&mut e, orders());
+        reply(
+            &mut e,
+            &request,
+            status,
+            &json!({"result":"error", "error":code}).to_string(),
+        );
+        let actions = owned_actions(&mut e, 91);
+        assert_eq!(actions.len(), 1);
+        assert!(
+            matches!(&actions[0], Action::Notice(Notice::CommandFailed { error, .. })
+            if error.kind == Some(kind) && serde_json::to_value(error).unwrap()["causeCode"] == cause
+                && error.venue_code.as_deref() == Some(code) && error.outcome.is_none()),
+            "{status} {code}: {actions:?}"
+        );
+    }
+    let (mut e, _) = ready();
+    let request = query(&mut e, orders());
+    reply(&mut e, &request, 200, r#"{"result":"success"}"#);
+    let actions = owned_actions(&mut e, 91);
+    assert!(
+        matches!(&actions[0], Action::Notice(Notice::CommandFailed { error, .. })
+        if error.kind == Some(ErrorKind::Internal) && error.cause_code == Some(ErrorCause::HistoryDecode)
+            && error.message.starts_with("Kraken history failed: response did not contain the expected list:" ))
+    );
+}
+
+#[test]
+fn order_row_refusal_names_the_closed_predicate_without_exposing_row_values() {
+    for (field, value, reason) in [
+        ("uid", json!(""), "identity"),
+        ("quantity", json!("0"), "quantity"),
+        ("filled", json!("3"), "filledQuantity"),
+        ("timestamp", json!("-1"), "timestamp"),
+        (
+            "lastUpdateTimestamp",
+            json!(NOW - 20_000.0),
+            "timestampOrder",
+        ),
+    ] {
+        let (mut e, _) = ready();
+        let request = query(&mut e, orders());
+        let mut row = event("event", "native-order", "OrderPlaced", NOW);
+        row["event"]["OrderPlaced"]["order"][field] = value;
+        answer(&mut e, &request, "elements", vec![row]);
+        let error = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .expect("strict history rejection");
+        let detail = serde_json::to_value(error).unwrap();
+        assert_eq!(detail["causeCode"], "HISTORY_DECODE");
+        assert_eq!(
+            detail["historyDecode"],
+            json!({"schema":"krakenOrders","reason":reason})
+        );
     }
 }

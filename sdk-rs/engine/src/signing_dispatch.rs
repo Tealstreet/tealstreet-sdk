@@ -159,9 +159,10 @@ pub(crate) struct Pending {
     pub(crate) nonce_repairs: u8,
 }
 impl Pending {
-    #[cfg(feature = "address-nonce")]
+    #[cfg(any(feature = "address-nonce", feature = "nonce-handoff"))]
     pub(crate) fn nonce_identity_current(&self, identities: &crate::signing::Identities) -> bool {
         self.nonce_claim.as_ref().is_none_or(|claim| {
+            #[cfg(not(feature = "nonce-handoff"))]
             if !claim.address_bound() {
                 return true;
             }
@@ -553,7 +554,7 @@ impl Dispatch {
         identities: &crate::signing::Identities,
     ) -> Result<SignRequest, SignError> {
         let p = self.pending.get_mut(&id).ok_or(SignError::Unavailable)?;
-        #[cfg(feature = "address-nonce")]
+        #[cfg(any(feature = "address-nonce", feature = "nonce-handoff"))]
         if !p.nonce_identity_current(identities) {
             return Err(SignError::InvalidRequest);
         }
@@ -622,7 +623,14 @@ impl Dispatch {
                             }
                             crate::signing::Operation::Sha256 { payload } => Some(payload),
                             crate::signing::Operation::Present { key }
-                                if *key == reservation.authority.credential.reference =>
+                                if !reservation.authority.signing_only
+                                    && *key == reservation.authority.credential.reference =>
+                            {
+                                None
+                            }
+                            // Public proof of the signing key, never its material.
+                            crate::signing::Operation::PublicAddress { key }
+                                if *key == reservation.authority.signing =>
                             {
                                 None
                             }
@@ -631,7 +639,8 @@ impl Dispatch {
                         if payload.is_some_and(|parts| {
                             parts.iter().any(|part| {
                                 matches!(part, crate::signing::PayloadPart::Credential { key }
-                            if *key != reservation.authority.credential.reference)
+                            if reservation.authority.signing_only
+                                || *key != reservation.authority.credential.reference)
                             })
                         }) {
                             return Err(SignError::InvalidRequest);
@@ -681,6 +690,13 @@ impl Dispatch {
                 .filter(|operation| matches!(operation, crate::signing::Operation::Sign { .. }))
                 .count()
                 != 1
+        {
+            return Err(SignError::InvalidRequest);
+        }
+        // Every path, nonce or not: a credential-absent primary's signing ref
+        // is never presented or interpolated.
+        if let Some(signing_only) = identities.signing_only_ref()
+            && work.presents(signing_only)
         {
             return Err(SignError::InvalidRequest);
         }
@@ -752,6 +768,10 @@ impl Dispatch {
                 Ok(false) => {
                     drop(result);
                     return Some(Completion::NonceStale(p));
+                }
+                #[cfg(feature = "nonce-handoff")]
+                Err(crate::nonce::NonceError::InvalidClaim) => {
+                    return Some(Completion::Failed(p, SignError::InvalidRequest));
                 }
                 Err(_) => return Some(Completion::Failed(p, SignError::Unavailable)),
             }

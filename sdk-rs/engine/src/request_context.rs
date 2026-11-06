@@ -238,6 +238,12 @@ impl SessionHeaders {
         }
     }
 
+    /// `Authorization: Bearer <token>`; the formatted value is wiped on refusal
+    /// and on drop like any `SecretHeaderValue`.
+    pub fn bearer(token: &str) -> Result<Self, Error> {
+        SecretHeaderValue::new(format!("Bearer {token}")).map(Self::authorization)
+    }
+
     pub fn placed(mut self, placement: SessionPlacement) -> Self {
         self.placement = placement;
         self
@@ -1341,6 +1347,10 @@ struct WriteLeg {
     superseded: bool,
 }
 
+/// A Plan the engine sealed Unknown on an unproven reply after an earlier
+/// refusal: that refusal's words would misreport what stands.
+pub(crate) const UNKNOWN_AFTER_REFUSAL: &str = "The outcome of this order change is unknown: a later request was not confirmed. Check Open Orders";
+
 /// Bounded evidence retained for the whole command, including prior retries.
 /// Registration order is logical planning order, never callback arrival order.
 pub struct CommandWrites {
@@ -1353,6 +1363,10 @@ pub struct CommandWrites {
     evidence: evidence::EvidenceBudget,
     // An earlier attempt of this intent may have reached the venue.
     inherited_uncertain: bool,
+    /// The venue's words for a failure whose terminal presents none of its own.
+    presentation: Option<String>,
+    /// The engine recorded an unproven status reply the venue never saw.
+    unproven_status: bool,
     #[cfg(feature = "serial-plans")]
     stream: Option<Box<StreamedWrites>>,
 }
@@ -1366,6 +1380,7 @@ struct StreamedWrites {
     ids: Vec<String>,
     settled: usize,
     refused: usize,
+    sent_refusal: bool,
     effects: bool,
     retained: Vec<(RequestId, VenueError, RejectionReports)>,
     retained_bytes: usize,
@@ -1423,6 +1438,8 @@ impl CommandWrites {
             report_messages: 0,
             evidence: evidence::EvidenceBudget::default(),
             inherited_uncertain: false,
+            presentation: None,
+            unproven_status: false,
             #[cfg(feature = "serial-plans")]
             stream: None,
         })
@@ -1767,7 +1784,9 @@ impl CommandWrites {
         status: u16,
         capture: impl FnOnce(&mut UnprovenEvidence),
     ) -> Result<(), Error> {
-        self.capture_unproven_result(id, |budget| UnprovenEvidence::new(budget, status), capture)
+        self.capture_unproven_result(id, |budget| UnprovenEvidence::new(budget, status), capture)?;
+        self.unproven_status = true;
+        Ok(())
     }
 
     pub(crate) fn unproven_native_result(
@@ -1976,9 +1995,22 @@ impl CommandWrites {
         self.inherited_uncertain = true;
     }
 
+    /// Words for this journal's failure when its terminal presents none; the
+    /// latest replaces any earlier. Outcome and protection stay projected.
+    #[cfg(feature = "http-plans")]
+    pub(crate) fn present_failure(&mut self, message: String) -> Result<(), Error> {
+        if self.sealed {
+            return Err(Error::State);
+        }
+        self.presentation = Some(message);
+        Ok(())
+    }
+
     /// Seal exactly once. A caller's fallback text never chooses the outcome;
     /// sent-leg errors have priority over pre-send siblings. Earlier release
     /// evidence survives a signer/transport failure on a newer physical retry.
+    /// A fallback naming what a protective edit left (`protection`) supplies the
+    /// words and that fact; the outcome still comes from the legs.
     pub fn fail(&mut self, fallback: VenueError) -> Result<VenueError, Error> {
         let (error, budget) = self.failure_projection(fallback, None)?;
         self.evidence = budget;
@@ -2002,6 +2034,8 @@ impl CommandWrites {
         if self.sealed {
             return Err(Error::State);
         }
+        let presented = (fallback.protection.is_some() || fallback.presents)
+            .then(|| (fallback.message.clone(), fallback.protection));
         let mut projected_budget = self.evidence;
         #[cfg(feature = "serial-plans")]
         let any_released = self.streamed().is_some_and(|stream| stream.settled > 0)
@@ -2036,6 +2070,11 @@ impl CommandWrites {
                 });
         #[cfg(feature = "serial-plans")]
         let all_rejected = all_rejected && !self.streamed().is_some_and(|stream| stream.effects);
+        let all_not_sent = all_rejected && self.attempts.iter()
+            .filter(|a| a.released && self.terminal(a))
+            .all(|a| matches!(&a.result, Some(WriteResult::Rejected(e)) if e.outcome == Some(Outcome::NotSent)));
+        #[cfg(feature = "serial-plans")]
+        let all_not_sent = all_not_sent && !self.streamed().is_some_and(|s| s.sent_refusal);
         let error = |a: &WriteAttempt| match &a.result {
             Some(
                 WriteResult::Rejected(error)
@@ -2057,14 +2096,18 @@ impl CommandWrites {
         };
         // Settled serial refusals precede every live call in planning order.
         #[cfg(feature = "serial-plans")]
-        let selected = self
+        let retained = self
             .streamed()
             .and_then(|stream| stream.retained.first())
-            .map(|(_, error, _)| error.clone())
-            .or_else(|| select(true))
-            .or_else(|| select(false));
+            .map(|(_, error, _)| error.clone());
         #[cfg(not(feature = "serial-plans"))]
-        let selected = select(true).or_else(|| select(false));
+        let retained: Option<VenueError> = None;
+        // The text a settled refusal gave: stale once a later write is unknown.
+        let refusal_text = retained.is_some()
+            || self.attempts.iter().any(|attempt| {
+                self.terminal(attempt) && matches!(attempt.result, Some(WriteResult::Rejected(_)))
+            });
+        let selected = retained.or_else(|| select(true)).or_else(|| select(false));
         let mut overflow = self.attempts.iter().any(|attempt| attempt.id_overflow);
         let mut error = match selected {
             Some(error) => error, // Already-budgeted facts are never charged again.
@@ -2088,6 +2131,8 @@ impl CommandWrites {
             Some(Outcome::NotSent)
         } else if uncertain || overflow {
             Some(Outcome::Unknown)
+        } else if all_not_sent {
+            Some(Outcome::NotSent)
         } else if all_rejected {
             Some(Outcome::Rejected)
         } else {
@@ -2152,6 +2197,14 @@ impl CommandWrites {
             .filter(|dropped| *dropped > 0)
         {
             error.message = format!("{} [truncated: {dropped} more refusals]", error.message);
+        }
+        if let Some((message, protection)) = presented {
+            error.message = message;
+            error.protection = protection;
+        } else if let Some(message) = &self.presentation {
+            error.message = message.clone();
+        } else if self.unproven_status && refusal_text && error.outcome == Some(Outcome::Unknown) {
+            error.message = UNKNOWN_AFTER_REFUSAL.into();
         }
         #[cfg(feature = "http-plans")]
         if let Some(note) = note {
@@ -2376,6 +2429,7 @@ impl CommandWrites {
                                 stream.effects |= !partial.order_ids.is_empty();
                                 stream.ids.extend(partial.order_ids);
                             }
+                            stream.sent_refusal |= error.outcome != Some(Outcome::NotSent);
                             stream.refused += 1;
                             let bytes = error.message.len()
                                 + error.venue_code.as_ref().map_or(0, String::len)

@@ -1,5 +1,6 @@
 //! Official clearinghouseState, frontendOpenOrders and WsUserFills payload shapes.
 mod support;
+use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Event};
 use support::*;
 /// Native cadence of the venue's recurring account poll; policy scales it.
@@ -19,8 +20,8 @@ fn private_bootstrap_separates_positions_and_market_settings() {
 fn newer_stream_state_wins_over_inflight_rest_and_failed_reads_preserve_state() {
     let (mut e, s) = ready("disabled");
     let (s, _) = reconnect(&mut e, s, 2000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -156,8 +157,8 @@ fn user_event_order_objects_and_raw_arrays_remove_terminal_orders() {
 fn newer_authoritative_rest_closes_positions_after_partial_stream() {
     let (mut e, s) = ready("disabled");
     let (s, _) = reconnect(&mut e, s, 2000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -239,8 +240,8 @@ fn fill_count(frame: &[u8]) -> u32 {
 fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
     let (mut e, s) = ready_with_dex("disabled", true);
     let (s, _) = reconnect(&mut e, s, 2000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -255,8 +256,8 @@ fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
         4000.0,
         r#"{"channel":"userFills","data":{"fills":[{"coin":"xyz:FOO","side":"B","px":"50","sz":"2","time":3000,"tid":11,"oid":91,"dir":"Open Long","startPosition":"0","closedPnl":"0","fee":"0.01"}]}}"#,
     );
-    let timer = e
-        .drain_actions()
+    let timer = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
                 (at_ms == 4350.0).then_some(timer)
@@ -266,8 +267,8 @@ fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
         })
         .unwrap();
     e.handle(4350.0, Event::TimerFired { timer });
-    let next = e
-        .drain_actions()
+    let next = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
                 (at_ms == 4700.0).then_some(timer)
@@ -289,7 +290,7 @@ fn hip3_fill_keeps_a_refresh_pending_behind_inflight_state() {
         reply(&mut e, &r, 200, body);
     }
     e.handle(4700.0, Event::TimerFired { timer: next });
-    assert!(e.drain_actions().any(|a|matches!(a,Action::Http(r) if kind(&r)=="clearinghouseState" && r.body.as_ref().unwrap().contains("xyz"))));
+    assert!(prepared_now(&mut e).into_iter().any(|a|matches!(a,Action::Http(r) if kind(&r)=="clearinghouseState" && r.body.as_ref().unwrap().contains("xyz"))));
 }
 #[test]
 fn rest_after_cancel_trust_window_reenables_live_order_updates() {
@@ -301,8 +302,8 @@ fn rest_after_cancel_trust_window_reenables_live_order_updates() {
         r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","origSz":"1","sz":"0"},"status":"canceled"}]}"#,
     );
     let (s, _) = reconnect(&mut e, s, 40000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -396,8 +397,8 @@ fn delayed_hip3_state_preserves_position_after_newer_fill() {
 fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
     let (mut e, s) = ready("disabled");
     let (s, _) = reconnect(&mut e, s, 2000.0);
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -432,8 +433,8 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
         );
     }
     assert!(e.store().order("9").is_some());
-    let timer = e
-        .drain_actions()
+    let timer = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
                 (at_ms == 3700.0).then_some(timer)
@@ -443,8 +444,8 @@ fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
         })
         .expect("invalidated reconnect snapshot must retry");
     e.handle(3700.0, Event::TimerFired { timer });
-    let r = e
-        .drain_actions()
+    let r = prepared_now(&mut e)
+        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 (kind(&r) == "frontendOpenOrders").then_some(r)
@@ -480,8 +481,8 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
             &format!(r#"{{"channel":"orderUpdates","data":[{{"order":{row},"status":"open"}}]}}"#),
         );
         let (_replacement, _) = reconnect(&mut e, s, 2100.0);
-        let r = e
-            .drain_actions()
+        let r = prepared_now(&mut e)
+            .into_iter()
             .find_map(|a| {
                 if let Action::Http(r) = a {
                     (kind(&r) == "frontendOpenOrders").then_some(r)
@@ -512,8 +513,8 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
                 ids: vec!["9".into()],
             }),
         );
-        let cancel = e
-            .drain_actions()
+        let cancel = prepared_now(&mut e)
+            .into_iter()
             .find_map(|a| {
                 if let Action::Http(r) = a {
                     r.url.ends_with("/exchange").then_some(r)
@@ -530,11 +531,17 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
         e.handle(finished_at, Event::HttpChunk {request: r.id, data: br#"{"coin":"BTC","oid":10,"side":"B","limitPx":"80","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}]"#});
         e.handle(finished_at, Event::HttpEnd { request: r.id });
         assert!(e.store().order("9").is_none());
-        assert!(
-            e.drain_actions().any(
+        let actions = prepared_now(&mut e);
+        if finished_at < 22_100.0 {
+            assert!(actions.into_iter().any(
                 |a| matches!(a, Action::SetTimer { at_ms, .. } if at_ms == finished_at + 500.0)
-            )
-        );
+            ));
+        } else {
+            assert!(
+                e.store().order("10").is_none(),
+                "expired stream publishes no rows"
+            );
+        }
     }
 }
 
@@ -542,15 +549,15 @@ fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
 fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timers() {
     let (mut e, _) = ready_with_dex("disabled", true);
     let now = 2000.;
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     e.handle(
         now,
         Event::PollScaleChanged {
             scale: f64::INFINITY,
         },
     );
-    let stale: Vec<_> = e
-        .drain_actions()
+    let stale: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::ClearTimer { timer } => Some(timer),
             _ => None,
@@ -568,7 +575,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                 scale: interval / POLL_MS,
             },
         );
-        let actions: Vec<_> = e.drain_actions().collect();
+        let actions: Vec<_> = prepared_now(&mut e).into_iter().collect();
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
         let timers: Vec<_> = actions
             .iter()
@@ -587,12 +594,16 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
     }
     for timer in obsolete {
         e.handle(now, Event::TimerFired { timer });
-        assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            !prepared_now(&mut e)
+                .into_iter()
+                .any(|a| matches!(a, Action::Http(_)))
+        );
     }
     let (timer, due) = current.unwrap();
     e.handle(due, Event::TimerFired { timer });
-    let mut pending: Vec<_> = e
-        .drain_actions()
+    let mut pending: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -610,7 +621,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: f64::INFINITY,
         },
     );
-    e.drain_actions().for_each(drop);
+    prepared_now(&mut e).into_iter().for_each(drop);
     for _ in 0..12 {
         if pending.is_empty() {
             break;
@@ -628,7 +639,7 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
                     },
                 },
             );
-            pending.extend(e.drain_actions().filter_map(|a| match a {
+            pending.extend(prepared_now(&mut e).into_iter().filter_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
             }));
@@ -641,8 +652,8 @@ fn periodic_account_policy_changes_preserve_inflight_reads_and_fence_stale_timer
             scale: 10_000. / POLL_MS,
         },
     );
-    let resumed: Vec<_> = e
-        .drain_actions()
+    let resumed: Vec<_> = prepared_now(&mut e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
             _ => None,
@@ -771,8 +782,8 @@ fn resync(
     let (replacement, at) = reconnect(e, s.socket, now.max(s.now));
     s.socket = replacement;
     s.now = at;
-    let requests = e
-        .drain_actions()
+    let requests = prepared_now(e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -799,7 +810,8 @@ fn resync(
             },
         );
     }
-    e.drain_actions()
+    prepared_now(e)
+        .into_iter()
         .filter_map(|a| match a {
             Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent {
                 message,
@@ -1037,4 +1049,259 @@ fn unified_spot_state_publishes_spot_holdings_as_coins() {
     assert_eq!(btc.amount, 0.5);
     // Valued at mark (100), as collateral is, not the mid that allMids moved to 110.
     assert_eq!(btc.notional, 50.0);
+}
+
+#[test]
+fn a_real_trigger_row_with_a_null_tif_stays_visible() {
+    let (mut e, s) = ready("disabled");
+    let row = r#"{"coin":"BTC","oid":77,"side":"A","limitPx":"1920.0","triggerPx":"1929.0","isTrigger":true,"isPositionTpsl":false,"reduceOnly":true,"orderType":"Stop Market","origSz":"0.005","sz":"0.005","tif":null,"cloid":null,"timestamp":1793547192000}"#;
+    let (_, _) = reconnect(&mut e, s, 40000.0);
+    let requests = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let orders = format!("[{row}]");
+    for r in requests {
+        let body = if kind(&r) == "frontendOpenOrders" {
+            orders.as_str()
+        } else {
+            STATE
+        };
+        e.handle(
+            40001.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+    let order = e.store().order("77").expect("the stop shows");
+    assert_eq!(order.kind, safe_cex_engine::model::OrderType::StopLoss);
+    assert_eq!(order.amount, 0.005);
+}
+
+#[test]
+fn a_triggered_stop_does_not_show_price_zero() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":78,"side":"A","limitPx":"88.5","triggerPx":"0.0","orderType":"Stop Market","origSz":"1","sz":"1","tif":"Gtc"},"status":"triggered"}]}"#,
+    );
+    assert_eq!(e.store().order("78").unwrap().price, 88.5);
+}
+
+#[test]
+fn a_fill_arms_an_order_read_because_partial_fills_send_no_update() {
+    let (mut e, s) = ready("disabled");
+    e.drain_actions().for_each(drop);
+    message(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"userFills","data":{"user":"0x14791697260e4c9a71f18484c9f997b308e59325","fills":[{"coin":"BTC","px":"90","sz":"0.1","side":"B","time":2000,"startPosition":"0","dir":"Open Long","closedPnl":"0","hash":"0x0","oid":9,"crossed":true,"fee":"0","tid":5,"feeToken":"USDC"}]}}"#,
+    );
+    let armed = e
+        .drain_actions()
+        .any(|a| matches!(a, Action::SetTimer { at_ms, .. } if at_ms < 3001.0));
+    assert!(armed);
+}
+
+// Live, ZRO: 160 closing in five partial fills; the feed froze at 49.3 and later frames omit the coin.
+#[test]
+fn a_state_frame_that_omits_a_coin_closes_its_position() {
+    let (mut e, s) = ready("disabled");
+    let frame = |time: u64, rows: &str| {
+        format!(
+            r#"{{"channel":"clearinghouseState","data":{{"user":"x","dex":"","clearinghouseState":{{"assetPositions":[{rows}],"marginSummary":{{"accountValue":"1000","totalMarginUsed":"0","totalNtlPos":"0","totalRawUsd":"1000"}},"withdrawable":"1000","time":{time}}}}}}}"#
+        )
+    };
+    let row = |coin: &str, szi: &str| {
+        format!(
+            r#"{{"position":{{"coin":"{coin}","szi":"{szi}","entryPx":"100","positionValue":"100","unrealizedPnl":"0","liquidationPx":null,"marginUsed":"1","leverage":{{"type":"cross","value":10}}}}}}"#
+        )
+    };
+    let both = format!("{},{}", row("BTC", "49.3"), row("ETH", "2"));
+    message(&mut e, s, 3000.0, &frame(3000, &both));
+    assert!(
+        e.store()
+            .positions()
+            .iter()
+            .any(|p| p.symbol == "BTC-PERP" && p.contracts == 49.3)
+    );
+    message(&mut e, s, 4000.0, &frame(4000, &row("ETH", "2")));
+    let symbols: Vec<_> = e
+        .store()
+        .positions()
+        .iter()
+        .map(|p| p.symbol.as_str())
+        .collect();
+    assert_eq!(symbols, ["ETH-PERP"]);
+}
+
+#[test]
+fn failed_hip3_orders_retry_after_peer_scope_loaded_and_honor_retry_after() {
+    let (mut e, socket) = ready_with_dex("disabled", true);
+    assert!(e.store().loaded().orders);
+    let (_socket, _) = reconnect(&mut e, socket, 2000.0);
+    let mut requests = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut failed = false;
+    let mut retained = Vec::new();
+    for _ in 0..20 {
+        for request in requests {
+            let body: serde_json::Value =
+                serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+            if kind(&request) == "frontendOpenOrders" && body["dex"] == "xyz" {
+                failed = true;
+                e.handle(
+                    3000.0,
+                    Event::HttpResponse {
+                        request: request.id,
+                        response: safe_cex_engine::Response {
+                            status: 429,
+                            headers: "Retry-After: 12\r\n",
+                            body: "Too many requests",
+                        },
+                    },
+                );
+            } else if kind(&request) == "frontendOpenOrders" {
+                reply(&mut e, &request, 200, "[]");
+            } else if kind(&request) == "clearinghouseState" {
+                reply(&mut e, &request, 200, STATE);
+            }
+        }
+        requests = Vec::new();
+        for action in prepared_now(&mut e) {
+            if let Action::Http(request) = action {
+                requests.push(request);
+            } else {
+                retained.push(action);
+            }
+        }
+        if requests.is_empty() {
+            break;
+        }
+    }
+    assert!(failed, "the failed read must belong to the HIP-3 scope");
+    let actions = retained;
+    let timer = actions
+        .into_iter()
+        .find_map(|action| {
+            if let Action::SetTimer { timer, at_ms } = action {
+                (at_ms == 15_000.0).then_some(timer)
+            } else {
+                None
+            }
+        })
+        .expect("an already-loaded peer scope cannot suppress the 12-second retry");
+    e.handle(15_000.0, Event::TimerFired { timer });
+    let retried = prepared_now(&mut e)
+        .into_iter()
+        .filter_map(|action| {
+            if let Action::Http(request) = action {
+                Some(request)
+            } else {
+                None
+            }
+        })
+        .find(|request| kind(request) == "frontendOpenOrders")
+        .expect("the failed orders scope must be retried");
+    let body: serde_json::Value = serde_json::from_str(retried.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["dex"], "xyz");
+    reply(&mut e, &retried, 200, "[]");
+    assert!(e.store().loaded().orders);
+}
+
+#[test]
+fn public_startup_diagnostics_never_report_private_order_reads() {
+    use safe_cex_engine::Venue;
+    use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+    let venue = Hyperliquid::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    });
+    let (ready, _) = ready("disabled");
+    let mut store = safe_cex_engine::Store::default();
+    store.set_markets(ready.store().markets().to_vec());
+    assert!(!store.loaded().orders);
+    assert!(
+        venue
+            .startup_diagnostics(&store)
+            .contains(&("stage", "tickers".into()))
+    );
+}
+
+#[test]
+fn startup_watchdog_exposes_stage_original_deadline_and_rate_limit_count() {
+    let (mut e, socket) = ready("disabled");
+    e.set_account_startup(true);
+    let (_socket, _) = reconnect(&mut e, socket, 2000.0);
+    for action in prepared_now(&mut e) {
+        if let Action::Http(request) = action {
+            if kind(&request) == "frontendOpenOrders" {
+                reply(&mut e, &request, 429, "Too many requests");
+            } else if kind(&request) == "clearinghouseState" {
+                reply(&mut e, &request, 200, STATE);
+            }
+        }
+    }
+    e.store_mut().reset_account();
+    e.store_mut().set_balance(Default::default());
+    e.store_mut().set_positions(vec![]);
+    prepared_now(&mut e);
+    e.handle(61_000.0, Event::PollScaleChanged { scale: 1.0 });
+    let notice = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "startup.incomplete" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("the startup watchdog must report the unloaded orders section");
+    assert!(
+        notice
+            .fields
+            .contains(&("stage", "frontendOpenOrders".into()))
+    );
+    assert!(notice.fields.contains(&("elapsedMs", 60_000.0.into())));
+    assert!(notice.fields.contains(&("deadlineMs", 60_000.0.into())));
+    assert!(notice.fields.contains(&("readTimeoutMs", 20_000.0.into())));
+    assert!(notice.fields.contains(&("http429Count", 1.0.into())));
+    e.handle(361_000.0, Event::PollScaleChanged { scale: 1.0 });
+    let repeated = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == "startup.incomplete" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .expect("a repeated notice must retain the original startup deadline");
+    assert!(repeated.fields.contains(&("elapsedMs", 360_000.0.into())));
+    assert!(repeated.fields.contains(&("deadlineMs", 60_000.0.into())));
 }

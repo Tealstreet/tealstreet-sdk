@@ -71,12 +71,21 @@ fn failed_and_malformed_snapshots_never_clear_account() {
 }
 
 #[test]
-fn empty_position_snapshot_blocks_older_rest_and_zero_updates_cannot_reopen() {
+fn empty_position_snapshot_preserves_rows_and_zero_updates_cannot_reopen() {
     let mut h = Harness::classic();
     let request = h.take("/all-position");
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[]}"#);
+    assert_eq!(
+        h.engine.store().positions().len(),
+        1,
+        "WS omission is not closure"
+    );
     h.reply(request.id, 200, POSITION);
-    assert!(h.engine.store().positions().is_empty());
+    assert_eq!(
+        h.engine.store().positions().len(),
+        1,
+        "REST row must remain admissible"
+    );
     h.private_message(r#"{"arg":{"channel":"positions"},"action":"update","data":[{"symbol":"BTCUSDT","holdSide":"long","total":"1","openPriceAvg":"90","posMode":"one_way_mode","marginMode":"crossed","uTime":"200"}]}"#);
     h.timer_after(500.0);
     let request = h.take("/all-position");
@@ -118,7 +127,14 @@ fn terminal_order_tombstone_and_ws_open_grace_guard_rest() {
         r#"{"code":"00000","data":{"entrustedList":[]}}"#,
     );
     h.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
-    assert!(h.engine.store().order("1").is_none());
+    // The read went out before both events, so it may not replace BTCUSDT's rows:
+    // the canceled order stays canceled (never resurrected), the live one stays.
+    assert!(
+        h.engine
+            .store()
+            .order("1")
+            .is_none_or(|order| order.status != safe_cex_engine::model::OrderStatus::Open)
+    );
     assert!(h.engine.store().order("2").is_some());
 }
 
@@ -428,6 +444,21 @@ fn row_engine(unified: bool) -> Harness {
         Harness::classic()
     }
 }
+fn position_census(h: &mut Harness, unified: bool, rows: serde_json::Value) {
+    let (path, body) = if unified {
+        (
+            "/current-position",
+            serde_json::json!({"code":"00000","data":{"list":rows}}),
+        )
+    } else {
+        (
+            "/all-position",
+            serde_json::json!({"code":"00000","data":rows}),
+        )
+    };
+    h.respond(path, 200, &body.to_string());
+}
+
 fn position_message(rows: serde_json::Value) -> String {
     serde_json::json!({"arg":{"channel":"positions","topic":"position"},"action":"snapshot","data":rows}).to_string()
 }
@@ -439,10 +470,12 @@ fn malformed_ws_positions_retain_cached_leg_and_admit_peers_for_classic_and_uta(
     for unified in [false, true] {
         for malformed in [serde_json::json!({"bad":1}), serde_json::json!("-1")] {
             let mut h = row_engine(unified);
-            h.private_message(&position_message(serde_json::json!([
+            let seed = serde_json::json!([
                 hedge_row("long", serde_json::json!("2")),
                 hedge_row("short", serde_json::json!("3"))
-            ])));
+            ]);
+            position_census(&mut h, unified, seed.clone());
+            h.private_message(&position_message(seed));
             h.private_message(&position_message(serde_json::json!([
                 hedge_row("long", malformed),
                 hedge_row("short", serde_json::json!("5"))
@@ -471,9 +504,20 @@ fn malformed_ws_positions_retain_cached_leg_and_admit_peers_for_classic_and_uta(
                     .any(|m| m.contains("skipped Bitget position stream record"))
             );
             h.private_message(&position_message(serde_json::json!([])));
+            assert_eq!(
+                h.engine.store().positions().len(),
+                2,
+                "empty WS retains both legs"
+            );
+            h.now += 5_001.0;
+            h.command(safe_cex_engine::Command::Venue {
+                command: 880,
+                action: safe_cex_engine::VenueAction::ReadPositions,
+            });
+            position_census(&mut h, unified, serde_json::json!([]));
             assert!(
                 h.engine.store().positions().is_empty(),
-                "authoritative empty follow-up clears retained leg"
+                "clean REST absence clears retained legs"
             );
         }
     }
@@ -481,10 +525,12 @@ fn malformed_ws_positions_retain_cached_leg_and_admit_peers_for_classic_and_uta(
 #[test]
 fn unidentified_ws_position_row_holds_absence_while_known_peer_updates() {
     let mut h = row_engine(false);
-    h.private_message(&position_message(serde_json::json!([
+    let seed = serde_json::json!([
         hedge_row("long", serde_json::json!("2")),
         hedge_row("short", serde_json::json!("3"))
-    ])));
+    ]);
+    position_census(&mut h, false, seed.clone());
+    h.private_message(&position_message(seed));
     h.private_message(&position_message(serde_json::json!([
         {},
         hedge_row("short", serde_json::json!("5"))
@@ -594,21 +640,25 @@ fn repeated_malformed_ws_snapshot_cannot_starve_fresh_rest_only_position_peer() 
 }
 
 #[test]
-fn malformed_snapshot_cannot_erase_clean_empty_proof_for_an_older_rest_read() {
-    let mut h = Harness::classic();
+fn empty_then_malformed_ws_snapshot_cannot_fabricate_a_rest_absence_fence() {
+    let mut h = two_market_rows();
     let read = h.take("/all-position");
     h.private_message(&position_message(serde_json::json!([])));
+    assert_eq!(h.engine.store().positions().len(), 1);
     h.now += 1.0;
     h.private_message(&position_message(serde_json::json!([{}])));
-    let peer = hedge_row("short", serde_json::json!("3"));
+    let mut peer = hedge_row("long", serde_json::json!("3"));
+    peer["symbol"] = serde_json::json!("ETHUSDT");
+    peer["posMode"] = serde_json::json!("one_way_mode");
     h.reply(
         read.id,
         200,
         &serde_json::json!({"code":"00000","data":[peer]}).to_string(),
     );
-    assert!(
-        h.engine.store().positions().is_empty(),
-        "bad snapshot erased earlier clean-empty read fence"
+    assert_eq!(
+        h.engine.store().positions().len(),
+        2,
+        "malformed BTC is retained and REST-only ETH is admitted"
     );
     h.timer_after(499.0);
     h.respond(
@@ -619,19 +669,21 @@ fn malformed_snapshot_cannot_erase_clean_empty_proof_for_an_older_rest_read() {
     assert_eq!(
         h.engine.store().positions().len(),
         1,
-        "fresh read after clean proof must heal normally"
+        "fresh REST heals the malformed observation"
     );
+    assert_eq!(h.engine.store().positions()[0].symbol, "ETHUSDT");
 }
+
 #[test]
 fn rejected_ws_leg_protects_mode_coherence_through_an_older_rest_join() {
     let mut h = Harness::classic();
     let hedge = hedge_row("long", serde_json::json!("2"));
-    h.private_message(&position_message(serde_json::json!([hedge])));
     h.respond(
         "/all-position",
         200,
         &serde_json::json!({"code":"00000","data":[hedge]}).to_string(),
     );
+    h.private_message(&position_message(serde_json::json!([hedge])));
     h.timer_after(500.0);
     let old = h.take("/all-position");
     h.now += 1.0;
@@ -720,15 +772,15 @@ fn rejected_ws_protection_retains_cancel_route_against_older_rest_plan_metadata(
 }
 
 #[test]
-fn rejected_ws_leg_does_not_erase_prior_valid_financial_timestamp() {
+fn rejected_ws_leg_preserves_local_receipt_protection_until_a_fresh_read_after_grace() {
     let mut h = Harness::classic();
     let seed = hedge_row("long", serde_json::json!("2"));
-    h.private_message(&position_message(serde_json::json!([seed])));
     h.respond(
         "/all-position",
         200,
         &serde_json::json!({"code":"00000","data":[seed]}).to_string(),
     );
+    h.private_message(&position_message(serde_json::json!([seed])));
     h.now += 1.0;
     h.private_message(&position_message(serde_json::json!([hedge_row(
         "long",
@@ -752,7 +804,7 @@ fn rejected_ws_leg_does_not_erase_prior_valid_financial_timestamp() {
         "long",
         serde_json::json!({"bad":1})
     )])));
-    h.timer_after(500.0);
+    h.timer_after(499.0); // Join the already owed repair at the earlier deadline.
     let mut newer = hedge_row("long", serde_json::json!("3"));
     newer["uTime"] = serde_json::json!("300");
     h.respond(
@@ -762,8 +814,23 @@ fn rejected_ws_leg_does_not_erase_prior_valid_financial_timestamp() {
     );
     assert_eq!(
         h.engine.store().positions()[0].contracts,
+        2.0,
+        "a later native timestamp cannot overrule recent WS receipt"
+    );
+    h.now += 5_001.0;
+    h.command(safe_cex_engine::Command::Venue {
+        command: 98,
+        action: safe_cex_engine::VenueAction::ReadPositions,
+    });
+    h.respond(
+        "/all-position",
+        200,
+        &serde_json::json!({"code":"00000","data":[newer]}).to_string(),
+    );
+    assert_eq!(
+        h.engine.store().positions()[0].contracts,
         3.0,
-        "fresh newer native proof must heal"
+        "fresh read heals once the bounded receipt protection has passed"
     );
 }
 fn two_market_rows() -> Harness {
@@ -812,10 +879,21 @@ fn partial_and_mixed_ws_modes_cannot_flip_global_mode_across_symbols() {
                     .iter()
                     .all(|p| p.position_mode == Some(safe_cex_engine::model::PositionMode::Oneway))
             );
-            // A complete consistent proof can still change account mode.
             eth["posMode"] = serde_json::json!("hedge_mode");
             eth["total"] = serde_json::json!("3");
             h.private_message(&position_message(serde_json::json!([btc, eth])));
+            assert!(
+                !h.engine.store().hedged(),
+                "even a coherent WS frame cannot prove the prior mode absent"
+            );
+            // Retire the old read, then issue a repair beyond the row freshness hold.
+            position_census(&mut h, false, serde_json::json!([]));
+            h.now += 5_001.0;
+            h.command(safe_cex_engine::Command::Venue {
+                command: 881,
+                action: safe_cex_engine::VenueAction::ReadPositions,
+            });
+            position_census(&mut h, false, serde_json::json!([btc, eth]));
             assert!(h.engine.store().hedged());
             assert!(
                 h.engine
@@ -845,8 +923,13 @@ fn initial_authenticated_malformed_snapshot_cannot_load_empty_positions() {
     assert!(h.engine.store().positions().is_empty());
     h.private_message(&position_message(serde_json::json!([])));
     assert!(
+        !h.engine.store().loaded().positions,
+        "empty WS is not a census"
+    );
+    position_census(&mut h, false, serde_json::json!([]));
+    assert!(
         h.engine.store().loaded().positions,
-        "valid empty proof must establish readiness"
+        "clean empty REST establishes readiness"
     );
 }
 
@@ -874,4 +957,245 @@ fn clean_position_delta_cannot_change_global_mode_while_other_symbol_is_retained
             .iter()
             .all(|p| p.position_mode == Some(safe_cex_engine::model::PositionMode::Oneway))
     );
+}
+
+fn fetch_leverage(h: &mut Harness, command: u32, symbol: &str) {
+    h.command(safe_cex_engine::Command::FetchLeverage {
+        command,
+        symbol: symbol.into(),
+    });
+}
+
+fn fetched(h: &Harness, command: u32) -> serde_json::Value {
+    let (_, result) = h
+        .done
+        .iter()
+        .find(|(id, _)| *id == command)
+        .expect("the read must settle");
+    serde_json::from_str(result.as_ref().expect("the read must succeed")).unwrap()
+}
+
+#[test]
+fn a_classic_flat_symbol_reads_its_leverage_on_demand() {
+    let mut h = Harness::classic();
+    assert_eq!(
+        h.engine.capabilities().leverage_query,
+        safe_cex_engine::LeverageQuery::OnReadAndMetadata
+    );
+    fetch_leverage(&mut h, 80, "BTCUSDT");
+    let request = h.take("/mix/account/account?symbol=BTCUSDT");
+    assert!(request.url.contains("marginCoin=USDT"), "{}", request.url);
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"marginMode":"crossed","posMode":"one_way_mode","crossedMarginLeverage":"33"}}"#,
+    );
+    let value = fetched(&h, 80);
+    assert_eq!(value["buyLeverage"], 33.0);
+    assert_eq!(value["sellLeverage"], 33.0);
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 33.0);
+}
+
+#[test]
+fn a_classic_isolated_hedged_symbol_reads_each_side() {
+    let mut h = Harness::classic();
+    fetch_leverage(&mut h, 81, "BTCUSDT");
+    let request = h.take("/mix/account/account?symbol=BTCUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"marginMode":"isolated","posMode":"hedge_mode","isolatedLongLever":"11","isolatedShortLever":"6"}}"#,
+    );
+    let value = fetched(&h, 81);
+    assert_eq!(value["buyLeverage"], 11.0);
+    assert_eq!(value["sellLeverage"], 6.0);
+    assert_eq!(value["positionMode"], "hedged");
+}
+
+#[test]
+fn a_failed_leverage_read_fails_its_command_and_writes_nothing() {
+    let mut h = Harness::classic();
+    let before = h.engine.store().setting("BTCUSDT");
+    fetch_leverage(&mut h, 82, "BTCUSDT");
+    let request = h.take("/mix/account/account?symbol=BTCUSDT");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"40001","msg":"no permission","data":null}"#,
+    );
+    let (_, result) = h.done.iter().find(|(id, _)| *id == 82).unwrap();
+    assert!(result.as_ref().unwrap_err().contains("no permission"));
+    assert_eq!(h.engine.store().setting("BTCUSDT"), before);
+}
+
+#[test]
+fn a_uta_symbol_absent_from_the_settings_list_fails_rather_than_guessing() {
+    let mut h = uta(r#"{"code":"00000","data":{"list":[]}}"#);
+    fetch_leverage(&mut h, 83, "BTCUSDT");
+    let request = h.take("/account/settings");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"holdMode":"one_way_mode","symbolConfigList":[{"symbol":"BTCUSDT","category":"USDT-FUTURES","leverage":"44","marginMode":"crossed"}]}}"#,
+    );
+    assert_eq!(fetched(&h, 83)["buyLeverage"], 44.0);
+    fetch_leverage(&mut h, 84, "BTCUSDT");
+    let request = h.take("/account/settings");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"holdMode":"one_way_mode","symbolConfigList":[]}}"#,
+    );
+    let (_, result) = h.done.iter().find(|(id, _)| *id == 84).unwrap();
+    assert!(result.as_ref().unwrap_err().contains("do not list"));
+}
+
+#[test]
+fn an_unknown_symbol_is_refused_before_any_request() {
+    let mut h = Harness::classic();
+    fetch_leverage(&mut h, 85, "NOPEUSDT");
+    let (_, result) = h.done.iter().find(|(id, _)| *id == 85).unwrap();
+    assert!(result.as_ref().unwrap_err().contains("unknown market"));
+}
+
+fn preset_parent() -> serde_json::Value {
+    let mut row = ordinary_row("1");
+    row["orderType"] = serde_json::json!("limit");
+    row["presetStopSurplusPrice"] = serde_json::json!("120");
+    row["presetStopLossPrice"] = serde_json::json!("80");
+    row
+}
+fn open_legs(h: &Harness) -> usize {
+    ["1__stop_loss", "1__take_profit"]
+        .into_iter()
+        .filter(|id| {
+            h.engine
+                .store()
+                .order(id)
+                .is_some_and(|o| format!("{:?}", o.status) == "Open")
+        })
+        .count()
+}
+
+#[test]
+fn preset_legs_end_when_another_session_cancels_their_parent() {
+    let mut h = Harness::classic();
+    let message = |row: serde_json::Value| {
+        serde_json::json!({"arg":{"channel":"orders"},"data":[row]}).to_string()
+    };
+    h.private_message(&message(preset_parent()));
+    assert_eq!(open_legs(&h), 2, "{:?}", h.logs);
+    // The venue's terminal row need not repeat the presets.
+    let mut canceled = ordinary_row("1");
+    canceled["status"] = serde_json::json!("canceled");
+    canceled["orderStatus"] = serde_json::json!("canceled");
+    h.private_message(&message(canceled));
+    assert_eq!(open_legs(&h), 0, "{:?}", h.logs);
+}
+
+#[test]
+fn a_venue_read_without_the_parent_proves_its_preset_legs_gone() {
+    let mut h = Harness::classic();
+    h.private_message(
+        &serde_json::json!({"arg":{"channel":"orders"},"data":[preset_parent()]}).to_string(),
+    );
+    assert_eq!(open_legs(&h), 2, "{:?}", h.logs);
+    h.timer_after(500.0);
+    let listed = serde_json::json!({"code":"00000","data":{"entrustedList":[preset_parent()]}});
+    h.orders(&listed.to_string());
+    // Past the stream's grace on a just-opened row; another order's event starts a fresh read.
+    h.timer_after(100.0);
+    h.timer_after(1400.0);
+    h.timer_after(3000.0);
+    h.private_message(
+        &serde_json::json!({"arg":{"channel":"orders"},"data":[ordinary_row("2")]}).to_string(),
+    );
+    // Read covers: a census already out when that event changed BTCUSDT cannot
+    // replace its rows, and another follows it; the first one released after the
+    // event proves the legs gone.
+    for _ in 0..3 {
+        if open_legs(&h) == 0 {
+            break;
+        }
+        if !h.requests.iter().any(|r| r.url.contains("/orders-pending")) {
+            h.timer_after(500.0);
+        }
+        h.orders(r#"{"code":"00000","data":{"entrustedList":[]}}"#);
+    }
+    assert_eq!(open_legs(&h), 0, "{:?}", h.logs);
+    assert!(h.engine.store().order("1").is_none());
+}
+
+#[test]
+fn a_post_only_that_crossed_shows_its_reason_on_first_sight() {
+    let mut h = Harness::classic();
+    let mut row = ordinary_row("crossed");
+    row["status"] = serde_json::json!("canceled");
+    row["orderStatus"] = serde_json::json!("canceled");
+    row["cancelReason"] = serde_json::json!("post_only_cancel");
+    h.private_message(&serde_json::json!({"arg":{"channel":"orders"},"data":[row]}).to_string());
+    let order = h
+        .engine
+        .store()
+        .order("crossed")
+        .expect("the refused order shows");
+    assert_eq!(
+        order.extra.as_ref().and_then(|e| e.reject_reason),
+        Some(safe_cex_engine::model::RejectReason::PostOnly)
+    );
+}
+
+#[test]
+fn a_flat_classic_account_learns_its_position_mode_at_startup() {
+    let mut h = Harness::private_started();
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, r#"{"code":"00000","data":[]}"#);
+    h.respond(
+        "/mix/account/account?",
+        200,
+        r#"{"code":"00000","data":{"posMode":"hedge_mode","marginMode":"crossed","crossedMarginLeverage":"10"}}"#,
+    );
+    assert!(h.engine.store().hedged());
+}
+
+fn stored_stop(h: &Harness, id: &str) -> safe_cex_engine::model::Order {
+    let mut stop = h.engine.store().orders()[0].clone();
+    stop.id = id.into();
+    stop.parent_id = None;
+    stop.kind = safe_cex_engine::model::OrderType::StopLoss;
+    stop
+}
+
+#[test]
+fn a_same_session_cancel_clears_a_stop() {
+    let mut h = Harness::classic();
+    let stop = stored_stop(&h, "my-stop");
+    h.engine.store_mut().upsert_order(stop);
+    h.requests.clear();
+    h.command(safe_cex_engine::Command::CancelOrders {
+        command: 91,
+        ids: vec!["my-stop".into()],
+    });
+    let cancel = h
+        .requests
+        .iter()
+        .find(|r| r.url.contains("cancel"))
+        .expect("a cancel request")
+        .id;
+    h.reply(
+        cancel,
+        200,
+        r#"{"code":"00000","data":{"successList":[{"orderId":"my-stop"}],"failureList":[]}}"#,
+    );
+    assert!(
+        h.done.iter().any(|(id, r)| *id == 91 && r.is_ok()),
+        "{:?}",
+        h.done
+    );
+    let status = h.engine.store().order("my-stop").map(|o| o.status);
+    assert_ne!(status, Some(safe_cex_engine::model::OrderStatus::Open));
 }

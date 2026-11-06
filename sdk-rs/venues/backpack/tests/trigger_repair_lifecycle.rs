@@ -38,6 +38,9 @@ struct Audit {
 type Driver = Engine<Audit>;
 impl Venue for Audit {
     type Pending = Pending;
+    fn managed_sockets() -> bool {
+        true
+    }
     fn book(&self, symbol: &str) -> Option<&safe_cex_engine::book::Book> {
         self.native.book(symbol)
     }

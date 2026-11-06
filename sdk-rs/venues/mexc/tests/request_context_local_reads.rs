@@ -186,10 +186,15 @@ fn native(actions: &[Action], owner: u32, message: &str) {
         1,
         "local error emits no I/O, timer, auth evidence or publication"
     );
-    assert_eq!(
-        terminal(actions, owner),
-        vec![Err(VenueError::new(message))]
-    );
+    // What MEXC cannot answer is typed Unsupported, so callers skip it instead of logging.
+    let expected = if message == "MEXC client-order-ID lookup is unsupported" {
+        VenueError::new(message)
+            .kind(ErrorKind::Unsupported)
+            .outcome(safe_cex_engine::Outcome::NotSent)
+    } else {
+        VenueError::new(message)
+    };
+    assert_eq!(terminal(actions, owner), vec![Err(expected)]);
 }
 fn rejected(actions: &[Action], owner: u32, kind: ErrorKind) {
     assert_eq!(

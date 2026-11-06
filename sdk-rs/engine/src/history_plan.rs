@@ -31,7 +31,7 @@ pub struct PlanHistoryRows<T> {
     accepted: Vec<T>,
     pending: Vec<T>,
     page: Option<(Context, Attempt)>,
-    incomplete: Option<String>,
+    incomplete: Option<(IncompleteReason, String)>,
 }
 
 struct AcceptedPlanPrefix {
@@ -150,8 +150,10 @@ impl<T, P> PlanRowsAdmission<'_, '_, T, P> {
         self.rows.pending.push(row);
         Ok(())
     }
-    pub fn incomplete(&mut self, message: impl Into<String>) {
-        self.rows.incomplete.get_or_insert_with(|| message.into());
+    pub fn incomplete(&mut self, reason: IncompleteReason, message: impl Into<String>) {
+        self.rows
+            .incomplete
+            .get_or_insert_with(|| (reason, message.into()));
     }
     pub fn accept_page(self) -> Result<(), ContextError> {
         self.rows
@@ -209,11 +211,12 @@ impl<T, P> PlanFailureAdmission<'_, '_, T, P> {
         let Some(prefix) = AcceptedPlanPrefix::from_rows(self.rows) else {
             return self.rows.reject(self.cx, error);
         };
-        let marker = self
-            .rows
-            .incomplete
-            .clone()
-            .unwrap_or_else(|| format!("history is INCOMPLETE: {}", error.message));
+        let marker = self.rows.incomplete.clone().unwrap_or_else(|| {
+            (
+                IncompleteReason::LaterPageFailed,
+                format!("history is INCOMPLETE: {}", error.message),
+            )
+        });
         let prepared = self.cx.prepare_read_history_terminal(
             &prefix.plan,
             Some((self.slot, self.context)),

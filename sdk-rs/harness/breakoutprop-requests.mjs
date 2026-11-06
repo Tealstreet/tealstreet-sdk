@@ -78,7 +78,7 @@ export const breakoutprop = {
   options: { subaccount: '00002' },
   recordOptions: { subaccount: undefined },
   publicOptions: { key: 'replay-key', secret: 'replay-secret' },
-  ts: { module: '../../packages/safe-cex/src/exchanges/breakoutprop/breakoutprop.exchange.ts', className: 'BreakoutpropExchange', name: 'breakoutprop' },
+  ts: { module: '../../packages/safe-cex/src/__tests__/reference/breakoutprop/breakoutprop.exchange.ts', className: 'BreakoutpropExchange', name: 'breakoutprop' },
   tsBooksSubscribed: (exchange, count) => Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('poll_book.') && handlers.length).length >= count,
   requestUrl: (url) => { const parsed = new URL(url); parsed.pathname = parsed.pathname.split('/').map((part) => encodeURIComponent(decodeURIComponent(part))).join('/'); return parsed.href; },
   tsSettings: (_exchange, store) => store.positions.filter((p) => p.leverage > 0).map((p) => ({ symbol: p.symbol, leverage: p.leverage, marginType: p.marginType })).filter((row, i, rows) => rows.findIndex((other) => other.symbol === row.symbol) === i),

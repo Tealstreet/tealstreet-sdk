@@ -2,8 +2,8 @@ import type { Market, Order, Position } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { parseAccountEquity } from '../../exchanges/okx/okx.account-equity';
-import { OKXExchange } from '../../exchanges/okx/okx.exchange';
+import { parseAccountEquity } from '../reference/okx/okx.account-equity';
+import { OKXExchange } from '../reference/okx/okx.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 

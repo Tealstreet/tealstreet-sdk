@@ -166,6 +166,7 @@ mod retire_unissued_plan_calls {
                             operation: Operation::Mutation,
                             timeout_ms: 100,
                             attempts: 1,
+                            pacing: None,
                         },
                         crate::request_context::plan::SerialPolicy {
                             credential: Some(credential.clone().unwrap()),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { hmacSha256Base64 } from '../exchanges/apexomni/apexomni.utils';
-import { sha256Hex } from '../exchanges/bitunix/bitunix.utils';
+import { hmacSha256Base64 } from './reference/apexomni/apexomni.utils';
+import { sha256Hex } from './reference/bitunix/bitunix.utils';
 
 // Equivalence oracle for the crypto-js -> @noble/hashes migration.
 //

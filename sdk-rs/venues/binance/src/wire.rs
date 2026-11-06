@@ -45,6 +45,8 @@ pub struct Filter<'a> {
     pub min_qty: Option<Str<'a>>,
     #[serde(borrow, default)]
     pub max_qty: Option<Str<'a>>,
+    #[serde(borrow, default, alias = "minNotional")]
+    pub notional: Option<Str<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -342,6 +344,14 @@ pub struct OpenOrder<'a> {
     pub time_in_force: Option<Str<'a>>,
     #[serde(borrow, default)]
     pub client_order_id: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub position_side: Option<Str<'a>>,
+    /// TRAILING_STOP_MARKET only (COIN-M): the callback rate in percent and its
+    /// activation price.
+    #[serde(borrow, default)]
+    pub price_rate: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub activate_price: Option<Str<'a>>,
 }
 
 /// One `/fapi/v1/openAlgoOrders` row.
@@ -349,6 +359,8 @@ pub struct OpenOrder<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct OpenAlgoOrder<'a> {
     pub algo_id: Id,
+    #[serde(borrow, default)]
+    pub position_side: Option<Str<'a>>,
     #[serde(borrow)]
     pub symbol: Str<'a>,
     #[serde(borrow)]
@@ -365,6 +377,11 @@ pub struct OpenAlgoOrder<'a> {
     pub close_position: bool,
     #[serde(borrow, default)]
     pub working_type: Option<Str<'a>>,
+    /// TRAILING_STOP_MARKET only: the callback rate in percent, and its activation price.
+    #[serde(borrow, default)]
+    pub callback_rate: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub activate_price: Option<Str<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -398,6 +415,8 @@ pub struct OrderUpdateEvent<'a> {
 #[derive(Deserialize)]
 pub struct OrderUpdate<'a> {
     pub i: Id,
+    #[serde(borrow, default)]
+    pub ps: Option<Str<'a>>,
     #[serde(borrow)]
     pub s: Str<'a>,
     #[serde(rename = "S", borrow)]
@@ -451,6 +470,8 @@ pub struct AlgoUpdateEvent<'a> {
 #[derive(Deserialize)]
 pub struct AlgoUpdate<'a> {
     pub aid: Id,
+    #[serde(borrow, default)]
+    pub ps: Option<Str<'a>>,
     #[serde(borrow)]
     pub s: Str<'a>,
     #[serde(rename = "S", borrow)]
@@ -629,6 +650,8 @@ pub struct PmBalance<'a> {
 pub struct PmConditionalOrder<'a> {
     #[serde(default)]
     pub strategy_id: Option<Id>,
+    #[serde(borrow, default)]
+    pub position_side: Option<Str<'a>>,
     #[serde(borrow)]
     pub new_client_strategy_id: Str<'a>,
     #[serde(borrow)]
@@ -647,6 +670,11 @@ pub struct PmConditionalOrder<'a> {
     pub reduce_only: bool,
     #[serde(borrow, default)]
     pub working_type: Option<Str<'a>>,
+    /// TRAILING_STOP_MARKET only: the callback rate in percent, and its activation price.
+    #[serde(borrow, default)]
+    pub price_rate: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub activate_price: Option<Str<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -660,6 +688,8 @@ pub struct ConditionalUpdateEvent<'a> {
 pub struct ConditionalUpdate<'a> {
     #[serde(default)]
     pub si: Option<Id>,
+    #[serde(borrow, default)]
+    pub ps: Option<Str<'a>>,
     #[serde(borrow)]
     pub s: Str<'a>,
     /// newClientStrategyId.

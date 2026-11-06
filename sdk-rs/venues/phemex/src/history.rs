@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 const MAX_ROWS: u32 = 200;
+/// Pages of a window read with no limit; beyond them the rows are flagged incomplete.
+const MAX_WINDOW_PAGES: u32 = 50;
 
 #[derive(Default)]
 pub struct State {
@@ -34,12 +36,18 @@ pub struct Request {
     from: Option<f64>,
     to: Option<f64>,
     limit: usize,
+    /// A window with no limit walks `offset` until a short page.
+    open_window: bool,
+    offset: usize,
+    pages: u32,
     order_id: Option<String>,
     client_id: Option<String>,
     rows: Rows,
     seen: HashSet<String>,
     count: usize,
     invalid: bool,
+    /// A lookup row that is no evidence of placement: Some(true) refused, Some(false) unclear.
+    unplaced: Option<bool>,
 }
 
 impl Request {
@@ -76,6 +84,38 @@ enum Rows {
     Lookup(Vec<safe_cex_engine::model::Order>),
 }
 
+/// The venue answers `{"code":0,"data":{"rows":[...]}}`; a bare array also reads.
+pub(crate) const HISTORY_ROWS: ArrayAt =
+    ArrayAt::Envelope(&[&["data", "rows"], &["data", "list"], &["data"], &[]]);
+/// The row array of a whole or stream-emptied history body.
+pub(crate) fn history_rows(body: &str) -> Option<&str> {
+    use serde_json::value::RawValue;
+    #[derive(Deserialize)]
+    struct Page<'a> {
+        #[serde(default)]
+        code: i64,
+        #[serde(borrow)]
+        data: &'a RawValue,
+    }
+    #[derive(Deserialize)]
+    struct Rows<'a> {
+        #[serde(borrow, default)]
+        rows: Option<&'a RawValue>,
+        #[serde(borrow, default)]
+        list: Option<&'a RawValue>,
+    }
+    if body.trim_start().starts_with('[') {
+        return Some(body);
+    }
+    let page = serde_json::from_str::<Page<'_>>(body)
+        .ok()
+        .filter(|p| p.code == 0)?;
+    if page.data.get().trim_start().starts_with('[') {
+        return Some(page.data.get());
+    }
+    let rows = serde_json::from_str::<Rows<'_>>(page.data.get()).ok()?;
+    rows.rows.or(rows.list).map(RawValue::get)
+}
 fn encode_rows<T: Serialize>(rows: &[T]) -> Result<String, VenueError> {
     serde_json::to_string(rows).map_err(|error| VenueError::new(error.to_string()))
 }
@@ -100,6 +140,31 @@ fn finish_rows<T: Serialize, P>(
     let _ = owner.finish_with(cx, Ok(()), |mut rows| {
         rows.sort_by(|a, b| time(b).total_cmp(&time(a)));
         rows.truncate(limit);
+        encode_rows(&rows)
+    });
+}
+
+fn accept_rows<T: Serialize, P>(
+    owner: &mut ReadHistoryRows<T>,
+    cx: &mut Cx<'_, P>,
+    leg: &Context,
+) -> bool {
+    let Ok(mut page) = owner.admit(cx, leg) else {
+        return false;
+    };
+    page.accept_page();
+    true
+}
+
+/// The owner keeps its accepted rows and emits the incomplete marker for the error.
+fn finish_partial<T: Serialize, P>(
+    owner: ReadHistoryRows<T>,
+    cx: &mut Cx<'_, P>,
+    error: VenueError,
+    time: impl Fn(&T) -> f64,
+) {
+    let _ = owner.finish_with(cx, Err(error), |mut rows| {
+        rows.sort_by(|a, b| time(b).total_cmp(&time(a)));
         encode_rows(&rows)
     });
 }
@@ -233,7 +298,35 @@ fn milliseconds(ns: u64) -> f64 {
 }
 
 impl PhemexPerpetuals {
+    pub(super) fn history_symbol(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Option<String> {
+        if let Some(market) = cx.store.market(symbol) {
+            return Some(market.symbol.clone());
+        }
+        let mut matches = cx.store.markets().iter().filter(|market| {
+            market.symbol.eq_ignore_ascii_case(symbol)
+                || market.id.eq_ignore_ascii_case(symbol)
+                || self
+                    .native_symbol(&market.symbol)
+                    .eq_ignore_ascii_case(symbol)
+        });
+        let market = matches.next()?;
+        // An alias must identify one listed contract, never a guessed settlement product.
+        matches.next().is_none().then(|| market.symbol.clone())
+    }
+
+    pub(super) fn history_symbol_error() -> VenueError {
+        VenueError::new(
+            "Phemex history requires a known symbol; select a listed USDT/USDC perpetual market",
+        )
+        .kind(safe_cex_engine::ErrorKind::InvalidInput)
+        .venue_code("unknown-symbol")
+    }
+
     pub(crate) fn finish_local_history(cx: &mut Cx<'_, Pending>, result: Result<&str, &str>) {
+        Self::finish_local_history_result(cx, result.map_err(VenueError::new));
+    }
+
+    fn finish_local_history_result(cx: &mut Cx<'_, Pending>, result: Result<&str, VenueError>) {
         let Ok(context) = cx.admit_http_command(Policy {
             operation: Operation::Read,
             credential: None,
@@ -279,10 +372,10 @@ impl PhemexPerpetuals {
                     Self::finish_local_history(cx, Err("Invalid Phemex client order ID"));
                     return;
                 }
-                if cx.store.market(&symbol).is_none() {
+                let Some(symbol) = self.history_symbol(cx, &symbol) else {
                     Self::finish_local_history(cx, Ok(r#"{"found":false,"definitive":false}"#));
                     return;
-                }
+                };
                 client_id = Some(client_order_id);
                 (Some(symbol), None, None, Some(1), None, Kind::Lookup)
             }
@@ -310,8 +403,11 @@ impl PhemexPerpetuals {
             Self::finish_local_history(cx, Err("Phemex private history requires credentials"));
             return;
         }
-        let Some(symbol) = symbol.filter(|s| cx.store.market(s).is_some()) else {
-            Self::finish_local_history(cx, Err("Phemex history requires a known symbol"));
+        let Some(symbol) = symbol
+            .as_deref()
+            .and_then(|symbol| self.history_symbol(cx, symbol))
+        else {
+            Self::finish_local_history_result(cx, Err(Self::history_symbol_error()));
             return;
         };
         if !bounds(from, to) {
@@ -368,7 +464,13 @@ impl PhemexPerpetuals {
         };
         self.history.owners.insert(command, root.context().owner());
         self.history.active.insert(command);
-        let limit = limit.unwrap_or(100).clamp(1, MAX_ROWS) as usize;
+        let open_window =
+            limit.is_none() && from.is_some() && matches!(kind, Kind::Fills | Kind::Orders);
+        let limit = if open_window {
+            MAX_ROWS as usize
+        } else {
+            limit.unwrap_or(100).clamp(1, MAX_ROWS) as usize
+        };
         let request = Request {
             root,
             leg: None,
@@ -377,12 +479,16 @@ impl PhemexPerpetuals {
             from,
             to,
             limit,
+            open_window,
+            offset: 0,
+            pages: 1,
             order_id,
             client_id,
             rows,
             seen: HashSet::new(),
             count: 0,
             invalid: false,
+            unplaced: None,
         };
         self.history_send(cx, request);
     }
@@ -402,9 +508,9 @@ impl PhemexPerpetuals {
             return;
         }
         let (path, at) = match request.rows {
-            Rows::Lookup(_) => ("/api-data/g-futures/orders/by-order-id", ArrayAt::Root),
-            Rows::Fills(_) => ("/api-data/g-futures/trades", ArrayAt::Root),
-            Rows::Orders(_) => ("/api-data/g-futures/orders", ArrayAt::Root),
+            Rows::Lookup(_) => ("/api-data/g-futures/orders/by-order-id", HISTORY_ROWS),
+            Rows::Fills(_) => ("/api-data/g-futures/trades", HISTORY_ROWS),
+            Rows::Orders(_) => ("/api-data/g-futures/orders", HISTORY_ROWS),
             Rows::Trades(_) => ("/md/v2/trade", ArrayAt::Path(&["result", "trades_p"])),
         };
         let native_symbol = &request.native_symbol;
@@ -422,7 +528,8 @@ impl PhemexPerpetuals {
             if let Some(to) = to {
                 query.push_str(&format!("&end={to:.0}"));
             }
-            query.push_str(&format!("&offset=0&limit={limit}"));
+            let offset = request.offset;
+            query.push_str(&format!("&offset={offset}&limit={limit}"));
         }
         let leg = match request.root.leg(
             cx,
@@ -534,10 +641,12 @@ impl PhemexPerpetuals {
                     .is_ok()
                 })
         } else {
-            safe_cex_engine::json::each::<&serde_json::value::RawValue>(response.body, |row| {
-                self.history_item(cx, &mut request, row.get())
+            history_rows(response.body).is_some_and(|rows| {
+                safe_cex_engine::json::each::<&serde_json::value::RawValue>(rows, |row| {
+                    self.history_item(cx, &mut request, row.get())
+                })
+                .is_ok()
             })
-            .is_ok()
         };
         if !parsed || request.invalid {
             self.history_failed(
@@ -547,7 +656,39 @@ impl PhemexPerpetuals {
             );
             return;
         }
+        if request.open_window && request.count >= MAX_ROWS as usize {
+            let leg = request.leg.take().expect("delivered page has a leg");
+            let accepted = match &mut request.rows {
+                Rows::Fills(owner) => accept_rows(owner, cx, leg.context()),
+                Rows::Orders(owner) => accept_rows(owner, cx, leg.context()),
+                _ => false,
+            };
+            let _ = cx.finish_http_context(leg.context());
+            if !accepted {
+                return;
+            }
+            if request.pages < MAX_WINDOW_PAGES {
+                request.pages += 1;
+                request.offset += request.count;
+                request.count = 0;
+                self.history_send(cx, request);
+                return;
+            }
+            self.retire_history(request.root.context().owner());
+            let budget = || VenueError::new("Phemex history page budget reached");
+            match request.rows {
+                Rows::Fills(owner) => finish_partial(*owner, cx, budget(), |row| row.timestamp),
+                Rows::Orders(owner) => finish_partial(*owner, cx, budget(), |row| row.created_time),
+                _ => {}
+            }
+            return;
+        }
         self.retire_history(request.root.context().owner());
+        let output_limit = if request.open_window {
+            usize::MAX
+        } else {
+            request.limit
+        };
         match request.rows {
             Rows::Lookup(rows) => {
                 #[derive(Serialize)]
@@ -561,7 +702,7 @@ impl PhemexPerpetuals {
                 let result = serde_json::to_string(&Lookup {
                     found: !rows.is_empty(),
                     order: rows.first(),
-                    definitive: rows.is_empty().then_some(true),
+                    definitive: rows.is_empty().then_some(request.unplaced.unwrap_or(true)),
                 });
                 match result.map_err(|error| error.to_string()) {
                     Ok(data) => {
@@ -576,14 +717,14 @@ impl PhemexPerpetuals {
                 *owner,
                 cx,
                 request.leg.as_ref().unwrap().context(),
-                request.limit,
+                output_limit,
                 |row| row.timestamp,
             ),
             Rows::Orders(owner) => finish_rows(
                 *owner,
                 cx,
                 request.leg.as_ref().unwrap().context(),
-                request.limit,
+                output_limit,
                 |row| row.created_time,
             ),
             Rows::Trades(owner) => finish_rows(
@@ -665,8 +806,17 @@ fn decode(cx: &Cx<'_, Pending>, request: &mut Request, text: &str) -> Option<()>
                 return None;
             }
             let mut orders = row.orders(milliseconds(row.version()))?;
-            if let Rows::Lookup(rows) = &mut request.rows {
-                rows.push(orders.remove(0));
+            let order = orders.remove(0);
+            // A refusal or an unfilled expiry was never placed; an unfilled cancel cannot say.
+            let status = row.status.to_ascii_lowercase();
+            if order.filled == 0.0 && matches!(status.as_str(), "rejected" | "expired") {
+                request.unplaced = Some(true);
+            } else if order.filled == 0.0
+                && matches!(status.as_str(), "canceled" | "cancelled" | "deactivated")
+            {
+                request.unplaced = Some(false);
+            } else if let Rows::Lookup(rows) = &mut request.rows {
+                rows.push(order);
             }
         }
         Rows::Fills(_) => {

@@ -7,7 +7,7 @@ import {
   mapBybitOptionInstrument,
   mapBybitOptionTicker,
   optionExpiries,
-} from '../exchanges/bybit/bybit.options';
+} from './reference/bybit/bybit.options';
 
 // Recorded from api.bybit.com on 2026-10-14.
 const CALL = {

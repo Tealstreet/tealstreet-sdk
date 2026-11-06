@@ -2,7 +2,7 @@ import type { ExchangeOptions } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 import { ENDPOINTS } from '../../exchanges/hyperliquid/hyperliquid.types';
 import { DefaultStore } from '../../store/store.base';
 

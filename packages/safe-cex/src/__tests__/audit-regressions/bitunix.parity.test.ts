@@ -2,7 +2,7 @@ import type { ExchangeOptions, Market, Order, Position } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BitunixExchange } from '../../exchanges/bitunix/bitunix.exchange';
+import { BitunixExchange } from '../reference/bitunix/bitunix.exchange';
 import { DefaultStore } from '../../store/store.base';
 import {
   MarginType,

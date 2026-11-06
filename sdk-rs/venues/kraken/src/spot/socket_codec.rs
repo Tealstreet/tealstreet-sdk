@@ -125,6 +125,23 @@ impl KrakenSpot {
             .unwrap(),
         )
     }
+    fn book_interest(&self, symbol: &str) -> Interest {
+        self.interest("book", &[symbol], None)
+    }
+    fn ohlc_interest(&self, symbol: &str, minutes: u32) -> Interest {
+        self.interest("ohlc", &[symbol], Some(minutes))
+    }
+    /// The public feed and key `topic` streams on.
+    pub(super) fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let interest = match topic {
+            SubscriptionTopic::OrderBook { symbol } => self.book_interest(symbol),
+            SubscriptionTopic::Candles {
+                symbol,
+                interval: tf,
+            } => self.ohlc_interest(symbol, interval(*tf)?),
+        };
+        Some((self.public.feed?, interest.key.to_string()))
+    }
     fn public_interests(&self, store: &safe_cex_engine::Store) -> Vec<Interest> {
         let symbols: Vec<_> = store
             .markets()
@@ -139,7 +156,7 @@ impl KrakenSpot {
         let mut books: Vec<_> = self.books.keys().collect();
         books.sort();
         for symbol in books {
-            interests.push(self.interest("book", &[symbol], None));
+            interests.push(self.book_interest(symbol));
         }
         let mut candles: Vec<_> = self
             .candles
@@ -149,7 +166,7 @@ impl KrakenSpot {
         candles.sort();
         candles.dedup();
         for (symbol, i) in candles {
-            interests.push(self.interest("ohlc", &[symbol], Some(i)));
+            interests.push(self.ohlc_interest(symbol, i));
         }
         interests
     }
@@ -162,10 +179,8 @@ impl KrakenSpot {
     }
     pub(super) fn repair_book(&self, cx: &mut Cx<'_, Pending>, symbol: &str) {
         if let Some(feed) = self.public.feed
-            && let Err(error) = cx.repair_socket_interests(
-                feed,
-                vec![self.interest("book", &[symbol], None).key.to_string()],
-            )
+            && let Err(error) =
+                cx.repair_socket_interests(feed, vec![self.book_interest(symbol).key.to_string()])
         {
             self.socket_error(cx, false, error);
         }

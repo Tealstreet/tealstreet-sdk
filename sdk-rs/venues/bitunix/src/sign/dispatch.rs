@@ -254,13 +254,14 @@ impl SignStep for WsLogin {
         #[serde(rename_all = "camelCase")]
         struct Login<'a> {
             api_key: &'a str,
-            timestamp: &'a str,
+            // Bitunix does not answer a login whose timestamp is a string.
+            timestamp: u64,
             nonce: &'a str,
             sign: &'a str,
         }
         let args = [Login {
             api_key: &key,
-            timestamp: &format!("{stamp:.0}"),
+            timestamp: stamp as u64,
             nonce: &attempt.nonce,
             sign: &sign,
         }];

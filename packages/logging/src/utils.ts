@@ -20,6 +20,7 @@ const needsStringification = (str: any) =>
 let logQueue: Array<[string, string, { level: string }]> = [];
 let logQueueSizeApprox = 0;
 let localUserId = '';
+let localUsername: string | undefined;
 let sessionKey = nanoid();
 let flushInterval: ReturnType<typeof setInterval> | undefined;
 let visibilityListener: (() => void) | undefined;
@@ -68,6 +69,8 @@ export const getSessionKey = () => sessionKey;
 // Test-only reset for module-scoped queues. Production code must use the
 // lifecycle returned by startLoggingToGrafana instead.
 export const resetLoggingStateForTests = () => {
+  localUserId = '';
+  localUsername = undefined;
   logQueue = [];
   logQueueSizeApprox = 0;
   pendingLogBatches = [];
@@ -105,7 +108,10 @@ const pushLogsToQueue = (level: LogSeverity, rawMessage: string) => {
     const date = Date.now().toString() + '000000';
     const messages = splitStringByBytes(rawMessage);
     for (const message of messages) {
-      const finalMessage = `${localUserId} [${sessionKey}]: ${stringifyMessage(message)}`;
+      // A handle is diagnostic text, never an unbounded Loki label. Capture it
+      // at enqueue so a later rename cannot relabel earlier notices.
+      const username = localUsername ? ` username=${JSON.stringify(localUsername)}` : '';
+      const finalMessage = `${localUserId}${username} [${sessionKey}]: ${stringifyMessage(message)}`;
 
       if (logQueueSizeApprox + finalMessage.length > 200_000) {
         loggingMetrics.pressureFlushes++;
@@ -150,8 +156,9 @@ export const dumpLogQueue = () => {
   void drainLogBatches();
 };
 
-export const startLoggingToGrafana = (userId: string) => {
+export const startLoggingToGrafana = (userId: string, username?: string) => {
   localUserId = userId;
+  localUsername = username;
 
   if (flushInterval) {
     clearInterval(flushInterval);
@@ -186,6 +193,8 @@ export const startLoggingToGrafana = (userId: string) => {
     if (flushInterval === activeFlushInterval) {
       clearInterval(activeFlushInterval);
       flushInterval = undefined;
+      localUserId = '';
+      localUsername = undefined;
     }
     if (visibilityListener === activeVisibilityListener && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', activeVisibilityListener);

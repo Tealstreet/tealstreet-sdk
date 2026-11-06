@@ -117,15 +117,20 @@ impl Request {
         read.failed(cx, error);
     }
 }
+const MAX_SUBSCRIPTIONS: i64 = 42900;
+
 #[derive(Default)]
 pub(crate) struct Public {
     socket: Option<SocketId>,
     open: bool,
     supervisor: Supervisor,
     next_rpc: u64,
+    last_ack: f64,
     subscriptions: HashMap<u64, Subscription>,
     retries: Vec<(TimerId, String, u8)>,
     seed_retry: safe_cex_engine::startup::Backoff<bool>,
+    failed_market_reads: u32,
+    first_market_failure: Option<String>,
     live_tickers: safe_cex_engine::startup::LiveTickers,
     pub(crate) books: HashMap<String, BookState>,
     pub(crate) price_bands: HashMap<String, f64>,
@@ -361,18 +366,22 @@ impl Paradex {
         }
     }
     fn interested(&self, cx: &Cx<'_, Pending>, channel: &str) -> bool {
-        if channel == "markets_summary" {
-            return !cx.store.markets().is_empty();
-        }
         if let Some(s) = channel
             .strip_prefix("order_book.")
             .and_then(|s| s.split('.').next())
         {
             return self.public.books.contains_key(s);
         }
+        if let Some(s) = channel.strip_prefix("trades.") {
+            return self.charted(s);
+        }
         channel
             .split_once('.')
             .is_some_and(|(_, s)| cx.store.market(s).is_some())
+    }
+    // Trades feed candles; summaries already carry last price for every market.
+    fn charted(&self, symbol: &str) -> bool {
+        self.public.candles.keys().any(|(s, _)| s == symbol)
     }
     fn retry_subscription(&mut self, cx: &mut Cx<'_, Pending>, sub: Subscription) {
         if sub.attempt < 2 && self.interested(cx, &sub.channel) {
@@ -401,10 +410,13 @@ impl Paradex {
         for s in &symbols {
             self.public_subscribe(cx, "subscribe", format!("bbo.{s}"), 0);
         }
-        for s in &symbols {
+        let charted: Vec<_> = symbols.iter().filter(|s| self.charted(s)).collect();
+        for s in charted {
             self.public_subscribe(cx, "subscribe", format!("trades.{s}"), 0);
         }
-        self.public_subscribe(cx, "subscribe", "markets_summary".into(), 0);
+        for s in &symbols {
+            self.public_subscribe(cx, "subscribe", format!("markets_summary.{s}"), 0);
+        }
         for s in self.public.books.keys().cloned().collect::<Vec<_>>() {
             self.public_subscribe(cx, "subscribe", book_channel(&s), 0);
         }
@@ -462,13 +474,17 @@ impl Paradex {
             });
             if valid && let Some(sub) = self.public.subscriptions.remove(&id) {
                 self.public.supervisor.received(cx.now);
+                self.public.last_ack = cx.now;
                 if let Some(error) = message.error {
                     cx.notice(
                         safe_cex_engine::Level::Warn,
                         code::SUBSCRIPTION_REJECTED,
                         format!("Paradex subscription failed: {}", error.message),
                     );
-                    self.retry_subscription(cx, sub);
+                    // The cap holds on every reconnect, so recovering would only loop.
+                    if error.code != MAX_SUBSCRIPTIONS {
+                        self.retry_subscription(cx, sub);
+                    }
                 }
             }
             return;
@@ -600,6 +616,9 @@ impl Paradex {
             t.open_interest = row.open_interest.0;
             t.funding_rate = row.funding_rate.0;
         });
+        // An unchanged mark or last is still a fresh observation of it.
+        cx.store
+            .observe_ticker_fields(&row.symbol, supplied & ((1 << 2) | (1 << 3)));
         self.public
             .live_tickers
             .record(cx.store, &row.symbol, supplied);
@@ -957,6 +976,8 @@ impl Paradex {
                 invalid: false,
             } => {
                 self.public.seed_retry.succeeded(cx, &true);
+                self.public.failed_market_reads = 0;
+                self.public.first_market_failure = None;
                 self.public.price_bands = bands;
                 self.account.excluded_perps = excluded;
                 cx.store.set_markets(rows);
@@ -989,8 +1010,11 @@ impl Paradex {
                         false,
                     );
                 }
-                self.public_connect(cx);
-                self.public_seed(cx, false);
+                // Frame-fed: the catalogue only; tickers and streams come from the data source.
+                if !cx.frame_fed() {
+                    self.public_connect(cx);
+                    self.public_seed(cx, false);
+                }
             }
             Request::Tickers {
                 mut rows,
@@ -999,9 +1023,7 @@ impl Paradex {
                 self.public.seed_retry.succeeded(cx, &false);
                 self.public.live_tickers.finish(cx.store, &mut rows);
                 cx.store.set_tickers(rows);
-                if self.options.public_data_only
-                    || self.options.key.as_ref().is_none_or(String::is_empty)
-                {
+                if self.options.public_data_only || self.options.credentials.is_none() {
                     cx.store.set_orders(vec![]);
                     cx.store.set_positions(vec![]);
                     cx.store.set_balance(Default::default());
@@ -1079,9 +1101,34 @@ impl Paradex {
                 let _ = cx.finish_http_context(&context);
                 self.public_failed(cx, *seed, error);
             }
-            Request::Markets { .. } | Request::Tickers { .. } => {
-                let markets = matches!(request, Request::Markets { .. });
+            seed @ (Request::Markets { .. } | Request::Tickers { .. }) => {
+                let markets = matches!(seed, Request::Markets { .. });
                 cx.notice(safe_cex_engine::Level::Warn, code::REQUEST_FAILED, error);
+                if markets {
+                    self.public.failed_market_reads =
+                        self.public.failed_market_reads.saturating_add(1);
+                    if self.public.failed_market_reads == 1 {
+                        self.public.first_market_failure = Some(error.chars().take(256).collect());
+                    }
+                    if self.public.failed_market_reads == 2 {
+                        cx.event(
+                            safe_cex_engine::Level::Error,
+                            code::REQUEST_FAILED,
+                            format!("Paradex market list is unavailable; retrying: {error}"),
+                            vec![
+                                (
+                                    "firstCause",
+                                    self.public
+                                        .first_market_failure
+                                        .take()
+                                        .unwrap_or_default()
+                                        .into(),
+                                ),
+                                ("cause", error.into()),
+                            ],
+                        );
+                    }
+                }
                 self.public.seed_retry.failed(cx, markets);
             }
             request @ Request::Candles { .. } => {
@@ -1403,11 +1450,13 @@ impl Paradex {
                 }
                 _ => {}
             }
+            let last_ack = self.public.last_ack;
             let expired: Vec<_> = self
                 .public
                 .subscriptions
                 .iter()
-                .filter(|(_, s)| cx.now - s.at >= 10_000.)
+                // Acks arriving prove the venue is working through the batch.
+                .filter(|(_, s)| cx.now - s.at.max(last_ack) >= 10_000.)
                 .map(|(id, _)| *id)
                 .collect();
             for id in expired {
@@ -1519,6 +1568,10 @@ impl Paradex {
                     state.subscribers += 1;
                     return None;
                 }
+                // An invalid clock schedules nothing; trade-silence recovery subscribes later.
+                if cx.now.is_finite() && !self.charted(&symbol) {
+                    self.public_subscribe(cx, "subscribe", format!("trades.{symbol}"), 0);
+                }
                 self.public.generation += 1;
                 let generation = self.public.generation;
                 let revision = 0;
@@ -1560,6 +1613,14 @@ impl Paradex {
                             cx.clear_timer(t);
                         }
                         self.public.candles.remove(&key);
+                        if !self.charted(&key.0) {
+                            self.public_subscribe(
+                                cx,
+                                "unsubscribe",
+                                format!("trades.{}", key.0),
+                                0,
+                            );
+                        }
                     }
                 }
             }
@@ -1582,7 +1643,7 @@ impl Paradex {
                         return None;
                     };
                     let _ = cx.fail_context(&context, interval.unsupported("Paradex"));
-                } else if cx.store.market(&symbol).is_none() {
+                } else if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
                     let Ok(context) = cx.admit_http_command(Policy {
                         operation: Operation::Read,
                         credential: None,

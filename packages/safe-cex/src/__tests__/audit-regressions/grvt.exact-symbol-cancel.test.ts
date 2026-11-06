@@ -5,7 +5,7 @@ import { AxiosError } from 'axios';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TDG } from '@tealstreet/grvt-client';
-import { GrvtExchange } from '../../exchanges/grvt/grvt.exchange';
+import { GrvtExchange } from '../reference/grvt/grvt.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 

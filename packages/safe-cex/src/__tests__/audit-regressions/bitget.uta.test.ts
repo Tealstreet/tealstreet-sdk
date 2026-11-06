@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from '../../exchanges/bitget/bitget.api';
-import { BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE, BitgetExchange } from '../../exchanges/bitget/bitget.exchange';
-import { BitgetInverseExchange } from '../../exchanges/bitget/bitgetinverse.exchange';
-import { BitgetUSDCExchange } from '../../exchanges/bitget/bitgetusdc.exchange';
+import { createAPI } from '../reference/bitget/bitget.api';
+import { BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE, BitgetExchange } from '../reference/bitget/bitget.exchange';
+import { BitgetInverseExchange } from '../reference/bitget/bitgetinverse.exchange';
+import { BitgetUSDCExchange } from '../reference/bitget/bitgetusdc.exchange';
 import { BASE_WS_PRIVATE_UTA_URL, ENDPOINTS } from '../../exchanges/bitget/bitget.types';
 import { DefaultStore } from '../../store/store.base';
 import { MarginType, OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionMode, PositionSide } from '../../types';

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   fetchCoreMetaAndAssetCtxsWithFallback,
   fetchHip3MetaAndAssetCtxsWithRetry,
-} from '../exchanges/hyperliquid/hyperliquid.market-startup-helpers';
+} from './reference/hyperliquid/hyperliquid.market-startup-helpers';
 
 const createAxiosMock = (responses: Array<{ data: unknown } | Error>) => {
   const queue = [...responses];

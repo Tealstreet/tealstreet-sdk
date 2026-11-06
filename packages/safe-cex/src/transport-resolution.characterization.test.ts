@@ -26,6 +26,9 @@ const encodeOptions = (o: ExchangeOptions): string => {
   const proxy = o.tealstreetProxy ? 'proxy' : '-';
   const tunnel = o.tealstreetTunnel ? 'tunnel' : '-';
   const region = o.proxyRegion ?? '-';
+  // secProxy was `exchange-proxy.jp` (AWS) until PUBLIC_CORS_PROXY moved to the edge
+  // Worker's /api/public_proxy (AWS_EXIT.md 3d); that path is not shortened, so the
+  // snapshot now pins the full `fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy`.
   const sec = o.secondaryProxyUrl
     ? o.secondaryProxyUrl.replace('https://', '').replace('.tealstreet.io/api/exchange_proxy', '')
     : '-';

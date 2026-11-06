@@ -6,6 +6,7 @@ use crate::{BybitLinear, Category, Pending, Rest, Then};
 use safe_cex_engine::history::{CursorHistory, ReadCompletion, ReadCursorHistory};
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::request_context::Context;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, Cx, Response, VenueError};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -96,7 +97,7 @@ impl BybitLinear {
                 _ => "Closed-PnL paging repeated a cursor; older rows in this window were not fetched".into(),
             }
                 },
-                |rows| Ok(format!("[{}]", rows.join(","))),
+                |rows| Ok(format!("[{}]", rows.join_with(","))),
             ),
             category,
             symbol,

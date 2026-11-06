@@ -246,8 +246,9 @@ fn decoded_nested_and_history_models_pin_native_field_identity() {
 #[test]
 fn decoded_task_snapshots_use_distinct_dimensions_and_one_hot_flags() {
     use safe_cex_types::{ActiveChaser, ActiveTWAP, DisplayedMargin};
+    // Preserve the original task seeds locally after the old Store was deleted.
     let original: serde_json::Value =
-        serde_json::from_str(include_str!("../../safe-cex-store/src/store_stub.json")).unwrap();
+        serde_json::from_str(include_str!("fixtures/task_snapshots.json")).unwrap();
     let mut chaser = original["activeChasers"][0].clone();
     for (field, value) in [
         ("id", json!("chaser-id")),

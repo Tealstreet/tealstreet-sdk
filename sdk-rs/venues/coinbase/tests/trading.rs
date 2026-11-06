@@ -8,7 +8,7 @@ const SPOT: &str = r#"{"products":[{"product_id":"BTC-USD","product_type":"SPOT"
 const INTX: &str = r#"{"products":[{"product_id":"BTC-PERP-INTX","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USDC","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"PERPETUAL","contract_root_unit":"BTC","contract_size":"1"}}]}"#;
 const CFM: &str = r#"{"products":[{"product_id":"BTC-CDE","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"1","price_increment":"0.01","base_min_size":"1","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"EXPIRING","contract_root_unit":"BTC","contract_size":"0.01"}}]}"#;
 const CFM_BALANCE: &str = r#"{"balance_summary":{"total_usd_balance":{"value":"10"},"available_margin":{"value":"8"},"unrealized_pnl":{"value":"1.5"}}}"#;
-const BREAKDOWN: &str = r#"{"breakdown":{"spot_positions":[{"asset":"BTC","total_balance_crypto":1.5,"available_to_trade_crypto":1,"total_balance_fiat":150}]}}"#;
+const BREAKDOWN: &str = r#"{"breakdown":{"spot_positions":[{"account_type":"ACCOUNT_TYPE_WALLET","asset":"BTC","total_balance_crypto":1.5,"available_to_trade_crypto":1,"total_balance_fiat":150}]}}"#;
 const INTX_BALANCE: &str =
     r#"{"summary":{"total_balance":{"value":"1000"},"buying_power":{"value":"800"}}}"#;
 const INTX_POSITIONS: &str = r#"{"positions":[{"symbol":"BTC-PERP-INTX","position_side":"POSITION_SIDE_LONG","net_size":"2","entry_vwap":{"value":"100"},"mark_price":{"value":"110"},"liquidation_price":{"value":"50"},"leverage":"10"}]}"#;
@@ -2275,4 +2275,28 @@ fn transient_then_mismatched_key_check_still_discovers_the_portfolio() {
     assert_eq!(portfolios, 1);
     s.collect();
     assert!(!s.deactivated);
+}
+
+#[test]
+fn an_intx_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut s = Session::new("INTX", false).ready();
+    s.seed("old", "BTC-PERP-INTX", "1", "100");
+    s.command(Command::AmendOrder {
+        command: 8,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    let r = s.write();
+    s.reply(r, 200, r#"{"results":[{"order_id":"old","success":true}]}"#);
+    let r = s.write();
+    s.reply(r,200,r#"{"order":{"order_id":"old","product_id":"BTC-PERP-INTX","status":"CANCELLED","filled_size":"0"}}"#);
+    let r = s.write();
+    s.reply(
+        r,
+        200,
+        r#"{"success":false,"error_response":{"error":"INSUFFICIENT_FUND","message":"refused"}}"#,
+    );
+    let error = s.done(8).unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
 }

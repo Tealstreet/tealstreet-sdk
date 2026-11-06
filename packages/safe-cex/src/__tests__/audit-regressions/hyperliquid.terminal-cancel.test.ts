@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createExchangeAPI } from '../../exchanges/hyperliquid/hyperliquid.api';
-import { HyperliquidExchange } from '../../exchanges/hyperliquid/hyperliquid.exchange';
+import { createExchangeAPI } from '../reference/hyperliquid/hyperliquid.api';
+import { HyperliquidExchange } from '../reference/hyperliquid/hyperliquid.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../../types';
 

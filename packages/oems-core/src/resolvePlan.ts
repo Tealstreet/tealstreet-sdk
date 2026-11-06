@@ -424,9 +424,9 @@ const resolveReduce = (
         // the number no longer matches.
         edit?.amount !== undefined
           ? `Reduce ${position.symbol} ${position.side} on ${position.account} by ` +
-            `${trim(sized.amount)} of ${trim(Math.abs(position.nativeContracts))}`
+              `${trim(sized.amount)} of ${trim(Math.abs(position.nativeContracts))}`
           : `Reduce ${position.symbol} ${position.side} on ${position.account} by ` +
-            `${trim(sized.amount)} of ${trim(Math.abs(position.nativeContracts))} (${step.percent}%)`,
+              `${trim(sized.amount)} of ${trim(Math.abs(position.nativeContracts))} (${step.percent}%)`,
       ),
     );
   }
@@ -854,10 +854,12 @@ const resolveAmend = (
 
   // Round to NEAREST for an amend even where placement rounds down: truncating
   // a resting order's size is a change the user did not ask for.
-  const update = hasPrice
-    ? { price: roundToStep(step.price as number, market.priceStep) }
-    : { amount: roundToStep(step.amount as number, market.amountStep) };
-  const value = hasPrice ? (update as { price: number }).price : (update as { amount: number }).amount;
+  const value = hasPrice
+    ? roundToStep(step.price as number, market.priceStep)
+    : roundToStep(step.amount as number, market.amountStep);
+  // The plan's amount is what should rest (nativeRemaining's unit); the engine's is the total.
+  const nativeFilled = order.remaining > 0 ? (order.filled * order.nativeRemaining) / order.remaining : 0;
+  const update = hasPrice ? { price: value } : { amount: roundToStep(value + nativeFilled, market.amountStep) };
   if (!(value > 0)) {
     out.reasons.push(`the amended ${hasPrice ? 'price' : 'amount'} rounds to zero`);
     return out;
@@ -866,7 +868,7 @@ const resolveAmend = (
   out.commands.push({
     method: 'updateOrder',
     args: [order.id, { update }, step.account],
-    preview: `Amend ${order.symbol} ${order.side} on ${step.account} — ${hasPrice ? 'price' : 'amount'} to ${trim(value)}`,
+    preview: `Amend ${order.symbol} ${order.side} on ${step.account} — ${hasPrice ? 'price' : 'remaining amount'} to ${trim(value)}`,
   });
   return out;
 };

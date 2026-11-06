@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
+import { PhemexExchange } from '../reference/phemex/phemex.exchange';
 import { ENDPOINTS } from '../../exchanges/phemex/phemex.types';
 import { DefaultStore } from '../../store/store.base';
 

@@ -104,6 +104,9 @@ pub struct Trading {
     active: Option<Job>,
     queue: VecDeque<Command>,
     detached: Vec<(Waiting, HashSet<String>)>,
+    /// O1 interim: a managed account delivery cannot complete a legacy trading
+    /// command, so its reconcile runs from this zero-delay timer (O2 deletes it).
+    deferred: Option<safe_cex_engine::TimerId>,
 }
 fn mode(m: MarginType) -> &'static str {
     if m == MarginType::Isolated {
@@ -1729,11 +1732,29 @@ impl Orderly {
             self.trade_next(cx);
         }
     }
+    /// From a managed account delivery: reconcile on the next tick, once,
+    /// only while a protective wait or fence could be released.
+    pub(crate) fn defer_trade_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
+        let waiting = self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| job.waiting.is_some())
+            || !self.trading.detached.is_empty();
+        if waiting && self.trading.deferred.is_none() {
+            self.trading.deferred = Some(cx.set_timer(0.0));
+        }
+    }
     pub(crate) fn trade_timer(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         timer: safe_cex_engine::TimerId,
     ) -> bool {
+        if self.trading.deferred == Some(timer) {
+            self.trading.deferred = None;
+            self.trade_reconcile(cx);
+            return true;
+        }
         let Some(wait) = self
             .trading
             .active

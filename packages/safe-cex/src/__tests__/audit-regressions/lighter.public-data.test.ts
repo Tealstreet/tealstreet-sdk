@@ -2,7 +2,7 @@ import type { ExchangeOptions, Market, OrderBook, Ticker } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { LighterExchange } from '../../exchanges/lighter/lighter.exchange';
+import { LighterExchange } from '../reference/lighter/lighter.exchange';
 import { ENDPOINTS } from '../../exchanges/lighter/lighter.types';
 import { DefaultStore } from '../../store/store.base';
 

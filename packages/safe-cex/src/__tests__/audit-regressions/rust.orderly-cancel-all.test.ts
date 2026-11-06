@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { ExchangeName } from '../../types';
 
 import { expect, it, vi } from 'vitest';
@@ -6,7 +11,7 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
-it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
   '%s cancel-all sends the unscoped native cancel instead of looping stored symbols',
   async (name) => {
     const store = new DefaultStore();

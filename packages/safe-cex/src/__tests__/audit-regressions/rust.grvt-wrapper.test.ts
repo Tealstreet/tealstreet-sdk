@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
@@ -56,7 +61,7 @@ it.each([true, false])('GRVT SDK uses the transport-selected authentication prot
 it.each(['grvt', 'woo'] as const)('%s cancel-all reaches the engine even with an empty local order snapshot', async (name) => {
   const exchange = new RustEngineExchange(name, { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
   const command = vi.fn().mockResolvedValue([]);
-  Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  Object.assign(exchange, { host: { command: (input: unknown) => command(input), dispose: vi.fn() } });
   adoptEngineCapabilities(exchange);
   try {
     await exchange.cancelAllOrders();

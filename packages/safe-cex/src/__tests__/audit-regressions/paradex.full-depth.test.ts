@@ -2,7 +2,7 @@ import type { OrderBook } from '../../types';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 // Official ResponsesPriceBookUpdate and order_book deltas feed contract:

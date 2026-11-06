@@ -553,9 +553,10 @@ fn assert_partial(d: &mut Driver, expected: &[&str]) {
     assert_eq!(gaps.len(), 1);
     assert_eq!(gaps[0].level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        gaps[0].fields,
-        vec![("command", safe_cex_engine::Value::Num(77.0))]
+        gaps[0].fields[..1],
+        [("command", safe_cex_engine::Value::Num(77.0))]
     );
+    assert_eq!(gaps[0].fields[1].0, "reason");
 }
 
 #[test]
@@ -822,4 +823,27 @@ fn duplicate_only_changing_cursors_continue_to_native_family_budget() {
         d.reply(r, 200, &format!(r#"{{"fills":[{a}],"cursor":"next-{i}"}}"#));
     }
     assert_partial(&mut d, &["a"]);
+}
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut d = Driver::new(true, "BTC-USD", false);
+    d.query(Query::Fills {
+        symbol: Some("BTC-USD".into()),
+        order_id: None,
+        from_ms: Some(NOW),
+        to_ms: Some(NOW + 1000.0),
+        limit: None,
+    });
+    let r = d.request();
+    let rows = (0..100)
+        .map(|n| fill(&format!("t{n}"), "100", "1", false, "2024-01-01T00:00:00Z"))
+        .collect::<Vec<_>>()
+        .join(",");
+    d.reply(
+        r,
+        200,
+        &format!(r#"{{"fills":[{rows}],"cursor":"page-2","proof_token_required":false}}"#),
+    );
+    assert!(d.request().url.ends_with("cursor=page-2"));
 }

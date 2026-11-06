@@ -63,8 +63,13 @@ Status: dazzy3 CLEARed the legacy seam shape at `71fbebd9739`. The legacy-path s
   - When a `reject_route` connect has no candidate left, the host does not dial. It emits `Event::WsRouteExhausted { socket }`.
   - That event is host-only, enqueued after `connect` returns, and dropped for a stale socket.
   - **It is that socket's only terminal.** A host that emits it emits no open and no close for the socket. The engine treats it as that epoch's sole terminal, so there is never a double retire.
-  - The driver turns it into `LifecycleEvent::RouteExhausted`. It is never a peer close.
-  - The default handling is today's close-and-retry path, so venues that don't opt in are unchanged.
+  - On the managed path the driver retires the epoch as
+    `LifecycleEvent::Retired { reason: RetireReason::RouteExhausted }` (landed in
+    #2324): never a peer close, no retry and no `ws.closed` count. #2324 first
+    named it `RouteRefused`; the rename keeps `RouteRefused` for the per-route
+    pre-login refusal above.
+  - On the legacy path, a venue that does not opt in through `route_exhaustion()`
+    keeps today's close-and-retry handling.
 - **The connect after exhaustion (dazzy3 B).** Any connect after `RouteExhausted` carries `reject_route = false`, and the host dials the last candidate: it stays where the walk ended, matching `WsDirectFallback`'s sticky choice. Native `SocketAttempts`, TS `WsDirectFallback` and the WASM pass-through agree on this. For Bitget, ruling 3 means no such connect happens: it stops. Venues on the default close-and-retry path use this rule.
   - REDs per host: refuse every route, then exhaustion with no dial, then the next connect dials the last candidate with no second exhaustion.
 - **One host contract on both paths.** `rejectRoute` plus `WsRouteExhausted` is the same host contract on the legacy and managed paths; only the producer differs. Adoption later moves only the evidence source, not the hosts or the event.
@@ -129,3 +134,37 @@ Ruled order:
 ## Callers
 
 A custom host must honour `reject_route` and emit `WsRouteExhausted`, or Bitget UTA and egress parity is lost. No SDK option changes. Recorded in `RUST_CUTOVER_CALLERS.md` at production time.
+
+## Managed adoption (overseer rulings, 2026-10-28)
+
+Owner claude-fe7lgm. Order: #2331 (exhaustion renamed `RouteExhausted`), then
+the engine per-route refusal (C), then Bitget adoption, then Crypto.com.
+
+- **(A) Recovery after exhaustion (ruling 3, restated).** On
+  `Retired { reason: RouteExhausted }` the private feed stays down:
+  - exactly one `AUTH_REJECTED` notice, with the IP-whitelist text;
+  - `account.degraded`, so the account poll refreshes balance, positions and
+    orders in place of the stream;
+  - `start()` never fails with `StartupFailed`, and public feeds are unaffected;
+  - a new start recovers, as in TS (`WsDirectFallback` reports once and stops).
+
+  Managed RED: with Bitget managed, a 40018 on every route ends in exhaustion
+  with one notice, zero private `WsConnect` across 10 backoff periods, polling
+  and public books live, and a fresh engine reconnecting. The legacy
+  zero-reconnect test is its preservation twin.
+- **(B) Close floors.** Every Bitget feed declares `close_floors: &[]`. The TS
+  reference sockets (`reference/bitget/bitget.ws-private.ts`, `bitget.ws-public.ts`,
+  `bitget.ws-secondary-public.ts`) never branch on a close code.
+- **(C) Per-route refusal is engine-owned (option E).**
+  - `AuthEvidence::RouteRefused` retires with `RetireReason::RouteRefused` and
+    retries.
+  - The first refusal of a streak redials at once, matching TS's immediate
+    `switchRoute`. Later refusals wait backoff.
+  - An accepted login resets the streak.
+  - The engine sets `reject_route` on the next connect spec.
+
+  Option V (venue-held, backoff before every switch) was rejected as slower
+  than TS on the first switch.
+- **(D) Size.** The adoption PR's cap follows the HL rule: the CI-measured
+  family size rounded up to the next KiB plus 2 KiB, with a twiggy breakdown.
+  It stops for an overseer ruling above about 110 KB.

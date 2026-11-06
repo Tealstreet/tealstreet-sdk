@@ -406,6 +406,46 @@ fn signature_rejection_resigns_once_without_changing_the_page_or_read_key() {
 }
 
 #[test]
+fn timestamp_refusal_resigns_the_page_once_and_reads_the_server_clock() {
+    let stamp = |request: &HttpRequest| -> f64 {
+        request
+            .url
+            .split(['?', '&'])
+            .find_map(|pair| pair.strip_prefix("timestamp="))
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let mut engine = engine();
+    let first = query(&mut engine, fills(), 10_000);
+    let refused = r#"{"code":109400,"msg":"timestamp is invalid","data":[]}"#;
+    let second = reply(&mut engine, NOW + 6_001., &first.requests[0], refused);
+    assert!(terminals(&second).is_empty());
+    assert_eq!(second.requests.len(), 2, "{:?}", second.requests);
+    let clock = second
+        .requests
+        .iter()
+        .find(|r| r.url.ends_with("/openApi/swap/v2/server/time"))
+        .expect("one clock read");
+    let page = second
+        .requests
+        .iter()
+        .find(|r| r.url.contains("pageIndex=1"))
+        .expect("the page resent");
+    assert_eq!(stamp(page), NOW + 6_001., "re-signed on a fresh stamp");
+    let server = format!(r#"{{"code":0,"data":{{"serverTime":{}}}}}"#, NOW + 9_011.);
+    let synced = reply(&mut engine, NOW + 6_011., clock, &server);
+    assert!(synced.requests.is_empty());
+    let output = reply(&mut engine, NOW + 6_012., page, refused);
+    let results = terminals(&output);
+    assert_eq!(results.len(), 1);
+    assert!(results[0].unwrap_err().message.contains("109400"));
+    // No third send: the final refusal only recalibrates the clock again.
+    assert_eq!(output.requests.len(), 1);
+    assert!(output.requests[0].url.ends_with("/server/time"));
+}
+
+#[test]
 fn signed_history_without_read_credentials_uses_the_primary_snapshot() {
     let mut engine = support::engine(support::Options {
         key: Some("primary-key".into()),

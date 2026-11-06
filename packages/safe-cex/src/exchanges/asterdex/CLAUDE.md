@@ -109,8 +109,8 @@ exercised on first order) — same caveat as the other non-binance HMAC exchange
 
 **Egress.** `createAPI` takes its transport from a per-call `transportOptions`
 argument (default = the primary account). The secondary read client passes its own
-`ExchangeOptions`, so its GETs pick up `overrideProxyUrl` = the AWS public CORS
-proxy (`AWS_PUBLIC_CORS_PROXY`) — reads egress there while writes stay on the
+`ExchangeOptions`, so its GETs pick up `overrideProxyUrl` = the public CORS
+proxy (`PUBLIC_CORS_PROXY`) — reads egress there while writes stay on the
 primary transport. This
 is the same handling as the tunnelled CORS HMAC exchanges (bitget et al.); Aster's
 `createAPI` previously read transport from `exchange.options` and ignored the override,

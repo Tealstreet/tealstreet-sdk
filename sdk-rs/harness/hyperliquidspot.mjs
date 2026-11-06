@@ -42,7 +42,7 @@ export const hyperliquidspot = {
   rust: 'hyperliquidspot',
   virtualPrivateClock: true,
   recordAfterReady: true,
-  ts: { module: '../../packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.exchange.ts', className: 'HyperliquidSpotExchange', name: 'hyperliquidspot' },
+  ts: { module: '../../packages/safe-cex/src/__tests__/reference/hyperliquid/hyperliquidspot.exchange.ts', className: 'HyperliquidSpotExchange', name: 'hyperliquidspot' },
   publicOptions: { key: '' },
   recordOptions: { publicDataOnly: true, key: '' },
   replayCredentials: HYPERLIQUID_SPOT_REPLAY,

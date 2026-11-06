@@ -1,8 +1,9 @@
 //! TS fetchAccountLimits(): coalesced reads, 5m cache, 60s failure cooldown.
 mod support;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, TimerId};
-use safe_cex_venue_lighter::{Lighter, Options};
+use safe_cex_venue_lighter::Lighter;
 use serde_json::json;
+use support::Options;
 use support::*;
 
 struct Client {
@@ -12,7 +13,7 @@ struct Client {
 impl Client {
     fn new(options: Options) -> Self {
         let mut client = Self {
-            engine: safe_cex_engine::test_support::seeded_engine(Lighter::new(options)),
+            engine: support::engine(options),
             timers: vec![],
         };
         client.engine.start(NOW);
@@ -63,7 +64,7 @@ impl Client {
         }
         let mut limits = vec![];
         for _ in 0..10 {
-            let actions = self.engine.drain_actions().collect::<Vec<_>>();
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut self.engine, now);
             if actions.is_empty() {
                 break;
             }
@@ -95,7 +96,7 @@ impl Client {
                 ],
             }),
         );
-        self.engine.drain_actions().collect()
+        safe_cex_engine::test_support::prepared_actions(&mut self.engine, NOW + offset)
     }
 }
 #[test]
@@ -323,7 +324,7 @@ impl Client {
     ) -> Vec<Action> {
         self.engine
             .handle(now, Event::Command(Command::Venue { command, action }));
-        self.engine.drain_actions().collect()
+        safe_cex_engine::test_support::prepared_actions(&mut self.engine, now)
     }
 }
 fn done(actions: &[Action], id: u32) -> Option<Result<String, String>> {
@@ -388,7 +389,8 @@ fn account_tier_reads_the_cached_tier_and_a_change_posts_then_rereads_limits() {
         200,
         r#"{"code":200}"#,
     );
-    let actions = client.engine.drain_actions().collect::<Vec<_>>();
+    let actions =
+        safe_cex_engine::test_support::prepared_actions(&mut client.engine, NOW + 2_004.0);
     assert_eq!(done(&actions, 62), Some(Ok("null".into())));
     assert!(actions.iter().any(
         |action| matches!(action, Action::Http(request) if request.url.contains("accountLimits"))

@@ -245,10 +245,13 @@ impl Coinbase {
             if kind != Kind::Trades && self.credentials.is_none() {
                 return Err("Coinbase private history requires credentials".into());
             }
+            // A window with no limit walks to its start; no default may stop it.
+            let open_window = limit.is_none() && from.is_some();
             let limit = limit.unwrap_or(100) as usize;
             if limit == 0 || limit > MAX_OUTPUT {
                 return Err("Coinbase history limit must be1..1000".into());
             }
+            let limit = if open_window { usize::MAX } else { limit };
             let from = from.map(checked_time).transpose()?;
             let to = to.map(checked_time).transpose()?;
             if from.zip(to).is_some_and(|(a, b)| a > b) {
@@ -609,7 +612,9 @@ impl Coinbase {
                 return Ok(());
             }
             req.rows.push(row);
-            if req.owner.accepted_len() + req.rows.len() > MAX_OUTPUT * 2 {
+            // An open window (no limit) is bounded by the page budget instead.
+            if req.limit != usize::MAX && req.owner.accepted_len() + req.rows.len() > MAX_OUTPUT * 2
+            {
                 return Err("Coinbase history result exceeds limit".into());
             }
             Ok(())

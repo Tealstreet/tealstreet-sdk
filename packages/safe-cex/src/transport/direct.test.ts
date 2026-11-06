@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
+import { BybitExchange } from '../__tests__/reference/bybit/bybit.exchange';
 import { DefaultStore } from '../store/store.base';
 import { directTransport } from './direct';
 import { resolveTransportRouting, withPublicCorsProxy } from './registry';

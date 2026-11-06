@@ -117,11 +117,7 @@ fn diagnostics(actions: &[Action]) -> usize {
 fn no_io(actions: &[Action]) {
     assert!(!actions.iter().any(|action| matches!(
         action,
-        Action::Http(_)
-            | Action::ManagedHttp(_)
-            | Action::WsSend { .. }
-            | Action::WsConnect { .. }
-            | Action::SignPayload { .. }
+        Action::Http(_) | Action::ManagedHttp(_) | Action::WsSend { .. } | Action::WsConnect { .. }
     )));
 }
 fn prep(actions: &[Action]) -> (Preparation, HttpRequest) {
@@ -291,7 +287,7 @@ fn native_wire_identity_row_and_duplicate_reply_on_all_four_hosts() {
 fn two_distinct_addresses_keep_all_four_native_candidates_in_order() {
     let mut e = engine(Options {
         application_id: Some(ADDRESS_A.into()),
-        key: Some(ADDRESS_B.into()),
+        l1_address: Some(ADDRESS_B.into()),
         public_data_only: true,
         ..Default::default()
     });

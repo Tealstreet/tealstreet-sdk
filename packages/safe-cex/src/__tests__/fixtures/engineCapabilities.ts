@@ -3,7 +3,7 @@ import type { EngineCapabilities } from '@tealstreet/safe-cex-wasm/host';
 import { QUANTITY_UNITS } from '@tealstreet/safe-cex-wasm/wire';
 import type { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 
-const ORDERLY = ['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'];
+const ORDERLY = ['kodiakfi', 'mode', 'what', 'woofi'];
 const OKX = ['okx', 'okxeu', 'okxdemo', 'okxeudemo'];
 
 /**
@@ -34,11 +34,11 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
       : is('phemex', 'asterdex', 'bitget', 'bitgetinverse', 'bitgetusdc', 'blofin', 'bitrue', ...OKX)
         ? 'eachPlacedSymbol'
         : 'eachOpenSymbol',
-    leverageQuery: is('bingx', 'weex')
+    leverageQuery: is('bingx', 'weex', 'bybit', 'bybitinverse', 'bybitdemo', 'bitget', 'bitgetinverse', 'bitgetusdc', 'kucoin')
       ? 'onReadAndMetadata'
       : is('asterdex', 'blofin', 'bitrue', 'grvt', 'paradex', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', ...OKX, ...ORDERLY)
         ? 'onRead'
-        : is('mexc', 'woo', 'kraken')
+        : is('mexc', 'woo', 'kraken', 'hyperliquid')
           ? 'onMetadata'
           : 'settings',
     maxLeverage: is('bitrue') ? 'query' : is('polymarket') ? 'rails' : is('breakoutprop') ? 'unsupported' : 'market',
@@ -58,15 +58,15 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
             ? 'inverseContractSized'
             : 'base',
     accountTier: is('lighter', 'lighter-robinhood'),
-    closedPositions: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'blofin', ...OKX),
-    balanceInfo: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot'),
+    closedPositions: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'blofin', 'bitunix', ...OKX),
+    balanceInfo: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse', 'bybitspot', 'binanceinverse'),
     marketRefresh: is('bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader'),
     positionHistory: is('kraken', 'bitget', 'bitgetusdc', 'bitgetinverse') ? 'fillsAccount'
       : is('binance', 'hyperliquid', 'paradex') ? 'fillsSymbol'
       : is('bybit', 'bybitdemo', 'hyrotrader') ? 'bybit'
-      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : is('woo') ? 'wooOrders' : 'unsupported',
+      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : is('woo') ? 'wooOrders' : is('bitunix') ? 'bitunix' : 'unsupported',
     closedPositionFormat: is('bybit', 'bybitdemo', 'hyrotrader', 'bybitinverse') ? 'bybit'
-      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : 'unsupported',
+      : is(...OKX) ? 'okx' : is('blofin') ? 'blofin' : is('bitunix') ? 'bitunix' : 'unsupported',
     fillHistoryTime: is('woo') ? 'nonnegativeSecondsOrMilliseconds'
       : is('apexomni', 'blofin', 'bitrue', 'grvt', 'hyperliquid', 'paradex', 'lighter', 'lighter-robinhood', 'kraken', 'coinbase', 'coinbasespot')
         ? 'secondsOrMilliseconds' : 'asProvided',
@@ -79,7 +79,40 @@ export const engineCapabilities = (venue: string, overrides: Partial<EngineCapab
     publicCatalogueValidation: is('breakoutprop'),
     isolatedBookSubscriptions: is('asterdex'),
     scheduleCancel: is('hyperliquid'),
+    orderHistoryNeedsSymbol: is('binance', 'binancepm', 'phemex'),
+    freshPositions: is(
+      'bybit', 'bybitinverse', 'bybitdemo', 'hyrotrader', 'bitget', 'bitgetinverse', 'bitgetusdc',
+      'binance', 'binancepm', 'binanceinverse', ...OKX, 'hyperliquid', 'kraken', 'lighter', 'paradex',
+      'bitunix', 'phemex', 'bingx', 'apexomni', 'blofin', 'cryptocom', 'asterdex',
+    ),
     inverseClosedPositions: is('bybitinverse'),
+    nukeAccountCancel: is('krakenspot', 'bitget', 'bitgetinverse', 'bitgetusdc', 'phemex'),
+    symbolCancelMissesUnseen: is(
+      'krakenspot', 'bitget', 'bitgetinverse', 'bitgetusdc', 'hyperliquid', 'hyperliquidspot', 'lighter',
+      'lighter-robinhood', ...OKX, 'blofin', 'hyrotrader', 'paradex', 'phemex',
+    ),
+    orderReadCovers: is(
+      'binance',
+      'binancepm',
+      'binanceinverse',
+      'binancespot',
+      'bingx',
+      'bitget',
+      'bitgetinverse',
+      'bitgetusdc',
+      'blofin',
+      'bybit',
+      'bybitdemo',
+      'bybitinverse',
+      'bybitspot',
+      'hyperliquid',
+      'hyperliquidspot',
+      'lighter',
+      'lighter-robinhood',
+      ...OKX,
+      'paradex',
+      'phemex',
+    ),
     ...overrides,
   };
   return JSON.stringify(record);

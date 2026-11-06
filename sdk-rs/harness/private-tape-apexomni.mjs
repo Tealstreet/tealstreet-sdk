@@ -11,6 +11,12 @@ const PRIVATE = 'wss://quote.omni.apex.exchange/realtime_private?v=2';
 const EPOCH = 1792454400000;
 const records = [{ t: 0, type: 'meta', epoch: EPOCH, private: true }];
 const ok = (data) => ({ code: 0, data });
+// Real ApeX write replies carry no `code`; a cancel's `data` is the bare order id.
+const written = (data) => ({ data, timeCost: 21 });
+// Rust proves an amend's cancel terminal with GET /v3/order before its
+// replacement; TS sends the replacement on the cancel's acknowledgement.
+const canceled = (row) => http('GET', '/v3/order', { id: row.id }, ok({ ...row, status: 'CANCELED', cancelReason: 'USER_CANCELED' }),
+  undefined, { impl: 'rust' });
 const stage = () => ({ afterCommand: records.filter((r) => r.type === 'command').length });
 function http(method, path, params, data, requestBody, extra = {}) {
   records.push({ t: 0, type: 'http', method, url: `${REST}${path}${params ? `?${new URLSearchParams(params)}` : ''}`, status: 200,
@@ -65,7 +71,7 @@ const caller = order('order-caller', '0.002', '60000', { clientId: 'caller-exact
 openOrders.push(caller); snapshot();
 const callerBody = generated('0.002', '60000', { clientId: 'caller-exact-01', clientOrderId: 'caller-exact-01', limitFee: '0.060000' });
 http('POST', '/v3/order', null, { code: 20016, msg: 'sign check failed' }, callerBody);
-http('POST', '/v3/order', null, ok({ id: 'order-caller' }), callerBody);
+http('POST', '/v3/order', null, written({ id: 'order-caller' }), callerBody);
 accountWs(1000, { orders: [caller] });
 const executed = { ...caller, status: 'FILLED', cumSuccessFillSize: '0.002', cumSuccessFillFee: '0.06', updatedAt: EPOCH + 1100 };
 accountWs(1100, { fills: [fill('exec-a', 1100), fill('exec-b', 1100)], orders: [executed] });
@@ -74,37 +80,38 @@ openOrders = [];
 
 command(1400, 'placeOrders', { orders: [{ symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.003, price: 59000, stopLoss: 58000, takeProfit: 67000 }] });
 openOrders.push(brackets('order-bracket')); snapshot();
-http('POST', '/v3/order', null, ok({ id: 'order-bracket' }), bracketBody());
+http('POST', '/v3/order', null, written({ id: 'order-bracket' }), bracketBody());
 accountWs(1700, { orders: [brackets('order-bracket')] });
 ws(2000, PRIVATE, { op: 'ping', args: ['private-token', 7] });
 
 command(2400, 'amendOrder', { id: 'order-bracket__stop_loss', price: 58100 });
 openOrders = [brackets('order-replaced', '58100')]; snapshot();
-http('POST', '/v3/delete-order', null, ok({ id: 'order-bracket' }), { id: 'order-bracket' });
-http('POST', '/v3/order', null, ok({ id: 'order-replaced' }), bracketBody('58100', '57809.5', '0.086715'));
+http('POST', '/v3/delete-order', null, written('order-bracket'), { id: 'order-bracket' });
+canceled(brackets('order-bracket'));
+http('POST', '/v3/order', null, written({ id: 'order-replaced' }), bracketBody('58100', '57809.5', '0.086715'));
 accountWs(2750, { orders: [brackets('order-replaced', '58100')] });
 
 command(3300, 'placeOrders', { orders: [{ symbol: 'BTCUSDT', type: 'market', side: 'buy', amount: 0.002 }] });
 const market = order('order-market', '0.002', '61200', { type: 'MARKET' });
 openOrders.push(market); snapshot();
-http('POST', '/v3/order', null, ok({ id: 'order-market' }), generated('0.002', '61200', { limitFee: '0.061200', type: 'MARKET' }));
+http('POST', '/v3/order', null, written({ id: 'order-market' }), generated('0.002', '61200', { limitFee: '0.061200', type: 'MARKET' }));
 accountWs(3600, { orders: [market] });
 
 command(4200, 'placeOrders', { orders: [{ symbol: 'BTCUSDT', type: 'stop_market', side: 'sell', amount: 0.001, price: 58000, reduceOnly: true }] });
 const stop = order('order-stop', '0.001', '57710', { type: 'STOP_LIMIT', status: 'UNTRIGGERED', side: 'SELL', reduceOnly: true, triggerPrice: '58000', triggerPriceType: 'INDEX' });
 openOrders.push(stop); snapshot();
-http('POST', '/v3/order', null, ok({ id: 'order-stop' }), generated('0.001', '57710', { side: 'SELL', limitFee: '0.028855', type: 'STOP_LIMIT', reduceOnly: 'true', triggerPrice: '58000', triggerPriceType: 'INDEX' }));
+http('POST', '/v3/order', null, written({ id: 'order-stop' }), generated('0.001', '57710', { side: 'SELL', limitFee: '0.028855', type: 'STOP_LIMIT', reduceOnly: 'true', triggerPrice: '58000', triggerPriceType: 'INDEX' }));
 accountWs(4550, { orders: [stop] });
 
 command(5100, 'placeOrders', { orders: [{ symbol: 'BTCUSDT', type: 'take_profit_market', side: 'sell', amount: 0.001, price: 65000, reduceOnly: true }] });
 const take = order('order-take', '0.001', '64675', { type: 'TAKE_PROFIT_LIMIT', status: 'UNTRIGGERED', side: 'SELL', reduceOnly: true, triggerPrice: '65000', triggerPriceType: 'MARKET' });
 openOrders.push(take); snapshot();
-http('POST', '/v3/order', null, ok({ id: 'order-take' }), generated('0.001', '64675', { side: 'SELL', limitFee: '0.032338', type: 'TAKE_PROFIT_LIMIT', reduceOnly: 'true', triggerPrice: '65000', triggerPriceType: 'MARKET' }));
+http('POST', '/v3/order', null, written({ id: 'order-take' }), generated('0.001', '64675', { side: 'SELL', limitFee: '0.032338', type: 'TAKE_PROFIT_LIMIT', reduceOnly: 'true', triggerPrice: '65000', triggerPriceType: 'MARKET' }));
 accountWs(5450, { orders: [take] });
 
 command(6100, 'cancelOrders', { ids: ['order-market'] });
 openOrders = openOrders.filter((row) => row.id !== 'order-market'); snapshot();
-http('POST', '/v3/delete-order', null, ok({ id: 'order-market' }), { id: 'order-market' });
+http('POST', '/v3/delete-order', null, written('order-market'), { id: 'order-market' });
 accountWs(6450, { orders: [{ ...market, status: 'CANCELED', cancelReason: 'USER_CANCELED' }] });
 
 command(7000, 'setLeverage', { symbol: 'BTCUSDT', leverage: 20 });
@@ -147,17 +154,18 @@ http('GET', '/v3/klines', { symbol: 'BTCUSDT', start: EPOCH / 1000 - 120, end: E
 command(12100, 'placeOrders', { orders: [{ symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.01, price: 60000, clientOrderId: 'partial-caller' }] });
 const partial = order('partial-entry', '0.01', '60000', { clientId: 'partial-caller', cumSuccessFillSize: '0.006' });
 openOrders = [partial]; snapshot();
-http('POST', '/v3/order', null, ok({ id: 'partial-entry' }), generated('0.01', '60000', { clientId: 'partial-caller', clientOrderId: 'partial-caller', limitFee: '0.300000' }));
+http('POST', '/v3/order', null, written({ id: 'partial-entry' }), generated('0.01', '60000', { clientId: 'partial-caller', clientOrderId: 'partial-caller', limitFee: '0.300000' }));
 accountWs(12200, { orders: [partial] });
 command(12400, 'amendOrder', { id: 'partial-entry', price: 59900 });
 const residual = order('partial-replaced', '0.004', '59900');
 openOrders = [residual]; snapshot();
-http('POST', '/v3/delete-order', null, ok({ id: 'partial-entry' }), { id: 'partial-entry' });
-http('POST', '/v3/order', null, ok({ id: 'partial-replaced' }), generated('0.004', '59900', { limitFee: '0.119800' }));
+http('POST', '/v3/delete-order', null, written('partial-entry'), { id: 'partial-entry' });
+canceled(partial);
+http('POST', '/v3/order', null, written({ id: 'partial-replaced' }), generated('0.004', '59900', { limitFee: '0.119800' }));
 accountWs(12600, { orders: [residual] });
 command(12700, 'cancelOrders', { ids: ['partial-replaced'] });
 openOrders = []; snapshot();
-http('POST', '/v3/delete-order', null, ok({ id: 'partial-replaced' }), { id: 'partial-replaced' });
+http('POST', '/v3/delete-order', null, written('partial-replaced'), { id: 'partial-replaced' });
 accountWs(12800, { orders: [{ ...residual, status: 'CANCELED', cancelReason: 'USER_CANCELED' }] });
 records.push({ t: 13000, type: 'close', url: PRIVATE, code: 1006 });
 accountWs(16800, { fills: [fill('snapshot-old', -60000)], orders: [], positions: [position('LONG', 20), position('SHORT', 20)] }, 'snapshot');

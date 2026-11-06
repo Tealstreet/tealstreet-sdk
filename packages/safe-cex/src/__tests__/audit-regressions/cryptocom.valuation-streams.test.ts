@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
+import { CryptocomExchange } from '../reference/cryptocom/cryptocom.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const createExchange = () => {

@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApexOmniExchange } from '../../exchanges/apexomni/apexomni.exchange';
-import { ENDPOINTS } from '../../exchanges/apexomni/apexomni.types';
+import { ApexOmniExchange } from '../reference/apexomni/apexomni.exchange';
+import { ENDPOINTS } from '../reference/apexomni/apexomni.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderStatus, OrderStopTriggerType, OrderType, PositionSide } from '../../types';
 
 vi.mock('zklink-web-sdk-alpha', () => ({
   newRpcSignerWithProvider: () => ({ initZklinkSigner: vi.fn(async () => undefined) }),
 }));
-vi.mock('../../exchanges/apexomni/zklink/signer/utils', () => ({ initSdk: vi.fn(async () => undefined) }));
+vi.mock('../reference/apexomni/zklink/signer/utils', () => ({ initSdk: vi.fn(async () => undefined) }));
 
 const row = (extra: Record<string, unknown> = {}) => ({
   id: 'parent',

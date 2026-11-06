@@ -28,6 +28,9 @@ struct Probe {
     releases: ReleaseLog,
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn guard_pending_placements(&self) -> bool {
         self.venue.guard_pending_placements()

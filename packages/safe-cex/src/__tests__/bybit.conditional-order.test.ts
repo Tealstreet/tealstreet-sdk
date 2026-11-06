@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
+import { BybitExchange } from './reference/bybit/bybit.exchange';
 import { OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType, PositionMode, PositionSide } from '../types';
 
 const createStore = () =>

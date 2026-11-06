@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { AsterDEXExchange } from '../../exchanges/asterdex/asterdex.exchange';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderTimeInForce, OrderType } from '../../types';
 

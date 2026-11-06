@@ -1,3 +1,8 @@
+vi.mock('../../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('../reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../../exchanges/rust/betaVenues')>());
+});
+
 import type { EngineCapabilities, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 import type { ExchangeName, Order, StoreData } from '../../types';
@@ -75,6 +80,24 @@ const fixture = (capabilities: Partial<EngineCapabilities>, name: ExchangeName =
   running.push(exchange);
   return { exchange, commands, commandTimes, started, engine };
 };
+
+/** Native markets for `symbols`: metadata refreshes read only loaded markets. */
+const loadedMarkets =
+  (...symbols: string[]) =>
+  (): Partial<StoreData> => ({
+    markets: symbols.map(
+      (symbol) =>
+        ({
+          id: symbol,
+          symbol,
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        }) as StoreData['markets'][number],
+    ),
+  });
 
 const order = (id: string, symbol: string): Order =>
   ({
@@ -414,7 +437,7 @@ describe('Rust bridge routes from the engine capability record', () => {
 
     // A metadata-refreshed venue reads a flat symbol it has not refreshed yet,
     // then serves the published rails without another venue read.
-    const onMetadata = fixture({ leverageQuery: 'onMetadata' });
+    const onMetadata = fixture({ leverageQuery: 'onMetadata' }, 'woo', loadedMarkets('BTC'));
     await onMetadata.exchange.start();
     await expect(onMetadata.exchange.fetchLeverageForSymbol('BTC')).resolves.toEqual({
       buyLeverage: 20,
@@ -431,7 +454,7 @@ describe('Rust bridge routes from the engine capability record', () => {
   });
 
   it('reads BingX settings for a flat symbol during metadata refresh', async () => {
-    const { exchange, commands } = fixture({}, 'bingx');
+    const { exchange, commands } = fixture({}, 'bingx', loadedMarkets('BTCUSDT'));
     await exchange.start();
     await exchange.updateSymbolMetadata('BTCUSDT');
     expect(commands.filter((c) => c.op === 'fetchLeverage')).toEqual([
@@ -442,7 +465,7 @@ describe('Rust bridge routes from the engine capability record', () => {
 
   it('keeps combined metadata refreshes and explicit reads fresh even with cached rails', async () => {
     // The generic record controls dispatch; no BingX-name branch is involved.
-    const { exchange, commands } = fixture({ leverageQuery: 'onReadAndMetadata' });
+    const { exchange, commands } = fixture({ leverageQuery: 'onReadAndMetadata' }, 'woo', loadedMarkets('BTCUSDT'));
     await exchange.start();
     for (let read = 0; read < 2; read++) {
       await expect(exchange.fetchLeverageForSymbol('BTCUSDT')).resolves.toEqual({
@@ -453,6 +476,24 @@ describe('Rust bridge routes from the engine capability record', () => {
     expect(commands.filter((command) => command.op === 'fetchLeverage')).toHaveLength(2);
     await exchange.updateSymbolMetadata('BTCUSDT');
     expect(commands.filter((command) => command.op === 'fetchLeverage')).toHaveLength(3);
+  });
+
+  it('starts no metadata command for a symbol this venue has not loaded', async () => {
+    for (const capabilities of [
+      { leverageQuery: 'onMetadata' },
+      { leverageQuery: 'onReadAndMetadata' },
+      { maxLeverage: 'query' },
+    ] as const) {
+      const { exchange, commands } = fixture(capabilities, 'woo', loadedMarkets('BTCUSDT'));
+      await exchange.start();
+      const before = commands.length;
+      await exchange.updateSymbolMetadata('ETHUSDT');
+      expect(commands.slice(before)).toEqual([]);
+      expect(exchange.store.fetchedLeverage.ETHUSDT).toBeUndefined();
+      // The control: the loaded symbol does query.
+      await exchange.updateSymbolMetadata('BTCUSDT');
+      expect(commands.length).toBeGreaterThan(before);
+    }
   });
 
   it('keeps existing onRead venues fresh only on explicit reads, without new metadata dispatch', async () => {

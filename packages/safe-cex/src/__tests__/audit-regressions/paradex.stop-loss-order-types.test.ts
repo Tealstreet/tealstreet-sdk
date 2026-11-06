@@ -2,8 +2,8 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
-import type { ORDER_RESPONSE } from '../../exchanges/paradex/paradex.types';
+import { ParadexExchange } from '../reference/paradex/paradex.exchange';
+import type { ORDER_RESPONSE } from '../reference/paradex/paradex.types';
 import { DefaultStore } from '../../store/store.base';
 import { OrderStatus, OrderType } from '../../types';
 

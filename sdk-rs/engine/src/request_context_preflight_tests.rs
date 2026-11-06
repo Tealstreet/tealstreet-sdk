@@ -891,3 +891,100 @@ fn inherited_uncertainty_requires_live_write_preflight_custody_and_mutates_nothi
     });
     assert_eq!(outcome, Some(Some(crate::Outcome::NotSent)));
 }
+
+#[cfg(not(feature = "condition-waits"))]
+struct ObservedFailure<'a> {
+    conversions: &'a Cell<usize>,
+    panic: bool,
+}
+
+#[cfg(not(feature = "condition-waits"))]
+impl From<ObservedFailure<'_>> for VenueError {
+    fn from(error: ObservedFailure<'_>) -> Self {
+        error.conversions.set(error.conversions.get() + 1);
+        assert!(!error.panic, "error conversion ran");
+        VenueError::new("counted failure")
+    }
+}
+
+#[cfg(not(feature = "condition-waits"))]
+#[test]
+fn preflight_failure_refuses_invalid_custody_before_converting_the_error() {
+    let mut foreign_engine = engine();
+    let foreign = begin(&mut foreign_engine, 7, PreflightPurpose::ReadOnly);
+    let mut local = engine();
+    let live = begin(&mut local, 7, PreflightPurpose::ReadOnly);
+    let revoked = begin(&mut local, 8, PreflightPurpose::ReadOnly);
+    cx(&mut local, 1., |cx| {
+        cx.done_preflight(&revoked, "cached".into())
+    })
+    .unwrap();
+    let before = local.io.core.actions.len();
+    for (label, handle, now, expected) in [
+        ("foreign", &foreign, 2., Error::Revoked),
+        ("revoked", &revoked, 2., Error::Revoked),
+        ("nonfinite", &live, f64::NAN, Error::Invalid),
+    ] {
+        for panic in [false, true] {
+            let conversions = Cell::new(0);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                cx(&mut local, now, |cx| {
+                    cx.fail_preflight(
+                        handle,
+                        ObservedFailure {
+                            conversions: &conversions,
+                            panic,
+                        },
+                    )
+                })
+            }));
+            assert!(
+                matches!(result, Ok(Err(error)) if error == expected),
+                "{label}: typed refusal must not run conversion"
+            );
+            assert_eq!(conversions.get(), 0, "{label}: conversion is after custody");
+            assert_eq!(
+                local.io.core.actions.len(),
+                before,
+                "{label}: no terminal or action"
+            );
+        }
+    }
+    cx(&mut local, 3., |cx| {
+        cx.done_preflight(&live, "still live".into())
+    })
+    .unwrap();
+    cx(&mut foreign_engine, 3., |cx| {
+        cx.done_preflight(&foreign, "still live".into())
+    })
+    .unwrap();
+}
+
+#[cfg(not(feature = "condition-waits"))]
+#[test]
+fn preflight_failure_converts_an_owned_error_once_and_keeps_the_terminal() {
+    let mut local = engine();
+    let owner = begin(&mut local, 7, PreflightPurpose::ReadOnly);
+    let conversions = Cell::new(0);
+    cx(&mut local, 1., |cx| {
+        cx.fail_preflight(
+            &owner,
+            ObservedFailure {
+                conversions: &conversions,
+                panic: false,
+            },
+        )
+    })
+    .unwrap();
+    assert_eq!(conversions.get(), 1);
+    let actions: Vec<_> = local.drain_actions().collect();
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { command: 7, error })
+            if error.message == "counted failure"))
+            .count(),
+        1
+    );
+}

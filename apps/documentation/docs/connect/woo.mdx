@@ -11,7 +11,7 @@ hide_table_of_contents: false
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import ThemedImage from '@theme/ThemedImage';
-import ApiWhitelist from '/img/connect/woox/v3/apiwhitelist.png';
+import ProxyFleetIps from '@site/src/components/ProxyFleetIps';
 import ApiTeal from '/img/connect/woox/v3/api-teal.png';
 import ApiDropdown from '/img/connect/woox/apidropdown.png';
 import ApiCreate from '/img/connect/woox/apicreate.png';
@@ -100,11 +100,9 @@ Do **not** activate the **Enable Withdrawals** permission.
 
     * Provide a description. Whatever you would like to call the API Key.
     * Provide the IP Addresses that are to be whitelisted that you can get from inside the Terminals **API Keys** window we opened earlier. Make sure to hit the **'Add'** button to **save the IP's** once you have pasted them into the box.
-      * In the screenshot below I have highlighted the **'clipboard'** function you can click to copy the IP addresses to your clipboard. You can then paste them into the WooX API keys box in step 4.
+      * Use the terminal's **clipboard** button to copy the current addresses listed below. You can then paste them into the WooX API keys box in step 4.
 
-<div class="text--center">
-    <img src={ApiWhitelist} alt="API Whitelist IP's" style={{ width: 500 }} />
-</div>
+<ProxyFleetIps exchange="woo" />
 
     * Provide authenticator code if you have 2FA enabled for your account.
     * Click Create Api.

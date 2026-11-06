@@ -715,7 +715,7 @@ fn native_later_page_exhaustion_remains_failure_without_prefix_success() {
 }
 
 #[test]
-fn native_bad_page_rolls_back_without_poisoning_retry_identities() {
+fn native_failed_envelope_rolls_back_without_poisoning_retry_identities() {
     let mut h = Harness::classic();
     query_with_wait(&mut h, fills(), 60_000);
     h.respond("/order/fills", 200, &page("next", "accepted"));
@@ -723,7 +723,8 @@ fn native_bad_page_rolls_back_without_poisoning_retry_identities() {
     h.respond(
         "/order/fills",
         200,
-        &json!({"code":"00000","data":{"fillList":[fill("retry-id"),{}],"endId":""}}).to_string(),
+        // Envelope failures remain retryable; validated row refusals now reject immediately.
+        &json!({"code":"50000","msg":"temporarily unavailable","data":{"fillList":[fill("retry-id"),{}],"endId":""}}).to_string(),
     );
     h.timer_after(250.);
     let retry = h.take("/order/fills");
@@ -1297,4 +1298,43 @@ fn promotion_resets_only_the_native_detection_wait() {
         r#"{"code":"00000","data":{"list":[],"cursor":""}}"#,
     );
     assert_eq!(terminals(&h), vec![Ok("[]".into())]);
+}
+
+#[test]
+fn a_later_row_refusal_rejects_accepted_rows_and_releases_the_query_identity() {
+    let mut h = Harness::classic();
+    let before = armed(&h);
+    query_with_wait(&mut h, fills(), 60_000);
+    h.respond("/order/fills", 200, &page("next", "accepted"));
+    h.timer_after(100.0);
+    h.respond(
+        "/order/fills",
+        200,
+        &json!({"code":"00000","data":{"fillList":[fill("staged"),{}],"endId":""}}).to_string(),
+    );
+    let result = terminals(&h);
+    assert_eq!(result.len(), 1);
+    let error = serde_json::to_value(result[0].as_ref().unwrap_err()).unwrap();
+    assert_eq!(error["causeCode"], "HISTORY_DECODE");
+    assert_eq!(
+        error["historyDecode"],
+        json!({"schema":"bitgetClassicFills","reason":"symbol"})
+    );
+    assert!(
+        !h.done
+            .iter()
+            .any(|(id, result)| *id == COMMAND && result.is_ok())
+    );
+    let until = h.now + 2_000.0;
+    fire_new(&mut h, &before, until);
+    assert_eq!(fills_requests(&h), 0);
+    assert_eq!(terminals(&h).len(), 1);
+
+    query_with_wait(&mut h, fills(), 60_000);
+    h.respond("/order/fills", 200, &page("", "fresh"));
+    let result = terminals(&h);
+    assert_eq!(result.len(), 2);
+    let rows: Value = serde_json::from_str(result[1].as_ref().unwrap()).unwrap();
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["id"], "fresh");
 }

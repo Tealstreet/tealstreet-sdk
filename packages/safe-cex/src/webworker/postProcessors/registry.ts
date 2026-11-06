@@ -7,18 +7,18 @@
  *   Run client-side in hosted mode, alongside everything else in non-hosted mode.
  *
  * - exchangeDependentPostprocessors: Need the live Exchange instance or
- *   process-local singletons (e.g. twapManager, chaserOrderManager).
+ *   process-local state. (`activeChasers`/`activeTWAPs` come from the engine's
+ *   Rust algos, not a post-processor.)
  *   Run server-side in hosted mode, alongside everything else in non-hosted mode.
  */
 import { BasePostprocessor } from './BasePostprocessor';
 import { ChaserOrderEnrichmentPostprocessor } from './ChaserOrderEnrichmentPostprocessor';
-import { ChaserOrderPostprocessor } from './ChaserOrderPostprocessor';
 import { DisplayedPositionsPostprocessor } from './DisplayedPositionsPostprocessor';
 import { ExchangeDependentPostprocessor } from './ExchangeDependentPostprocessor';
 import { DisplayedMarginPostprocessor } from './DisplayedMarginPostprocessor';
 import { MessageHandlerStatsPostprocessor } from './MessageHandlerStatsPostprocessor';
 import { OrdersRiskProfilePostprocessor } from './OrdersRiskProfilePostprocessor';
-import { TwapPostprocessor } from './TwapPostprocessor';
+import { TwapOrderEnrichmentPostprocessor } from './TwapOrderEnrichmentPostprocessor';
 
 export const independentPostprocessors: (typeof BasePostprocessor)[] = [
   // DisplayedMarginPostprocessor reads displayedPositions, so it must run after
@@ -26,6 +26,7 @@ export const independentPostprocessors: (typeof BasePostprocessor)[] = [
   DisplayedPositionsPostprocessor,
   DisplayedMarginPostprocessor,
   ChaserOrderEnrichmentPostprocessor,
+  TwapOrderEnrichmentPostprocessor,
   OrdersRiskProfilePostprocessor,
 ];
 
@@ -36,7 +37,5 @@ export const registerIndependentPostprocessor = (Cls: typeof BasePostprocessor):
 };
 
 export const exchangeDependentPostprocessors: (typeof ExchangeDependentPostprocessor)[] = [
-  ChaserOrderPostprocessor,
-  TwapPostprocessor,
   MessageHandlerStatsPostprocessor,
 ];

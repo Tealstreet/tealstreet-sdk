@@ -75,7 +75,7 @@ Rust source references below are under `sdk-rs/venues/<venue>/src/`.
 | `paradex` | Pending exact app payload/native request coverage for native protective types, sizing and authenticated builder attribution. |
 | `mexc` | Existing protective formatter accepts trigger/price and native size. Full resolves current closing-side position. Trailing unsupported. |
 | `woo` | Existing algo paths accept app shape including Full and advertised trailing. Preserve sibling protection and position-sized trailing. |
-| `tealstreet-dex`, `woofi`, `kodiakfi`, `mode`, `salsadex`, `what` | Orderly fixes belong to `feat/rust-order-races`; do not duplicate. Include its eventual change in end-to-end matrix. |
+| `woofi`, `kodiakfi`, `mode`, `what` | Orderly fixes belong to `feat/rust-order-races`; do not duplicate. Include its eventual change in end-to-end matrix. |
 | `hyperliquid` | Existing trigger mapping accepts shape using price; retain explicit/full grouping. Trailing unsupported. |
 | `hyperliquidspot` | **Genuinely unsupported**: TS SL/TP branch ends with `throw new Error('Not supported')`. Keep Rust rejection. |
 | `grvt` | Existing EIP-712/protective formatter accepts redundancy. Requires positive explicit size and authorized builder. Full/trailing unsupported. |

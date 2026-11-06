@@ -9,7 +9,7 @@ import {
   CoinbaseStarbaseProtocolError,
   CoinbaseStarbaseRpcError,
   createCoinbaseStarbaseHttpTransport,
-} from '../../exchanges/coinbase/coinbase.starbase';
+} from '../reference/coinbase/coinbase.starbase';
 import {
   STARBASE_AUTH_REQUEST,
   STARBASE_AUTH_RESPONSE,

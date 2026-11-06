@@ -318,7 +318,7 @@ fn opening_order_is_list_then_one_subscribe_and_ids_increase_across_reconnects()
 }
 
 #[test]
-fn private_open_lists_then_refreshes_orders_once() {
+fn private_open_lists_then_refreshes_orders_and_positions_once() {
     let mut h = H::account();
     let socket = h.private_socket();
     h.event(Event::WsOpened { socket });
@@ -331,6 +331,31 @@ fn private_open_lists_then_refreshes_orders_once() {
         [LIST_PRIVATE]
     );
     assert_eq!(h.count("/openOrders"), 1);
+    assert_eq!(h.count("/positionRisk"), 1);
+}
+
+#[test]
+fn a_read_in_flight_at_the_private_open_is_read_again_after_it_settles() {
+    let mut h = H::start(Options {
+        key: Some("documented-key".into()),
+        secret: Some("synthetic-secret".into()),
+        ..Default::default()
+    });
+    h.reply("/listenKey", r#"{"listenKey":"private-contract"}"#);
+    let socket = h.private_socket();
+    assert_eq!(h.count("/openOrders"), 1);
+    assert_eq!(h.count("/positionRisk"), 1);
+    h.event(Event::WsOpened { socket });
+    assert_eq!(h.count("/openOrders"), 1);
+    assert_eq!(h.count("/positionRisk"), 1);
+    h.reply("/openOrders", "[]");
+    h.reply("/positionRisk", "[]");
+    assert_eq!(h.count("/openOrders"), 1, "the read predates the stream");
+    assert_eq!(h.count("/positionRisk"), 1, "the read predates the stream");
+    h.reply("/openOrders", "[]");
+    h.reply("/positionRisk", "[]");
+    assert_eq!(h.count("/openOrders"), 0);
+    assert_eq!(h.count("/positionRisk"), 0);
 }
 
 #[test]

@@ -6,7 +6,6 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 import '../transport/registerTealstreetTransport';
 
-import { exchangeRegistry } from '../exchanges/registry';
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import {
   axiosHttpOverWebsocketAdapter,
@@ -14,10 +13,16 @@ import {
   disposeHOWWebSockets,
 } from '../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
 import { DefaultStore } from '../store/store.base';
+import { legacyVenueRegistry as exchangeRegistry } from './reference/legacyVenueRegistry';
+
+vi.mock('../exchanges/rust/betaVenues', async (importOriginal) => {
+  const { retainedRustPolicy } = await import('./reference/retainedRustPolicy');
+  return retainedRustPolicy(await importOriginal<typeof import('../exchanges/rust/betaVenues')>());
+});
 
 // Inspect REST adapter construction, without bootstrapping a remote SDK account.
-vi.mock('../exchanges/paradex/paradex.sdk', async (original) => ({
-  ...await original<typeof import('../exchanges/paradex/paradex.sdk')>(),
+vi.mock('./reference/paradex/paradex.sdk', async (original) => ({
+  ...(await original<typeof import('./reference/paradex/paradex.sdk')>()),
   initializeParadexSDK: vi.fn(async () => null),
 }));
 
@@ -123,6 +128,8 @@ const collectAxiosInstances = (exchange: BaseExchange): Record<string, string> =
 
 const ADAPTER_SELECTION_TIMEOUT_MS = 120_000;
 
+// The binance* and lighter* entries that pin the public CORS proxy moved from AWS's
+// exchange-proxy.jp/api/exchange_proxy to the edge Worker's /api/public_proxy (AWS_EXIT.md 3d).
 describe('transport adapter selection per exchange', () => {
   const exchangeNames = Object.keys(exchangeRegistry).sort() as ExchangeName[];
 
@@ -145,7 +152,11 @@ describe('transport adapter selection per exchange', () => {
       }
 
       const rust = Exchange === RustEngineExchange;
-      expect(Object.values(selection).every((instances) => rust ? Object.keys(instances).length === 0 : Object.keys(instances).length > 0)).toBe(true);
+      expect(
+        Object.values(selection).every((instances) =>
+          rust ? Object.keys(instances).length === 0 : Object.keys(instances).length > 0,
+        ),
+      ).toBe(true);
       expect(selection).toMatchSnapshot();
     },
     ADAPTER_SELECTION_TIMEOUT_MS,

@@ -5,7 +5,7 @@ import {
   buildLighterTradesTopic,
   shouldAttemptLighterOhlcvRecovery,
   shouldPromoteLighterOhlcvRecoveryToProxy,
-} from '../exchanges/lighter/lighter.ws-public-ohlcv';
+} from './reference/lighter/lighter.ws-public-ohlcv';
 
 describe('lighter.ws-public-ohlcv helpers', () => {
   it('builds expected candle and trades topics', () => {

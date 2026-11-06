@@ -1,8 +1,13 @@
 //! Oracles: KuCoin Classic Futures Add Order, Add TP/SL Order, Cancel Order,
 //! Switch Position Mode; safe-cex native-lot and client-ID contracts.
+use safe_cex_engine::error::Protection;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Method, Notice, Outcome, Response,
+};
+mod support;
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 
 struct Harness {
     engine: Engine<Kucoin>,
@@ -26,16 +31,16 @@ impl Harness {
         Self::with_source(17)
     }
     fn with_source(seed: u64) -> Self {
-        let mut engine = Engine::new(
-            Kucoin::new(Options {
+        let mut engine = support::credentials::with_seed(
+            Options {
                 key: Some("documented-test-key".into()),
                 secret: Some("documented-test-secret".into()),
                 passphrase: Some("documented-test-passphrase".into()),
                 ..Default::default()
-            }),
-            Some(safe_cex_engine::test_support::seeded_entropy(seed)),
-        )
-        .unwrap();
+            },
+            Kucoin::new,
+            seed,
+        );
         engine.store_mut().set_markets(vec![Market {
             id: "XBTUSDTM".into(),
             symbol: "BTCUSDT".into(),
@@ -77,7 +82,9 @@ impl Harness {
     fn event(&mut self, event: Event<'_>) {
         self.engine.handle(self.now, event);
         let mut receipts = Vec::new();
-        for action in self.engine.drain_actions() {
+        for action in
+            safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now).into_iter()
+        {
             if let Action::Notice(Notice::CommandProgress {
                 receipts: actual, ..
             }) = &action
@@ -158,6 +165,11 @@ impl Harness {
         self.event(Event::TimerFired { timer });
     }
     fn metadata(&mut self, hedged: bool, margin: &str) {
+        self.metadata_replies(hedged, margin);
+        self.pace();
+    }
+    /// The metadata reads answered; the write they gate is paced next.
+    fn metadata_replies(&mut self, hedged: bool, margin: &str) {
         assert!(!self.has("/api/v1/orders"));
         self.reply(
             "getMarginMode",
@@ -177,7 +189,6 @@ impl Harness {
                 r#"{"code":"200000","data":{"leverage":5}}"#,
             );
         }
-        self.pace();
     }
     fn done(&self, command: u32) -> Result<String, String> {
         self.actions
@@ -220,6 +231,15 @@ impl Harness {
             }),
         });
     }
+    /// A reference price observed now, as a final stop check needs one.
+    fn fresh_ticker(&mut self, price: f64) {
+        self.event(Event::PollCeilingChanged { ceiling_ms: None });
+        self.engine.store_mut().update_ticker("BTCUSDT", |t| {
+            t.mark = price;
+            t.last = price;
+            t.index = price;
+        });
+    }
     fn confirm_cancel(&mut self, id: &str, size: f64, filled: f64) {
         let request = self.take(&format!("/api/v1/orders/{id}"));
         assert_eq!(request.method, Method::Get);
@@ -234,6 +254,31 @@ fn order() -> PlaceOrderOpts {
 }
 fn place(h: &mut Harness, orders: Vec<PlaceOrderOpts>) {
     h.command(Command::PlaceOrders { command: 1, orders });
+}
+
+#[test]
+fn provider_refusal_is_not_sent_and_releases_the_native_write_job() {
+    let mut h = Harness::new();
+    let provider = h.engine.signer().unwrap();
+    h.engine
+        .set_signer(Some(std::sync::Arc::new(
+            support::credentials::RefuseWrites(provider.clone()),
+        )))
+        .unwrap();
+    place(&mut h, vec![order()]);
+    h.metadata(true, "CROSS");
+    h.pace();
+    assert!(!h.has("/api/v1/orders"));
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    h.engine.set_signer(Some(provider)).unwrap();
+    h.command(Command::PlaceOrders {
+        command: 2,
+        orders: vec![order()],
+    });
+    assert_eq!(h.take("/api/v1/orders").method, Method::Post);
 }
 
 #[test]
@@ -471,6 +516,39 @@ fn explicit_signature_rejection_retries_only_once() {
     assert!(!h.has("/api/v1/orders"));
     assert!(h.done(1).is_err());
 }
+
+#[test]
+fn timestamp_refusal_does_not_resend_a_placement_or_cancel() {
+    let mut h = Harness::new();
+    place(&mut h, vec![order()]);
+    h.metadata(false, "CROSS");
+    let request = h.take("/api/v1/orders");
+    assert_eq!(request.method, Method::Post);
+    h.response(
+        &request,
+        400,
+        r#"{"code":"400002","msg":"Invalid KC-API-TIMESTAMP"}"#,
+    );
+    h.pace();
+    assert!(h.done(1).is_err());
+    assert!(!h.has("/timestamp") && !h.has("/api/v1/orders"));
+
+    let mut h = Harness::new();
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec!["unknown".into()],
+    });
+    let request = h.take("/api/v1/orders/unknown");
+    assert_eq!(request.method, Method::Delete);
+    h.response(
+        &request,
+        400,
+        r#"{"code":"400002","msg":"Invalid KC-API-TIMESTAMP"}"#,
+    );
+    h.pace();
+    assert!(h.done(1).is_err());
+    assert!(!h.has("/timestamp") && !h.has("/api/v1/orders"));
+}
 #[test]
 fn cancel_replace_uses_remaining_native_once_and_a_new_client_id() {
     let mut h = Harness::new();
@@ -499,6 +577,83 @@ fn cancel_replace_uses_remaining_native_once_and_a_new_client_id() {
     assert!(!body.contains("original-caller"));
 }
 #[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    let cancel = h.take("/api/v1/orders/old");
+    h.response(
+        &cancel,
+        200,
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    h.confirm_cancel("old", 10.0, 4.0);
+    let create = h.take("/api/v1/orders");
+    h.response(
+        &create,
+        200,
+        r#"{"code":"300003","msg":"Balance insufficient"}"#,
+    );
+    h.pace();
+    let error = h.done(1).unwrap_err();
+    assert!(error.contains("order is gone"), "{error}");
+}
+#[test]
+fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+    for (id, cancelled, expected) in [
+        ("old", "old", "Your BTCUSDT short position has no stop"),
+        (
+            "parent__stop_loss",
+            "parent",
+            "Your BTCUSDT long position has no stop",
+        ),
+    ] {
+        let mut h = Harness::new();
+        if id == "old" {
+            h.set_order("old", OrderType::StopLoss, 6.0);
+            h.fresh_ticker(80.0);
+        } else {
+            h.fresh_ticker(95.0);
+            h.set_order("parent", OrderType::Limit, 6.0);
+            h.set_order(id, OrderType::StopLoss, 6.0);
+            h.engine
+                .store_mut()
+                .update_order(id, |o| o.side = OrderSide::Sell);
+        }
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: id.into(),
+            price: Some(90.0),
+            amount: None,
+        });
+        h.metadata(false, "CROSS");
+        let cancel = h.take(&format!("/api/v1/orders/{cancelled}"));
+        h.response(
+            &cancel,
+            200,
+            &format!(r#"{{"code":"200000","data":{{"cancelledOrderIds":["{cancelled}"]}}}}"#),
+        );
+        h.pace();
+        h.confirm_cancel(cancelled, 10.0, 4.0);
+        let create = h.take("/api/v1/");
+        h.response(
+            &create,
+            200,
+            r#"{"code":"300003","msg":"Balance insufficient"}"#,
+        );
+        h.pace();
+        let error = h.done(1).unwrap_err();
+        assert!(error.contains(expected), "{error}");
+    }
+}
+#[test]
 fn ambiguous_cancel_prevents_replacement() {
     let mut h = Harness::new();
     h.set_order("old", OrderType::Limit, 6.0);
@@ -524,6 +679,10 @@ fn virtual_leg_amend_keeps_both_protections_and_uses_st_orders() {
     h.set_order("parent", OrderType::Limit, 6.0);
     h.set_order("parent__stop_loss", OrderType::StopLoss, 6.0);
     h.set_order("parent__take_profit", OrderType::TakeProfit, 6.0);
+    h.engine
+        .store_mut()
+        .update_order("parent__stop_loss", |o| o.side = OrderSide::Sell);
+    h.fresh_ticker(95.0);
     h.command(Command::AmendOrder {
         command: 1,
         id: "parent__stop_loss".into(),
@@ -580,7 +739,11 @@ fn symbol_cancel_uses_v3_and_account_cancel_covers_both_families() {
     assert_eq!(request.method, Method::Delete);
     h.response(&request, 200, r#"{"code":"200000","data":[]}"#);
     h.pace();
-    assert!(!h.has("/api/v1/stopOrders"));
+    h.reply(
+        "/api/v1/stopOrders?symbol=XBTUSDTM",
+        r#"{"code":"200000","data":[]}"#,
+    );
+    h.pace();
     assert_eq!(h.done(1), Ok("[]".into()));
     h.command(Command::CancelSymbolOrders {
         command: 2,
@@ -826,7 +989,7 @@ fn isolated_hedged_placement_uses_the_target_sides_leverage() {
 
 #[test]
 fn cancel_replace_waits_for_terminal_proof_and_subtracts_intervening_fills() {
-    for (amount, expected) in [(None, "2"), (Some(9.0), "5")] {
+    for (amount, expected) in [(None, "2"), (Some(9.0), "1")] {
         let mut h = Harness::new();
         h.set_order("old", OrderType::Limit, 6.0);
         h.command(Command::AmendOrder {
@@ -1099,6 +1262,13 @@ fn write_failures_are_classified_without_changing_their_text() {
             rejected(ErrorKind::AuthPermission),
             "KuCoin API Error 400007: Access denied (HTTP 200)",
         ),
+        // An IP the key's whitelist excludes, at any 4xx: what to do, as an auth refusal.
+        (
+            400,
+            r#"{"code":"400006","msg":"The requested IP address is not in the API whitelist"}"#,
+            rejected(ErrorKind::AuthPermission),
+            "KuCoin API Error 400006: The requested IP address is not in the API whitelist (HTTP 400). The API key's IP whitelist does not include this server: add the new Tealstreet IPs to the key on the exchange",
+        ),
         (
             200,
             r#"{"code":"999999","msg":"new"}"#,
@@ -1221,3 +1391,778 @@ fn cancel_legs_combine_outcomes_without_overclaiming() {
 #[cfg(feature = "private-adoption-originals")]
 #[path = "support/trading_context.rs"]
 mod trading_context;
+
+fn leverage_result(h: &Harness, command: u32) -> serde_json::Value {
+    serde_json::from_str(&h.done(command).expect("the read must succeed")).unwrap()
+}
+
+#[test]
+fn a_flat_cross_symbol_reads_margin_then_leverage() {
+    let mut h = Harness::new();
+    assert_eq!(
+        h.engine.capabilities().leverage_query,
+        safe_cex_engine::LeverageQuery::OnReadAndMetadata
+    );
+    h.command(Command::FetchLeverage {
+        command: 70,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(
+        &margin,
+        200,
+        r#"{"code":"200000","data":{"symbol":"XBTUSDTM","marginMode":"CROSS"}}"#,
+    );
+    let leverage = h.take("/api/v2/getCrossUserLeverage");
+    h.response(
+        &leverage,
+        200,
+        r#"{"code":"200000","data":{"symbol":"XBTUSDTM","leverage":"7"}}"#,
+    );
+    let value = leverage_result(&h, 70);
+    assert_eq!(value["buyLeverage"], 7.0);
+    assert_eq!(value["sellLeverage"], 7.0);
+    assert_eq!(value["marginType"], "cross");
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 7.0);
+}
+
+#[test]
+fn a_flat_isolated_symbol_is_one_as_in_ts_with_no_cross_read() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 71,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(
+        &margin,
+        200,
+        r#"{"code":"200000","data":{"symbol":"XBTUSDTM","marginMode":"ISOLATED"}}"#,
+    );
+    assert!(!h.has("getCrossUserLeverage"));
+    let value = leverage_result(&h, 71);
+    assert_eq!(value["buyLeverage"], 1.0);
+    assert_eq!(value["marginType"], "isolated");
+}
+
+#[test]
+fn a_failed_or_invalid_leverage_read_fails_its_command() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 72,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(&margin, 200, r#"{"code":"400100","msg":"denied"}"#);
+    assert!(h.done(72).unwrap_err().contains("denied"));
+
+    h.command(Command::FetchLeverage {
+        command: 73,
+        symbol: "BTCUSDT".into(),
+    });
+    let margin = h.take("/api/v2/position/getMarginMode");
+    h.response(
+        &margin,
+        200,
+        r#"{"code":"200000","data":{"marginMode":"CROSS"}}"#,
+    );
+    let leverage = h.take("/api/v2/getCrossUserLeverage");
+    h.response(
+        &leverage,
+        200,
+        r#"{"code":"200000","data":{"leverage":"0"}}"#,
+    );
+    assert!(h.done(73).unwrap_err().contains("invalid leverage"));
+}
+
+#[test]
+fn an_unknown_symbol_leverage_read_sends_nothing() {
+    let mut h = Harness::new();
+    h.command(Command::FetchLeverage {
+        command: 74,
+        symbol: "NOPEUSDT".into(),
+    });
+    assert!(h.done(74).unwrap_err().contains("unknown market"));
+    assert!(!h.has("getMarginMode"));
+}
+
+/// A buy stop of 6 lots at 100 (it closes a short), whose trigger moves to
+/// 120 against a fresh mark of 110; nothing has filled, so the original can
+/// be put back exactly.
+fn resting_stop(h: &mut Harness) {
+    h.set_order("old", OrderType::StopLoss, 6.0);
+    h.engine.store_mut().update_order("old", |o| o.filled = 0.0);
+    h.fresh_ticker(110.0);
+}
+fn amend_stop(h: &mut Harness, id: &str, price: f64) {
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: id.into(),
+        price: Some(price),
+        amount: None,
+    });
+}
+fn writes(h: &Harness) -> Vec<String> {
+    h.actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.method != Method::Get => Some(r.url.clone()),
+            _ => None,
+        })
+        .collect()
+}
+/// The cancel lands, reads as cancelled with `filled` lots, and the
+/// replacement is the next write.
+fn to_replacement(h: &mut Harness, id: &str, filled: f64) -> HttpRequest {
+    h.metadata(false, "CROSS");
+    let cancel = h.take(&format!("/api/v1/orders/{id}"));
+    assert_eq!(cancel.method, Method::Delete);
+    h.response(
+        &cancel,
+        200,
+        &format!(r#"{{"code":"200000","data":{{"cancelledOrderIds":["{id}"]}}}}"#),
+    );
+    h.pace();
+    h.confirm_cancel(id, 10.0, filled);
+    let index = h
+        .actions
+        .iter()
+        .position(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        .unwrap_or_else(|| panic!("no replacement: {:?}", h.actions));
+    let Action::Http(request) = h.actions.remove(index) else {
+        unreachable!()
+    };
+    request
+}
+fn short_position() -> Position {
+    Position {
+        id: "BTCUSDT".into(),
+        symbol: "BTCUSDT".into(),
+        side: PositionSide::Short,
+        entry_price: 110.0,
+        notional: 0.66,
+        leverage: 5.0,
+        margin_type: Some(MarginType::Cross),
+        position_mode: Some(PositionMode::Oneway),
+        unrealized_pnl: 0.0,
+        realized_pnl: None,
+        contracts: 6.0,
+        liquidation_price: 0.0,
+        margin_size: None,
+        last_update: None,
+    }
+}
+const REFUSED: &str = r#"{"code":"300003","msg":"Balance insufficient"}"#;
+fn failure(h: &Harness) -> safe_cex_engine::VenueError {
+    h.failures.last().cloned().expect("a typed failure")
+}
+
+#[test]
+/// KuCoin plans an amend in the tick that sends its cancel, so the plan-time
+/// check is the final one; a fill during the cancel is handled after it.
+fn a_stale_crossed_or_flat_stop_at_the_cancel_cancels_nothing() {
+    for case in ["stale", "crossed", "flat"] {
+        let mut h = Harness::new();
+        resting_stop(&mut h);
+        h.engine
+            .store_mut()
+            .update_order("old", |o| o.reduce_only = true);
+        h.engine.store_mut().set_positions(vec![short_position()]);
+        if case == "stale" {
+            // Fresh when planned, 5.01 s old when the cancel is sent 20 ms later.
+            h.now += 4_990.0;
+        }
+        amend_stop(&mut h, "old", 120.0);
+        h.metadata_replies(false, "CROSS");
+        // The cancel is planned and sent on the next pacing tick.
+        match case {
+            "stale" => {}
+            // The mark rose through the new trigger before the cancel left.
+            "crossed" => h
+                .engine
+                .store_mut()
+                .update_ticker("BTCUSDT", |t| t.mark = 125.0),
+            _ => h.engine.store_mut().set_positions(vec![]),
+        }
+        h.pace();
+        assert!(writes(&h).is_empty(), "{case}: {:?}", writes(&h));
+        let error = failure(&h);
+        let why = match case {
+            "stale" => "mark price reference is stale",
+            "crossed" => "already crossed the mark price",
+            _ => "no position for it to protect",
+        };
+        assert!(
+            error.message.contains("was not changed") && error.message.contains(why),
+            "{case}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::NotSent), "{case}");
+        assert_eq!(error.protection, None, "{case}: the stop still stands");
+        assert!(h.engine.store().order("old").is_some(), "{case}");
+    }
+}
+
+#[test]
+fn a_refused_replacement_puts_the_original_stop_back_once() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    assert!(
+        replacement
+            .body
+            .as_deref()
+            .unwrap()
+            .contains(r#""stopPrice":"120""#)
+    );
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let restore = h.take("/api/v1/");
+    let body = restore.body.clone().unwrap();
+    for expected in [r#""stopPrice":"100""#, r#""size":"6""#, r#""side":"buy""#] {
+        assert!(
+            body.contains(expected),
+            "the original, not the edit: {body}"
+        );
+    }
+    h.response(
+        &restore,
+        200,
+        r#"{"code":"200000","data":{"orderId":"restored"}}"#,
+    );
+    h.pace();
+    let error = failure(&h);
+    assert!(
+        error.message.contains("is unchanged") && error.message.contains("put back"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Restored));
+    assert!(writes(&h).is_empty(), "one put-back only: {:?}", writes(&h));
+}
+
+#[test]
+fn a_refused_put_back_is_typed_unprotected_and_never_retried() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let restore = h.take("/api/v1/");
+    h.response(&restore, 200, REFUSED);
+    h.pace();
+    let error = failure(&h);
+    assert!(
+        error.message.contains("both refused") && error.message.contains("re-place"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+}
+
+const RATE_LIMITED: &str = r#"{"code":"429000","msg":"Too Many Requests"}"#;
+
+/// A 429 may have placed the order, so it is unknown: never "refused" or Unprotected.
+fn assert_unknown_stop(h: &Harness) {
+    let error = failure(h);
+    assert!(
+        error
+            .message
+            .contains("outcome is unknown. Check Open Orders"),
+        "{}",
+        error.message
+    );
+    assert!(!error.message.contains("both refused"), "{}", error.message);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.protection, None);
+    assert!(writes(h).is_empty(), "{:?}", writes(h));
+}
+
+#[test]
+fn a_rate_limited_put_back_is_unknown_not_unprotected() {
+    for (status, body) in [(429, RATE_LIMITED), (200, RATE_LIMITED)] {
+        let mut h = Harness::new();
+        resting_stop(&mut h);
+        amend_stop(&mut h, "old", 120.0);
+        let replacement = to_replacement(&mut h, "old", 0.0);
+        h.response(&replacement, 200, REFUSED);
+        h.pace();
+        let restore = h.take("/api/v1/");
+        h.response(&restore, status, body);
+        h.pace();
+        assert_unknown_stop(&h);
+    }
+}
+
+#[test]
+fn a_rate_limited_replacement_is_unknown_and_never_put_back() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    h.response(&replacement, 429, RATE_LIMITED);
+    h.pace();
+    assert_unknown_stop(&h);
+}
+
+#[test]
+fn a_stop_that_filled_during_its_cancel_is_not_put_back() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 2.0);
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let error = failure(&h);
+    assert!(
+        error.message.contains("stop was removed") && error.message.contains("please re-place it"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+}
+
+#[test]
+fn a_leg_of_a_partly_filled_entry_says_its_stop_was_removed() {
+    let mut h = Harness::new();
+    h.set_order("parent", OrderType::Limit, 6.0);
+    h.set_order("parent__stop_loss", OrderType::StopLoss, 6.0);
+    h.engine
+        .store_mut()
+        .update_order("parent__stop_loss", |o| o.side = OrderSide::Sell);
+    h.fresh_ticker(95.0);
+    amend_stop(&mut h, "parent__stop_loss", 90.0);
+    let replacement = to_replacement(&mut h, "parent", 4.0);
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let error = failure(&h);
+    assert!(
+        error.message.contains("stop was removed") && error.message.contains("please re-place it"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+}
+
+#[test]
+fn an_unknown_replacement_is_never_put_back_or_resent() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    h.event(Event::HttpFailed {
+        request: replacement.id,
+        error: "lost create response",
+    });
+    h.pace();
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.protection, None);
+    assert!(
+        writes(&h).is_empty(),
+        "no put-back over an unknown: {:?}",
+        writes(&h)
+    );
+}
+
+/// Lost, or refused outright, a confirmation read leaves the accepted cancel
+/// unproven: never a refusal that would invite a put-back.
+#[test]
+fn a_lost_cancel_confirmation_is_unknown_with_no_put_back_or_resend() {
+    for refused in [false, true] {
+        let mut h = Harness::new();
+        resting_stop(&mut h);
+        amend_stop(&mut h, "old", 120.0);
+        h.metadata(false, "CROSS");
+        h.reply(
+            "/api/v1/orders/old",
+            r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+        );
+        h.pace();
+        for attempt in 0..3 {
+            let read = h.take("/api/v1/orders/old");
+            assert_eq!(read.method, Method::Get);
+            if refused {
+                h.response(&read, 400, r#"{"code":"100001","msg":"Parameter error"}"#);
+            } else {
+                h.event(Event::HttpFailed {
+                    request: read.id,
+                    error: "lost confirmation read",
+                });
+            }
+            if attempt < 2 {
+                h.advance(100.0);
+            } else {
+                h.pace();
+            }
+        }
+        let error = failure(&h);
+        assert_eq!(
+            error.outcome,
+            Some(Outcome::Unknown),
+            "refused read: {refused}"
+        );
+        assert_eq!(error.protection, None);
+        assert!(
+            error.message.contains("could not be confirmed")
+                && error.message.contains("unknown")
+                && error.message.contains("no replacement was sent"),
+            "{}",
+            error.message
+        );
+        assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+        assert!(!h.has("/api/v1/orders/old"), "no further reads");
+    }
+}
+
+/// A leg whose row carries no source is replaced on its entry's (mark here),
+/// so the veto checks the mark, not a last-price default.
+#[test]
+fn a_leg_crossed_on_the_mark_but_not_the_last_cancels_nothing() {
+    let mut h = Harness::new();
+    h.set_order("parent", OrderType::Limit, 6.0);
+    h.set_order("parent__stop_loss", OrderType::StopLoss, 6.0);
+    h.engine.store_mut().update_order("parent__stop_loss", |o| {
+        o.side = OrderSide::Sell;
+        o.trigger_type = None;
+    });
+    h.fresh_ticker(95.0);
+    amend_stop(&mut h, "parent__stop_loss", 90.0);
+    // The mark falls through the new stop before the cancel; the last does not.
+    h.engine
+        .store_mut()
+        .update_ticker("BTCUSDT", |t| t.mark = 89.0);
+    h.metadata(false, "CROSS");
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+    let error = failure(&h);
+    assert!(
+        error.message.contains("already crossed the mark price"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(error.protection, None);
+}
+
+/// A cancel refused for its signature is re-signed a round trip later; the
+/// stop is checked again before that resend.
+#[test]
+fn a_stop_that_filled_before_its_resigned_cancel_is_left_alone() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    h.metadata(false, "CROSS");
+    let cancel = h.take("/api/v1/orders/old");
+    assert_eq!(cancel.method, Method::Delete);
+    h.engine
+        .store_mut()
+        .update_order("old", |o| o.filled = 0.002);
+    h.response(
+        &cancel,
+        400,
+        r#"{"code":"400005","msg":"Invalid KC-API-SIGN"}"#,
+    );
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+    h.pace();
+    let error = failure(&h);
+    assert!(
+        error.message.contains("was not changed")
+            && error
+                .message
+                .contains("changed or filled before cancellation"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(error.protection, None);
+}
+
+/// A cancel answered 404 falls back to the stop family a round trip later;
+/// that fallback, and its re-signed resend, are checked like the first.
+#[test]
+fn a_stop_family_fallback_cancel_is_vetoed_like_the_first() {
+    for case in ["crossed", "filled", "resigned"] {
+        let mut h = Harness::new();
+        resting_stop(&mut h);
+        amend_stop(&mut h, "old", 120.0);
+        h.metadata(false, "CROSS");
+        let cancel = h.take("/api/v1/orders/old");
+        let cross = |h: &mut Harness| {
+            h.engine
+                .store_mut()
+                .update_ticker("BTCUSDT", |t| t.mark = 125.0)
+        };
+        match case {
+            "crossed" => cross(&mut h),
+            "filled" => {
+                h.engine
+                    .store_mut()
+                    .update_order("old", |o| o.filled = 0.002);
+            }
+            _ => {}
+        }
+        h.response(&cancel, 404, r#"{"code":"404","msg":"Not Found"}"#);
+        if case == "resigned" {
+            let fallback = h.take("/api/v1/stopOrders/old");
+            assert_eq!(fallback.method, Method::Delete);
+            cross(&mut h);
+            h.response(
+                &fallback,
+                400,
+                r#"{"code":"400005","msg":"Invalid KC-API-SIGN"}"#,
+            );
+        }
+        assert!(!h.has("/api/v1/stopOrders"), "{case}: {:?}", writes(&h));
+        h.pace();
+        let error = failure(&h);
+        let why = if case == "filled" {
+            "changed or filled before cancellation"
+        } else {
+            "already crossed the mark price"
+        };
+        assert!(
+            error.message.contains("was not changed") && error.message.contains(why),
+            "{case}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::NotSent), "{case}");
+        assert_eq!(error.protection, None, "{case}");
+        assert!(writes(&h).is_empty(), "{case}: {:?}", writes(&h));
+    }
+}
+
+fn resting_stop_limit(h: &mut Harness, kind: OrderType, close: bool) {
+    resting_stop(h);
+    h.engine.store_mut().update_order("old", |o| {
+        o.kind = kind;
+        o.close = Some(close);
+        o.reduce_only = true;
+        o.extra.as_mut().unwrap().conditional_order_price = Some(130.0);
+    });
+    h.engine.store_mut().set_positions(vec![short_position()]);
+}
+
+#[test]
+fn stop_limit_replacement_preserves_price_type_and_native_lots() {
+    for (kind, trigger) in [(OrderType::StopLoss, 120.0), (OrderType::TakeProfit, 90.0)] {
+        let mut h = Harness::new();
+        resting_stop_limit(&mut h, kind, false);
+        amend_stop(&mut h, "old", trigger);
+        let request = to_replacement(&mut h, "old", 0.0);
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["type"], "limit");
+        assert_eq!(body["price"], "130");
+        assert_eq!(body["stopPrice"], trigger.to_string());
+        assert_eq!(body["size"], "6");
+        assert_ne!(
+            body["closeOrder"], true,
+            "omitted closeOrder defaults to false"
+        );
+        assert_eq!(body["stopPriceType"], "MP");
+        assert_eq!(body["timeInForce"], "GTC");
+    }
+}
+
+#[test]
+fn stop_limit_put_back_preserves_original_type_price_trigger_and_size() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut h = Harness::new();
+        resting_stop_limit(&mut h, kind, false);
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(if kind == OrderType::StopLoss {
+                120.0
+            } else {
+                90.0
+            }),
+            amount: Some(8.0),
+        });
+        let replacement = to_replacement(&mut h, "old", 0.0);
+        h.response(&replacement, 200, REFUSED);
+        h.pace();
+        let restore = h.take("/api/v1/orders");
+        let body: serde_json::Value =
+            serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["type"], "limit");
+        assert_eq!(body["price"], "130");
+        assert_eq!(body["stopPrice"], "100");
+        assert_eq!(
+            body["size"], "6",
+            "put-back uses original lots, not the edit"
+        );
+        assert_ne!(
+            body["closeOrder"], true,
+            "omitted closeOrder defaults to false"
+        );
+        h.response(
+            &restore,
+            200,
+            r#"{"code":"200000","data":{"orderId":"restored"}}"#,
+        );
+        h.pace();
+        assert_eq!(failure(&h).protection, Some(Protection::Restored));
+        assert!(writes(&h).is_empty());
+    }
+}
+
+#[test]
+fn stop_close_flag_is_preserved_even_when_the_native_row_has_a_size() {
+    let mut h = Harness::new();
+    resting_stop_limit(&mut h, OrderType::StopLoss, true);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["closeOrder"], true);
+    assert!(
+        body.get("size").is_none(),
+        "closeOrder owns the full-position quantity"
+    );
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let restore = h.take("/api/v1/orders");
+    let body: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["closeOrder"], true);
+    assert!(body.get("size").is_none());
+}
+
+#[test]
+fn stop_limit_with_unusable_limit_price_is_refused_before_cancel() {
+    for price in [0.0, f64::NAN, 0.01] {
+        let mut h = Harness::new();
+        resting_stop_limit(&mut h, OrderType::StopLoss, false);
+        h.engine.store_mut().update_order("old", |o| {
+            o.extra.as_mut().unwrap().conditional_order_price = Some(price);
+        });
+        amend_stop(&mut h, "old", 120.0);
+        if h.has("getMarginMode") {
+            h.metadata(false, "CROSS");
+        }
+        assert!(writes(&h).is_empty(), "invalid native limit: {price}");
+        assert_eq!(failure(&h).outcome, Some(Outcome::NotSent));
+        assert!(h.engine.store().order("old").is_some());
+    }
+}
+
+#[test]
+fn new_app_protection_with_redundant_trigger_remains_stop_market() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut h = Harness::new();
+        let mut opts = order();
+        opts.kind = kind;
+        opts.client_order_id = None;
+        opts.price = Some(110.0);
+        opts.trigger_price = Some(110.0);
+        place(&mut h, vec![opts]);
+        h.metadata(false, "CROSS");
+        let request = h.take("/api/v1/orders");
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["type"], "market");
+        assert_eq!(body["stopPrice"], "110");
+        assert!(body.get("price").is_none());
+        assert!(body.get("timeInForce").is_none());
+    }
+}
+
+#[test]
+fn new_redundant_trigger_stop_cannot_bypass_post_only_refusal() {
+    let mut h = Harness::new();
+    let mut opts = order();
+    opts.kind = OrderType::StopLoss;
+    opts.client_order_id = None;
+    opts.trigger_price = opts.price;
+    opts.time_in_force = Some(TimeInForce::PostOnly);
+    place(&mut h, vec![opts]);
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. }))),
+        "new PostOnly stop must refuse synchronously"
+    );
+    assert!(writes(&h).is_empty());
+    assert_eq!(failure(&h).outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn new_sized_close_market_or_stop_keeps_the_explicit_native_size() {
+    for kind in [
+        OrderType::Market,
+        OrderType::StopLoss,
+        OrderType::TakeProfit,
+    ] {
+        let mut h = Harness::new();
+        let mut opts = order();
+        opts.kind = kind;
+        opts.client_order_id = None;
+        opts.close = Some(true);
+        opts.amount = 10.0;
+        place(&mut h, vec![opts]);
+        h.metadata(false, "CROSS");
+        let request = h.take("/api/v1/orders");
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["size"], "10");
+        assert_ne!(body["closeOrder"], true);
+        assert_eq!(body["type"], "market");
+    }
+}
+
+#[test]
+fn native_stop_limit_equal_to_its_trigger_stays_limit_on_replacement_and_put_back() {
+    let mut h = Harness::new();
+    resting_stop_limit(&mut h, OrderType::StopLoss, false);
+    h.engine.store_mut().update_order("old", |o| {
+        o.price = 130.0;
+    });
+    h.fresh_ticker(110.0);
+    amend_stop(&mut h, "old", 130.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["price"], "130");
+    assert_eq!(body["stopPrice"], "130");
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let restore = h.take("/api/v1/orders");
+    let body: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["price"], "130");
+    assert_eq!(body["stopPrice"], "130");
+}
+
+#[test]
+fn an_ordinary_limit_amend_keeps_the_original_close_order_wire_shape() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    h.reply(
+        "/api/v1/orders/old",
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    h.confirm_cancel("old", 10.0, 4.0);
+    let replacement = h.take("/api/v1/orders");
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["size"], "6");
+    assert!(
+        body.get("closeOrder").is_none(),
+        "native default false needs no new field"
+    );
+}

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidPrivateWebSocket } from '../../exchanges/hyperliquid/hyperliquid.ws-private';
-import { HyperliquidPublicWebSocket } from '../../exchanges/hyperliquid/hyperliquid.ws-public';
+import { HyperliquidPrivateWebSocket } from '../reference/hyperliquid/hyperliquid.ws-private';
+import { HyperliquidPublicWebSocket } from '../reference/hyperliquid/hyperliquid.ws-public';
 import { setWsDiagnosticsEnabled } from '../../utils/wsDiagnostics';
 
 const WALLET_ADDRESS = '0x1111111111111111111111111111111111111111';
@@ -133,7 +133,11 @@ describe('Hyperliquid WebSocket diagnostics', () => {
     const send = vi.fn();
     (websocket as any).send = send;
 
-    (websocket as any).subscribeAllActiveAssetData();
+    // activeAssetData follows open orders; spot and HIP-3 symbols never subscribe.
+    parent.store.orders = parent.store.markets.map((market: { symbol: string }) => ({ symbol: market.symbol })) as never;
+    parent.store.marketsBySymbol = Object.fromEntries(parent.store.markets.map((m: { symbol: string }) => [m.symbol, m])) as never;
+    Object.defineProperty(websocket, 'isConnected', { get: () => true });
+    (websocket as any).subscribeOrderAssetData();
 
     expect(send).toHaveBeenCalledTimes(2);
     expect(emittedMessages(parent.emitter, 'grafana-pws-sub')).toEqual([]);

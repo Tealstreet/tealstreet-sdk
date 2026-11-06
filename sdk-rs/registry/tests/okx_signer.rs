@@ -146,7 +146,7 @@ fn okx_only_feature_installs_provider_and_all_aliases_sign_secondary_gets() {
                 let login = &value["args"][0];
                 assert_eq!(login["apiKey"], "primary-key");
                 assert_eq!(login["passphrase"], "primary-pass");
-                let stamp = login["timestamp"].as_str().unwrap();
+                let stamp = &login["timestamp"].to_string();
                 assert_eq!(
                     login["sign"],
                     safe_cex_crypto::hmac_sha256(

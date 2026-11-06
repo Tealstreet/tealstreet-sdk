@@ -1,8 +1,9 @@
 //! Native codecs and store invalidation; Engine owns auth, epochs and replay.
 use super::*;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::socket_lifecycle::{
-    AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
-    Interest, Invalidation, LifecycleEvent, SocketError, TrafficPolicy,
+    AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, DataSilence, EncodedBatch,
+    FeedId, FeedPolicy, Interest, Invalidation, LifecycleEvent, SocketError, TrafficPolicy,
 };
 #[derive(serde::Deserialize)]
 struct EventName<'a> {
@@ -17,7 +18,37 @@ struct TopicArgs<'a> {
     #[serde(rename = "instType", default)]
     inst_type: Option<&'a str>,
 }
+/// The interest key, and wire args, of one native topic.
+pub(super) fn interest_key(topic: &Topic<'_>) -> String {
+    serde_json::to_string(topic).expect("native topic")
+}
+pub(super) fn book_topic(inst_id: &str) -> Topic<'_> {
+    Topic::instrument("books", inst_id)
+}
+fn candle_channel(interval: Interval) -> Option<String> {
+    bar(interval).map(|bar| format!("candle{bar}"))
+}
 impl Okx {
+    /// The feed and key `desired_socket_interests` streams `topic` under.
+    pub(super) fn topic_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        match topic {
+            SubscriptionTopic::OrderBook { symbol } => {
+                let market = store.market(symbol)?;
+                let key = interest_key(&book_topic(&market.id));
+                Some((self.connections[PUBLIC].feed?, key))
+            }
+            SubscriptionTopic::Candles { symbol, interval } => {
+                let market = store.market(symbol)?;
+                let channel = candle_channel(*interval)?;
+                let key = interest_key(&Topic::instrument(&channel, &market.id));
+                Some((self.connections[BUSINESS].feed?, key))
+            }
+        }
+    }
     pub(super) fn feed_channel(&self, feed: FeedId) -> Option<usize> {
         self.connections.iter().position(|c| c.feed == Some(feed))
     }
@@ -27,10 +58,8 @@ impl Okx {
         channel: usize,
     ) -> Vec<Interest> {
         let mut values = Vec::new();
-        let mut add = |topic: Topic<'_>| {
-            let text = serde_json::to_string(&topic).expect("native topic");
-            values.push(Interest::from_wire_args(text));
-        };
+        let mut add =
+            |topic: Topic<'_>| values.push(Interest::from_wire_args(interest_key(&topic)));
         if channel == PUBLIC {
             for name in [
                 "tickers",
@@ -55,7 +84,7 @@ impl Okx {
             }
             for symbol in self.books.keys() {
                 if let Some(m) = store.market(symbol) {
-                    add(Topic::instrument("books", &m.id));
+                    add(book_topic(&m.id));
                 }
             }
         } else {
@@ -83,8 +112,10 @@ impl Okx {
             }
             if channel == BUSINESS {
                 for (symbol, interval) in self.candles.keys() {
-                    if let (Some(m), Some(bar)) = (store.market(symbol), bar(*interval)) {
-                        add(Topic::instrument(&format!("candle{bar}"), &m.id));
+                    if let (Some(m), Some(channel)) =
+                        (store.market(symbol), candle_channel(*interval))
+                    {
+                        add(Topic::instrument(&channel, &m.id));
                     }
                 }
             }
@@ -133,7 +164,20 @@ impl Okx {
                 } else {
                     Invalidation::None
                 },
-                subscription_interval_ms: 0.,
+                // OKX EEA (772 markets, about 40 subscribe frames) resets a
+                // public socket that writes them all in the open tick; 50 ms
+                // between frames streams at line rate. Global takes the burst.
+                subscription_interval_ms: if channel == PUBLIC && self.options.eea {
+                    50.
+                } else {
+                    0.
+                },
+                close_floors: &[],
+                // Tickers and books stream all session; a socket with only those gone quiet is dead.
+                data_silence: (channel == PUBLIC).then_some(DataSilence {
+                    after_ms: 60_000.,
+                    streams: &[r#"{"channel":"tickers""#, r#"{"channel":"books""#],
+                }),
             };
             let feed = cx.register_socket_feed(policy)?;
             self.connections[channel].feed = Some(feed);
@@ -282,12 +326,15 @@ impl Okx {
             let name = v.channel;
             let kind = usize::from(v.inst_type == Some("FUTURES"));
             let order = if channel == PUBLIC {
+                // Books lead: the feed is paced, so a watched book must not
+                // wait behind OKX EEA's 40-frame ticker sweep.
                 match name {
-                    "tickers" => 0,
-                    "mark-price" => 1,
-                    "index-tickers" => 2,
-                    "open-interest" => 3,
-                    "funding-rate" => 4,
+                    "books" => 0,
+                    "tickers" => 1,
+                    "mark-price" => 2,
+                    "index-tickers" => 3,
+                    "open-interest" => 4,
+                    "funding-rate" => 5,
                     _ => 100,
                 }
             } else {
@@ -442,7 +489,8 @@ mod encoding_tests {
                     .map(|arg| (arg.channel.to_owned(), arg.inst_id.unwrap().to_owned())),
             );
         }
-        let mut expected = Vec::new();
+        // A watched book leads the paced stream.
+        let mut expected = vec![("books".to_owned(), "M0".to_owned())];
         for topic in [
             "tickers",
             "mark-price",
@@ -461,14 +509,13 @@ mod encoding_tests {
                 ));
             }
         }
-        expected.push(("books".into(), "M0".into()));
         assert_eq!(actual, expected);
         assert_eq!(
             batches
                 .iter()
                 .map(|batch| batch.covered_keys.len())
                 .collect::<Vec<_>>(),
-            [100, 100, 100, 100, 100, 76, 1]
+            [100, 100, 100, 100, 100, 77]
         );
     }
 }

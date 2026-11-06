@@ -65,6 +65,7 @@ fn a_snapshot_frame_carries_the_whole_state_without_draining_changes() {
             BALANCE,
             SETTINGS,
             STATUS,
+            VENUE_STATE,
             CAPABILITIES,
             BOOK,
             STRINGS

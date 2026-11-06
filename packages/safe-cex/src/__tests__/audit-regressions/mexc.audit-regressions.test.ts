@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getExchangeMetadata } from '../../exchangeMetadata';
-import { signMexcRequest, signMexcWsLogin, serializeMexcParams } from '../../exchanges/mexc/mexc.api';
-import { MexcExchange } from '../../exchanges/mexc/mexc.exchange';
-import { ENDPOINTS } from '../../exchanges/mexc/mexc.types';
+import { signMexcRequest, signMexcWsLogin, serializeMexcParams } from '../reference/mexc/mexc.api';
+import { MexcExchange } from '../reference/mexc/mexc.exchange';
+import { ENDPOINTS } from '../reference/mexc/mexc.types';
 import { virtualClock } from '../../utils/virtualClock';
 import { setWsDiagnosticsEnabled } from '../../utils/wsDiagnostics';
 import {
@@ -17,7 +17,7 @@ import {
   normalizePosition,
   normalizeTicker,
   toMexcSymbol,
-} from '../../exchanges/mexc/mexc.utils';
+} from '../reference/mexc/mexc.utils';
 import { DefaultStore } from '../../store/store.base';
 import {
   MarginType,
@@ -2174,7 +2174,7 @@ describe('MEXC futures audit regressions', () => {
   // future refactor cannot silently regress `normalizePlanOrder` back to the
   // regular-order `ORDER_STATUS` map (state=2 Open).
   it('normalizePlanOrder maps the MEXC trigger-order state enum to Open/Closed/Canceled correctly', async () => {
-    const { normalizePlanOrder } = await import('../../exchanges/mexc/mexc.utils');
+    const { normalizePlanOrder } = await import('../reference/mexc/mexc.utils');
     const base = {
       id: 'plan-state-1',
       symbol: 'BTC_USDT',

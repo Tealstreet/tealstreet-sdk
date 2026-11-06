@@ -2,8 +2,8 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
 import { describe, expect, it } from 'vitest';
 
-import { createAPI as createBybitAPI, shouldRetryBybitRequest } from '../exchanges/bybit/bybit.api';
-import { createAPI as createOkxAPI } from '../exchanges/okx/okx.api';
+import { createAPI as createBybitAPI, shouldRetryBybitRequest } from './reference/bybit/bybit.api';
+import { createAPI as createOkxAPI } from './reference/okx/okx.api';
 
 const stubExchange = (name: string) =>
   ({

@@ -700,6 +700,10 @@ impl Backpack {
         let Request { read, data } = *pending;
         let next = data.next();
         if !(200..300).contains(&response.status) {
+            cx.startup_read_refused(&crate::trading::http_failure(
+                response.status,
+                format!("Backpack refused the API key: {}", response.body),
+            ));
             cx.retried_failure(
                 "backpack.account:613",
                 format!("Backpack HTTP {}: {}", response.status, response.body),

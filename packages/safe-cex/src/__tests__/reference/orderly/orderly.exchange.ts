@@ -1050,9 +1050,7 @@ export class OrderlyExchange extends BaseExchange {
 
     // Determine order_tag based on exchange type
     let orderTag = 'TEALSTREET';
-    if (this.orderlyExchangeName === 'SALSADEX') {
-      orderTag = 'TEALSALSA';
-    } else if (this.orderlyExchangeName === 'KODIAKFI') {
+    if (this.orderlyExchangeName === 'KODIAKFI') {
       orderTag = 'TEALKODIAK';
     } else if (this.orderlyExchangeName === 'MODE') {
       orderTag = 'TEALMODE';

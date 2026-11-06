@@ -1007,10 +1007,11 @@ fn timers(engine: &mut Engine<Probe>) -> Vec<Action> {
 fn ready_returns_live_waiters_in_arrival_order_and_clears_their_timers() {
     let mut engine = engine();
     let session = open(&mut engine, true);
+    // Off the standard read bound, so a background owner keeps it during startup discovery.
     let owners = [
-        owner(&mut engine, Scope::Background, 20_000, 1.),
-        owner(&mut engine, Scope::Command(7), 20_000, 1.),
-        owner(&mut engine, Scope::Background, 20_000, 1.),
+        owner(&mut engine, Scope::Background, 21_000, 1.),
+        owner(&mut engine, Scope::Command(7), 21_000, 1.),
+        owner(&mut engine, Scope::Background, 21_000, 1.),
     ];
     for owner in &owners {
         wait(&mut engine, &session, owner, 1.).unwrap();
