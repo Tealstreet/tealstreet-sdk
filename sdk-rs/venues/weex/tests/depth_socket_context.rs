@@ -1140,7 +1140,7 @@ fn physical_depth_timeout(held: bool) {
             Action::Notice(safe_cex_engine::Notice::Event(event))
                 if event.code == safe_cex_engine::log::code::REQUEST_FAILED
                     && event.message
-                        == "WEEX: HTTP request timed out (class=discovery budget=20000ms elapsed=20000ms)" =>
+                        == "WEEX: HTTP request timed out (class=read budget=20000ms elapsed=20000ms)" =>
             {
                 diagnostics += 1
             }

@@ -1313,9 +1313,9 @@ fn history_physical_timeout_waits_once_then_sends_a_fresh_leg() {
     h.load();
     h.actions.clear();
     let old = private_fills(&mut h, 1);
-    let timer = physical_timer(&h.actions, h.now + 20_000.);
+    let timer = physical_timer(&h.actions, h.now + 30_000.);
     h.actions.clear();
-    h.now += 20_000.;
+    h.now += 30_000.;
     h.event(Event::TimerFired { timer });
     no_private_http(&h.actions);
     assert!(terminals(&h.actions).is_empty());

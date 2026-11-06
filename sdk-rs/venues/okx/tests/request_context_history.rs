@@ -524,12 +524,12 @@ fn child_timeout_distinguishes_unreleased_and_released_query_work() {
         let timer = output
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 30_000. => Some(*timer),
                 _ => None,
             })
             .expect("native20s child timer distinct from caller root");
-        engine.handle(NOW + 20_000., Event::TimerFired { timer });
-        let output = actions(&mut engine, NOW + 20_000.);
+        engine.handle(NOW + 30_000., Event::TimerFired { timer });
+        let output = actions(&mut engine, NOW + 30_000.);
         if released {
             strict_failure(&output);
             assert_eq!(failed(&output)[0].kind, Some(ErrorKind::Timeout));
