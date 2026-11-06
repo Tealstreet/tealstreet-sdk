@@ -1,7 +1,7 @@
 //! FIFO commands; all placement reads and validation precede the first write.
 use crate::{
     Pending, Woo, native,
-    wire::{Envelope, id, number},
+    wire::{Envelope, id, number, optional_number},
 };
 use safe_cex_engine::model::*;
 use safe_cex_engine::text::JoinWith;
@@ -26,7 +26,99 @@ enum Accepted {
         hedged: bool,
         revision: u64,
     },
+    /// A native algo edit, read back before it counts.
+    Edit(Box<Edit>),
 }
+/// WOO answers an algo edit EDIT_SENT: it is read back this long after, and
+/// re-read a bounded number of times while the old values still show.
+const READ_BACK_MS: f64 = 300.0;
+const READ_BACK_ATTEMPTS: u8 = 3;
+
+/// The last check before a stop, take-profit or trailing edit is sent: a
+/// refusal leaves the order untouched.
+#[derive(Clone)]
+struct StopGuard {
+    order: Order,
+    reference: StopTriggerType,
+    /// The new trigger, checked against the reference; a trailing edit has none.
+    trigger: Option<f64>,
+    /// A trailing edit's new callback distance.
+    callback: Option<f64>,
+    /// The side of the reference a trigger stays on.
+    below: bool,
+    closes: Option<PositionSide>,
+}
+impl StopGuard {
+    /// A refusal is typed NotSent and leaves the order untouched.
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        let unchanged = || format!("Your {} order was not changed", self.order.symbol);
+        if store.order(&self.order.id) != Some(&self.order) {
+            return Err(refused(Some(format!(
+                "{}: it changed or filled before the edit",
+                unchanged()
+            ))));
+        }
+        if let Some(side) = self.closes
+            && !store
+                .positions()
+                .iter()
+                .any(|p| p.symbol == self.order.symbol && p.side == side && positive(p.contracts))
+        {
+            return Err(refused(Some(format!(
+                "{}: no position for it to protect",
+                unchanged()
+            ))));
+        }
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::IndexPrice => "index",
+            StopTriggerType::LastPrice => "last",
+        };
+        let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
+            return Err(refused(Some(format!(
+                "{}: the {label} price reference is stale",
+                unchanged()
+            ))));
+        };
+        if let Some(trigger) = self.trigger
+            && ((self.below && trigger >= price) || (!self.below && trigger <= price))
+        {
+            return Err(refused(Some(format!(
+                "{}: the new trigger has already crossed the {label} price",
+                unchanged()
+            ))));
+        }
+        if self.callback.is_some_and(|callback| !positive(callback)) {
+            return Err(refused(Some(format!(
+                "{}: the trailing distance from the {label} price is zero",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
+}
+/// A native algo edit: its final check and what it must read back as.
+#[derive(Clone)]
+struct Edit {
+    guard: StopGuard,
+    /// The algo order read back: the edited order or its positional parent.
+    root: String,
+    /// A positional TP/SL child, read back from its parent's childOrders.
+    child: Option<String>,
+    trigger: Option<f64>,
+    quantity: Option<f64>,
+    callback: Option<f64>,
+}
+/// How a message names an edited algo order of `kind`.
+fn what(kind: OrderType) -> &'static str {
+    match kind {
+        OrderType::TakeProfit => "take profit",
+        OrderType::TrailingStopLoss => "trailing stop",
+        _ => "stop",
+    }
+}
+
 #[derive(Clone)]
 enum Step {
     Touch {
@@ -50,6 +142,12 @@ enum Step {
     Mode {
         hedged: bool,
         revision: u64,
+        attempt: u8,
+    },
+    /// An algo edit's read-back: the edit's proof.
+    ReadBack {
+        edit: Box<Edit>,
+        not_before: f64,
         attempt: u8,
     },
 }
@@ -524,9 +622,9 @@ impl Woo {
                     side: Some(side(o.side)),
                     quantity: Some(num::format(p.contracts)),
                     trigger_price: None,
-                    trigger_price_type: Some(trigger(
-                        o.sl_trigger_type.or(o.tp_trigger_type).or(o.trigger_type),
-                    )?),
+                    // The v3 algo API documents MARKET_PRICE as the only trigger
+                    // source: a trailing stop always trails the last price.
+                    trigger_price_type: Some("MARKET_PRICE"),
                     callback_value: Some(num::format(num::adjust(
                         (t.last - o.price.unwrap()).abs(),
                         m.precision.price,
@@ -659,43 +757,6 @@ impl Woo {
         {
             return Err("WOO amendment quantity is outside native lot limits".into());
         }
-        if order.kind == OrderType::TrailingStopLoss {
-            let opts = PlaceOrderOpts {
-                symbol: order.symbol.clone(),
-                kind: order.kind,
-                side: order.side,
-                amount: amount.unwrap_or(order.amount),
-                price: Some(price.unwrap_or(order.price)),
-                trigger_price: None,
-                stop_loss: None,
-                take_profit: None,
-                reduce_only: Some(true),
-                time_in_force: None,
-                trigger_type: order.trigger_type,
-                tp_trigger_type: None,
-                sl_trigger_type: order.extra.as_ref().and_then(|e| e.sl_trigger_type),
-                client_order_id: None,
-                close: None,
-                max_slippage_pct: None,
-                stp_mode: None,
-                bybit_bbo: None,
-                bybit_slippage_tolerance_ticks: None,
-                implied_volatility: None,
-            };
-            self.validate_places(cx, std::slice::from_ref(&opts))?;
-            let mut steps = VecDeque::from([write(
-                Method::Delete,
-                format!(
-                    "/v3/algo/order/{}",
-                    order.parent_id.as_deref().unwrap_or(id)
-                ),
-                vec![],
-                None,
-                Accepted::Ids(vec![]),
-            )]);
-            steps.push_back(Step::Build(vec![opts]));
-            return Ok(steps);
-        }
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Amendment<'a> {
@@ -707,6 +768,8 @@ impl Woo {
             quantity: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
             trigger_price: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            callback_value: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
             child_orders: Option<Vec<ChildEdit<'a>>>,
         }
@@ -724,6 +787,7 @@ impl Woo {
             price: None,
             quantity: None,
             trigger_price: None,
+            callback_value: None,
             child_orders: None,
         };
         let path = if !algo(order.kind) {
@@ -736,22 +800,65 @@ impl Woo {
             body.price = price.map(|v| num::format(num::adjust(v, m.precision.price)));
             format!("/v3/order/{id}")
         } else {
-            let p = price.map(|v| num::format(num::adjust(v, m.precision.price)));
-            let quantity = amount.map(|v| num::format(num::adjust(v, m.precision.amount)));
-            if self.account_algo_positional(id) {
+            let root = order.parent_id.as_deref().unwrap_or(id).to_owned();
+            let quantity = amount.map(|v| num::adjust(v, m.precision.amount));
+            let trailing = order.kind == OrderType::TrailingStopLoss;
+            // A trailing stop's price is its stop level: the native edit moves
+            // its callback distance from the last price, which it trails.
+            let callback = if trailing {
+                let last = cx.store.ticker(&order.symbol).map_or(0.0, |t| t.last);
+                price.map(|v| num::adjust((last - v).abs(), m.precision.price))
+            } else {
+                None
+            };
+            let trigger = (!trailing)
+                .then(|| price.map(|v| num::adjust(v, m.precision.price)))
+                .flatten();
+            let child = self.account_algo_positional(id).then(|| id.to_owned());
+            if child.is_some() {
                 body.child_orders = Some(vec![ChildEdit {
                     algo_order_id: id,
-                    trigger_price: p,
-                    quantity,
+                    trigger_price: trigger.map(num::format),
+                    quantity: quantity.map(num::format),
                 }]);
             } else {
-                body.trigger_price = p;
-                body.quantity = quantity;
+                body.trigger_price = trigger.map(num::format);
+                body.callback_value = callback.map(num::format);
+                body.quantity = quantity.map(num::format);
             }
-            format!(
-                "/v3/algo/order/{}",
-                order.parent_id.as_deref().unwrap_or(id)
-            )
+            let guard = StopGuard {
+                order: order.clone(),
+                // Trailing triggers only on the last price (MARKET_PRICE).
+                reference: if trailing {
+                    StopTriggerType::LastPrice
+                } else {
+                    order.trigger_type.unwrap_or(StopTriggerType::MarkPrice)
+                },
+                trigger,
+                callback,
+                below: (order.kind == OrderType::TakeProfit) == (order.side == OrderSide::Buy),
+                closes: Some(if order.side == OrderSide::Sell {
+                    PositionSide::Long
+                } else {
+                    PositionSide::Short
+                }),
+            };
+            guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
+            let edit = Edit {
+                guard,
+                root: root.clone(),
+                child,
+                trigger,
+                quantity,
+                callback,
+            };
+            return Ok(VecDeque::from([write(
+                Method::Put,
+                format!("/v3/algo/order/{root}"),
+                vec![],
+                Some(json(&body)?),
+                Accepted::Edit(Box::new(edit)),
+            )]));
         };
         Ok(VecDeque::from([write(
             Method::Put,
@@ -1048,6 +1155,16 @@ impl Woo {
                         self.trading.timer = Some(cx.set_timer(ready - cx.now));
                         return;
                     }
+                    // The amended algo is checked once more as its edit is sent.
+                    if let Step::Write {
+                        accepted: Accepted::Edit(edit),
+                        ..
+                    } = &step
+                        && let Err(error) = edit.guard.validate(cx.store, cx.now)
+                    {
+                        self.trade_abort(cx, error);
+                        continue;
+                    }
                     let mut outbound = step.clone();
                     if let Step::Write { accepted, .. } = &mut outbound {
                         match accepted {
@@ -1110,6 +1227,34 @@ impl Woo {
                     );
                     if let Err(error) = result {
                         self.trade_abort(cx, not_sent(error));
+                        continue;
+                    }
+                }
+                Step::ReadBack {
+                    ref edit,
+                    not_before,
+                    ..
+                } => {
+                    if cx.now < not_before {
+                        self.trading.active.as_mut().unwrap().steps.push_front(step);
+                        self.trading.timer = Some(cx.set_timer(not_before - cx.now));
+                        return;
+                    }
+                    let path = format!("/v3/algo/order/{}", edit.root);
+                    let result = self.signed(
+                        cx,
+                        Method::Get,
+                        &path,
+                        vec![],
+                        None,
+                        Pending::Trade(Request {
+                            command,
+                            step: step.clone(),
+                        }),
+                    );
+                    if let Err(error) = result {
+                        let edit = edit.clone();
+                        self.read_back_failed(cx, &edit, error);
                         continue;
                     }
                 }
@@ -1286,6 +1431,9 @@ impl Woo {
             self.trade_pump(cx);
             return;
         }
+        if let Step::ReadBack { edit, attempt, .. } = request.step {
+            return self.read_back_answer(cx, *edit, attempt, response);
+        }
         let checked = Envelope::checked(response.body).and_then(|e| {
             if response.status >= 400 {
                 Err(format!("WOO HTTP {}: {}", response.status, e.message))
@@ -1327,181 +1475,199 @@ impl Woo {
                 return;
             }
         };
-        let outcome: Result<(), String> = (|| {
-            match &request.step {
-                Step::Write { accepted, .. } => {
-                    #[derive(Deserialize)]
-                    struct Ack {
-                        success: Option<bool>,
-                    }
-                    if let Some(data) = envelope.data
-                        && serde_json::from_str::<Ack>(data.get())
-                            .is_ok_and(|a| a.success == Some(false))
-                    {
-                        return Err("WOO mutation was not accepted".into());
-                    }
-                    match accepted {
-                        Accepted::Regular(_) => {
-                            #[derive(Deserialize)]
-                            struct Placed {
-                                #[serde(deserialize_with = "id")]
-                                order_id: String,
+        let outcome: Result<(), String> =
+            (|| {
+                match &request.step {
+                    Step::Write { accepted, .. } => {
+                        #[derive(Deserialize)]
+                        struct Ack {
+                            success: Option<bool>,
+                        }
+                        if let Some(data) = envelope.data
+                            && serde_json::from_str::<Ack>(data.get())
+                                .is_ok_and(|a| a.success == Some(false))
+                        {
+                            return Err("WOO mutation was not accepted".into());
+                        }
+                        match accepted {
+                            Accepted::Regular(_) => {
+                                #[derive(Deserialize)]
+                                struct Placed {
+                                    #[serde(deserialize_with = "id")]
+                                    order_id: String,
+                                }
+                                let result: Placed = serde_json::from_str(response.body)
+                                    .map_err(|e| e.to_string())?;
+                                if !native_id(&result.order_id) {
+                                    return Err(
+                                        "WOO placement returned an invalid native ID".into()
+                                    );
+                                }
+                                self.trading
+                                    .active
+                                    .as_mut()
+                                    .unwrap()
+                                    .ids
+                                    .push(result.order_id);
                             }
-                            let result: Placed =
-                                serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                            if !native_id(&result.order_id) {
-                                return Err("WOO placement returned an invalid native ID".into());
+                            Accepted::Algo => {
+                                #[derive(Deserialize)]
+                                struct Rows {
+                                    rows: Vec<Row>,
+                                }
+                                #[derive(Deserialize)]
+                                #[serde(rename_all = "camelCase")]
+                                struct Row {
+                                    #[serde(deserialize_with = "id")]
+                                    order_id: String,
+                                }
+                                let rows: Rows = serde_json::from_str(envelope.payload()?)
+                                    .map_err(|e| e.to_string())?;
+                                if rows.rows.is_empty()
+                                    || rows.rows.iter().any(|r| !native_id(&r.order_id))
+                                {
+                                    return Err(
+                                        "WOO algo placement returned no valid native IDs".into()
+                                    );
+                                }
+                                self.trading
+                                    .active
+                                    .as_mut()
+                                    .unwrap()
+                                    .ids
+                                    .extend(rows.rows.into_iter().map(|r| r.order_id));
                             }
-                            self.trading
+                            Accepted::CancelAll => (),
+                            // EDIT_SENT is not proof: the edit counts once read back.
+                            Accepted::Edit(edit) => {
+                                self.trading.active.as_mut().unwrap().steps.push_front(
+                                    Step::ReadBack {
+                                        edit: edit.clone(),
+                                        not_before: cx.now + READ_BACK_MS,
+                                        attempt: 0,
+                                    },
+                                )
+                            }
+                            Accepted::Ids(ids) => self
+                                .trading
                                 .active
                                 .as_mut()
                                 .unwrap()
                                 .ids
-                                .push(result.order_id);
-                        }
-                        Accepted::Algo => {
-                            #[derive(Deserialize)]
-                            struct Rows {
-                                rows: Vec<Row>,
-                            }
-                            #[derive(Deserialize)]
-                            #[serde(rename_all = "camelCase")]
-                            struct Row {
-                                #[serde(deserialize_with = "id")]
-                                order_id: String,
-                            }
-                            let rows: Rows = serde_json::from_str(envelope.payload()?)
-                                .map_err(|e| e.to_string())?;
-                            if rows.rows.is_empty()
-                                || rows.rows.iter().any(|r| !native_id(&r.order_id))
-                            {
-                                return Err(
-                                    "WOO algo placement returned no valid native IDs".into()
-                                );
-                            }
-                            self.trading
-                                .active
-                                .as_mut()
-                                .unwrap()
-                                .ids
-                                .extend(rows.rows.into_iter().map(|r| r.order_id));
-                        }
-                        Accepted::CancelAll => (),
-                        Accepted::Ids(ids) => self
-                            .trading
-                            .active
-                            .as_mut()
-                            .unwrap()
-                            .ids
-                            .extend(ids.iter().cloned()),
-                        Accepted::Leverage {
-                            symbol,
-                            leverage,
-                            revision,
-                        } => {
-                            self.trading
-                                .active
-                                .as_mut()
-                                .unwrap()
-                                .steps
-                                .push_front(Step::Leverage {
+                                .extend(ids.iter().cloned()),
+                            Accepted::Leverage {
+                                symbol,
+                                leverage,
+                                revision,
+                            } => self.trading.active.as_mut().unwrap().steps.push_front(
+                                Step::Leverage {
                                     symbol: symbol.clone(),
                                     expected: Some(*leverage),
                                     revision: *revision,
                                     attempt: 0,
-                                })
+                                },
+                            ),
+                            Accepted::Mode { hedged, revision } => self
+                                .trading
+                                .active
+                                .as_mut()
+                                .unwrap()
+                                .steps
+                                .push_front(Step::Mode {
+                                    hedged: *hedged,
+                                    revision: *revision,
+                                    attempt: 0,
+                                }),
                         }
-                        Accepted::Mode { hedged, revision } => self
-                            .trading
-                            .active
-                            .as_mut()
-                            .unwrap()
-                            .steps
-                            .push_front(Step::Mode {
-                                hedged: *hedged,
-                                revision: *revision,
-                                attempt: 0,
-                            }),
+                        if !matches!(accepted, Accepted::Leverage { .. } | Accepted::Mode { .. }) {
+                            cx.store.invalidate_order_snapshots();
+                            self.account_refresh(cx);
+                        }
                     }
-                    if !matches!(accepted, Accepted::Leverage { .. } | Accepted::Mode { .. }) {
-                        cx.store.invalidate_order_snapshots();
+                    Step::Leverage {
+                        symbol,
+                        expected,
+                        revision,
+                        ..
+                    } => {
+                        #[derive(Deserialize)]
+                        struct Leverage {
+                            symbol: String,
+                            margin_mode: Option<String>,
+                            position_mode: String,
+                            details: Vec<Detail>,
+                        }
+                        #[derive(Deserialize)]
+                        struct Detail {
+                            position_side: String,
+                            #[serde(deserialize_with = "number")]
+                            leverage: f64,
+                        }
+                        let data: Leverage =
+                            serde_json::from_str(envelope.payload()?).map_err(|e| e.to_string())?;
+                        let m = cx.store.market(symbol).unwrap();
+                        if data.symbol != native(m)
+                            || data
+                                .margin_mode
+                                .as_deref()
+                                .is_some_and(|mode| mode != "CROSS")
+                            || data.position_mode != "ONE_WAY"
+                            || data.details.len() != 1
+                            || data.details[0].position_side != "BOTH"
+                            || !positive(data.details[0].leverage)
+                            || data.details[0].leverage.fract() != 0.0
+                            || expected.is_some_and(|v| v != data.details[0].leverage)
+                        {
+                            return Err(
+                                "WOO leverage readback did not match the requested scope/value"
+                                    .into(),
+                            );
+                        }
+                        self.account_leverage_applied(
+                            cx,
+                            symbol,
+                            data.details[0].leverage,
+                            data.margin_mode.as_ref().map(|_| MarginType::Cross),
+                            *revision,
+                        );
+                    }
+                    Step::Mode {
+                        hedged, revision, ..
+                    } => {
+                        #[derive(Deserialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct Account {
+                            account_mode: String,
+                            position_mode: String,
+                        }
+                        let data: Account =
+                            serde_json::from_str(envelope.payload()?).map_err(|e| e.to_string())?;
+                        if data.account_mode != "FUTURES"
+                            || data.position_mode != if *hedged { "HEDGE_MODE" } else { "ONE_WAY" }
+                        {
+                            return Err(
+                                "WOO position mode readback did not match the requested mode"
+                                    .into(),
+                            );
+                        }
+                        self.account_mode_applied(cx, *hedged, *revision);
                         self.account_refresh(cx);
                     }
+                    _ => (),
                 }
-                Step::Leverage {
-                    symbol,
-                    expected,
-                    revision,
-                    ..
-                } => {
-                    #[derive(Deserialize)]
-                    struct Leverage {
-                        symbol: String,
-                        margin_mode: Option<String>,
-                        position_mode: String,
-                        details: Vec<Detail>,
-                    }
-                    #[derive(Deserialize)]
-                    struct Detail {
-                        position_side: String,
-                        #[serde(deserialize_with = "number")]
-                        leverage: f64,
-                    }
-                    let data: Leverage =
-                        serde_json::from_str(envelope.payload()?).map_err(|e| e.to_string())?;
-                    let m = cx.store.market(symbol).unwrap();
-                    if data.symbol != native(m)
-                        || data
-                            .margin_mode
-                            .as_deref()
-                            .is_some_and(|mode| mode != "CROSS")
-                        || data.position_mode != "ONE_WAY"
-                        || data.details.len() != 1
-                        || data.details[0].position_side != "BOTH"
-                        || !positive(data.details[0].leverage)
-                        || data.details[0].leverage.fract() != 0.0
-                        || expected.is_some_and(|v| v != data.details[0].leverage)
-                    {
-                        return Err(
-                            "WOO leverage readback did not match the requested scope/value".into(),
-                        );
-                    }
-                    self.account_leverage_applied(
-                        cx,
-                        symbol,
-                        data.details[0].leverage,
-                        data.margin_mode.as_ref().map(|_| MarginType::Cross),
-                        *revision,
-                    );
-                }
-                Step::Mode {
-                    hedged, revision, ..
-                } => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct Account {
-                        account_mode: String,
-                        position_mode: String,
-                    }
-                    let data: Account =
-                        serde_json::from_str(envelope.payload()?).map_err(|e| e.to_string())?;
-                    if data.account_mode != "FUTURES"
-                        || data.position_mode != if *hedged { "HEDGE_MODE" } else { "ONE_WAY" }
-                    {
-                        return Err(
-                            "WOO position mode readback did not match the requested mode".into(),
-                        );
-                    }
-                    self.account_mode_applied(cx, *hedged, *revision);
-                    self.account_refresh(cx);
-                }
-                _ => (),
-            }
-            Ok(())
-        })();
+                Ok(())
+            })();
         match outcome {
             Ok(()) => {
+                // An algo edit takes effect only once its read-back proves it.
                 if matches!(request.step, Step::Write { .. })
+                    && !matches!(
+                        request.step,
+                        Step::Write {
+                            accepted: Accepted::Edit(_),
+                            ..
+                        }
+                    )
                     && let Some(job) = self.trading.active.as_mut()
                 {
                     job.effective = true;
@@ -1534,6 +1700,10 @@ impl Woo {
         }
         self.trading.waiting = false;
         match request.step {
+            Step::ReadBack { edit, .. } => {
+                self.read_back_failed(cx, &edit, error.into());
+                self.trade_pump(cx);
+            }
             Step::Touch { .. } => self.trade_pump(cx),
             Step::Mode { .. } | Step::Leverage { .. } => {
                 self.trade_retry_read(cx, request.step, error)
@@ -1546,6 +1716,127 @@ impl Woo {
                 self.trade_pump(cx);
             }
         }
+    }
+    /// An algo edit read back: as edited, it counts; still showing the old
+    /// values it is re-read a bounded number of times; otherwise it did not take.
+    fn read_back_answer(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        edit: Edit,
+        attempt: u8,
+        response: Response<'_>,
+    ) {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Row {
+            #[serde(default, deserialize_with = "id")]
+            algo_order_id: String,
+            #[serde(default)]
+            algo_status: String,
+            #[serde(default, deserialize_with = "optional_number")]
+            trigger_price: Option<f64>,
+            #[serde(default, deserialize_with = "optional_number")]
+            quantity: Option<f64>,
+            #[serde(default, deserialize_with = "optional_number")]
+            callback_value: Option<f64>,
+            #[serde(default)]
+            child_orders: Vec<Row>,
+        }
+        let read = Envelope::checked(response.body)
+            .ok()
+            .filter(|_| response.status < 400)
+            .and_then(|envelope| envelope.data)
+            .and_then(|data| serde_json::from_str::<Row>(data.get()).ok());
+        let Some(parent) = read else {
+            return self.read_back_failed(cx, &edit, "malformed read".into());
+        };
+        let row = match &edit.child {
+            Some(child) => parent
+                .child_orders
+                .into_iter()
+                .find(|r| r.algo_order_id == *child),
+            None => Some(parent),
+        };
+        let Some(row) = row else {
+            return self.read_back_failed(cx, &edit, "edited child missing".into());
+        };
+        let same = |expected: Option<f64>, read: Option<f64>| {
+            expected.is_none_or(|expected| {
+                read.is_some_and(|read| (read - expected).abs() <= 1e-9 * expected.abs().max(1.0))
+            })
+        };
+        let terminal = matches!(
+            row.algo_status.as_str(),
+            "FILLED" | "CANCELLED" | "CANCELED" | "REJECTED"
+        );
+        if !terminal
+            && same(edit.trigger, row.trigger_price)
+            && same(edit.quantity, row.quantity)
+            && same(edit.callback, row.callback_value)
+        {
+            let job = self.trading.active.as_mut().unwrap();
+            job.ids.push(edit.guard.order.id.clone());
+            job.effective = true;
+            return self.trade_pump(cx);
+        }
+        if !terminal && attempt + 1 < READ_BACK_ATTEMPTS {
+            self.trading
+                .active
+                .as_mut()
+                .unwrap()
+                .steps
+                .push_front(Step::ReadBack {
+                    edit: Box::new(edit),
+                    not_before: cx.now + READ_BACK_MS,
+                    attempt: attempt + 1,
+                });
+            return self.trade_pump(cx);
+        }
+        let order = &edit.guard.order;
+        let (symbol, what) = (order.symbol.clone(), what(order.kind));
+        let reads = if terminal {
+            format!("it reads {}", row.algo_status)
+        } else if order.kind == OrderType::TrailingStopLoss {
+            format!(
+                "callbackValue reads {}",
+                row.callback_value.map_or("nothing".into(), num::format)
+            )
+        } else {
+            format!(
+                "triggerPrice reads {}",
+                row.trigger_price.map_or("nothing".into(), num::format)
+            )
+        };
+        let mut error = if order.kind == OrderType::TrailingStopLoss && !terminal {
+            // The edit did not take: the trailing stop stands as it was.
+            not_sent(format!(
+                "Your {symbol} {what} was not changed: its edit did not take ({reads})"
+            ))
+        } else {
+            VenueError::new(format!(
+                "Your {symbol} {what} does not read as edited ({reads})"
+            ))
+            .kind(ErrorKind::Internal)
+        };
+        error.presents = true;
+        self.trade_abort(cx, error);
+        self.trade_pump(cx);
+    }
+    /// The edit was sent but its read-back failed: what stands is unconfirmed.
+    fn read_back_failed(&mut self, cx: &mut Cx<'_, Pending>, edit: &Edit, cause: String) {
+        let order = &edit.guard.order;
+        let mut error = VenueError::new(format!(
+            "Your {} {} edit was sent but could not be read back ({cause}). Check Open Orders",
+            order.symbol,
+            what(order.kind)
+        ))
+        .kind(ErrorKind::VenueUnavailable);
+        error.presents = true;
+        // The PUT was accepted: its effect is open, not refused.
+        if let Some(job) = self.trading.active.as_mut() {
+            job.effective = true;
+        }
+        self.trade_abort(cx, error);
     }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
         if self.trading.timer == Some(timer) {

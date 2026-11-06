@@ -894,6 +894,7 @@ fn full_position_stop_replacement_retains_sibling_and_its_independent_trigger_so
 #[test]
 fn positional_amend_targets_child_under_parent_and_sized_algo_amount_is_native_quantity() {
     let mut e = positional_engine();
+    e.store_mut().set_positions(vec![position()]);
     e.handle(
         1000.0,
         Event::Command(Command::AmendOrder {
@@ -908,6 +909,7 @@ fn positional_amend_targets_child_under_parent_and_sized_algo_amount_is_native_q
     let body = r.body.as_ref().unwrap();
     assert!(body.contains(r#""childOrders":[{"algoOrderId":"101","triggerPrice":"58500"}]"#));
     let mut e = engine();
+    e.store_mut().set_positions(vec![position()]);
     let mut o = order("22", OrderType::StopLoss);
     o.parent_id = Some("22".into());
     e.store_mut().set_orders(vec![o]);
@@ -1013,12 +1015,13 @@ fn amendments_reject_rounded_zero_prices_and_sized_algo_invalid_lots_without_wri
     }
 }
 #[test]
-fn trailing_amend_refreshes_full_position_quantity_after_cancel_ack() {
+fn trailing_amend_edits_its_callback_in_place_and_reads_it_back() {
     let mut e = engine();
     e.store_mut().set_positions(vec![position()]);
     let mut trailing = order("12", OrderType::TrailingStopLoss);
     trailing.price = 59000.0;
     e.store_mut().set_orders(vec![trailing]);
+    let last = e.store().ticker("BTCUSDT").unwrap().last;
     e.handle(
         1000.0,
         Event::Command(Command::AmendOrder {
@@ -1029,12 +1032,34 @@ fn trailing_amend_refreshes_full_position_quantity_after_cancel_ack() {
         }),
     );
     let a: Vec<_> = e.drain_actions().collect();
-    let r = req(&a, Method::Delete, "/v3/algo/order/12");
-    e.store_mut().update_positions(|p| p.contracts = 0.03);
-    let a = reply(&mut e, &r, 1010.0, r#"{"success":true}"#);
+    assert!(
+        !a.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method == Method::Delete)),
+        "no cancel and replace"
+    );
+    let r = req(&a, Method::Put, "/v3/algo/order/12");
+    let callback = format!("{}", (last - 59500.0).abs());
+    assert_eq!(
+        r.body.as_deref(),
+        Some(format!(r#"{{"callbackValue":"{callback}"}}"#).as_str())
+    );
+    let a = reply(
+        &mut e,
+        &r,
+        1010.0,
+        r#"{"success":true,"data":{"success":true,"status":"EDIT_SENT"}}"#,
+    );
     let a = tick(&mut e, &a);
-    let r = req(&a, Method::Post, "/v3/algo/order");
-    assert!(r.body.as_ref().unwrap().contains(r#""quantity":"0.03""#));
+    let read = req(&a, Method::Get, "/v3/algo/order/12");
+    let a = reply(
+        &mut e,
+        &read,
+        1400.0,
+        &format!(
+            r#"{{"success":true,"data":{{"algoOrderId":12,"algoStatus":"NEW","callbackValue":{callback}}}}}"#
+        ),
+    );
+    assert_eq!(result(&a).unwrap(), r#"["12"]"#);
 }
 
 #[test]
