@@ -181,6 +181,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // ddi2il standing rule: CI + 10 KiB rounded up; all Bybit variants share this family cap.
 // #3145 run 42218930349 job 127896386942 measured hyperliquid 2,153,944 B: trades as last for
 // watched coins. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
+// #3150 final runtime, same-run comparison 42258955401: PR merge d820d0d012d vs
+// exact master first-parent 0115ba8df07. Source head d04b192d1b1; URL/RPC tables removed.
+// Only over-cap families receive measured CI bytes + 10 KiB, rounded up to a KiB; HL siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
@@ -190,16 +193,16 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitget: 2_359_296,
   bitgetusdc: 2_359_296,
   bitrue: 1_840_128,
-  bitunix: 1_849_344,
+  bitunix: 1_861_632,
   blofin: 1_989_632,
   breakoutprop: 1_565_696,
   bybit: 2_257_920,
   coinbase: 1_826_816,
-  cryptocom: 1_727_488,
+  cryptocom: 1_738_752,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_164_736,
-  hyperliquidspot: 2_164_736,
+  hyperliquid: 2_177_024,
+  hyperliquidspot: 2_177_024,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
@@ -210,12 +213,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   mexc: 1_858_560,
   okx: 1_973_248,
   orderly: 1_732_608,
-  paradex: 2_249_728,
-  phemex: 2_065_408,
+  paradex: 2_263_040,
+  phemex: 2_077_696,
   polymarket: 1_600_512,
-  txflow: 1_838_080,
+  txflow: 1_850_368,
   weex: 1_936_384,
-  woo: 2_399_232,
+  woo: 2_413_568,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
