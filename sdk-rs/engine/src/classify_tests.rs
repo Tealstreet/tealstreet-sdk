@@ -1001,6 +1001,29 @@ fn a_phrase_row_names_a_refusal_under_any_code_and_reports_the_venues_own() {
             assert_eq!(error.error().venue_code, own);
         }
     }
+    // An unproven or resend-granting code keeps its verdict: the text proves nothing more.
+    for code in [40010, 50008, 40009] {
+        let native = Native {
+            code: NativeCode::Int(code),
+            message: "Not enough position is available",
+        };
+        let plain = Native {
+            code: NativeCode::Int(code),
+            message: "",
+        };
+        assert_eq!(
+            PHRASED_OVER_CODES.verdict(&native, Intent::Place),
+            PHRASED_OVER_CODES.verdict(&plain, Intent::Place),
+            "{code}"
+        );
+        assert!(
+            !matches!(
+                PHRASED_OVER_CODES.verdict(&native, Intent::Place),
+                Verdict::Refused(_)
+            ),
+            "{code}"
+        );
+    }
     let other = Native {
         code: NativeCode::Int(40999),
         message: "Not enough balance",
@@ -1025,3 +1048,31 @@ fn a_phrase_row_needs_real_text() {
         status: &[],
     });
 }
+
+const PHRASED_OVER_CODES: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(40009),
+            verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40010),
+            verdict: Verdict::Unknown(None),
+            only: None,
+        },
+        Row {
+            key: Key::Int(50008),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
+            only: None,
+        },
+        Row {
+            key: Key::Phrase("Not enough position is available"),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+    ],
+    success: &[],
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: &[],
+};

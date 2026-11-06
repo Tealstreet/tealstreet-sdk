@@ -79,8 +79,8 @@ pub enum Key {
     /// fixture carrying the text (`error_corpus::assert_message_rows_recorded`).
     IntMessage(i64, &'static str),
     /// A refusal the venue names by its text whatever code it carries (or none):
-    /// the message contains it, ASCII case-insensitively. It wins over code rows
-    /// in its scope like `IntMessage`, and the reported code stays the venue's.
+    /// the message contains it, ASCII case-insensitively. It refines only a plain
+    /// `Refused` code verdict (listed or `unlisted`), and the reported code stays the venue's.
     Phrase(&'static str),
 }
 
@@ -168,6 +168,11 @@ impl CodeTable {
         }
         let row = self.row(native, intent);
         let verdict = row.map_or(self.unlisted, |row| row.verdict);
+        // A phrase only names which refusal it is: it never upgrades an unproven
+        // or resend-granting verdict.
+        if let (Verdict::Refused(_), Some(phrase)) = (verdict, self.phrase(native, intent)) {
+            return scoped(phrase.verdict, intent);
+        }
         if verdict == Verdict::NonceRefused
             && !row.is_some_and(|row| matches!(row.key, Key::Int(_) | Key::Text(_)))
         {
@@ -181,13 +186,25 @@ impl CodeTable {
     fn row(&self, native: &Native<'_>, intent: Intent) -> Option<&Row> {
         let scoped = |only: Option<Intent>| {
             let candidates = || {
-                self.rows
-                    .iter()
-                    .filter(move |row| row.only == only && row.key.matches(native))
+                self.rows.iter().filter(move |row| {
+                    row.only == only
+                        && !matches!(row.key, Key::Phrase(_))
+                        && row.key.matches(native)
+                })
             };
             candidates()
-                .find(|row| matches!(row.key, Key::IntMessage(..) | Key::Phrase(_)))
+                .find(|row| matches!(row.key, Key::IntMessage(..)))
                 .or_else(|| candidates().next())
+        };
+        scoped(Some(intent)).or_else(|| scoped(None))
+    }
+
+    /// The phrase row naming this refusal, exact intent first.
+    fn phrase(&self, native: &Native<'_>, intent: Intent) -> Option<&Row> {
+        let scoped = |only: Option<Intent>| {
+            self.rows.iter().find(|row| {
+                row.only == only && matches!(row.key, Key::Phrase(_)) && row.key.matches(native)
+            })
         };
         scoped(Some(intent)).or_else(|| scoped(None))
     }
@@ -670,8 +687,8 @@ pub fn assert_table(table: &CodeTable) {
                 "row {index}: a phrase this short is no evidence"
             );
             assert!(
-                !matches!(row.verdict, Verdict::Satisfied(_) | Verdict::NonceRefused),
-                "row {index}: a phrase row cannot be Satisfied or a nonce refusal"
+                matches!(row.verdict, Verdict::Refused(_)),
+                "row {index}: a phrase row only refines one refusal into another"
             );
         }
         for (other_index, other) in table.rows.iter().enumerate().skip(index + 1) {
