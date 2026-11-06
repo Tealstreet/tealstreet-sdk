@@ -3333,6 +3333,22 @@ impl BitgetFutures {
                     } else {
                         StopTriggerType::MarkPrice
                     });
+                    let (kind, limit) = if kind == OrderType::StopLoss {
+                        (raw.sl_order_type.as_ref(), raw.sl_limit_price.0)
+                    } else {
+                        (raw.tp_order_type.as_ref(), raw.tp_limit_price.0)
+                    };
+                    let execution = match kind {
+                        "market" => Some(0.0),
+                        "limit" => limit.filter(|price| price.is_finite() && *price > 0.0),
+                        _ => None,
+                    };
+                    if let Some(execution) = execution {
+                        order
+                            .extra
+                            .get_or_insert_with(OrderExtra::default)
+                            .conditional_order_price = Some(execution);
+                    }
                     orders.push(order);
                 }
             }
@@ -3354,6 +3370,20 @@ impl BitgetFutures {
                     child.side = base.side.opposite();
                     child.kind = kind;
                     child.price = price;
+                    let reference = if self.account.uta
+                        && match kind {
+                            OrderType::StopLoss => raw.sl_trigger_by == "mark",
+                            _ => raw.tp_trigger_by == "mark",
+                        } {
+                        StopTriggerType::MarkPrice
+                    } else {
+                        StopTriggerType::LastPrice
+                    };
+                    let extra = child.extra.get_or_insert_with(OrderExtra::default);
+                    match kind {
+                        OrderType::StopLoss => extra.sl_trigger_type = Some(reference),
+                        _ => extra.tp_trigger_type = Some(reference),
+                    }
                     orders.push(child);
                 }
             }
