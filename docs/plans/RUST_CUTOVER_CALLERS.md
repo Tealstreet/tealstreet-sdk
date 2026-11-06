@@ -10444,9 +10444,13 @@ permission to create a replacement. The former proves no cancellation reason or
 fill quantity; the latter only queues cancellation under the documented
 [cancel contract](https://docs.paradex.trade/api/prod/orders/cancel).
 The edit now uses the authenticated [order-history endpoint](https://docs.paradex.trade/api/prod/orders/get-orders),
-filtered by market, CLOSED status and original client ID when present. At most
-three reads, one second apart, share one five-second deadline. Only one matching
-exchange ID with CLOSED / USER_CANCELED, the same original identity and parameters,
+filtered by market, CLOSED status and original client ID when present. Each
+proof read bounds `start_at` to the target's native `created_at` and `end_at` to
+that read's own time in integer milliseconds, including bracket legs without a
+client ID. The documented time filters narrow the candidate window; a full
+100-row page missing the target still proves nothing, even with a cursor.
+At most three reads, one second apart, share one five-second deadline. Only one
+matching exchange ID with CLOSED / USER_CANCELED, the same original identity and parameters,
 and remaining quantity equal to the entire original size authorizes replacement.
 An empty, missing, duplicate, malformed, partially filled or conflicting target
 never proves cancellation; a cursor is not absence evidence. Exhaustion, read

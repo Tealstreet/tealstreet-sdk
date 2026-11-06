@@ -1069,8 +1069,10 @@ impl Trading {
         proof.polls += 1;
         let raw = &proof.guard.raw;
         let mut path = format!(
-            "/orders-history?market={}&status=CLOSED&page_size=100",
-            encode(&raw.market)
+            "/orders-history?market={}&status=CLOSED&page_size=100&start_at={}&end_at={}",
+            encode(&raw.market),
+            encode(&raw.created_at),
+            num::format(cx.now.floor())
         );
         if !raw.client_id.is_empty() {
             path.push_str(&format!("&client_id={}", encode(&raw.client_id)));
