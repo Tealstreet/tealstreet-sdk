@@ -739,3 +739,45 @@ fn a_reconnect_with_an_interim_proposal_keeps_the_refusal_on_the_frame_sent() {
         "allMids and the book keep their subscriptions"
     );
 }
+
+// A proposal made before the host takes the previous one's frames supersedes them: the
+// engine drops the queued candle and re-encodes it after the book, in desired order. The
+// refusal names what actually went out first (the book), never the superseded encode.
+#[test]
+fn a_superseded_revision_never_answers_for_frames_it_did_not_send() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    for ack in [
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"allMids"}}}"#,
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"fastAssetCtxs"}}}"#,
+    ] {
+        message(&mut e, s, ack);
+    }
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ETH-PERP".into(),
+        }),
+    );
+    let wire = sent(&prepared_now(&mut e));
+    assert!(
+        wire[0].contains(r#""type":"l2Book""#),
+        "the book goes out first: {wire:?}"
+    );
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Cannot subscribe to more than 1000 channels."}"#,
+    );
+    assert_eq!(
+        notices(&prepared_now(&mut e)),
+        ["Hyperliquid refused l2Book ETH: Cannot subscribe to more than 1000 channels."]
+    );
+}
