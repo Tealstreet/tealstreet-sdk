@@ -402,22 +402,32 @@ fn pm_uses_only_its_um_ao_stream_shape() {
 
 #[test]
 fn unknown_algo_cancel_is_not_terminal_proof_even_for_a_cancel_only_command() {
-    let mut h = ready();
-    let row = h.engine.store().order("stop").unwrap().clone();
-    h.event(Event::Command(Command::CancelOrders {
-        command: 7,
-        ids: vec!["stop".into()],
-    }));
-    let cancel = cancel(&mut h);
-    h.reply(
-        cancel.id,
-        400,
-        "",
-        r#"{"code":-2011,"msg":"Unknown order sent."}"#,
-    );
-    assert_unknown_no_create(&h, "unknown cancel");
-    assert_eq!(h.engine.store().order("stop"), Some(&row));
-    assert!(!h.has_request("/papi/v1/um/algo/algoOrder"));
+    for amending in [false, true] {
+        let mut h = ready();
+        let row = h.engine.store().order("stop").unwrap().clone();
+        if amending {
+            amend(&mut h);
+        } else {
+            h.event(Event::Command(Command::CancelOrders {
+                command: 7,
+                ids: vec!["stop".into()],
+            }));
+        }
+        let cancel = cancel(&mut h);
+        h.reply(
+            cancel.id,
+            400,
+            "",
+            r#"{"code":-2011,"msg":"Unknown order sent."}"#,
+        );
+        assert_unknown_no_create(&h, "unknown cancel");
+        assert_eq!(
+            h.result(7).unwrap().as_ref().unwrap_err(),
+            "Binance algo cancellation could not be confirmed; check Open Orders before re-placing"
+        );
+        assert_eq!(h.engine.store().order("stop"), Some(&row));
+        assert!(!h.has_request("/papi/v1/um/algo/algoOrder"));
+    }
 }
 #[test]
 fn an_algo_without_captured_native_identity_is_refused_before_cancel() {

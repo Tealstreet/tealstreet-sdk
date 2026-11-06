@@ -1077,7 +1077,7 @@ impl BinanceFutures {
                     unproven = true;
                     Some((
                         UNKNOWN_ORDER,
-                        format!("Cancellation was not confirmed: {message}"),
+                        "Binance algo cancellation could not be confirmed; check Open Orders before re-placing".into(),
                     ))
                 } else if self
                     .trading
