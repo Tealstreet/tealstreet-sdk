@@ -165,6 +165,8 @@ pub struct ExchangeMetadata {
     pub private_proxy_regions: JsObjectMap<Vec<String>>,
     #[serde(rename = "autoDownSizeReduceOrders")]
     pub auto_down_size_reduce_orders: bool,
+    #[serde(rename = "reduceOrdersLockPositionSize")]
+    pub reduce_orders_lock_position_size: bool,
     #[serde(rename = "supportsChaser")]
     pub supports_chaser: bool,
     #[serde(rename = "supportsPositionMargin")]
@@ -387,6 +389,8 @@ struct ExchangeMetadataWire {
     pub private_proxy_regions: JsObjectMap<Vec<String>>,
     #[serde(rename = "autoDownSizeReduceOrders")]
     pub auto_down_size_reduce_orders: bool,
+    #[serde(rename = "reduceOrdersLockPositionSize")]
+    pub reduce_orders_lock_position_size: bool,
     #[serde(rename = "supportsChaser")]
     pub supports_chaser: bool,
     #[serde(rename = "supportsPositionMargin")]

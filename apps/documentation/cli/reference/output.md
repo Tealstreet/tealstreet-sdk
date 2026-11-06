@@ -53,7 +53,11 @@ Where each stream goes:
   Everything else prints **above** the prompt (readline-aware, so async output
   never shreds what you're mid-typing).
 - `console.warn / error` → log file + printed above the prompt, and the latest
-  one is mirrored on the [top status bar](#status-bar--footer).
+  one is mirrored on the [top status bar](#status-bar--footer). The terminal
+  line always carries the cause: an error's message, a venue envelope's
+  `retMsg`/`ret_msg`/`msg` (also inside a proxied `raw_response`), else its
+  code or kind, else the body serialized to 300 characters. The full body is
+  always in `cli.log`.
 - `console.debug` → log file **only when `DEBUG=1` / `DEBUG=true`** is set;
   dropped otherwise (it routes to `logger.debug`, gated by `MIN_LOG_LEVEL`,
   which defaults to `info`).

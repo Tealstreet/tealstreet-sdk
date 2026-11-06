@@ -212,6 +212,9 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
   TTY, terminal renderers print ASCII markers (`[x] [!] [ok] [i]`) and terminal
   sinks transliterate tables; JSON, pipes and capture/listener output stay
   Unicode. `TEALSTREET_ASCII=1`/`0` overrides. A test rejects raw glyphs.
+- **Error lines always name the cause.** `src/error-cause.ts` turns every
+  non-string `console.error/warn` argument into its message, code or a bounded
+  serialization, so a prefix like `bybitdemo error` never prints alone.
   `console.warn` / `console.error` (and any line `log-classify.ts` rates
   `critical`) are additionally mirrored on the **top status bar**
   (`src/status-line.ts`). ("critical" is a severity classification, not a

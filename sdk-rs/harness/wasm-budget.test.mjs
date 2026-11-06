@@ -498,9 +498,9 @@ test('BreakoutProp native protective edits retain measured headroom and the exac
   assert.match(wasmBudgetError(cap + 1, 'venue', 'breakoutprop'), /exceeds/);
 });
 
-test('#3121 protective amendments (run 42122802638) retain OKX headroom and all siblings share the cap', () => {
-  const measured = 1_962_129;
-  const cap = 1_973_248;
+test('#3199 chaser refusals (run 42280800704) retain OKX headroom and all siblings share the cap', () => {
+  const measured = 1_973_874;
+  const cap = 1_984_512;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['okx', 'okxeu', 'okxdemo', 'okxeudemo']) {
     const family = venueFamily(venue);
