@@ -336,7 +336,7 @@ fn loaded_variant(variant: &str) -> (Harness, &'static [&'static str]) {
                 variant: Variant::CoinM,
                 ..credentials()
             },
-            &["/dapi/v1/openOrders"],
+            &["/dapi/v1/openOrders", "/dapi/v1/openAlgoOrders"],
         ),
         _ => (
             Options {

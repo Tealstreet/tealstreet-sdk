@@ -138,16 +138,23 @@ fn spot_brackets_have_no_limit_only_fields() {
     assert!(tp.url.contains("quantity=2"));
 }
 #[test]
-fn coin_m_stops_use_regular_endpoint_and_native_counts() {
+/// The CM-UM integration moved COIN-M stop types to the algo endpoint: /dapi/v1/order
+/// answers them -4120.
+fn coin_m_stops_use_the_algo_endpoint_and_native_counts() {
     let mut h = ready(Variant::CoinM);
     let mut o = order(Variant::CoinM, r#""reduceOnly":true"#);
     o.kind = safe_cex_engine::model::OrderType::StopLoss;
     place(&mut h, vec![o]);
-    let r = h.take("/dapi/v1/order");
-    assert!(r.url.contains("type=STOP_MARKET"));
-    assert!(r.url.contains("stopPrice=99"));
-    assert!(r.url.contains("quantity=2"));
-    assert!(!r.url.contains("algo"));
+    assert!(!h.has_request("/dapi/v1/order?"), "{:?}", h.paths());
+    let r = h.take("/dapi/v1/algoOrder");
+    assert_eq!(r.method, safe_cex_engine::Method::Post);
+    assert_eq!(param(&r.url, "algoType").as_deref(), Some("CONDITIONAL"));
+    assert_eq!(param(&r.url, "type").as_deref(), Some("STOP_MARKET"));
+    assert_eq!(param(&r.url, "triggerPrice").as_deref(), Some("99"));
+    assert_eq!(param(&r.url, "stopPrice"), None);
+    assert_eq!(param(&r.url, "quantity").as_deref(), Some("2"));
+    assert!(param(&r.url, "clientAlgoId").is_some());
+    assert_eq!(param(&r.url, "newClientOrderId"), None);
 }
 #[test]
 fn coin_m_all_native_order_families_cancel_in_one_call() {
@@ -562,7 +569,7 @@ fn inverse_full_stop_requires_zero_input_or_an_explicit_close_intent() {
         let cancel = h.take("/dapi/v1/order");
         assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
         h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":999,"status":"CANCELED","origQty":"0","executedQty":"0"}"#);
-        let placed = h.take("/dapi/v1/order");
+        let placed = h.take("/dapi/v1/algoOrder");
         assert_eq!(param(&placed.url, "closePosition").as_deref(), Some("true"));
         assert!(param(&placed.url, "quantity").is_none());
     }
@@ -696,8 +703,9 @@ fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
             r#"{"orderId":12,"clientOrderId":"caller_1","code":"0"}"#,
             vec![],
         ),
-        (Variant::CoinM, r#"{"orderId":12}"#, vec!["12"]),
-        (Variant::CoinM, r#"{"algoId":13}"#, vec![]),
+        // A COIN-M stop is an algo order: only its algoId names it.
+        (Variant::CoinM, r#"{"algoId":13}"#, vec!["13"]),
+        (Variant::CoinM, r#"{"orderId":12}"#, vec![]),
     ] {
         let mut h = ready(variant);
         let mut input = order(variant, r#""clientOrderId":"caller_1""#);
@@ -710,7 +718,7 @@ fn unproven_spot_and_inverse_ids_keep_the_cancellable_namespace() {
         let request = h.take(if variant == Variant::Spot {
             "/api/v3/order"
         } else {
-            "/dapi/v1/order"
+            "/dapi/v1/algoOrder"
         });
         h.reply(request.id, 503, "", body);
         let failure = &h.failures.iter().find(|(id, _)| *id == 77).unwrap().1;
