@@ -192,14 +192,16 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
 // #3188 startup attribution, run 42260192686 at cda38ed52a9: CI + 10 KiB rounded up.
 // Only measured over-cap families grow; shared siblings stay equal and larger incoming caps win.
+// #3207 run 42279265759, job 128106963965 measured Bitget 2,390,477 B.
+// CI size plus 10 KiB rounded up to KiB; BitgetUSDC shares the family cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
   backpack: 1_948_672,
   binance: 2_223_104,
   bingx: 2_085_888,
-  bitget: 2_375_680,
-  bitgetusdc: 2_375_680,
+  bitget: 2_401_280,
+  bitgetusdc: 2_401_280,
   bitrue: 1_851_392,
   bitunix: 1_863_680,
   blofin: 2_001_920,
