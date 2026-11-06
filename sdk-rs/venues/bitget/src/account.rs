@@ -881,11 +881,7 @@ impl BitgetFutures {
                             row.strategy_type = std::borrow::Cow::Borrowed("trailing_stop");
                         }
                         let orders = self.map_order(cx, &row)?;
-                        if let Some(price) = row
-                            .execute_price
-                            .0
-                            .filter(|price| price.is_finite() && *price >= 0.0)
-                        {
+                        if let Some(price) = execution_price(&row, !self.account.uta) {
                             for order in &orders {
                                 snapshot.execution_prices.push((order.id.clone(), price));
                             }
@@ -2477,11 +2473,7 @@ impl BitgetFutures {
                         self.emit_execution(cx, &raw, order);
                     }
                     for order in orders {
-                        if let Some(price) = raw
-                            .execute_price
-                            .0
-                            .filter(|price| price.is_finite() && *price >= 0.0)
-                        {
+                        if let Some(price) = execution_price(&raw, !self.account.uta) {
                             self.account
                                 .execution_prices
                                 .insert(order.id.clone(), price);
@@ -3401,6 +3393,24 @@ pub(crate) fn is_algo(kind: OrderType) -> bool {
         OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
     )
 }
+fn execution_price(row: &OrderRow<'_>, classic: bool) -> Option<f64> {
+    match row.execute_price {
+        ExecutionPrice::Value(price) if price.is_finite() && price >= 0.0 => Some(price),
+        // Only explicit Classic TPSL market rows prove that blank means market.
+        ExecutionPrice::Blank
+            if classic
+                && row.order_type == "market"
+                && matches!(
+                    row.plan_type.as_ref(),
+                    "pos_loss" | "pos_profit" | "loss_plan" | "profit_plan"
+                ) =>
+        {
+            Some(0.0)
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn plan_type(value: &str) -> Option<&'static str> {
     Some(match value {
         "psl" | "pos_loss" => "pos_loss",
