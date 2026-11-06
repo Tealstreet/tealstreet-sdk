@@ -6,6 +6,13 @@ use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 fn ready(variant: Variant) -> Harness {
+    let mut h = ready_keeping_reads(variant);
+    h.requests.clear();
+    h
+}
+
+/// Markets loaded; the private startup reads are still pending.
+fn ready_keeping_reads(variant: Variant) -> Harness {
     let mut h = Harness::started(Options {
         variant,
         key: Some("key".into()),
@@ -35,7 +42,6 @@ fn ready(variant: Variant) -> Harness {
         );
         h.respond(&format!("{prefix}/premiumIndex"),200,r#"[{"symbol":"BTCUSD_PERP","markPrice":"100","indexPrice":"100","lastFundingRate":"0","nextFundingTime":1}]"#);
     }
-    h.requests.clear();
     h
 }
 fn order(variant: Variant, fields: &str) -> PlaceOrderOpts {
@@ -830,4 +836,27 @@ fn coin_m_trailing_outside_the_callback_range_is_refused_not_clamped() {
             }
         }
     }
+}
+
+/// COIN-M lists trailing stops in its regular snapshot with their native rate: an
+/// in-range amend still cancels and replaces, as on master.
+#[test]
+fn coin_m_trailing_stop_from_the_snapshot_can_be_amended() {
+    let mut h = ready_keeping_reads(Variant::CoinM);
+    h.respond(
+        "/dapi/v1/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/dapi/v1/openOrders",200,r#"[{"avgPrice":"0","clientOrderId":"coin-trail","cumBase":"0","executedQty":"0","orderId":77,"origQty":"2","origType":"TRAILING_STOP_MARKET","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","status":"NEW","stopPrice":"98","closePosition":false,"symbol":"BTCUSD_PERP","time":1,"timeInForce":"GTC","type":"TRAILING_STOP_MARKET","updateTime":1,"workingType":"CONTRACT_PRICE","priceProtect":false,"priceRate":"1.5","activatePrice":"103"}]"#);
+    h.requests.clear();
+    assert!(h.engine.store().order("77").is_some());
+    h.event(Event::Command(Command::AmendOrder {
+        command: 72,
+        id: "77".into(),
+        price: Some(97.0),
+        amount: None,
+    }));
+    let cancel = h.take("/dapi/v1/order");
+    assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
 }

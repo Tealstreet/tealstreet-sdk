@@ -224,3 +224,93 @@ fn an_ordinary_limit_amend_is_unchanged() {
         "POST https://fapi.binance.com/fapi/v1/order?symbol=BTCUSDT&positionSide=BOTH&side=BUY&type=LIMIT&quantity=0.1&price=91&timeInForce=GTC&newClientOrderId=x-s3vFFRQpknoku1vzPM4NJqegqfwzt&timestamp=1000&recvWindow=20000&signature=2497438551c31356f2a51abcb5fc2cf998e9001272ff0910b7c1cc65346aedc5"
     );
 }
+
+/// The native rate is captured when the amend is admitted: an open-orders refresh that
+/// lands while the cancel is in flight cannot change what the put-back restores.
+#[test]
+fn a_refresh_during_the_cancel_cannot_change_the_put_back() {
+    let mut h = ready();
+    amend(&mut h, 75, "5550", 97.0);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.event(Event::Command(Command::Venue {
+        command: 76,
+        action: safe_cex_engine::VenueAction::RefreshOrders { symbols: None },
+    }));
+    h.respond("/fapi/v1/openAlgoOrders", 200, "[]");
+    assert!(h.engine.store().order("5550").is_some());
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let put_back = h.take("/fapi/v1/algoOrder");
+    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+    assert_eq!(
+        param(&put_back.url, "activatePrice").as_deref(),
+        Some("103")
+    );
+}
+
+fn legacy_without_reduce_only() -> Harness {
+    let row = TRAILING_ROW
+        .replace(r#""reduceOnly":true"#, r#""reduceOnly":false"#)
+        .replace(r#""quantity":"0.010""#, r#""quantity":"0.100""#);
+    let mut h = ready_with(false, &format!("[{row}]"));
+    assert!(!h.engine.store().order("5550").unwrap().reduce_only);
+    h.engine.store_mut().update_positions(|p| p.contracts = 0.1);
+    h
+}
+
+/// A one-way trailing stop placed without reduceOnly (the old shape) only reduces once
+/// amended: on the replacement and on the put-back.
+#[test]
+fn a_legacy_trailing_stops_replacement_and_put_back_are_reduce_only() {
+    let mut h = legacy_without_reduce_only();
+    amend(&mut h, 80, "5550", 97.0);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/fapi/v1/algoOrder");
+    assert_eq!(
+        param(&replacement.url, "reduceOnly").as_deref(),
+        Some("true")
+    );
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let put_back = h.take("/fapi/v1/algoOrder");
+    assert_eq!(param(&put_back.url, "reduceOnly").as_deref(), Some("true"));
+    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+}
+
+/// A new one-way trailing stop reduces unless the caller explicitly says it must not.
+#[test]
+fn a_new_trailing_stop_reduces_by_default_and_honours_an_explicit_false() {
+    for (reduce, expected) in [(None, Some("true")), (Some(false), None)] {
+        let mut h = ready();
+        let mut order = trailing(98.0);
+        order.reduce_only = reduce;
+        place(&mut h, 81, order);
+        let sent = h.take("/fapi/v1/algoOrder");
+        assert_eq!(
+            param(&sent.url, "reduceOnly").as_deref(),
+            expected,
+            "{reduce:?}"
+        );
+    }
+}

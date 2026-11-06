@@ -200,6 +200,9 @@ struct Amendment {
     /// The order as it stands, with its own trigger and size.
     original: PlaceOrderOpts,
     position_side: Option<&'static str>,
+    /// A trailing stop's native parameters, captured before the cancel: what its put-back
+    /// restores, whatever a later snapshot says.
+    trailing: Option<NativeTrailing>,
 }
 
 #[derive(Clone)]
@@ -641,10 +644,11 @@ impl BinanceFutures {
                     } else {
                         (original.amount - filled).max(0.0)
                     };
-                    let trailing = (original.kind == OrderType::TrailingStopLoss)
-                        .then(|| self.account.trailing.get(&amendment.id).cloned())
-                        .flatten();
-                    job.restore = Some((original, amendment.position_side, trailing));
+                    job.restore = Some((
+                        original,
+                        amendment.position_side,
+                        amendment.trailing.clone(),
+                    ));
                 }
             }
             amendment.replacement.amount = if full_close {
@@ -1884,10 +1888,20 @@ impl BinanceFutures {
             if !last.is_finite() || last <= 0.0 {
                 return Err("Binance COIN-M trailing orders require a valid ticker".into());
             }
-            let rate = ((last - target).abs() * 1000.0 / last).round() / 10.0;
-            trailing_rate_in_range((last - target).abs(), rate, 10.0)?;
-            p.set("callbackRate", number(rate));
-            p.set("activationPrice", number(target));
+            match &self.trading.restoring_trailing {
+                Some(native) => {
+                    p.set("callbackRate", number(native.rate));
+                    if let Some(activate) = &native.activate_price {
+                        p.set("activationPrice", activate.clone());
+                    }
+                }
+                None => {
+                    let rate = ((last - target).abs() * 1000.0 / last).round() / 10.0;
+                    trailing_rate_in_range((last - target).abs(), rate, 10.0)?;
+                    p.set("callbackRate", number(rate));
+                    p.set("activationPrice", number(target));
+                }
+            }
         }
         let mut out = if close {
             vec![p]
@@ -1981,12 +1995,19 @@ impl BinanceFutures {
         }
         // Its put-back restores the native callback rate exactly, never one recomputed
         // from the current last price (or from a row price Binance may leave empty).
-        if order.kind == OrderType::TrailingStopLoss && !self.account.trailing.contains_key(id) {
-            return Err(format!(
-                "Your {} trailing stop was not changed: its native callback rate is not known yet, so it could not be put back exactly; try again shortly",
-                order.symbol
-            ));
-        }
+        let trailing = if order.kind == OrderType::TrailingStopLoss {
+            Some(self.native_trailing(id).ok_or_else(|| {
+                format!(
+                    "Your {} trailing stop was not changed: its native callback rate is not known yet, so it could not be put back exactly; try again shortly",
+                    order.symbol
+                )
+            })?)
+        } else {
+            None
+        };
+        // A one-way trailing stop trails a whole position: its replacement and put-back
+        // only reduce, even where an older order was placed without reduceOnly.
+        let reduce_only = order.reduce_only || (trailing.is_some() && !cx.store.hedged());
         let replacement = PlaceOrderOpts {
             symbol: order.symbol.clone(),
             kind: order.kind,
@@ -1996,7 +2017,7 @@ impl BinanceFutures {
             trigger_price: None,
             stop_loss: None,
             take_profit: None,
-            reduce_only: Some(order.reduce_only),
+            reduce_only: Some(reduce_only),
             time_in_force: order.time_in_force,
             trigger_type: None,
             tp_trigger_type: (order.kind == OrderType::TakeProfit)
@@ -2046,8 +2067,18 @@ impl BinanceFutures {
             replacement,
             original,
             position_side: self.order_position_side(id),
+            trailing,
         });
         Ok(job)
+    }
+
+    /// The native rate and activation price the last open-orders snapshot listed.
+    fn native_trailing(&self, id: &str) -> Option<NativeTrailing> {
+        self.account
+            .trailing
+            .get(id)
+            .or_else(|| self.account.regular_trailing.get(id))
+            .cloned()
     }
 
     fn plan_leverage(
@@ -2389,8 +2420,9 @@ impl BinanceFutures {
         if let Some(activate) = restored.and_then(|native| native.activate_price) {
             params.set("activatePrice", activate);
         }
-        // A one-way trailing stop without reduceOnly could reverse the position it trails.
-        if opts.reduce_only == Some(true) && !cx.store.hedged() {
+        // A one-way trailing stop without reduceOnly could reverse the position it trails:
+        // it reduces unless the caller explicitly says otherwise.
+        if opts.reduce_only != Some(false) && !cx.store.hedged() {
             params.set("reduceOnly", "true");
         }
         params.set("priceProtect", "TRUE");
