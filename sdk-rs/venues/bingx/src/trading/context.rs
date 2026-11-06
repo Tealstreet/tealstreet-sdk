@@ -136,6 +136,31 @@ pub(super) const TABLE: CodeTable = CodeTable {
     status: &[],
 };
 
+/// Selected only for missing-order replies on cancels or edits, never generic 109400.
+pub(super) const MISSING_ORDER_TABLE: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(109400),
+            verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+            only: Some(Intent::Cancel),
+        },
+        Row {
+            key: Key::Int(109421),
+            verdict: Verdict::Satisfied(SatisfiedIntent::Cancel),
+            only: Some(Intent::Cancel),
+        },
+        refused(109400, ErrorKind::Rejected),
+        refused(109421, ErrorKind::Rejected),
+    ],
+    success: &[],
+    unlisted: Verdict::Unknown(None),
+    status: &[],
+};
+
+pub(super) fn missing_order(code: i64, message: &str) -> bool {
+    code == 109421 || (code == 109400 && message.trim().eq_ignore_ascii_case("order not exist"))
+}
+
 /// 101400 also covers a duplicate client order id, whose original may be live.
 pub(super) const DUPLICATE_TABLE: CodeTable = CodeTable {
     rows: &[],

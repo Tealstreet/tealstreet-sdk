@@ -291,7 +291,7 @@ fn native_trigger_protection_uses_trigger_fields_instead_of_conditional_fields()
 fn trailing_replacement_refusal_restores_exact_native_parameters_once() {
     let mut e = native_engine(TRAILING, "move_order_stop");
     assert!(e.store().order("91_tsl").is_some());
-    amend(&mut e, "91_tsl", Some(60.), Some(5.));
+    amend(&mut e, "91_tsl", Some(39940.), Some(5.));
     let out = prepared(&mut e, 5.);
     let cancel = post(&out, "/cancel-algos");
     reply(
@@ -413,7 +413,7 @@ fn final_cancel_claim_rechecks_freshness_source_and_size_with_a_working_boundary
     use safe_cex_engine::request_context::Claim;
     for case in ["working", "stale", "crossed", "terminal", "filled", "size"] {
         let mut e = native_engine(TRAILING, "move_order_stop");
-        amend(&mut e, "91_tsl", Some(60.), Some(5.));
+        amend(&mut e, "91_tsl", Some(39940.), Some(5.));
         let permit = held_cancel(&mut e);
         let now = if case == "stale" { 5003. } else { 5002. };
         match case {
@@ -449,7 +449,7 @@ fn final_cancel_claim_rechecks_freshness_source_and_size_with_a_working_boundary
 }
 
 fn replacement(e: &mut Engine<Okx>, ack_at: f64) -> Action {
-    amend(e, "91_tsl", Some(60.), Some(5.));
+    amend(e, "91_tsl", Some(39940.), Some(5.));
     let cancel = post(&prepared(e, 5.), "/cancel-algos");
     reply(
         e,
@@ -571,7 +571,7 @@ fn unproven_trailing_and_dust_refuse_before_any_cancel() {
     let mut e = trading_engine();
     e.store_mut()
         .upsert_order(stored("91_tsl", OrderType::TrailingStopLoss));
-    amend(&mut e, "91_tsl", Some(60.), Some(5.));
+    amend(&mut e, "91_tsl", Some(39940.), Some(5.));
     let out = prepared(&mut e, 5.);
     assert!(
         !out.iter()
@@ -579,7 +579,7 @@ fn unproven_trailing_and_dust_refuse_before_any_cancel() {
     );
     assert_eq!(e.store().order("91_tsl").unwrap().status, OrderStatus::Open);
     let mut e = native_engine(TRAILING, "move_order_stop");
-    amend(&mut e, "91_tsl", Some(60.), Some(0.001));
+    amend(&mut e, "91_tsl", Some(39940.), Some(0.001));
     let out = prepared(&mut e, 5.);
     assert!(
         !out.iter()
@@ -591,7 +591,7 @@ fn unproven_trailing_and_dust_refuse_before_any_cancel() {
 #[test]
 fn dependent_cancel_refusal_never_replaces_or_restores() {
     let mut e = native_engine(TRAILING, "move_order_stop");
-    amend(&mut e, "91_tsl", Some(60.), Some(5.));
+    amend(&mut e, "91_tsl", Some(39940.), Some(5.));
     let cancel = post(&prepared(&mut e, 5.), "/cancel-algos");
     reply(
         &mut e,
@@ -612,7 +612,7 @@ fn concurrent_edit_cancel_and_cancel_all_cannot_overlap_restore_custody() {
         Command::AmendOrder {
             command: 21,
             id: "91_tsl".into(),
-            price: Some(70.),
+            price: Some(39930.),
             amount: Some(5.),
         },
         Command::CancelOrders {
@@ -706,7 +706,7 @@ fn frame_fed_writer_reads_native_trailing_parameters_before_cancel_and_can_resto
     row.amount = 0.;
     row.remaining = 0.;
     let mut e = frame_writer(row);
-    amend(&mut e, "91_tsl", Some(60.), Some(5.));
+    amend(&mut e, "91_tsl", Some(39940.), Some(5.));
     let read = source_read(&mut e);
     reply(&mut e, &read, &envelope(TRAILING), 6.);
     let cancel = post(&prepared(&mut e, 6.), "/cancel-algos");
@@ -775,7 +775,7 @@ fn failed_foreign_or_raced_source_read_never_cancels_the_original_protection() {
         row.amount = 0.;
         row.remaining = 0.;
         let mut e = frame_writer(row);
-        amend(&mut e, "91_tsl", Some(60.), Some(5.));
+        amend(&mut e, "91_tsl", Some(39940.), Some(5.));
         let read = source_read(&mut e);
         let response = match case {
             "refused" => r#"{"code":"50113","msg":"signature refused"}"#.into(),
@@ -826,7 +826,7 @@ fn quiet_lookup(frame_fed: bool) -> (Engine<Okx>, Action) {
         Event::Command(Command::AmendOrder {
             command: 20,
             id: "91_tsl".into(),
-            price: Some(60.),
+            price: Some(39940.),
             amount: Some(5.),
         }),
     );
@@ -871,7 +871,11 @@ fn quiet_native_and_frame_fed_markets_obtain_fresh_quote_before_cancel_without_r
             20000.,
         );
         let out = prepared(&mut e, 20000.);
-        post(&out, "/order-algo");
+        assert_eq!(
+            body(&post(&out, "/order-algo"))["callbackSpread"],
+            "60",
+            "the level converts against the read quote, never the algo row's last"
+        );
         assert!(
             !out.iter()
                 .any(|a| matches!(a, Action::Http(r) if r.method == safe_cex_engine::Method::Get)),

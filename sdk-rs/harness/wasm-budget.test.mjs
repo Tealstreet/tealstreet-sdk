@@ -391,8 +391,8 @@ test('#3127 KuCoin guarded stop edits (run 42140111861) retain KuCoin headroom',
   }
 });
 
-test('#3131 MEXC protective edits (run 42150228180) retain measured headroom', () => {
-  const [venue, measured, cap] = ['mexc', 1_777_946, 1_788_928];
+test('#3169 MEXC managed protective edits (run 42228563954) retain measured headroom', () => {
+  const [venue, measured, cap] = ['mexc', 1_848_283, 1_858_560];
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
   assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
