@@ -618,6 +618,104 @@ impl Okx {
         Ok(())
     }
 
+    /// One public price row: the generic serde path and the fixed-shape scanner share it.
+    fn price_row(&mut self, cx: &mut Cx<'_, Pending>, channel: PriceChannel, p: wire::Prices<'_>) {
+        // Each non-blank tickers field is validated and parsed in one pass.
+        let mut parsed = [0.0; 6];
+        if channel == PriceChannel::Tickers {
+            let fields = [
+                p.last,
+                p.open24h,
+                p.bid_px,
+                p.ask_px,
+                p.vol_ccy24h,
+                p.vol24h,
+            ];
+            for (slot, value) in parsed.iter_mut().zip(fields) {
+                if !value.is_empty() {
+                    let Some(value) = strict_decimal(value) else {
+                        return;
+                    };
+                    *slot = value;
+                }
+            }
+        }
+        let [last, open24h, bid, ask, volume, quote_volume] = parsed;
+        let mut update = |id: &str| {
+            let Some(index) = self.price_tickers.get(id).copied() else {
+                return;
+            };
+            if channel == PriceChannel::Mark && !self.marks.contains(id) {
+                self.marks.insert(id.to_owned());
+            }
+            if channel == PriceChannel::Index && !self.indexes.contains(id) {
+                self.indexes.insert(id.to_owned());
+            }
+            // Like TS, live prices only update rows the REST ticker read listed.
+            let Some(index) = index else {
+                return;
+            };
+            cx.store.update_ticker_at(index, |t| match channel {
+                PriceChannel::Tickers => {
+                    t.bid = bid;
+                    t.ask = ask;
+                    if !p.last.is_empty() {
+                        t.last = last;
+                    }
+                    if !p.last.is_empty() && !p.open24h.is_empty() {
+                        t.percentage = change(last, open24h);
+                    }
+                    t.volume = volume;
+                    t.quote_volume = quote_volume;
+                }
+                // A blank or null live value keeps the last good one.
+                PriceChannel::Mark if !p.mark_px.is_empty() => t.mark = num::parse(p.mark_px),
+                PriceChannel::Index if !p.idx_px.is_empty() => t.index = num::parse(p.idx_px),
+                PriceChannel::OpenInterest if !p.oi_ccy.is_empty() => {
+                    t.open_interest = num::parse(p.oi_ccy)
+                }
+                PriceChannel::Funding => {
+                    if !p.funding_rate.is_empty() {
+                        t.funding_rate = num::parse(p.funding_rate);
+                    }
+                    if !p.funding_time.is_empty() {
+                        t.funding_time = num::parse(p.funding_time);
+                    }
+                }
+                _ => {}
+            });
+            let mask = match channel {
+                PriceChannel::Tickers => {
+                    3 | (1 << 9)
+                        | (1 << 10)
+                        | if !p.last.is_empty() { 1 << 2 } else { 0 }
+                        | if !p.last.is_empty() && !p.open24h.is_empty() {
+                            1 << 5
+                        } else {
+                            0
+                        }
+                }
+                PriceChannel::Mark => 1 << 3,
+                PriceChannel::Index => 1 << 4,
+                PriceChannel::OpenInterest => 1 << 6,
+                PriceChannel::Funding => (1 << 7) | (1 << 8),
+                PriceChannel::Other => 0,
+            };
+            if let Some(ticker) = cx.store.tickers().get(index as usize) {
+                self.live_tickers.record(cx.store, &ticker.symbol, mask);
+            }
+        };
+        if channel == PriceChannel::Index {
+            if let Some(ids) = self.underlying_products.get(p.inst_id) {
+                for id in ids {
+                    update(id);
+                }
+            }
+        } else {
+            update(p.inst_id);
+        }
+    }
+
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, message: wire::Message<'_>) {
         let Some(data) = message.data else {
             return;
@@ -715,101 +813,8 @@ impl Okx {
             }
             return;
         }
-        let _ = json::each::<wire::Prices<'_>>(data.get(), |p| {
-            if channel == "tickers"
-                && [
-                    p.last,
-                    p.open24h,
-                    p.bid_px,
-                    p.ask_px,
-                    p.vol_ccy24h,
-                    p.vol24h,
-                ]
-                .iter()
-                .any(|value| {
-                    !value.is_empty()
-                        && value
-                            .parse::<f64>()
-                            .ok()
-                            .is_none_or(|value| !value.is_finite())
-                })
-            {
-                return;
-            }
-            let mut update = |id: &str| {
-                let Some(index) = self.price_tickers.get(id).copied() else {
-                    return;
-                };
-                if channel == "mark-price" && !self.marks.contains(id) {
-                    self.marks.insert(id.to_owned());
-                }
-                if channel == "index-tickers" && !self.indexes.contains(id) {
-                    self.indexes.insert(id.to_owned());
-                }
-                // Like TS, live prices only update rows the REST ticker read listed.
-                let Some(index) = index else {
-                    return;
-                };
-                cx.store.update_ticker_at(index, |t| match channel {
-                    "tickers" => {
-                        t.bid = num::parse(p.bid_px);
-                        t.ask = num::parse(p.ask_px);
-                        if !p.last.is_empty() {
-                            t.last = num::parse(p.last);
-                        }
-                        if !p.last.is_empty() && !p.open24h.is_empty() {
-                            t.percentage = percentage(p.last, p.open24h);
-                        }
-                        t.volume = num::parse(p.vol_ccy24h);
-                        t.quote_volume = num::parse(p.vol24h);
-                    }
-                    // A blank or null live value keeps the last good one.
-                    "mark-price" if !p.mark_px.is_empty() => t.mark = num::parse(p.mark_px),
-                    "index-tickers" if !p.idx_px.is_empty() => t.index = num::parse(p.idx_px),
-                    "open-interest" if !p.oi_ccy.is_empty() => {
-                        t.open_interest = num::parse(p.oi_ccy)
-                    }
-                    "funding-rate" => {
-                        if !p.funding_rate.is_empty() {
-                            t.funding_rate = num::parse(p.funding_rate);
-                        }
-                        if !p.funding_time.is_empty() {
-                            t.funding_time = num::parse(p.funding_time);
-                        }
-                    }
-                    _ => {}
-                });
-                let mask = match channel {
-                    "tickers" => {
-                        3 | (1 << 9)
-                            | (1 << 10)
-                            | if !p.last.is_empty() { 1 << 2 } else { 0 }
-                            | if !p.last.is_empty() && !p.open24h.is_empty() {
-                                1 << 5
-                            } else {
-                                0
-                            }
-                    }
-                    "mark-price" => 1 << 3,
-                    "index-tickers" => 1 << 4,
-                    "open-interest" => 1 << 6,
-                    "funding-rate" => (1 << 7) | (1 << 8),
-                    _ => 0,
-                };
-                if let Some(ticker) = cx.store.tickers().get(index as usize) {
-                    self.live_tickers.record(cx.store, &ticker.symbol, mask);
-                }
-            };
-            if channel == "index-tickers" {
-                if let Some(ids) = self.underlying_products.get(p.inst_id) {
-                    for id in ids {
-                        update(id);
-                    }
-                }
-            } else {
-                update(p.inst_id);
-            }
-        });
+        let channel = PriceChannel::of(channel);
+        let _ = json::each::<wire::Prices<'_>>(data.get(), |p| self.price_row(cx, channel, p));
         self.account_prices(cx);
     }
 
@@ -1037,6 +1042,15 @@ impl Venue for Okx {
         let Some(channel) = self.channel(cx, socket) else {
             return;
         };
+        // The hot price pushes skip serde; anything off their fixed shape takes it.
+        if let Some((name, row)) = wire::scan_price(text)
+            && let price @ (PriceChannel::Tickers | PriceChannel::Mark | PriceChannel::Index) =
+                PriceChannel::of(name)
+        {
+            self.price_row(cx, price, row);
+            self.account_prices(cx);
+            return;
+        }
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
             return;
         };
@@ -1986,10 +2000,45 @@ fn interval_for_bar(value: &str) -> Option<Interval> {
     BARS.iter().find(|(_, bar)| *bar == value).map(|(i, _)| *i)
 }
 fn percentage(last: &str, open: &str) -> f64 {
-    let open = num::parse(open);
     match last.parse::<f64>() {
-        Ok(last) if last.is_finite() && open != 0.0 => usd((last - open) / open * 100.0),
+        Ok(last) if last.is_finite() => change(last, num::parse(open)),
         _ => 0.0,
+    }
+}
+/// The 24h change in percent from a finite last price; 0 without an open.
+fn change(last: f64, open: f64) -> f64 {
+    if open != 0.0 {
+        usd((last - open) / open * 100.0)
+    } else {
+        0.0
+    }
+}
+/// What `str::parse::<f64>` accepts as finite, valued exactly as `num::parse`.
+fn strict_decimal(text: &str) -> Option<f64> {
+    (text.trim().len() == text.len())
+        .then(|| num::parse_decimal(text))
+        .flatten()
+}
+/// A public price channel, decided once per message rather than per row.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PriceChannel {
+    Tickers,
+    Mark,
+    Index,
+    OpenInterest,
+    Funding,
+    Other,
+}
+impl PriceChannel {
+    fn of(channel: &str) -> Self {
+        match channel {
+            "tickers" => Self::Tickers,
+            "mark-price" => Self::Mark,
+            "index-tickers" => Self::Index,
+            "open-interest" => Self::OpenInterest,
+            "funding-rate" => Self::Funding,
+            _ => Self::Other,
+        }
     }
 }
 fn usd(value: f64) -> f64 {
@@ -2032,6 +2081,83 @@ fn subtract_bars(end: f64, interval: Interval, count: u32) -> Option<f64> {
         _ => interval.ms(),
     };
     Some(end - duration * f64::from(count))
+}
+
+#[cfg(test)]
+mod price_parse_tests {
+    use super::*;
+
+    /// The one-pass parse keeps the old two-pass contract: reject exactly what
+    /// `str::parse::<f64>` rejects or reads as non-finite, else `num::parse`'s value.
+    #[test]
+    fn strict_decimal_matches_validate_then_parse() {
+        let long = "1234567890.123456789";
+        for text in [
+            "1",
+            "0",
+            "-0",
+            "+5",
+            ".5",
+            "5.",
+            "-.5",
+            "00012",
+            "65000.1",
+            "1e5",
+            "1E-3",
+            long,
+            "0.000000000000001",
+            "123456789012345",
+            "1234567890123456",
+            " 1",
+            "1 ",
+            "\u{a0}1",
+            "1.2.3",
+            "-",
+            ".",
+            "+",
+            "inf",
+            "-inf",
+            "infinity",
+            "NaN",
+            "1e400",
+            "0x10",
+            "1_000",
+            "\u{ff11}",
+            "--1",
+            "1-",
+            "e5",
+        ] {
+            let valid = text.parse::<f64>().is_ok_and(f64::is_finite);
+            let parsed = strict_decimal(text);
+            assert_eq!(parsed.is_some(), valid, "{text:?}");
+            if let Some(value) = parsed {
+                assert_eq!(value.to_bits(), num::parse(text).to_bits(), "{text:?}");
+                assert_eq!(
+                    value.to_bits(),
+                    text.parse::<f64>().unwrap().to_bits(),
+                    "{text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn change_matches_the_string_percentage() {
+        for (last, open) in [
+            ("101", "100"),
+            ("99.5", "100"),
+            ("1", "0"),
+            ("2", ""),
+            ("0", "3"),
+        ] {
+            let last_value = last.parse::<f64>().unwrap();
+            assert_eq!(
+                change(last_value, num::parse(open)).to_bits(),
+                percentage(last, open).to_bits(),
+                "{last} {open}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

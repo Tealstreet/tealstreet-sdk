@@ -42,7 +42,9 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         const markets = this._exchange.store.markets;
         if (!markets.some((m) => m.symbol === payload.data.symbol)) {
           console.warn(
-            `[OHLCVSubscriptionsHandler] Symbol "${payload.data.symbol}" not found on ${this._exchange.name}, skipping subscription`,
+            `[OHLCVSubscriptionsHandler] Symbol "${payload.data.symbol}" not found on ${this._exchange.name}, skipping subscription${
+              payload.data.reset ? ' and its forced repair' : ''
+            }`,
           );
           return;
         }
