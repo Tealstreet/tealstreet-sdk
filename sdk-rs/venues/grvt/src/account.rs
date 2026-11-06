@@ -2446,3 +2446,16 @@ fn session_headers(response: &Response<'_>) -> (Option<String>, Option<String>) 
 #[cfg(test)]
 #[path = "login_preparation_tests.rs"]
 mod login_preparation_tests;
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Summary => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::Login => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+}

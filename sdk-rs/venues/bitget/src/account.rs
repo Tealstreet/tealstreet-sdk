@@ -3686,3 +3686,16 @@ mod key_refusal_tests {
         }
     }
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE,
+            Self::UtaBalance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders(_) => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}

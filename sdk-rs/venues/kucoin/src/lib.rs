@@ -945,6 +945,17 @@ impl Venue for Kucoin {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Read(read) => Self::startup_reads(&read.pending),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1327,6 +1338,7 @@ impl Venue for Kucoin {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&pending, &error);
         match pending {
             Pending::Read(mut read) => {
                 if read.retried {

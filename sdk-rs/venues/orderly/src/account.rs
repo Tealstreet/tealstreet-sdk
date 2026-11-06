@@ -2030,3 +2030,15 @@ mod security_poll_interval {
 #[cfg(test)]
 #[path = "../tests/unit/margin_mode_rows.rs"]
 mod margin_mode_rows;
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Info => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::Modes { .. } => S::POSITIONS,
+        }
+    }
+}

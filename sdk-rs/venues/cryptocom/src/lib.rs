@@ -586,6 +586,16 @@ impl Venue for Cryptocom {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1062,6 +1072,7 @@ impl Venue for Cryptocom {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&pending, &error);
         match pending {
             Pending::Identity(request) => self.identity_reject(cx, request, error),
             Pending::History(request) => self.history_reject(cx, request, error),

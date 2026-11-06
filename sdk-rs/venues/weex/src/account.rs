@@ -1393,3 +1393,15 @@ mod auth_envelopes {
         }
     }
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.kind {
+            Kind::Balance => S::BALANCE,
+            Kind::Positions => S::POSITIONS,
+            Kind::Normal | Kind::Algo => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}

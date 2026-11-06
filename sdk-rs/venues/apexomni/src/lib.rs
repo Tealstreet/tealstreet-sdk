@@ -293,6 +293,7 @@ impl Venue for ApexOmni {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&pending, &error);
         self.failed(cx, pending, error);
     }
     fn guard_order_mutations(&self) -> bool {
@@ -320,6 +321,15 @@ impl Venue for ApexOmni {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Public(_, _) => S::MARKETS,
+            Pending::Account(_, request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,

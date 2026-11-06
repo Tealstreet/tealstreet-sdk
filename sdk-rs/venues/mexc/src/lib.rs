@@ -780,6 +780,22 @@ impl Venue for MexcFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Private { pending, .. } => Self::startup_reads(pending),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(account::Request::Mode) => S::ACCOUNT,
+            Pending::Account(account::Request::Snapshot(read)) => match read.scope {
+                account::Scope::Assets => S::BALANCE,
+                account::Scope::Positions => S::POSITIONS,
+                _ => S::ORDERS,
+            },
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
@@ -1355,6 +1371,7 @@ impl Venue for MexcFutures {
         self.protective_retired(owner)
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        cx.startup_request_refused(&pending, &error);
         if let Pending::Protective(request) = pending {
             self.protective_failed(cx, *request, error);
             return;

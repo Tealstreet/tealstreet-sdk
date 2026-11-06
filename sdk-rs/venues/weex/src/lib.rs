@@ -793,6 +793,16 @@ impl Venue for WeexFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &pending.task {
+            Task::Markets(_) => S::MARKETS,
+            Task::Daily(_) | Task::BookTickers(_) => S::TICKERS,
+            Task::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.invalid_read_credentials {
             cx.notice(
@@ -1238,6 +1248,7 @@ impl Venue for WeexFutures {
         p: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&p, &error);
         match p.task {
             Task::Candles(request) => request.failed(cx, error),
             Task::BookQuery(request) => request.failed(cx, error),

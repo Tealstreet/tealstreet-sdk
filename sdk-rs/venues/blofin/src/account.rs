@@ -2532,3 +2532,15 @@ fn rejection(which: &str, code: &str, msg: &str, kind: ErrorKind) -> VenueError 
     }
     error
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Positions { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}

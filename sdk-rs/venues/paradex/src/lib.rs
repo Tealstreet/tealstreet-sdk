@@ -91,6 +91,15 @@ impl Paradex {
 
 impl Venue for Paradex {
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Public(request) => request.startup_sections(),
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     /// A host-answered provider binds its Stark public key before start; a
     /// trusted local provider keeps the key it sealed at setup.
     fn public_key_setup(
@@ -328,6 +337,7 @@ impl Venue for Paradex {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&pending, &error);
         match pending {
             Pending::BookQuery(context) => {
                 let _ = cx.fail_context(&context, error);

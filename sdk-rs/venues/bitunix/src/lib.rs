@@ -609,6 +609,20 @@ impl Venue for BitunixFutures {
         self.account_auth(pending, response, store)
     }
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Private(request) => match request.axis {
+                account::Axis::Balance => S::BALANCE,
+                account::Axis::Positions => S::POSITIONS,
+                account::Axis::Orders | account::Axis::Tpsl => S::ORDERS,
+            },
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             closed_positions: true,
@@ -1106,6 +1120,7 @@ impl Venue for BitunixFutures {
     /// A provider refusal never released the request: a write is NotSent,
     /// and a read keeps its native failure path.
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        cx.startup_request_refused(&pending, &error);
         match pending {
             Pending::Trade(request) => self.trade_error(cx, request, error),
             Pending::History(read) => self.history_sign_failed(cx, read, &error.message),

@@ -996,6 +996,17 @@ impl Venue for Bingx {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Signed(request) => Self::startup_reads(&request.inner),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Daily { .. } | Pending::Premium { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn export_venue_state(&self) -> Option<Vec<u8>> {
         Some(self.trading.export_venue_state(self.account.mode_known()))
     }
@@ -1562,6 +1573,7 @@ impl Venue for Bingx {
         pending: Pending,
         mut error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&pending, &error);
         match pending {
             Pending::Signed(signed) => {
                 if let Some(context) = signed.context()

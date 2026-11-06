@@ -1764,3 +1764,15 @@ mod cache_tests {
         assert!(!account.terminal.contains("order-0"));
     }
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.scope {
+            Scope::Balance => S::BALANCE,
+            Scope::Positions => S::POSITIONS,
+            Scope::Orders => S::ORDERS,
+            Scope::Settings => S::NONE,
+        }
+    }
+}

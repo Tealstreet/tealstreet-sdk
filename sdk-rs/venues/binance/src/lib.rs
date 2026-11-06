@@ -1418,6 +1418,18 @@ impl Venue for BinanceFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Background(_, pending) => Self::startup_reads(pending),
+            Pending::ExchangeInfo { .. } => S::MARKETS,
+            Pending::Daily | Pending::BookTickers | Pending::PremiumIndex => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            Pending::Options(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         let capabilities = match self.options.variant {
             Variant::UsdM | Variant::PortfolioMargin => safe_cex_engine::Capabilities {
@@ -1843,6 +1855,7 @@ impl Venue for BinanceFutures {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&pending, &error);
         match pending {
             Pending::Background(context, pending) => {
                 let _ = cx.finish_http_context(&context);

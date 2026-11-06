@@ -1061,6 +1061,18 @@ fn candle(text: &str) -> Result<Candle, String> {
 
 impl Venue for KucoinSpot {
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Read(read) => Self::startup_reads(&read.pending),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Balance(_) => S::BALANCE,
+            Pending::Orders(_) => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1638,6 +1650,7 @@ impl Venue for KucoinSpot {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        cx.startup_request_refused(&pending, &error);
         match pending {
             Pending::Read(read) => {
                 let (pending, error) = crate::clock::failed(cx, *read, error);

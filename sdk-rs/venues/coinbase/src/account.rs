@@ -2574,3 +2574,19 @@ mod tests {
         }
     }
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance => S::BALANCE,
+            Self::SpotBalance => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders(_) => S::ORDERS,
+            Self::Portfolios => S::ACCOUNT,
+            Self::KeyPermissions { .. } => S::ACCOUNT,
+            Self::DetectCfm { .. } => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+}

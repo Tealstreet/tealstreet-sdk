@@ -929,6 +929,15 @@ impl Venue for Bitrue {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &pending.job {
+            Job::Markets { .. } => S::MARKETS,
+            Job::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
@@ -1348,6 +1357,7 @@ impl Venue for Bitrue {
         mut pending: Pending,
         mut error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&pending, &error);
         Self::finish_custody(cx, &mut pending);
         if let Job::Account(account::Request::Brackets { root, .. }) = &pending.job {
             error.outcome = None;

@@ -1366,3 +1366,14 @@ mod account_coverage_tests;
 #[cfg(test)]
 #[path = "../tests/unit/setting_custody.rs"]
 mod setting_custody_tests;
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::State { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}

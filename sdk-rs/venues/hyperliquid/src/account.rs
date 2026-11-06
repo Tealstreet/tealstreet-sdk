@@ -3423,3 +3423,17 @@ mod every_dex_clean_tests {
         assert_eq!(every_dex_clean(&[], &clean), Some(5));
     }
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Role => S::ACCOUNT,
+            Self::Mode => S::ACCOUNT,
+            Self::State { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            Self::Spot { .. } => S::BALANCE,
+            _ => S::NONE,
+        }
+    }
+}

@@ -498,6 +498,17 @@ impl Venue for PhemexPerpetuals {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets(..) => S::MARKETS,
+            Pending::Tickers(..) => S::TICKERS,
+            Pending::Account(_) => S::BALANCE.union(S::POSITIONS),
+            Pending::Orders(_) => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
@@ -1007,6 +1018,7 @@ impl Venue for PhemexPerpetuals {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&pending, &error);
         self.settle_retired_trading(cx);
         match pending {
             Pending::Identity(command) => self.identity_failed(cx, command, error),

@@ -1145,6 +1145,16 @@ impl Venue for Lighter {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account { request, .. } => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn on_http_preflight_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1949,6 +1959,7 @@ impl Venue for Lighter {
         }
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        cx.startup_request_refused(&pending, &error);
         match pending {
             Pending::Identity(request) => self.identity_rejected(cx, request, error),
             Pending::Trade(request) => self.trade_error(cx, request, error),

@@ -280,7 +280,18 @@ impl BitgetFutures {
         let scope = safe_cex_engine::request_context::Scope::Background;
         let context = match cx.http_context(scope, read_policy(None)) {
             Ok(context) => context,
-            Err(reason) => return self.public_failed(cx, tickers, reason.read_venue_error()),
+            Err(reason) => {
+                let error = reason.read_venue_error();
+                cx.startup_admission_refused(
+                    if tickers {
+                        safe_cex_engine::startup::Sections::TICKERS
+                    } else {
+                        safe_cex_engine::startup::Sections::MARKETS
+                    },
+                    &error,
+                );
+                return self.public_failed(cx, tickers, error);
+            }
         };
         let path = if tickers {
             paths::TICKERS
@@ -912,6 +923,19 @@ impl Venue for BitgetFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Discovery {
+                rows: Discovered::Markets(..),
+                ..
+            } => S::MARKETS,
+            Pending::Discovery { .. } => S::TICKERS,
+            Pending::Account { request, .. } => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1300,6 +1324,7 @@ impl Venue for BitgetFutures {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
+        cx.startup_request_refused(&pending, &error);
         match pending {
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);

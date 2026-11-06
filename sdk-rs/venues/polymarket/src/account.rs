@@ -1497,3 +1497,16 @@ mod execution_bounds {
         assert_eq!(engine.venue().account_filled("o1"), 3.0);
     }
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance => S::BALANCE,
+            Self::Orders(_) => S::ORDERS,
+            Self::Positions(_) => S::POSITIONS,
+            Self::Time => S::ACCOUNT,
+            Self::Derive => S::ACCOUNT,
+        }
+    }
+}

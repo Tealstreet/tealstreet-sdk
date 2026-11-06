@@ -841,6 +841,10 @@ impl BybitLinear {
             _ => policy::read_policy().timeout_ms,
         };
         let Some(policy) = self.read_policy(rest.signed, timeout_ms) else {
+            cx.startup_admission_refused(
+                then.startup_sections(),
+                &VenueError::new("").kind(ErrorKind::AuthInvalid),
+            );
             return self.on_public_response(
                 cx,
                 then,
@@ -850,6 +854,7 @@ impl BybitLinear {
         let context = match cx.http_context(Scope::Background, policy) {
             Ok(context) => context,
             Err(error) => {
+                cx.startup_admission_refused(then.startup_sections(), &error.read_venue_error());
                 self.note_local_read_refusal();
                 return self.on_public_response(cx, then, Err(&error.venue_error().message));
             }
@@ -1082,6 +1087,7 @@ impl BybitLinear {
             native.as_ref(),
             message.clone(),
         );
+        cx.startup_read_failure(current.then.startup_sections(), &failure.error);
         if failure.retry != Some(ReadRetry::NativeResend) {
             return false;
         }
@@ -2271,6 +2277,12 @@ impl BybitLinear {
         then: Then,
         response: Result<Response<'_>, &str>,
     ) {
+        if let Ok(response) = &response
+            && then.startup_sections() != safe_cex_engine::startup::Sections::NONE
+            && let Some(error) = read_refusal(response, "")
+        {
+            cx.startup_read_failure(then.startup_sections(), &error);
+        }
         let failure = match &response {
             Ok(response) => venue_error(response).map(|(_, message)| message),
             Err(error) => Some((*error).to_owned()),
@@ -2841,6 +2853,9 @@ impl Venue for BybitLinear {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        pending.then.startup_sections()
+    }
 
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
@@ -3337,6 +3352,7 @@ impl Venue for BybitLinear {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        cx.startup_request_refused(&pending, &error);
         if let Then::AuthClock = pending.then {
             return self.settle_auth_clock(cx);
         }
@@ -3765,3 +3781,19 @@ mod candle_start_tests {
         assert_eq!(candle_start(Interval::S15, t), 1_792_499_685.0);
     }
 }
+
+impl Then {
+    fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Then::Markets { .. } | Then::Fees(_) => S::MARKETS,
+            Then::Tickers(_) | Then::OptionSeed { .. } => S::TICKERS,
+            Then::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "startup_cause_tests.rs"]
+mod startup_cause_tests;
