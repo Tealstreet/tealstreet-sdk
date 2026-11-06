@@ -28,6 +28,13 @@ fully preflighted before any order is sent. Caller IDs are honored verbatim on
 one ordinary order or rejected before writes. Leverage changes without a side
 update both hedge sides sequentially, matching the engine's symbol-level API.
 
+An ordinary cancel answered `109400` with exactly `order not exist`, or `109421`,
+uses the same satisfied-cancel path as `80016`: the command completes, but its
+symbols remain fenced until a fresh primary-key order snapshot reconciles them.
+Edits and protective cancels require their existing cancellation proof; a missing
+order reply never authorizes a replacement or put-back. Generic `109400`
+parameter and timestamp refusals keep their existing classifications.
+
 The gate declares TS fixes for zero decimal precision, descending asks,
 non-finite ticker placeholders, per-execution fills and terminal dedupe,
 `cp` close flags, required full-position stop quantity, fail-closed bracket
