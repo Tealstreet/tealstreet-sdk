@@ -455,6 +455,9 @@ impl MexcFutures {
         request: ManagedRequest,
         error: VenueError,
     ) {
+        if error.outcome == Some(Outcome::NotSent) {
+            let _ = cx.present_plan_failure(&request.plan, error.message.clone());
+        }
         let _ = cx.finish_plan_failed_call(&request.plan, &request.slot, &request.context);
         if let Some(run) = self
             .trading

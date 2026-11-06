@@ -3583,6 +3583,21 @@ fn protective_final_claim_rechecks_a_held_signed_cancel() {
             e.store().order("guarded").unwrap().status,
             OrderStatus::Open
         );
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .expect("one final claim refusal");
+        assert!(
+            error.message.contains(if crossed {
+                "crossed"
+            } else {
+                "reference stale"
+            }),
+            "{error:?}"
+        );
         assert_eq!(
             actions
                 .iter()
