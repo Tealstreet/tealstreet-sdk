@@ -303,12 +303,11 @@ fn bitunix_real_public_encoder_preserves_symbol_and_channel_identity() {
                         Action::WsConnect { socket, .. } => {
                             engine.handle(0., Event::WsOpened { socket })
                         }
-                        Action::WsSend { text, .. } => {
+                        Action::WsSend { text, .. }
                             if serde_json::from_str::<Value>(&text)
-                                .is_ok_and(|v| v["op"] == "subscribe" && v["args"].is_array())
-                            {
-                                batches.push(text);
-                            }
+                                .is_ok_and(|v| v["op"] == "subscribe" && v["args"].is_array()) =>
+                        {
+                            batches.push(text);
                         }
                         _ => {}
                     }
