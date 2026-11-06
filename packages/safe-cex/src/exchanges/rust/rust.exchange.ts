@@ -452,6 +452,17 @@ const LOADED_SECTIONS = [
   [LOADED_FLAG.BALANCE, 'balance'],
 ] as const;
 
+/** A source answers an orders ask on dispatch; its orders come in a later frame, within the refresh deadline. */
+const SOURCE_ORDERS_FRAME_DEADLINE_MS = 30_000;
+
+const sourceFrameHasOrders = (buffer: ArrayBuffer): boolean => {
+  try {
+    return Boolean(new Frame(buffer).orders());
+  } catch {
+    return false;
+  }
+};
+
 /** Frames whose clock samples estimate the data source's offset, and the change worth resetting it for. */
 const SOURCE_CLOCK_SAMPLES = 20;
 const SOURCE_CLOCK_STEP_MS = 25;
@@ -1186,6 +1197,7 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.sourceBaseline = true;
     host.flush();
+    if (this.sourceOrdersAwaited !== undefined && sourceFrameHasOrders(frame)) this.settleSourceOrders();
   };
 
   /**
@@ -1231,15 +1243,37 @@ export class RustEngineExchange extends BaseExchange {
     this.refreshSourceOrders(ask.symbols);
   };
 
+  /** Source order reads asked for and not yet answered: the held writes they settle are still open. */
+  private sourceOrderReads = 0;
+  /** An answered ask whose orders frame has not landed yet; the deadline stops a lost frame holding forever. */
+  private sourceOrdersAwaited: ReturnType<typeof setTimeout> | undefined;
+
   private refreshSourceOrders = (symbols?: string[]) => {
     if (this.isDisposed || this.engineFailure) return;
     const checks = this.sourceCancelChecks;
     this.sourceCancelChecks = [];
-    void this.refreshAccountOrders(symbols, checks.length ? checks : undefined).catch((error: unknown) => {
-      if (this.isDisposed) return;
-      const reason = error instanceof Error ? error.message : String(error);
-      this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
-    });
+    this.sourceOrderReads += 1;
+    void this.refreshAccountOrders(symbols, checks.length ? checks : undefined)
+      .then(
+        () => {
+          if (this.isDisposed) return;
+          clearTimeout(this.sourceOrdersAwaited);
+          this.sourceOrdersAwaited = setTimeout(this.settleSourceOrders, SOURCE_ORDERS_FRAME_DEADLINE_MS);
+        },
+        (error: unknown) => {
+          if (this.isDisposed) return;
+          const reason = error instanceof Error ? error.message : String(error);
+          this.log(`${this.name} could not ask its data source for orders: ${reason}`, LogSeverity.Warning);
+        },
+      )
+      .finally(() => {
+        this.sourceOrderReads -= 1;
+      });
+  };
+
+  private settleSourceOrders = () => {
+    clearTimeout(this.sourceOrdersAwaited);
+    this.sourceOrdersAwaited = undefined;
   };
 
   /** Data source: send orders, for these symbols or the account, from a read sent after this call. */
@@ -1829,7 +1863,7 @@ export class RustEngineExchange extends BaseExchange {
       if (inert.has(method) || typeof members[method] !== 'function') continue;
       const local = members[method] as (...args: unknown[]) => Promise<unknown>;
       // An engine-owning instance calls straight through, keeping its own synchronous refusals.
-      members[method] = (...args: unknown[]) => {
+      const route = (...args: unknown[]) => {
         // The explicit flag, not isPublicDataOnly: a keyed account's mirror holds no key and derives public.
         if (this.routesToWorker && this.options.publicDataOnly === true && PRIVATE_HISTORY_READS.has(method))
           return Promise.reject(notReadOnPublicData(method));
@@ -1859,7 +1893,44 @@ export class RustEngineExchange extends BaseExchange {
           },
         );
       };
+      members[method] = FRAME_FED_WRITES.has(method)
+        ? (...args: unknown[]) => this.trackWrite(() => route(...args))
+        : route;
     }
+  }
+
+  private writesInFlight = 0;
+
+  private trackWrite = <T>(send: () => Promise<T>): Promise<T> => {
+    this.writesInFlight += 1;
+    let sent: Promise<T>;
+    try {
+      sent = Promise.resolve(send());
+    } catch (error) {
+      this.writesInFlight -= 1;
+      throw error;
+    }
+    return sent.finally(() => {
+      this.writesInFlight -= 1;
+    });
+  };
+
+  /** A user write here has not answered, or an uncertain one still waits for its source's orders. */
+  get hasUnsettledWrites(): boolean {
+    return (
+      this.writesInFlight > 0 ||
+      this.sourceOrdersAsk !== undefined ||
+      this.sourceCancelChecks.length > 0 ||
+      this.sourceOrderReads > 0 ||
+      this.sourceOrdersAwaited !== undefined
+    );
+  }
+
+  /** The startup sections this engine applied from frames itself; carried or seeded rows never set these. */
+  get appliedSections(): Record<(typeof LOADED_SECTIONS)[number][1], boolean> {
+    const sections = {} as Record<(typeof LOADED_SECTIONS)[number][1], boolean>;
+    for (const [flag, name] of LOADED_SECTIONS) sections[name] = (this.nativeLoaded & flag) === flag;
+    return sections;
   }
 
   private receiveCommandProgress = (progress: CommandProgress) => {
@@ -3624,6 +3695,7 @@ export class RustEngineExchange extends BaseExchange {
     clearTimeout(this.sourceOrdersTimer);
     this.sourceOrdersTimer = undefined;
     this.sourceOrdersAsk = undefined;
+    this.settleSourceOrders();
     this.candleSource?.dispose();
     this.candleSource = undefined;
     this.algoControlWatch?.dispose();

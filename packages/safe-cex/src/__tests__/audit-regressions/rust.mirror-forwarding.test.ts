@@ -257,3 +257,48 @@ it('keeps unsupported methods working on an exchange that owns its engine', () =
   mirror = new RustEngineExchange('bybit', { key: '', secret: '' }, new DefaultStore());
   expect(() => mirror!.snapshotFrame()).not.toThrow();
 });
+
+// A never-ready page engine is rebuilt on reload only while none of its writes is unsettled.
+it('counts a forwarded write as unsettled until the worker answers it, success or failure', async () => {
+  mirror = mirrorFor('bybit');
+  const requests: string[] = [];
+  mirror.on('callMethod', (event: { requestId: string; method: string }) => {
+    if (event.method === 'cancelOrders') requests.push(event.requestId);
+    else mirror!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: [] });
+  });
+  expect(mirror.hasUnsettledWrites).toBe(false);
+  const first = mirror.cancelOrders([{ id: 'a', symbol: 'BTCUSDT' } as never]);
+  const second = mirror.cancelOrders([{ id: 'b', symbol: 'BTCUSDT' } as never]).catch(() => 'failed');
+  await vi.waitFor(() => expect(requests).toHaveLength(2));
+  expect(mirror.hasUnsettledWrites).toBe(true);
+  mirror.emitter.emit('callMethod:done', { requestId: requests[0], success: true, result: [] });
+  await first;
+  expect(mirror.hasUnsettledWrites).toBe(true);
+  mirror.emitter.emit('callMethod:done', { requestId: requests[1], success: false, error: 'venue refused' });
+  await second;
+  expect(mirror.hasUnsettledWrites).toBe(false);
+});
+
+// 19pt8s: sending the ask cleared the fence, though the hold lifts only when the source's orders return.
+it('keeps a source orders read unsettled past its answer, with its cancel checks', async () => {
+  mirror = mirrorFor('bybit');
+  const asks: string[] = [];
+  mirror.on('callMethod', (event: { requestId: string; method: string }) => {
+    if (event.method === 'refreshAccountOrders') asks.push(event.requestId);
+    else mirror!.emitter.emit('callMethod:done', { requestId: event.requestId, success: true, result: [] });
+  });
+  const internals = mirror as unknown as {
+    sourceCancelChecks: { id: string; symbol: string }[];
+    refreshSourceOrders: (symbols?: string[]) => void;
+  };
+  internals.sourceCancelChecks.push({ id: 'a', symbol: 'BTCUSDT' });
+  expect(mirror.hasUnsettledWrites).toBe(true);
+  internals.refreshSourceOrders(['BTCUSDT']);
+  await vi.waitFor(() => expect(asks).toHaveLength(1));
+  expect(internals.sourceCancelChecks).toEqual([]);
+  expect(mirror.hasUnsettledWrites).toBe(true);
+  mirror.emitter.emit('callMethod:done', { requestId: asks[0], success: true, result: undefined });
+  // The source answers on dispatch: its orders are still to come in a frame.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(mirror.hasUnsettledWrites).toBe(true);
+});
