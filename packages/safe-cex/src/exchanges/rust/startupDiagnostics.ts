@@ -50,6 +50,39 @@ export function startupDiagnosticTags(event: EngineEvent): Record<string, string
   if (event.code !== 'startup.incomplete') return {};
   const fields = event.fields ?? {};
   const tags: Record<string, string> = {};
+  for (const section of ['Markets', 'Tickers', 'Balance', 'Orders', 'Positions']) {
+    const prefix = `startup${section}`;
+    const tag = `startup_${section.toLowerCase()}`;
+    const state = fields[`${prefix}State`];
+    if (typeof state !== 'string' || !['neverStarted', 'started', 'timedOut', 'refused', 'failed'].includes(state))
+      continue;
+    tags[`${tag}_state`] = state;
+    const kind = fields[`${prefix}Kind`];
+    if (
+      typeof kind === 'string' &&
+      [
+        'rejected',
+        'invalidInput',
+        'insufficientBalance',
+        'authInvalid',
+        'authExpired',
+        'authPermission',
+        'rateLimited',
+        'network',
+        'timeout',
+        'venueUnavailable',
+        'unsupported',
+        'internal',
+      ].includes(kind)
+    )
+      tags[`${tag}_kind`] = kind;
+    const code = fields[`${prefix}VenueCode`];
+    if (typeof code === 'string' && /^[A-Za-z0-9_:.\-]{1,32}$/.test(code)) tags[`${tag}_venue_code`] = code;
+    const status = fields[`${prefix}HttpStatus`];
+    if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599)
+      tags[`${tag}_http_status`] = String(status);
+  }
+
   if (typeof fields.stage === 'string' && STAGES.has(fields.stage)) tags.startup_stage = fields.stage;
   const failedRead = failedPrivateReadKind(fields.lastFailedPrivateReadKind);
   if (failedRead) tags.startup_last_failed_private_read_kind = failedRead;

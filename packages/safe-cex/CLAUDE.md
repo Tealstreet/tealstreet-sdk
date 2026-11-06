@@ -224,6 +224,11 @@ are reported through `console.error` with venue, event and original cause.
 Reporting emits no error/log event, so failures in those listeners cannot recurse.
 The inherited once/off/context and subscription-snapshot behavior stays intact.
 
+Rust `startup.incomplete` carries bounded per-section cause fields from the native
+engine. `BaseExchange.emitAndLogError` derives Sentry tags from those event fields
+for local and hosted accounts; it never guesses causes from browser read state.
+See `docs/plans/callers/startup-incomplete-causes.md` for the field contract.
+
 Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
 with the actual SDK venue plus method, redacted path template, phase and closed
 failure kind. Queries, origins and request material are never diagnostic fields;

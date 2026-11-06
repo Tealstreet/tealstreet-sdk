@@ -1,3 +1,5 @@
+import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
+
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
@@ -170,3 +172,84 @@ it('invalidates cached catalogues only on typed discovery failures', () => {
   emit('request.failed', 'discovery');
   expect(invalidate).toHaveBeenCalledTimes(1);
 });
+
+it('derives all five startup causes from a hosted-shaped event at the BaseExchange boundary', () => {
+  vi.stubGlobal('window', undefined);
+  vi.stubGlobal('self', {});
+  const exchange = new RustEngineExchange('bitget', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  accounts.push(exchange);
+  const errors = vi.fn();
+  exchange.on('error', errors);
+  const fields: Record<string, string | number> = {};
+  for (const section of ['Markets', 'Tickers', 'Balance', 'Orders', 'Positions']) {
+    fields[`startup${section}State`] = 'timedOut';
+    fields[`startup${section}Kind`] = 'timeout';
+    fields[`startup${section}VenueCode`] = '10006';
+    fields[`startup${section}HttpStatus`] = 429;
+  }
+  const message = 'Startup incomplete: still waiting for markets, tickers, balance, orders, positions';
+  exchange.emitAndLogError(message, undefined, {
+    engineEvent: { code: 'startup.incomplete', level: 'error', message, fields },
+  });
+  expect(errors).toHaveBeenCalledTimes(1);
+  const [text, opts] = errors.mock.calls[0];
+  expect(text).toBe(`Exchange Error: ${message}`);
+  for (const section of ['markets', 'tickers', 'balance', 'orders', 'positions']) {
+    expect(opts.sentryData.tags).toMatchObject({
+      [`startup_${section}_state`]: 'timedOut',
+      [`startup_${section}_kind`]: 'timeout',
+      [`startup_${section}_venue_code`]: '10006',
+      [`startup_${section}_http_status`]: '429',
+    });
+  }
+  expect(Object.keys(opts.sentryData.tags).every((key) => key.length <= 32)).toBe(true);
+  expect(exchange.startupDiagnostics).not.toHaveProperty('startup_orders_state');
+});
+
+it('rejects unbounded, untyped and sensitive startup cause fields', () => {
+  expect(
+    startupDiagnosticTags({
+      code: 'startup.incomplete',
+      level: 'error',
+      message: '',
+      fields: {
+        startupMarketsState: 'wallet-secret',
+        startupMarketsVenueCode: 'secret',
+        startupTickersState: 'started',
+        startupTickersKind: 'body text',
+        startupTickersVenueCode: 'https://secret.invalid?key=secret',
+        startupTickersHttpStatus: 600,
+        startupBalanceState: 'failed',
+        startupBalanceHttpStatus: 400.5,
+        startupOrdersState: 'refused',
+        startupOrdersVenueCode: 'x'.repeat(33),
+        startupPositionsState: 'neverStarted',
+        startupPositionsHttpStatus: NaN,
+        account: 'secret',
+        url: 'secret',
+        body: 'secret',
+      },
+    }),
+  ).toEqual({
+    startup_tickers_state: 'started',
+    startup_balance_state: 'failed',
+    startup_orders_state: 'refused',
+    startup_positions_state: 'neverStarted',
+  });
+});
+
+it.each([{ state: ['timedOut'] }, { state: { toString: () => 'failed' } }, { state: null }, { state: 500 }])(
+  'does not coerce a non-string startup state',
+  ({ state }) => {
+    expect(
+      startupDiagnosticTags({
+        code: 'startup.incomplete',
+        level: 'error',
+        message: '',
+        fields: {
+          startupMarketsState: state,
+        } as unknown as EngineEvent['fields'],
+      }),
+    ).toEqual({});
+  },
+);
