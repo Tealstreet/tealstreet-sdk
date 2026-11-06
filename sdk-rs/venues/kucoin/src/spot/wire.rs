@@ -527,6 +527,46 @@ mod scan_price_tests {
         assert!(scan_price(TICKER.trim_end_matches('}')).is_none());
     }
 
+    /// An ignored key's number must scan only as an exact JSON integer serde accepts.
+    fn time_boundary(value: &str) {
+        let text = TICKER.replace("1792471145034", value);
+        let serde_accepts = serde_json::from_str::<PriceMessage<'_>>(&text).is_ok();
+        if scan_matches_serde(&text) {
+            assert!(serde_accepts, "{value:?}");
+        } else if !serde_accepts {
+            assert!(scan_price(&text).is_none(), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn ignored_number_boundaries_fall_back_or_match_serde() {
+        for value in [
+            "1.", "1.2.3", "01", "-", "-01", "1e5", "1.5", "1E5", "1.0", "00", "--1", "+1", "-0",
+            "0", "12", "-7", ".5", "1-", "0x1", "1_0",
+        ] {
+            time_boundary(value);
+        }
+        for value in [
+            "1.", "1.2.3", "01", "-", "-01", "00", "--1", "+1", ".5", "1-", "0x1", "1_0",
+        ] {
+            let text = TICKER.replace("1792471145034", value);
+            assert!(scan_price(&text).is_none(), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn fuzzed_ignored_integers_never_scan_what_serde_rejects() {
+        let alphabet = b"0123456789.-+eE";
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for _ in 0..10_000 {
+            let length = 1 + next(&mut state) as usize % 5;
+            let value: String = (0..length)
+                .map(|_| alphabet[next(&mut state) as usize % alphabet.len()] as char)
+                .collect();
+            time_boundary(&value);
+        }
+    }
+
     /// Deterministic xorshift64 so a failure reproduces from its case number.
     fn next(state: &mut u64) -> u64 {
         *state ^= *state << 13;
