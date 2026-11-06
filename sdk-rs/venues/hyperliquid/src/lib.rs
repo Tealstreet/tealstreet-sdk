@@ -1725,6 +1725,37 @@ impl Venue for Hyperliquid {
                 } else {
                     self.startup.failed(cx, (dex.clone(), offset));
                 }
+                // A changed shared identity/index may affect another scope. Ordinary
+                // new DEX rows are scoped; remaps conservatively re-read every DEX.
+                let refresh_all = markets.iter().any(|m| {
+                    m.id.split_once(':').map_or("", |(scope, _)| scope) != dex
+                        || self
+                            .coins
+                            .get(&m.id.to_ascii_lowercase())
+                            .is_some_and(|old| old != &m.symbol)
+                }) || instruments.iter().enumerate().any(|(index, native)| {
+                    let Some(native) = native else {
+                        return false;
+                    };
+                    let id = if dex.is_empty() || native.name.contains(':') {
+                        native.name.clone()
+                    } else {
+                        format!("{dex}:{}", native.name)
+                    };
+                    let Some(market) = markets.iter().find(|m| m.id == id) else {
+                        return false;
+                    };
+                    let asset = offset + index as u32;
+                    self.assets
+                        .get(&market.symbol)
+                        .is_some_and(|old| *old != asset)
+                        || self
+                            .assets
+                            .iter()
+                            .any(|(symbol, old)| *old == asset && symbol != &market.symbol)
+                }) || excluded
+                    .iter()
+                    .any(|coin| coin.split_once(':').map_or("", |(scope, _)| scope) != dex);
                 if valid {
                     for (index, meta) in instruments.iter().enumerate() {
                         let Some(meta) = meta else {
@@ -1750,7 +1781,11 @@ impl Venue for Hyperliquid {
                 }
                 self.account_prices(cx);
                 if self.account.started && !self.options.public_data_only && self.user().is_some() {
-                    self.refresh_account(cx);
+                    if refresh_all {
+                        self.refresh_account(cx);
+                    } else {
+                        self.refresh_account_scope(cx, &dex);
+                    }
                 }
                 if complete || cx.store.loaded().markets {
                     self.advance_scope(cx, &dex);

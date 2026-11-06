@@ -11,9 +11,11 @@ const DISPATCH_LEASE_MS = 2000;
 const MAX_DISPATCH_WAITERS = 128;
 const dispatchRealm = Math.random().toString(36).slice(2);
 let dispatchSequence = 0;
-export type InfoReadClass = 'critical' | 'normal' | 'bulk';
-const rank = (readClass: InfoReadClass = 'normal') => (readClass === 'critical' ? 0 : readClass === 'normal' ? 1 : 2);
-const capacity = (readClass: InfoReadClass) => (readClass === 'critical' ? 1000 : 800);
+export type InfoReadClass = 'critical' | 'reconciliation' | 'normal' | 'bulk';
+const rank = (readClass: InfoReadClass = 'normal') =>
+  readClass === 'critical' ? 0 : readClass === 'reconciliation' ? 1 : readClass === 'normal' ? 2 : 3;
+const capacity = (readClass: InfoReadClass) =>
+  readClass === 'critical' || readClass === 'reconciliation' ? 1000 : 800;
 type DispatchWaiter = { id: string; until: number; readClass?: InfoReadClass };
 let indexedDBOpenedInRealm = false;
 type BudgetState = {
@@ -58,7 +60,10 @@ function boundedState(raw: Partial<BudgetState> = {}): BudgetState {
           .map((row) => ({
             id: row.id,
             until: Math.min(row.until, now + DISPATCH_LEASE_MS),
-            readClass: row.readClass === 'critical' || row.readClass === 'bulk' ? row.readClass : ('normal' as const),
+            readClass:
+              row.readClass === 'critical' || row.readClass === 'reconciliation' || row.readClass === 'bulk'
+                ? row.readClass
+                : ('normal' as const),
           }))
       : [],
     nextAt: timestamp(raw.nextAt, MAX_PAUSE_MS + BUCKET_WINDOW_MS),
@@ -321,7 +326,7 @@ function readClassFor(body: string | undefined, readClass: InfoReadClass): InfoR
   } catch {
     /* Malformed bodies get no priority. */
   }
-  return readClass === 'bulk' ? 'bulk' : 'normal';
+  return readClass === 'reconciliation' ? 'reconciliation' : readClass === 'bulk' ? 'bulk' : 'normal';
 }
 export type InfoBudgetGrant = {
   generation: number;
@@ -373,7 +378,7 @@ export class HyperliquidInfoBudget {
             const queue = (state.dispatchQueue ?? []).filter((row) => row.until > now);
             if (
               !waiterId &&
-              queue.length >= (readClass === 'critical' ? MAX_DISPATCH_WAITERS : readClass === 'normal' ? 96 : 64)
+              queue.length >= (readClass === 'critical' ? MAX_DISPATCH_WAITERS : readClass !== 'bulk' ? 96 : 64)
             )
               return { at: Math.min(deadline, now + DISPATCH_POLL_MS), ready: false, generation: state.generation };
             if (!waiterId) {
@@ -434,7 +439,7 @@ export class HyperliquidInfoBudget {
           const existing = queue.find((row) => row.id === waiterId);
           if (
             !existing &&
-            queue.length >= (readClass === 'critical' ? MAX_DISPATCH_WAITERS : readClass === 'normal' ? 96 : 64)
+            queue.length >= (readClass === 'critical' ? MAX_DISPATCH_WAITERS : readClass !== 'bulk' ? 96 : 64)
           )
             return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
           // Leases order dispatch attempts across realms without charging queued work.

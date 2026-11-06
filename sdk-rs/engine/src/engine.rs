@@ -113,6 +113,8 @@ pub enum HttpReadClass {
     Normal = 0,
     Critical = 1,
     Bulk = 2,
+    #[cfg(feature = "address-nonce")]
+    Reconciliation = 3,
 }
 
 #[derive(Clone, PartialEq)]

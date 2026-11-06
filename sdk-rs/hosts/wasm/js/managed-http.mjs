@@ -114,7 +114,7 @@ export class ManagedHttp {
     try {
       const nativeReadClass = typeof host.engine.httpReadClass === 'function'
         ? host.invoke(host.engine.httpReadClass, action.packet.request) : 0;
-      const readClass = nativeReadClass === 1 ? 'critical' : nativeReadClass === 2 ? 'bulk' : 'normal';
+      const readClass = nativeReadClass === 1 ? 'critical' : nativeReadClass === 2 ? 'bulk' : nativeReadClass === 3 ? 'reconciliation' : 'normal';
       resource.readClass = readClass;
       const prepared = await host.transport.prepareHttp({ ...action.packet, readClass, headers: Object.fromEntries(action.packet.headers), intent: action.intent, signal: resource.controller.signal });
       if (!this.live(token, resource) || !host.invoke(host.engine.httpPreparationPending, token)) {

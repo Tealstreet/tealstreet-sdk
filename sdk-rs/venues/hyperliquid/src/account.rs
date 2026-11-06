@@ -82,7 +82,9 @@ pub enum Request {
         symbol: String,
         revision: u64,
     },
-    Builder,
+    Builder {
+        startup: bool,
+    },
     Fees,
     AmendSource {
         id: String,
@@ -104,7 +106,7 @@ impl Request {
             Self::Orders { .. } => "orders",
             Self::Spot { .. } => "spot",
             Self::Asset { .. } => "asset",
-            Self::Builder => "builder",
+            Self::Builder { .. } => "builder",
             Self::Fees => "fees",
             Self::AmendSource { .. } => "amendSource",
             Self::AmendRole { .. } => "amendRole",
@@ -117,7 +119,7 @@ impl Request {
         }
     }
     pub(crate) fn is_builder(&self) -> bool {
-        matches!(self, Self::Builder)
+        matches!(self, Self::Builder { .. })
     }
 }
 enum ReadContinuation {
@@ -138,6 +140,7 @@ impl ReadContinuation {
 enum ReadPriority {
     Foreground,
     Core,
+    Financial,
     Background,
     Bulk,
 }
@@ -166,13 +169,16 @@ impl QueuedRead {
     }
     fn capacity(&self) -> u32 {
         match self.priority {
-            ReadPriority::Foreground => 1000,
+            ReadPriority::Foreground | ReadPriority::Core | ReadPriority::Financial => 1000,
             _ => 800,
         }
     }
     fn read_class(&self) -> safe_cex_engine::HttpReadClass {
         match self.priority {
             ReadPriority::Foreground => safe_cex_engine::HttpReadClass::Critical,
+            ReadPriority::Core | ReadPriority::Financial => {
+                safe_cex_engine::HttpReadClass::Reconciliation
+            }
             ReadPriority::Bulk => safe_cex_engine::HttpReadClass::Bulk,
             _ => safe_cex_engine::HttpReadClass::Normal,
         }
@@ -355,7 +361,7 @@ impl Hyperliquid {
                 .as_deref()
                 .filter(|identity| !identity.is_empty()))
     }
-    fn account_read(
+    pub(super) fn account_read(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         kind: &str,
@@ -392,7 +398,9 @@ impl Hyperliquid {
         // approval is read, once, before the first placement.
         if cx.frame_fed() {
             match &account_request {
-                Request::Builder | Request::AmendSource { .. } | Request::AmendRole { .. } => {}
+                Request::Builder { .. }
+                | Request::AmendSource { .. }
+                | Request::AmendRole { .. } => {}
                 _ => return,
             }
         }
@@ -406,6 +414,10 @@ impl Hyperliquid {
                 &account_request,
                 Request::AmendSource { .. } | Request::AmendRole { .. } | Request::Asset { .. }
             );
+        let financial = matches!(
+            &account_request,
+            Request::State { .. } | Request::Orders { .. }
+        );
         let core = match &account_request {
             Request::Role | Request::Mode | Request::Spot { .. } => true,
             Request::State { dex, .. } | Request::Orders { dex, .. } => dex.is_empty(),
@@ -420,6 +432,8 @@ impl Hyperliquid {
                 ReadPriority::Foreground
             } else if core {
                 ReadPriority::Core
+            } else if financial {
+                ReadPriority::Financial
             } else {
                 ReadPriority::Background
             },
@@ -505,8 +519,18 @@ impl Hyperliquid {
             .iter()
             .enumerate()
             .filter(|(_, read)| {
-                self.account.background_reads < MAX_BACKGROUND_READS
-                    || !read.occupies_account_slot()
+                let ancillary = matches!(
+                    &read.continuation,
+                    ReadContinuation::Account(Request::Fees | Request::Builder { startup: true })
+                );
+                // Startup-only work follows the financial census before its 20 s
+                // deadline starts. A live placement may promote its queued builder read.
+                (!ancillary
+                    || (self.account.inflight.is_empty()
+                        && !self.account.mode_pending
+                        && !self.account.role_pending))
+                    && (self.account.background_reads < MAX_BACKGROUND_READS
+                        || !read.occupies_account_slot())
             })
             .min_by_key(|(_, read)| read.priority)
             .map(|(index, _)| index)
@@ -854,7 +878,7 @@ impl Hyperliquid {
         self.send_mode(cx);
         self.refresh_account(cx);
         self.account_read(cx, "userFees", None, Request::Fees, false);
-        self.check_builder(cx);
+        self.request_builder(cx, true);
         if !self.dex_names.is_empty() {
             self.account.sync_timer = Some(cx.set_poll_timer_with_bounds(
                 120_000.0,
@@ -866,6 +890,22 @@ impl Hyperliquid {
         }
     }
     pub(crate) fn check_builder(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = self.account.reads.iter_mut().find(|read| {
+            matches!(
+                &read.continuation,
+                ReadContinuation::Account(Request::Builder { startup: true })
+            )
+        }) {
+            if let ReadContinuation::Account(Request::Builder { startup }) = &mut read.continuation
+            {
+                *startup = false;
+            }
+            self.pump_reads(cx);
+            return;
+        }
+        self.request_builder(cx, false);
+    }
+    fn request_builder(&mut self, cx: &mut Cx<'_, Pending>, startup: bool) {
         let Some(user) = self.options.application_id.as_deref() else {
             self.account.builder_approved = Some(false);
             return;
@@ -886,7 +926,7 @@ impl Hyperliquid {
                 builder: &b.b,
             })
             .unwrap(),
-            Request::Builder,
+            Request::Builder { startup },
         );
     }
     pub(crate) fn read_amend_source(
@@ -983,9 +1023,12 @@ impl Hyperliquid {
         let mut dexes = vec![String::new()];
         dexes.extend(self.dex_names.iter().cloned());
         for dex in dexes {
-            self.refresh_state(cx, &dex);
-            self.refresh_orders_scope(cx, &dex);
+            self.refresh_account_scope(cx, &dex);
         }
+    }
+    pub(crate) fn refresh_account_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
+        self.refresh_state(cx, dex);
+        self.refresh_orders_scope(cx, dex);
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn recheck_account_startup(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
@@ -1404,7 +1447,7 @@ impl Hyperliquid {
                 self.account.mode = mode;
                 self.mode_ready(cx);
             }
-            Request::Builder => {
+            Request::Builder { .. } => {
                 self.account.builder_approved = serde_json::from_str::<Num>(raw)
                     .ok()
                     .map(|n| n.0 >= f64::from(self.builder().f));
@@ -1855,7 +1898,7 @@ impl Hyperliquid {
                     }
                 }
             }
-            Request::Builder => self.account.builder_approved = None,
+            Request::Builder { .. } => self.account.builder_approved = None,
             Request::AmendSource { id, amend } | Request::AmendRole { id, amend } => {
                 if !self.amend_read_current(&id, amend) {
                     return;

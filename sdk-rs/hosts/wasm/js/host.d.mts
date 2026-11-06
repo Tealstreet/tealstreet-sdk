@@ -40,7 +40,7 @@ export interface HttpPacket {
   headers: Record<string, string>;
   body?: string;
   /** Native admission hint; never sent as an HTTP header or payload field. */
-  readClass?: 'normal' | 'critical' | 'bulk';
+  readClass?: 'normal' | 'critical' | 'reconciliation' | 'bulk';
   signal?: AbortSignal;
 }
 export interface PreparedHttp {
@@ -496,7 +496,7 @@ export interface WasmEngineLike {
   addressSetupRetired?(token: string, now: number): string;
   /** Optional engine ownership export; invalid or absent data retains the legacy context. */
   signMeta?(attempt: number): string | undefined;
-  httpReadClass?(request: number): 0 | 1 | 2;
+  httpReadClass?(request: number): 0 | 1 | 2 | 3;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;

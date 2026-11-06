@@ -1246,3 +1246,35 @@ it('cancelling a quota-waiting critical preparation cannot retire its peer or sp
   await peer;
   expect(sends).toEqual(['peer']);
 });
+
+it('financial reconciliation shares the critical reserve and never exceeds the total quota', async () => {
+  const a = client();
+  await spend(a, 800);
+  const controller = new AbortController();
+  const grant = await a.wait(
+    ORIGIN,
+    '{"type":"clearinghouseState"}',
+    Date.now() + 20_000,
+    controller.signal,
+    'reconciliation',
+  );
+  const send = vi.fn();
+  await a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, controller.signal, send);
+  expect(send).toHaveBeenCalledOnce();
+  await spend(a, 198);
+  await expect(
+    a.wait(ORIGIN, '{"type":"clearinghouseState"}', Date.now() + 1, controller.signal, 'reconciliation'),
+  ).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+});
+
+it('financial reconciliation cannot bypass the shared 429 pause', async () => {
+  const a = client();
+  const controller = new AbortController();
+  const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal, 'reconciliation');
+  await a.response(ORIGIN, 429, 'Retry-After: 5');
+  const send = vi.fn();
+  await expect(a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, controller.signal, send)).rejects.toMatchObject({
+    code: 'HTTP_PREPARATION_TIMED_OUT',
+  });
+  expect(send).not.toHaveBeenCalled();
+});

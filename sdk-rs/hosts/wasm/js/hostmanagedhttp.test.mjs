@@ -321,7 +321,7 @@ test('late provider answers and broken diagnostic observers cannot alter cleanup
 });
 
 
-for (const [nativeClass, expected] of [[undefined, 'normal'], [0, 'normal'], [1, 'critical'], [2, 'bulk'], [99, 'normal']]) {
+for (const [nativeClass, expected] of [[undefined, 'normal'], [0, 'normal'], [1, 'critical'], [2, 'bulk'], [3, 'reconciliation'], [99, 'normal']]) {
   test(`managed preparation carries the closed native read class ${nativeClass}`, async () => {
     const seen = [];
     const r = rig((prepared) => {
