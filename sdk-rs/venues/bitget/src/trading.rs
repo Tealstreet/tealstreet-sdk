@@ -83,7 +83,7 @@ pub(crate) const CODES: CodeTable = CodeTable {
         refused(45122, ErrorKind::InvalidInput),
         // "Not enough position is available": a reduce-only size above the
         // position, refused at any price until the position changes.
-        refused(40757, ErrorKind::InvalidInput),
+        refused(NOT_ENOUGH_POSITION, ErrorKind::InvalidInput),
         Row {
             key: Key::Int(40010),
             verdict: Verdict::Unknown(None),
@@ -3056,7 +3056,7 @@ impl BitgetFutures {
                     .collect();
                 items.extend(failures.iter().map(|(code, message)| {
                     BatchItem::Native(Native {
-                        code: code.map_or(NativeCode::None, NativeCode::Int),
+                        code: table_code(*code, message).map_or(NativeCode::None, NativeCode::Int),
                         message: message.as_str(),
                     })
                 }));
@@ -3780,6 +3780,21 @@ fn narrowable(command: &Command, intent: Intent) -> bool {
     )
 }
 
+/// Bitget's code for its reduce-only refusal of a size above the position.
+const NOT_ENOUGH_POSITION: i64 = 40757;
+
+/// The code the table reads: no capture has carried 40757 yet, so the refusal's
+/// exact text (any case, optional final period) names it when the code is absent or differs.
+fn table_code(code: Option<i64>, message: &str) -> Option<i64> {
+    let text = message.trim();
+    let text = text.strip_suffix('.').unwrap_or(text);
+    if text.eq_ignore_ascii_case("Not enough position is available") {
+        Some(NOT_ENOUGH_POSITION)
+    } else {
+        code
+    }
+}
+
 /// The reply's native code as classifier evidence; Bitget codes are integers.
 /// Native classifies 401, 403 and 429 by status, so those carry none.
 fn native_code<'a>(reply: Option<&'a Reply<'a>>, status: u16) -> Option<Native<'a>> {
@@ -3787,9 +3802,13 @@ fn native_code<'a>(reply: Option<&'a Reply<'a>>, status: u16) -> Option<Native<'
         return None;
     }
     let reply = reply?;
-    let code = reply.code.0.filter(|code| code.fract() == 0.0)?;
+    let code = reply
+        .code
+        .0
+        .filter(|code| code.fract() == 0.0)
+        .map(|code| code as i64);
     Some(Native {
-        code: NativeCode::Int(code as i64),
+        code: NativeCode::Int(table_code(code, &reply.msg)?),
         message: &reply.msg,
     })
 }
