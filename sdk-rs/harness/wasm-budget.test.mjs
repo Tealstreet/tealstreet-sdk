@@ -139,7 +139,6 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
 
 test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['apexomni', 1_974_257, 1_984_512],
     ['backpack', 1_876_304, 1_887_232],
     ['bitrue', 1_810_954, 1_821_696],
     ['breakoutprop', 1_501_277, 1_512_448],
@@ -288,6 +287,16 @@ test('#3122 protective stop edits (run 42126229513) retain Paradex and BloFin he
     ['paradex', 2_239_351, 2_249_728],
     ['blofin', 1_979_025, 1_989_632],
   ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3128 ApeX guarded amends (run 42146728975) retain ApeX headroom', () => {
+  for (const [venue, measured, cap] of [['apexomni', 2_002_359, 2_013_184]]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);

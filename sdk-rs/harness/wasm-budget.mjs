@@ -150,8 +150,10 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // shared-ticker/orders-held calls without the combined dedup. CI size plus 10 KiB rounded up; siblings equal.
 // #3122 run 42126229513 measured paradex 2,239,351 and blofin 1,979,025 B (guarded stop edits,
 // put-back, BloFin native amends and read-backs). CI size plus 10 KiB, rounded up to the KiB.
+// #3128 run 42146728975 measured apexomni 2,002,359 B: amends stream as serial Plans (cancel proof
+// and put-back). CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 1_984_512,
+  apexomni: 2_013_184,
   asterdex: 2_150_400,
   backpack: 1_887_232,
   binance: 2_206_720,
