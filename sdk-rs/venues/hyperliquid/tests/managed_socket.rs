@@ -456,8 +456,8 @@ fn private_reconnect_hands_subscriptions_off_before_account_refresh() {
         .collect();
     assert_eq!(
         private.len(),
-        9,
-        "seven fixed private and two active assets"
+        7,
+        "seven fixed private; activeAssetData only for a selection or open order"
     );
     assert!(
         private.iter().all(|index| *index < refresh),
@@ -561,7 +561,8 @@ fn mode_after_open_hands_private_topics_off_before_spot_read() {
             _ => None,
         })
         .collect();
-    assert_eq!(private.len(), 10);
+    // Eight fixed private; activeAssetData only for a selection or open order.
+    assert_eq!(private.len(), 8);
     let wake = actions
         .iter()
         .find_map(|a| match a {
@@ -781,6 +782,37 @@ fn refused_mode_handoff_recovers_its_spot_refresh_after_capacity_is_freed() {
     );
     let (mut engine, socket, mode) = private_connecting_before_mode_with_meta(&meta);
     assert_eq!(engine.store().markets().len(), MAX_INTERESTS);
+    // activeAssetData follows open orders: one resting on every market fills the socket.
+    let symbols: Vec<_> = engine
+        .store()
+        .markets()
+        .iter()
+        .map(|m| m.symbol.clone())
+        .collect();
+    for (index, symbol) in symbols.into_iter().enumerate() {
+        use safe_cex_engine::model::*;
+        engine.store_mut().upsert_order(Order {
+            id: (index + 1).to_string(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol,
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 90.,
+            amount: 1.,
+            filled: 0.,
+            remaining: 1.,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 1000.,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        });
+    }
     engine.handle(2000.0, Event::WsOpened { socket });
     prepared_now(&mut engine).into_iter().for_each(drop);
     engine.handle(

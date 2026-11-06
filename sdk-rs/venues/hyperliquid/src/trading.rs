@@ -86,7 +86,89 @@ pub struct Request {
     command: CommandId,
     effect: Effect,
     order_reply: OrderReply,
+    intent_deadline: Option<f64>,
     cancel_deadline: Option<f64>,
+}
+impl Request {
+    pub(crate) fn check_intent_deadline(
+        &self,
+        now: f64,
+    ) -> Result<(), safe_cex_engine::request_context::Error> {
+        if self
+            .intent_deadline
+            .is_some_and(|at| !now.is_finite() || now >= at)
+        {
+            Err(safe_cex_engine::request_context::Error::TimedOut)
+        } else {
+            Ok(())
+        }
+    }
+}
+fn intent_expired() -> VenueError {
+    not_sent("Hyperliquid command expired before sending; nothing was sent")
+        .kind(ErrorKind::Timeout)
+}
+impl Job {
+    fn urgent(&self) -> bool {
+        self.replacing_stop.is_some()
+            || self.steps.iter().any(|step| match step {
+                Step::Cancel(_) => self.amend_source.is_none(),
+                Step::Place(order) => {
+                    matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                }
+                _ => false,
+            })
+    }
+    fn touches(&self, symbol: &str) -> bool {
+        self.steps.iter().any(|step| match step {
+            Step::ScheduleCancel { .. } | Step::Restore => true,
+            Step::Place(order) => order.symbol == symbol,
+            Step::Cancel(orders) => orders.iter().any(|order| order.symbol == symbol),
+            Step::Leverage { symbol: market, .. } => market == symbol,
+        })
+    }
+    fn references(&self, id: &str) -> bool {
+        self.amend_source.as_deref() == Some(id)
+            || self.steps.iter().any(|step| match step {
+                Step::Place(order) => order.client_order_id.as_deref() == Some(id),
+                Step::Cancel(orders) => orders
+                    .iter()
+                    .any(|order| order.id == id || order.client_order_id.as_deref() == Some(id)),
+                _ => false,
+            })
+    }
+    fn independent(&self, older: &Self) -> bool {
+        if older
+            .steps
+            .iter()
+            .any(|step| matches!(step, Step::ScheduleCancel { .. }))
+            || self
+                .amend_source
+                .as_deref()
+                .is_some_and(|id| older.references(id))
+        {
+            return false;
+        }
+        self.steps.iter().all(|step| match step {
+            Step::ScheduleCancel { .. } | Step::Restore => false,
+            Step::Place(order) => {
+                !older.touches(&order.symbol)
+                    && order
+                        .client_order_id
+                        .as_deref()
+                        .is_none_or(|id| !older.references(id))
+            }
+            Step::Cancel(orders) => orders.iter().all(|order| {
+                !older.touches(&order.symbol)
+                    && !older.references(&order.id)
+                    && order
+                        .client_order_id
+                        .as_deref()
+                        .is_none_or(|id| !older.references(id))
+            }),
+            Step::Leverage { symbol, .. } => !older.touches(symbol),
+        })
+    }
 }
 /// How long an unapproved builder fee stays believed before a placement re-reads it.
 const BUILDER_RECHECK_MS: f64 = 60_000.0;
@@ -474,7 +556,7 @@ impl Hyperliquid {
                 steps,
                 ids: Vec::new(),
                 replacement,
-                amend_deadline: amend_source.as_ref().map(|_| cx.now + AMEND_READ_MS),
+                amend_deadline: None,
                 amend_source,
                 amend_total: amend_size,
                 amend_read: false,
@@ -682,7 +764,7 @@ impl Hyperliquid {
             return;
         }
         if self.trading.active.is_none() {
-            self.trading.active = self.trading.queue.pop_front();
+            self.trading.active = self.take_next_trade();
         }
         if self.trading.active.is_none() {
             return;
@@ -800,6 +882,18 @@ impl Hyperliquid {
         if let Err(error) = self.submit_trade(cx, &action, effect) {
             self.finish_trade(cx, Err(error));
         }
+    }
+    fn take_next_trade(&mut self) -> Option<Job> {
+        let queue = &self.trading.queue;
+        let index = queue
+            .iter()
+            .enumerate()
+            .find_map(|(index, job)| {
+                (job.urgent() && queue.iter().take(index).all(|older| job.independent(older)))
+                    .then_some(index)
+            })
+            .unwrap_or(0);
+        self.trading.queue.remove(index)
     }
     fn remember_trade_effect(
         &mut self,
@@ -1432,6 +1526,9 @@ impl Hyperliquid {
             other => other,
         };
         if let Some(mut job) = self.trading.active.take() {
+            if let Some(timer) = self.trading.builder_wait.take() {
+                cx.clear_timer(timer);
+            }
             let result = if result.is_ok() {
                 job.protection
                     .as_ref()
@@ -1491,9 +1588,10 @@ impl Hyperliquid {
     fn expire_amend(&mut self, cx: &mut Cx<'_, Pending>) {
         self.finish_trade(
             cx,
-            Err(not_sent(
-                "Hyperliquid amendment not sent: the order read did not answer",
-            )),
+            Err(
+                not_sent("Hyperliquid amendment not sent: the order read did not answer")
+                    .kind(ErrorKind::Timeout),
+            ),
         );
     }
     pub(crate) fn amend_read_current(&self, id: &str, amend: AmendRead) -> bool {
@@ -1592,6 +1690,9 @@ impl Hyperliquid {
         }
     }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.expire_trade_intent(cx, timer) {
+            return;
+        }
         if self
             .trading
             .amend_retry

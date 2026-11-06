@@ -175,9 +175,10 @@ fn recovering_a_missing_context_preserves_quotes_received_while_the_read_was_pen
         let mut actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
         let timer = retry(&actions, 1000.0, 1000.0);
         if !spot {
+            // The socket opens with the main catalogue, before perpDexs answers.
             let req = http(&actions, "perpDexs");
             reply(&mut e, &req, 1000.0, "[null]");
-            actions = prepared_now(&mut e).into_iter().collect();
+            actions.extend(prepared_now(&mut e));
         }
         let socket = actions
             .iter()
@@ -215,6 +216,14 @@ fn partial_perp_context_retries_upserts_and_preserves_known_rails_and_native_ind
     let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let first = retry(&actions, 1000.0, 1000.0);
     let dexs = http(&actions, "perpDexs");
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::WsConnect { .. }))
+            .count(),
+        1,
+        "the socket opens with the main catalogue, before perpDexs answers"
+    );
     let btc = e.store().market("BTC-PERP").unwrap().clone();
     assert_eq!(e.venue().assets["BTC-PERP"], 0);
     assert!(!e.venue().assets.contains_key("ETH-PERP"));
@@ -224,7 +233,8 @@ fn partial_perp_context_retries_upserts_and_preserves_known_rails_and_native_ind
             .into_iter()
             .filter(|a| matches!(a, Action::WsConnect { .. }))
             .count(),
-        1
+        0,
+        "discovery completing opens no second socket"
     );
     e.handle(2000.0, Event::TimerFired { timer: first });
     let req = http(
@@ -305,13 +315,15 @@ fn unmapped_owned_position_rejects_authoritative_snapshot_and_recovers_without_s
     let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let timer = retry(&actions, 1000.0, 1000.0);
     let req = http(&actions, "perpDexs");
+    let opened = actions.clone();
     reply(&mut e, &req, 1000.0, "[null]");
     let actions = prepared_now(&mut e).into_iter().collect::<Vec<_>>();
     let state = http(&actions, "clearinghouseState");
     assert!(!e.store().loaded().positions);
     assert!(!e.store().loaded().orders);
     assert!(!e.store().loaded().balance);
-    let socket = actions
+    // The socket opened with the main catalogue, before perpDexs answered.
+    let socket = opened
         .iter()
         .find_map(|a| match a {
             Action::WsConnect { socket, .. } => Some(*socket),

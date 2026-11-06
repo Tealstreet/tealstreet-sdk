@@ -1617,6 +1617,7 @@ export class RustEngineExchange extends BaseExchange {
         lighterWsRoute: Boolean(options.tealstreetWsRoute),
         vault,
         hyperliquidBuilder,
+        hyperliquidFastBook: options.hyperliquidFastBook === true,
         enableSpotMarkets: Boolean(enableSpotMarkets),
         enableInverseMarkets: Boolean(options.enableInverseMarkets && !options.externalPublicData),
         enableOptionMarkets: Boolean(options.enableOptionMarkets),
@@ -3587,6 +3588,11 @@ export class RustEngineExchange extends BaseExchange {
   /** The engine re-sends the venue's subscribe for this live stream; a venue that cannot logs why. */
   repairOHLCV = (opts: Pick<OHLCVOptions, 'symbol' | 'interval'>) => {
     if (!this.publicDemandReady || !this.candleListeners.has(`${opts.symbol}:${opts.interval}`)) return;
+    // A shared-feed account holds no public topics; its source's socket carries the stream.
+    if (this.sharedPublicFeed) {
+      this.sharedPublicFeed.send({ op: 'repair', symbol: opts.symbol, interval: opts.interval });
+      return;
+    }
     this.subscriptionCommand({
       op: 'repairSubscription',
       topic: { kind: 'candles', symbol: opts.symbol, interval: opts.interval },

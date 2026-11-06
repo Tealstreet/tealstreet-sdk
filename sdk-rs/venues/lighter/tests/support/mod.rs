@@ -127,12 +127,60 @@ pub fn ready_tracked_meta(options: Options, meta: &str) -> (Engine<Lighter>, Soc
     ready_engine_meta(engine(options), meta)
 }
 pub fn ready_engine_meta<V: safe_cex_engine::Venue>(
-    mut e: Engine<V>,
+    e: Engine<V>,
     meta: &str,
 ) -> (Engine<V>, SocketId, Timers) {
+    let (e, feeds, timers) = bootstrap(e, meta, true);
+    (e, feeds.private, timers)
+}
+/// Bootstrapped with the private socket still connecting: the test's own
+/// `WsOpened` is its first open, which subscribes and resyncs the account.
+pub fn ready_unopened() -> (Engine<Lighter>, SocketId) {
+    ready_unopened_meta(options(), META)
+}
+pub fn ready_unopened_meta(options: Options, meta: &str) -> (Engine<Lighter>, SocketId) {
+    let (e, feeds, _) = bootstrap(engine(options), meta, false);
+    (e, feeds.private)
+}
+pub struct Feeds {
+    pub public: SocketId,
+    pub private: SocketId,
+}
+/// Both bootstrap sockets; the public one is open, the private one only if asked.
+pub fn ready_feeds(options: Options, open_private: bool) -> (Engine<Lighter>, Feeds, Timers) {
+    bootstrap(engine(options), META, open_private)
+}
+/// Drop the private socket at `now`, then open its managed reconnect when the
+/// engine's backoff fires. Returns the new socket and the time it opened.
+pub fn reopen(e: &mut Engine<Lighter>, socket: SocketId, now: f64) -> (SocketId, f64) {
+    safe_cex_engine::test_support::prepared_actions(e, now);
+    e.handle(now, Event::WsClosed { socket, code: 1006 });
+    let retry = safe_cex_engine::test_support::prepared_actions(e, now)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        });
+    let (timer, at) = retry.expect("managed retry timer");
+    e.handle(at, Event::TimerFired { timer });
+    let next = safe_cex_engine::test_support::prepared_actions(e, at)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .expect("managed reconnect");
+    e.handle(at, Event::WsOpened { socket: next });
+    (next, at)
+}
+fn bootstrap<V: safe_cex_engine::Venue>(
+    mut e: Engine<V>,
+    meta: &str,
+    open_private: bool,
+) -> (Engine<V>, Feeds, Timers) {
     let mut timers = Timers::new();
     e.start(NOW);
-    let mut private = None;
+    let (mut public, mut private) = (None, None);
     for _ in 0..30 {
         let mut actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
         actions.sort_by_key(|a| !matches!(a, Action::Http(r) if r.url.contains("exchangeStats")));
@@ -157,15 +205,29 @@ pub fn ready_engine_meta<V: safe_cex_engine::Venue>(
                     };
                     reply(&mut e, &r, 200, body);
                 }
-                Action::WsConnect { socket, .. } => {
-                    private = Some(socket);
-                    e.handle(NOW, Event::WsOpened { socket });
+                Action::WsConnect {
+                    socket, channel, ..
+                } => {
+                    let role = channel == Some(safe_cex_engine::SocketChannel::Private);
+                    if role {
+                        private = Some(socket);
+                    } else {
+                        public = Some(socket);
+                    }
+                    if open_private || !role {
+                        e.handle(NOW, Event::WsOpened { socket });
+                    }
                 }
                 _ => {}
             }
         }
     }
-    (e, private.expect("private socket"), timers)
+    let private = private.or(public).expect("private socket");
+    let feeds = Feeds {
+        public: public.unwrap_or(private),
+        private,
+    };
+    (e, feeds, timers)
 }
 pub fn fill_count(frame: &[u8]) -> u32 {
     let mut at = 16;

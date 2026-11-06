@@ -23,9 +23,16 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 const MIRROR_EVERY: Duration = Duration::from_secs(60);
 const START_FAILED_CODE: &str = "hosted.start_failed";
 
-/// Notices the journal gets at any level, unthrottled: each subscription repair's outcome.
+/// Notices the journal gets at any level, unthrottled: each subscription repair's outcome,
+/// and the per-account subscription counts a box sums against a venue's per-IP cap.
 fn always_journaled(code: Option<&str>) -> bool {
-    code == Some(safe_cex_engine::log::code::SUBSCRIPTION_REPAIRED)
+    matches!(
+        code,
+        Some(
+            safe_cex_engine::log::code::SUBSCRIPTION_REPAIRED
+                | safe_cex_engine::log::code::SUBSCRIPTION_COUNT
+        )
+    )
 }
 
 /// `safe-cex warn hosted.start_failed [user account venue]: kind=… venue_code=… signing_mode=… message="…"`:
@@ -60,6 +67,8 @@ pub struct ServerConfig {
     /// Who signs this account (`hosted_cosign`, or `public` with no key), named on
     /// its start-failure line; None outside the Hosted server.
     pub signing_mode: Option<&'static str>,
+    /// Optional deployment-owned observation of actual upstream socket topics.
+    pub interest_observer: Option<safe_cex_engine::socket_lifecycle::InterestObserver>,
 }
 
 impl Default for ServerConfig {
@@ -78,6 +87,7 @@ impl Default for ServerConfig {
             io_timeout: Duration::from_secs(5),
             log_label: None,
             signing_mode: None,
+            interest_observer: None,
         }
     }
 }
@@ -350,7 +360,7 @@ pub struct ClientLink {
 /// Starts an account actor without a frame-server listener. The task ends after
 /// `dispose` or when every handle is dropped; await it to observe teardown.
 pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
-    host: Host<V, T>,
+    mut host: Host<V, T>,
     config: ServerConfig,
 ) -> io::Result<(AccountHandle, JoinHandle<io::Result<()>>)> {
     config.validate()?;
@@ -358,6 +368,12 @@ pub fn spawn_account<V: Venue + 'static, T: Transport + 'static>(
         return Err(invalid(
             "account engine must not receive commands before server registration",
         ));
+    }
+    if let Some(observer) = &config.interest_observer {
+        host.engine.set_interest_observer(observer.clone());
+        if !V::managed_sockets() {
+            host.legacy_interest_observer = Some(observer.clone());
+        }
     }
     let capabilities = host.engine.capabilities();
     let events = host.event_sender();
@@ -2016,6 +2032,7 @@ mod tests {
     #[test]
     fn every_subscription_repair_outcome_reaches_the_journal() {
         assert!(always_journaled(Some("subscription.repaired")));
+        assert!(always_journaled(Some("subscription.count")));
         assert!(!always_journaled(Some("subscription.rejected")));
         assert!(!always_journaled(None));
     }

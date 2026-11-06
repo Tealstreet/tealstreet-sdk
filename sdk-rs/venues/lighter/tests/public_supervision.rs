@@ -334,7 +334,8 @@ fn paced_ticker_subscribes_reach_every_market_and_a_displayed_symbol_goes_next()
     );
     let mut seen = tickers(&drain_at(&mut e, &mut timers, NOW));
     seen.extend(tickers(&advance(&mut e, &mut timers, NOW + 1_000.0)));
-    assert!(seen[0].contains("ticker/8"), "{seen:?}");
+    // The next paced pair carries it; the engine orders a pair's frames by key.
+    assert!(seen[..2].iter().any(|t| t.contains("ticker/8")), "{seen:?}");
     seen.extend(tickers(&advance(&mut e, &mut timers, NOW + 10_000.0)));
     assert_eq!(seen.len(), 7, "{seen:?}");
 }

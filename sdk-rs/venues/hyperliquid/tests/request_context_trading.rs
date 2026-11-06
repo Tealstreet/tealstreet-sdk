@@ -2309,6 +2309,23 @@ fn a_failed_read_refuses_the_amend_and_cancels_nothing() {
         result[0].as_ref().unwrap_err().outcome,
         Some(Outcome::NotSent)
     );
+    // The failure names the amend read, so a report shows which read did not answer.
+    let kinds: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == "request.failed" => {
+                event.fields.iter().find(|(name, _)| *name == "readKind")
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![&(
+            "readKind",
+            safe_cex_engine::log::Value::Str("amendSource".into())
+        )]
+    );
 }
 
 // Live: the read refused on 429 when the budget had room again a moment later.

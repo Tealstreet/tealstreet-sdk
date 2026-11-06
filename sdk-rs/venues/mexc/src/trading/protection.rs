@@ -257,6 +257,20 @@ fn source(n: Option<f64>, price: f64) -> Result<u8, String> {
     }
 }
 
+// Moving a trigger alone cannot retain a stop-limit's execution-price offset.
+fn check_plan_limit(edit: &Edit, raw: &OrderRow<'_>) -> Result<(), String> {
+    if edit.scope == Scope::Plan
+        && edit.leg.is_none()
+        && raw.order_type != 5.
+        && edit.price.is_some_and(|price| price != raw.trigger_price)
+    {
+        return Err(
+            "MEXC stop-limit trigger cannot retain its limit offset; stop not changed".into(),
+        );
+    }
+    Ok(())
+}
+
 pub fn native_edit(edit: &Edit) -> Result<Option<Step>, String> {
     if (edit.scope == Scope::Regular && edit.leg.is_none())
         || (edit.amount.is_some()
@@ -268,6 +282,7 @@ pub fn native_edit(edit: &Edit) -> Result<Option<Step>, String> {
         return Ok(None);
     }
     let raw: OrderRow<'_> = serde_json::from_str(&edit.native).map_err(|e| e.to_string())?;
+    check_plan_limit(edit, &raw)?;
     let native: Native<'_> = serde_json::from_str(&edit.native).map_err(|e| e.to_string())?;
     let price = edit.price.unwrap();
     if !price.is_finite() || price <= 0. {
@@ -410,6 +425,9 @@ pub fn placement(edit: &Edit, restore: bool) -> Result<(&'static str, String), S
     }
     let amount = if restore { None } else { edit.amount };
     let price = if restore { None } else { edit.price };
+    if !restore {
+        check_plan_limit(edit, &raw)?;
+    }
     if edit.scope == Scope::Plan {
         if !matches!(n.execute_cycle, Some(1. | 2.))
             || !matches!(n.open_type, Some(1. | 2.))
@@ -468,6 +486,9 @@ pub fn placement(edit: &Edit, restore: bool) -> Result<(&'static str, String), S
             })?,
         ))
     } else if edit.scope == Scope::Stop {
+        if n.vol_type == Some(2.) && amount.is_some_and(|a| a > 0.) {
+            return Err("MEXC full-position protection cannot be resized; stop not changed".into());
+        }
         if !matches!(n.vol_type, Some(1. | 2.))
             || !matches!(n.price_protect, Some(0. | 1.))
             || !matches!(n.take_profit_reverse, Some(1. | 2.))
@@ -507,11 +528,7 @@ pub fn placement(edit: &Edit, restore: bool) -> Result<(&'static str, String), S
                 take_profit_price: if take { price.unwrap_or(tp) } else { tp },
                 price_protect: required(n.price_protect)?,
                 profit_loss_vol_type: &n.profit_loss_vol_type,
-                vol_type: if amount.is_some_and(|a| a > 0.) {
-                    1.
-                } else {
-                    required(n.vol_type)?
-                },
+                vol_type: required(n.vol_type)?,
                 take_profit_vol: n.take_profit_vol,
                 stop_loss_vol: n.stop_loss_vol,
                 take_profit_reverse: required(n.take_profit_reverse)?,

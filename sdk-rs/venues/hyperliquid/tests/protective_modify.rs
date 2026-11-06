@@ -970,3 +970,94 @@ fn replacement_429_is_uncertain_without_restore_or_resend() {
         );
     }
 }
+
+#[test]
+fn released_cancel_keeps_replacement_and_restored_result_after_original_intent_expiry() {
+    let row = order("Take Profit Market", "120", "0");
+    let (mut e, _) = setup(&row);
+    e.handle_command(
+        2000.,
+        Command::AmendOrder {
+            command: 90,
+            id: "9".into(),
+            price: Some(75.),
+            amount: None,
+        },
+        Some(10),
+    )
+    .unwrap();
+    let actions = prepared_now(&mut e);
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == 2010. => Some(*timer),
+            _ => None,
+        })
+        .expect("original caller intent timer");
+    let read = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "orderStatus" => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    let actions = size_reply(&mut e, read, &row);
+    let cancel = write(&actions).clone();
+    assert_eq!(action(&cancel)["type"], "cancel");
+    e.handle(2010., Event::TimerFired { timer });
+    assert!(
+        !prepared_now(&mut e)
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 90, .. })))
+    );
+    e.handle(2020., Event::HttpResponse {
+        request: cancel.id,
+        response: safe_cex_engine::Response { status: 200, headers: "", body:
+            r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"# },
+    });
+    let actions = prepared_now(&mut e);
+    let actions = advance_packet_timers(&mut e, actions, 2334.);
+    let replacement = write(&actions);
+    assert_eq!(
+        action(replacement)["orders"][0]["t"]["trigger"]["triggerPx"],
+        "75"
+    );
+    reply(
+        &mut e,
+        replacement,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"error":"Invalid TP/SL price."}]}}}"#,
+    );
+    let actions = prepared_now(&mut e);
+    let actions = advance_packet_timers(&mut e, actions, 2668.);
+    let restore = write(&actions);
+    assert_eq!(
+        action(restore)["orders"][0]["t"]["trigger"]["triggerPx"],
+        "120"
+    );
+    reply(
+        &mut e,
+        restore,
+        200,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":["waitingForTrigger"]}}}"#,
+    );
+    let actions = prepared_now(&mut e);
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 90, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        failures[0].protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+    assert!(failures[0].message.contains("restored"));
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 90, .. })))
+    );
+}

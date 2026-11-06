@@ -85,6 +85,8 @@ pub struct Level {
 }
 #[derive(Deserialize)]
 pub struct Depth<'a> {
+    #[serde(default)]
+    pub fast: bool,
     #[serde(borrow)]
     pub coin: Cow<'a, str>,
     pub time: f64,

@@ -394,17 +394,17 @@ fn original_queued_page_child_is_minted_at_dequeue_and_capped_by_its_root() {
         ask(&mut e, NOW, command, fills(), Some(65_000));
     }
     let initial = actions(&mut e, NOW);
-    let (timer, at) = initial
+    let (timer, _) = initial
         .iter()
         .find_map(|a| match a {
-            Action::SetTimer { timer, at_ms }
-                if *at_ms > NOW + 20_000. && *at_ms < NOW + 65_000. =>
-            {
+            Action::SetTimer { timer, at_ms } if *at_ms > NOW && *at_ms < NOW + 20_000. => {
                 Some((*timer, *at_ms))
             }
             _ => None,
         })
         .expect("native shared-budget wake before caller expiry");
+    // A delayed callback near root expiry cannot mint a fresh twenty-second window.
+    let at = NOW + 64_999.;
     e.handle(at, Event::TimerFired { timer });
     let output = actions(&mut e, at);
     assert!(
@@ -514,6 +514,27 @@ fn public_preparation_auth_failures_keep_metadata_without_auth_health_evidence()
 fn refused_dequeue_discards_prefix_without_spending_another_owners_weight() {
     use safe_cex_engine::model::Interval;
     let mut e = ready();
+    e.handle(
+        NOW,
+        Event::Command(Command::FetchCandles {
+            command: 900,
+            symbol: "BTC-PERP".into(),
+            interval: Interval::M1,
+            limit: Some(1),
+            from_ms: None,
+            to_ms: Some(60_000.),
+        }),
+    );
+    let peer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::ManagedHttp(a) => match *a {
+                HttpAction::Prepare { preparation, .. } => Some(preparation),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("one real unrelated candle owns a preparation");
     ask(&mut e, NOW, OWNER, fills(), Some(300_000));
     let first = read(&actions(&mut e, NOW), "userFillsByTime");
     let mut budget = None;
@@ -554,7 +575,8 @@ fn refused_dequeue_discards_prefix_without_spending_another_owners_weight() {
             if matches!(action.as_ref(), HttpAction::Prepare { .. })))
         );
     }
-    let mut peers = vec![];
+    let mut peers = vec![peer];
+    let mut admitted = 0;
     for command in 1000..1300 {
         e.handle(
             at - 1.,
@@ -577,21 +599,43 @@ fn refused_dequeue_discards_prefix_without_spending_another_owners_weight() {
         });
         if let Some(preparation) = prepared {
             peers.push(preparation);
-        } else {
+        }
+        if output.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command: owner, ..}) if *owner == command)) {
             assert_eq!(
                 failure(&output, command).message,
                 "Engine request capacity reached"
             );
             break;
         }
+        admitted += 1;
     }
     assert!(
-        peers.len() >= 200 && peers.len() < 256,
+        (200..256).contains(&admitted),
         "real peer roots fill the bounded registry"
     );
     assert!(peers.iter().all(|p| e.http_preparation_pending(*p)));
-    e.handle(at, Event::TimerFired { timer });
-    let output: Vec<_> = e.drain_actions().collect();
+    let mut next = (timer, at);
+    let mut output = Vec::new();
+    for _ in 0..4 {
+        e.handle(next.1, Event::TimerFired { timer: next.0 });
+        let fresh: Vec<_> = e.drain_actions().collect();
+        let wake = fresh.iter().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > next.1 && *at_ms < NOW + 20_000. => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        });
+        output.extend(fresh);
+        if output.iter().any(|a| {
+            matches!(
+                a,
+                Action::Notice(Notice::CommandFailed { command: OWNER, .. })
+            )
+        }) {
+            break;
+        }
+        next = wake.expect("continuous refill retains its genuine wake");
+    }
     let error = failure(&output, OWNER);
     assert_eq!(error.kind, Some(ErrorKind::Internal));
     assert_eq!(error.message, "Engine request capacity reached");
@@ -604,8 +648,8 @@ fn refused_dequeue_discards_prefix_without_spending_another_owners_weight() {
     let dispatched = output.iter().filter(|a| matches!(a, Action::ManagedHttp(action)
         if matches!(action.as_ref(), HttpAction::Prepare { request, .. } if support::kind(request) == "userFillsByTime"))).count();
     assert_eq!(
-        dispatched, 8,
-        "failed child mint spends no native weight; eight live peers fit the fresh window"
+        dispatched, 1,
+        "failed child mint spends no native weight; the due refill credit releases a live peer"
     );
     assert!(
         peers.iter().all(|p| e.http_preparation_pending(*p)),
@@ -671,7 +715,9 @@ fn exact_owner_expiry_preserves_live_history_and_account_in_both_enqueue_orders(
                 let wake = output
                     .iter()
                     .find_map(|a| match a {
-                        Action::SetTimer { timer, at_ms } if *at_ms > NOW + 20_000. => {
+                        Action::SetTimer { timer, at_ms }
+                            if *at_ms > NOW && *at_ms < NOW + 5000. =>
+                        {
                             Some((*timer, *at_ms))
                         }
                         _ => None,
@@ -681,7 +727,7 @@ fn exact_owner_expiry_preserves_live_history_and_account_in_both_enqueue_orders(
                 break;
             }
         }
-        let (old, (wake, at)) = parked.expect("native weight parks a real history root");
+        let (old, (wake, _)) = parked.expect("native weight parks a real history root");
         let mut next = NOW + 1.;
         if !account_first {
             ask(&mut e, next, OWNER, fills(), Some(300_000));
@@ -689,25 +735,46 @@ fn exact_owner_expiry_preserves_live_history_and_account_in_both_enqueue_orders(
             next += 1.;
         }
         let (_, handoff) = support::reconnect(&mut e, socket, next);
-        let refresh: Vec<_> = e.drain_actions().collect();
-        assert!(
-            !refresh.iter().any(|a| matches!(a, Action::Http(_))),
-            "account refresh is actually behind the blocked history head"
-        );
+        let mut collected = actions(&mut e, handoff);
         if account_first {
             ask(&mut e, handoff + 1., OWNER, fills(), Some(300_000));
             e.drain_actions().for_each(drop);
         }
         e.prepare_dispatch(NOW + 5000.);
-        let expired: Vec<_> = e.drain_actions().collect();
+        let expired = actions(&mut e, NOW + 5000.);
         timeout(&expired, old);
         assert!(!expired.iter().any(|a| matches!(
             a,
             Action::Notice(Notice::CommandFailed { command: OWNER, .. })
         )));
+        collected.extend(expired);
+        let mut at = NOW + 5000.;
         e.handle(at, Event::TimerFired { timer: wake });
-        let output = actions(&mut e, at);
-        let requests: Vec<_> = output
+        for _ in 0..20 {
+            let output = actions(&mut e, at);
+            let wake = output
+                .iter()
+                .filter_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } if *at_ms > at && *at_ms < NOW + 20_000. => {
+                        Some((*timer, *at_ms))
+                    }
+                    _ => None,
+                })
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            collected.extend(output);
+            let has = |kind: &str| {
+                collected
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if support::kind(r) == kind))
+            };
+            if has("userFillsByTime") && has("clearinghouseState") {
+                break;
+            }
+            let (timer, now) = wake.expect("live history retains a bounded refill wake");
+            at = now;
+            e.handle(at, Event::TimerFired { timer });
+        }
+        let requests: Vec<_> = collected
             .iter()
             .filter_map(|a| match a {
                 Action::Http(r) => Some(r),
@@ -723,8 +790,8 @@ fn exact_owner_expiry_preserves_live_history_and_account_in_both_enqueue_orders(
             .position(|r| support::kind(r) == "clearinghouseState")
             .expect("queued Account continuation survived cleanup");
         assert!(
-            history < account,
-            "caller-owned history precedes routine account reads in either enqueue order"
+            account < history,
+            "account state precedes bulk caller history in either enqueue order"
         );
         for request in requests {
             let body = if support::kind(request) == "clearinghouseState" {

@@ -6,6 +6,7 @@
 pub(crate) mod acknowledgement;
 pub(crate) mod codes;
 pub(crate) mod ordinary;
+mod partial;
 
 use crate::sign::Body;
 use crate::wire::*;
@@ -77,8 +78,9 @@ enum Call {
     CancelPartialStop {
         id: String,
         batch: bool,
-        guard: PartialStopGuard,
+        guard: Box<PartialStopGuard>,
     },
+    PartialProof(partial::Axis),
     CancelAll {
         ids: Vec<String>,
     },
@@ -96,6 +98,9 @@ enum Call {
 
 #[derive(Clone)]
 struct PartialStopGuard {
+    original: Order,
+    category: String,
+    position_idx: i64,
     symbol: String,
     side: OrderSide,
     kind: OrderType,
@@ -104,6 +109,59 @@ struct PartialStopGuard {
 }
 
 impl PartialStopGuard {
+    fn validate_original(
+        &self,
+        store: &safe_cex_engine::Store,
+        now: f64,
+    ) -> Result<(), VenueError> {
+        let reference = self.original.trigger_type.ok_or_else(|| {
+            safe_cex_engine::protective_amend::refused(Some(
+                "The original trigger source is unknown; your protection is unchanged".into(),
+            ))
+        })?;
+        let mut original = self.clone();
+        original.kind = original.original.kind;
+        original.price = original.original.price;
+        original.reference = reference;
+        original.validate(store, now)
+    }
+
+    fn validate_order(
+        &self,
+        store: &safe_cex_engine::Store,
+        canceled: bool,
+    ) -> Result<(), VenueError> {
+        let unchanged = match store.order(&self.original.id) {
+            Some(current) => {
+                let mut current = current.clone();
+                current.last_update = self.original.last_update;
+                if canceled && current.status == OrderStatus::Canceled {
+                    current.status = self.original.status;
+                }
+                current == self.original
+            }
+            None => canceled,
+        };
+        let protected_side = if self.side == OrderSide::Sell {
+            PositionSide::Long
+        } else {
+            PositionSide::Short
+        };
+        let protected = store.positions().iter().any(|position| {
+            position.symbol == self.symbol
+                && position.side == protected_side
+                && position.contracts.is_finite()
+                && position.contracts > 0.0
+        });
+        if !unchanged || self.original.filled != 0.0 || !protected {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "The original {} protection changed, filled, or no longer protects an open position; check Open Orders before editing it",
+                self.symbol
+            ))));
+        }
+        Ok(())
+    }
+
     fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
         let label = match self.reference {
             StopTriggerType::MarkPrice => "mark",
@@ -250,10 +308,18 @@ fn trigger_by(opts: &PlaceOrderOpts) -> Option<&'static str> {
     })
 }
 
-/// Stop-losses trigger on mark unless asked for last; take-profits the reverse.
+/// Stop-losses default to mark; take-profits default to last.
 fn sl_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
     match opts.sl_trigger_type {
         Some(StopTriggerType::LastPrice) => "LastPrice",
+        _ => "MarkPrice",
+    }
+}
+
+fn stop_loss_reference(trigger: Option<StopTriggerType>) -> &'static str {
+    match trigger {
+        Some(StopTriggerType::LastPrice) => "LastPrice",
+        Some(StopTriggerType::IndexPrice) => "IndexPrice",
         _ => "MarkPrice",
     }
 }
@@ -1119,11 +1185,7 @@ impl BybitLinear {
                 "stopLoss",
                 "slTriggerBy",
                 "slSize",
-                if trigger == Some(StopTriggerType::LastPrice) {
-                    "LastPrice"
-                } else {
-                    "MarkPrice"
-                },
+                stop_loss_reference(trigger),
             )
         } else {
             (
@@ -1181,14 +1243,16 @@ impl BybitLinear {
         }
         let mark = cx
             .store
-            .ticker(&order.symbol)
-            .map(|ticker| ticker.mark)
-            .filter(|mark| mark.is_finite() && *mark > 0.0);
-        let base = || {
-            Body::new()
-                .str("category", self.category_for(&order.symbol).as_str())
-                .str("symbol", &order.symbol)
-        };
+            .reference_seen_at(&order.symbol, StopTriggerType::MarkPrice)
+            .filter(|seen| *seen <= cx.now)
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    cx.store,
+                    &order.symbol,
+                    StopTriggerType::MarkPrice,
+                    cx.now,
+                )
+            });
         if let Some(mark) =
             mark.filter(|_| self.variant != crate::Variant::Inverse || price.is_some())
         {
@@ -1246,6 +1310,9 @@ impl BybitLinear {
                 _ => StopTriggerType::MarkPrice,
             };
             let guard = PartialStopGuard {
+                original: order.clone(),
+                category: self.category_for(&order.symbol).as_str().into(),
+                position_idx: self.stop_position_idx(cx, &order.symbol, order.side),
                 symbol: order.symbol.clone(),
                 side: order.side,
                 kind,
@@ -1253,7 +1320,9 @@ impl BybitLinear {
                 reference: by,
             };
             guard
-                .validate(cx.store, cx.now)
+                .validate_order(cx.store, false)
+                .and_then(|()| guard.validate_original(cx.store, cx.now))
+                .and_then(|()| guard.validate(cx.store, cx.now))
                 .map_err(|error| error.message)?;
             // The stop as it stands, to put back exactly if its replacement is refused.
             let (restore, _) = self.trading_stop_body(
@@ -1262,7 +1331,7 @@ impl BybitLinear {
                 order.kind,
                 order.price,
                 order.trigger_type,
-                num::adjust(order.amount, market.precision.amount),
+                order.amount,
                 limit,
             );
             let mut job = self.plan_cancel(std::slice::from_ref(order));
@@ -1270,8 +1339,22 @@ impl BybitLinear {
                 planned.call = Call::CancelPartialStop {
                     id: order.id.clone(),
                     batch: self.paths.batch_orders,
-                    guard: guard.clone(),
+                    guard: Box::new(guard.clone()),
                 };
+            }
+            for axis in [
+                partial::Axis::Target,
+                partial::Axis::Live,
+                partial::Axis::History,
+            ] {
+                job.steps.push_back(Step {
+                    delay_ms: 0.0,
+                    requests: vec![partial::proof(
+                        self.category_for(&order.symbol).as_str(),
+                        order,
+                        axis,
+                    )],
+                });
             }
             job.steps.push_back(Step {
                 delay_ms: 0.0,
@@ -1291,33 +1374,11 @@ impl BybitLinear {
         if self.variant == crate::Variant::Inverse && price.is_none() {
             return Err("Bybit inverse stop and take-profit sizes cannot be edited".into());
         }
-        // Missing mark (or inverse amount-only): TS updates the original leg directly.
-        let level = if order.kind == OrderType::StopLoss {
-            "stopLoss"
-        } else {
-            "takeProfit"
-        };
-        let size = if order.kind == OrderType::StopLoss {
-            "slSize"
-        } else {
-            "tpSize"
-        };
-        let mut body = base().int(
-            "positionIdx",
-            self.position_idx(cx, &order.symbol, order.side, order.reduce_only),
-        );
-        if self.variant != crate::Variant::Inverse {
-            body = body.str("tpslMode", "Partial");
-        }
-        body = body.opt_str(level, price.map(number).as_deref()).opt_str(
-            "tpTriggerBy",
-            (order.kind == OrderType::TakeProfit)
-                .then(|| take_profit_reference(order.trigger_type)),
-        );
-        if self.variant != crate::Variant::Inverse {
-            body = body.str(size, &number(amount.unwrap_or(order.amount)));
-        }
-        Ok(trading_stop_job(body.finish()))
+        // Partial trading-stop only adds protection; it cannot edit the existing leg.
+        Err(format!(
+            "A fresh mark price is required before replacing this protection; your {} order is unchanged",
+            order.symbol
+        ))
     }
 
     /// Partial position stops cancel/recreate; ordinary orders amend in place.

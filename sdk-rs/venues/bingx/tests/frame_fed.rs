@@ -99,7 +99,7 @@ fn put_str(out: &mut Vec<u8>, value: &str) {
     out.extend_from_slice(value.as_bytes());
 }
 
-/// A data source's snapshot: one open order and BingX's VENUE_STATE (version 1:
+/// A data source's snapshot: one open order and BingX's VENUE_STATE (version 2:
 /// mode known, that order observed as a NEW one-way LIMIT).
 fn source_frame() -> Vec<u8> {
     source_frame_with(false, true)
@@ -107,6 +107,10 @@ fn source_frame() -> Vec<u8> {
 
 /// A one-way or hedged source snapshot, with or without its open order.
 fn source_frame_with(hedged: bool, with_order: bool) -> Vec<u8> {
+    source_frame_version(2, hedged, with_order)
+}
+
+fn source_frame_version(version: u8, hedged: bool, with_order: bool) -> Vec<u8> {
     let mut source = Store::default();
     source.set_hedged(hedged);
     source.set_markets(vec![Market {
@@ -151,7 +155,7 @@ fn source_frame_with(hedged: bool, with_order: bool) -> Vec<u8> {
         reduce_only: false,
         close: None,
         client_order_id: None,
-        time_in_force: None,
+        time_in_force: Some(safe_cex_engine::model::TimeInForce::GoodTillCancel),
         last_update: 0.,
         trigger_type: None,
         take_profit: None,
@@ -159,20 +163,79 @@ fn source_frame_with(hedged: bool, with_order: bool) -> Vec<u8> {
         extra: None,
     }];
     source.set_orders(if with_order { orders } else { Vec::new() });
-    let mut state = vec![1u8, 1];
+    let mut state = vec![version, 1];
     state.extend_from_slice(&u32::from(with_order).to_le_bytes());
     if with_order {
-        for text in [ORDER_ID, "LIMIT", "BOTH"] {
+        for text in [ORDER_ID, "LIMIT", if hedged { "LONG" } else { "BOTH" }] {
             put_str(&mut state, text);
         }
         state.push(0);
         put_str(&mut state, "NEW");
+        if version == 2 {
+            put_str(&mut state, "");
+        }
     }
     let pending = source.take_pending();
     let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.0);
     source.write(&pending, &mut writer);
     writer.venue_state(&state);
     writer.finish()
+}
+
+#[test]
+fn a_v1_source_preserves_mode_and_ordinary_place_amend_and_cancel() {
+    for hedged in [false, true] {
+        for operation in ["place-empty", "place-row", "amend", "cancel"] {
+            let mut h = Harness::frame_fed();
+            h.load();
+            h.engine
+                .apply_frame(
+                    h.now,
+                    &source_frame_version(1, hedged, operation != "place-empty"),
+                    true,
+                )
+                .unwrap();
+            h.collect();
+            assert_eq!(h.engine.store().hedged(), hedged);
+            match operation {
+                "amend" => h.event(Event::Command(Command::AmendOrder {
+                    command: 40,
+                    id: ORDER_ID.into(),
+                    price: None,
+                    amount: Some(0.3),
+                })),
+                "cancel" => h.event(Event::Command(Command::CancelOrders {
+                    command: 40,
+                    ids: vec![ORDER_ID.into()],
+                })),
+                _ => h.place(40),
+            }
+            assert!(h.failed.is_empty(), "{hedged}/{operation}: {:?}", h.failed);
+            assert_eq!(h.requests.len(), 1, "{hedged}/{operation}: {:?}", h.paths());
+            let write = &h.requests[0];
+            let body: serde_json::Value =
+                serde_json::from_str(write.body.as_deref().unwrap_or("{}")).unwrap();
+            match operation {
+                "amend" => {
+                    assert!(write.url.ends_with("/trade/amend"));
+                    let id = body["orderId"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .or_else(|| body["orderId"].as_u64().map(|id| id.to_string()));
+                    assert_eq!(id.as_deref(), Some(ORDER_ID));
+                    assert_eq!(body["quantity"].as_f64(), Some(0.3));
+                }
+                "cancel" => {
+                    assert_eq!(write.method, safe_cex_engine::Method::Delete);
+                    assert!(write.url.contains(ORDER_ID));
+                }
+                _ => {
+                    assert_eq!(body["type"], "LIMIT");
+                    assert_eq!(body["positionSide"], if hedged { "LONG" } else { "BOTH" });
+                }
+            }
+        }
+    }
 }
 
 #[test]

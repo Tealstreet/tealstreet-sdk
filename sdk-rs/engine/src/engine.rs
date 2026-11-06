@@ -105,6 +105,18 @@ impl RequestRoute {
     }
 }
 
+/// Admission hints only; never signing, delivery or reconciliation authority.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum HttpReadClass {
+    #[default]
+    Normal = 0,
+    Critical = 1,
+    Bulk = 2,
+    #[cfg(feature = "address-nonce")]
+    Reconciliation = 3,
+}
+
 #[derive(Clone, PartialEq)]
 pub struct HttpRequest {
     pub id: RequestId,
@@ -619,8 +631,9 @@ pub enum VenueAction {
 /// The shared rejection for a venue action the venue does not implement.
 const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
 /// A repair on a feed that has carried no data this long reconnects it instead.
+/// Venue data-silence windows that a repair should agree with use this value.
 #[cfg(feature = "managed-sockets")]
-const REPAIR_SILENCE_MS: f64 = 30_000.0;
+pub const REPAIR_SILENCE_MS: f64 = 30_000.0;
 /// The same topic repaired again within this window reconnects its feed.
 #[cfg(feature = "managed-sockets")]
 const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;
@@ -3996,6 +4009,10 @@ pub trait Venue {
     ) {
     }
 
+    fn http_read_class(&self, _pending: &Self::Pending) -> HttpReadClass {
+        HttpReadClass::Normal
+    }
+
     /// Bounded native correlation metadata only. No credential, outbound packet
     /// or recipe may be retained here. Managed mutations require this codec.
     fn capture_http_reconciliation(
@@ -4630,60 +4647,111 @@ struct BookBaseline {
     book: Book,
 }
 
+/// The venue's declarations `Engine::new` needs, read once so the rest of
+/// construction compiles once for every venue.
+struct CoreSpec<'a> {
+    quantity_units: crate::QuantityUnits,
+    http_pacing: &'a [crate::request_context::Pacing],
+    http_pacing_sets: &'a [crate::request_context::PacingSet],
+    nonce_unscheduled: bool,
+    #[cfg(feature = "order-locks")]
+    fence_uncertain_placements: bool,
+    #[cfg(feature = "release-domains")]
+    release_domain: Option<crate::request_context::ReleaseDomain>,
+    #[cfg(feature = "dispatch-nonce")]
+    dispatch_nonce: bool,
+    #[cfg(feature = "http-mutation-barriers")]
+    http_mutation_barriers: bool,
+    #[cfg(feature = "managed-sockets")]
+    managed_sockets: bool,
+    #[cfg(feature = "managed-sockets")]
+    socket_capabilities: crate::socket_lifecycle::SocketCapabilities,
+}
+
+/// The venue-independent half of `Engine::new`: validated pacing, store and I/O core.
+fn new_core(
+    entropy: Option<crate::entropy::Entropy>,
+    spec: CoreSpec<'_>,
+) -> Result<(Store, IoCore), VenueError> {
+    let entropy = entropy.ok_or_else(|| {
+        VenueError::new("Engine entropy providers are required").kind(ErrorKind::InvalidInput)
+    })?;
+    let mut store = Store::default();
+    store.set_quantity_units(spec.quantity_units);
+    let http_pacing =
+        crate::request_context::SendPacing::with_sets(spec.http_pacing, spec.http_pacing_sets)
+            .map_err(|_| {
+                VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput)
+            })?;
+    #[cfg(feature = "order-locks")]
+    let order_locks =
+        crate::order_locks::OrderLocks::fencing_placements(spec.fence_uncertain_placements);
+    #[cfg(feature = "release-domains")]
+    let release_domain = spec.release_domain;
+    #[cfg(feature = "release-domains")]
+    if let Some(domain) = release_domain {
+        release_domain::validate(domain, &http_pacing).map_err(|_| {
+            VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
+        })?;
+    }
+    #[cfg(feature = "release-domains")]
+    let (domain_queue, domain_held) = release_domain::reserve(release_domain.is_some())
+        .map_err(|_| VenueError::new("HTTP release domain capacity unavailable"))?;
+    let core = IoCore {
+        entropy: Some(entropy),
+        http_pacing,
+        #[cfg(feature = "release-domains")]
+        release_domain,
+        #[cfg(feature = "release-domains")]
+        domain_queue,
+        #[cfg(feature = "release-domains")]
+        domain_held,
+        nonce_unscheduled: spec.nonce_unscheduled,
+        #[cfg(feature = "dispatch-nonce")]
+        nonce_enabled: spec.dispatch_nonce,
+        #[cfg(feature = "http-mutation-barriers")]
+        mutation_barriers_declared: spec.http_mutation_barriers,
+        #[cfg(feature = "managed-sockets")]
+        managed_sockets_declared: spec.managed_sockets,
+        #[cfg(feature = "managed-sockets")]
+        socket_capabilities: spec.socket_capabilities,
+        #[cfg(feature = "order-locks")]
+        order_locks,
+        ..IoCore::default()
+    };
+    Ok((store, core))
+}
+
 impl<V: Venue> Engine<V> {
     pub fn new(venue: V, entropy: Option<crate::entropy::Entropy>) -> Result<Self, VenueError> {
-        let entropy = entropy.ok_or_else(|| {
-            VenueError::new("Engine entropy providers are required").kind(ErrorKind::InvalidInput)
-        })?;
-        let mut store = Store::default();
-        store.set_quantity_units(venue.capabilities().quantity_units);
-        let http_pacing = crate::request_context::SendPacing::with_sets(
-            venue.http_pacing(),
-            venue.http_pacing_sets(),
-        )
-        .map_err(|_| VenueError::new("Invalid HTTP pacing policy").kind(ErrorKind::InvalidInput))?;
         let http_release = V::http_release();
-        #[cfg(feature = "order-locks")]
-        let order_locks =
-            crate::order_locks::OrderLocks::fencing_placements(venue.fence_uncertain_placements());
-        #[cfg(feature = "release-domains")]
-        let release_domain = V::http_release_domain();
-        #[cfg(feature = "release-domains")]
-        if let Some(domain) = release_domain {
-            release_domain::validate(domain, &http_pacing).map_err(|_| {
-                VenueError::new("Invalid HTTP release domain").kind(ErrorKind::InvalidInput)
-            })?;
-        }
-        #[cfg(feature = "release-domains")]
-        let (domain_queue, domain_held) = release_domain::reserve(release_domain.is_some())
-            .map_err(|_| VenueError::new("HTTP release domain capacity unavailable"))?;
+        let (store, core) = new_core(
+            entropy,
+            CoreSpec {
+                quantity_units: venue.capabilities().quantity_units,
+                http_pacing: venue.http_pacing(),
+                http_pacing_sets: venue.http_pacing_sets(),
+                nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
+                #[cfg(feature = "order-locks")]
+                fence_uncertain_placements: venue.fence_uncertain_placements(),
+                #[cfg(feature = "release-domains")]
+                release_domain: V::http_release_domain(),
+                #[cfg(feature = "dispatch-nonce")]
+                dispatch_nonce: V::dispatch_nonce(),
+                #[cfg(feature = "http-mutation-barriers")]
+                http_mutation_barriers: V::http_mutation_barriers(),
+                #[cfg(feature = "managed-sockets")]
+                managed_sockets: V::managed_sockets(),
+                #[cfg(feature = "managed-sockets")]
+                socket_capabilities: V::socket_capabilities(),
+            },
+        )?;
         Ok(Self {
             venue,
             http_release,
             store,
             io: Io {
-                core: IoCore {
-                    entropy: Some(entropy),
-                    http_pacing,
-                    #[cfg(feature = "release-domains")]
-                    release_domain,
-                    #[cfg(feature = "release-domains")]
-                    domain_queue,
-                    #[cfg(feature = "release-domains")]
-                    domain_held,
-                    nonce_unscheduled: matches!(http_release, HttpRelease::NonceUnscheduled(_)),
-                    #[cfg(feature = "dispatch-nonce")]
-                    nonce_enabled: V::dispatch_nonce(),
-                    #[cfg(feature = "http-mutation-barriers")]
-                    mutation_barriers_declared: V::http_mutation_barriers(),
-                    #[cfg(feature = "managed-sockets")]
-                    managed_sockets_declared: V::managed_sockets(),
-                    #[cfg(feature = "managed-sockets")]
-                    socket_capabilities: V::socket_capabilities(),
-                    #[cfg(feature = "order-locks")]
-                    order_locks,
-                    ..IoCore::default()
-                },
+                core,
                 #[cfg(feature = "managed-sockets")]
                 managed_close: V::managed_sockets().then_some(
                     Cx::<V::Pending>::managed_close
@@ -6202,6 +6270,15 @@ impl<V: Venue> Engine<V> {
                 }
             }
             if by_feed.is_empty() {
+                // A stream the venue itself withdrew (a refused subscribe) is its to retry.
+                let mut cx = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                };
+                if let Some(result) = self.venue.repair_subscription(&mut cx, topic) {
+                    return result;
+                }
                 return Err(format!("{} is not subscribed", skipped.join(", ")));
             }
             let mut cx = Cx {
