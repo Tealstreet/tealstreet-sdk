@@ -95,6 +95,7 @@ export const rustPublicFeedIdentity = (name: ExchangeName, options: ExchangeOpti
     name,
     Boolean(options.testnet),
     Boolean(options.enableSpotMarkets),
+    name === 'hyperliquid' && options.hyperliquidFastBook === true,
     Boolean(options.enableInverseMarkets),
     Boolean(options.enableOptionMarkets),
     options.bybitSiteId ?? '',
