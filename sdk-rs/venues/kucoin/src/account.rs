@@ -231,6 +231,13 @@ impl OrderRow<'_> {
         if self.stop_price_type.is_empty() {
             order.trigger_type = old.trigger_type;
         }
+        if !matches!(self.order_type, "limit" | "market")
+            && !matches!(self.event, "limit" | "market")
+            && let Some(extra) = &mut order.extra
+        {
+            extra.conditional_order_price =
+                old.extra.as_ref().and_then(|e| e.conditional_order_price);
+        }
     }
 
     fn orders(&self, store: &Store, now: f64) -> Vec<Order> {
@@ -354,6 +361,13 @@ impl OrderRow<'_> {
             extra: Some(OrderExtra {
                 remaining_native: Some(remaining),
                 filled_in_placement_units: Some(self.filled_size.get()),
+                conditional_order_price: (is_stop && raw_type == "limit").then_some(
+                    if self.price.get() != 0.0 {
+                        self.price.get()
+                    } else {
+                        self.order_price.get()
+                    },
+                ),
                 ..Default::default()
             }),
         };
@@ -581,6 +595,11 @@ impl Kucoin {
             hydrated.kind = order.kind;
             hydrated.client_order_id.clone_from(&order.client_order_id);
             hydrated.trigger_type = order.trigger_type;
+            hydrated
+                .extra
+                .get_or_insert_default()
+                .conditional_order_price =
+                order.extra.as_ref().and_then(|e| e.conditional_order_price);
             cx.store.upsert_order(hydrated);
         }
         self.account.incomplete_orders.remove(id);

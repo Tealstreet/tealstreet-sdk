@@ -130,12 +130,14 @@ pub struct ManagedInfoRead {
     context: Context,
     pending: Pending,
     background: bool,
+    read_class: safe_cex_engine::HttpReadClass,
 }
 struct InfoSuccessor {
     body: String,
     pending: Pending,
     streamed: Option<ArrayAt>,
     background: bool,
+    read_class: safe_cex_engine::HttpReadClass,
 }
 #[derive(Default)]
 struct Connection {
@@ -422,7 +424,14 @@ impl Hyperliquid {
         true
     }
     fn info(&mut self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
-        self.info_read(cx, body, pending, Some(at), false);
+        self.info_read(
+            cx,
+            body,
+            pending,
+            Some(at),
+            false,
+            safe_cex_engine::HttpReadClass::Normal,
+        );
     }
     fn info_read(
         &mut self,
@@ -431,6 +440,7 @@ impl Hyperliquid {
         pending: Pending,
         streamed: Option<ArrayAt>,
         background: bool,
+        read_class: safe_cex_engine::HttpReadClass,
     ) {
         if self.info_completing {
             self.info_successors.push_back(InfoSuccessor {
@@ -438,6 +448,7 @@ impl Hyperliquid {
                 pending,
                 streamed,
                 background,
+                read_class,
             });
             return;
         }
@@ -462,6 +473,7 @@ impl Hyperliquid {
             context: context.clone(),
             pending,
             background,
+            read_class,
         }));
         match cx.request_managed_with_headers(
             context,
@@ -1357,6 +1369,15 @@ impl Venue for Hyperliquid {
             self.unproven_trade_evidence(response, evidence);
         }
     }
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::ManagedInfo(read) => read.read_class,
+            Pending::ManagedCandles(_) | Pending::History(_) => {
+                safe_cex_engine::HttpReadClass::Bulk
+            }
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,
@@ -1537,6 +1558,13 @@ impl Venue for Hyperliquid {
     ) -> Vec<(FeedId, String)> {
         self.topic_interests(store, topic)
     }
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        self.retry_refused(cx, topic)
+    }
     fn socket_control(
         &self,
         _: &safe_cex_engine::Store,
@@ -1617,7 +1645,14 @@ impl Venue for Hyperliquid {
                     let _ = cx.finish_http_context(&read.context);
                     self.info_completing = false;
                     while let Some(next) = self.info_successors.pop_front() {
-                        self.info_read(cx, next.body, next.pending, next.streamed, next.background);
+                        self.info_read(
+                            cx,
+                            next.body,
+                            next.pending,
+                            next.streamed,
+                            next.background,
+                            next.read_class,
+                        );
                     }
                 }
                 self.finish_background_read(cx, read.background);
@@ -1755,6 +1790,37 @@ impl Venue for Hyperliquid {
                 } else {
                     self.startup.failed(cx, (dex.clone(), offset));
                 }
+                // A changed shared identity/index may affect another scope. Ordinary
+                // new DEX rows are scoped; remaps conservatively re-read every DEX.
+                let refresh_all = markets.iter().any(|m| {
+                    m.id.split_once(':').map_or("", |(scope, _)| scope) != dex
+                        || self
+                            .coins
+                            .get(&m.id.to_ascii_lowercase())
+                            .is_some_and(|old| old != &m.symbol)
+                }) || instruments.iter().enumerate().any(|(index, native)| {
+                    let Some(native) = native else {
+                        return false;
+                    };
+                    let id = if dex.is_empty() || native.name.contains(':') {
+                        native.name.clone()
+                    } else {
+                        format!("{dex}:{}", native.name)
+                    };
+                    let Some(market) = markets.iter().find(|m| m.id == id) else {
+                        return false;
+                    };
+                    let asset = offset + index as u32;
+                    self.assets
+                        .get(&market.symbol)
+                        .is_some_and(|old| *old != asset)
+                        || self
+                            .assets
+                            .iter()
+                            .any(|(symbol, old)| *old == asset && symbol != &market.symbol)
+                }) || excluded
+                    .iter()
+                    .any(|coin| coin.split_once(':').map_or("", |(scope, _)| scope) != dex);
                 if valid {
                     for (index, meta) in instruments.iter().enumerate() {
                         let Some(meta) = meta else {
@@ -1780,7 +1846,11 @@ impl Venue for Hyperliquid {
                 }
                 self.account_prices(cx);
                 if self.account.started && !self.options.public_data_only && self.user().is_some() {
-                    self.refresh_account(cx);
+                    if refresh_all {
+                        self.refresh_account(cx);
+                    } else {
+                        self.refresh_account_scope(cx, &dex);
+                    }
                 }
                 if complete || cx.store.loaded().markets {
                     self.advance_scope(cx, &dex);
@@ -2074,10 +2144,18 @@ impl Venue for Hyperliquid {
                 from_ms,
                 to_ms,
             } => {
+                let timeout_ms = match cx.command_wait() {
+                    Some(safe_cex_engine::CommandWait::Remaining(left)) => left.min(20_000),
+                    Some(safe_cex_engine::CommandWait::Expired) => {
+                        let _ = cx.reject_expired_command(Operation::Read);
+                        return;
+                    }
+                    None => 20_000,
+                };
                 let Ok(context) = cx.admit_http_command(Policy {
                     operation: Operation::Read,
                     credential: None,
-                    timeout_ms: 20_000,
+                    timeout_ms,
                     pacing: None,
                     retry: RetryPolicy::Never,
                 }) else {
@@ -2095,25 +2173,15 @@ impl Venue for Hyperliquid {
                     let _ = cx.fail_context(&context, "Invalid candle time range");
                     return;
                 };
-                let pending = Pending::ManagedCandles(Box::new(ManagedCandleRead {
-                    context: context.clone(),
-                    candles: Vec::new(),
-                    valid: true,
-                }));
-                match cx.request_managed_with_headers(
-                    context.clone(),
-                    None,
-                    Method::Post,
-                    format!("{}/info", self.rest()),
-                    &[("Content-Type", "application/json")],
-                    Some(body),
-                    pending,
-                ) {
-                    Ok(id) => cx.stream_response(id, ArrayAt::Root),
-                    Err((_pending, error)) => {
-                        let _ = cx.fail_context(&context, error.venue_error());
-                    }
-                }
+                self.queue_candles(
+                    cx,
+                    body,
+                    Box::new(ManagedCandleRead {
+                        context,
+                        candles: Vec::new(),
+                        valid: true,
+                    }),
+                );
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             Command::FetchLeverage { symbol, .. } if !self.spot => self.fetch_leverage(cx, symbol),

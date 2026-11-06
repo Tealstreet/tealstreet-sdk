@@ -147,18 +147,17 @@ struct ResultRow<'a> {
     #[serde(borrow, default, alias = "message", alias = "msg")]
     error_msg: Str<'a>,
 }
-/// A placement row carrying `errorCode` (stop orders) was refused: it placed nothing,
-/// and its `id`/`orderId` of 0 is not an order.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ResultRows<'a> {
+    One(#[serde(borrow)] ResultRow<'a>),
+    Many(#[serde(borrow)] Vec<ResultRow<'a>>),
+}
+/// A nonzero row code is an error, not an order identity; write_failure proves its outcome.
 fn row_refusal(payload: &str) -> Option<String> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Rows<'a> {
-        One(#[serde(borrow)] ResultRow<'a>),
-        Many(#[serde(borrow)] Vec<ResultRow<'a>>),
-    }
-    let rows = match serde_json::from_str::<Rows<'_>>(payload).ok()? {
-        Rows::One(row) => vec![row],
-        Rows::Many(rows) => rows,
+    let rows = match serde_json::from_str::<ResultRows<'_>>(payload).ok()? {
+        ResultRows::One(row) => vec![row],
+        ResultRows::Many(rows) => rows,
     };
     rows.iter().find(|row| row.error_code != 0.0).map(|row| {
         format!(
@@ -1582,14 +1581,12 @@ impl MexcFutures {
         }
         let call = &request.call;
         let native_edit = matches!(call, Call::NativeEdit);
-        let guarded_regular_place = if let Call::Place { .. } = request.call {
-            self.trading
-                .active
-                .as_ref()
-                .is_some_and(|j| j.protection.is_some())
-        } else {
-            false
-        };
+        let protective_write = self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|j| j.protection.is_some());
+        let guarded_regular_place = matches!(call, Call::Place { .. }) && protective_write;
         let protective_place = if let Call::ProtectivePlace { restore } = request.call {
             Some(restore)
         } else {
@@ -1943,31 +1940,18 @@ impl MexcFutures {
             }
             Err(error) => {
                 cx.command_error(request.command, &error);
-                let mut error = write_failure(response.status, response.body, error, refused);
-                if refused
-                    && response.status == 200
-                    && (protective_place.is_some() || guarded_regular_place || native_edit)
-                {
-                    error.outcome = Some(Outcome::Rejected);
-                }
-                if (protective_place.is_some() || native_edit)
-                    && (200..500).contains(&response.status)
-                    && let Ok(e) = Envelope::checked(response.body).or_else(|_| {
-                        serde_json::from_str::<Envelope<'_>>(response.body)
-                            .map_err(|e| e.to_string())
-                    })
-                    && e.success == Some(false)
-                    && e.code != 0.
-                {
-                    error.outcome = Some(Outcome::Rejected);
-                }
-                if (protective_place.is_some() || guarded_regular_place || native_edit)
-                    && error.outcome.is_none()
-                {
+                let mut error = write_failure(
+                    response.status,
+                    response.body,
+                    error,
+                    refused,
+                    protective_write,
+                );
+                if protective_write && error.outcome.is_none() {
                     error.outcome = Some(Outcome::Unknown);
                 }
                 if (response.status == 429 || error.kind == Some(ErrorKind::RateLimited))
-                    && (protective_place.is_some() || guarded_regular_place || native_edit)
+                    && protective_write
                 {
                     error.outcome = Some(Outcome::Unknown);
                 }
@@ -1993,11 +1977,18 @@ fn not_sent(message: impl Into<String>) -> VenueError {
 
 /// Classifies a failed write answer. 408/5xx and malformed or unproven 2xx
 /// answers are Unknown; undocumented venue codes stay unset.
-fn write_failure(status: u16, body: &str, message: String, refused: bool) -> VenueError {
+fn write_failure(
+    status: u16,
+    body: &str,
+    message: String,
+    refused: bool,
+    protective: bool,
+) -> VenueError {
     let error = VenueError::new(message);
     let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
     match status {
         200 => {}
+        400..=499 if protective && !matches!(status, 408 | 429) => {}
         401 => return rejected(error, ErrorKind::AuthInvalid),
         403 => return rejected(error, ErrorKind::AuthPermission),
         429 => return rejected(error, ErrorKind::RateLimited),
@@ -2009,21 +2000,52 @@ fn write_failure(status: u16, body: &str, message: String, refused: bool) -> Ven
         return error.outcome(Outcome::Unknown);
     };
     if envelope.success == Some(true) && envelope.code == 0.0 {
-        return if refused {
-            error
-        } else {
-            error.outcome(Outcome::Unknown)
+        if !refused {
+            return error.outcome(Outcome::Unknown);
+        }
+        if !protective {
+            return error;
+        }
+        let row = envelope.data.and_then(|data| {
+            match serde_json::from_str::<ResultRows<'_>>(data.get()).ok()? {
+                ResultRows::One(row) => Some(row),
+                ResultRows::Many(mut rows) if rows.len() == 1 => rows.pop(),
+                _ => None,
+            }
+        });
+        return match row {
+            Some(row)
+                if row.error_code != 0.
+                    && matches!(row.id.as_ref(), "" | "0")
+                    && matches!(row.order_id.as_ref(), "" | "0") =>
+            {
+                write_code_failure(error, row.error_code, &row.error_msg, true)
+            }
+            _ => error,
         };
     }
-    let mut error = error.venue_code(envelope.code.to_string());
-    if !envelope.message.is_empty() {
-        error = error.venue_message(envelope.message.into_owned());
+    if protective && envelope.success != Some(false) {
+        return error.outcome(Outcome::Unknown);
     }
-    match envelope.code as i64 {
+    write_code_failure(error, envelope.code, &envelope.message, protective)
+}
+
+fn write_code_failure(error: VenueError, code: f64, message: &str, protective: bool) -> VenueError {
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    if protective && (!code.is_finite() || code.fract() != 0.) {
+        return error.outcome(Outcome::Unknown);
+    }
+    let mut error = error.venue_code(code.to_string());
+    if !message.is_empty() {
+        error = error.venue_message(message);
+    }
+    match code as i64 {
         401 | 602 => rejected(error, ErrorKind::AuthInvalid),
         402 => rejected(error, ErrorKind::AuthExpired),
         406 | 701..=704 => rejected(error, ErrorKind::AuthPermission),
         510 => rejected(error, ErrorKind::RateLimited),
+        // MEXC documents 3001 as a trigger-order price-type refusal.
+        3001 if protective => rejected(error, ErrorKind::Rejected),
         600 | 1001..=1004 | 2001..=2009 | 2011 | 2013..=2015 => {
             rejected(error, ErrorKind::Rejected)
         }

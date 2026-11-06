@@ -3,7 +3,10 @@
 A partial position stop still uses Bybit's existing cancel/recreate flow. The
 position trading-stop API adds Partial legs; it does not amend an existing leg.
 Before planning a destructive cancel, require a fresh price for the reference
-that the replacement body will actually send. Repeat that check inside the
+that the replacement body will actually send. Kind projection also requires a
+genuine Mark receipt no older than 5 s. Missing or stale Mark evidence refuses
+NotSent before any write; Partial trading-stop is never an edit fallback.
+Repeat the replacement-source check inside the
 managed request's final synchronous claim, after preparation/signing and pacing.
 
 The guard captures the planned symbol, side, replacement kind, raw trigger and
@@ -23,8 +26,17 @@ after release. Existing atomic group admission and nonce scheduling are unchange
 
 A price can still move after the release cut. The existing native-refusal and
 exact-old-stop restoration path remains intact for that race. No new retry,
-refresh or position-setting behavior is introduced. Missing-mark non-destructive
-fallbacks and in-place standalone/full/attached amendments are unchanged.
+refresh or position-setting behavior is introduced. Known Last/Mark/Index sources
+are preserved in both replacement and exact-old-stop payloads, including Index
+stop-losses. In-place standalone/full/attached amendments are unchanged.
+New SL placement keeps its existing policy: Last when requested, otherwise Mark,
+including an Index request. A wire control covers standalone, attached and
+position trading-stop placement across the five supported profiles.
+
+The additive-fallback fix leaves the existing cancel/recreate flow in place.
+Target-terminal proof after its cancel ACK, expanded unchanged/unfilled/position
+release checks, and the full restoration/presentation contract are a separate
+approved follow-up; this change does not claim those guarantees.
 
 Controls cover the reported long/LastPrice shape, missing/stale references, a
 price move or aging while genuine preparation waits, the inclusive 5 s boundary,

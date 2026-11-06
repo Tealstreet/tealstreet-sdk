@@ -74,6 +74,7 @@ impl Default for Options {
         }
     }
 }
+type TickerSeed = (String, Ticker, Option<(f64, f64)>);
 pub enum Pending {
     Account {
         context: Context,
@@ -96,7 +97,7 @@ pub enum Pending {
     },
     Tickers {
         context: Context,
-        rows: Vec<(String, Ticker)>,
+        rows: Vec<TickerSeed>,
         failed: bool,
         revision: u64,
     },
@@ -227,6 +228,7 @@ fn candle_channel(store: &Store, symbol: &str, interval: Interval) -> Option<Str
     Some(format!("candle/{}/{interval}", store.market(symbol)?.id))
 }
 pub struct Lighter {
+    protection: trading::protection::ProtectionState,
     options: Options,
     account: account::Account,
     trading: trading::Trading,
@@ -274,6 +276,7 @@ impl Lighter {
     }
     pub fn new(options: Options) -> Self {
         Self {
+            protection: Default::default(),
             options,
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -723,6 +726,7 @@ impl Lighter {
         let Some(symbol) = symbol.map(str::to_owned) else {
             return;
         };
+        self.observe_mark(&symbol, stats.mark_price, cx.now);
         self.ticker_revision += 1;
         self.ticker_sources
             .insert(symbol.clone(), self.ticker_revision);
@@ -1068,6 +1072,14 @@ impl Venue for Lighter {
             return Err(safe_cex_engine::request_context::Error::Invalid);
         }
         safe_cex_engine::request_context::ReconciliationData::new(String::new())
+    }
+    fn http_release_veto(
+        &self,
+        store: &Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.protective_release_veto(store, pending, release.time.raw_ms)
     }
     fn cancel_needs_stored_order(&self) -> bool {
         true
@@ -1612,7 +1624,11 @@ impl Venue for Lighter {
                             if let Some(v) = stats.daily_price_change {
                                 ticker.percentage = v;
                             }
-                            rows.push((symbol.into(), ticker));
+                            rows.push((
+                                symbol.into(),
+                                ticker,
+                                stats.mark_price.map(|v| (v, cx.now)),
+                            ));
                         } else {
                             *failed = true;
                             safe_cex_engine::startup::skipped_row(cx);
@@ -1750,9 +1766,15 @@ impl Venue for Lighter {
                     return;
                 }
                 self.startup.succeeded(cx, &false);
-                for (symbol, ticker) in rows {
+                let genuine = !failed
+                    && (200..300).contains(&response.status)
+                    && trading::protection::accepted_envelope(response.body);
+                for (symbol, ticker, mark) in rows {
                     if self.ticker_sources.get(&symbol).copied().unwrap_or(0) <= revision {
                         cx.store.update_ticker(&symbol, |t| *t = ticker);
+                        if genuine && let Some((value, at)) = mark {
+                            self.observe_mark(&symbol, Some(value), at);
+                        }
                     }
                 }
             }

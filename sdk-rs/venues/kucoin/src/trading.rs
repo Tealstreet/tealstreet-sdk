@@ -50,6 +50,7 @@ struct Replacement {
     amended: (OrderSide, OrderType),
     id: String,
     options: PlaceOrderOpts,
+    stop_limit: Option<f64>,
     filled: f64,
     polls: u8,
     read_retries: u8,
@@ -223,7 +224,15 @@ fn advanced(kind: OrderType) -> bool {
 fn positive(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
+fn native_stop_limit(order: &Order) -> Option<f64> {
+    advanced(order.kind)
+        .then(|| order.extra.as_ref().and_then(|e| e.conditional_order_price))
+        .flatten()
+}
 fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
+    preflight_native(orders, None)
+}
+fn preflight_native(orders: &[PlaceOrderOpts], stop_limit: Option<f64>) -> Result<(), String> {
     let mut seen = HashSet::new();
     for order in orders {
         if order.bybit_bbo.is_some() || order.bybit_slippage_tolerance_ticks.is_some() {
@@ -269,7 +278,9 @@ fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
                 "KuCoin requires positive native lots (zero only for full-position stops)".into(),
             );
         }
-        if order.kind == OrderType::Limit && !order.price.is_some_and(positive) {
+        if (order.kind == OrderType::Limit || stop_limit.is_some())
+            && !stop_limit.or(order.price).is_some_and(positive)
+        {
             return Err("KuCoin limit price must be positive".into());
         }
         if advanced(order.kind) && !order.trigger_price.or(order.price).is_some_and(positive) {
@@ -283,7 +294,10 @@ fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
         {
             return Err("KuCoin attached stop prices must be positive".into());
         }
-        if order.kind != OrderType::Limit && order.time_in_force == Some(TimeInForce::PostOnly) {
+        if order.kind != OrderType::Limit
+            && stop_limit.is_none()
+            && order.time_in_force == Some(TimeInForce::PostOnly)
+        {
             return Err("KuCoin post-only requires a limit order".into());
         }
         if order.take_profit.is_some()
@@ -350,6 +364,7 @@ impl Kucoin {
         &mut self,
         cx: &Cx<'_, Pending>,
         order: &PlaceOrderOpts,
+        stop_limit: Option<f64>,
     ) -> Result<Step, String> {
         let market = cx
             .store
@@ -360,8 +375,8 @@ impl Kucoin {
             .setting(&order.symbol)
             .ok_or("KuCoin account settings unavailable")?;
         for price in [
-            (order.kind == OrderType::Limit)
-                .then_some(order.price)
+            (order.kind == OrderType::Limit || stop_limit.is_some())
+                .then_some(stop_limit.or(order.price))
                 .flatten(),
             advanced(order.kind)
                 .then_some(order.trigger_price.or(order.price))
@@ -385,6 +400,10 @@ impl Kucoin {
             return Err("KuCoin native lots are outside market limits".into());
         }
         let is_stop = advanced(order.kind);
+        // Only native edit metadata selects stop-limit: app placements commonly
+        // repeat their trigger in both public price fields.
+        let limit = order.kind == OrderType::Limit || stop_limit.is_some();
+        let close = is_stop && order.amount == 0.0;
         let reduce = order.reduce_only.unwrap_or(is_stop);
         let closing = reduce || is_stop;
         let long = (order.side == OrderSide::Buy) != closing;
@@ -424,20 +443,15 @@ impl Kucoin {
         let has_attached = up.is_some() || down.is_some();
         let payload = Placement {
             symbol: market.id.clone(),
-            kind: if order.kind == OrderType::Market || is_stop {
-                "market"
-            } else {
-                "limit"
-            },
+            kind: if limit { "limit" } else { "market" },
             side: if order.side == OrderSide::Buy {
                 "buy"
             } else {
                 "sell"
             },
             client_oid: oid,
-            price: (!is_stop && order.kind == OrderType::Limit)
-                .then(|| price(order.price.unwrap())),
-            size: (order.amount > 0.0).then(|| num::format(amount)),
+            price: limit.then(|| price(stop_limit.or(order.price).unwrap())),
+            size: (!close && order.amount > 0.0).then(|| num::format(amount)),
             leverage: (!is_stop).then_some(leverage.max(1.0)),
             reduce_only: reduce,
             margin_mode: match margin {
@@ -448,15 +462,13 @@ impl Kucoin {
                 .store
                 .hedged()
                 .then_some(if long { "LONG" } else { "SHORT" }),
-            time_in_force: (!is_stop && order.kind == OrderType::Limit).then_some(
-                match order.time_in_force {
-                    Some(TimeInForce::ImmediateOrCancel) => "IOC",
-                    Some(TimeInForce::FillOrKill) => "FOK",
-                    _ => "GTC",
-                },
-            ),
+            time_in_force: limit.then_some(match order.time_in_force {
+                Some(TimeInForce::ImmediateOrCancel) => "IOC",
+                Some(TimeInForce::FillOrKill) => "FOK",
+                _ => "GTC",
+            }),
             post_only: (order.time_in_force == Some(TimeInForce::PostOnly)).then_some(true),
-            close_order: (is_stop && order.amount == 0.0).then_some(true),
+            close_order: close.then_some(true),
             stop: is_stop.then_some(match (order.kind, order.side) {
                 (OrderType::StopLoss, OrderSide::Buy)
                 | (OrderType::TakeProfit, OrderSide::Sell) => "up",
@@ -554,6 +566,10 @@ impl Kucoin {
         if virtual_stop && amount.is_some() {
             return Err("KuCoin attached stop size is controlled by its parent".into());
         }
+        if parent.close == Some(true) && amount.is_some() {
+            return Err("KuCoin full-position stop size is controlled by closeOrder".into());
+        }
+        let stop_limit = native_stop_limit(parent);
         let native = parent
             .extra
             .as_ref()
@@ -566,7 +582,9 @@ impl Kucoin {
             symbol: parent.symbol.clone(),
             kind: parent.kind,
             side: parent.side,
-            amount: if virtual_stop {
+            amount: if parent.close == Some(true) {
+                0.0
+            } else if virtual_stop {
                 native
             } else {
                 amount
@@ -600,7 +618,7 @@ impl Kucoin {
             client_order_id: None,
             close: parent.close,
         };
-        preflight(std::slice::from_ref(&opts))?;
+        preflight_native(std::slice::from_ref(&opts), stop_limit)?;
         Ok((parent.clone(), opts))
     }
 
@@ -638,7 +656,7 @@ impl Kucoin {
                 opts.stop_loss
             }
         } else {
-            opts.price
+            opts.trigger_price.or(opts.price)
         }
         .map(|p| num::adjust(p, market.precision.price))
         .ok_or("KuCoin amendment has no trigger")?;
@@ -675,7 +693,7 @@ impl Kucoin {
             .validate(cx.store, cx.now)
             .map_err(|error| error.message)?;
         let (_, original) = self.replacement(cx, id, None, None)?;
-        let mut restore = self.format_placement(cx, &original)?;
+        let mut restore = self.format_placement(cx, &original, native_stop_limit(parent))?;
         restore.call = Call::Place;
         Ok(Some(Box::new(StopProtect {
             guard,
@@ -694,14 +712,15 @@ impl Kucoin {
             Command::PlaceOrders { orders, .. } => {
                 preflight(&orders)?;
                 for order in orders {
-                    steps.push_back(self.format_placement(cx, &order)?);
+                    steps.push_back(self.format_placement(cx, &order, None)?);
                 }
             }
             Command::AmendOrder {
                 id, price, amount, ..
             } => {
                 let (parent, opts) = self.replacement(cx, &id, price, amount)?;
-                self.format_placement(cx, &opts)?;
+                let stop_limit = native_stop_limit(&parent);
+                self.format_placement(cx, &opts, stop_limit)?;
                 let stop = self.stop_protect(cx, &id, &parent, &opts)?;
                 let amended = cx
                     .store
@@ -721,6 +740,7 @@ impl Kucoin {
                         amended,
                         id: parent.id,
                         options: opts,
+                        stop_limit,
                         filled,
                         polls: 0,
                         read_retries: 0,
@@ -1261,7 +1281,7 @@ impl Kucoin {
                         if full_position_stop && canceled && !fully_filled
                             || !full_position_stop && replacement.options.amount > 0.0
                         {
-                            let mut step = self.format_placement(cx, &replacement.options)?;
+                            let mut step = self.format_placement(cx, &replacement.options, replacement.stop_limit)?;
                             step.call = Call::PlaceAfterCancel {
                                 id: replacement.id.clone(),
                                 filled,
