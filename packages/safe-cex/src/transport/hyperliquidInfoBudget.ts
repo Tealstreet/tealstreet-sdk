@@ -9,9 +9,13 @@ const STORAGE_COOLDOWN_MS = 30_000;
 const DISPATCH_POLL_MS = 100;
 const DISPATCH_LEASE_MS = 2000;
 const MAX_DISPATCH_WAITERS = 128;
+// Candle and history reads leave this much of the bucket to every other read, and
+// queue behind them, until they have waited long enough to compete in arrival order.
+const DEFERRED_RESERVE_MS = 120 * MS_PER_WEIGHT;
+const MAX_DEFER_MS = 10_000;
 const dispatchRealm = Math.random().toString(36).slice(2);
 let dispatchSequence = 0;
-type DispatchWaiter = { id: string; until: number };
+type DispatchWaiter = { id: string; until: number; deferrable?: boolean; since?: number };
 let indexedDBOpenedInRealm = false;
 type BudgetState = {
   nextAt: number;
@@ -52,7 +56,14 @@ function boundedState(raw: Partial<BudgetState> = {}): BudgetState {
               row && typeof row.id === 'string' && row.id.length <= 64 && Number.isFinite(row.until) && row.until > now,
           )
           .slice(0, MAX_DISPATCH_WAITERS)
-          .map((row) => ({ id: row.id, until: Math.min(row.until, now + DISPATCH_LEASE_MS) }))
+          .map((row) => ({
+            id: row.id,
+            until: Math.min(row.until, now + DISPATCH_LEASE_MS),
+            ...(row.deferrable === true && {
+              deferrable: true,
+              since: Number.isFinite(row.since) ? Math.min(row.since!, now) : now,
+            }),
+          }))
       : [],
     nextAt: timestamp(raw.nextAt, MAX_PAUSE_MS + BUCKET_WINDOW_MS),
     pausedUntil: timestamp(raw.pausedUntil, MAX_PAUSE_MS),
@@ -274,13 +285,23 @@ const LIST_READS = new Set([
   'validatorStats',
 ]);
 
-export function hyperliquidInfoWeight(body: string | undefined): number {
-  let type: unknown;
+function infoType(body: string | undefined): unknown {
   try {
-    type = JSON.parse(body ?? '{}').type;
+    return JSON.parse(body ?? '{}').type;
   } catch {
-    return 20;
+    return undefined;
   }
+}
+
+/** Candle and history pages may wait for fence, amend and account reads. */
+export function hyperliquidInfoDeferrable(body: string | undefined): boolean {
+  const type = infoType(body);
+  return type === 'candleSnapshot' || (typeof type === 'string' && LIST_READS.has(type));
+}
+
+export function hyperliquidInfoWeight(body: string | undefined): number {
+  const type = infoType(body);
+  if (type === undefined) return 20;
   if (type === 'userRole') return 60;
   if (typeof type === 'string' && LOW_WEIGHT.has(type)) return 2;
   // Reserve the SDK's maximum 2,000-row history page or 5,000-candle reply before sending.
@@ -306,7 +327,13 @@ function waitUntil(at: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export type InfoBudgetGrant = { generation: number; weight: number };
+export type InfoBudgetGrant = { generation: number; weight: number; deferrable?: boolean; since?: number };
+
+/** A deferrable read still inside its deferral leaves the reserve to every other read. */
+const deferred = (row: { deferrable?: boolean; since?: number }, now: number) =>
+  row.deferrable === true && now - (row.since ?? now) < MAX_DEFER_MS;
+const admissionAt = (state: BudgetState, cost: number, now: number, holdsReserve: boolean) =>
+  Math.max(now, state.nextAt + cost - BUCKET_WINDOW_MS + (holdsReserve ? DEFERRED_RESERVE_MS : 0), state.pausedUntil);
 
 /** Admission precedes managed HTTP claim; only a physical handoff consumes tokens. */
 export class HyperliquidInfoBudget {
@@ -319,13 +346,16 @@ export class HyperliquidInfoBudget {
     signal: AbortSignal,
   ): Promise<InfoBudgetGrant> {
     const weight = hyperliquidInfoWeight(body);
+    const deferrable = hyperliquidInfoDeferrable(body);
+    const since = Date.now();
     for (;;) {
       signal.throwIfAborted();
       const grant = await this.backend.update(origin, (state) => {
         signal.throwIfAborted();
         const cost = weight * MS_PER_WEIGHT;
+        const now = Date.now();
         // Virtual finish time allows one minute's tokens to burst, then refills by weight.
-        const at = Math.max(Date.now(), state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
+        const at = admissionAt(state, cost, now, deferred({ deferrable, since }, now));
         if (at >= deadline) throw new HttpPreparationError('timedOut');
         return { at, generation: state.generation };
       });
@@ -333,7 +363,7 @@ export class HyperliquidInfoBudget {
       signal.throwIfAborted();
       const current = await this.backend.update(origin, (state) => state.generation === grant.generation);
       if (Date.now() >= deadline) throw new HttpPreparationError('timedOut');
-      if (current) return { generation: grant.generation, weight };
+      if (current) return { generation: grant.generation, weight, ...(deferrable && { deferrable, since }) };
     }
   }
 
@@ -347,6 +377,7 @@ export class HyperliquidInfoBudget {
   ): Promise<T> {
     const cost = grant.weight * MS_PER_WEIGHT;
     const waiterId = `${dispatchRealm}:${++dispatchSequence}`;
+    const self = grant.deferrable ? { deferrable: true, since: grant.since ?? Date.now() } : {};
     let charged = false;
     let dispatched = false;
     const active = () => {
@@ -361,20 +392,18 @@ export class HyperliquidInfoBudget {
           // Once this realm joined IDB, local-only sends could exceed the peers' budget.
           if (!shared && indexedDBOpenedInRealm) return { at: retryStorageAt() };
           const now = Date.now();
-          const at = Math.max(now, state.nextAt + cost - BUCKET_WINDOW_MS, state.pausedUntil);
+          const at = admissionAt(state, cost, now, deferred(self, now));
           if (at >= deadline || state.generation !== grant.generation) throw new HttpPreparationError('timedOut');
           const queue = (state.dispatchQueue ?? []).filter((row) => row.until > now);
           const existing = queue.find((row) => row.id === waiterId);
           if (!existing && queue.length >= MAX_DISPATCH_WAITERS)
             return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
           // Leases order dispatch attempts across realms without charging queued work.
-          state.dispatchQueue = existing
-            ? queue.map((row) =>
-                row.id === waiterId ? { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS) } : row,
-              )
-            : [...queue, { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS) }];
-          if (state.dispatchQueue[0]?.id !== waiterId || at > now)
-            return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
+          const lease = { id: waiterId, until: Math.min(deadline, now + DISPATCH_LEASE_MS), ...self };
+          state.dispatchQueue = existing ? queue.map((row) => (row.id === waiterId ? lease : row)) : [...queue, lease];
+          // The oldest waiter that is not deferring goes first; deferred reads keep FIFO among themselves.
+          const head = state.dispatchQueue.find((row) => !deferred(row, now)) ?? state.dispatchQueue[0];
+          if (head?.id !== waiterId || at > now) return { at: Math.min(deadline, now + DISPATCH_POLL_MS) };
           state.nextAt = Math.max(now, state.nextAt) + cost;
           state.dispatchQueue = state.dispatchQueue.filter((row) => row.id !== waiterId);
           return undefined;

@@ -643,8 +643,10 @@ describe('managed transport admission', () => {
         return prepared.bind(request).dispatch();
       };
       try {
-        const initial = Math.floor(1000 / weight);
-        const delay = ((initial + 1) * weight - 1000) * 60;
+        // Candle reads burst only to the bucket less the 120 weight they leave to other reads.
+        const capacity = type === 'candleSnapshot' ? 1000 - 120 : 1000;
+        const initial = Math.floor(capacity / weight);
+        const delay = ((initial + 1) * weight - capacity) * 60;
         for (let request = 1; request <= initial; request++) await execute(a, { ...packet, request });
         const next = execute(b, { ...packet, request: initial + 1 });
         await flushDatabase();
@@ -1043,4 +1045,80 @@ it('does not require crypto.randomUUID to schedule ordinary reads', async () => 
   const sent = vi.fn();
   await client().admitDispatch(ORIGIN, { generation: 0, weight: 20 }, Date.now() + 20_000, signal(), sent);
   expect(sent).toHaveBeenCalledOnce();
+});
+
+describe('fence and amend reads ahead of candle and history reads', () => {
+  const CANDLES = JSON.stringify({ type: 'candleSnapshot', req: { coin: 'BTC', interval: '1m' } });
+  const HISTORY = JSON.stringify({ type: 'userFillsByTime', user: 'local-only', startTime: 0 });
+  const STATUS = JSON.stringify({ type: 'orderStatus', user: 'local-only', oid: 1 });
+  const pump = async (ms: number) => {
+    for (let step = 0; step < ms / 100; step++) {
+      await vi.advanceTimersByTimeAsync(100);
+      await flushDatabase();
+    }
+  };
+  const read = (budget: HyperliquidInfoBudget, body: string, sent: string[], label: string, deadlineMs = 30_000) =>
+    budget
+      .wait(ORIGIN, body, Date.now() + deadlineMs, signal())
+      .then((grant) => budget.admitDispatch(ORIGIN, grant, Date.now() + deadlineMs, signal(), () => sent.push(label)));
+
+  it('classifies only candle and history reads as deferrable', () => {
+    expect(budgetModule.hyperliquidInfoDeferrable(CANDLES)).toBe(true);
+    expect(budgetModule.hyperliquidInfoDeferrable(HISTORY)).toBe(true);
+    for (const type of ['orderStatus', 'frontendOpenOrders', 'userRole', 'clearinghouseState', 'metaAndAssetCtxs'])
+      expect(budgetModule.hyperliquidInfoDeferrable(JSON.stringify({ type }))).toBe(false);
+  });
+
+  it('candle reads leave the reserve, so an amend read behind a candle burst sends at once', async () => {
+    const a = client();
+    const sent: string[] = [];
+    const candles = Array.from({ length: 12 }, (_, index) => read(a, CANDLES, sent, `candle${index}`));
+    await pump(1000);
+    expect(sent).toEqual(Array.from({ length: 8 }, (_, index) => `candle${index}`));
+    const amend = Promise.all([read(a, STATUS, sent, 'status'), read(a, ORDERS, sent, 'orders')]);
+    await pump(1000);
+    expect(sent.slice(8)).toEqual(['status', 'orders']);
+    await amend;
+    await pump(30_000);
+    await Promise.all(candles);
+    expect(sent).toHaveLength(14);
+  });
+
+  it('a newer amend read overtakes an older queued history read from another realm', async () => {
+    const a = client();
+    await spend(a);
+    const sent: string[] = [];
+    const deadline = Date.now() + 30_000;
+    const history = { generation: 0, weight: 120, deferrable: true, since: Date.now() };
+    const older = a.admitDispatch(ORIGIN, history, deadline, signal(), () => sent.push('history'));
+    await pump(200);
+    vi.resetModules();
+    const realm = await import('./hyperliquidInfoBudget');
+    const b = new realm.HyperliquidInfoBudget(new realm.IndexedInfoBudgetStorage(factory));
+    const newer = b.admitDispatch(ORIGIN, { generation: 0, weight: 20 }, deadline, signal(), () => sent.push('orders'));
+    await pump(1500);
+    expect(sent).toEqual(['orders']);
+    await pump(20_000);
+    await Promise.all([older, newer]);
+    expect(sent).toEqual(['orders', 'history']);
+  });
+
+  it('a candle read that has waited 10 s competes in arrival order and is never starved', async () => {
+    const a = client();
+    await spend(a);
+    const sent: string[] = [];
+    const candle = read(a, CANDLES, sent, 'candle', 40_000);
+    const statuses: Promise<unknown>[] = [];
+    // Fence reads arriving at the full refill rate would otherwise hold every token forever.
+    for (let tick = 0; tick < 25; tick++) {
+      statuses.push(read(a, ORDERS, sent, `orders${tick}`, 40_000));
+      await pump(1200);
+    }
+    const at = sent.indexOf('candle');
+    expect(at).toBeGreaterThan(0);
+    // Deferred for 10 s, then 104 weight refills (6.24 s) ahead of every later read.
+    expect(at).toBeLessThanOrEqual(Math.ceil((10_000 + 6240) / 1200) + 1);
+    await pump(40_000);
+    await Promise.all([candle, ...statuses]);
+  });
 });
