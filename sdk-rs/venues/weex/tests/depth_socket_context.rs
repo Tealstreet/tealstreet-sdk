@@ -15,7 +15,7 @@ use std::collections::{HashMap, VecDeque};
 use support::setup::Options;
 
 const NOW: f64 = 1_000.;
-const LIMIT: f64 = 20_000.;
+const LIMIT: f64 = 60_000.;
 const A: &str = "BTCUSDT";
 const B: &str = "ETHUSDT";
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":3},{"symbol":"ETHUSDT","baseAsset":"ETH","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":2,"quantityPrecision":3}]}"#;
@@ -286,13 +286,13 @@ fn exact_cleanup(out: &Trace, issued: Option<&Issued>) {
 }
 
 #[test]
-fn depth_waits_for_prepare_with_primary_unsigned_twenty_second_bound() {
+fn depth_waits_for_prepare_with_primary_unsigned_discovery_bound() {
     let (mut d, _) = public();
     let out = d.subscribe(NOW + 1., A, true);
     let issued = prepared(&out);
     assert_eq!(issued.intent, RoutingIntent::Primary);
     assert_eq!(issued.deadline, NOW + 1. + LIMIT);
-    assert_eq!(issued.request.timeout_ms, Some(20_000));
+    assert_eq!(issued.request.timeout_ms, Some(LIMIT as u32));
     assert_eq!(
         issued.request.url,
         "https://api-contract.weex.com/capi/v3/market/depth?limit=200&symbol=BTCUSDT"
@@ -1139,7 +1139,8 @@ fn physical_depth_timeout(held: bool) {
             }
             Action::Notice(safe_cex_engine::Notice::Event(event))
                 if event.code == safe_cex_engine::log::code::REQUEST_FAILED
-                    && event.message == "WEEX: HTTP request timed out" =>
+                    && event.message
+                        == "WEEX: HTTP request timed out (class=discovery budget=60000ms elapsed=60000ms)" =>
             {
                 diagnostics += 1
             }
