@@ -269,7 +269,10 @@ fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
                 "KuCoin requires positive native lots (zero only for full-position stops)".into(),
             );
         }
-        if order.kind == OrderType::Limit && !order.price.is_some_and(positive) {
+        if (order.kind == OrderType::Limit
+            || advanced(order.kind) && order.trigger_price.is_some() && order.price.is_some())
+            && !order.price.is_some_and(positive)
+        {
             return Err("KuCoin limit price must be positive".into());
         }
         if advanced(order.kind) && !order.trigger_price.or(order.price).is_some_and(positive) {
@@ -283,7 +286,10 @@ fn preflight(orders: &[PlaceOrderOpts]) -> Result<(), String> {
         {
             return Err("KuCoin attached stop prices must be positive".into());
         }
-        if order.kind != OrderType::Limit && order.time_in_force == Some(TimeInForce::PostOnly) {
+        if order.kind != OrderType::Limit
+            && !(advanced(order.kind) && order.trigger_price.is_some() && order.price.is_some())
+            && order.time_in_force == Some(TimeInForce::PostOnly)
+        {
             return Err("KuCoin post-only requires a limit order".into());
         }
         if order.take_profit.is_some()
@@ -360,9 +366,10 @@ impl Kucoin {
             .setting(&order.symbol)
             .ok_or("KuCoin account settings unavailable")?;
         for price in [
-            (order.kind == OrderType::Limit)
-                .then_some(order.price)
-                .flatten(),
+            (order.kind == OrderType::Limit
+                || advanced(order.kind) && order.trigger_price.is_some())
+            .then_some(order.price)
+            .flatten(),
             advanced(order.kind)
                 .then_some(order.trigger_price.or(order.price))
                 .flatten(),
@@ -385,6 +392,9 @@ impl Kucoin {
             return Err("KuCoin native lots are outside market limits".into());
         }
         let is_stop = advanced(order.kind);
+        let limit = order.kind == OrderType::Limit
+            || is_stop && order.trigger_price.is_some() && order.price.is_some();
+        let close = order.close.unwrap_or(is_stop && order.amount == 0.0);
         let reduce = order.reduce_only.unwrap_or(is_stop);
         let closing = reduce || is_stop;
         let long = (order.side == OrderSide::Buy) != closing;
@@ -424,20 +434,15 @@ impl Kucoin {
         let has_attached = up.is_some() || down.is_some();
         let payload = Placement {
             symbol: market.id.clone(),
-            kind: if order.kind == OrderType::Market || is_stop {
-                "market"
-            } else {
-                "limit"
-            },
+            kind: if limit { "limit" } else { "market" },
             side: if order.side == OrderSide::Buy {
                 "buy"
             } else {
                 "sell"
             },
             client_oid: oid,
-            price: (!is_stop && order.kind == OrderType::Limit)
-                .then(|| price(order.price.unwrap())),
-            size: (order.amount > 0.0).then(|| num::format(amount)),
+            price: limit.then(|| price(order.price.unwrap())),
+            size: (!close && order.amount > 0.0).then(|| num::format(amount)),
             leverage: (!is_stop).then_some(leverage.max(1.0)),
             reduce_only: reduce,
             margin_mode: match margin {
@@ -448,15 +453,13 @@ impl Kucoin {
                 .store
                 .hedged()
                 .then_some(if long { "LONG" } else { "SHORT" }),
-            time_in_force: (!is_stop && order.kind == OrderType::Limit).then_some(
-                match order.time_in_force {
-                    Some(TimeInForce::ImmediateOrCancel) => "IOC",
-                    Some(TimeInForce::FillOrKill) => "FOK",
-                    _ => "GTC",
-                },
-            ),
+            time_in_force: limit.then_some(match order.time_in_force {
+                Some(TimeInForce::ImmediateOrCancel) => "IOC",
+                Some(TimeInForce::FillOrKill) => "FOK",
+                _ => "GTC",
+            }),
             post_only: (order.time_in_force == Some(TimeInForce::PostOnly)).then_some(true),
-            close_order: (is_stop && order.amount == 0.0).then_some(true),
+            close_order: order.close.or(close.then_some(true)),
             stop: is_stop.then_some(match (order.kind, order.side) {
                 (OrderType::StopLoss, OrderSide::Buy)
                 | (OrderType::TakeProfit, OrderSide::Sell) => "up",
@@ -554,6 +557,17 @@ impl Kucoin {
         if virtual_stop && amount.is_some() {
             return Err("KuCoin attached stop size is controlled by its parent".into());
         }
+        if parent.close == Some(true) && amount.is_some() {
+            return Err("KuCoin full-position stop size is controlled by closeOrder".into());
+        }
+        let stop_limit = advanced(parent.kind)
+            .then(|| {
+                parent
+                    .extra
+                    .as_ref()
+                    .and_then(|e| e.conditional_order_price)
+            })
+            .flatten();
         let native = parent
             .extra
             .as_ref()
@@ -566,7 +580,9 @@ impl Kucoin {
             symbol: parent.symbol.clone(),
             kind: parent.kind,
             side: parent.side,
-            amount: if virtual_stop {
+            amount: if parent.close == Some(true) {
+                0.0
+            } else if virtual_stop {
                 native
             } else {
                 amount
@@ -581,10 +597,12 @@ impl Kucoin {
             },
             price: if virtual_stop {
                 Some(parent.price)
+            } else if let Some(limit) = stop_limit {
+                Some(limit)
             } else {
                 price.or(Some(parent.price))
             },
-            trigger_price: None,
+            trigger_price: stop_limit.map(|_| price.unwrap_or(parent.price)),
             max_slippage_pct: None,
             stp_mode: None,
             bybit_bbo: None,
@@ -638,7 +656,7 @@ impl Kucoin {
                 opts.stop_loss
             }
         } else {
-            opts.price
+            opts.trigger_price.or(opts.price)
         }
         .map(|p| num::adjust(p, market.precision.price))
         .ok_or("KuCoin amendment has no trigger")?;
