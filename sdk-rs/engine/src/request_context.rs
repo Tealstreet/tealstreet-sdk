@@ -439,10 +439,11 @@ pub struct Context {
     leg: u64,
     operation: Operation,
     request_class: crate::request_budget::RequestClass,
+    #[cfg(not(target_arch = "wasm32"))]
     created_at: f64,
-    // Upper bound reserved before a Background request's semantic bytes exist.
-    // The physical read is classified once against this original issuance time.
-    background_budget_seconds: u8,
+    // Precomputed at logical issuance, never reset by queueing or retries.
+    // Discovery keeps the logical bound; live reads use this shorter ceiling.
+    short_read_deadline: f64,
     credential: Option<Credential>,
     /// Egress declared at issuance; it may only confirm a credential's intent.
     egress: Option<Egress>,
@@ -501,8 +502,9 @@ impl Context {
                 crate::request_budget::RequestClass::Read
             },
             credential,
+            #[cfg(not(target_arch = "wasm32"))]
             created_at,
-            background_budget_seconds: 0,
+            short_read_deadline: deadline,
             egress: None,
             deadline,
             pacing,
@@ -518,20 +520,16 @@ impl Context {
         self.request_class = class.for_operation(self.operation);
     }
 
-    pub(crate) fn set_background_budget(&mut self, seconds: u8) {
-        self.background_budget_seconds = seconds;
+    pub(crate) fn set_background_budget(&mut self, issued_at: f64) {
+        self.short_read_deadline = self.deadline.min(issued_at + 20_000.);
     }
 
     pub(crate) fn background_deadline(&self, class: crate::request_budget::RequestClass) -> f64 {
-        if self.background_budget_seconds == 0 {
-            return self.deadline;
-        }
-        let budget = if class == crate::request_budget::RequestClass::Discovery {
-            u32::from(self.background_budget_seconds) * 1_000
+        if class == crate::request_budget::RequestClass::Discovery {
+            self.deadline
         } else {
-            class.budget_ms()
-        };
-        self.deadline.min(self.created_at + f64::from(budget))
+            self.short_read_deadline
+        }
     }
 
     /// Capture egress before issuer binding: unsigned reads declare it, a

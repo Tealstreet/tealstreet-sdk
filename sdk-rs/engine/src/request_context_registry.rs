@@ -2370,18 +2370,13 @@ impl crate::engine::CoreCx<'_> {
             policy
         };
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        let background_seconds = if background || default_discovery {
-            (policy.timeout_ms / 1_000) as u8
-        } else {
-            0
-        };
         let mut context = self
             .io
             .core
             .request_contexts
             .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
         if background || default_discovery {
-            context.set_background_budget(background_seconds);
+            context.set_background_budget(self.now);
             *self
                 .io
                 .core

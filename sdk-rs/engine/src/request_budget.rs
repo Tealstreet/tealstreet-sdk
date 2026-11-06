@@ -413,19 +413,32 @@ mod tests {
             None,
         )
         .unwrap();
-        context.set_background_budget(60);
+        context.set_background_budget(100.);
         assert_eq!(context.background_deadline(RequestClass::Read), 20_100.);
         assert_eq!(
             context.background_deadline(RequestClass::Discovery),
             60_100.
         );
-        context.set_background_budget(90);
+        context.set_background_budget(100.);
         assert_eq!(context.background_deadline(RequestClass::Read), 20_100.);
         assert_eq!(
             context.background_deadline(RequestClass::Discovery),
             60_100.
         );
-        context.set_background_budget(0);
-        assert_eq!(context.background_deadline(RequestClass::Read), 60_100.);
+        let explicit = Context::new(
+            Owner::Background { generation: 1 },
+            3,
+            Operation::Read,
+            None,
+            100.,
+            5_100.,
+            None,
+        )
+        .unwrap();
+        assert_eq!(explicit.background_deadline(RequestClass::Read), 5_100.);
+        assert_eq!(
+            explicit.background_deadline(RequestClass::Discovery),
+            5_100.
+        );
     }
 }
