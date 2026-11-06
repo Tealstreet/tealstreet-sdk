@@ -252,7 +252,7 @@ impl<P> Cx<'_, P> {
             attempts: first.attempts.into(),
             retry_window: RetryWindow::FreshAttempt,
         });
-        let (plan, _) = self.admit_plan_root(
+        let (plan, _) = self.core().admit_plan_root(
             preflight,
             PreparedAdmission {
                 schedule,

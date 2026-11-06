@@ -191,6 +191,8 @@ pub struct NativeOrder {
     pub sl_execution: String,
     pub tp_limit: f64,
     pub sl_limit: f64,
+    /// Reduce-only came from the venue's row or this session's own placement, not a default.
+    pub reduce_reconciled: bool,
 }
 pub struct OrderReadProgress {
     serial: u64,
@@ -1570,17 +1572,21 @@ impl BitunixFutures {
         ws: bool,
     ) -> (Vec<Order>, Vec<(String, NativeOrder)>) {
         let raw = o.order_id.to_string();
-        let reduce = o
+        let known = o
             .reduce_only
             .as_ref()
             .and_then(Supported::boolean)
-            .unwrap_or_else(|| {
+            .or_else(|| self.account.reduces.get(o.client_id.as_ref()).copied())
+            // The private channel omits reduceOnly on UPDATE: keep this order's reconciled value.
+            .or_else(|| {
                 self.account
-                    .reduces
-                    .get(o.client_id.as_ref())
-                    .copied()
-                    .unwrap_or(false)
+                    .native
+                    .get(&raw)
+                    .filter(|meta| meta.reduce_reconciled)
+                    .and_then(|_| cx.store.order(&raw))
+                    .map(|row| row.reduce_only)
             });
+        let reduce = known.unwrap_or(false);
         let side = if tpsl {
             cx.store
                 .positions()
@@ -1628,6 +1634,7 @@ impl BitunixFutures {
             sl_execution: o.sl_order_type.to_ascii_uppercase(),
             tp_limit: o.tp_order_price.0,
             sl_limit: o.sl_order_price.0,
+            reduce_reconciled: known.is_some(),
         };
         let base = Order {
             id: raw.clone(),

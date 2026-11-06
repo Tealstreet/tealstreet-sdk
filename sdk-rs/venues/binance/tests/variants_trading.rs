@@ -6,6 +6,13 @@ use safe_cex_venue_binance::Variant;
 use support::Harness;
 
 fn ready(variant: Variant) -> Harness {
+    let mut h = ready_keeping_reads(variant);
+    h.requests.clear();
+    h
+}
+
+/// Markets loaded; the private startup reads are still pending.
+fn ready_keeping_reads(variant: Variant) -> Harness {
     let mut h = Harness::started(Options {
         variant,
         key: Some("key".into()),
@@ -35,7 +42,6 @@ fn ready(variant: Variant) -> Harness {
         );
         h.respond(&format!("{prefix}/premiumIndex"),200,r#"[{"symbol":"BTCUSD_PERP","markPrice":"100","indexPrice":"100","lastFundingRate":"0","nextFundingTime":1}]"#);
     }
-    h.requests.clear();
     h
 }
 fn order(variant: Variant, fields: &str) -> PlaceOrderOpts {
@@ -804,4 +810,105 @@ fn a_signature_code_on_an_unproven_status_is_never_resent() {
     assert!(h.requests.is_empty(), "no resend of an unproven write");
     let (_, error) = h.failures.last().expect("the write fails");
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+}
+
+/// COIN-M refuses a trailing level past its 10% callback ceiling, or one that rounds to
+/// 0%, instead of clamping it.
+#[test]
+fn coin_m_trailing_outside_the_callback_range_is_refused_not_clamped() {
+    for (price, rate) in [(85.0, None), (99.96, None), (98.0, Some("2"))] {
+        let mut h = ready(Variant::CoinM);
+        let mut trailing = order(Variant::CoinM, r#""reduceOnly":true"#);
+        trailing.kind = safe_cex_engine::model::OrderType::TrailingStopLoss;
+        trailing.side = safe_cex_engine::model::OrderSide::Sell;
+        trailing.price = Some(price);
+        place(&mut h, vec![trailing]);
+        let sent = h.requests.iter().find(|r| r.url.contains("/dapi/v1/order"));
+        match rate {
+            Some(rate) => {
+                let sent = sent.expect("an in-range trailing stop is placed");
+                assert_eq!(param(&sent.url, "callbackRate").as_deref(), Some(rate));
+            }
+            None => {
+                assert!(sent.is_none(), "{price}: {:?}", h.paths());
+                let refused = h.result(77).unwrap().as_ref().unwrap_err();
+                assert!(refused.contains("0.1%-10% callback range"), "{refused}");
+            }
+        }
+    }
+}
+
+/// COIN-M lists trailing stops in its regular snapshot with their native rate: an
+/// in-range amend still cancels and replaces, as on master.
+#[test]
+fn coin_m_trailing_stop_from_the_snapshot_can_be_amended() {
+    let mut h = ready_keeping_reads(Variant::CoinM);
+    h.respond(
+        "/dapi/v1/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/dapi/v1/openOrders",200,r#"[{"avgPrice":"0","clientOrderId":"coin-trail","cumBase":"0","executedQty":"0","orderId":77,"origQty":"2","origType":"TRAILING_STOP_MARKET","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","status":"NEW","stopPrice":"98","closePosition":false,"symbol":"BTCUSD_PERP","time":1,"timeInForce":"GTC","type":"TRAILING_STOP_MARKET","updateTime":1,"workingType":"CONTRACT_PRICE","priceProtect":false,"priceRate":"1.5","activatePrice":"103"}]"#);
+    h.requests.clear();
+    assert!(h.engine.store().order("77").is_some());
+    h.event(Event::Command(Command::AmendOrder {
+        command: 72,
+        id: "77".into(),
+        price: Some(97.0),
+        amount: None,
+    }));
+    let cancel = h.take("/dapi/v1/order");
+    assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+}
+
+/// COIN-M ignores stopPrice for trailing stops, so a native row may list it as 0: after
+/// a refused replacement the put-back still restores the captured rate and activation.
+#[test]
+fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
+    for stop in ["98", "0"] {
+        let mut h = ready_keeping_reads(Variant::CoinM);
+        h.respond(
+            "/dapi/v1/positionSide/dual",
+            200,
+            r#"{"dualSidePosition":false}"#,
+        );
+        let row = r#"[{"avgPrice":"0","clientOrderId":"coin-trail","cumBase":"0","executedQty":"0","orderId":77,"origQty":"2","origType":"TRAILING_STOP_MARKET","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","status":"NEW","stopPrice":"98","closePosition":false,"symbol":"BTCUSD_PERP","time":1,"timeInForce":"GTC","type":"TRAILING_STOP_MARKET","updateTime":1,"workingType":"CONTRACT_PRICE","priceProtect":false,"priceRate":"1.5","activatePrice":"103"}]"#;
+        h.respond(
+            "/dapi/v1/openOrders",
+            200,
+            &row.replace(r#""stopPrice":"98""#, &format!(r#""stopPrice":"{stop}""#)),
+        );
+        h.requests.clear();
+        h.event(Event::Command(Command::AmendOrder {
+            command: 72,
+            id: "77".into(),
+            price: Some(97.0),
+            amount: None,
+        }));
+        let cancel = h.take("/dapi/v1/order");
+        assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+        h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":77,"clientOrderId":"coin-trail","status":"CANCELED","origQty":"2","executedQty":"0"}"#);
+        let replacement = h.take("/dapi/v1/order");
+        assert_eq!(
+            param(&replacement.url, "callbackRate").as_deref(),
+            Some("3")
+        );
+        h.reply(
+            replacement.id,
+            400,
+            "",
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let put_back = h.take("/dapi/v1/order");
+        assert_eq!(
+            put_back.method,
+            safe_cex_engine::Method::Post,
+            "stopPrice {stop}"
+        );
+        assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+        assert_eq!(
+            param(&put_back.url, "activationPrice").as_deref(),
+            Some("103")
+        );
+    }
 }

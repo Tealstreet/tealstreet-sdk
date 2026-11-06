@@ -4940,3 +4940,191 @@ fn spot_attached_stop_loss_amend_omits_derivative_trigger_reference() {
     );
     assert!(!h.has_request("/v5/order/cancel"));
 }
+
+fn stop_row(trigger: &str, qty: &str) -> String {
+    format!(
+        r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"stop","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"Stop","triggerPrice":"{trigger}","triggerBy":"MarkPrice","side":"Sell","price":"0","qty":"{qty}","leavesQty":"{qty}","reduceOnly":true,"closeOnTrigger":true}}]}}"#
+    )
+}
+
+fn amend_stop(h: &mut Harness, command: u32, price: f64, amount: Option<f64>) -> String {
+    h.command(Command::AmendOrder {
+        command,
+        id: "stop".into(),
+        price: Some(price),
+        amount,
+    });
+    if h.has_request("/v5/position/list") {
+        resolve_mode(h, "BTCUSDT");
+    }
+    let request = h.take("/v5/order/amend");
+    let body = request.body.clone().unwrap_or_default();
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    body
+}
+
+/// A stop moved to the trigger it already has: Bybit answers "order not modified"
+/// (prod, release 7dd55432) and the edit is done, not an error.
+#[test]
+fn a_trigger_amend_equal_to_the_stored_stop_is_done_when_not_modified() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("60000", "1"));
+    let body = amend_stop(&mut h, 3, 60000.0, None);
+    assert!(body.contains(r#""triggerPrice":"60000""#), "{body}");
+    assert!(h.result(3).unwrap().is_ok(), "{:?}", h.result(3));
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("60000", "1"));
+    amend_stop(&mut h, 4, 60000.0, Some(1.0));
+    assert!(h.result(4).unwrap().is_ok(), "{:?}", h.result(4));
+}
+
+/// Anything the stored stop does not already hold stays Bybit's refusal.
+#[test]
+fn a_trigger_amend_that_differs_from_the_stored_stop_stays_refused() {
+    for (price, amount) in [(60100.0, None), (60000.0, Some(2.0))] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        amend_stop(&mut h, 5, price, amount);
+        let result = h.result(5).unwrap();
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|e| e.contains("order not modified")),
+            "{price} {amount:?}: {result:?}"
+        );
+    }
+}
+
+fn pending_trigger_amend(h: &mut Harness, price: f64) -> safe_cex_engine::HttpRequest {
+    h.command(Command::AmendOrder {
+        command: 87,
+        id: "stop".into(),
+        price: Some(price),
+        amount: None,
+    });
+    if h.has_request("/v5/position/list") {
+        resolve_mode(h, "BTCUSDT");
+    }
+    h.take("/v5/order/amend")
+}
+
+/// The no-op needs the whole answer to agree: another order's echo, an item row, or a
+/// server error keeps it the refusal it is.
+#[test]
+fn a_trigger_no_op_needs_a_clean_whole_answer() {
+    for (status, reply) in [
+        (
+            200,
+            r#"{"retCode":10001,"retMsg":"order not modified","result":{"orderId":"foreign"},"retExtInfo":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{"list":[{"code":10001,"msg":"invalid trigger"}]}}"#,
+        ),
+        (
+            500,
+            r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        let request = pending_trigger_amend(&mut h, 60000.0);
+        h.reply(request.id, status, reply);
+        assert!(
+            h.result(87).unwrap().is_err(),
+            "{reply}: {:?}",
+            h.result(87)
+        );
+    }
+}
+
+/// Only a trigger-bearing row stores its trigger: once the same id is an open limit
+/// (it triggered), its execution price is never trigger proof.
+#[test]
+fn a_trigger_no_op_never_reads_an_active_limits_price_as_its_trigger() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("59000", "1"));
+    let request = pending_trigger_amend(&mut h, 60000.0);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"stop","orderStatus":"New","orderType":"Limit","stopOrderType":"UNKNOWN","triggerPrice":"0","side":"Sell","price":"60000","qty":"1","leavesQty":"1","reduceOnly":true,"closeOnTrigger":false}]}"#);
+    assert_eq!(
+        h.engine.store().order("stop").unwrap().kind,
+        OrderType::Limit
+    );
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    assert!(h.result(87).unwrap().is_err(), "{:?}", h.result(87));
+}
+
+/// The comparison reads the store when the answer lands: a stop moved meanwhile keeps
+/// the refusal.
+#[test]
+fn a_trigger_no_op_compares_the_store_as_it_stands_when_answered() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("60000", "1"));
+    let request = pending_trigger_amend(&mut h, 60000.0);
+    h.message("/v5/private", &stop_row("59000", "1"));
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    assert!(h.result(87).unwrap().is_err(), "{:?}", h.result(87));
+}
+
+fn not_modified_with(result: &str, ext: &str) -> String {
+    format!(
+        r#"{{"retCode":10001,"retMsg":"order not modified","result":{result},"retExtInfo":{ext}}}"#
+    )
+}
+
+/// Only a provably clean answer is a no-op: unreadable identities, duplicated native
+/// ids or item lists are never read as clean absence.
+#[test]
+fn a_trigger_no_op_rejects_unreadable_or_duplicated_answers() {
+    for (result, ext) in [
+        (r#"{"orderId":"foreign","orderLinkId":123}"#, "{}"),
+        (r#"{"orderId":"foreign","orderId":"stop"}"#, "{}"),
+        (r#"{"orderId":123}"#, "{}"),
+        (
+            "{}",
+            r#"{"list":[{"code":10001,"msg":"invalid trigger"}],"list":[]}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        let request = pending_trigger_amend(&mut h, 60000.0);
+        h.reply(request.id, 200, &not_modified_with(result, ext));
+        assert!(
+            h.result(87).unwrap().is_err(),
+            "{result} {ext}: {:?}",
+            h.result(87)
+        );
+    }
+}
+
+/// A clean empty answer, or one echoing only its own order, is still done.
+#[test]
+fn a_trigger_no_op_accepts_a_clean_empty_or_own_echo() {
+    for (result, ext) in [
+        ("{}", "{}"),
+        (r#"{"orderId":"stop"}"#, "{}"),
+        ("{}", r#"{"list":[]}"#),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        let request = pending_trigger_amend(&mut h, 60000.0);
+        h.reply(request.id, 200, &not_modified_with(result, ext));
+        assert!(
+            h.result(87).unwrap().is_ok(),
+            "{result} {ext}: {:?}",
+            h.result(87)
+        );
+    }
+}
