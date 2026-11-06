@@ -31,6 +31,7 @@ pub struct Trading {
     amend_wait: Option<(TimerId, AmendRead)>,
     amend_issuing: bool,
     amend_retry: Option<(TimerId, String, AmendRead)>,
+    retired_intent_timers: Vec<TimerId>,
 }
 /// A read continuation is bound to one genuine preflight and its original bound.
 #[derive(Clone, Copy, PartialEq)]
@@ -752,6 +753,7 @@ impl Hyperliquid {
         Ok((wires, grouping))
     }
     pub(crate) fn pump_trades(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.clear_retired_intent_timers(cx);
         if self.trading.inflight
             || self.trading.builder_wait.is_some()
             || self.trading.amend_wait.is_some()
@@ -1627,6 +1629,7 @@ impl Hyperliquid {
         }
     }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.clear_retired_intent_timers(cx);
         if self.expire_trade_intent(cx, timer) {
             return;
         }
