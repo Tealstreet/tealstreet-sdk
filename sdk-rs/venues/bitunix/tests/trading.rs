@@ -1106,3 +1106,33 @@ fn a_parent_that_filled_during_the_fallback_fails_the_tpsl_edit() {
         assert!(error.contains("filled before its TP/SL edit"), "{error}");
     }
 }
+
+// The private channel omits reduceOnly, and the amend's fallback re-places the order with
+// it: an order whose flag neither the venue reported nor this session set is not amended.
+#[test]
+fn an_order_whose_reduce_only_was_never_reported_is_not_amended() {
+    let (mut e, s) = startup();
+    event(
+        &mut e,
+        s,
+        r#"{"ch":"order","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"stray","side":"Buy","type":"LIMIT","qty":"1","price":"90","dealAmount":"0"}}"#,
+    );
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
+    e.handle(
+        2.0,
+        Event::Command(Command::AmendOrder {
+            command: 15,
+            id: "stray".into(),
+            price: Some(91.0),
+            amount: None,
+        }),
+    );
+    let (error, wrote) = failed_without_write(&mut e, 15);
+    assert!(!wrote, "no write");
+    assert!(
+        error.contains("reduce-only state is not reconciled"),
+        "{error}"
+    );
+}

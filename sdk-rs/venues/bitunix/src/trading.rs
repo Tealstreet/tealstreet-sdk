@@ -1430,6 +1430,19 @@ impl BitunixFutures {
             if parent.kind != OrderType::Limit {
                 return Err("Bitunix native amend requires a pending LIMIT order".into());
             }
+            // The cancel-and-recreate fallback re-places this flag: never one the venue
+            // did not report and this session did not set.
+            if !self
+                .account
+                .native
+                .get(&parent.id)
+                .is_some_and(|meta| meta.reduce_reconciled)
+            {
+                return Err(format!(
+                    "Bitunix cannot safely amend {}: reduce-only state is not reconciled",
+                    parent.id
+                ));
+            }
             p.symbol = Some(parent.symbol.clone());
             p.order_id = Some(parent.id.clone());
             p.qty = Some(num::format(positive(
