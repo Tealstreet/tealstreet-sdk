@@ -1,3 +1,5 @@
+import type { EngineEvent } from '@tealstreet/safe-cex-wasm/host';
+
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
@@ -236,9 +238,9 @@ it('rejects unbounded, untyped and sensitive startup cause fields', () => {
   });
 });
 
-it.each([['timedOut'], { toString: () => 'failed' }, null, 500])(
+it.each([{ state: ['timedOut'] }, { state: { toString: () => 'failed' } }, { state: null }, { state: 500 }])(
   'does not coerce a non-string startup state',
-  (state) => {
+  ({ state }) => {
     expect(
       startupDiagnosticTags({
         code: 'startup.incomplete',
@@ -246,7 +248,7 @@ it.each([['timedOut'], { toString: () => 'failed' }, null, 500])(
         message: '',
         fields: {
           startupMarketsState: state,
-        },
+        } as unknown as EngineEvent['fields'],
       }),
     ).toEqual({});
   },
