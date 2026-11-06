@@ -12,7 +12,9 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{
     Context, Credential, HttpOwnerRetirement, Operation, Plan, PlanPolicy, Policy, Preflight,
     PreflightPolicy, PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
-    plan::{CallBound, MutationTerminalBound, RetryWindow, Slot, StepBound},
+    plan::{
+        CallBound, MutationTerminalBound, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound,
+    },
 };
 use safe_cex_engine::{
     Command, CommandId, CommandWait, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
@@ -130,6 +132,10 @@ pub enum Step {
         symbol: String,
     },
     Leverage(f64),
+    /// A refused stop replacement's proof read: is anything like it open?
+    OpenOrders {
+        symbol: String,
+    },
 }
 pub struct Request {
     managed: Option<ManagedWrite>,
@@ -157,6 +163,101 @@ struct Job {
     amendment: Option<f64>,
     /// The amended order's side and kind: what its lost replacement costs.
     amended: Option<(OrderSide, OrderType)>,
+    /// A trigger edit's final check and put-back; such an amend streams.
+    protect: Option<Box<StopProtect>>,
+    /// The replacement's definite refusal awaits its open-orders proof.
+    refused: bool,
+    restoring: bool,
+}
+
+/// The last check before an amended trigger order's cancel: a refusal leaves
+/// it untouched.
+struct StopGuard {
+    order: Order,
+    trigger: f64,
+    reference: StopTriggerType,
+    /// The side of the reference the trigger stays on, from planning.
+    below: bool,
+    /// A reduce-only stop needs a position on the side it closes.
+    closes: Option<PositionSide>,
+}
+impl StopGuard {
+    /// A refusal is typed NotSent and leaves the order untouched.
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        let unchanged = || format!("Your {} order was not changed", self.order.symbol);
+        if store.order(&self.order.id) != Some(&self.order) {
+            return Err(refused(Some(format!(
+                "{}: it changed or filled before cancellation",
+                unchanged()
+            ))));
+        }
+        if let Some(side) = self.closes
+            && !store
+                .positions()
+                .iter()
+                .any(|p| p.symbol == self.order.symbol && p.side == side && p.contracts > 0.0)
+        {
+            return Err(refused(Some(format!(
+                "{}: no position for it to protect",
+                unchanged()
+            ))));
+        }
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::IndexPrice => "index",
+            StopTriggerType::LastPrice => "last",
+        };
+        let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
+            return Err(refused(Some(format!(
+                "{}: the {label} price reference is stale",
+                unchanged()
+            ))));
+        };
+        if (self.below && self.trigger >= price) || (!self.below && self.trigger <= price) {
+            return Err(refused(Some(format!(
+                "{}: the new trigger has already crossed the {label} price",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
+}
+/// An amended trigger order's final check and the exact original to put back.
+struct StopProtect {
+    guard: StopGuard,
+    restore: Box<NativeOrder>,
+    /// False once anything filled: only an untouched original is put back.
+    restorable: bool,
+}
+
+/// A trigger amend's write: one attempt, as every Backpack write.
+fn mutation_call() -> SerialCall {
+    SerialCall {
+        auth: Default::default(),
+        operation: Operation::Mutation,
+        timeout_ms: 20000,
+        attempts: 1,
+        pacing: None,
+    }
+}
+fn serial_call(step: &Step) -> SerialCall {
+    SerialCall {
+        operation: if matches!(step, Step::OpenOrders { .. }) {
+            Operation::Read
+        } else {
+            Operation::Mutation
+        },
+        ..mutation_call()
+    }
+}
+/// How a message names an amended trigger order of `kind`.
+fn what(kind: OrderType) -> &'static str {
+    if kind == OrderType::TakeProfit {
+        "take profit"
+    } else {
+        "stop"
+    }
 }
 #[derive(Default)]
 pub struct Trading {
