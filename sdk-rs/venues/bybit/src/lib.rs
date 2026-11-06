@@ -1096,12 +1096,26 @@ impl BybitLinear {
         };
         // Bybit names its own clock in the raw refusal, before any sanitizing.
         if let Some(server) = trading::ordinary::server_time(response.body) {
-            cx.observe_protocol_time(server);
+            Self::observe_clock(cx, server);
         }
         let mut taken = pending.take().expect("checked above");
         taken.rest.resent = true;
         self.queue_read(cx, retry, taken.rest, taken.then);
         true
+    }
+
+    /// Only protocol time changes; hosts receive numeric evidence for clock-sync advice.
+    pub(crate) fn observe_clock(cx: &mut Cx<'_, Pending>, server: f64) {
+        let changed = (server - cx.protocol_now()).abs() >= CLOCK_DRIFT_MS;
+        let offset = server - cx.now;
+        if cx.observe_protocol_time(server) && changed && offset.abs() >= CLOCK_DRIFT_MS {
+            cx.event(
+                Level::Info,
+                "bybit.clock.corrected",
+                "Bybit protocol clock corrected",
+                vec![("offsetMs", offset.into())],
+            );
+        }
     }
 
     /// Calibrate from an answer's own `time` only past network delay, so

@@ -426,6 +426,10 @@ delegated to the client over WebSocket.
 
 ³ `console.debug` routes to `logger.debug`, which is gated by `MIN_LOG_LEVEL` (`logger.ts`) — default `info`, so debug lines are **dropped entirely** unless `DEBUG=1`/`DEBUG=true` is set. Don't rely on debug output being in `cli.log` by default.
 
+Bybit timestamp refusals use the Rust engine's per-account clock correction and
+one bounded re-signed retry. A detected system-clock skew prints one warning per
+CLI session, including the measured fast/slow offset and Windows time-sync steps.
+
 HoW/tradetunnel request diagnostics use this same existing console/logging
 path in the CLI: with `DEBUG=1`/`DEBUG=true`, the shared
 `@tealstreet/http-over-websocket` adapter writes sanitized `[TradeTunnel]`
