@@ -423,6 +423,15 @@ pub struct AccountRow<'a> {
 
 #[derive(Deserialize, Default)]
 pub struct OrderRow<'a> {
+    #[serde(default, rename = "executePrice")]
+    pub execute_price: Number,
+    #[serde(
+        default,
+        rename = "tpslMode",
+        borrow,
+        deserialize_with = "nullable_text"
+    )]
+    pub tpsl_mode: Cow<'a, str>,
     #[serde(default, rename = "callbackRatio", alias = "rangeRate")]
     pub callback_ratio: Number,
     #[serde(default, rename = "type", borrow, deserialize_with = "nullable_text")]

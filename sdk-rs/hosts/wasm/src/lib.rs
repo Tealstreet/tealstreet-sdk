@@ -2400,7 +2400,7 @@ mod tests {
                     || any(&ORDERLY, venue)
                 {
                     LeverageQuery::OnRead
-                } else if any(&["mexc", "woo", "kraken"], venue) {
+                } else if any(&["mexc", "woo", "kraken", "hyperliquid"], venue) {
                     LeverageQuery::OnMetadata
                 } else {
                     LeverageQuery::Settings

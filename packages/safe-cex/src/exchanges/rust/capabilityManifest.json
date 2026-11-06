@@ -1085,7 +1085,7 @@
     "incomeHistory": true,
     "fillsByOrderId": false,
     "cancelAll": "eachOpenSymbol",
-    "leverageQuery": "settings",
+    "leverageQuery": "onMetadata",
     "maxLeverage": "market",
     "accountLeverage": false,
     "accountMarginType": false,
