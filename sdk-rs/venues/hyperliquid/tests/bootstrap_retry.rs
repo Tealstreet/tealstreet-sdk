@@ -335,11 +335,14 @@ fn real_failures_publish_only_closed_private_read_kind_facts_before_the_watchdog
             .iter()
             .filter(|notice| notice.code == "request.failed")
             .flat_map(|notice| notice.fields.iter())
-            .filter(|(name, _)| *name == "lastFailedPrivateReadKind")
+            .filter(|(name, _)| *name == "lastFailedPrivateReadKind" || *name == "readKind")
             .collect();
         assert_eq!(
             facts,
-            vec![&("lastFailedPrivateReadKind", Value::Str(expected.into()))]
+            vec![
+                &("lastFailedPrivateReadKind", Value::Str(expected.into())),
+                &("readKind", Value::Str(expected.into()))
+            ]
         );
         assert!(run.now < 60_000.0);
     }

@@ -32,6 +32,22 @@ fn request(engine: &mut Engine<Hyperliquid>) -> RequestId {
         })
         .unwrap()
 }
+/// The socket a batch opened: it connects with the first catalogue, not after discovery.
+fn opened(actions: &[Action]) -> Option<SocketId> {
+    actions.iter().find_map(|a| match a {
+        Action::WsConnect { socket, .. } => Some(*socket),
+        _ => None,
+    })
+}
+fn http_id(actions: &[Action]) -> RequestId {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r.id),
+            _ => None,
+        })
+        .unwrap()
+}
 fn start() -> (Engine<Hyperliquid>, SocketId) {
     let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
         public_data_only: true,
@@ -44,18 +60,10 @@ fn start() -> (Engine<Hyperliquid>, SocketId) {
         id,
         r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"ETH","szDecimals":4,"maxLeverage":50}]},[{"midPx":"97500.5","markPx":"97500.5","oraclePx":"97500","prevDayPx":"95000","dayNtlVlm":"195001","openInterest":"2","funding":"0.0001"},{"midPx":"3650.25","markPx":"3650.25","szDecimals":4}]]"#,
     );
-    let id = request(&mut e);
-    response(&mut e, id, "[null]");
-    let socket = prepared_now(&mut e)
-        .into_iter()
-        .find_map(|a| {
-            if let Action::WsConnect { socket, .. } = a {
-                Some(socket)
-            } else {
-                None
-            }
-        })
-        .unwrap();
+    let catalogue = prepared_now(&mut e);
+    response(&mut e, http_id(&catalogue), "[null]");
+    let socket = opened(&catalogue).expect("the socket opens with the main catalogue");
+    assert!(opened(&prepared_now(&mut e)).is_none(), "one socket");
     e.handle(1000.0, Event::WsOpened { socket });
     (e, socket)
 }
@@ -76,20 +84,18 @@ fn dex_mids_ride_fast_asset_contexts_not_a_per_dex_all_mids() {
         e.start(1000.0);
         let id = request(&mut e);
         response(&mut e, id, r#"[{"universe":[]},[]]"#);
-        let id = request(&mut e);
-        response(&mut e, id, r#"[null,{"name":"xyz"}]"#);
-        let id = request(&mut e);
+        let catalogue = prepared_now(&mut e);
+        response(&mut e, http_id(&catalogue), r#"[null,{"name":"xyz"}]"#);
+        let dexs = prepared_now(&mut e);
         response(
             &mut e,
-            id,
+            http_id(&dexs),
             r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50"}]]"#,
         );
-        let socket = prepared_now(&mut e)
-            .into_iter()
-            .find_map(|action| match action {
-                Action::WsConnect { socket, .. } => Some(socket),
-                _ => None,
-            })
+        let discovered = prepared_now(&mut e);
+        let socket = opened(&catalogue)
+            .or_else(|| opened(&dexs))
+            .or_else(|| opened(&discovered))
             .unwrap();
         e.handle(1000.0, Event::WsOpened { socket });
         let types: Vec<_> = prepared_now(&mut e)
@@ -825,5 +831,75 @@ fn a_book_reopened_within_a_round_trip_keeps_the_refusal_on_the_right_frame() {
     assert_eq!(
         notices(&prepared_now(&mut e)),
         ["Hyperliquid refused l2Book ETH: Cannot subscribe to more than 1000 channels."]
+    );
+}
+
+fn sent_texts(actions: &[Action]) -> Vec<String> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+// 5b15cb: the socket waited for every HIP-3 dex's metadata, so a slow catalogue left
+// the whole public stream silent. It now opens with the main catalogue, and each dex
+// adds its topics as its metadata lands.
+#[test]
+fn the_public_stream_starts_before_hip3_discovery_finishes() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(1000.0);
+    let id = request(&mut e);
+    response(
+        &mut e,
+        id,
+        r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50}]},[{"midPx":"100","markPx":"100"}]]"#,
+    );
+    let catalogue = prepared_now(&mut e);
+    let socket = opened(&catalogue).expect("the socket opens with the main catalogue");
+    response(&mut e, http_id(&catalogue), r#"[null,{"name":"xyz"}]"#);
+    let dex_meta = http_id(&prepared_now(&mut e));
+    e.handle(1000.0, Event::WsOpened { socket });
+    let streams = sent_texts(&prepared_now(&mut e));
+    for kind in ["allMids", "fastAssetCtxs"] {
+        assert!(
+            streams
+                .iter()
+                .any(|t| t.contains(&format!("\"type\":\"{kind}\""))),
+            "{kind} streams while xyz is still loading: {streams:?}"
+        );
+    }
+    e.handle(
+        1500.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "XYZ|FOO-PERP".into(),
+        }),
+    );
+    assert!(
+        sent_texts(&prepared_now(&mut e)).is_empty(),
+        "xyz:FOO is not known yet"
+    );
+    e.handle(
+        2000.0,
+        Event::HttpResponse {
+            request: dex_meta,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50"}]]"#,
+            },
+        },
+    );
+    let added = sent_texts(&prepared_now(&mut e));
+    assert!(
+        added
+            .iter()
+            .any(|t| t.contains(r#""type":"l2Book","coin":"xyz:FOO""#)),
+        "the dex's book joins the open socket: {added:?}"
     );
 }

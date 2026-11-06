@@ -102,14 +102,17 @@ impl Rig {
         self.collect();
     }
     pub fn reply(&mut self, request: &HttpRequest, status: u16, body: &str) {
-        self.now += 1.0;
+        self.reply_headers(request, status, "", body);
+    }
+    pub fn reply_headers(&mut self, request: &HttpRequest, status: u16, headers: &str, body: &str) {
+        self.now += 1.;
         self.engine.handle(
             self.now,
             Event::HttpResponse {
                 request: request.id,
                 response: Response {
                     status,
-                    headers: "",
+                    headers,
                     body,
                 },
             },
