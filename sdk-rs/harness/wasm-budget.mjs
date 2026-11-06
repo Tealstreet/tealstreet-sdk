@@ -176,6 +176,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // FetchLeverage read and subscription.count. CI size plus 10 KiB, rounded up; siblings equal.
 // #3158 run 42215250423, job 127884302751 measured lighter 2,068,697 B.
 // CI size plus 10 KiB, rounded up to the KiB; lighter-robinhood equal.
+// #3178 run 42239151280, job 127965614325: Hyperliquid 2,154,756 B at 81206ca3c02.
+// CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
@@ -193,8 +195,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   cryptocom: 1_727_488,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_153_472,
-  hyperliquidspot: 2_153_472,
+  hyperliquid: 2_165_760,
+  hyperliquidspot: 2_165_760,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
