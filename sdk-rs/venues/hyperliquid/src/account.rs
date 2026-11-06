@@ -95,6 +95,21 @@ pub enum Request {
     },
 }
 impl Request {
+    /// Names the read in its `request.failed` notice, so a report shows which read failed.
+    pub(crate) fn read_kind(&self) -> &'static str {
+        match self {
+            Self::Role => "role",
+            Self::Mode => "mode",
+            Self::State { .. } => "state",
+            Self::Orders { .. } => "orders",
+            Self::Spot { .. } => "spot",
+            Self::Asset { .. } => "asset",
+            Self::Builder => "builder",
+            Self::Fees => "fees",
+            Self::AmendSource { .. } => "amendSource",
+            Self::AmendRole { .. } => "amendRole",
+        }
+    }
     pub(crate) fn amend_read(&self) -> Option<(&str, crate::trading::AmendRead)> {
         match self {
             Self::AmendRole { id, amend } | Self::AmendSource { id, amend } => Some((id, *amend)),
@@ -1630,7 +1645,10 @@ impl Hyperliquid {
             Level::Warn,
             code::REQUEST_FAILED,
             error,
-            vec![("lastFailedPrivateReadKind", kind.as_str().into())],
+            vec![
+                ("lastFailedPrivateReadKind", kind.as_str().into()),
+                ("readKind", kind.as_str().into()),
+            ],
         );
     }
     fn bootstrap_read_needed(&self, kind: BootstrapRead) -> bool {
@@ -1676,6 +1694,8 @@ impl Hyperliquid {
             Request::Mode => Some(PrivateReadKind::Mode),
             _ => None,
         };
+        let read_kind = request.read_kind();
+        debug_assert!(kind.is_none_or(|kind| kind.as_str() == read_kind));
         match request {
             Request::Mode => self.mode_failed(cx),
             Request::Role => self.role_failed(cx, error),
@@ -1730,7 +1750,12 @@ impl Hyperliquid {
         if let Some(kind) = kind {
             self.private_read_failed(cx, kind, error);
         } else {
-            cx.notice(Level::Warn, code::REQUEST_FAILED, error);
+            cx.event(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                error,
+                vec![("readKind", read_kind.into())],
+            );
         }
     }
     /// `readPositions`: wait on each dex's next read. One already out may predate
