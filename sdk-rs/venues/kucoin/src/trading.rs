@@ -39,6 +39,11 @@ enum Call {
         hedged: bool,
     },
 }
+impl Call {
+    fn confirms_cancel(&self) -> bool {
+        matches!(self, Call::ConfirmCancel(_))
+    }
+}
 #[derive(Clone)]
 struct Replacement {
     /// The amended order's side and kind: a virtual leg's own, not its parent's.
@@ -641,20 +646,28 @@ impl Kucoin {
         // A leg acts only once its entry fills; a standalone stop acts at once.
         let live = !leg || parent.filled > 0.0;
         let below = live.then_some(stops == (order.side == OrderSide::Sell));
-        let closes = (!leg && (opts.reduce_only == Some(true) || opts.close == Some(true))).then(
-            || {
+        let closes =
+            (!leg && (opts.reduce_only == Some(true) || opts.close == Some(true))).then(|| {
                 if order.side == OrderSide::Sell {
                     PositionSide::Long
                 } else {
                     PositionSide::Short
                 }
-            },
-        );
+            });
+        // The source the replacement is sent with (format_placement's
+        // stopPriceType), so the veto checks the price KuCoin triggers on.
+        let source = if leg {
+            opts.tp_trigger_type.or(opts.sl_trigger_type)
+        } else if order.kind == OrderType::StopLoss {
+            opts.sl_trigger_type.or(opts.trigger_type)
+        } else {
+            opts.tp_trigger_type.or(opts.trigger_type)
+        };
         let guard = StopGuard {
             order: order.clone(),
             parent: leg.then(|| parent.clone()),
             trigger,
-            reference: order.trigger_type.unwrap_or(StopTriggerType::LastPrice),
+            reference: source.unwrap_or(StopTriggerType::LastPrice),
             below,
             closes,
         };
@@ -1334,7 +1347,7 @@ impl Kucoin {
                 } => Some((symbol.clone(), *amended)),
                 _ => None,
             };
-            let confirming = matches!(request.step.call, Call::ConfirmCancel(_));
+            let confirming = request.step.call.confirms_cancel();
             if let Call::ConfirmCancel(mut replacement) = request.step.call
                 && replacement.read_retries < 2
             {
@@ -1370,7 +1383,6 @@ impl Kucoin {
             // A definite refusal proves no replacement exists: put the original back once.
             if replacing.is_some()
                 && refused
-                && !job.restoring
                 && let Some(restore) = job
                     .protect
                     .as_ref()

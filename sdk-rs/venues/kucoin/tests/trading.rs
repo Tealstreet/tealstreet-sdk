@@ -1,7 +1,10 @@
 //! Oracles: KuCoin Classic Futures Add Order, Add TP/SL Order, Cancel Order,
 //! Switch Position Mode; safe-cex native-lot and client-ID contracts.
+use safe_cex_engine::error::Protection;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Method, Notice, Outcome, Response,
+};
 mod support;
 use safe_cex_venue_kucoin::Kucoin;
 use support::credentials::Options;
@@ -162,6 +165,11 @@ impl Harness {
         self.event(Event::TimerFired { timer });
     }
     fn metadata(&mut self, hedged: bool, margin: &str) {
+        self.metadata_replies(hedged, margin);
+        self.pace();
+    }
+    /// The metadata reads answered; the write they gate is paced next.
+    fn metadata_replies(&mut self, hedged: bool, margin: &str) {
         assert!(!self.has("/api/v1/orders"));
         self.reply(
             "getMarginMode",
@@ -181,7 +189,6 @@ impl Harness {
                 r#"{"code":"200000","data":{"leverage":5}}"#,
             );
         }
-        self.pace();
     }
     fn done(&self, command: u32) -> Result<String, String> {
         self.actions
@@ -1527,33 +1534,62 @@ fn to_replacement(h: &mut Harness, id: &str, filled: f64) -> HttpRequest {
     };
     request
 }
+fn short_position() -> Position {
+    Position {
+        id: "BTCUSDT".into(),
+        symbol: "BTCUSDT".into(),
+        side: PositionSide::Short,
+        entry_price: 110.0,
+        notional: 0.66,
+        leverage: 5.0,
+        margin_type: Some(MarginType::Cross),
+        position_mode: Some(PositionMode::Oneway),
+        unrealized_pnl: 0.0,
+        realized_pnl: None,
+        contracts: 6.0,
+        liquidation_price: 0.0,
+        margin_size: None,
+        last_update: None,
+    }
+}
 const REFUSED: &str = r#"{"code":"300003","msg":"Balance insufficient"}"#;
 fn failure(h: &Harness) -> safe_cex_engine::VenueError {
     h.failures.last().cloned().expect("a typed failure")
 }
 
 #[test]
-fn a_stale_crossed_changed_or_flat_stop_at_the_final_send_cancels_nothing() {
-    for case in ["stale", "crossed", "filled", "flat"] {
+/// KuCoin plans an amend in the tick that sends its cancel, so the plan-time
+/// check is the final one; a fill during the cancel is handled after it.
+fn a_stale_crossed_or_flat_stop_at_the_cancel_cancels_nothing() {
+    for case in ["stale", "crossed", "flat"] {
         let mut h = Harness::new();
         resting_stop(&mut h);
-        h.engine.store_mut().update_order("old", |o| o.reduce_only = true);
+        h.engine
+            .store_mut()
+            .update_order("old", |o| o.reduce_only = true);
         h.engine.store_mut().set_positions(vec![short_position()]);
+        if case == "stale" {
+            // Fresh when planned, 5.01 s old when the cancel is sent 20 ms later.
+            h.now += 4_990.0;
+        }
         amend_stop(&mut h, "old", 120.0);
+        h.metadata_replies(false, "CROSS");
+        // The cancel is planned and sent on the next pacing tick.
         match case {
-            "stale" => h.now += 6_000.0,
+            "stale" => {}
             // The mark rose through the new trigger before the cancel left.
-            "crossed" => h.engine.store_mut().update_ticker("BTCUSDT", |t| t.mark = 125.0),
-            "filled" => h.engine.store_mut().update_order("old", |o| o.filled = 0.002),
+            "crossed" => h
+                .engine
+                .store_mut()
+                .update_ticker("BTCUSDT", |t| t.mark = 125.0),
             _ => h.engine.store_mut().set_positions(vec![]),
         }
-        h.metadata(false, "CROSS");
+        h.pace();
         assert!(writes(&h).is_empty(), "{case}: {:?}", writes(&h));
         let error = failure(&h);
         let why = match case {
             "stale" => "mark price reference is stale",
             "crossed" => "already crossed the mark price",
-            "filled" => "changed or filled before cancellation",
             _ => "no position for it to protect",
         };
         assert!(
@@ -1573,13 +1609,22 @@ fn a_refused_replacement_puts_the_original_stop_back_once() {
     resting_stop(&mut h);
     amend_stop(&mut h, "old", 120.0);
     let replacement = to_replacement(&mut h, "old", 0.0);
-    assert!(replacement.body.as_deref().unwrap().contains(r#""stopPrice":"120""#));
+    assert!(
+        replacement
+            .body
+            .as_deref()
+            .unwrap()
+            .contains(r#""stopPrice":"120""#)
+    );
     h.response(&replacement, 200, REFUSED);
     h.pace();
     let restore = h.take("/api/v1/");
     let body = restore.body.clone().unwrap();
     for expected in [r#""stopPrice":"100""#, r#""size":"6""#, r#""side":"buy""#] {
-        assert!(body.contains(expected), "the original, not the edit: {body}");
+        assert!(
+            body.contains(expected),
+            "the original, not the edit: {body}"
+        );
     }
     h.response(
         &restore,
@@ -1673,43 +1718,121 @@ fn an_unknown_replacement_is_never_put_back_or_resent() {
     let error = failure(&h);
     assert_eq!(error.outcome, Some(Outcome::Unknown));
     assert_eq!(error.protection, None);
-    assert!(writes(&h).is_empty(), "no put-back over an unknown: {:?}", writes(&h));
+    assert!(
+        writes(&h).is_empty(),
+        "no put-back over an unknown: {:?}",
+        writes(&h)
+    );
 }
 
+/// Lost, or refused outright, a confirmation read leaves the accepted cancel
+/// unproven: never a refusal that would invite a put-back.
 #[test]
 fn a_lost_cancel_confirmation_is_unknown_with_no_put_back_or_resend() {
+    for refused in [false, true] {
+        let mut h = Harness::new();
+        resting_stop(&mut h);
+        amend_stop(&mut h, "old", 120.0);
+        h.metadata(false, "CROSS");
+        h.reply(
+            "/api/v1/orders/old",
+            r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+        );
+        h.pace();
+        for attempt in 0..3 {
+            let read = h.take("/api/v1/orders/old");
+            assert_eq!(read.method, Method::Get);
+            if refused {
+                h.response(&read, 400, r#"{"code":"100001","msg":"Parameter error"}"#);
+            } else {
+                h.event(Event::HttpFailed {
+                    request: read.id,
+                    error: "lost confirmation read",
+                });
+            }
+            if attempt < 2 {
+                h.advance(100.0);
+            } else {
+                h.pace();
+            }
+        }
+        let error = failure(&h);
+        assert_eq!(
+            error.outcome,
+            Some(Outcome::Unknown),
+            "refused read: {refused}"
+        );
+        assert_eq!(error.protection, None);
+        assert!(
+            error.message.contains("could not be confirmed")
+                && error.message.contains("unknown")
+                && error.message.contains("no replacement was sent"),
+            "{}",
+            error.message
+        );
+        assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+        assert!(!h.has("/api/v1/orders/old"), "no further reads");
+    }
+}
+
+/// A leg whose row carries no source is replaced on its entry's (mark here),
+/// so the veto checks the mark, not a last-price default.
+#[test]
+fn a_leg_crossed_on_the_mark_but_not_the_last_cancels_nothing() {
+    let mut h = Harness::new();
+    h.set_order("parent", OrderType::Limit, 6.0);
+    h.set_order("parent__stop_loss", OrderType::StopLoss, 6.0);
+    h.engine.store_mut().update_order("parent__stop_loss", |o| {
+        o.side = OrderSide::Sell;
+        o.trigger_type = None;
+    });
+    h.fresh_ticker(95.0);
+    amend_stop(&mut h, "parent__stop_loss", 90.0);
+    // The mark falls through the new stop before the cancel; the last does not.
+    h.engine
+        .store_mut()
+        .update_ticker("BTCUSDT", |t| t.mark = 89.0);
+    h.metadata(false, "CROSS");
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+    let error = failure(&h);
+    assert!(
+        error.message.contains("already crossed the mark price"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(error.protection, None);
+}
+
+/// A cancel refused for its signature is re-signed a round trip later; the
+/// stop is checked again before that resend.
+#[test]
+fn a_stop_that_filled_before_its_resigned_cancel_is_left_alone() {
     let mut h = Harness::new();
     resting_stop(&mut h);
     amend_stop(&mut h, "old", 120.0);
     h.metadata(false, "CROSS");
-    h.reply(
-        "/api/v1/orders/old",
-        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    let cancel = h.take("/api/v1/orders/old");
+    assert_eq!(cancel.method, Method::Delete);
+    h.engine
+        .store_mut()
+        .update_order("old", |o| o.filled = 0.002);
+    h.response(
+        &cancel,
+        400,
+        r#"{"code":"400005","msg":"Invalid KC-API-SIGN"}"#,
     );
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
     h.pace();
-    for attempt in 0..3 {
-        let read = h.take("/api/v1/orders/old");
-        assert_eq!(read.method, Method::Get);
-        h.event(Event::HttpFailed {
-            request: read.id,
-            error: "lost confirmation read",
-        });
-        if attempt < 2 {
-            h.advance(100.0);
-        } else {
-            h.pace();
-        }
-    }
     let error = failure(&h);
-    assert_eq!(error.outcome, Some(Outcome::Unknown));
-    assert_eq!(error.protection, None);
     assert!(
-        error.message.contains("could not be confirmed")
-            && error.message.contains("unknown")
-            && error.message.contains("no replacement was sent"),
+        error.message.contains("was not changed")
+            && error
+                .message
+                .contains("changed or filled before cancellation"),
         "{}",
         error.message
     );
-    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
-    assert!(!h.has("/api/v1/orders/old"), "no further reads");
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert_eq!(error.protection, None);
 }
