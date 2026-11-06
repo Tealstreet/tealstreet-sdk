@@ -34,6 +34,21 @@ const DETECTION: &str = "Bitget account detection did not complete";
 pub(crate) const CODES: CodeTable = CodeTable {
     rows: &[
         Row {
+            key: Key::Int(429),
+            verdict: Verdict::Unknown(Some(ErrorKind::RateLimited)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(25000),
+            verdict: Verdict::Unknown(Some(ErrorKind::VenueUnavailable)),
+            only: None,
+        },
+        Row {
+            key: Key::Int(25001),
+            verdict: Verdict::Unknown(Some(ErrorKind::Timeout)),
+            only: None,
+        },
+        Row {
             key: Key::Int(40009),
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
@@ -107,7 +122,7 @@ pub(crate) const CODES: CodeTable = CodeTable {
     status: &[
         (401, Verdict::Refused(ErrorKind::AuthInvalid)),
         (403, Verdict::Refused(ErrorKind::AuthPermission)),
-        (429, Verdict::Refused(ErrorKind::RateLimited)),
+        (429, Verdict::Unknown(Some(ErrorKind::RateLimited))),
     ],
 };
 
@@ -352,6 +367,10 @@ struct Payload {
     plan_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     trigger_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execute_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    range_rate: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     trigger_type: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2117,7 +2136,12 @@ impl BitgetFutures {
                     .plans
                     .get(&order.id)
                     .is_some_and(|p| p == "uta_tpsl"));
-        if standalone && !self.account.uta && order.kind == OrderType::TrailingStopLoss {
+        let moving = self
+            .account
+            .plans
+            .get(&order.id)
+            .is_some_and(|plan| plan == "moving_plan");
+        if standalone && !self.account.uta && order.kind == OrderType::TrailingStopLoss && !moving {
             let mut opts = place_opts(&order);
             opts.price = Some(next_price);
             opts.amount = next_amount;
@@ -2146,7 +2170,30 @@ impl BitgetFutures {
         if standalone && !self.account.uta {
             let mut p = self.classic(cx, &order.symbol)?;
             p.order_id = Some(native_id(&order));
-            p.trigger_price = price.map(|_| num::format(next_price));
+            p.trigger_price = Some(num::format(next_price));
+            p.trigger_type = Some(trigger(order.trigger_type));
+            if moving {
+                let (kind, rate) = self
+                    .account
+                    .trailing
+                    .get(&order.id)
+                    .filter(|(kind, rate)| {
+                        kind == "ratio" && rate.is_finite() && *rate > 0.0 && *rate <= 10.0
+                    })
+                    .ok_or(
+                        "Bitget native moving-plan range is unavailable; refresh before editing",
+                    )?;
+                debug_assert_eq!(kind, "ratio");
+                p.range_rate = Some(num::format(*rate));
+            } else {
+                p.execute_price = Some(num::format(
+                    self.account
+                        .execution_prices
+                        .get(&order.id)
+                        .copied()
+                        .ok_or("Bitget execution price is unavailable; refresh before editing")?,
+                ));
+            }
             p.size = Some(if amount.is_some_and(|a| a > 0.0) {
                 num::format(next_amount)
             } else if order.amount > 0.0 {
@@ -2218,6 +2265,18 @@ impl BitgetFutures {
                 &opts,
                 if price.is_none() { retained } else { None },
             )?;
+            if order.kind != OrderType::TrailingStopLoss {
+                original.tpsl_mode = Some(if order.amount > 0.0 {
+                    "partial"
+                } else {
+                    "full"
+                });
+                original.qty = (order.amount > 0.0).then(|| num::format(order.amount));
+                if order.amount == 0.0 && amount.is_none_or(|amount| amount == 0.0) {
+                    next.tpsl_mode = Some("full");
+                    next.qty = None;
+                }
+            }
             if linked.len() > 1 {
                 for related in &linked {
                     let original_price = number(related.price, m.precision.price);
@@ -2426,6 +2485,7 @@ impl BitgetFutures {
         let explicit_rejection = parsed.as_ref().is_ok_and(|reply| {
             status < 500
                 && status != 408
+                && status != 429
                 // Every code the table marks unknown (busy, timeout), not a hand-kept subset.
                 && !reply.code.0.is_some_and(|code| {
                     matches!(
@@ -2707,7 +2767,30 @@ impl BitgetFutures {
                 job.ids.extend(ids);
             }
         }
-        if let Some(message) = error {
+        if let Some(mut message) = error {
+            let batch_unknown = if let Answer::Batch { failures, .. } = &answer {
+                failures.iter().any(|(code, _)| {
+                    let verdict = CODES.verdict(
+                        &Native {
+                            code: code.map_or(NativeCode::None, NativeCode::Int),
+                            message: "",
+                        },
+                        request.call.intent(),
+                    );
+                    matches!(verdict, Verdict::Unknown(_))
+                })
+            } else {
+                false
+            };
+            let uncertain = unproven
+                || (!explicit_rejection
+                    && !parsed
+                        .as_ref()
+                        .is_ok_and(|reply| status == 200 && reply.code.0 == Some(0.0)))
+                || batch_unknown;
+            if uncertain && !request.call.read() {
+                message.push_str("; outcome unknown, check Open Orders");
+            }
             let (_, _, native_unknown) =
                 self.record_once(cx, &request, native, answer, &message, &mut recorded);
             let error = match &parsed {
@@ -3294,6 +3377,9 @@ impl BitgetFutures {
         if released || request.signature_retry {
             // A released write, or a resend after the first attempt reached the venue.
             error.outcome = Some(Outcome::Unknown);
+            error
+                .message
+                .push_str("; outcome unknown, check Open Orders");
         }
         if released && request.call.is_place() {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
@@ -3568,13 +3654,14 @@ fn related(orders: &[Order], order: &Order) -> Vec<Order> {
         .collect()
 }
 /// Every plan type `plan_type` maps, plus untyped triggers.
-const NUKE_PLAN_TYPES: [&str; 6] = [
+const NUKE_PLAN_TYPES: [&str; 7] = [
     "normal_plan",
     "profit_plan",
     "loss_plan",
     "pos_profit",
     "pos_loss",
     "track_plan",
+    "moving_plan",
 ];
 fn fallback_plan(order: &Order) -> &'static str {
     match (order.kind, order.amount > 0.0) {
