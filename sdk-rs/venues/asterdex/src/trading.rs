@@ -855,6 +855,16 @@ impl AsterDex {
             let Some(slot) = job.slot.take() else {
                 return;
             };
+            // A 408 or 5xx on a put-back is sealed before this venue sees it:
+            // say what is unknown rather than repeat the replacement's refusal.
+            if job.restoring
+                && let Some((symbol, ..)) = &job.replacing_stop
+            {
+                let words = format!(
+                    "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+                );
+                let _ = cx.present_plan_failure(&plan, words);
+            }
             let path = self.path(step.endpoint);
             // The request layer consumes the pending request and reports any
             // signing failure through on_trade_response, including synchronous

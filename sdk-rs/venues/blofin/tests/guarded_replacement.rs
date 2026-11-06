@@ -250,3 +250,29 @@ fn a_later_cancel_of_the_original_follows_it_to_the_put_back_entry() {
         cancel.body
     );
 }
+
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
+#[test]
+fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
+    for status in [408, 503] {
+        let mut h = Harness::new();
+        partly_filled(&mut h);
+        edit_stop(&mut h, 56000.0);
+        let replacement = to_replacement(&mut h);
+        h.respond(replacement, REFUSED);
+        let restore = h.take("batch-orders");
+        h.respond_status(restore, status, "");
+        let error = failure(&h).expect("the engine seals the Plan");
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("trigger refused"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{status}");
+        assert_eq!(error.protection, None, "{status}");
+        assert!(writes(&h).is_empty(), "{status}: never resent");
+    }
+}
