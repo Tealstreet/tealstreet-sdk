@@ -39737,7 +39737,7 @@
     },
     {
       "venue": "okx",
-      "tapeSha256": "bd0a74076e742e252227923bd8c23dfb3febf93b5b302c46a4a27b831ba73489",
+      "tapeSha256": "74a118f8e887d45e9d4dc243cf48cbaf5b3a829fe553b4091073ca30bb7bed1c",
       "tape": "sdk-rs/harness/tapes/okx-private.jsonl",
       "diagnostics": [
         {
@@ -39993,7 +39993,7 @@
     },
     {
       "venue": "okxdemo",
-      "tapeSha256": "4fba7373abdab9574b2ac95b8e9b47945147636888192aae70867c083dba2dc1",
+      "tapeSha256": "9185854cc09dbad9b9142b3e5b15812b66813e4e413caa84467bf864807149af",
       "tape": "sdk-rs/harness/tapes/okxdemo-private.jsonl",
       "diagnostics": [
         {
@@ -40249,7 +40249,7 @@
     },
     {
       "venue": "okxeu",
-      "tapeSha256": "e5e22bb3d8e5a5a50bfee63416dc691403e0be87460d0dab2e7fffa6d6f024c3",
+      "tapeSha256": "16a59dcbb227ea25238e7708803b49c8b87e26ca6863d1de9a7a6dfce3851ea9",
       "tape": "sdk-rs/harness/tapes/okxeu-private.jsonl",
       "diagnostics": [
         {
@@ -40663,7 +40663,7 @@
     },
     {
       "venue": "okxeudemo",
-      "tapeSha256": "3230f647ad0c24e4fe69e74fcf343b92859e308e485814172167d7d315efd060",
+      "tapeSha256": "1e3d0e42eaf44165351a876997b0894d25655d2fa031aabd46c6e5a693a7eb78",
       "tape": "sdk-rs/harness/tapes/okxeudemo-private.jsonl",
       "diagnostics": [
         {

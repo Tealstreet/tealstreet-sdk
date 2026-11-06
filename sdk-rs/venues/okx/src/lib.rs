@@ -841,6 +841,14 @@ impl Okx {
 }
 
 impl Venue for Okx {
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.trailing_release_veto(store, pending, release)
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -964,6 +972,9 @@ impl Venue for Okx {
         self.trading
             .acknowledged
             .retain(|id, _| !stored.contains(id.as_str()));
+        self.trading
+            .algo_orders
+            .retain(|id, _| stored.contains(id.as_str()));
     }
 
     fn guard_order_mutations(&self) -> bool {

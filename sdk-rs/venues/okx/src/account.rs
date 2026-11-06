@@ -106,6 +106,12 @@ fn terminal_state(state: &str) -> bool {
     )
 }
 
+#[derive(Default)]
+pub struct OrderMetadata {
+    margins: HashMap<String, (f64, String)>,
+    algos: HashMap<String, crate::trading::ObservedAlgo>,
+}
+
 pub enum Request {
     Config {
         context: Context,
@@ -153,7 +159,7 @@ pub enum Request {
         kind: usize,
         product: usize,
         rows: SnapshotBuilder<String, Order>,
-        margins: HashMap<String, (f64, String)>,
+        metadata: Box<OrderMetadata>,
         page_count: usize,
         cursor: String,
         cursors: HashSet<String>,
@@ -499,7 +505,7 @@ impl Okx {
                 kind: 0,
                 product: 0,
                 rows: SnapshotBuilder::default(),
-                margins: HashMap::new(),
+                metadata: Box::default(),
                 page_count: 0,
                 cursor: String::new(),
                 cursors: HashSet::new(),
@@ -765,7 +771,7 @@ impl Okx {
                 kind,
                 product,
                 rows,
-                margins,
+                metadata,
                 page_count,
                 cursor,
                 invalid,
@@ -806,7 +812,10 @@ impl Okx {
                         return;
                     }
                     for order in orders {
-                        margins.insert(
+                        if let Some(native) = crate::trading::ObservedAlgo::new(&o, &order) {
+                            metadata.algos.insert(order.id.clone(), native);
+                        }
+                        metadata.margins.insert(
                             order.id.clone(),
                             (reserve_leverage(o.lever), self.order_margin_currency(&o)),
                         );
@@ -1116,7 +1125,7 @@ impl Okx {
                 mut kind,
                 mut product,
                 rows,
-                margins,
+                metadata,
                 page_count,
                 cursor,
                 mut cursors,
@@ -1150,7 +1159,7 @@ impl Okx {
                             kind,
                             product,
                             rows,
-                            margins,
+                            metadata,
                             page_count: 0,
                             cursor,
                             cursors,
@@ -1179,7 +1188,7 @@ impl Okx {
                             kind,
                             product,
                             rows,
-                            margins,
+                            metadata,
                             page_count: 0,
                             cursor: String::new(),
                             cursors: HashSet::new(),
@@ -1192,6 +1201,7 @@ impl Okx {
                     return;
                 }
                 self.account.orders_in_flight = false;
+                let OrderMetadata { margins, algos } = *metadata;
                 let clean = rows.rejected() == 0;
                 let mapped: Vec<String> = rows
                     .rows()
@@ -1277,6 +1287,15 @@ impl Okx {
                 cx.store.set_orders_loaded();
                 unproven.extend(refused.iter().cloned());
                 cx.orders_reconciled_except(&unproven, epoch);
+                for (id, observed) in algos {
+                    if cx.store.order(&id) == Some(&observed.order)
+                        && !self.account.order_versions.get(&id).is_some_and(|(v, _, _)| *v > version)
+                    {
+                        self.trading.algo_orders.insert(id, observed);
+                    }
+                }
+                self.trading.algo_orders.retain(|id, _| cx.store.order(id)
+                    .is_some_and(|o| matches!(o.status, OrderStatus::Open | OrderStatus::Updating | OrderStatus::Canceling)));
                 self.trading
                     .acknowledged
                     .retain(|_, order| order.version > version || refused.contains(&order.symbol));
@@ -2108,6 +2127,16 @@ impl Okx {
                         (self.account.revision, cx.now, terminal || triggered),
                     );
                     for order in self.orders(cx, &row) {
+                        if terminal || triggered {
+                            self.trading.algo_orders.remove(&order.id);
+                        } else if matches!(
+                            row.state,
+                            "live" | "partially_filled" | "partially_effective" | "pause"
+                        ) && let Some(observed) =
+                            crate::trading::ObservedAlgo::new(&row, &order)
+                        {
+                            self.trading.algo_orders.insert(order.id.clone(), observed);
+                        }
                         if terminal || triggered {
                             self.account.order_leverage.remove(&order.id);
                         }

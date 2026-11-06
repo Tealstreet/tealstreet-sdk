@@ -268,4 +268,11 @@ describe('Rust Hyperliquid wrapper', () => {
       { op: 'findOrderByClientOrderId', symbol: MARKET.symbol, clientOrderId: CLOID },
     ]);
   });
+  it.each([undefined, false, true])('forwards explicit fast-depth opt-in %s', async (fast) => {
+    const options = { publicDataOnly: true, hyperliquidFastBook: fast };
+    const { exchange, construct } = setup(options);
+    await exchange.start();
+    expect(JSON.parse(construct.mock.calls[0][1]).hyperliquidFastBook).toBe(fast === true);
+  });
+
 });

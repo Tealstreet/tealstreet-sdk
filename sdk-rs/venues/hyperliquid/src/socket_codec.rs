@@ -82,6 +82,13 @@ fn spot_depth_topic(coin: &str, n_sig_figs: Option<u8>) -> String {
     .expect("native spot depth topic")
 }
 
+#[derive(Serialize)]
+struct FastDepth<'a> {
+    r#type: &'static str,
+    coin: &'a str,
+    fast: bool,
+}
+
 #[derive(serde::Deserialize)]
 struct EncodedTopic<'a> {
     #[serde(borrow)]
@@ -94,6 +101,8 @@ struct DepthOrder<'a> {
     kind: &'a str,
     #[serde(rename = "nSigFigs", default)]
     figures: Option<u8>,
+    #[serde(default)]
+    fast: bool,
 }
 
 impl Hyperliquid {
@@ -236,16 +245,28 @@ impl Hyperliquid {
     }
 
     /// Every native stream one book on `coin` subscribes: perps' `l2Book` and
-    /// `bbo`, or spot's full-precision depth and each rounded tier.
+    /// fast depth and `bbo`, or spot's full-precision depth and each rounded tier.
     fn book_topics(&self, coin: &str, push: &mut dyn FnMut(String)) {
         if self.spot {
             for n_sig_figs in [None, Some(2), Some(3), Some(4), Some(5)] {
                 push(spot_depth_topic(coin, n_sig_figs));
             }
         } else {
-            for kind in ["l2Book", "bbo"] {
-                push(public_topic(kind, Some(coin), None, None));
+            push(public_topic("l2Book", Some(coin), None, None));
+            if self.options.fast_book {
+                push(
+                    serde_json::to_string(&Send {
+                        method: "subscribe",
+                        subscription: FastDepth {
+                            r#type: "l2Book",
+                            coin,
+                            fast: true,
+                        },
+                    })
+                    .expect("native fast depth topic"),
+                );
             }
+            push(public_topic("bbo", Some(coin), None, None));
         }
     }
 
@@ -323,6 +344,31 @@ impl Hyperliquid {
         interests
     }
 
+    /// Never evict admitted demand when catalogue/private projection grows.
+    pub(super) fn bounded_socket_interests(&mut self, cx: &mut Cx<'_, Pending>) -> Vec<Interest> {
+        let mut desired = self.desired_socket_interests(cx.store, cx.public_feed_policy());
+        let excess = desired.len().saturating_sub(1000);
+        if excess > 0 {
+            // On first admission, baseline/user topics precede implicit per-market topics.
+            desired.sort_by_key(|i| {
+                (
+                    !self.connection.admitted_interests.contains(&i.key),
+                    i.wire_args.contains("\"type\":\"activeAssetData\""),
+                )
+            });
+            desired.truncate(1000);
+            if self.connection.capacity_excess != excess {
+                cx.notice(
+                    safe_cex_engine::Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    format!("Managed Hyperliquid socket Capacity: {excess} excess topics refused; accepted subscriptions unchanged"),
+                );
+            }
+        }
+        self.connection.capacity_excess = excess;
+        desired
+    }
+
     pub(super) fn managed_connect(&mut self, cx: &mut Cx<'_, Pending>) -> Result<(), SocketError> {
         let feed = if let Some(feed) = self.connection.feed {
             feed
@@ -380,9 +426,11 @@ impl Hyperliquid {
         let Some(feed) = self.connection.feed else {
             return;
         };
-        let desired = self.desired_socket_interests(cx.store, cx.public_feed_policy());
+        let desired = self.bounded_socket_interests(cx);
+        let admitted: HashSet<_> = desired.iter().map(|i| i.key.clone()).collect();
         let required: Vec<_> = private
             .iter()
+            .filter(|interest| admitted.contains(&interest.key))
             .map(|interest| interest.key.as_ref())
             .collect();
         let epoch = cx.socket_epoch(feed);
@@ -396,8 +444,11 @@ impl Hyperliquid {
             if error == SocketError::Capacity && epoch.is_some() && cx.socket_epoch(feed) == epoch {
                 cx.retire_socket(feed, RetireReason::Closed);
             }
-        } else if let Some(epoch) = epoch {
-            self.prepare_private_snapshots(cx, epoch);
+        } else {
+            self.connection.admitted_interests = admitted;
+            if let Some(epoch) = epoch {
+                self.prepare_private_snapshots(cx, epoch);
+            }
         }
     }
 
@@ -427,6 +478,8 @@ impl Hyperliquid {
                     for ladder in self.books.values_mut() {
                         ladder.spot_depth = Default::default();
                         ladder.depth_time = None;
+                        ladder.fast_depth = None;
+                        ladder.depth = Default::default();
                         ladder.bbo = None;
                         ladder.book.clear();
                     }
@@ -442,6 +495,8 @@ impl Hyperliquid {
                 for ladder in self.books.values_mut() {
                     ladder.spot_depth = Default::default();
                     ladder.depth_time = None;
+                    ladder.fast_depth = None;
+                    ladder.depth = Default::default();
                     ladder.book.clear();
                 }
             }
@@ -482,7 +537,8 @@ impl Hyperliquid {
                 let value: EncodedTopic<'_> = serde_json::from_str(&interest.wire_args)
                     .map_err(|_| SocketError::InvalidInterest)?;
                 let figures = value.subscription.figures.unwrap_or(0);
-                let book_order = usize::from(value.subscription.kind == "bbo");
+                let book_order = 2 * usize::from(value.subscription.kind == "bbo")
+                    + usize::from(value.subscription.fast);
                 Ok((
                     interest,
                     ranks
