@@ -2111,3 +2111,19 @@ fn a_limit_stop_edit_is_refused_before_any_cancel() {
         );
     }
 }
+
+// An undocumented code may have placed the replacement: unknown, never a refusal that
+// puts the old stop back beside it.
+#[test]
+fn an_unlisted_code_on_the_replacement_is_unknown_and_never_put_back() {
+    let mut h = guarded_stop();
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond(
+        replacement,
+        r#"{"code":-9999,"msg":"Internal processing issue."}"#,
+    );
+    assert_unknown_stop(&h);
+}

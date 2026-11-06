@@ -166,9 +166,39 @@ pub(crate) const ASTER: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
+        // Aster futures v3 "20xx - Processing Issues": the order was rejected.
+        Row {
+            key: Key::Int(-2010),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2016),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-2028, -2018),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2031),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
     ],
     success: &[Key::Int(200)],
     unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: ASTER_STATUS,
+};
+
+/// A stop's replacement or put-back: an undocumented code may have placed the
+/// order, so it is unknown, never a refusal that earns a put-back or a resend.
+pub(crate) const ASTER_PROTECTIVE: CodeTable = CodeTable {
+    rows: ASTER.rows,
+    success: ASTER.success,
+    unlisted: Verdict::Unknown(None),
     status: ASTER_STATUS,
 };
 
@@ -1110,6 +1140,12 @@ impl AsterDex {
         }
         // A status-only refusal takes its kind and outcome from the table's status rows.
         let mut status_error = None;
+        let protective = was_place
+            && self
+                .trading
+                .jobs
+                .get(&command)
+                .is_some_and(|job| job.replacing_stop.is_some());
         if let Some(leg) = leg.filter(|_| !reported) {
             let _ = match &outcome {
                 _ if replied
@@ -1137,12 +1173,23 @@ impl AsterDex {
                         .jobs
                         .get(&command)
                         .filter(|_| was_place)
-                        .and_then(|job| job.gone_text(rate_limited))
-                    {
+                        .and_then(|job| {
+                            job.gone_text(
+                                rate_limited
+                                    || protective
+                                        && protective_failure(*code, message.clone()).outcome
+                                            == Some(Outcome::Unknown),
+                            )
+                        }) {
                         Some(gone) => format!("{gone}: {message}"),
                         None => message.clone(),
                     };
-                    match cx.classify_write(leg, &ASTER, native, told) {
+                    let table = if protective {
+                        &ASTER_PROTECTIVE
+                    } else {
+                        &ASTER
+                    };
+                    match cx.classify_write(leg, table, native, told) {
                         Ok(fact) => {
                             if native.is_none() {
                                 status_error = Some(fact.error().clone());
@@ -1169,7 +1216,7 @@ impl AsterDex {
             if outcome.is_err() && !job.restoring && !transport && !unproven && !replied {
                 let definitive = outcome.as_ref().err().is_some_and(|(code, message)| {
                     matches!(
-                        failure(*code, message.clone()).outcome,
+                        protective_failure(*code, message.clone()).outcome,
                         Some(Outcome::Rejected)
                     )
                 });
@@ -1240,7 +1287,11 @@ impl AsterDex {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     let guarded = was_place && job.gone_text(true).is_some();
-                    if guarded && rate_limited {
+                    if guarded
+                        && (rate_limited
+                            || protective_failure(code, message.clone()).outcome
+                                == Some(Outcome::Unknown))
+                    {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     let unknown = error.outcome == Some(Outcome::Unknown);
@@ -1826,6 +1877,22 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
 
 /// A trading failure classified by its Aster code; code 0 is a transport
 /// failure, a non-JSON HTTP error or an unproven acknowledgement.
+/// `failure` for a stop's replacement or put-back: a code Aster does not document
+/// as a rejection leaves the write unknown.
+fn protective_failure(code: i64, message: String) -> VenueError {
+    let documented = matches!(
+        code,
+        -1008 | -1003 | -1015 | -1022 | -2014 | -2015 | -1002 | -5025 | -2010 | -2016 | -2031
+    ) || (-1199..=-1100).contains(&code)
+        || (-4999..=-4000).contains(&code)
+        || (-2028..=-2018).contains(&code)
+        || (code == -1000 && refusal_1000(&message).is_some());
+    let mut error = failure(code, message);
+    if !documented && error.outcome == Some(Outcome::Rejected) {
+        error.outcome = Some(Outcome::Unknown);
+    }
+    error
+}
 fn failure(code: i64, message: String) -> VenueError {
     let (kind, outcome) = match code {
         -1000 if refusal_1000(&message) == Some(DEVICE_TIME) => {
