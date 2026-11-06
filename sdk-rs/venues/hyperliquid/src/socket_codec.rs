@@ -344,6 +344,31 @@ impl Hyperliquid {
         interests
     }
 
+    /// Never evict admitted demand when catalogue/private projection grows.
+    pub(super) fn bounded_socket_interests(&mut self, cx: &mut Cx<'_, Pending>) -> Vec<Interest> {
+        let mut desired = self.desired_socket_interests(cx.store, cx.public_feed_policy());
+        let excess = desired.len().saturating_sub(1000);
+        if excess > 0 {
+            // On first admission, baseline/user topics precede implicit per-market topics.
+            desired.sort_by_key(|i| {
+                (
+                    !self.connection.admitted_interests.contains(&i.key),
+                    i.wire_args.contains("\"type\":\"activeAssetData\""),
+                )
+            });
+            desired.truncate(1000);
+            if self.connection.capacity_excess != excess {
+                cx.notice(
+                    safe_cex_engine::Level::Error,
+                    code::SUBSCRIPTION_REJECTED,
+                    format!("Managed Hyperliquid socket Capacity: {excess} excess topics refused; accepted subscriptions unchanged"),
+                );
+            }
+        }
+        self.connection.capacity_excess = excess;
+        desired
+    }
+
     pub(super) fn managed_connect(&mut self, cx: &mut Cx<'_, Pending>) -> Result<(), SocketError> {
         let feed = if let Some(feed) = self.connection.feed {
             feed
@@ -401,9 +426,11 @@ impl Hyperliquid {
         let Some(feed) = self.connection.feed else {
             return;
         };
-        let desired = self.desired_socket_interests(cx.store, cx.public_feed_policy());
+        let desired = self.bounded_socket_interests(cx);
+        let admitted: HashSet<_> = desired.iter().map(|i| i.key.clone()).collect();
         let required: Vec<_> = private
             .iter()
+            .filter(|interest| admitted.contains(&interest.key))
             .map(|interest| interest.key.as_ref())
             .collect();
         let epoch = cx.socket_epoch(feed);
@@ -417,8 +444,11 @@ impl Hyperliquid {
             if error == SocketError::Capacity && epoch.is_some() && cx.socket_epoch(feed) == epoch {
                 cx.retire_socket(feed, RetireReason::Closed);
             }
-        } else if let Some(epoch) = epoch {
-            self.prepare_private_snapshots(cx, epoch);
+        } else {
+            self.connection.admitted_interests = admitted;
+            if let Some(epoch) = epoch {
+                self.prepare_private_snapshots(cx, epoch);
+            }
         }
     }
 
@@ -496,9 +526,6 @@ impl Hyperliquid {
             return Err(SocketError::Stale);
         }
         let desired = self.desired_socket_interests(store, PublicFeedPolicy::Direct);
-        if subscribe && desired.len() > 1000 {
-            return Err(SocketError::Capacity);
-        }
         let ranks: HashMap<_, _> = desired
             .iter()
             .enumerate()

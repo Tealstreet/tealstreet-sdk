@@ -140,6 +140,9 @@ struct Connection {
     private_bootstrap: socket_codec::PrivateBootstrap,
     // Transport liveness and epoch retirement cannot forgive a missing private bootstrap.
     private_bootstrap_misses: u8,
+    // Successful proposal admission persists across epochs and catalogue growth.
+    admitted_interests: HashSet<std::sync::Arc<str>>,
+    capacity_excess: usize,
 }
 #[derive(Default)]
 struct Ladder {
@@ -600,9 +603,12 @@ impl Hyperliquid {
             return;
         }
         if let Some(feed) = self.connection.feed {
-            let desired = self.desired_socket_interests(cx.store, cx.public_feed_policy());
+            let desired = self.bounded_socket_interests(cx);
+            let admitted = desired.iter().map(|i| i.key.clone()).collect();
             if let Err(error) = cx.set_socket_interests(feed, desired) {
                 Self::socket_refused(cx, error);
+            } else {
+                self.connection.admitted_interests = admitted;
             }
         }
     }

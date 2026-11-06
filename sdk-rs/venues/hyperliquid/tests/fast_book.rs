@@ -859,3 +859,229 @@ fn opted_in_book_repair_releases_each_of_its_three_native_topics_once() {
         );
     }
 }
+
+fn catalogue_capacity_start(partial: bool) -> (Engine<Hyperliquid>, SocketId, Vec<Action>, String) {
+    use safe_cex_venue_hyperliquid::Options;
+    let mut e = support::private_engine(
+        Options {
+            key: Some(
+                safe_cex_crypto::ethereum::private_key_address(support::TEST_SECRET).unwrap(),
+            ),
+            application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+            ..Options::default()
+        },
+        support::TEST_SECRET.into(),
+        false,
+    );
+    let universe: Vec<_> = (0..1005)
+        .map(|i| serde_json::json!({"name":format!("C{i}"),"szDecimals":2}))
+        .collect();
+    let contexts: Vec<_> = (0..1005)
+        .map(|_| serde_json::json!({"midPx":"100"}))
+        .collect();
+    let full = serde_json::json!([{"universe":universe},contexts]).to_string();
+    let mut first: serde_json::Value = serde_json::from_str(&full).unwrap();
+    if partial {
+        for ctx in first[1].as_array_mut().unwrap().iter_mut().skip(980) {
+            *ctx = serde_json::json!({"midPx":"bad"});
+        }
+    }
+    let first = first.to_string();
+    e.start(1000.);
+    let mut observed = Vec::new();
+    let mut socket = None;
+    for _ in 0..30 {
+        let batch = prepared_now(&mut e);
+        if batch.is_empty() {
+            break;
+        }
+        for action in batch {
+            match action {
+                Action::Http(r) => {
+                    let body = match support::kind(&r).as_str() {
+                        "metaAndAssetCtxs" => first.as_str(),
+                        "perpDexs" => "[null]",
+                        "userAbstraction" => "\"disabled\"",
+                        "maxBuilderFee" => "0",
+                        "userFees" => r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
+                        "frontendOpenOrders" => "[]",
+                        "clearinghouseState" => {
+                            r#"{"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":1000}"#
+                        }
+                        other => panic!("unexpected startup read {other}"),
+                    };
+                    support::reply(&mut e, &r, 200, body);
+                }
+                Action::WsConnect { socket: s, .. } => {
+                    socket = Some(s);
+                    e.handle(1000., Event::WsOpened { socket: s });
+                }
+                Action::SetTimer { timer, at_ms } if at_ms == 1000. => {
+                    e.handle(at_ms, Event::TimerFired { timer })
+                }
+                other => observed.push(other),
+            }
+        }
+    }
+    (e, socket.expect("genuine keyed socket"), observed, full)
+}
+
+fn subscription_keys(actions: &[Action]) -> std::collections::HashSet<String> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } if text.contains("\"method\":\"subscribe\"") => {
+                Some(text.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn catalogue_growth_refuses_only_new_excess_topics_and_replays_accepted_keys() {
+    use safe_cex_engine::Notice;
+    let (mut e, socket, initial, full) = catalogue_capacity_start(true);
+    assert_eq!(e.store().markets().len(), 980);
+    let mut accepted = subscription_keys(&initial);
+    assert_eq!(
+        accepted.len(),
+        989,
+        "nine fixed topics plus 980 activeAssetData"
+    );
+    e.handle(
+        1100.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "C0-PERP".into(),
+        }),
+    );
+    let book = prepared_now(&mut e);
+    assert_eq!(subscription_keys(&book).len(), 2);
+    accepted.extend(subscription_keys(&book));
+    e.handle(
+        1100.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    assert_eq!(subscription_keys(&prepared_now(&mut e)).len(), 1);
+    let (timer, at) = initial
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms > 1100. && *at_ms < 3000. => {
+                Some((*timer, *at_ms))
+            }
+            _ => None,
+        })
+        .expect("native incomplete-catalogue retry");
+    e.handle(at, Event::TimerFired { timer });
+    let mut growth = Vec::new();
+    let mut answered = false;
+    for _ in 0..20 {
+        let batch = prepared_now(&mut e);
+        if batch.is_empty() {
+            break;
+        }
+        for action in batch {
+            if let Action::Http(r) = action {
+                let body = match support::kind(&r).as_str() {
+                    "metaAndAssetCtxs" => {
+                        answered = true;
+                        full.as_str()
+                    }
+                    "frontendOpenOrders" => "[]",
+                    "clearinghouseState" => {
+                        r#"{"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":1000}"#
+                    }
+                    other => panic!("unexpected retry read {other}"),
+                };
+                support::reply(&mut e, &r, 200, body);
+            } else {
+                growth.push(action);
+            }
+        }
+    }
+    assert!(answered);
+    // A genuine demand removal projects the newly grown M term too.
+    e.handle(
+        at + 1.,
+        Event::Command(Command::UnsubscribeCandles {
+            symbol: "C0-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    growth.extend(prepared_now(&mut e));
+    assert_eq!(e.store().markets().len(), 1005, "metadata is not truncated");
+    assert!(
+        !growth.iter().any(|a| matches!(a, Action::WsClose { .. })),
+        "catalogue growth must not retire accepted interests"
+    );
+    assert!(growth.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::SUBSCRIPTION_REJECTED && event.message.contains("Capacity"))));
+    assert_eq!(
+        subscription_keys(&growth).len(),
+        9,
+        "only remaining topic slots are filled"
+    );
+    accepted.extend(subscription_keys(&growth));
+    assert_eq!(accepted.len(), 1000);
+    assert!(!growth.iter().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("\"method\":\"unsubscribe\"") && !text.contains("\"type\":\"candle\""))), "M growth must not evict an accepted book or private topic");
+    let now = safe_cex_engine::test_support::dispatch_now(&e).max(3000.);
+    let text = r#"{"channel":"l2Book","data":{"coin":"C0","time":1,"levels":[[{"px":"100","sz":"1"}],[{"px":"101","sz":"1"}]]}}"#;
+    e.handle(now, Event::WsMessage { socket, text });
+    assert!(e.book("C0-PERP").is_some(), "accepted book remains live");
+    e.handle(now, Event::WsClosed { socket, code: 1006 });
+    let (retry, at) = prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms > now && at_ms <= now + 16000. => {
+                Some((timer, at_ms))
+            }
+            _ => None,
+        })
+        .expect("ordinary socket retry");
+    e.handle(at, Event::TimerFired { timer: retry });
+    let next = prepared_now(&mut e)
+        .into_iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .expect("replacement socket");
+    e.handle(at, Event::WsOpened { socket: next });
+    let replay = prepared_now(&mut e);
+    assert!(
+        !replay.iter().any(|a| matches!(a, Action::WsClose { .. })),
+        "oversized catalogue must not poison reconnect"
+    );
+    assert_eq!(
+        subscription_keys(&replay),
+        accepted,
+        "reconnect retains the exact admitted 1000, not another subset"
+    );
+    e.handle(at + 1., Event::WsMessage { socket: next, text });
+    assert!(e.book("C0-PERP").is_some());
+}
+
+#[test]
+fn oversized_initial_catalogue_keeps_core_private_and_public_subscriptions() {
+    use safe_cex_engine::Notice;
+    let (e, _, actions, _) = catalogue_capacity_start(false);
+    assert_eq!(e.store().markets().len(), 1005);
+    assert!(!actions.iter().any(|a| matches!(a, Action::WsClose { .. })));
+    let keys = subscription_keys(&actions);
+    assert_eq!(keys.len(), 1000);
+    for kind in [
+        "allMids",
+        "fastAssetCtxs",
+        "clearinghouseState",
+        "orderUpdates",
+    ] {
+        assert!(
+            keys.iter()
+                .any(|k| k.contains(&format!("\"type\":\"{kind}\""))),
+            "required baseline {kind} survives implicit market topic excess"
+        );
+    }
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::SUBSCRIPTION_REJECTED && event.message.contains("Capacity"))));
+}

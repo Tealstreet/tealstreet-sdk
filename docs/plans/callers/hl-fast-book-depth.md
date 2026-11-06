@@ -16,8 +16,13 @@ and private topic selection remain unchanged.
 
 New book/candle demand above 1,000 topics is refused visibly and rolled back
 before proposal. Accepted references and the feed remain live; an explicit
-close/retry/new Open replays exactly the accepted set. The encoder also refuses
-an oversized projection before release. This per-connection guard cannot enforce
+close/retry/new Open replays exactly the accepted set. Catalogue/private-topic
+growth retains admitted keys, fills remaining slots and visibly refuses only new
+excess before core submission. Initial admission prioritizes baseline/caller
+topics over implicit activeAssetData. Required private handoff keys are selected
+from that admitted projection; metadata and HTTP reads are not truncated. The
+encoder covers the selected keys without a whole-sync cap refusal. Repeated
+excess counts dedupe the Capacity notice across reconnects. This per-connection guard cannot enforce
 the venue's 1,000-subscription PER-IP cap across accounts/tabs/other clients.
 
 For M core markets, D HIP-3 scopes, B books and C candle streams, Direct keyed

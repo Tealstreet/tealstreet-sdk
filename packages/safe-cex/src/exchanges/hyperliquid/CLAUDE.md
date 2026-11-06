@@ -1655,8 +1655,12 @@ Newer BBO replaces the top. Retirement clears both baselines before replay.
 
 New book or candle demand above 1,000 desired topics is visibly refused without
 retaining its key/refcount or changing accepted references. The accepted feed
-stays live; reconnect replays only accepted demand. The encoder independently
-refuses an oversized projection before release.
+stays live; reconnect replays only accepted demand. Catalogue/private-topic
+growth is capped before core submission: existing admitted keys keep their slots,
+only new excess topics are refused with a Capacity notice. Initial projection
+keeps baseline and caller topics before implicit activeAssetData. Only selected
+private keys gate handoff; metadata and HTTP reads remain complete. The encoder
+covers every admitted key and never rejects the whole sync because of excess demand.
 
 Hyperliquid's 1,000-subscription limit is per IP across connections, not per
 account. The per-connection check cannot enforce it across accounts/tabs/clients.
