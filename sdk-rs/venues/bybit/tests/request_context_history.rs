@@ -67,7 +67,7 @@ fn history_pages_are_managed_legs_signed_with_the_read_key() {
             query: fills(None, None),
         });
         let page = h.take("/v5/execution/list");
-        assert_eq!(page.timeout_ms, Some(30_000), "a managed page window");
+        assert_eq!(page.timeout_ms, Some(20_000), "a managed page window");
         let expected = if read_key { "read-key" } else { "primary-key" };
         assert_eq!(
             Harness::header(&page, "X-BAPI-API-KEY").as_deref(),
@@ -85,7 +85,7 @@ fn an_unanswered_history_page_times_out_typed() {
         query: fills(None, None),
     });
     let _page = h.take("/v5/execution/list");
-    h.advance(30_001.0);
+    h.advance(20_001.0);
     assert_eq!(failure(&h, 61).kind, Some(ErrorKind::Timeout));
 }
 
@@ -142,7 +142,7 @@ fn history_re_reads_only_on_a_native_timestamp_refusal() {
     let page = h.take("/v5/execution/list");
     h.reply(page.id, 200, TIMESTAMP_REFUSAL);
     let retry = h.take("/v5/execution/list");
-    assert_eq!(retry.timeout_ms, Some(30_000));
+    assert_eq!(retry.timeout_ms, Some(20_000));
     assert_eq!(
         Harness::header(&retry, "X-BAPI-TIMESTAMP").as_deref(),
         Some("9000")

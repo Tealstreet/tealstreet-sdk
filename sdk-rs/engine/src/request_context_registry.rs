@@ -1740,6 +1740,7 @@ impl<P> Cx<'_, P> {
 
     /// A new physical leg under the same logical authority. Preserve its exact
     /// raw deadline; integer timeout recomputation cannot round the bound up.
+    /// The declared physical cap is never expanded to the logical class budget.
     /// Session legs use `session_leg_context`, so families without Sessions
     /// never link Session issuance.
     pub fn http_leg_context(&mut self, parent: &Context, policy: Policy) -> Result<Context, Error> {
@@ -2390,14 +2391,16 @@ impl crate::engine::CoreCx<'_> {
                 )
                 .for_operation(policy.operation)
         };
-        let default_discovery = class == crate::request_budget::RequestClass::Discovery
+        let default_discovery = parent.is_none()
+            && class == crate::request_budget::RequestClass::Discovery
             && policy.timeout_ms == READ_TIMEOUT_MS;
         let policy = if default_discovery {
             discovery_bound(scope, policy, loaded)
         } else {
             policy
         };
-        let policy = if policy.timeout_ms == READ_TIMEOUT_MS {
+        // Class budgets supply logical defaults; child policies declare physical caps.
+        let policy = if parent.is_none() && policy.timeout_ms == READ_TIMEOUT_MS {
             Policy {
                 timeout_ms: class.budget_ms(),
                 ..policy

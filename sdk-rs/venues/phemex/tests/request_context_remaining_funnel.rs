@@ -998,20 +998,20 @@ fn physical_read_timeout_seals_once_while_the_original_root_is_live() {
         let timer = a
             .iter()
             .filter_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 30_000. => Some(*timer),
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000. => Some(*timer),
                 _ => None,
             })
             .next_back()
             .unwrap();
         let request = requests(&a).into_iter().next().unwrap();
-        let output = at(&mut e, NOW + 30_000., Event::TimerFired { timer });
+        let output = at(&mut e, NOW + 20_000., Event::TimerFired { timer });
         let result = terminal(&output, 805);
         assert_eq!(result.len(), 1);
         assert_eq!(
             result[0].as_ref().unwrap_err().kind,
             Some(ErrorKind::Timeout)
         );
-        assert!(terminal(&reply(&mut e, NOW + 30_001., &request, 200, "[]"), 805).is_empty());
+        assert!(terminal(&reply(&mut e, NOW + 20_001., &request, 200, "[]"), 805).is_empty());
     }
 }
 

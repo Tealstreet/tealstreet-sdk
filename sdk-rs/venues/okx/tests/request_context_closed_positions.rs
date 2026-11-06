@@ -637,12 +637,12 @@ fn page_child_is_minted_at_dequeue_and_its_live_root_can_recover_timeout() {
         let deadline = output
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 45_100.0 => Some(*timer),
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 35_100.0 => Some(*timer),
                 _ => None,
             })
             .expect("the20s page window begins at native dequeue, not the prior response");
-        engine.handle(NOW + 45_100.0, Event::TimerFired { timer: deadline });
-        let output = prepared(&mut engine, NOW + 45_100.0);
+        engine.handle(NOW + 35_100.0, Event::TimerFired { timer: deadline });
+        let output = prepared(&mut engine, NOW + 35_100.0);
         assert_eq!(
             done(&output),
             Some(format!("[{}]", accepted.join(",")).as_str())
@@ -666,12 +666,12 @@ fn first_child_expiry_retains_timeout_kind_and_release_outcome() {
         let deadline = output
             .iter()
             .find_map(|a| match a {
-                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 30_000.0 => Some(*timer),
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000.0 => Some(*timer),
                 _ => None,
             })
             .expect("physical child deadline before the60s caller root");
-        engine.handle(NOW + 30_000.0, Event::TimerFired { timer: deadline });
-        let output = prepared(&mut engine, NOW + 30_000.0);
+        engine.handle(NOW + 20_000.0, Event::TimerFired { timer: deadline });
+        let output = prepared(&mut engine, NOW + 20_000.0);
         let errors = failures(&output);
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].kind, Some(ErrorKind::Timeout));

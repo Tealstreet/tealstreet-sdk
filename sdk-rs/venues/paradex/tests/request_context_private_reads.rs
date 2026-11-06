@@ -85,7 +85,7 @@ fn ends_at_its_window(command: Command, id: u32, path: &str) {
         Command::Query {
             query: Query::OrderHistory { .. },
             ..
-        } => 30_000.,
+        } => 20_000.,
         Command::FetchLeverage { .. } => 20_000.,
         _ => panic!("unexpected private read kind"),
     };
@@ -133,8 +133,8 @@ fn a_later_history_page_that_never_answers_ends_at_the_walk_window() {
     let from = h.actions.len();
     h.command(order_history(82));
     let first = h.take("/orders-history");
-    let deadline = h.now + 30_000.;
-    window(&h, from, 30_000.).expect("the history walk has no deadline");
+    let deadline = h.now + 25_000.;
+    window(&h, from, 20_000.).expect("the history walk has no deadline");
     h.now += 5_000.;
     let page = h.actions.len();
     h.respond(first, 200, r#"{"next":"page-2","results":[]}"#);

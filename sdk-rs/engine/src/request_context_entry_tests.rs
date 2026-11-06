@@ -1055,7 +1055,8 @@ fn history_default_is_medium_and_issued_deadlines_never_renew() {
             );
             assert!(retry.is_err(), "a budget grants no retry authority");
             let child = cx.http_leg_context(&context, read_policy()).unwrap();
-            assert_eq!(child.deadline(), context.deadline());
+            assert_eq!(child.deadline(), cx.now + 20_000.);
+            assert_eq!(context.deadline(), cx.now + 30_000.);
             assert_eq!(child.request_class(), RequestClass::History);
             let explicit = Policy {
                 timeout_ms: 1_234,
@@ -1063,6 +1064,11 @@ fn history_default_is_medium_and_issued_deadlines_never_renew() {
             };
             let child = cx.http_leg_context(&context, explicit).unwrap();
             assert_eq!(child.deadline(), cx.now + 1_234.);
+            cx.now += 25_000.;
+            let page = cx.http_leg_context(&context, read_policy()).unwrap();
+            assert_eq!(page.deadline(), context.deadline());
+            assert_eq!(page.deadline() - cx.now, 5_000.);
+            assert_eq!(page.request_class(), RequestClass::History);
         }),
         ..Default::default()
     });
