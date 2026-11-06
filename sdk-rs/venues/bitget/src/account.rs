@@ -143,9 +143,10 @@ const POSITION_RECEIPT_GRACE_MS: f64 = 5_000.0;
 /// A position row's size split: `locked` is held by resting close orders.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Closable {
-    /// The mapped position's contracts and update time, to match the store's admitted row.
+    /// The admitted row's contracts, update time and position epoch.
     pub contracts: f64,
     pub last_update: Option<f64>,
+    pub epoch: u64,
     pub total: f64,
     pub available: f64,
     pub locked: f64,
@@ -220,8 +221,10 @@ pub struct Account {
     census_follow_up: Option<TimerId>,
     cancel_checks: Vec<CancelCheck>,
     cancel_check_serial: u64,
-    /// Each position's last reported unlocked split; it only words a close refusal.
-    pub(crate) closable: HashMap<(String, PositionSide), Closable>,
+    /// Each admitted position's unlocked split; it only words a close refusal.
+    closable: HashMap<(String, PositionSide), Closable>,
+    /// Splits read by the positions read in flight, committed only for rows it admits.
+    staged_closable: Vec<(u32, String, Option<Closable>)>,
     degraded: bool,
     /// When positions, balance and orders were last read over REST while live;
     /// `None` after each (re)login, so the first live poll covers the gap.
@@ -840,7 +843,12 @@ impl BitgetFutures {
         item: &str,
     ) {
         match request {
-            Request::Positions { rows, skipped, .. } => {
+            Request::Positions {
+                rows,
+                skipped,
+                read,
+                ..
+            } => {
                 match serde_json::from_str::<PositionRow>(item)
                     .map_err(|_| "malformed record".to_owned())
                     .and_then(|row| {
@@ -848,7 +856,9 @@ impl BitgetFutures {
                         Ok((closable(&row, &position), position))
                     }) {
                     Ok((split, p)) => {
-                        self.note_closable(&p, split);
+                        let staged = &mut self.account.staged_closable;
+                        staged.retain(|(staged_read, ..)| staged_read == read);
+                        staged.push((*read, p.id.clone(), split));
                         rows.push(p)
                     }
                     Err(error) => {
@@ -1024,7 +1034,8 @@ impl BitgetFutures {
                     self.owe_position_repair(cx);
                     return;
                 };
-                let (mut rows, stream_held) = self.merge_positions(cx, rows, started, cut);
+                let (mut rows, stream_held, admitted) =
+                    self.merge_positions(cx, rows, started, cut);
                 if stream_held && !repair {
                     self.owe_position_repair(cx);
                 }
@@ -1076,6 +1087,16 @@ impl BitgetFutures {
                 }
                 cx.store
                     .set_positions(rows.into_iter().filter(|p| p.contracts > 0.0).collect());
+                // Only rows this read's guards admitted carry their split into the Store.
+                for (staged_read, id, split) in std::mem::take(&mut self.account.staged_closable) {
+                    if staged_read == read
+                        && admitted.contains(&id)
+                        && let Some(position) =
+                            cx.store.positions().iter().find(|p| p.id == id).cloned()
+                    {
+                        self.commit_closable(&position, split);
+                    }
+                }
                 self.settle_fresh_positions(cx, read, skipped.rejected() != 0, stream_held);
             }
             Request::Balance {
@@ -1875,7 +1896,8 @@ impl BitgetFutures {
         rows: Vec<Position>,
         started: f64,
         cut: PositionCut,
-    ) -> (Vec<Position>, bool) {
+    ) -> (Vec<Position>, bool, Vec<String>) {
+        let mut admitted = Vec::new();
         // A post-cut zero has no Store row, but still prevents certifying this read.
         let held = std::cell::Cell::new(self.account.ws_positions.values().any(|mark| {
             [mark.observed, mark.rejected]
@@ -1973,6 +1995,7 @@ impl BitgetFutures {
                             .cloned();
                     }
                 }
+                admitted.push(p.id.clone());
                 Some(p)
             })
             .collect();
@@ -1999,7 +2022,7 @@ impl BitgetFutures {
                 rows.push(current.clone());
             }
         }
-        (rows, held.get())
+        (rows, held.get(), admitted)
     }
 
     fn order_metadata_current(
@@ -2330,6 +2353,7 @@ impl BitgetFutures {
                 };
                 let empty = rows.is_empty();
                 let mut positions = Vec::with_capacity(rows.len());
+                let mut splits = Vec::with_capacity(rows.len());
                 let mut skipped = RowAdmission::default();
                 for item in rows {
                     let mapped = match serde_json::from_str::<PositionRow>(item.get()) {
@@ -2342,7 +2366,7 @@ impl BitgetFutures {
                             }
                             let mapped = self.map_position(cx, &row);
                             if let Ok(position) = &mapped {
-                                self.note_closable(position, closable(&row, position));
+                                splits.push((position.id.clone(), closable(&row, position)));
                             }
                             mapped
                         }
@@ -2443,6 +2467,9 @@ impl BitgetFutures {
                 // Only REST establishes readiness; an explicit zero closes its own ID.
                 if useful {
                     for p in positions {
+                        if let Some((_, split)) = splits.iter().find(|(id, _)| *id == p.id) {
+                            self.commit_closable(&p, *split);
+                        }
                         cx.store.upsert_position(p);
                     }
                 }
@@ -3048,20 +3075,41 @@ impl BitgetFutures {
         (!symbol.is_empty()).then_some((symbol, side))
     }
 
-    fn note_closable(&mut self, position: &Position, split: Option<Closable>) {
+    /// An admitted row's split, bound to that row and this position epoch.
+    fn commit_closable(&mut self, position: &Position, split: Option<Closable>) {
         let key = (position.symbol.clone(), position.side);
-        // A row older than the kept one (a late REST read) never replaces it.
-        let newer = |kept: &Closable| match (kept.last_update, position.last_update) {
-            (Some(kept), Some(row)) => row >= kept,
-            _ => true,
-        };
-        if !self.account.closable.get(&key).is_none_or(newer) {
-            return;
-        }
         match split {
-            Some(split) => self.account.closable.insert(key, split),
-            None => self.account.closable.remove(&key),
-        };
+            Some(split) => {
+                let split = Closable {
+                    contracts: position.contracts,
+                    last_update: position.last_update,
+                    epoch: self.account.position_epoch,
+                    ..split
+                };
+                self.account.closable.insert(key, split);
+            }
+            None => {
+                self.account.closable.remove(&key);
+            }
+        }
+    }
+
+    /// The split of the Store's current row, admitted in this position epoch.
+    pub(crate) fn admitted_split(
+        &self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        side: PositionSide,
+    ) -> Option<Closable> {
+        let split = self.account.closable.get(&(symbol.to_owned(), side))?;
+        (split.epoch == self.account.position_epoch
+            && cx.store.positions().iter().any(|p| {
+                p.symbol == symbol
+                    && p.side == side
+                    && p.contracts == split.contracts
+                    && p.last_update == split.last_update
+            }))
+        .then_some(*split)
     }
 
     fn map_position(
@@ -3424,6 +3472,7 @@ fn closable(raw: &PositionRow<'_>, position: &Position) -> Option<Closable> {
     Some(Closable {
         contracts: position.contracts,
         last_update: position.last_update,
+        epoch: 0,
         total,
         available,
         locked: raw.locked.0.unwrap_or_else(|| round8(total - available)),

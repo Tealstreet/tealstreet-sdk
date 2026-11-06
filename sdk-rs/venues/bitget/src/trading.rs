@@ -1669,18 +1669,7 @@ impl BitgetFutures {
         } else {
             (PositionSide::Short, "short")
         };
-        let split = self
-            .account
-            .closable
-            .get(&(symbol.to_owned(), side))
-            .filter(|split| {
-                cx.store.positions().iter().any(|p| {
-                    p.symbol == symbol
-                        && p.side == side
-                        && p.contracts == split.contracts
-                        && p.last_update == split.last_update
-                })
-            });
+        let split = self.admitted_split(cx, symbol, side);
         Some(match split {
             Some(split) => format!(
                 "only {} of the {} {symbol} {label} is free to close; {} is held by open close orders, cancel them first ({message})",

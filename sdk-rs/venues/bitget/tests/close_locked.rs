@@ -295,3 +295,134 @@ fn an_unattributable_refusal_names_no_side_or_size() {
         );
     }
 }
+
+// Review probes (#3203, second round): only an admitted row's split is quoted.
+fn settled() -> Harness {
+    let mut h = held();
+    while h.requests.iter().any(|r| r.url.contains("/all-position")) {
+        h.respond("/all-position", 200, HELD);
+    }
+    h
+}
+
+/// A newer stream row: nothing free, all locked, a new entry the store must keep.
+fn fresh_stream_row(h: &mut Harness, with_time: bool) {
+    let mut response: Value = serde_json::from_str(HELD).unwrap();
+    let row = &mut response["data"][0];
+    row["available"] = json!("0");
+    row["locked"] = json!("0.749");
+    row["openPriceAvg"] = json!("91");
+    if !with_time {
+        row.as_object_mut().unwrap().remove("uTime");
+    }
+    h.private_message(
+        &json!({"arg":{"channel":"positions"},"action":"update","data":response["data"]})
+            .to_string(),
+    );
+    assert_eq!(h.engine.store().positions()[0].entry_price, 91.0);
+}
+
+fn quotes_no_rejected_split(h: &mut Harness) {
+    assert_eq!(
+        h.engine.store().positions()[0].entry_price,
+        91.0,
+        "the guards kept the stream row"
+    );
+    let (_, id) = close(h, 91, 0.138);
+    h.reply(
+        id,
+        200,
+        &json!({"code":"40757","msg":REFUSAL,"data":null}).to_string(),
+    );
+    let message = &h.failures.last().unwrap().message;
+    assert!(!message.contains("only 0.197"), "{message}");
+}
+
+fn read_positions(h: &mut Harness) -> safe_cex_engine::RequestId {
+    h.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::ReadPositions,
+    });
+    h.take("/all-position").id
+}
+
+#[test]
+fn a_rejected_rest_row_with_an_equal_update_time_never_writes_its_split() {
+    let mut h = settled();
+    let old = read_positions(&mut h);
+    h.now += 1.0;
+    fresh_stream_row(&mut h, true);
+    h.reply(old, 200, HELD);
+    quotes_no_rejected_split(&mut h);
+}
+
+#[test]
+fn a_rejected_rest_row_without_update_times_never_writes_its_split() {
+    let mut h = settled();
+    let old = read_positions(&mut h);
+    h.now += 1.0;
+    fresh_stream_row(&mut h, false);
+    h.reply(old, 200, &HELD.replace(r#","uTime":"100""#, ""));
+    quotes_no_rejected_split(&mut h);
+}
+
+#[test]
+fn a_pre_reconnect_rest_row_never_writes_its_split() {
+    use safe_cex_engine::Event;
+    let mut h = settled();
+    let old = read_positions(&mut h);
+    let socket = h
+        .sockets
+        .iter()
+        .rev()
+        .find(|(_, u)| u.ends_with("/private"))
+        .unwrap()
+        .0;
+    let timers: Vec<_> = h.timers.iter().map(|(id, _)| *id).collect();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    let (timer, at) = h
+        .timers
+        .iter()
+        .copied()
+        .filter(|(id, _)| !timers.contains(id))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap();
+    h.timers.retain(|(id, _)| *id != timer);
+    h.now = at;
+    h.event(Event::TimerFired { timer });
+    let next = h
+        .sockets
+        .iter()
+        .rev()
+        .find(|(_, u)| u.ends_with("/private"))
+        .unwrap()
+        .0;
+    assert_ne!(socket, next);
+    h.event(Event::WsOpened { socket: next });
+    h.private_message(r#"{"event":"login","code":0,"msg":""}"#);
+    h.now += 1.0;
+    fresh_stream_row(&mut h, true);
+    h.reply(old, 200, HELD);
+    quotes_no_rejected_split(&mut h);
+}
+
+#[test]
+fn an_absent_position_never_quotes_a_kept_split() {
+    let mut h = settled();
+    let (_, id) = close(&mut h, 91, 0.138);
+    h.now += 6000.0;
+    h.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::ReadPositions,
+    });
+    h.respond("/all-position", 200, r#"{"code":"00000","data":[]}"#);
+    assert!(h.engine.store().positions().is_empty());
+    h.reply(
+        id,
+        200,
+        &json!({"code":"40757","msg":REFUSAL,"data":null}).to_string(),
+    );
+    let message = &h.failures.last().unwrap().message;
+    assert!(message.contains("the BTCUSDT long is held"), "{message}");
+    assert!(!message.contains("only 0.197"), "{message}");
+}
