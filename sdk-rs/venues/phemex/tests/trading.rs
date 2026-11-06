@@ -4518,7 +4518,7 @@ fn ordinary_same_symbol_fills_veto_planning_or_replacement() {
 }
 
 #[test]
-fn ordinary_post_cancel_pause_retains_master_behavior_in_this_slice() {
+fn ordinary_post_cancel_pause_says_the_order_was_canceled_and_needs_replacement() {
     let (mut e, socket) = authenticated("OneWay");
     e.store_mut().upsert_order(order("old"));
     protective_cancel_wait(&mut e);
@@ -4534,7 +4534,50 @@ fn ordinary_post_cancel_pause_retains_master_behavior_in_this_slice() {
     assert!(writes(&a).is_empty());
     assert_eq!(
         failure(&a).message,
+        "Phemex order was canceled; replacement not sent (rate limited); re-place it"
+    );
+    assert_eq!(failure(&a).protection, None);
+    assert_eq!(
+        e.store().order("old").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        a.iter()
+            .filter(|action| matches!(
+                action,
+                Action::Notice(Notice::CommandFailed { command: 1, .. })
+            ))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn ordinary_pause_before_cancel_still_says_the_mutation_was_not_sent() {
+    let (mut e, _) = authenticated("OneWay");
+    let a = command(
+        &mut e,
+        Command::Venue {
+            command: 88,
+            action: safe_cex_engine::VenueAction::ReadPositions,
+        },
+    );
+    raw_status(&mut e, &requests(&a)[0], 429);
+    e.store_mut().upsert_order(order("old"));
+    let a = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        },
+    );
+    assert!(writes(&a).is_empty());
+    assert_eq!(
+        failure(&a).message,
         "Phemex requests are rate limited; mutation was not sent"
     );
     assert_eq!(failure(&a).protection, None);
+    assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
 }

@@ -394,3 +394,193 @@ fn a_size_edit_put_back_restores_the_original_volume() {
     );
     assert_eq!(original["triggerPrice"], 1800.0);
 }
+
+#[test]
+fn documented_protective_refusals_restore_the_exact_original_once() {
+    for code in [
+        -1111, -1136, -1137, -1138, -1139, -1140, -1154, -1155, -1156, -1158, -1159, -1160, -1161,
+        -1162, -1164, -1165, -1166,
+    ] {
+        let mut h = guarded_stop();
+        let create = to_replacement(&mut h);
+        h.reply(
+            create,
+            &format!(r#"{{"code":"{code}","msg":"documented placement refusal"}}"#),
+        );
+        assert_eq!(order_posts(&h), 1, "{code}: one exact put-back");
+        let restore = h.take(Method::Post, "/fapi/v2/order");
+        let original = body(&restore);
+        assert_eq!(original["triggerPrice"], 1800.0, "{code}");
+        assert_eq!(original["volume"], "0.001", "{code}");
+        assert_eq!(original["type"], "MARKET", "{code}");
+        assert_eq!(original["triggerType"], 1, "{code}");
+        // Refusal of that one put-back is explicit, not a third placement.
+        h.reply(restore, REFUSED);
+        assert_eq!(
+            failure(&h).protection,
+            Some(Protection::Unprotected),
+            "{code}"
+        );
+        assert!(failure(&h).message.contains("re-place"), "{code}");
+        assert_eq!(order_posts(&h), 0, "{code}: never retried");
+    }
+}
+
+#[test]
+fn ambiguous_protective_answers_are_unknown_and_never_restore() {
+    for (status, reply) in [
+        (418, r#"{"code":"-1111","msg":"precision"}"#),
+        (429, r#"{"code":"-1111","msg":"precision"}"#),
+        (503, r#"{"code":"-1111","msg":"precision"}"#),
+        (408, r#"{"code":"-1111","msg":"precision"}"#),
+        (200, r#"{"code":"-1003","msg":"request rate"}"#),
+        (200, r#"{"code":"-5999","msg":"unlisted"}"#),
+        (200, r#"{"code":"-1007","msg":"backend timeout"}"#),
+        (200, "not JSON"),
+        (200, r#"{"code":"0","data":{}}"#),
+        (
+            200,
+            r#"{"code":"-1111","msg":"precision","data":{"orderId":999}}"#,
+        ),
+    ] {
+        let mut h = guarded_stop();
+        let create = to_replacement(&mut h);
+        h.reply_status(create, status, reply);
+        let error = failure(&h);
+        assert_eq!(
+            error.outcome,
+            Some(Outcome::Unknown),
+            "{status} {reply}: {error:?}"
+        );
+        assert_eq!(error.protection, None);
+        assert_eq!(order_posts(&h), 0);
+    }
+}
+
+#[test]
+fn directly_edited_attached_legs_are_refused_before_cancel() {
+    for (kind, trigger, edited, native_kind) in [
+        (OrderType::StopLoss, 1800., 1790., 1),
+        (OrderType::TakeProfit, 2200., 2210., 2),
+    ] {
+        let mut h = guarded_stop();
+        h.e.store_mut().update_order("456", |order| {
+            order.parent_id = Some("parent".into());
+            order.kind = kind;
+            order.price = trigger;
+        });
+        h.command(Command::AmendOrder {
+            command: 7,
+            id: "456".into(),
+            price: Some(edited),
+            amount: None,
+        });
+        // Drive any Inspect emitted by the old code, so it reaches its cancel.
+        if let Some(index) = h
+            .requests
+            .iter()
+            .position(|r| r.method == Method::Get && r.url.contains("/fapi/v2/order?"))
+        {
+            let inspect = h.requests.remove(index);
+            let mut row: serde_json::Value = serde_json::from_str(&detail("INIT", 0.)).unwrap();
+            row["data"][0]["triggerType"] = serde_json::json!(native_kind);
+            row["data"][0]["triggerPrice"] = serde_json::json!(trigger);
+            h.reply(inspect, &row.to_string());
+        }
+        assert_eq!(cancels(&h), 0, "{kind:?}: attached order stays untouched");
+        assert_eq!(order_posts(&h), 0);
+        let error = failure(&h);
+        assert_eq!(error.outcome, Some(Outcome::NotSent));
+        assert_eq!(error.protection, None);
+        assert!(
+            error.message.contains("attached") && error.message.contains("re-place"),
+            "{error:?}"
+        );
+        assert_eq!(h.e.store().order("456").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn ordinary_amend_refusal_wire_and_outcome_match_master() {
+    // Recorded before this fix on master 06a9b1326ac, using only synthetic keys.
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/ordinary-amend-master.json")).unwrap();
+    let mut records = Vec::new();
+    for (status, code) in [
+        (200, -1111),
+        (200, -1136),
+        (400, -1155),
+        (200, -2017),
+        (429, -1111),
+        (503, -1111),
+        (200, -5999),
+        (200, -1003),
+    ] {
+        let mut h = Harness::new();
+        h.order(0.);
+        h.amend();
+        let inspect = h.take(Method::Get, "/fapi/v2/order?");
+        h.reply(inspect, &support::trading::detail("INIT", 0., ""));
+        let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+        let cancel_wire =
+            serde_json::json!({"url":cancel.url,"body":cancel.body,"headers":cancel.headers});
+        h.reply(
+            cancel,
+            r#"{"code":"0","data":{"orderId":"2334151155877155281"}}"#,
+        );
+        let verify = h.take(Method::Get, "/fapi/v2/order?");
+        h.reply(verify, &support::trading::detail("CANCELED", 0., ""));
+        let create = h.take(Method::Post, "/fapi/v2/order");
+        let create_wire =
+            serde_json::json!({"url":create.url,"body":create.body,"headers":create.headers});
+        assert_eq!(cancel_wire, expected["cancel"]);
+        assert_eq!(create_wire, expected["create"]);
+        h.reply_status(
+            create,
+            status,
+            &format!(r#"{{"code":"{code}","msg":"ordinary pin"}}"#),
+        );
+        records.push(serde_json::json!({"status":status,"code":code,"error":failure(&h),"additionalOrderPosts":order_posts(&h)}));
+    }
+    assert_eq!(serde_json::json!(records), expected["cases"]);
+}
+
+#[test]
+fn an_inexact_or_split_original_is_never_guessed_back() {
+    for (amount, trigger) in [(0.0015, 1800.), (0.025, 1800.), (0.001, 1800.05)] {
+        let mut h = guarded_stop();
+        h.e.store_mut().update_order("456", |order| {
+            order.amount = amount;
+            order.remaining = amount;
+            order.price = trigger;
+        });
+        h.command(Command::AmendOrder {
+            command: 7,
+            id: "456".into(),
+            price: Some(1790.),
+            amount: Some(0.001),
+        });
+        let native = |status| {
+            let mut row: serde_json::Value = serde_json::from_str(&detail(status, 0.)).unwrap();
+            row["data"][0]["origQty"] = serde_json::json!(amount);
+            row["data"][0]["triggerPrice"] = serde_json::json!(trigger);
+            row.to_string()
+        };
+        let inspect = h.take(Method::Get, "/fapi/v2/order?");
+        h.reply(inspect, &native("INIT"));
+        let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+        h.reply(cancel, r#"{"code":"0","data":{"orderId":456}}"#);
+        let verify = h.take(Method::Get, "/fapi/v2/order?");
+        h.reply(verify, &native("CANCELED"));
+        let create = h.take(Method::Post, "/fapi/v2/order");
+        h.reply(create, REFUSED);
+        assert_eq!(
+            order_posts(&h),
+            0,
+            "{amount}/{trigger}: no resized, rounded or split restore"
+        );
+        let error = failure(&h);
+        assert_eq!(error.protection, Some(Protection::Unprotected));
+        assert!(error.message.contains("re-place"), "{error:?}");
+    }
+}

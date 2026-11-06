@@ -15,6 +15,10 @@ const LEGACY_STOP_ROW: &str = r#"{"symbol":"BTCUSD_PERP","orderId":14,"clientOrd
 const ALGO_ROW: &str = r#"{"algoId":5550,"clientAlgoId":"algo","algoType":"CONDITIONAL","orderType":"STOP_MARKET","symbol":"BTCUSD_PERP","side":"SELL","positionSide":"BOTH","quantity":"7","algoStatus":"NEW","triggerPrice":"8500","price":"0","workingType":"MARK_PRICE","reduceOnly":true,"closePosition":false,"createTime":1}"#;
 
 fn ready() -> Harness {
+    ready_with_algo(&format!("[{ALGO_ROW}]"))
+}
+
+fn ready_with_algo(algo: &str) -> Harness {
     let mut h = Harness::started(Options {
         variant: Variant::CoinM,
         key: Some("api-key".into()),
@@ -45,7 +49,7 @@ fn ready() -> Harness {
     );
     // Conditional so the limit pin also runs against master, which has no algo read.
     if h.has_request("/dapi/v1/openAlgoOrders") {
-        h.respond("/dapi/v1/openAlgoOrders", 200, &format!("[{ALGO_ROW}]"));
+        h.respond("/dapi/v1/openAlgoOrders", 200, algo);
     }
     let socket = h.socket("/ws/coin-key").unwrap();
     h.event(Event::WsOpened { socket });
@@ -488,4 +492,61 @@ fn a_frame_fed_cancel_all_cancels_its_algo_stops_by_algo_id() {
         fed.engine.store().order("5550").unwrap().status,
         OrderStatus::Canceled
     );
+}
+
+/// A COIN-M algo trailing stop's refused replacement is put back on the algo endpoint
+/// with its native callbackRate and activatePrice (the algo name, never activationPrice).
+#[test]
+fn an_algo_trailing_stops_put_back_restores_its_native_rate_on_the_algo_endpoint() {
+    let trailing = ALGO_ROW
+        .replace(r#""algoId":5550"#, r#""algoId":5560"#)
+        .replace(
+            r#""orderType":"STOP_MARKET""#,
+            r#""orderType":"TRAILING_STOP_MARKET""#,
+        )
+        .replace(
+            r#""triggerPrice":"8500""#,
+            r#""triggerPrice":"9800","callbackRate":"1.5","activatePrice":"10300""#,
+        );
+    let mut h = ready_with_algo(&format!("[{ALGO_ROW},{trailing}]"));
+    h.event(Event::Command(Command::AmendOrder {
+        command: 50,
+        id: "5560".into(),
+        price: Some(9700.0),
+        amount: None,
+    }));
+    let cancel = h.take("/dapi/v1/algoOrder");
+    assert_eq!(cancel.method, Method::Delete);
+    assert_eq!(param(&cancel.url, "algoId").as_deref(), Some("5560"));
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":5560,"clientAlgoId":"algo","code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/dapi/v1/algoOrder");
+    assert_eq!(replacement.method, Method::Post);
+    assert_eq!(
+        param(&replacement.url, "callbackRate").as_deref(),
+        Some("3")
+    );
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let put_back = h.take("/dapi/v1/algoOrder");
+    assert_eq!(put_back.method, Method::Post);
+    assert!(!h.has_request("/dapi/v1/order?"), "{:?}", h.paths());
+    assert_eq!(
+        param(&put_back.url, "type").as_deref(),
+        Some("TRAILING_STOP_MARKET")
+    );
+    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+    assert_eq!(
+        param(&put_back.url, "activatePrice").as_deref(),
+        Some("10300")
+    );
+    assert_eq!(param(&put_back.url, "activationPrice"), None);
 }
