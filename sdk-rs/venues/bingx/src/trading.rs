@@ -1146,9 +1146,7 @@ impl Trading {
         }
         if full {
             params = params.str("closePosition", "true");
-        } else if !cx.store.hedged()
-            && (kind == "TRIGGER_MARKET" || o.reduce_only == Some(true) && !stop)
-        {
+        } else if !cx.store.hedged() && (kind == "TRIGGER_MARKET" || o.reduce_only == Some(true)) {
             params = params.boolean("reduceOnly", true);
         }
         let size = if full {

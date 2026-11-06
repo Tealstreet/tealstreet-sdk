@@ -2040,3 +2040,50 @@ fn a_price_move_on_a_limit_with_tp_sl_says_what_to_do() {
         "{error}"
     );
 }
+
+#[test]
+fn an_edited_standalone_stop_preserves_its_original_closing_authority_on_the_wire() {
+    for (kind, native, price) in [
+        (OrderType::StopLoss, "STOP_MARKET", 91.0),
+        (OrderType::TakeProfit, "TAKE_PROFIT_MARKET", 111.0),
+    ] {
+        for full in [false, true] {
+            let mut original = order();
+            original.kind = kind;
+            original.side = OrderSide::Sell;
+            original.price = if kind == OrderType::StopLoss {
+                90.0
+            } else {
+                110.0
+            };
+            original.reduce_only = !full;
+            original.close = Some(full);
+            original.client_order_id = None;
+            original.trigger_type = Some(StopTriggerType::MarkPrice);
+            let mut h = Harness::new(Some((original.clone(), native)));
+            h.engine.store_mut().set_positions(vec![position()]);
+            h.command(Command::AmendOrder {
+                command: 1,
+                id: original.id.clone(),
+                price: Some(price),
+                amount: None,
+            });
+            assert_eq!(h.requests.len(), 1, "{native}: {:?}", h.done);
+            h.reply(
+                &serde_json::json!({"code":0,"data":{"orderId":original.id,"status":"CANCELED"}})
+                    .to_string(),
+            );
+            let wire: serde_json::Value = serde_json::from_str(h.body()).unwrap();
+            assert_eq!(wire["type"], native);
+            if full {
+                assert_eq!(wire["closePosition"], "true");
+                assert!(wire.get("reduceOnly").is_none());
+            } else {
+                assert_eq!(
+                    wire["reduceOnly"], true,
+                    "{native} closing flag was lost: {wire}"
+                );
+            }
+        }
+    }
+}
