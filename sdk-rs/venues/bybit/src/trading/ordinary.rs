@@ -942,7 +942,7 @@ impl BybitLinear {
                     )
                 {
                     if let Some(server) = server {
-                        cx.observe_protocol_time(server);
+                        Self::observe_clock(cx, server);
                     }
                     if !self.send_mode_read(cx, id, &symbol, context.clone()) {
                         let _ = cx.fail_preflight(
@@ -1761,7 +1761,7 @@ impl BybitLinear {
         // Bybit's clock corrects ours for the next attempt, even when this
         // write gets no resend (an execution-owned Hyro create).
         if let (Verdict::RefusedResend(_), Some(server)) = (verdict, server) {
-            cx.observe_protocol_time(server);
+            Self::observe_clock(cx, server);
         }
         match (verdict, &planned.call) {
             (Verdict::Satisfied(_), call) => {
