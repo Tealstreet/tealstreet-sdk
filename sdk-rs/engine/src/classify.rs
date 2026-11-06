@@ -78,6 +78,10 @@ pub enum Key {
     /// other wording falls through to the plain row. Each needs a recorded
     /// fixture carrying the text (`error_corpus::assert_message_rows_recorded`).
     IntMessage(i64, &'static str),
+    /// A refusal the venue names by its text whatever code it carries (or none):
+    /// the message contains it, ASCII case-insensitively. It wins over code rows
+    /// in its scope like `IntMessage`, and the reported code stays the venue's.
+    Phrase(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,6 +151,10 @@ impl Key {
             (Self::IntMessage(key, message), NativeCode::Int(code)) => {
                 key == code && native.message == message
             }
+            (Self::Phrase(phrase), _) => native
+                .message
+                .to_ascii_lowercase()
+                .contains(&phrase.to_ascii_lowercase()),
             _ => false,
         }
     }
@@ -178,7 +186,7 @@ impl CodeTable {
                     .filter(move |row| row.only == only && row.key.matches(native))
             };
             candidates()
-                .find(|row| matches!(row.key, Key::IntMessage(..)))
+                .find(|row| matches!(row.key, Key::IntMessage(..) | Key::Phrase(_)))
                 .or_else(|| candidates().next())
         };
         scoped(Some(intent)).or_else(|| scoped(None))
@@ -656,6 +664,16 @@ pub fn assert_table(table: &CodeTable) {
                 "row {index}: a code-and-message row cannot be Satisfied or a nonce refusal"
             );
         }
+        if let Key::Phrase(phrase) = row.key {
+            assert!(
+                phrase.trim().len() >= 8,
+                "row {index}: a phrase this short is no evidence"
+            );
+            assert!(
+                !matches!(row.verdict, Verdict::Satisfied(_) | Verdict::NonceRefused),
+                "row {index}: a phrase row cannot be Satisfied or a nonce refusal"
+            );
+        }
         for (other_index, other) in table.rows.iter().enumerate().skip(index + 1) {
             // An exact code listed before a range that contains it refines the
             // range: rows match first to last, so the exact row always wins.
@@ -720,6 +738,7 @@ fn keys_overlap(a: Key, b: Key) -> bool {
             (Key::Text(a), Key::Text(b)) => a == b,
             (Key::Message(a), Key::Message(b)) => a == b,
             (Key::IntMessage(a, m), Key::IntMessage(b, n)) => a == b && m == n,
+            (Key::Phrase(a), Key::Phrase(b)) => a.eq_ignore_ascii_case(b),
             _ => false,
         },
     }

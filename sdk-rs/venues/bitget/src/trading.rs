@@ -82,8 +82,14 @@ pub(crate) const CODES: CodeTable = CodeTable {
         refused(45113, ErrorKind::InvalidInput),
         refused(45122, ErrorKind::InvalidInput),
         // "Not enough position is available": a reduce-only size above the
-        // position, refused at any price until the position changes.
-        refused(NOT_ENOUGH_POSITION, ErrorKind::InvalidInput),
+        // position, refused at any price until the position changes. No capture
+        // has carried 40757 yet, so the text names it under any code or none.
+        refused(40757, ErrorKind::InvalidInput),
+        Row {
+            key: Key::Phrase("Not enough position is available"),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
         Row {
             key: Key::Int(40010),
             verdict: Verdict::Unknown(None),
@@ -3780,21 +3786,6 @@ fn narrowable(command: &Command, intent: Intent) -> bool {
     )
 }
 
-/// Bitget's code for its reduce-only refusal of a size above the position.
-const NOT_ENOUGH_POSITION: i64 = 40757;
-
-/// The code the table reads: no capture has carried 40757 yet, so the refusal's
-/// exact text (any case, optional final period) names it when the code is absent or differs.
-fn table_code(code: Option<i64>, message: &str) -> Option<i64> {
-    let text = message.trim();
-    let text = text.strip_suffix('.').unwrap_or(text);
-    if text.eq_ignore_ascii_case("Not enough position is available") {
-        Some(NOT_ENOUGH_POSITION)
-    } else {
-        code
-    }
-}
-
 /// The reply's native code as classifier evidence; Bitget codes are integers.
 /// Native classifies 401, 403 and 429 by status, so those carry none.
 fn native_code<'a>(reply: Option<&'a Reply<'a>>, status: u16) -> Option<Native<'a>> {
@@ -3802,13 +3793,9 @@ fn native_code<'a>(reply: Option<&'a Reply<'a>>, status: u16) -> Option<Native<'
         return None;
     }
     let reply = reply?;
-    let code = reply
-        .code
-        .0
-        .filter(|code| code.fract() == 0.0)
-        .map(|code| code as i64);
+    let code = reply.code.0.filter(|code| code.fract() == 0.0)?;
     Some(Native {
-        code: NativeCode::Int(table_code(code, &reply.msg)?),
+        code: NativeCode::Int(code as i64),
         message: &reply.msg,
     })
 }
@@ -3822,17 +3809,13 @@ fn failure_text(failures: &[(Option<i64>, String)]) -> String {
         .join_with("; ")
 }
 
-/// Each failed row's message and integer code, when Bitget sends one. The code
-/// is read from the venue's own text here, before any rewording of the message.
+/// Each failed row's message and integer code, when Bitget sends one.
 fn failure_messages(failures: &[Failure]) -> Vec<(Option<i64>, String)> {
     failures
         .iter()
         .map(|e| {
             let code = e.error_code.0.filter(|code| code.fract() == 0.0);
-            (
-                table_code(code.map(|code| code as i64), &e.error_msg),
-                e.error_msg.clone(),
-            )
+            (code.map(|code| code as i64), e.error_msg.clone())
         })
         .collect()
 }

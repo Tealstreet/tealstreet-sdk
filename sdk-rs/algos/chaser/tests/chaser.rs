@@ -592,6 +592,28 @@ async fn an_unaffordable_or_unsupported_order_is_placed_once() {
     }
 }
 
+/// Binance GTX_ORDER_REJECT, as its code table classifies it: a post-only cross
+/// is the routine re-price, so it retries to Binance's 20-try bound.
+#[tokio::test(start_paused = true)]
+async fn a_binance_post_only_cross_retries_to_its_bound() {
+    local(async {
+        let port = FakePort::new("binance");
+        let tries = refuse_placements(
+            &port,
+            VenueError::new("Due to the order could not be executed as maker, the Post Only order will be rejected.")
+                .kind(ErrorKind::Rejected)
+                .outcome(Outcome::Rejected)
+                .venue_code("-5022"),
+        );
+        let _chase = start(&port, BUY_ONE);
+        settle(30_000).await;
+        assert_eq!(tries.get(), 19);
+        assert_eq!(port.errors().len(), 1, "{:?}", port.errors());
+        assert!(port.errors()[0].contains("after 20 tries"), "{:?}", port.errors());
+    })
+    .await;
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_passing_placement_failure_is_still_retried() {
     for kind in [

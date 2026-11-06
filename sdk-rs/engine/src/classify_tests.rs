@@ -953,3 +953,75 @@ fn an_exact_code_after_its_range_is_dead_and_refused() {
         status: &[],
     });
 }
+
+const PHRASED: CodeTable = CodeTable {
+    rows: &[
+        Row {
+            key: Key::Int(40999),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Phrase("Not enough position is available"),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
+    ],
+    success: &[],
+    unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: &[],
+};
+
+#[test]
+fn a_phrase_row_names_a_refusal_under_any_code_and_reports_the_venues_own() {
+    assert_table(&PHRASED);
+    for code in [NativeCode::Int(40999), NativeCode::Int(1), NativeCode::None] {
+        for message in [
+            "Not enough position is available",
+            "not enough position is available.",
+            "only 0.4 is free to close (Not enough position is available)",
+        ] {
+            let native = Native { code, message };
+            assert_eq!(
+                PHRASED.verdict(&native, Intent::Place),
+                Verdict::Refused(ErrorKind::InvalidInput),
+                "{code:?} {message}"
+            );
+            let error = fact(
+                &PHRASED,
+                Intent::Place,
+                Released::Response(&response(400)),
+                Some(&native),
+                "x",
+            );
+            let own = match code {
+                NativeCode::Int(code) => Some(code.to_string()),
+                _ => None,
+            };
+            assert_eq!(error.error().venue_code, own);
+        }
+    }
+    let other = Native {
+        code: NativeCode::Int(40999),
+        message: "Not enough balance",
+    };
+    assert_eq!(
+        PHRASED.verdict(&other, Intent::Place),
+        Verdict::Refused(ErrorKind::Rejected)
+    );
+}
+
+#[test]
+#[should_panic(expected = "no evidence")]
+fn a_phrase_row_needs_real_text() {
+    assert_table(&CodeTable {
+        rows: &[Row {
+            key: Key::Phrase(" ab "),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        }],
+        success: &[],
+        unlisted: Verdict::Unknown(None),
+        status: &[],
+    });
+}

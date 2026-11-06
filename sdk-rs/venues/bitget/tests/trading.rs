@@ -1452,8 +1452,9 @@ fn write_failures_are_classified_without_changing_their_text() {
             error.message
         );
         assert_eq!(h.done.last().unwrap().1, Err(error.legacy_text()));
-        if status == 400 && body.contains("40762") {
-            assert_eq!(error.venue_code.as_deref(), Some("40762"));
+        if status == 400 {
+            let own: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(error.venue_code.as_deref(), own["code"].as_str(), "{body}");
         }
     }
     // Transport loss on a write is Unknown.

@@ -2528,16 +2528,17 @@ pub(crate) const BINANCE: CodeTable = CodeTable {
             only: None,
         },
         // Order rules the order itself broke: UNABLE_TO_FILL,
-        // ORDER_WOULD_IMMEDIATELY_TRIGGER, REDUCE_ONLY_REJECT, FOK_ORDER_REJECT
-        // and GTX_ORDER_REJECT (post-only).
+        // ORDER_WOULD_IMMEDIATELY_TRIGGER and REDUCE_ONLY_REJECT.
         Row {
             key: Key::Range(-2022, -2020),
             verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
+        // FOK_ORDER_REJECT and GTX_ORDER_REJECT (post-only): the book was against
+        // the order this time, so a re-priced order may rest; a chaser retries them.
         Row {
             key: Key::Range(-5022, -5021),
-            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },
         Row {
