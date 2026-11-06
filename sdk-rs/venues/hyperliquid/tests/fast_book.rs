@@ -101,7 +101,8 @@ fn subscribes_fast_slow_bbo_once_and_releases_after_last_reference() {
             _ => None,
         })
         .collect();
-    assert_eq!(sent.len(), 3);
+    // Fast, slow and bbo depth, and the coin's trades stream for its last.
+    assert_eq!(sent.len(), 4);
     assert!(sent.iter().any(|s| s
         == r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC","fast":true}}"#));
     for command in [
@@ -130,7 +131,7 @@ fn subscribes_fast_slow_bbo_once_and_releases_after_last_reference() {
             .into_iter()
             .filter(|a| matches!(a, Action::WsSend { .. }))
             .count(),
-        3
+        4
     );
 }
 #[test]
@@ -328,7 +329,8 @@ fn many_books_stay_under_the_venue_limit_and_refuse_only_the_excess() {
         .into_iter()
         .filter(|a| matches!(a, Action::WsSend { .. }))
         .count();
-    for i in 0..332 {
+    // Four topics a book: fast, slow, bbo and trades.
+    for i in 0..249 {
         e.handle(
             2000.,
             Event::Command(Command::SubscribeOrderBook {
@@ -344,14 +346,14 @@ fn many_books_stay_under_the_venue_limit_and_refuse_only_the_excess() {
     e.handle(
         2000.,
         Event::Command(Command::SubscribeOrderBook {
-            symbol: "C332-PERP".into(),
+            symbol: "C249-PERP".into(),
         }),
     );
     let refused = prepared_now(&mut e);
     assert!(!refused.iter().any(|a| matches!(a, Action::WsSend { .. })));
     assert!(refused.iter().any(|a|matches!(a,Action::Notice(Notice::Event(event)) if event.code==safe_cex_engine::log::code::SUBSCRIPTION_REJECTED)));
-    e.handle(2100., Event::WsMessage {socket, text: r#"{"channel":"l2Book","data":{"coin":"C332","time":1,"fast":true,"levels":[[{"px":"100","sz":"1"}],[{"px":"101","sz":"1"}]]}}"#});
-    assert!(e.book("C332-PERP").is_none());
+    e.handle(2100., Event::WsMessage {socket, text: r#"{"channel":"l2Book","data":{"coin":"C249","time":1,"fast":true,"levels":[[{"px":"100","sz":"1"}],[{"px":"101","sz":"1"}]]}}"#});
+    assert!(e.book("C249-PERP").is_none());
     e.handle(
         2000.,
         Event::Command(Command::UnsubscribeOrderBook {
@@ -362,7 +364,7 @@ fn many_books_stay_under_the_venue_limit_and_refuse_only_the_excess() {
     e.handle(
         2000.,
         Event::Command(Command::SubscribeOrderBook {
-            symbol: "C332-PERP".into(),
+            symbol: "C249-PERP".into(),
         }),
     );
     assert_eq!(
@@ -370,7 +372,7 @@ fn many_books_stay_under_the_venue_limit_and_refuse_only_the_excess() {
             .into_iter()
             .filter(|a| matches!(a, Action::WsSend { .. }))
             .count(),
-        3
+        4
     );
 }
 
@@ -448,7 +450,7 @@ fn keyed_hip3_topic_budget_includes_private_topics_books_and_candles() {
                 _ => None,
             })
             .collect();
-        assert_eq!(topics(sent), 2);
+        assert_eq!(topics(sent), 3, "l2Book, bbo and trades");
     }
     e.handle(
         2000.,
@@ -823,7 +825,7 @@ fn default_options_keep_fast_depth_off() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(sent.len(), 2);
+    assert_eq!(sent.len(), 3, "l2Book, bbo and trades");
     assert!(!sent.iter().any(|s| s.contains("\"fast\":true")));
 }
 
@@ -974,7 +976,7 @@ fn catalogue_growth_refuses_only_new_excess_topics_and_replays_accepted_keys() {
         }),
     );
     let book = prepared_now(&mut e);
-    assert_eq!(subscription_keys(&book).len(), 2);
+    assert_eq!(subscription_keys(&book).len(), 3, "l2Book, bbo and trades");
     accepted.extend(subscription_keys(&book));
     e.handle(
         1100.,
@@ -1038,7 +1040,7 @@ fn catalogue_growth_refuses_only_new_excess_topics_and_replays_accepted_keys() {
     assert!(growth.iter().any(|a| matches!(a, Action::Notice(Notice::Event(event)) if event.code == safe_cex_engine::log::code::SUBSCRIPTION_REJECTED && event.message.contains("Capacity"))));
     assert_eq!(
         subscription_keys(&growth).len(),
-        9,
+        8,
         "only remaining topic slots are filled"
     );
     accepted.extend(subscription_keys(&growth));

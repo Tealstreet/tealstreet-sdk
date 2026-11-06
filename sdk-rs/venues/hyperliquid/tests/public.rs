@@ -593,6 +593,41 @@ fn a_refusal_naming_its_subscription_drops_that_one_and_a_fresh_subscribe_retrie
     );
 }
 
+// A refused trades stream belongs to the book that watches its coin: reopening the book
+// retries it, as it retries the book's own refused depth.
+#[test]
+fn a_refused_trades_stream_is_retried_when_its_book_is_asked_for_again() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    let book = |subscribe| {
+        let symbol = "BTC-PERP".into();
+        if subscribe {
+            Command::SubscribeOrderBook { symbol }
+        } else {
+            Command::UnsubscribeOrderBook { symbol }
+        }
+    };
+    let trades = r#"{"method":"subscribe","subscription":{"type":"trades","coin":"BTC"}}"#;
+    e.handle(1000.0, Event::Command(book(true)));
+    assert!(sent(&prepared_now(&mut e)).contains(&trades.to_owned()));
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Invalid subscription {\"method\":\"subscribe\",\"subscription\":{\"type\":\"trades\",\"coin\":\"BTC\"}}"}"#,
+    );
+    let actions = prepared_now(&mut e);
+    assert!(notices(&actions)[0].starts_with("Hyperliquid refused trades BTC"));
+    assert_eq!(
+        sent(&actions),
+        [trades.replacen("subscribe", "unsubscribe", 1)]
+    );
+    e.handle(3000.0, Event::Command(book(false)));
+    prepared_now(&mut e).into_iter().for_each(drop);
+    e.handle(4000.0, Event::Command(book(true)));
+    let again = sent(&prepared_now(&mut e));
+    assert!(again.contains(&trades.to_owned()), "{again:?}");
+}
+
 // HL answers frames in the order sent, so an unnamed cap refusal answers the oldest frame
 // still unanswered: here the candle, never the book that desired order lists ahead of it.
 #[test]
@@ -612,8 +647,8 @@ fn an_unnamed_refusal_answers_the_oldest_unanswered_frame_not_desired_order() {
             interval: safe_cex_engine::model::Interval::M1,
         }),
     );
-    // The host takes the candle frame, so it goes out before the book is asked for.
-    assert_eq!(sent(&prepared_now(&mut e)).len(), 1);
+    // The host takes the candle and BTC's trades frames before the book is asked for.
+    assert_eq!(sent(&prepared_now(&mut e)).len(), 2);
     e.handle(
         2000.0,
         Event::Command(Command::SubscribeOrderBook {
@@ -724,7 +759,11 @@ fn a_reconnect_with_an_interim_proposal_keeps_the_refusal_on_the_frame_sent() {
             interval: safe_cex_engine::model::Interval::M1,
         }),
     );
-    assert_eq!(sent(&prepared_now(&mut e)).len(), 1, "the candle goes out");
+    assert_eq!(
+        sent(&prepared_now(&mut e)).len(),
+        2,
+        "the candle and BTC's trades go out"
+    );
     e.handle(
         now + 3.0,
         Event::WsMessage {
@@ -790,7 +829,7 @@ fn a_superseded_revision_never_answers_for_frames_it_did_not_send() {
 
 // Open, close and reopen one book inside a round trip: the first subscribe's key has left
 // the released ledger by the time the reopen is proposed, yet it was sent and HL answers
-// it. The refusal after the four answers is the reopened l2Book's, not one frame later.
+// it. The refusal after the six answers is the reopened l2Book's, not one frame later.
 #[test]
 fn a_book_reopened_within_a_round_trip_keeps_the_refusal_on_the_right_frame() {
     let (mut e, s) = start();
@@ -812,16 +851,19 @@ fn a_book_reopened_within_a_round_trip_keeps_the_refusal_on_the_right_frame() {
             }
         }
     };
-    for (subscribe, frames) in [(true, 2), (false, 2), (true, 2)] {
+    // l2Book, bbo and the coin's trades stream.
+    for subscribe in [true, false, true] {
         e.handle(2000.0, Event::Command(book(subscribe)));
-        assert_eq!(sent(&prepared_now(&mut e)).len(), frames);
+        assert_eq!(sent(&prepared_now(&mut e)).len(), 3);
     }
-    // HL answers the first subscribe and unsubscribe pairs in order.
-    for method in ["subscribe", "subscribe", "unsubscribe", "unsubscribe"] {
-        let reply = format!(
-            r#"{{"channel":"subscriptionResponse","data":{{"method":"{method}","subscription":{{"type":"l2Book","coin":"ETH"}}}}}}"#
-        );
-        message(&mut e, s, &reply);
+    // HL answers the first subscribe and unsubscribe frames in order.
+    for method in ["subscribe", "unsubscribe"] {
+        for kind in ["l2Book", "bbo", "trades"] {
+            let reply = format!(
+                r#"{{"channel":"subscriptionResponse","data":{{"method":"{method}","subscription":{{"type":"{kind}","coin":"ETH"}}}}}}"#
+            );
+            message(&mut e, s, &reply);
+        }
     }
     message(
         &mut e,
