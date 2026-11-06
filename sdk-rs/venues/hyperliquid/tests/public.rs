@@ -586,3 +586,48 @@ fn a_refusal_naming_its_subscription_drops_that_one_and_a_fresh_subscribe_retrie
         "the user asked again: {again:?}"
     );
 }
+
+// HL answers frames in the order sent, so an unnamed cap refusal answers the oldest frame
+// still unanswered: here the candle, never the book that desired order lists ahead of it.
+#[test]
+fn an_unnamed_refusal_answers_the_oldest_unanswered_frame_not_desired_order() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    for ack in [
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"allMids"}}}"#,
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"fastAssetCtxs"}}}"#,
+    ] {
+        message(&mut e, s, ack);
+    }
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ETH-PERP".into(),
+        }),
+    );
+    prepared_now(&mut e).into_iter().for_each(drop);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Cannot subscribe to more than 1000 channels."}"#,
+    );
+    let actions = prepared_now(&mut e);
+    assert_eq!(
+        notices(&actions),
+        ["Hyperliquid refused candle BTC 1m: Cannot subscribe to more than 1000 channels."]
+    );
+    assert_eq!(
+        sent(&actions),
+        [
+            r#"{"method":"unsubscribe","subscription":{"type":"candle","coin":"BTC","interval":"1m"}}"#
+        ],
+        "the working book keeps its subscription"
+    );
+}

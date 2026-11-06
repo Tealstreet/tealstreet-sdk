@@ -9,8 +9,9 @@ use std::collections::BTreeMap;
 
 const PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 30_000.;
 const MAX_PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 300_000.;
-/// Mids and asset contexts tick every second; half a minute without them is a dead feed.
-const PUBLIC_SILENCE_MS: f64 = 30_000.;
+/// Mids and asset contexts tick every second; half a minute without them is a dead
+/// feed. The engine's repair threshold, so a repair and the watch agree on silence.
+const PUBLIC_SILENCE_MS: f64 = safe_cex_engine::engine::REPAIR_SILENCE_MS;
 const PUBLIC_STREAMS: &[&str] = &[
     r#"{"method":"subscribe","subscription":{"type":"allMids""#,
     r#"{"method":"subscribe","subscription":{"type":"fastAssetCtxs""#,
@@ -41,11 +42,9 @@ pub(super) fn managed_control(text: &str) -> Control {
     }
 }
 
-/// A subscription reply or request: the method, and the subscription it names.
+/// A subscription request or reply: the subscription it names.
 #[derive(serde::Deserialize)]
 struct Subscribing<'a> {
-    #[serde(borrow, default)]
-    method: Option<Cow<'a, str>>,
     #[serde(borrow)]
     subscription: &'a serde_json::value::RawValue,
 }
@@ -446,21 +445,13 @@ impl Hyperliquid {
         };
         match frame.channel.as_ref() {
             "subscriptionResponse" => {
-                let raw = frame.data.get();
-                let subscribed = serde_json::from_str::<Subscribing<'_>>(raw)
-                    .is_ok_and(|reply| reply.method.as_deref() != Some("unsubscribe"));
-                if let Some(key) = canonical_subscription(raw) {
-                    if subscribed {
-                        self.connection.acked.insert(key);
-                    } else {
-                        self.connection.acked.remove(&key);
-                    }
-                }
+                self.connection.unanswered.borrow_mut().pop_front();
                 true
             }
             "error" => {
+                let answered = self.connection.unanswered.borrow_mut().pop_front();
                 if let Ok(message) = serde_json::from_str::<Cow<'_, str>>(frame.data.get()) {
-                    self.subscription_refused(cx, &message);
+                    self.subscription_refused(cx, &message, answered);
                 }
                 true
             }
@@ -468,9 +459,14 @@ impl Hyperliquid {
         }
     }
 
-    /// A refusal names its subscription, except the per-IP cap's; that one
-    /// answers the oldest subscription still unacknowledged.
-    fn subscription_refused(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
+    /// A refusal names its subscription, except the per-IP cap's; that one answers
+    /// the oldest frame this socket sent and the venue has not yet answered.
+    fn subscription_refused(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        message: &str,
+        answered: Option<(bool, std::sync::Arc<str>)>,
+    ) {
         if message.starts_with("Already subscribed") || message.starts_with("Already unsubscribed")
         {
             return;
@@ -482,18 +478,16 @@ impl Hyperliquid {
                 .ok()?;
             canonical_subscription(raw.get())
         });
-        let desired = self.desired_socket_interests(cx.store, cx.public_feed_policy());
-        let canonical = |interest: &Interest| canonical_subscription(&interest.wire_args);
-        let refused = desired
-            .iter()
-            .find(|interest| {
-                let key = canonical(interest);
-                match &named {
-                    Some(named) => key.as_ref() == Some(named),
-                    None => key.is_some_and(|key| !self.connection.acked.contains(&key)),
-                }
-            })
-            .map(|interest| interest.key.to_string());
+        let refused = match named {
+            Some(named) => self
+                .desired_socket_interests(cx.store, cx.public_feed_policy())
+                .into_iter()
+                .find(|interest| canonical_subscription(&interest.wire_args) == Some(named.clone()))
+                .map(|interest| interest.key.to_string()),
+            None => answered
+                .filter(|(subscribe, _)| *subscribe)
+                .map(|(_, key)| key.to_string()),
+        };
         if self.connection.refusal_notices < REFUSAL_NOTICES {
             self.connection.refusal_notices += 1;
             let label = refused
@@ -645,7 +639,6 @@ impl Hyperliquid {
                     return Err(SocketError::Stale);
                 }
                 self.connection.open = true;
-                self.connection.acked.clear();
                 self.connection.refusal_notices = 0;
                 if cx.public_feed_policy() == PublicFeedPolicy::Direct {
                     for ladder in self.books.values_mut() {
@@ -667,6 +660,7 @@ impl Hyperliquid {
                 self.connection.open = false;
                 // A new socket tries every topic again; a repeat refusal is reported again.
                 self.connection.refused.clear();
+                self.connection.unanswered.borrow_mut().clear();
                 for ladder in self.books.values_mut() {
                     ladder.spot_depth = Default::default();
                     ladder.depth_time = None;
@@ -740,6 +734,10 @@ impl Hyperliquid {
                 text,
                 covered_keys: vec![interest.key.clone()],
             })?;
+            self.connection
+                .unanswered
+                .borrow_mut()
+                .push_back((subscribe, interest.key.clone()));
         }
         Ok(())
     }

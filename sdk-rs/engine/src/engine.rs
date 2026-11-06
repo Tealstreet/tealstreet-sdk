@@ -619,8 +619,9 @@ pub enum VenueAction {
 /// The shared rejection for a venue action the venue does not implement.
 const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
 /// A repair on a feed that has carried no data this long reconnects it instead.
+/// Venue data-silence windows that a repair should agree with use this value.
 #[cfg(feature = "managed-sockets")]
-const REPAIR_SILENCE_MS: f64 = 30_000.0;
+pub const REPAIR_SILENCE_MS: f64 = 30_000.0;
 /// The same topic repaired again within this window reconnects its feed.
 #[cfg(feature = "managed-sockets")]
 const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;

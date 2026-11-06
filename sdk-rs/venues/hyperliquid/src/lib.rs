@@ -140,8 +140,9 @@ struct Connection {
     private_bootstrap: socket_codec::PrivateBootstrap,
     // Transport liveness and epoch retirement cannot forgive a missing private bootstrap.
     private_bootstrap_misses: u8,
-    /// Canonical subscriptions the venue acknowledged on the current socket.
-    acked: HashSet<String>,
+    /// Subscribe (true) and unsubscribe frames sent on the current socket and not yet
+    /// answered, oldest first: the venue answers each, in order, with an ack or an error.
+    unanswered: std::cell::RefCell<VecDeque<(bool, std::sync::Arc<str>)>>,
     /// Interest keys the venue refused; left out until the socket or the topic is renewed.
     refused: HashSet<String>,
     refusal_notices: u8,
