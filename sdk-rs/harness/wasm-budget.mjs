@@ -210,12 +210,14 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   mexc: 1_858_560,
   okx: 1_973_248,
   orderly: 1_732_608,
-  paradex: 2_249_728,
+  // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
+  paradex: 2_260_992,
   phemex: 2_065_408,
   polymarket: 1_600_512,
   txflow: 1_838_080,
   weex: 1_936_384,
-  woo: 2_399_232,
+  // #3190, CI run 42248954523: WOO measured 2,399,392 B + 10 KiB, rounded up.
+  woo: 2_410_496,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

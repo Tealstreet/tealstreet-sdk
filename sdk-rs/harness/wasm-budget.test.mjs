@@ -140,14 +140,15 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
 });
 
 test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
-  for (const [venue, measured, cap] of [
+  for (const [venue, measured, measuredCap] of [
     ['coinbase', 1_816_299, 1_826_816],
     ['txflow', 1_827_125, 1_838_080],
     ['weex', 1_925_507, 1_936_384],
     ['woo', 2_388_474, 2_399_232],
   ]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(measuredCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= measuredCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -373,12 +374,13 @@ test('#3145 trades as last (run 42218930349 job 127896386942) retains Hyperliqui
 });
 
 test('#3122 protective stop edits (run 42126229513) retain Paradex and BloFin headroom', () => {
-  for (const [venue, measured, cap] of [
+  for (const [venue, measured, measuredCap] of [
     ['paradex', 2_239_351, 2_249_728],
     ['blofin', 1_979_025, 1_989_632],
   ]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(measuredCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= measuredCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -477,4 +479,17 @@ test('#3152 BingX protective edits (run 42200843544) retain measured headroom an
   assert.equal(wasmBudgetError(measured, 'venue', 'bingx'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
+
+test('#3190 engine de-monomorphisation (run 42248954523) retains WOO and Paradex headroom', () => {
+  for (const [venue, measured, cap] of [
+    ['woo', 2_399_392, 2_410_496],
+    ['paradex', 2_249_770, 2_260_992],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
