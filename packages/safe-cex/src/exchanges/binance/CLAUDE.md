@@ -375,10 +375,11 @@ is performed on the WebSocket API as described below.
 | `/papi/v1/account`                   | GET         | PM account info                          |
 | `/papi/v1/um/leverageBracket`        | GET         | UM leverage brackets                     |
 | `/papi/v1/um/openOrders`             | GET         | Open regular orders                      |
-| `/papi/v1/um/conditional/openOrders` | GET         | Open conditional (SL/TP) orders          |
+| `/papi/v1/um/algo/openAlgoOrders` | GET         | Open conditional (SL/TP) orders          |
 | `/papi/v1/um/order`                  | POST/DELETE | Place or cancel a regular order          |
-| `/papi/v1/um/conditional/order`      | POST/DELETE | Place or cancel a conditional order      |
-| `/papi/v1/um/allOpenOrders`          | DELETE      | Cancel all open orders for a symbol      |
+| `/papi/v1/um/algo/order`      | POST/DELETE | Place or cancel a conditional order      |
+| `/papi/v1/um/allOpenOrders`          | DELETE      | Cancel regular orders for a symbol       |
+| `/papi/v1/um/algo/allOpenOrders`     | DELETE      | Cancel algo orders for a symbol          |
 | `/papi/v1/um/positionSide/dual`      | GET/POST    | Hedge mode                               |
 | `/papi/v1/um/leverage`               | POST        | Set leverage                             |
 | `/papi/v1/um/positionRisk`           | GET         | Position risk                            |
@@ -553,7 +554,7 @@ snapshot and recompute USD totals.
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `ACCOUNT_UPDATE`                 | Balance and position changes (same as futures)                                                                           |
 | `ORDER_TRADE_UPDATE`             | Regular order events (uses `clientOrderId` via `data.c`, not `orderId`)                                                  |
-| `CONDITIONAL_ORDER_TRADE_UPDATE` | Conditional order events (nested in `so` object, uses `data.c` as ID, `data.st` for strategy type, `data.os` for status) |
+| `ALGO_UPDATE` | PM algo lifecycle in `ao` (not USD-M's `o`); `caid` is the retained PM client identity. Triggering is not a fill; actual execution arrives in `ORDER_TRADE_UPDATE`. Legacy `CONDITIONAL_ORDER_TRADE_UPDATE` remains readable during handover. |
 
 **PM-specific**: Position side in `ACCOUNT_UPDATE` is determined by the signed
 `p.pa` value, while stored contracts and notional are always absolute and
@@ -680,9 +681,9 @@ Orders are split into **regular** (limit/market) and **algo** (SL/TP/trailing) c
 PM splits orders differently (`binancepm.exchange.ts:878-935`):
 
 - **Regular orders** (LIMIT, MARKET): Placed via `/papi/v1/um/order`
-- **Conditional orders** (STOP_MARKET, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET): Placed via `/papi/v1/um/conditional/order` with `strategyType` instead of `type`
-- Conditional orders that have `closePosition` but no quantity attempt to look up the position size from the store (`binancepm.exchange.ts:894-904`)
-- Uses `newClientOrderId` (not exchange-assigned orderId) as the order ID
+- **Conditional orders** (STOP_MARKET, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET): Placed via `/papi/v1/um/algo/order` with `algoType: CONDITIONAL`, native `type`, `clientAlgoId` and `triggerPrice`
+- Algo `closePosition:true` omits quantity and reduceOnly; explicit-size orders retain quantity. Trailing callbackRate is 0.1–20 (the current PM algo API bound); an invalid rate emits and refuses before a write.
+- Retains client identity: `newClientOrderId` for regular orders, `clientAlgoId` for algo orders.
 - No batch order support -- all orders placed one at a time
 
 ### Order Cancellation
@@ -1184,9 +1185,9 @@ For batch order placement via `/fapi/v1/batchOrders`, each item in the response 
 | ----------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------- |
 | Base URL                | `fapi.binance.com`                                    | `papi.binance.com` + `fapi.binance.com`                                  | `api.binance.com`                            |
 | Exchange class          | `BinanceExchange`                                     | `BinancePMExchange`                                                      | `BinanceSpotExchange`                        |
-| Order API               | Regular + Algo                                        | Regular + Conditional (strategy)                                         | Regular only                                 |
-| Order ID type           | `orderId` / `algoId`                                  | `clientOrderId` / `newClientStrategyId`                                  | `clientOrderId`                              |
-| Stop orders             | Algo API (`/fapi/v1/algoOrder`)                       | Conditional API (`/papi/v1/um/conditional/order`)                        | `stopPrice` field on regular order           |
+| Order API               | Regular + Algo                                        | Regular + Algo                                         | Regular only                                 |
+| Order ID type           | `orderId` / `algoId`                                  | `clientOrderId` / `clientAlgoId`                                  | `clientOrderId`                              |
+| Stop orders             | Algo API (`/fapi/v1/algoOrder`)                       | Conditional API (`/papi/v1/um/algo/order`)                        | `stopPrice` field on regular order           |
 | Margin types            | Cross + Isolated                                      | Cross only                                                               | N/A                                          |
 | Fake positions          | No                                                    | Yes (for all markets)                                                    | No                                           |
 | Balance fetch           | Aggregated per-asset                                  | Per-asset (USDT/USDC/FDUSD)                                              | Top-level fields                             |
