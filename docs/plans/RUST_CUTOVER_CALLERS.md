@@ -10428,3 +10428,19 @@ statuses from default history. Explicit status calls retain the documented
 [24-hour availability](https://bybit-exchange.github.io/docs/v5/order/order-list);
 this change does not restore already expired terminal orders or claim longer
 retention. Hyro placement recovery is handled independently.
+
+### Binance PM TypeScript Algo Service migration
+
+NX preview still loads the TS BinancePMExchange (preview `6610c67c867`); NX
+master `9021302626e` uses the Rust registry. The TS PM client now reads and writes
+UM conditional/trailing orders through `/papi/v1/um/algo/*`, retaining its client
+identity as `clientAlgoId`. The old strategy field spellings are not sent. Symbol
+cancel-all attempts regular and algo families independently, marking only each
+successful captured family canceled. PM `ALGO_UPDATE` reads `ao`, never fabricates
+a trade at trigger, and retains the actual-trade event path. Trailing callbackRate
+is bounded to 0.1–20. Ordinary limit/market placement and single cancellation
+payload bytes are pinned against the unchanged base. Snapshot failure and
+non-array guards retain previous Store state.
+
+Sources: [PM trade API](https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/rest-api/trade),
+[PM stream schema](https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/ws-streams/~schemas#algoorderupdate).
