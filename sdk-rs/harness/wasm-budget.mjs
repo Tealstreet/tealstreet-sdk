@@ -164,6 +164,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // CI size plus 10 KiB rounded up to the KiB; all OKX variants share the okx family cap.
 // #3143 run 42181736999 measured hyperliquid 2,126,281 B: the public data watch, error-channel
 // refusals and Control::Unwatched. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
+// #3149 run 42197163575 measured hyperliquid 2,143,008 B: activeAssetData scoping, the
+// FetchLeverage read and subscription.count. CI size plus 10 KiB, rounded up; siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
@@ -181,8 +183,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   cryptocom: 1_727_488,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_137_088,
-  hyperliquidspot: 2_137_088,
+  hyperliquid: 2_153_472,
+  hyperliquidspot: 2_153_472,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
