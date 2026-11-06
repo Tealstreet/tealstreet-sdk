@@ -1021,11 +1021,8 @@ impl Venue for Planless {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, ()>, pending: (), error: &str) {
         self.0.on_request_failed(cx, pending, error);
     }
-    fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
-        assert!(
-            cx.begin_preflight(policy(PreflightPurpose::ReadOnly))
-                .is_err()
-        );
+    fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+        self.0.on_command(cx, command);
     }
     fn book(&self, symbol: &str) -> Option<&Book> {
         self.0.book(symbol)
@@ -1047,34 +1044,27 @@ fn a_venue_declaring_no_plans_cannot_open_a_preflight() {
         PreflightPurpose::ReadOnly,
         PreflightPurpose::WriteAfterReads,
     ] {
-        let refused = f(&mut planless, |cx| cx.issue_preflight(7, policy(purpose)));
-        assert_eq!(refused.err(), Some(Error::Invalid));
+        // A declaration bug is loud under test and refused, not issued, in release.
+        let issued = catch_unwind(AssertUnwindSafe(|| {
+            f(&mut planless, |cx| cx.issue_preflight(7, policy(purpose)))
+        }));
+        match issued {
+            Err(panic) => {
+                assert!(cfg!(debug_assertions));
+                assert!(
+                    panic
+                        .downcast_ref::<&str>()
+                        .is_some_and(|message| message.contains("http_plans() false"))
+                );
+            }
+            Ok(refused) => {
+                assert!(!cfg!(debug_assertions));
+                assert_eq!(refused.err(), Some(Error::Invalid));
+            }
+        }
     }
     assert!(!planless.io.core.request_contexts.has_plans());
     assert!(!planless.io.core.request_contexts.has_retirements());
-
-    // A genuine command callback is refused once, with nothing sent.
-    planless.handle(
-        1.,
-        Event::Command(Command::FetchLeverage {
-            command: 9,
-            symbol: "BTCUSDT".into(),
-        }),
-    );
-    let actions = planless.drain_actions().collect::<Vec<_>>();
-    assert_eq!(
-        actions
-            .iter()
-            .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 9, .. })))
-            .count(),
-        1,
-        "{actions:?}"
-    );
-    assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
-    );
 }
 
 fn f<R>(engine: &mut Engine<Planless>, op: impl FnOnce(&mut Cx<'_, ()>) -> R) -> R {

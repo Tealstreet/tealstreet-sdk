@@ -297,7 +297,12 @@ impl<P> Cx<'_, P> {
             &crate::request_context::Session,
         >,
     ) -> Result<Preflight, Error> {
-        // Every Plan, Session root and owner retirement hangs off a Preflight.
+        // Every Plan, Session root and owner retirement hangs off a Preflight. A
+        // venue declaring no Plans that gets here is a bug: loud in debug builds.
+        debug_assert!(
+            self.io.core.http_plans_declared,
+            "Preflight from a venue declaring Venue::http_plans() false"
+        );
         if !self.io.core.http_plans_declared {
             return Err(Error::Invalid);
         }
