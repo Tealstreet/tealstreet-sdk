@@ -37,6 +37,7 @@ const ORDER: &str = "/openApi/swap/v2/trade/order";
 const CANCEL_ALL: &str = "/openApi/swap/v2/trade/allOpenOrders";
 const AMEND: &str = "/openApi/swap/v1/trade/amend";
 const REPLACE: &str = "/openApi/swap/v1/trade/cancelReplace";
+const MISSING_ORDER_WORDS: &str = "BingX order was already filled or cancelled; check Open Orders";
 
 pub struct Request {
     command: CommandId,
@@ -895,7 +896,21 @@ impl Trading {
                     && d.order.is_none()
                     && d.status.is_empty()
             });
-        let absent = envelope.as_ref().is_ok_and(|e| e.code == 80016)
+        let missing_order = ((200..300).contains(&response.status) || response.status == 400)
+            && matches!(
+                call,
+                Call::Cancel { .. } | Call::Amend { .. } | Call::Replace { .. }
+            )
+            && envelope
+                .as_ref()
+                .is_ok_and(|e| context::missing_order(e.code, &e.msg));
+        if missing_order {
+            let _ = cx.present_plan_failure(&request.plan, MISSING_ORDER_WORDS);
+        }
+        let absent = envelope
+            .as_ref()
+            .is_ok_and(|e| e.code == 80016 || missing_order)
+            && !guarded
             && matches!(
                 call,
                 Call::Cancel {
@@ -913,7 +928,11 @@ impl Trading {
             .map_err(|e| unknown(format!("Invalid BingX trading response: {e}")))
             .and_then(|e| {
                 if e.code != 0 && !absent {
-                    return Err(unknown(format!("BingX {}: {}", e.code, e.msg)));
+                    return Err(unknown(if missing_order {
+                        MISSING_ORDER_WORDS.into()
+                    } else {
+                        format!("BingX {}: {}", e.code, e.msg)
+                    }));
                 }
                 decode(
                     &request.call,
@@ -1046,6 +1065,8 @@ impl Trading {
                 &context::DUPLICATE_TABLE
             } else if timestamp {
                 &context::TIMESTAMP_TABLE
+            } else if missing_order {
+                &context::MISSING_ORDER_TABLE
             } else {
                 &TABLE
             };
