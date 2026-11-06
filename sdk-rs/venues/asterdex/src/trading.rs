@@ -1287,10 +1287,10 @@ impl AsterDex {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     let guarded = was_place && job.gone_text(true).is_some();
-                    if guarded
-                        && (rate_limited
-                            || protective_failure(code, message.clone()).outcome
-                                == Some(Outcome::Unknown))
+                    if guarded && rate_limited
+                        || protective
+                            && protective_failure(code, message.clone()).outcome
+                                == Some(Outcome::Unknown)
                     {
                         error.outcome = Some(Outcome::Unknown);
                     }
@@ -1886,24 +1886,29 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
     }
 }
 
-/// A trading failure classified by its Aster code; code 0 is a transport
-/// failure, a non-JSON HTTP error or an unproven acknowledgement.
-/// `failure` for a stop's replacement or put-back: a code Aster does not document
-/// as a rejection leaves the write unknown.
+/// `failure` for a stop's replacement or put-back: a code `ASTER` does not list as a
+/// refusal leaves the write unknown, as `ASTER_PROTECTIVE` classifies it.
 fn protective_failure(code: i64, message: String) -> VenueError {
-    let documented = matches!(
-        code,
-        -1008 | -1003 | -1015 | -1022 | -2014 | -2015 | -1002 | -5025 | -2010 | -2016 | -2031
-    ) || (-1199..=-1100).contains(&code)
-        || (-4999..=-4000).contains(&code)
-        || (-2028..=-2018).contains(&code)
-        || (code == -1000 && refusal_1000(&message).is_some());
+    let listed = {
+        let native = Native {
+            code: NativeCode::Int(code),
+            message: refusal_1000(&message)
+                .filter(|_| code == -1000)
+                .unwrap_or(&message),
+        };
+        matches!(
+            ASTER_PROTECTIVE.verdict(&native, Intent::Place),
+            Verdict::Refused(_) | Verdict::RefusedResend(_) | Verdict::NonceRefused
+        )
+    };
     let mut error = failure(code, message);
-    if !documented && error.outcome == Some(Outcome::Rejected) {
+    if !listed && error.outcome == Some(Outcome::Rejected) {
         error.outcome = Some(Outcome::Unknown);
     }
     error
 }
+/// A trading failure classified by its Aster code; code 0 is a transport
+/// failure, a non-JSON HTTP error or an unproven acknowledgement.
 fn failure(code: i64, message: String) -> VenueError {
     let (kind, outcome) = match code {
         -1000 if refusal_1000(&message) == Some(DEVICE_TIME) => {

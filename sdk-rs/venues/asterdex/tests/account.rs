@@ -2146,3 +2146,63 @@ fn the_replacement_keeps_the_originals_price_protection() {
         assert!(replacement.url.contains(expected), "{}", replacement.url);
     }
 }
+
+// An ordinary limit order's replacement is not a protective write: an undocumented code
+// stays the definitive refusal it is on master, with no unknown wording or protection.
+#[test]
+fn an_ordinary_replacement_refused_with_an_unlisted_code_stays_refused() {
+    let mut h = H::new();
+    h.ws(order(10.0, "NEW", "0", 1));
+    h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+        command: 40,
+        id: "123".into(),
+        price: Some(105.0),
+        amount: None,
+    }));
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":123,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond(
+        replacement,
+        r#"{"code":-9999,"msg":"Internal processing issue."}"#,
+    );
+    // Exactly master's terminal: the order is gone and its replacement refused.
+    let error = h.failures.last().unwrap();
+    assert!(
+        error.message.contains("order is gone") && error.message.contains("replacement refused"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert!(!error.message.contains("unknown"), "{error:?}");
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+}
+
+// The put-back is a protective write too: an undocumented code on it is unknown, and
+// nothing is sent again.
+#[test]
+fn an_unlisted_code_on_the_put_back_is_unknown_and_never_resent() {
+    let mut h = guarded_stop();
+    amend_guarded_stop(&mut h, 105.0);
+    let cancel = h.take("/order");
+    h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+    let replacement = h.take("/order");
+    h.respond(
+        replacement,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let restore = h.take("/order");
+    assert!(restore.url.contains("stopPrice=110"));
+    h.respond(
+        restore,
+        r#"{"code":-9999,"msg":"Internal processing issue."}"#,
+    );
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+    assert_eq!(h.failures.last().unwrap().protection, None);
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+}
