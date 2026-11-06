@@ -5,14 +5,18 @@ The engine compiles its per-event Plan sweeps out for a venue declaring false an
 refuses (debug: panics on) any Preflight it opens. So the declaring impl's scope
 may not reference a Preflight or Plan admission API: the impl's module directory
 for a `mod.rs` impl, otherwise the whole crate source. A crate-root impl also
-may not sit in a crate whose Cargo.toml enables a Plan engine feature.
+may not sit in a crate whose Cargo.toml enables a Plan engine feature. Every
+venue `http_plans` body must be a literal `true` or `false`, so none hides.
 """
 import pathlib
 import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-DECLARES_FALSE = re.compile(r'fn\s+http_plans\s*\(\s*\)\s*->\s*bool\s*\{\s*false\s*\}')
+DECLARATION = re.compile(r'\bfn\s+http_plans\b')
+# The whole declaration, with or without the trait's `where Self: Sized` clause.
+LITERAL = re.compile(r'fn\s+http_plans\s*\(\s*\)\s*->\s*bool\s*(?:where\s+Self\s*:\s*Sized\s*,?\s*)?'
+                     r'\{\s*(true|false)\s*\}')
 PLAN_API = re.compile(
     r'\b(?:begin_preflight\w*|issue_preflight\w*|admit_serial_plan|admit_plan\w*'
     r'|begin_planned_execution)\s*\(')
@@ -25,6 +29,15 @@ def scope(path):
     """The source the declaring impl in `path` may reach."""
     src = next(parent for parent in path.parents if parent.name == 'src')
     return path.parent if path.name == 'mod.rs' else src
+
+
+def declarations(path, text):
+    """(declares false, problems): every `http_plans` body must be a literal."""
+    literals = list(LITERAL.finditer(text))
+    problems = []
+    if len(DECLARATION.findall(text)) != len(literals):
+        problems.append(f'{path}: http_plans() must return a literal true or false')
+    return any(m.group(1) == 'false' for m in literals), problems
 
 
 def violations(declaring, sources, cargo_toml):
@@ -47,10 +60,15 @@ def violations(declaring, sources, cargo_toml):
 def main():
     venues = ROOT / 'venues'
     sources = {path.relative_to(ROOT): path.read_text() for path in venues.rglob('src/**/*.rs')}
-    declaring = {path for path, text in sources.items() if DECLARES_FALSE.search(text)}
+    declaring, found = set(), []
+    for path, text in sources.items():
+        false, problems = declarations(path, text)
+        found += problems
+        if false:
+            declaring.add(path)
     cargo_toml = {path.parent.relative_to(ROOT): path.read_text()
                   for path in venues.glob('*/Cargo.toml')}
-    found = violations(declaring, sources, cargo_toml)
+    found += violations(declaring, sources, cargo_toml)
     for line in found:
         print(f'BANNED: {line}')
     return 1 if found else 0

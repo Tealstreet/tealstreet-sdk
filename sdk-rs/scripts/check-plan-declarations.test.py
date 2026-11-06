@@ -40,9 +40,24 @@ class PlanDeclarations(unittest.TestCase):
                                           {P('venues/x/src/spot/mod.rs'): FALSE}, cargo), [])
 
     def test_only_a_false_declaration_is_detected(self):
-        self.assertTrue(check.DECLARES_FALSE.search(FALSE))
-        self.assertFalse(check.DECLARES_FALSE.search(FALSE.replace('false', 'true')))
-        self.assertTrue(check.DECLARES_FALSE.search('fn http_plans() -> bool { false }'))
+        path = P('venues/x/src/lib.rs')
+        self.assertEqual(check.declarations(path, FALSE), (True, []))
+        self.assertEqual(check.declarations(path, FALSE.replace('false', 'true')), (False, []))
+        self.assertEqual(check.declarations(path, 'fn http_plans() -> bool { false }'), (True, []))
+        self.assertEqual(check.declarations(path, 'fn other() -> bool { false }'), (False, []))
+
+    def test_the_where_clause_form_is_a_declaration(self):
+        text = 'fn http_plans() -> bool\n    where\n        Self: Sized,\n    {\n        false\n    }\n'
+        self.assertEqual(check.declarations(P('venues/x/src/lib.rs'), text), (True, []))
+        self.assertEqual(check.declarations(P('venues/x/src/lib.rs'), text.replace('Sized,', 'Sized')),
+                         (True, []))
+
+    def test_a_computed_body_is_refused(self):
+        for body in ['{ cfg!(feature = "plans") }', '{ !true }', '{ OTHER }', '{ false || x() }',
+                     '{\n        // adopters only\n        false\n    }']:
+            false, problems = check.declarations(P('venues/x/src/lib.rs'), f'fn http_plans() -> bool {body}')
+            self.assertFalse(false, body)
+            self.assertEqual(len(problems), 1, body)
 
     def test_the_repository_is_clean(self):
         self.assertEqual(check.main(), 0)
