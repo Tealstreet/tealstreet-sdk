@@ -1117,7 +1117,7 @@ fn partial_stops_cancel_recreate_and_full_stops_keep_the_position_update_path() 
             &mut h,
             "BTCUSDT",
             if mode == "Partial" {
-                80_000.0
+                86_500.0
             } else {
                 90_000.0
             },
@@ -1138,6 +1138,7 @@ fn partial_stops_cancel_recreate_and_full_stops_keep_the_position_update_path() 
                 200,
                 r#"{"retCode":0,"retMsg":"OK","retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
             );
+            confirm_position_stop_cancel(&mut h);
             let amend = h.take("/v5/position/trading-stop");
             assert_eq!(
                 body(&amend),
@@ -1152,6 +1153,19 @@ fn partial_stops_cancel_recreate_and_full_stops_keep_the_position_update_path() 
             );
             assert!(!h.has_request("/v5/order/amend"));
         }
+    }
+}
+
+fn confirm_position_stop_cancel(h: &mut Harness) {
+    let target = serde_json::json!({
+        "orderId":"position-stop","symbol":"BTCUSDT","side":"Sell","orderStatus":"Cancelled",
+        "qty":"0.005","cumExecQty":"0","triggerPrice":"86000","triggerBy":"MarkPrice",
+        "orderType":"Market","price":"0","positionIdx":0,"tpslMode":"Partial","stopOrderType":"StopLoss",
+        "parentOrderLinkId":"","orderLinkId":"standalone-stop","createdTime":(h.now as u64).to_string()
+    });
+    h.respond("&orderId=position-stop",200,&serde_json::json!({"retCode":0,"result":{"category":"linear","list":[target],"nextPageCursor":""}}).to_string());
+    for path in ["&openOnly=0&limit=50", "/v5/order/history"] {
+        h.respond(path, 200, EMPTY_LIST);
     }
 }
 
@@ -4419,6 +4433,7 @@ fn review_3014_margin_code_working_control() {
 fn margin_noop_cannot_satisfy_full_or_partial_protection_writes_or_resend() {
     for partial in [false, true] {
         let mut h = ready();
+        price_at(&mut h, "BTCUSDT", 90_000.0);
         let before = h.engine.store().positions().to_vec();
         if partial {
             h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"Partial","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}]}"#);
@@ -4433,6 +4448,7 @@ fn margin_noop_cannot_satisfy_full_or_partial_protection_writes_or_resend() {
                 200,
                 r#"{"retCode":0,"retMsg":"OK","retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#,
             );
+            confirm_position_stop_cancel(&mut h);
         } else {
             let mut stop = limit("BTCUSDT", OrderSide::Sell, 0., 86000.04);
             stop.kind = OrderType::StopLoss;
@@ -4441,18 +4457,9 @@ fn margin_noop_cannot_satisfy_full_or_partial_protection_writes_or_resend() {
         let request = h.take("/v5/position/trading-stop");
         h.reply(request.id, 200, r#"{"retCode":110026,"retMsg":"Cross/isolated margin mode has not been modified.","result":{}}"#);
         if partial {
-            // #3018: the refused replacement's cancel landed, so the old stop goes back once
-            // (a different write: its own 86000 body, not a resend of the replacement).
-            let restore = h.take("/v5/position/trading-stop");
             assert!(
-                body(&restore).contains(r#""stopLoss":"86000""#),
-                "{}",
-                body(&restore)
-            );
-            h.reply(
-                restore.id,
-                200,
-                r#"{"retCode":0,"retMsg":"OK","result":{}}"#,
+                h.unknown.contains(&704),
+                "a margin-only code cannot prove a protective refusal"
             );
         }
         assert!(matches!(h.result(704), Some(Err(_))));
