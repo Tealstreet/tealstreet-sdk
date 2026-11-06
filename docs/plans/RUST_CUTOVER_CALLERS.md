@@ -10428,3 +10428,11 @@ statuses from default history. Explicit status calls retain the documented
 [24-hour availability](https://bybit-exchange.github.io/docs/v5/order/order-list);
 this change does not restore already expired terminal orders or claim longer
 retention. Hyro placement recovery is handled independently.
+
+### Bitrue protective replacement refusals
+
+Guarded stop edits recognize documented Futures placement refusals and may put
+back only one exact original order after proven cancellation. Ambiguous replies
+remain Unknown without a put-back; direct attached-leg edits refuse before any
+cancel. Ordinary amendments retain their master wire/error contract. See the
+[contract and regression controls](callers/bitrue-protective-refusals.md).
