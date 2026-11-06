@@ -50,7 +50,16 @@ impl Venue for Probe {
         issue(cx, Sections::ORDERS, 100);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Read>, read: Read, response: Response<'_>) {
-        if response.body == "refused" {
+        if response.body == "issue-then-refuse" {
+            issue(cx, Sections::NONE, 120_000);
+            cx.notice_error(
+                Level::Warn,
+                log_code::REQUEST_FAILED,
+                &VenueError::new("startup native refusal after issuing unrelated read")
+                    .kind(ErrorKind::AuthPermission)
+                    .venue_code("10006"),
+            );
+        } else if response.body == "refused" {
             cx.notice_error(
                 Level::Warn,
                 log_code::REQUEST_FAILED,
@@ -228,4 +237,35 @@ fn loaded_and_nonrequired_sections_have_no_retained_failure_fields() {
         || key.starts_with("startupBalance")
         || key.starts_with("startupOrders")
         || key.starts_with("startupPositions")));
+}
+
+#[test]
+fn review_issuing_another_read_must_not_clear_the_delivering_startup_cause() {
+    let mut engine = crate::test_support::seeded_engine(Probe);
+    engine.start(0.);
+    let requests = requests(&mut engine, 0.);
+    engine.handle(
+        1.,
+        Event::HttpResponse {
+            request: requests[0].id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "issue-then-refuse",
+            },
+        },
+    );
+    let got = fields(&mut engine, STARTUP_WATCH_MS);
+    assert!(
+        got.contains(&("startupMarketsKind", "authPermission".into())),
+        "{got:?}"
+    );
+    assert!(
+        got.contains(&("startupMarketsVenueCode", "10006".into())),
+        "{got:?}"
+    );
+    assert!(
+        got.contains(&("startupMarketsHttpStatus", 200_u16.into())),
+        "{got:?}"
+    );
 }

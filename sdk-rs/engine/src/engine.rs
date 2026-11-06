@@ -2346,7 +2346,6 @@ impl<P> Io<P> {
     fn startup_issued(&mut self, pending: &P) -> crate::startup::Sections {
         let sections = (self.startup_reads)(pending);
         self.core.startup_causes.started(sections);
-        self.core.startup_delivery = Default::default();
         sections
     }
 
@@ -3183,7 +3182,6 @@ impl<P> Cx<'_, P> {
         sections: crate::startup::Sections,
         error: &VenueError,
     ) {
-        self.io.core.startup_delivery = Default::default();
         self.io.core.startup_causes.failed(
             &mut crate::startup_causes::Delivery::new(sections, None),
             error,
@@ -3197,7 +3195,6 @@ impl<P> Cx<'_, P> {
         let status = (self.io.core.startup_delivery.sections == sections)
             .then_some(self.io.core.startup_delivery.status)
             .flatten();
-        self.io.core.startup_delivery = Default::default();
         self.io.core.startup_causes.failed(
             &mut crate::startup_causes::Delivery::new(sections, status),
             error,
@@ -3675,7 +3672,7 @@ impl crate::engine::CoreCx<'_> {
         let mut message = message.into();
         if level >= Level::Warn {
             let kind = fields.iter().find_map(|(name, value)| match (name, value) {
-                (&"kind", Value::Str(kind)) => auth_kind(kind),
+                (&"kind", value) => value.as_str().and_then(auth_kind),
                 _ => None,
             });
             if let Some((hinted, named)) = crate::error::ip_whitelist_text(&message, kind) {
@@ -3695,7 +3692,7 @@ impl crate::engine::CoreCx<'_> {
         ) {
             let mut error = VenueError::new("");
             for (key, value) in &fields {
-                if let Value::Str(value) = value {
+                if let Some(value) = value.as_str() {
                     if *key == "kind" {
                         error.kind = crate::startup_causes::error_kind(value);
                     }
@@ -8168,8 +8165,12 @@ fn push_event(
     }
     event.message = crate::log::cap(event.message);
     for (_, value) in &mut event.fields {
-        if let Value::Str(text) = value {
-            *text = crate::log::cap(std::mem::take(text));
+        match value {
+            Value::Str(text) => *text = crate::log::cap(std::mem::take(text)),
+            Value::StaticStr(text) if text.len() > crate::log::MAX_LOG_BYTES => {
+                *value = Value::Str(crate::log::cap((*text).to_owned()));
+            }
+            _ => {}
         }
     }
     actions.push(Action::Notice(Notice::Event(event)));

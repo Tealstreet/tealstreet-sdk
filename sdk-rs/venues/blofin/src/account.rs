@@ -2540,7 +2540,20 @@ impl Request {
             Self::Balance { .. } => S::BALANCE.union(S::POSITIONS),
             Self::Positions { .. } => S::BALANCE.union(S::POSITIONS),
             Self::Orders { .. } => S::ORDERS,
-            _ => S::NONE,
+            Self::Margin { .. } | Self::Mode { .. } => S::ACCOUNT,
         }
+    }
+}
+
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    for read in [
+        Request::Margin { revision: 0 },
+        Request::Mode { revision: 0 },
+    ] {
+        assert_eq!(
+            read.startup_sections(),
+            safe_cex_engine::startup::Sections::ACCOUNT
+        );
     }
 }

@@ -1329,6 +1329,19 @@ fn log_skip(
         .report(cx, asset.to_owned(), level, message);
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance => S::BALANCE,
+            Self::Orders(_) => S::ORDERS,
+            Self::Positions(_) => S::POSITIONS,
+            Self::Time => S::ACCOUNT,
+            Self::Derive => S::ACCOUNT,
+        }
+    }
+}
+
 #[cfg(test)]
 mod execution_bounds {
     use super::*;
@@ -1495,18 +1508,5 @@ mod execution_bounds {
         );
         trade(&mut engine, "new", "1", "MATCHED");
         assert_eq!(engine.venue().account_filled("o1"), 3.0);
-    }
-}
-
-impl Request {
-    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
-        use safe_cex_engine::startup::Sections as S;
-        match self {
-            Self::Balance => S::BALANCE,
-            Self::Orders(_) => S::ORDERS,
-            Self::Positions(_) => S::POSITIONS,
-            Self::Time => S::ACCOUNT,
-            Self::Derive => S::ACCOUNT,
-        }
     }
 }

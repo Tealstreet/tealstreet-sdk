@@ -1227,6 +1227,18 @@ fn refusal_text(body: &str) -> Option<String> {
     })
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.kind {
+            Kind::Balance => S::BALANCE,
+            Kind::Positions => S::POSITIONS,
+            Kind::Normal | Kind::Algo => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1390,18 +1402,6 @@ mod auth_envelopes {
                 );
                 assert_eq!(venue.account_auth(&p, &response(success)), Some(Accepted));
             }
-        }
-    }
-}
-
-impl Request {
-    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
-        use safe_cex_engine::startup::Sections as S;
-        match self.kind {
-            Kind::Balance => S::BALANCE,
-            Kind::Positions => S::POSITIONS,
-            Kind::Normal | Kind::Algo => S::ORDERS,
-            _ => S::NONE,
         }
     }
 }

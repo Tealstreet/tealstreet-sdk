@@ -2509,6 +2509,22 @@ impl Coinbase {
         }
     }
 }
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance => S::BALANCE,
+            Self::SpotBalance => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders(_) => S::ORDERS,
+            Self::Portfolios | Self::Probe { .. } => S::ACCOUNT,
+            Self::KeyPermissions { .. } => S::ACCOUNT,
+            Self::DetectCfm { .. } => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2575,18 +2591,14 @@ mod tests {
     }
 }
 
-impl Request {
-    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
-        use safe_cex_engine::startup::Sections as S;
-        match self {
-            Self::Balance => S::BALANCE,
-            Self::SpotBalance => S::BALANCE,
-            Self::Positions { .. } => S::POSITIONS,
-            Self::Orders(_) => S::ORDERS,
-            Self::Portfolios => S::ACCOUNT,
-            Self::KeyPermissions { .. } => S::ACCOUNT,
-            Self::DetectCfm { .. } => S::ACCOUNT,
-            _ => S::NONE,
-        }
-    }
+#[test]
+fn review_startup_prerequisite_has_a_section() {
+    let read = Request::Probe {
+        portfolios: vec![],
+        index: 0,
+    };
+    assert_eq!(
+        read.startup_sections(),
+        safe_cex_engine::startup::Sections::ACCOUNT
+    );
 }

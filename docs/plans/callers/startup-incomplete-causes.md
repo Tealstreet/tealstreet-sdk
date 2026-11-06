@@ -32,9 +32,10 @@ it to text, including native re-sign retries. Local refusals without a request i
 use the same explicit membership.
 
 The tracker has five slots and no retained request payload, URL, account, order
-identity, raw error message or response body. Starting follow-up work ends the
-parent callback's diagnostic association. This prevents an unrelated child
-failure from becoming the parent section's cause. There are no additional logs,
+identity, raw error message or response body. Issuing follow-up work does not change the active response callback's section or
+HTTP status. Its later asynchronous response has its own immutable membership;
+caller-owned reads and lookups cannot overwrite startup causes. Account prerequisites
+that gate the private snapshot set explicitly label the sections they block. There are no additional logs,
 timers, retries or changes to request/terminal authority.
 
 `BaseExchange.emitAndLogError` projects only the bounded event fields to
@@ -48,3 +49,7 @@ Controls exercise missing/required sections, a real managed preparation refusal,
 native HTTP rejection, transport failure, exact physical timeout, retry retention,
 unrelated-read isolation, a real Bybit native rate-limit envelope, and a
 hosted-shaped fields-only event through the real TS error-reporting boundary.
+
+Closed startup states/kinds use borrowed static log values, preserving the existing
+watchdog allocation pin. WASM and hosted serialization is byte-identical to owned
+strings; text-value equality and the existing log-size limit apply to both.

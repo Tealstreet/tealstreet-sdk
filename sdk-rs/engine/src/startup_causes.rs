@@ -168,20 +168,18 @@ impl Causes {
             let failure = self.failures[i].as_ref();
             fields.push((
                 state,
-                failure
-                    .map_or(
-                        if self.started & (1 << i) == 0 {
-                            "neverStarted"
-                        } else {
-                            "started"
-                        },
-                        |f| f.state,
-                    )
-                    .into(),
+                Value::StaticStr(failure.map_or(
+                    if self.started & (1 << i) == 0 {
+                        "neverStarted"
+                    } else {
+                        "started"
+                    },
+                    |f| f.state,
+                )),
             ));
             if let Some(failure) = failure {
                 if let Some(value) = failure.kind {
-                    fields.push((kind, value.as_str().into()));
+                    fields.push((kind, Value::StaticStr(value.as_str())));
                 }
                 if let Some(value) = &failure.venue_code {
                     fields.push((code, value.as_str().into()));

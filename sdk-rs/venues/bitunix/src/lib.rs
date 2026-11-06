@@ -614,11 +614,19 @@ impl Venue for BitunixFutures {
         match pending {
             Pending::Markets { .. } => S::MARKETS,
             Pending::Tickers { .. } => S::TICKERS,
-            Pending::Private(request) => match request.axis {
-                account::Axis::Balance => S::BALANCE,
-                account::Axis::Positions => S::POSITIONS,
-                account::Axis::Orders | account::Axis::Tpsl => S::ORDERS,
-            },
+            Pending::Private(request)
+                if request.after.is_none()
+                    && matches!(
+                        request.custody,
+                        None | Some(account::ReadCustody::Background(_))
+                    ) =>
+            {
+                match request.axis {
+                    account::Axis::Balance => S::BALANCE,
+                    account::Axis::Positions => S::POSITIONS,
+                    account::Axis::Orders | account::Axis::Tpsl => S::ORDERS,
+                }
+            }
             _ => S::NONE,
         }
     }
@@ -1341,5 +1349,56 @@ impl Venue for BitunixFutures {
                 .filter(|(_, b)| b.initialized)
                 .map(|(s, b)| (s.as_str(), &b.levels)),
         )
+    }
+}
+
+#[cfg(test)]
+mod startup_cause_tests {
+    use super::*;
+
+    fn pending(axis: account::Axis, after: Option<u32>) -> Pending {
+        Pending::Private(account::Read {
+            custody: None,
+            axis,
+            after,
+            generation: 0,
+            balance_write_revision: 0,
+            position_write_revision: 0,
+            order_token: None,
+            serial: 0,
+            positions: vec![],
+            position_rejected: Default::default(),
+            position_admitted: vec![],
+            identities: vec![],
+            orders: vec![],
+            order_rejected: Default::default(),
+            order_accepted: Default::default(),
+            order_newer: Default::default(),
+            native: vec![],
+            invalid: false,
+            baselines: vec![],
+            reconcile: false,
+            epoch: 0,
+        })
+    }
+
+    #[test]
+    fn command_prerequisites_do_not_supply_startup_causes() {
+        use safe_cex_engine::startup::Sections as S;
+        for (axis, expected) in [
+            (account::Axis::Balance, S::BALANCE),
+            (account::Axis::Positions, S::POSITIONS),
+            (account::Axis::Orders, S::ORDERS),
+            (account::Axis::Tpsl, S::ORDERS),
+        ] {
+            assert_eq!(
+                BitunixFutures::startup_reads(&pending(axis, None)),
+                expected
+            );
+            assert_eq!(
+                BitunixFutures::startup_reads(&pending(axis, Some(1))),
+                S::NONE
+            );
+        }
     }
 }

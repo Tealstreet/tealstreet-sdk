@@ -1749,6 +1749,7 @@ impl Serialize for NoticeFields<'_> {
         for (key, value) in self.0 {
             match value {
                 Value::Str(text) => map.serialize_entry(key, text)?,
+                Value::StaticStr(text) => map.serialize_entry(key, text)?,
                 Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
                 Value::Num(_) => map.serialize_entry(key, &())?,
                 Value::Bool(flag) => map.serialize_entry(key, flag)?,
@@ -2977,6 +2978,27 @@ mod tests {
         actor.broadcast(Outgoing::Frame(unsplittable.into()));
         assert!(actor.peers.is_empty());
         assert!(peers.iter().all(|(_, canceled)| *canceled.borrow()));
+    }
+
+    #[test]
+    fn static_startup_fields_encode_identically_to_owned_strings() {
+        let borrowed = [
+            ("state", Value::StaticStr("neverStarted")),
+            ("kind", Value::StaticStr("timeout")),
+        ];
+        let owned = [
+            ("state", Value::from("neverStarted")),
+            ("kind", Value::from("timeout")),
+        ];
+        let expected = r#"{"state":"neverStarted","kind":"timeout"}"#;
+        assert_eq!(
+            serde_json::to_string(&NoticeFields(&borrowed)).unwrap(),
+            expected
+        );
+        assert_eq!(
+            serde_json::to_string(&NoticeFields(&owned)).unwrap(),
+            expected
+        );
     }
 
     #[test]

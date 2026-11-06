@@ -512,6 +512,7 @@ impl serde::Serialize for Fields<'_> {
         for (key, value) in self.0 {
             match value {
                 Value::Str(text) => map.serialize_entry(key, text)?,
+                Value::StaticStr(text) => map.serialize_entry(key, text)?,
                 // JSON has no non-finite numbers.
                 Value::Num(number) if number.is_finite() => map.serialize_entry(key, number)?,
                 Value::Num(_) => map.serialize_entry(key, &())?,
@@ -2963,6 +2964,21 @@ mod tests {
         fn account_snapshot(&mut self, _now: f64) -> &[u8] {
             &[]
         }
+    }
+
+    #[test]
+    fn static_startup_fields_encode_identically_to_owned_strings() {
+        let borrowed = [
+            ("state", Value::StaticStr("neverStarted")),
+            ("kind", Value::StaticStr("timeout")),
+        ];
+        let owned = [
+            ("state", Value::from("neverStarted")),
+            ("kind", Value::from("timeout")),
+        ];
+        let expected = r#"{"state":"neverStarted","kind":"timeout"}"#;
+        assert_eq!(serde_json::to_string(&Fields(&borrowed)).unwrap(), expected);
+        assert_eq!(serde_json::to_string(&Fields(&owned)).unwrap(), expected);
     }
 
     #[test]

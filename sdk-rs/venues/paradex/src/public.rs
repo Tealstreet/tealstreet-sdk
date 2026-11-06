@@ -1692,6 +1692,18 @@ fn skip_or_reject(cx: &mut Cx<'_, Pending>, invalid: &mut bool, e: &serde_json::
     }
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::ManagedSeed(_, request) => request.startup_sections(),
+            Self::Markets { .. } => S::MARKETS,
+            Self::Tickers { .. } => S::TICKERS,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1749,17 +1761,5 @@ mod tests {
             failed.venue().public.price_bands.get("BTC-USD-PERP"),
             Some(&0.05)
         );
-    }
-}
-
-impl Request {
-    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
-        use safe_cex_engine::startup::Sections as S;
-        match self {
-            Self::ManagedSeed(_, request) => request.startup_sections(),
-            Self::Markets { .. } => S::MARKETS,
-            Self::Tickers { .. } => S::TICKERS,
-            _ => S::NONE,
-        }
     }
 }

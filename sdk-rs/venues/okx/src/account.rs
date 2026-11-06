@@ -2708,6 +2708,19 @@ fn read_policy(credential: Option<Credential>) -> Policy {
     }
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Config { .. } => S::ACCOUNT,
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod key_refusal_tests {
     use super::*;
@@ -2733,19 +2746,6 @@ mod key_refusal_tests {
                 Verdict::Refused(kind)
             };
             assert_eq!(verdict, expected, "{code}");
-        }
-    }
-}
-
-impl Request {
-    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
-        use safe_cex_engine::startup::Sections as S;
-        match self {
-            Self::Config { .. } => S::ACCOUNT,
-            Self::Balance { .. } => S::BALANCE,
-            Self::Positions { .. } => S::POSITIONS,
-            Self::Orders { .. } => S::ORDERS,
-            _ => S::NONE,
         }
     }
 }

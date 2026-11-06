@@ -1068,7 +1068,7 @@ impl Venue for KucoinSpot {
             Pending::Markets { .. } => S::MARKETS,
             Pending::Tickers { .. } => S::TICKERS,
             Pending::Balance(_) => S::BALANCE,
-            Pending::Orders(_) => S::ORDERS,
+            Pending::Orders(read) if read.lookup.is_none() && read.root.is_none() => S::ORDERS,
             _ => S::NONE,
         }
     }
@@ -2102,4 +2102,22 @@ mod execution_retention {
         // Retention and dedupe remain independent native history domains.
         assert!(venue.fills.is_empty() && venue.terminal.is_empty());
     }
+}
+
+#[test]
+fn review_caller_lookup_is_not_a_startup_read() {
+    let pending = Pending::Orders(ReadOrders {
+        revision: 0,
+        symbols: VecDeque::new(),
+        symbol: "BTC-USDT".into(),
+        page: 1,
+        rows: SnapshotBuilder::default(),
+        seeds: vec![],
+        lookup: Some((1, "caller-link".into())),
+        root: None,
+    });
+    assert_eq!(
+        KucoinSpot::startup_reads(&pending),
+        safe_cex_engine::startup::Sections::NONE
+    );
 }

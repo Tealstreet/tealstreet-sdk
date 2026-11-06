@@ -3691,6 +3691,19 @@ fn hyro_failure(ready: bool, transient: bool, local: bool, streak: u8) -> HyroFa
     }
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Wallet { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::AccountInfo => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3820,18 +3833,5 @@ mod row_class_tests {
         let row: crate::wire::WalletAccount<'_> =
             serde_json::from_str(r#"{"accountType":"UNIFIED","coin":null}"#).unwrap();
         assert!(row.coin.is_empty());
-    }
-}
-
-impl Request {
-    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
-        use safe_cex_engine::startup::Sections as S;
-        match self {
-            Self::Wallet { .. } => S::BALANCE,
-            Self::Positions { .. } => S::POSITIONS,
-            Self::Orders { .. } => S::ORDERS,
-            Self::AccountInfo => S::ACCOUNT,
-            _ => S::NONE,
-        }
     }
 }

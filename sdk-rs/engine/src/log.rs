@@ -31,13 +31,39 @@ impl Level {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Str(String),
+    /// Closed engine vocabulary, encoded as the same JSON string without allocation.
+    StaticStr(&'static str),
     Num(f64),
     Bool(bool),
     /// A field whose value must never leave the engine.
     Redacted,
+}
+
+impl Value {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Str(text) => Some(text),
+            Self::StaticStr(text) => Some(text),
+            _ => None,
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Str(a), Self::Str(b)) => a == b,
+            (Self::StaticStr(a), Self::StaticStr(b)) => a == b,
+            (Self::StaticStr(a), Self::Str(b)) | (Self::Str(b), Self::StaticStr(a)) => *a == b,
+            (Self::Num(a), Self::Num(b)) => a == b,
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Redacted, Self::Redacted) => true,
+            _ => false,
+        }
+    }
 }
 
 /// Wraps a sensitive value so only its presence reaches a notice.
@@ -246,5 +272,22 @@ impl Health {
             _ => return,
         };
         *counter = counter.saturating_add(1);
+    }
+}
+
+#[cfg(test)]
+mod value_tests {
+    use super::Value;
+
+    #[test]
+    fn static_and_owned_strings_have_equal_text_value() {
+        assert_eq!(
+            Value::StaticStr("neverStarted"),
+            Value::from("neverStarted")
+        );
+        assert_eq!(Value::from("timeout"), Value::StaticStr("timeout"));
+        assert_ne!(Value::StaticStr("started"), Value::StaticStr("failed"));
+        assert_ne!(Value::StaticStr("1"), Value::Num(1.));
+        assert_ne!(Value::Num(f64::NAN), Value::Num(f64::NAN));
     }
 }

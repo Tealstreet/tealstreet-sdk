@@ -3602,6 +3602,18 @@ impl Venue for BybitLinear {
     }
 }
 
+impl Then {
+    fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Then::Markets { .. } | Then::Fees(_) => S::MARKETS,
+            Then::Tickers(_) | Then::OptionSeed { .. } => S::TICKERS,
+            Then::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod public_decoder_tests {
     use super::*;
@@ -3779,18 +3791,6 @@ mod candle_start_tests {
         assert_eq!(candle_start(Interval::D1, t), 1_792_454_400.0);
         assert_eq!(candle_start(Interval::H4, t), 1_792_497_600.0);
         assert_eq!(candle_start(Interval::S15, t), 1_792_499_685.0);
-    }
-}
-
-impl Then {
-    fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
-        use safe_cex_engine::startup::Sections as S;
-        match self {
-            Then::Markets { .. } | Then::Fees(_) => S::MARKETS,
-            Then::Tickers(_) | Then::OptionSeed { .. } => S::TICKERS,
-            Then::Account(request) => request.startup_sections(),
-            _ => S::NONE,
-        }
     }
 }
 

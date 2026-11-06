@@ -1148,6 +1148,18 @@ impl crate::Backpack {
     }
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &self.data {
+            ReadData::Info { .. } => S::ACCOUNT,
+            ReadData::Balance { .. } => S::BALANCE,
+            ReadData::Positions { .. } => S::POSITIONS,
+            ReadData::Orders { .. } => S::ORDERS,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1183,15 +1195,3 @@ mod tests {
 #[cfg(test)]
 #[path = "../tests/support/repair_readiness.rs"]
 mod repair_readiness_tests;
-
-impl Request {
-    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
-        use safe_cex_engine::startup::Sections as S;
-        match &self.data {
-            ReadData::Info { .. } => S::ACCOUNT,
-            ReadData::Balance { .. } => S::BALANCE,
-            ReadData::Positions { .. } => S::POSITIONS,
-            ReadData::Orders { .. } => S::ORDERS,
-        }
-    }
-}

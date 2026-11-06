@@ -1359,14 +1359,6 @@ impl TxFlow {
     }
 }
 
-#[cfg(test)]
-#[path = "../tests/unit/account_coverage.rs"]
-mod account_coverage_tests;
-
-#[cfg(test)]
-#[path = "../tests/unit/setting_custody.rs"]
-mod setting_custody_tests;
-
 impl Request {
     pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
         use safe_cex_engine::startup::Sections as S;
@@ -1377,3 +1369,11 @@ impl Request {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/account_coverage.rs"]
+mod account_coverage_tests;
+
+#[cfg(test)]
+#[path = "../tests/unit/setting_custody.rs"]
+mod setting_custody_tests;
