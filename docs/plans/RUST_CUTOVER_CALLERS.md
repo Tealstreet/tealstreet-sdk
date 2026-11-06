@@ -9839,8 +9839,10 @@ PM UM conditional and trailing commands use `/papi/v1/um/algo/order`,
 query. The April 14, 2026 [USD-M changelog](https://developers.binance.com/en/docs/derivatives/change-log)
 retired the old `/conditional/*` routes on April 28. PM `ALGO_UPDATE` is read
 from `ao`, keyed by `caid` plus native `aid`; USD-M's `o` routing is unchanged.
-A triggered child never fabricates a parent fill, and an execution contradicting
-a cancellation read fences its replacement.
+A streamed cancellation requires explicit finite zero `aq`. Missing, malformed
+or negative `aq` leaves the current order unchanged and schedules reconciliation;
+positive `aq` is a triggered child, never a fabricated parent fill. An execution
+contradicting a cancellation read fences its replacement.
 
 A DELETE `{complete:true}` only acknowledges the request. Before any replacement,
 a separate Primary Read must return the exact captured algo ID, client ID and

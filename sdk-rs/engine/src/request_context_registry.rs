@@ -2992,7 +2992,12 @@ mod tests {
 
     #[test]
     fn inherited_http_uncertainty_cannot_downgrade_or_authorize_a_write() {
-        for fallback in [crate::Outcome::NotSent, crate::Outcome::Rejected] {
+        for (fallback, retry) in [
+            (crate::Outcome::NotSent, RetryPolicy::Never),
+            (crate::Outcome::Rejected, RetryPolicy::Never),
+            (crate::Outcome::NotSent, RetryPolicy::DefinitiveRefusal),
+            (crate::Outcome::Rejected, RetryPolicy::DefinitiveRefusal),
+        ] {
             for registered in [false, true] {
                 let mut io = super::super::Io::<()>::default();
                 let mut store = Store::default();
@@ -3006,7 +3011,7 @@ mod tests {
                         Scope::Command(7),
                         Policy {
                             operation: Operation::Mutation,
-                            retry: RetryPolicy::Never,
+                            retry,
                             ..policy()
                         },
                     )
@@ -3022,6 +3027,16 @@ mod tests {
                     cx.io.core.next_id,
                     cx.io.core.actions.len(),
                     cx.io.core.timers.len(),
+                );
+                // A permissive policy can form a logical retry, but there is no
+                // physical refusal/resend grant, before or after inheritance.
+                assert_eq!(
+                    root.retry(RetryEvidence::DefinitiveRefusal, cx.now).is_ok(),
+                    retry == RetryPolicy::DefinitiveRefusal
+                );
+                assert_eq!(
+                    cx.http_retry_context(&root, RetryEvidence::DefinitiveRefusal),
+                    Err(Error::RetryForbidden)
                 );
                 cx.inherit_http_uncertainty(&root).unwrap();
                 cx.inherit_http_uncertainty(&root).unwrap();

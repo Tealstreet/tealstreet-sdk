@@ -441,3 +441,40 @@ fn an_algo_without_captured_native_identity_is_refused_before_cancel() {
         Some(safe_cex_engine::Outcome::NotSent)
     );
 }
+
+#[test]
+fn canceled_stream_requires_explicit_zero_actual_quantity() {
+    for quantity in [None, Some("bad"), Some("NaN"), Some("-1"), Some("0")] {
+        let mut h = ready();
+        amend(&mut h);
+        let cancel = cancel(&mut h);
+        h.reply(cancel.id, 200, "", r#"{"complete":true}"#);
+        let query = h.take("/papi/v1/um/algo/algoOrder");
+        let mut event = serde_json::json!({"e":"ALGO_UPDATE","fs":"UM","ao":{
+            "caid":"stop","aid":123,"s":"BTCUSDT","S":"SELL","o":"STOP_MARKET",
+            "X":"CANCELED","q":"0.01","tp":"90","R":true,
+        }});
+        if let Some(quantity) = quantity {
+            event["ao"]["aq"] = serde_json::json!(quantity);
+        }
+        h.message("/pm/ws", &event.to_string());
+        let row = h.engine.store().order("stop").unwrap();
+        assert_eq!(
+            row.status,
+            if quantity == Some("0") {
+                safe_cex_engine::model::OrderStatus::Canceled
+            } else {
+                safe_cex_engine::model::OrderStatus::Open
+            },
+            "aq={quantity:?}"
+        );
+        assert_eq!(row.filled, 0.0);
+        assert_eq!(
+            posts(&h),
+            0,
+            "a stream observation never bypasses the targeted proof read"
+        );
+        h.reply(query.id, 200, "", &proof("NEW").to_string());
+        assert_unknown_no_create(&h, "stream alone is not cancellation proof");
+    }
+}

@@ -2278,13 +2278,17 @@ impl BinanceFutures {
                 {
                     let o = event.ao;
                     if let Some(client) = o.caid {
-                        // A child execution is a trigger, not a zero-fill cancel proof.
-                        let status = if matches!(o.status.as_ref(), "CANCELED" | "CANCELLED")
-                            && o.aq
-                                .as_deref()
-                                .is_some_and(|q| !q.parse::<f64>().is_ok_and(|q| q == 0.0))
-                        {
-                            Cow::Borrowed("TRIGGERED")
+                        let status = if matches!(o.status.as_ref(), "CANCELED" | "CANCELLED") {
+                            match o.aq.as_deref().and_then(|q| q.parse::<f64>().ok()) {
+                                Some(0.0) => o.status,
+                                // A child execution is a trigger, not a zero-fill cancel proof.
+                                Some(q) if q.is_finite() && q > 0.0 => Cow::Borrowed("TRIGGERED"),
+                                _ => {
+                                    // Missing or malformed execution evidence cannot retire the order.
+                                    self.schedule_orders_refresh(cx);
+                                    return;
+                                }
+                            }
                         } else {
                             o.status
                         };
