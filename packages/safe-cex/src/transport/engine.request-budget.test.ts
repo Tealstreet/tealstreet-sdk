@@ -20,7 +20,7 @@ it.each([
   const transport = createEngineTransport('bybit', { key: '', secret: '', transport: directTransport }, raw);
   let error: any;
   try {
-    const pending = Promise.resolve(transport.prepareHttp!({ request: 1, method: 'POST', url: 'https://venue.test/private', headers: {}, intent: 'primary', requestClass } as HttpPacket & { intent: 'primary' }))
+    const pending = Promise.resolve(transport.prepareHttp!({ request: 1, method: 'GET', url: 'https://venue.test/private', headers: {}, intent: 'primary', requestClass } as HttpPacket & { intent: 'primary' }))
       .catch(e => { error = e; });
     await vi.advanceTimersByTimeAsync(budgetMs - 1);
     expect(error).toBeUndefined();

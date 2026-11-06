@@ -61,8 +61,9 @@ bounds, Plan/Preflight call windows and caller-wait roots remain authoritative.
 A child or retry never extends its original root deadline.
 
 The engine exposes `http_request_class` only for an exact pending preparation.
-Native and WASM hosts copy that closed label into transport diagnostics; the
-label grants no send or retry authority and never changes signed wire bytes.
+Native and WASM hosts pass that closed label into transport diagnostics. TS
+conservatively labels non-GET methods `orderWrite` regardless of hints while
+honoring the explicit remaining engine deadline. The label grants no send or retry authority and never changes signed wire bytes.
 Timeouts name class, budget and elapsed milliseconds, including engine expiry
 when it wins the race with the host timer. HOW readiness remains capped at 30 s
 inside the same original deadline. Legacy GET paths use exact catalogue/history/

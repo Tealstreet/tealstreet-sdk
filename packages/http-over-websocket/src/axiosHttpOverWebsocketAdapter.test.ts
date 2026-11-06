@@ -117,7 +117,7 @@ describe('axiosHttpOverWebsocketAdapter — config preservation invariant', () =
       let error: any;
       const pending = adapter({
         url: 'https://venue.test/read?signature=secret-sentinel',
-        method: 'POST',
+        method: 'GET',
         headers: {},
         requestClass,
       } as any).catch((e) => {

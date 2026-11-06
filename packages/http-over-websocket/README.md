@@ -12,8 +12,9 @@ reference for the Rust engine/native host.
 | order write | 20 s |
 | other read | 20 s |
 
-Managed hosts supply a closed `requestClass` label; posted reads keep their read
-semantics. Legacy GETs classify exact path components (e.g. `instruments-info`,
+GET requests accept closed `requestClass` hints. Non-GET methods always keep
+the short `orderWrite` label, ignoring hints for longer classes; managed posted
+reads retain their explicit remaining engine deadline. Legacy GETs classify exact path components (e.g. `instruments-info`,
 `contracts`, `exchangeInfo`, `history`, `candles`, `orders`), ignoring queries and
 bodies. Unknown GET paths use `read`; other methods use `orderWrite`. Labels only
 select budgets and diagnostic facts; they never authorize retries.

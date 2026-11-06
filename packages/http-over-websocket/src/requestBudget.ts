@@ -10,13 +10,13 @@ export const REQUEST_BUDGET_MS: Readonly<Record<RequestClass, number>> = Object.
 });
 export const MAX_REQUEST_BUDGET_MS = 2_147_483_647;
 
-/** Legacy GET classification only. Posted reads need the engine's semantic label.
+/** GET classification with closed hints. Other methods keep the short write default.
  * Exact path components keep queries and arbitrary IDs out of the policy.
  * This selects a wait budget only, never retry or execution semantics.
  */
 export const requestClass = (method: string, url: string, hint?: unknown): RequestClass => {
-  if (typeof hint === 'string' && Object.hasOwn(REQUEST_BUDGET_MS, hint)) return hint as RequestClass;
   if (method.toUpperCase() !== 'GET') return 'orderWrite';
+  if (typeof hint === 'string' && Object.hasOwn(REQUEST_BUDGET_MS, hint)) return hint as RequestClass;
   // Deliberately raw path components, with the same parser in Rust. Do not
   // normalize or decode IDs into policy vocabulary.
   const match = /^https?:\/\/[^/?#]+/i.exec(url);

@@ -1214,7 +1214,8 @@ provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.
 
 Managed HTTP carries the engine's closed `requestClass` into HOW outside signed
-packet bytes. Standard engine budgets are 60 s for credential-free background
+packet bytes. TS ignores non-write hints on non-GET methods; explicit remaining
+engine deadlines still govern managed posted reads. Standard engine budgets are 60 s for credential-free background
 catalogue snapshots (90 s during startup), 30 s for history Query/Candles contexts (client-ID order lookups stay short) and
 20 s for live account/order reads, writes and other reads. Explicit venue bounds,
 Plan/Preflight call windows and caller roots remain authoritative. Both the
