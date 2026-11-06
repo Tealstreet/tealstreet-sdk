@@ -1048,19 +1048,16 @@ fn a_venue_declaring_no_plans_cannot_open_a_preflight() {
         let issued = catch_unwind(AssertUnwindSafe(|| {
             f(&mut planless, |cx| cx.issue_preflight(7, policy(purpose)))
         }));
+        assert_eq!(issued.is_err(), cfg!(debug_assertions));
         match issued {
             Err(panic) => {
-                assert!(cfg!(debug_assertions));
                 assert!(
                     panic
                         .downcast_ref::<&str>()
                         .is_some_and(|message| message.contains("http_plans() false"))
                 );
             }
-            Ok(refused) => {
-                assert!(!cfg!(debug_assertions));
-                assert_eq!(refused.err(), Some(Error::Invalid));
-            }
+            Ok(refused) => assert_eq!(refused.err(), Some(Error::Invalid)),
         }
     }
     assert!(!planless.io.core.request_contexts.has_plans());
