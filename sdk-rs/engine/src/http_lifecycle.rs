@@ -1214,43 +1214,6 @@ impl<P> Io<P> {
 
     /// A sealed physical Plan owner: clear its timer and unsent work.
     #[cfg(feature = "http-plans")]
-    /// The physical owner's live requests, listed and their cleanup actions
-    /// reserved before its seal (each: clear, cancel, timer rearm), in one
-    /// reservation together with `notices` further actions.
-    pub(super) fn prepare_owner_retirement(
-        &mut self,
-        owner: Owner,
-        notices: usize,
-    ) -> Result<Vec<RequestId>, crate::request_context::Error> {
-        let capacity = crate::request_context::Error::Capacity;
-        let count = self
-            .core
-            .managed_http
-            .values()
-            .filter(|managed| managed.lifecycle.context().owner() == owner)
-            .count();
-        let mut requests = Vec::new();
-        requests.try_reserve_exact(count).map_err(|_| capacity)?;
-        requests.extend(
-            self.core
-                .managed_http
-                .iter()
-                .filter(|(_, managed)| managed.lifecycle.context().owner() == owner)
-                .map(|(request, _)| *request),
-        );
-        let actions = count
-            .checked_mul(4)
-            .and_then(|n| n.checked_add(1))
-            .and_then(|n| n.checked_add(notices))
-            .ok_or(capacity)?;
-        self.core
-            .actions
-            .try_reserve(actions)
-            .map_err(|_| capacity)?;
-        Ok(requests)
-    }
-
-    #[cfg(feature = "http-plans")]
     #[inline]
     // Only some feature combinations call this.
     #[cfg_attr(feature = "http-plans", allow(dead_code))]
@@ -3121,6 +3084,45 @@ impl crate::engine::IoCore {
             .iter_mut()
             .find(|(bound, _)| *bound == generation)
             .map(|(_, requests)| requests)
+    }
+}
+
+impl crate::engine::CoreIo<'_> {
+    #[cfg(feature = "http-plans")]
+    /// The physical owner's live requests, listed and their cleanup actions
+    /// reserved before its seal (each: clear, cancel, timer rearm), in one
+    /// reservation together with `notices` further actions.
+    pub(super) fn prepare_owner_retirement(
+        &mut self,
+        owner: Owner,
+        notices: usize,
+    ) -> Result<Vec<RequestId>, crate::request_context::Error> {
+        let capacity = crate::request_context::Error::Capacity;
+        let count = self
+            .core
+            .managed_http
+            .values()
+            .filter(|managed| managed.lifecycle.context().owner() == owner)
+            .count();
+        let mut requests = Vec::new();
+        requests.try_reserve_exact(count).map_err(|_| capacity)?;
+        requests.extend(
+            self.core
+                .managed_http
+                .iter()
+                .filter(|(_, managed)| managed.lifecycle.context().owner() == owner)
+                .map(|(request, _)| *request),
+        );
+        let actions = count
+            .checked_mul(4)
+            .and_then(|n| n.checked_add(1))
+            .and_then(|n| n.checked_add(notices))
+            .ok_or(capacity)?;
+        self.core
+            .actions
+            .try_reserve(actions)
+            .map_err(|_| capacity)?;
+        Ok(requests)
     }
 }
 

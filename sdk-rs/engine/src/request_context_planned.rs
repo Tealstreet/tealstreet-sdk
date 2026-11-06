@@ -1607,71 +1607,10 @@ impl<P> Cx<'_, P> {
         error: Option<VenueError>,
         note: Option<&str>,
     ) -> Result<(), Error> {
-        let prepared = self.prepare_plan_terminal(plan, error, note, result.as_deref())?;
+        let prepared = self
+            .core()
+            .prepare_plan_terminal(plan, error, note, result.as_deref())?;
         self.commit_plan_terminal(plan, result, prepared)
-    }
-
-    fn prepare_plan_terminal(
-        &mut self,
-        plan: &Plan,
-        error: Option<VenueError>,
-        note: Option<&str>,
-        result: Option<&str>,
-    ) -> Result<conditional::PreparedPlanSeal, Error> {
-        // Ready-loop custody first: no effect before the owner is confirmed.
-        self.validate_preflight_ready_owner(plan.owner())?;
-        let physical = matches!(plan.owner(), Owner::Execution { .. });
-        // Observers already past their own bound expire against the live
-        // journal before any terminal preparation (host callbacks seal first).
-        if physical {
-            self.sweep_executions();
-        }
-        let mut prepared = self.io.core.request_contexts.prepare_plan_seal(
-            plan,
-            self.now,
-            self.io.core.http_delivery.as_ref(),
-            error,
-            note,
-        )?;
-        if physical {
-            // Every observer's terminal and reports, cloned before the seal.
-            let projection = match (&prepared.journal, &prepared.legacy) {
-                (Some(journal), _) => journal
-                    .failure()
-                    .cloned()
-                    .map_or_else(|| Ok(result.unwrap_or_default().to_owned()), Err),
-                (None, Some(error)) => Err(error.clone()),
-                (None, None) => Ok(result.unwrap_or_default().to_owned()),
-            };
-            let observers = self.io.core.request_contexts.planned_observer_count(plan);
-            prepared
-                .fanout
-                .try_reserve_exact(observers)
-                .map_err(|_| Error::Capacity)?;
-            prepared
-                .sealed
-                .try_reserve_exact(observers)
-                .map_err(|_| Error::Capacity)?;
-            // Each observer's reports and terminal notice, plus the
-            // execution timer rearm (clear and set).
-            let notices = observers
-                .checked_mul(prepared.reports.len() + 1)
-                .and_then(|n| n.checked_add(2))
-                .ok_or(Error::Capacity)?;
-            // One reservation covers the notices and the owner's cleanup.
-            prepared.retired = self.io.prepare_owner_retirement(plan.owner(), notices)?;
-            for _ in 0..observers {
-                let mut reports = Vec::new();
-                if projection.is_err() {
-                    reports
-                        .try_reserve_exact(prepared.reports.len())
-                        .map_err(|_| Error::Capacity)?;
-                    reports.extend(prepared.reports.iter().cloned());
-                }
-                prepared.fanout.push((projection.clone(), reports));
-            }
-        }
-        Ok(prepared)
     }
 
     #[inline]
@@ -2513,5 +2452,71 @@ impl ContextRegistry {
             .as_mut()
             .expect("queued keyless serial")
             .wire_fingerprint = Some(fingerprint);
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    fn prepare_plan_terminal(
+        &mut self,
+        plan: &Plan,
+        error: Option<VenueError>,
+        note: Option<&str>,
+        result: Option<&str>,
+    ) -> Result<conditional::PreparedPlanSeal, Error> {
+        // Ready-loop custody first: no effect before the owner is confirmed.
+        self.core_ref()
+            .validate_preflight_ready_owner(plan.owner())?;
+        let physical = matches!(plan.owner(), Owner::Execution { .. });
+        // Observers already past their own bound expire against the live
+        // journal before any terminal preparation (host callbacks seal first).
+        if physical {
+            self.sweep_executions();
+        }
+        let mut prepared = self.io.core.request_contexts.prepare_plan_seal(
+            plan,
+            self.now,
+            self.io.core.http_delivery.as_ref(),
+            error,
+            note,
+        )?;
+        if physical {
+            // Every observer's terminal and reports, cloned before the seal.
+            let projection = match (&prepared.journal, &prepared.legacy) {
+                (Some(journal), _) => journal
+                    .failure()
+                    .cloned()
+                    .map_or_else(|| Ok(result.unwrap_or_default().to_owned()), Err),
+                (None, Some(error)) => Err(error.clone()),
+                (None, None) => Ok(result.unwrap_or_default().to_owned()),
+            };
+            let observers = self.io.core.request_contexts.planned_observer_count(plan);
+            prepared
+                .fanout
+                .try_reserve_exact(observers)
+                .map_err(|_| Error::Capacity)?;
+            prepared
+                .sealed
+                .try_reserve_exact(observers)
+                .map_err(|_| Error::Capacity)?;
+            // Each observer's reports and terminal notice, plus the
+            // execution timer rearm (clear and set).
+            let notices = observers
+                .checked_mul(prepared.reports.len() + 1)
+                .and_then(|n| n.checked_add(2))
+                .ok_or(Error::Capacity)?;
+            // One reservation covers the notices and the owner's cleanup.
+            prepared.retired = self.io.prepare_owner_retirement(plan.owner(), notices)?;
+            for _ in 0..observers {
+                let mut reports = Vec::new();
+                if projection.is_err() {
+                    reports
+                        .try_reserve_exact(prepared.reports.len())
+                        .map_err(|_| Error::Capacity)?;
+                    reports.extend(prepared.reports.iter().cloned());
+                }
+                prepared.fanout.push((projection.clone(), reports));
+            }
+        }
+        Ok(prepared)
     }
 }
