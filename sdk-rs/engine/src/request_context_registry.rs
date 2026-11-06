@@ -1733,7 +1733,9 @@ impl<P> Cx<'_, P> {
         parent: Option<&Context>,
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
-        self.core().make_http_context(scope, policy, parent, egress)
+        let loaded = self.store.loaded();
+        self.core()
+            .make_http_context(scope, policy, parent, egress, loaded)
     }
 
     /// Validate context provenance and retry policy without extending its bound.
@@ -2317,6 +2319,7 @@ impl crate::engine::CoreCx<'_> {
         policy: Policy,
         parent: Option<&Context>,
         egress: Option<Egress>,
+        loaded: crate::model::Loaded,
     ) -> Result<Context, Error> {
         #[cfg(feature = "http-plans")]
         if self.io.core.http_preflight_ready.is_some() {
@@ -2346,7 +2349,7 @@ impl crate::engine::CoreCx<'_> {
             && policy.operation == Operation::Read
             && policy.credential.is_none()
             && policy.timeout_ms == READ_TIMEOUT_MS;
-        let policy = discovery_bound(scope, policy, self.store.loaded());
+        let policy = discovery_bound(scope, policy, loaded);
         let class = parent.map_or_else(
             || self.io.core.request_contexts.request_class(scope, &policy),
             Context::request_class,

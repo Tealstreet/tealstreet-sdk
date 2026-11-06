@@ -1887,7 +1887,8 @@ fn session_egress_never_crosses_sessions_or_engines() {
             Scope::Command(7),
             policy(Operation::Read),
             Some(&scoped),
-            other
+            other,
+            crate::model::Loaded::default()
         )),
         Err(Error::Invalid),
         "a child cannot swap its parent's session egress"
