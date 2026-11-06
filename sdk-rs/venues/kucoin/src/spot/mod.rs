@@ -1650,8 +1650,7 @@ impl Venue for KucoinSpot {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Read(read) => {
                 let (pending, error) = crate::clock::failed(cx, *read, error);
                 self.on_sign_error(cx, pending, error);
@@ -1661,7 +1660,7 @@ impl Venue for KucoinSpot {
                 self.fail_account_identity(cx, &root, command, error)
             }
             other => self.on_http_failed(cx, other, error),
-        }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {

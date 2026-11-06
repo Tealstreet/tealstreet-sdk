@@ -1248,8 +1248,7 @@ impl Venue for WeexFutures {
         p: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        cx.startup_request_refused(&p, &error);
-        match p.task {
+        cx.with_startup_request_failure(p, error, |cx, p, error| match p.task {
             Task::Candles(request) => request.failed(cx, error),
             Task::BookQuery(request) => request.failed(cx, error),
             Task::Account(r) => {
@@ -1260,7 +1259,7 @@ impl Venue for WeexFutures {
             Task::Trade(r) => self.trade_failed(cx, r, error),
             Task::History(r) => self.history_refused(cx, r, error),
             task => self.on_request_failed(cx, Pending { task, ..p }, &error.message),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

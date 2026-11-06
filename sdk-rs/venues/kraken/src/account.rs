@@ -715,26 +715,28 @@ impl Kraken {
             }
             let read = request.read;
             let request = Pending::Account(request);
-            let result = if let Some(array) = array {
-                self.signed_streamed(
-                    cx,
-                    Method::Get,
-                    path,
-                    String::new(),
-                    ArrayAt::Field(array),
-                    request,
-                )
-            } else {
-                self.signed_request(cx, Method::Get, path, String::new(), request)
-            };
-            if let Err(error) = result {
-                self.account.inflight.remove(&key);
-                if scope == Scope::Positions {
-                    let fresh = VenueError::new(error.clone());
-                    self.account.fresh_positions.failed(cx, 0, read, &fresh);
+            cx.with_startup_request(request, |cx, request| {
+                let result = if let Some(array) = array {
+                    self.signed_streamed(
+                        cx,
+                        Method::Get,
+                        path,
+                        String::new(),
+                        ArrayAt::Field(array),
+                        request,
+                    )
+                } else {
+                    self.signed_request(cx, Method::Get, path, String::new(), request)
+                };
+                if let Err(error) = result {
+                    self.account.inflight.remove(&key);
+                    if scope == Scope::Positions {
+                        let fresh = VenueError::new(error.clone());
+                        self.account.fresh_positions.failed(cx, 0, read, &fresh);
+                    }
+                    cx.retried_failure("kraken.account:634", error);
                 }
-                cx.retried_failure("kraken.account:634", error);
-            }
+            });
         }
     }
     fn account_schedule_heal(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1774,5 +1776,114 @@ mod cache_tests {
         assert!(account.terminal.contains("order-19999"));
         assert!(!account.terminal.insert("order-19999".into()));
         assert!(!account.terminal.contains("order-0"));
+    }
+}
+
+#[cfg(test)]
+mod startup_cause_tests {
+    use super::*;
+    use safe_cex_engine::book::Book;
+    use safe_cex_engine::{Action, Command, Event, Notice, SocketId, TimerId, Venue};
+
+    struct RefreshOnly(Kraken);
+    impl Venue for RefreshOnly {
+        type Pending = Pending;
+        fn startup_reads(p: &Pending) -> safe_cex_engine::startup::Sections {
+            Kraken::startup_reads(p)
+        }
+        fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+            cx.request(
+                Method::Get,
+                "https://startup.test/orders".into(),
+                vec![],
+                None,
+                Pending::Account(Request::new(Scope::Orders, 0, 0)),
+            );
+        }
+        fn on_response(&mut self, cx: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {
+            self.0.account_refresh(cx);
+        }
+        fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {}
+        fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
+        fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[test]
+    fn optional_settings_signing_refusal_does_not_poison_delivering_orders() {
+        let mut native = Kraken::new(crate::secondary_tests::options());
+        for scope in [Scope::Orders, Scope::Positions, Scope::Balance] {
+            native.account.inflight.insert(scope as u8);
+        }
+        let mut engine = safe_cex_engine::test_support::seeded_engine(RefreshOnly(native));
+        engine.set_account_startup(true);
+        engine.start(0.);
+        let requests: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(requests.len(), 1);
+        let now = (u64::MAX / 1000) as f64 + 1_000_000.;
+        engine.handle(
+            now,
+            Event::HttpResponse {
+                request: requests[0].id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "{}",
+                },
+            },
+        );
+        let events: Vec<_> = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::Event(e)) => Some(e),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            events
+                .iter()
+                .any(|e| e.code == safe_cex_engine::log::code::REQUEST_FAILED
+                    && e.message.contains("Kraken invalid nonce clock")),
+            "{events:?}"
+        );
+        engine.handle(now + 600_000., Event::PollScaleChanged { scale: 1. });
+        let watch = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Notice(Notice::Event(e))
+                    if e.code == safe_cex_engine::log::code::STARTUP_INCOMPLETE =>
+                {
+                    Some(e)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            watch
+                .fields
+                .contains(&("startupOrdersState", "started".into())),
+            "{watch:?}"
+        );
+        assert!(
+            !watch
+                .fields
+                .iter()
+                .any(|(key, _)| *key == "startupOrdersHttpStatus"),
+            "{watch:?}"
+        );
     }
 }

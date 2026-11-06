@@ -1571,44 +1571,45 @@ impl Venue for Bingx {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         pending: Pending,
-        mut error: safe_cex_engine::VenueError,
+        error: safe_cex_engine::VenueError,
     ) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
-            Pending::Signed(signed) => {
-                if let Some(context) = signed.context()
-                    && matches!(&signed.inner, Pending::Candles { .. })
-                {
-                    let _ = cx.command_error_context(context, error.message.clone());
-                    let _ = cx.fail_context(context, error);
-                    managed::finish(cx, signed.context().cloned());
-                    return;
+        cx.with_startup_request_failure(pending, error, |cx, pending, mut error| {
+            match pending {
+                Pending::Signed(signed) => {
+                    if let Some(context) = signed.context()
+                        && matches!(&signed.inner, Pending::Candles { .. })
+                    {
+                        let _ = cx.command_error_context(context, error.message.clone());
+                        let _ = cx.fail_context(context, error);
+                        managed::finish(cx, signed.context().cloned());
+                        return;
+                    }
+                    if signed.resent && matches!(&signed.inner, Pending::Trade(_)) {
+                        // Only the retry was refused before release. The original
+                        // write reached the venue, so reconciliation is still required.
+                        error.outcome = Some(safe_cex_engine::Outcome::Unknown);
+                    }
+                    let context = signed.context().cloned();
+                    self.on_sign_error(cx, signed.inner, error);
+                    managed::finish(cx, context);
                 }
-                if signed.resent && matches!(&signed.inner, Pending::Trade(_)) {
-                    // Only the retry was refused before release. The original
-                    // write reached the venue, so reconciliation is still required.
-                    error.outcome = Some(safe_cex_engine::Outcome::Unknown);
+                Pending::Clock(probe) => self.clock_failed(cx, probe, &error.message),
+                Pending::Identity(read) => self.identity_failed(cx, read, error),
+                Pending::History(request) => self.history.on_sign_failed(cx, request, error),
+                Pending::Trade(request) => {
+                    self.trading
+                        .on_sign_failed(cx, self.credentials.as_ref(), request, error)
                 }
-                let context = signed.context().cloned();
-                self.on_sign_error(cx, signed.inner, error);
-                managed::finish(cx, context);
-            }
-            Pending::Clock(probe) => self.clock_failed(cx, probe, &error.message),
-            Pending::Identity(read) => self.identity_failed(cx, read, error),
-            Pending::History(request) => self.history.on_sign_failed(cx, request, error),
-            Pending::Trade(request) => {
-                self.trading
-                    .on_sign_failed(cx, self.credentials.as_ref(), request, error)
-            }
-            Pending::Account(request) => {
-                if let Some(credentials) = &self.credentials {
-                    self.account.on_sign_failed(cx, request, error, credentials);
+                Pending::Account(request) => {
+                    if let Some(credentials) = &self.credentials {
+                        self.account.on_sign_failed(cx, request, error, credentials);
+                    }
                 }
+                // Provider refusal is typed and is never venue-auth evidence.
+                Pending::Metadata(leg) => account::fail_metadata_plan(cx, &leg, error),
+                pending => self.request_failed(cx, pending, &error.message, Some(&error)),
             }
-            // Provider refusal is typed and is never venue-auth evidence.
-            Pending::Metadata(leg) => account::fail_metadata_plan(cx, &leg, error),
-            pending => self.request_failed(cx, pending, &error.message, Some(&error)),
-        }
+        });
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         self.request_failed(cx, pending, error, None);

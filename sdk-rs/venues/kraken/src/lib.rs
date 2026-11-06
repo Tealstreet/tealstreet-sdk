@@ -1201,16 +1201,18 @@ impl Venue for Kraken {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        if matches!(pending, Pending::Candles { .. }) {
-            self.candles_failed(cx, pending, error);
-        } else {
-            match pending {
-                Pending::PublicTrades(r, child) => {
-                    self.public_trades_preparation_failed(cx, *r, Some(child), error)
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if matches!(pending, Pending::Candles { .. }) {
+                self.candles_failed(cx, pending, error);
+            } else {
+                match pending {
+                    Pending::PublicTrades(r, child) => {
+                        self.public_trades_preparation_failed(cx, *r, Some(child), error)
+                    }
+                    pending => self.on_sign_error(cx, pending, error),
                 }
-                pending => self.on_sign_error(cx, pending, error),
             }
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

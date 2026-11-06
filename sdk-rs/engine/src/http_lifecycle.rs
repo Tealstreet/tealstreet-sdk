@@ -1890,33 +1890,26 @@ impl<V: Venue> Engine<V> {
             .record_owned_read_failure(&delivery);
         self.io.core.request_contexts.enter_delivery(&delivery);
         if let Some(pending) = self.io.discard_managed(request) {
-            self.io.core.startup_causes.failed(
-                &mut crate::startup_causes::Delivery::new(pending.startup, None),
-                &error,
-                true,
-            );
             self.begin_event_scope();
             #[cfg(feature = "http-plans")]
             {
                 self.io.core.http_history_failure = None;
             }
             let previous = self.io.core.http_delivery.replace(delivery.clone());
-            self.venue.on_http_preparation_failed(
-                &mut Cx {
-                    now,
-                    store: &mut self.store,
-                    io: &mut self.io,
-                },
-                pending.value,
-                reason,
-                error.clone(),
-            );
             Cx {
                 now,
                 store: &mut self.store,
                 io: &mut self.io,
             }
-            .finish_owned_read_failure(&delivery, error);
+            .with_startup_delivery(pending.startup, |cx| {
+                cx.io
+                    .core
+                    .startup_causes
+                    .failed(&mut cx.io.core.startup_delivery, &error, true);
+                self.venue
+                    .on_http_preparation_failed(cx, pending.value, reason, error.clone());
+                cx.finish_owned_read_failure(&delivery, error);
+            });
             self.io.core.http_delivery = previous;
         }
         self.io.core.request_contexts.exit_delivery(&delivery);

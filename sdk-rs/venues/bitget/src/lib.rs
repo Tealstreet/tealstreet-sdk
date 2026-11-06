@@ -1324,8 +1324,7 @@ impl Venue for BitgetFutures {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(root) | Pending::Candles { root, .. } => {
                 let _ = cx.fail_context(&root, error);
             }
@@ -1344,7 +1343,7 @@ impl Venue for BitgetFutures {
                     self.wake_trading(cx);
                 }
             }
-        }
+        });
     }
 
     /// History keeps typed failure causes separate from native response retries;

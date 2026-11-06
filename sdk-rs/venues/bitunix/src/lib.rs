@@ -1128,12 +1128,11 @@ impl Venue for BitunixFutures {
     /// A provider refusal never released the request: a write is NotSent,
     /// and a read keeps its native failure path.
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_error(cx, request, error),
             Pending::History(read) => self.history_sign_failed(cx, read, &error.message),
             pending => self.public_typed_failed(cx, pending, error),
-        }
+        });
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
         pending.release(cx);

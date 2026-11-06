@@ -1855,8 +1855,7 @@ impl Venue for BinanceFutures {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Background(context, pending) => {
                 let _ = cx.finish_http_context(&context);
                 self.on_sign_error(cx, *pending, error);
@@ -1868,7 +1867,7 @@ impl Venue for BinanceFutures {
             }
             Pending::History(request) => self.history_failed(cx, *request, error, true),
             pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
 
     /// Managed history keeps the typed failure, such as a page Timeout.

@@ -1018,23 +1018,25 @@ impl Venue for PhemexPerpetuals {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        cx.startup_request_refused(&pending, &error);
-        self.settle_retired_trading(cx);
-        match pending {
-            Pending::Identity(command) => self.identity_failed(cx, command, error),
-            Pending::Candles { root, .. } => {
-                let _ = cx.fail_context(root.context(), error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.settle_retired_trading(cx);
+            match pending {
+                Pending::Identity(command) => self.identity_failed(cx, command, error),
+                Pending::Candles { root, .. } => {
+                    let _ = cx.fail_context(root.context(), error);
+                }
+                Pending::Repair(request) => self.repair_failed(cx, request, error),
+                Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
+                Pending::History(read) => self.history_failed(cx, read, error),
+                Pending::Income(read) => self.income_failed(cx, read, error),
+                Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
+                Pending::PublicCandles { context, .. } => {
+                    let _ =
+                        cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+                }
+                pending => self.on_request_failed(cx, pending, &error.message),
             }
-            Pending::Repair(request) => self.repair_failed(cx, request, error),
-            Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
-            Pending::History(read) => self.history_failed(cx, read, error),
-            Pending::Income(read) => self.income_failed(cx, read, error),
-            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
-            Pending::PublicCandles { context, .. } => {
-                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
-            }
-            pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

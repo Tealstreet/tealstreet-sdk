@@ -1111,11 +1111,13 @@ impl Venue for Orderly {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        if let Some(context) = Self::candle_context(&pending) {
-            let _ = cx.fail_context(context, error);
-        } else {
-            self.on_sign_error(cx, pending, error);
-        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if let Some(context) = Self::candle_context(&pending) {
+                let _ = cx.fail_context(context, error);
+            } else {
+                self.on_sign_error(cx, pending, error);
+            }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
@@ -1131,11 +1133,10 @@ impl Venue for Orderly {
     /// A provider refusal of a private read: history is strict; an account
     /// read fails as a native failed read does, reported and retried.
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::History(request) => self.history_refused(cx, request, error),
             pending => self.on_sign_failed(cx, pending, &error.message),
-        }
+        });
     }
     /// A malformed stream was delivered, so its custody is checked first: a
     /// stale or superseded leg only closes its Context and changes nothing.

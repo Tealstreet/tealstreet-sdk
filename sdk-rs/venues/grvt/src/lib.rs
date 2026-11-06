@@ -1230,17 +1230,19 @@ impl Venue for Grvt {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        if matches!(pending.job, Job::Markets { .. }) {
-            self.fail_pending(cx, pending, &error.message);
-            return;
-        }
-        if let Job::BookQuery(request) = pending.job {
-            let _ = cx.fail_plan(&request.plan, error);
-        } else if let Job::Candles(request) = pending.job {
-            let _ = cx.fail_plan(&request.plan, error);
-        } else {
-            self.on_sign_error(cx, pending, error);
-        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if matches!(pending.job, Job::Markets { .. }) {
+                self.fail_pending(cx, pending, &error.message);
+                return;
+            }
+            if let Job::BookQuery(request) = pending.job {
+                let _ = cx.fail_plan(&request.plan, error);
+            } else if let Job::Candles(request) = pending.job {
+                let _ = cx.fail_plan(&request.plan, error);
+            } else {
+                self.on_sign_error(cx, pending, error);
+            }
+        });
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
         if matches!(pending.job, Job::Markets { .. }) {

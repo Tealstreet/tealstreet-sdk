@@ -50,7 +50,16 @@ impl Venue for Probe {
         issue(cx, Sections::ORDERS, 100);
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Read>, read: Read, response: Response<'_>) {
-        if response.body == "pre-send-refused" {
+        if response.body == "child-sign-refused" {
+            self.on_sign_error(
+                cx,
+                Read {
+                    sections: Sections::NONE,
+                    context: read.context.clone(),
+                },
+                VenueError::new("unrelated child recipe refused").kind(ErrorKind::InvalidInput),
+            );
+        } else if response.body == "pre-send-refused" {
             let context = cx
                 .http_context(
                     Scope::Background,
@@ -67,11 +76,48 @@ impl Venue for Probe {
                 sections: read.sections,
                 context,
             };
-            cx.startup_request_refused(
-                &pending,
-                &VenueError::new("local recipe refusal").kind(ErrorKind::InvalidInput),
+            let context = pending.context.clone();
+            self.on_sign_error(
+                cx,
+                pending,
+                VenueError::new("local recipe refusal").kind(ErrorKind::InvalidInput),
             );
-            let _ = cx.finish_http_context(&pending.context);
+            let _ = cx.finish_http_context(&context);
+        } else if response.body == "child-prep-refused"
+            || response.body == "child-refused-then-parent-failed"
+        {
+            let context = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 120_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            self.on_http_preparation_failed(
+                cx,
+                Read {
+                    sections: Sections::NONE,
+                    context: context.clone(),
+                },
+                crate::request_context::Error::Invalid,
+                VenueError::new("unrelated child preparation refused")
+                    .kind(ErrorKind::InvalidInput),
+            );
+            let _ = cx.finish_http_context(&context);
+            if response.body == "child-refused-then-parent-failed" {
+                cx.notice_error(
+                    Level::Warn,
+                    log_code::REQUEST_FAILED,
+                    &VenueError::new("parent native refusal")
+                        .kind(ErrorKind::AuthPermission)
+                        .venue_code("10006"),
+                );
+            }
         } else if response.body == "issue-then-refuse" {
             issue(cx, Sections::NONE, 120_000);
             cx.notice_error(
@@ -122,6 +168,18 @@ fn requests(engine: &mut Engine<Probe>, now: f64) -> Vec<HttpRequest> {
         .into_iter()
         .filter_map(|a| match a {
             Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect()
+}
+
+fn failure_messages(engine: &mut Engine<Probe>) -> Vec<String> {
+    engine
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Notice(Notice::Event(event)) if event.code == log_code::REQUEST_FAILED => {
+                Some(event.message)
+            }
             _ => None,
         })
         .collect()
@@ -226,6 +284,7 @@ fn real_preparation_refusal_is_retained_without_http_or_invented_status() {
         crate::request_context::Error::Invalid,
         VenueError::new("policy refused").kind(ErrorKind::InvalidInput),
     );
+    assert_eq!(failure_messages(&mut engine), ["policy refused"]);
     let got = fields(&mut engine, STARTUP_WATCH_MS);
     assert!(
         got.contains(&("startupMarketsState", "refused".into())),
@@ -308,6 +367,7 @@ fn local_pre_send_failure_does_not_borrow_the_current_response_status() {
             },
         },
     );
+    assert_eq!(failure_messages(&mut engine), ["local recipe refusal"]);
     let got = fields(&mut engine, STARTUP_WATCH_MS);
     assert!(
         got.contains(&("startupMarketsState", "refused".into())),
@@ -320,6 +380,101 @@ fn local_pre_send_failure_does_not_borrow_the_current_response_status() {
     assert!(
         !got.iter()
             .any(|(key, _)| *key == "startupMarketsHttpStatus"),
+        "{got:?}"
+    );
+}
+
+#[test]
+fn review_unrelated_child_sign_refusal_must_not_poison_parent_startup() {
+    let mut engine = crate::test_support::seeded_engine(Probe);
+    engine.start(0.);
+    let requests = requests(&mut engine, 0.);
+    engine.handle(
+        1.,
+        Event::HttpResponse {
+            request: requests[0].id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "child-sign-refused",
+            },
+        },
+    );
+    let got = fields(&mut engine, STARTUP_WATCH_MS);
+    assert!(
+        got.contains(&("startupMarketsState", "started".into())),
+        "{got:?}"
+    );
+    assert!(
+        !got.iter()
+            .any(|(key, _)| *key == "startupMarketsHttpStatus"),
+        "{got:?}"
+    );
+}
+
+#[test]
+fn unrelated_child_preparation_refusal_does_not_poison_parent_startup() {
+    let mut engine = crate::test_support::seeded_engine(Probe);
+    engine.start(0.);
+    let requests = requests(&mut engine, 0.);
+    engine.handle(
+        1.,
+        Event::HttpResponse {
+            request: requests[0].id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "child-prep-refused",
+            },
+        },
+    );
+    assert_eq!(
+        failure_messages(&mut engine),
+        ["unrelated child preparation refused"]
+    );
+    let got = fields(&mut engine, STARTUP_WATCH_MS);
+    assert!(
+        got.contains(&("startupMarketsState", "started".into())),
+        "{got:?}"
+    );
+    assert!(
+        !got.iter()
+            .any(|(key, _)| *key == "startupMarketsHttpStatus"),
+        "{got:?}"
+    );
+}
+
+#[test]
+fn parent_delivery_is_restored_after_the_child_failure_callback() {
+    let mut engine = crate::test_support::seeded_engine(Probe);
+    engine.start(0.);
+    let requests = requests(&mut engine, 0.);
+    engine.handle(
+        1.,
+        Event::HttpResponse {
+            request: requests[0].id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: "child-refused-then-parent-failed",
+            },
+        },
+    );
+    let got = fields(&mut engine, STARTUP_WATCH_MS);
+    assert!(
+        got.contains(&("startupMarketsState", "refused".into())),
+        "{got:?}"
+    );
+    assert!(
+        got.contains(&("startupMarketsKind", "authPermission".into())),
+        "{got:?}"
+    );
+    assert!(
+        got.contains(&("startupMarketsVenueCode", "10006".into())),
+        "{got:?}"
+    );
+    assert!(
+        got.contains(&("startupMarketsHttpStatus", 200_u16.into())),
         "{got:?}"
     );
 }

@@ -1004,8 +1004,7 @@ impl Venue for Blofin {
         }
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
             Pending::Managed(context, pending) => self.public_failure(cx, context, *pending, error),
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
@@ -1013,7 +1012,7 @@ impl Venue for Blofin {
             Pending::History(request) => self.history_refused(cx, request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, false),
             other => self.on_request_failed(cx, other, &error.message),
-        }
+        });
     }
     /// A failed delivery has no body to validate. History and closed positions
     /// keep one leg in flight per query, so the failure belongs to that leg.

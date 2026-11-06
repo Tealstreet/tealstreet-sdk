@@ -3352,52 +3352,53 @@ impl Venue for BybitLinear {
     }
 
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        cx.startup_request_refused(&pending, &error);
-        if let Then::AuthClock = pending.then {
-            return self.settle_auth_clock(cx);
-        }
-        // The engine seals an ordinary preflight or plan unless an
-        // independent-order leg retires alone.
-        if let Then::Ordinary(request) = pending.then {
-            self.on_ordinary_leg_failed(cx, request, error);
-            return;
-        }
-        if let Then::Candles(read) = pending.then {
-            Self::candles_failed(cx, read, error);
-            return;
-        }
-        // A managed identity read (first or retried leg) keeps the engine's type.
-        if let Then::Identity(context) = pending.then {
-            self.identity_response(cx, context, Err(error));
-            return;
-        }
-        if let Then::Leverage(read) = pending.then {
-            self.leverage_response(cx, read, Err(error));
-            return;
-        }
-        // A page or its re-read keeps the signer's typed error.
-        if let Then::History(request) = pending.then {
-            self.on_history_failed(cx, request, error);
-            return;
-        }
-        if let Then::Closed(request) = pending.then {
-            self.on_closed_failed(cx, *request, error);
-            return;
-        }
-        if pending.rest.resent {
-            // This refusal concerns only the retry. The earlier dispatched
-            // attempt keeps the existing conservative failure/recovery path.
-            self.on_request_failed(cx, pending, "Bybit retry signing failed before dispatch");
-            return;
-        }
-        self.select_category(pending.category);
-        match pending.then {
-            Then::Hyro(read) => self.on_hyro_response(cx, read, Err(&error.message)),
-            Then::Identity(context) => self.identity_response(cx, context, Err(error)),
-            Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
-            Then::Options(request) => self.on_options_response(cx, request, Err(error)),
-            then => self.on_public_response(cx, then, Err(&error.message)),
-        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if let Then::AuthClock = pending.then {
+                return self.settle_auth_clock(cx);
+            }
+            // The engine seals an ordinary preflight or plan unless an
+            // independent-order leg retires alone.
+            if let Then::Ordinary(request) = pending.then {
+                self.on_ordinary_leg_failed(cx, request, error);
+                return;
+            }
+            if let Then::Candles(read) = pending.then {
+                Self::candles_failed(cx, read, error);
+                return;
+            }
+            // A managed identity read (first or retried leg) keeps the engine's type.
+            if let Then::Identity(context) = pending.then {
+                self.identity_response(cx, context, Err(error));
+                return;
+            }
+            if let Then::Leverage(read) = pending.then {
+                self.leverage_response(cx, read, Err(error));
+                return;
+            }
+            // A page or its re-read keeps the signer's typed error.
+            if let Then::History(request) = pending.then {
+                self.on_history_failed(cx, request, error);
+                return;
+            }
+            if let Then::Closed(request) = pending.then {
+                self.on_closed_failed(cx, *request, error);
+                return;
+            }
+            if pending.rest.resent {
+                // This refusal concerns only the retry. The earlier dispatched
+                // attempt keeps the existing conservative failure/recovery path.
+                self.on_request_failed(cx, pending, "Bybit retry signing failed before dispatch");
+                return;
+            }
+            self.select_category(pending.category);
+            match pending.then {
+                Then::Hyro(read) => self.on_hyro_response(cx, read, Err(&error.message)),
+                Then::Identity(context) => self.identity_response(cx, context, Err(error)),
+                Then::EnvironmentProbe => self.finish_environment_probe(cx, false),
+                Then::Options(request) => self.on_options_response(cx, request, Err(error)),
+                then => self.on_public_response(cx, then, Err(&error.message)),
+            }
+        });
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {

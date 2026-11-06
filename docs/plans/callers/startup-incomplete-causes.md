@@ -53,3 +53,9 @@ hosted-shaped fields-only event through the real TS error-reporting boundary.
 Closed startup states/kinds use borrowed static log values, preserving the existing
 watchdog allocation pin. WASM and hosted serialization is byte-identical to owned
 strings; text-value equality and the existing log-size limit apply to both.
+
+Local child failure callbacks run under the child's own startup membership, with
+no HTTP status, through their entire native cleanup and failure-log sequence.
+The previous response's diagnostic delivery is restored afterward. Kraken's
+synchronous signer-return path scopes the issue attempt and its caller-side
+failure logging together. These scopes change no HTTP/terminal authority.

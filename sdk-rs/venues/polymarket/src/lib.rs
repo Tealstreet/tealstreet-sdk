@@ -1264,7 +1264,9 @@ impl Venue for Polymarket {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        self.on_http_failed(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_http_failed(cx, pending, error);
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {

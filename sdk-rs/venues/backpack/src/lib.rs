@@ -1178,7 +1178,7 @@ impl Venue for Backpack {
         reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Account(request) => self.account_precommit_failed(cx, request, reason, error),
             Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Identity(request) => self.identity_failed(cx, request, error),
@@ -1189,7 +1189,7 @@ impl Venue for Backpack {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
             pending => self.on_sign_error(cx, pending, error),
-        }
+        });
     }
     fn on_sign_error(
         &mut self,
@@ -1197,8 +1197,7 @@ impl Venue for Backpack {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Account(request) => self.account_precommit_failed(
                 cx,
                 request,
@@ -1210,7 +1209,7 @@ impl Venue for Backpack {
             Pending::Repair(request) => self.repair_failed(cx, *request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_repair_notice(
         &mut self,

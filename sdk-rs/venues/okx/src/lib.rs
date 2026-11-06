@@ -1693,8 +1693,7 @@ impl Venue for Okx {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
             Pending::Closed(request) => Self::closed_sign_failed(cx, *request, error),
             Pending::Account(account::Request::Leverage { context, .. }) => {
@@ -1705,7 +1704,7 @@ impl Venue for Okx {
             }
             Pending::History(read) => Self::history_sign_failed(cx, *read, error),
             pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
 
     fn read_root_retired(

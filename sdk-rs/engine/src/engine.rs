@@ -3189,14 +3189,44 @@ impl<P> Cx<'_, P> {
         );
     }
 
-    /// Explicit failed startup issue, including admission refusals with no HTTP id.
-    pub fn startup_request_refused(&mut self, pending: &P, error: &VenueError) {
-        let sections = (self.io.startup_reads)(pending);
-        self.io.core.startup_causes.failed(
-            &mut crate::startup_causes::Delivery::new(sections, None),
-            error,
-            true,
+    fn with_startup_delivery<R>(
+        &mut self,
+        sections: crate::startup::Sections,
+        callback: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = std::mem::replace(
+            &mut self.io.core.startup_delivery,
+            crate::startup_causes::Delivery::new(sections, None),
         );
+        let result = callback(self);
+        self.io.core.startup_delivery = previous;
+        result
+    }
+
+    /// Keep a child read's local failure handling and logging separate from its parent callback.
+    pub fn with_startup_request<R>(
+        &mut self,
+        pending: P,
+        callback: impl FnOnce(&mut Self, P) -> R,
+    ) -> R {
+        let sections = (self.io.startup_reads)(&pending);
+        self.with_startup_delivery(sections, |cx| callback(cx, pending))
+    }
+
+    /// Scope a pre-send failure, including its native cleanup and legacy failure notices.
+    pub fn with_startup_request_failure<R>(
+        &mut self,
+        pending: P,
+        error: VenueError,
+        callback: impl FnOnce(&mut Self, P, VenueError) -> R,
+    ) -> R {
+        self.with_startup_request(pending, |cx, pending| {
+            cx.io
+                .core
+                .startup_causes
+                .failed(&mut cx.io.core.startup_delivery, &error, true);
+            callback(cx, pending, error)
+        })
     }
 
     /// A private read the venue refused over the key, before the account
@@ -4215,7 +4245,9 @@ pub trait Venue {
         _reason: crate::request_context::Error,
         error: VenueError,
     ) {
-        self.on_sign_error(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_sign_error(cx, pending, error);
+        });
     }
 
     /// Reconcile writes whose outcome is unknown: issue a fresh order read for
@@ -4402,8 +4434,9 @@ pub trait Venue {
         pending: Self::Pending,
         error: VenueError,
     ) {
-        cx.startup_request_refused(&pending, &error);
-        self.on_sign_failed(cx, pending, &error.message);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.on_sign_failed(cx, pending, &error.message);
+        });
     }
     /// Delegated signing failed before an HTTP write could reach the venue.
     fn on_sign_failed(
@@ -6953,13 +6986,15 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.order_read_tokens.remove(&http.id);
                 cx.io.core.streams.remove(&http.id);
                 if let Some(pending) = cx.io.pending.remove(&http.id) {
-                    let mut delivery = crate::startup_causes::Delivery::new(pending.startup, None);
-                    cx.io
-                        .core
-                        .startup_causes
-                        .failed(&mut delivery, &error.venue_error(), true);
-                    self.venue
-                        .on_sign_error(&mut cx, pending.value, error.venue_error());
+                    cx.with_startup_delivery(pending.startup, |cx| {
+                        let error = error.venue_error();
+                        cx.io.core.startup_causes.failed(
+                            &mut cx.io.core.startup_delivery,
+                            &error,
+                            true,
+                        );
+                        self.venue.on_sign_error(cx, pending.value, error);
+                    });
                 }
             }
             Action::WsSend { socket, .. } | Action::WsConnect { socket, .. } => {

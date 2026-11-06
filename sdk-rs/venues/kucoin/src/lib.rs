@@ -1338,8 +1338,7 @@ impl Venue for Kucoin {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Read(mut read) => {
                 if read.retried {
                     read.pending.stop_read_retries();
@@ -1351,7 +1350,7 @@ impl Venue for Kucoin {
             Pending::Identity { command, root } => self.identity_failed(cx, command, root, error),
             Pending::Account(request) => self.account_failed(cx, request, Some(&error)),
             other => self.on_request_failed(cx, other, &error.message),
-        }
+        });
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Read(read) = pending {

@@ -1005,10 +1005,10 @@ impl Venue for TxFlow {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Candles { read, .. } => read.failed(cx, error),
             pending => self.on_sign_error(cx, pending, error),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

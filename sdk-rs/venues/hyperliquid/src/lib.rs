@@ -2043,8 +2043,7 @@ impl Venue for Hyperliquid {
         self.account.fresh_positions.retired(owner);
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        cx.startup_request_refused(&pending, &error);
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, *read, error),
             Pending::ManagedCandles(read) => {
@@ -2054,7 +2053,7 @@ impl Venue for Hyperliquid {
                 let _ = cx.fail_context(&read.context, error);
             }
             pending => self.on_sign_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         match pending {
