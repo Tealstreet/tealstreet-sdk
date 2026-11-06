@@ -320,12 +320,12 @@ fn pm_superseded_native_cannot_rebind_when_old_terminal_event_was_delayed() {
         let mut h = ready(v);
         let path = private_path(v);
         h.respond("/papi/v1/um/openOrders", 200, "[]");
-        h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+        h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
         h.message(path, &event(v, "NEW", "NEW", "0", 0));
         if snapshot_binding {
             h.advance(10_000.0);
             h.respond("/papi/v1/um/openOrders", 200, r#"[{"symbol":"BTCUSDT","orderId":78,"clientOrderId":"audit-client","price":"9000","origQty":"3","executedQty":"0","type":"LIMIT","side":"SELL"}]"#);
-            h.respond("/papi/v1/um/conditional/openOrders", 200, "[]");
+            h.respond("/papi/v1/um/algo/openAlgoOrders", 200, "[]");
         } else {
             h.message(
                 path,

@@ -1990,7 +1990,6 @@ impl CommandWrites {
     }
 
     /// Mark a live journal maybe-sent; like `inheriting`, never clears.
-    #[cfg(feature = "http-plans")]
     pub(crate) fn inherit_uncertain(&mut self) {
         self.inherited_uncertain = true;
     }

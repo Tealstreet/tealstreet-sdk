@@ -2209,7 +2209,8 @@ impl<P> Cx<'_, P> {
     /// Raise a live Mutation Plan's failure projection to Unknown, for an
     /// effect the venue can no longer prove (such as a failed protective
     /// census after an accepted placement). Monotonic; it grants no send,
-    /// retry or success authority and records no write fact.
+    /// retry or success authority and records no write fact. Legacy HTTP command
+    /// roots use `inherit_http_uncertainty` with the same failure-only contract.
     pub fn inherit_plan_uncertainty(&mut self, plan: &Plan) -> Result<(), Error> {
         let body = self
             .io
