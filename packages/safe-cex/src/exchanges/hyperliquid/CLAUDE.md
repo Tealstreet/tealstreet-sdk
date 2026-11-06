@@ -1636,3 +1636,39 @@ zero balance. Valid pending live snapshots fence older REST reads immediately.
 A real live/shared/context quote or the first core snapshot rechecks that native
 collateral and derives wallet principal using current proven position PnL.
 Ordinary successful private snapshots keep the existing valuation cadence.
+
+## Rust fast public depth
+
+Fast depth is opt-in through SDK `ExchangeOptions.hyperliquidFastBook: true`
+(registry JSON `hyperliquidFastBook`, native `Options.fast_book`). The default
+keeps slow `l2Book` plus BBO: two topics per unique perpetual book. Opt-in adds
+`l2Book {fast:true}`, making three; duplicate consumers share the same topics.
+Shared public-feed identities separate opted-in and default-off sources.
+Standalone spot retains its five native significant-figure topics regardless.
+
+Live fast responses carry `data.fast: true` and at most five levels per side.
+Slow depth remains the deeper baseline. Fast coverage replaces its whole covered
+range and permanently prunes conflicting baseline rows until a new slow snapshot.
+Fast sides shorter than five rows clear the old tail, including empty sides.
+Older timestamps cannot regress depth; equal-time fast data wins in either order.
+Newer BBO replaces the top. Retirement clears both baselines before replay.
+
+New book or candle demand above 1,000 desired topics is visibly refused without
+retaining its key/refcount or changing accepted references. The accepted feed
+stays live; reconnect replays only accepted demand. Catalogue/private-topic
+growth is capped before core submission: existing admitted keys keep their slots,
+only new excess topics are refused with a Capacity notice. Initial projection
+keeps baseline and caller topics before implicit activeAssetData. Only selected
+private keys gate handoff; metadata and HTTP reads remain complete. The encoder
+covers every admitted key and never rejects the whole sync because of excess demand.
+
+Hyperliquid's 1,000-subscription limit is per IP across connections, not per
+account. The per-connection check cannot enforce it across accounts/tabs/clients.
+With `M` core markets, `D` HIP-3 scopes, `B` books, `C` candles, keyed Direct feeds
+use `9 + M + 5D + (2+F)B + C` topics, plus one for spotState when needed;
+public-only uses `2 + (2+F)B + C`, where F is 1 only with fast depth enabled.
+At illustrative M=235, D=0, four keyed engines with 20 books each already use
+1,136 by default; enabling fast depth makes 1,216. Three such keyed engines with
+20 candles each plus a public engine with 20 books use 954 default or 1,034
+opted in. Keep fast depth off unless the caller budgets aggregate demand; the
+subscription-diet/shared-public-feed follow-up addresses the existing overage.
