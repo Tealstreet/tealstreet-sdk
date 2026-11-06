@@ -805,6 +805,7 @@ async fn upgrade(
             };
             Identity {
                 user: Some(verified.user_id),
+                chat_handle: verified.chat_handle,
                 token: Some((token, verified.expires_at_ms)),
                 resume_from: query.resume,
                 resumable: query.resumable.as_deref() == Some("1"),
@@ -812,6 +813,7 @@ async fn upgrade(
         }
         None => Identity {
             user: None,
+            chat_handle: None,
             token: None,
             resume_from: None,
             resumable: false,
@@ -920,9 +922,6 @@ async fn serve(
         .as_ref()
         .map(|(_, expires_at_ms)| *expires_at_ms);
     let user = identity.user.clone();
-    if let Some(user) = &user {
-        app.registry.user_connected(user);
-    }
     let mut session = Session::new(app.registry.clone(), app.metrics.clone(), identity, out);
     // Session now owns its live count; the pending upgrade never leaves a zero-count gap.
     drop(pending_socket);

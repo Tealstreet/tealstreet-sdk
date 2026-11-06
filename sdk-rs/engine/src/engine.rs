@@ -631,8 +631,9 @@ pub enum VenueAction {
 /// The shared rejection for a venue action the venue does not implement.
 const UNSUPPORTED_VENUE_ACTION: &str = "This action is not supported on this venue";
 /// A repair on a feed that has carried no data this long reconnects it instead.
+/// Venue data-silence windows that a repair should agree with use this value.
 #[cfg(feature = "managed-sockets")]
-const REPAIR_SILENCE_MS: f64 = 30_000.0;
+pub const REPAIR_SILENCE_MS: f64 = 30_000.0;
 /// The same topic repaired again within this window reconnects its feed.
 #[cfg(feature = "managed-sockets")]
 const REPEAT_REPAIR_WINDOW_MS: f64 = 10.0 * 60_000.0;
@@ -6218,6 +6219,15 @@ impl<V: Venue> Engine<V> {
                 }
             }
             if by_feed.is_empty() {
+                // A stream the venue itself withdrew (a refused subscribe) is its to retry.
+                let mut cx = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                };
+                if let Some(result) = self.venue.repair_subscription(&mut cx, topic) {
+                    return result;
+                }
                 return Err(format!("{} is not subscribed", skipped.join(", ")));
             }
             let mut cx = Cx {

@@ -93,7 +93,14 @@ pub enum Request {
 /// The one read-cover scope of BingX's account-wide open-orders read.
 const ORDERS_SCOPE: &str = "orders";
 
-type OrderMeta = (Order, String, String, bool, String);
+type OrderMeta = (
+    Order,
+    String,
+    String,
+    bool,
+    String,
+    Option<crate::trading::protection::Original>,
+);
 
 /// One background per-symbol settings refresh. Both legs share the issue-time
 /// stamp, so their merged row publishes once and never over a newer write.
@@ -2096,9 +2103,22 @@ impl Account {
 }
 
 fn observation(order: Order, native: &NativeOrder<'_>) -> OrderMeta {
+    let original = original_protection(native);
     (
         order,
-        native.kind.to_string(),
+        if (native.stop_guaranteed.is_some()
+            || native.price_protect.is_some()
+            || native.position_id.is_some())
+            && matches!(
+                native.kind.as_ref(),
+                "STOP_MARKET" | "TAKE_PROFIT_MARKET" | "TRIGGER_MARKET"
+            )
+            && original.is_none()
+        {
+            String::new()
+        } else {
+            native.kind.to_string()
+        },
         native.position_side.to_string(),
         native
             .take_profit
@@ -2109,7 +2129,105 @@ fn observation(order: Order, native: &NativeOrder<'_>) -> OrderMeta {
                 .as_ref()
                 .is_some_and(Protection::meaningful),
         native.status.as_deref().unwrap_or_default().to_owned(),
+        original,
     )
+}
+
+fn original_protection(native: &NativeOrder<'_>) -> Option<crate::trading::protection::Original> {
+    use crate::trading::protection::{NativeScalar, Original};
+    if !native.complete_metadata()
+        || native.filled != Some(0.0)
+        || native
+            .parent_order_id
+            .as_deref()
+            .is_some_and(|s| !s.is_empty())
+        || native.group_id.as_deref().is_some_and(|s| !s.is_empty())
+        || native
+            .take_profit
+            .as_ref()
+            .is_some_and(Protection::meaningful)
+        || native
+            .stop_loss
+            .as_ref()
+            .is_some_and(Protection::meaningful)
+        || !matches!(native.status.as_deref(), Some("NEW" | "PENDING"))
+        || !matches!(native.position_side.as_ref(), "BOTH" | "LONG" | "SHORT")
+        || !matches!(native.side.as_ref(), "BUY" | "SELL")
+    {
+        return None;
+    }
+    let quantity = native.quantity.filter(|q| q.is_finite() && *q > 0.0)?;
+    let stop = matches!(
+        native.kind.as_ref(),
+        "STOP_MARKET" | "TAKE_PROFIT_MARKET" | "TRIGGER_MARKET"
+    );
+    if !stop && !(native.kind == "LIMIT" && native.reduce_only) {
+        return None;
+    }
+    let (price, stop_price, working_type, time_in_force) = if stop {
+        if !native.stop_price.is_finite() || native.stop_price <= 0.0 {
+            return None;
+        }
+        (
+            None,
+            Some(native.stop_price),
+            Some(
+                native
+                    .working_type
+                    .as_deref()
+                    .filter(|s| matches!(*s, "MARK_PRICE" | "CONTRACT_PRICE"))?
+                    .to_owned(),
+            ),
+            None,
+        )
+    } else {
+        if !native.price.is_finite() || native.price <= 0.0 {
+            return None;
+        }
+        (
+            Some(native.price),
+            None,
+            None,
+            Some(
+                native
+                    .time_in_force
+                    .as_deref()
+                    .filter(|s| matches!(*s, "GTC" | "PostOnly" | "GTX"))?
+                    .to_owned(),
+            ),
+        )
+    };
+    let scalar = |raw: Option<&serde_json::value::RawValue>| -> Option<Option<NativeScalar>> {
+        raw.map(|r| serde_json::from_str(r.get())).transpose().ok()
+    };
+    let guaranteed = scalar(native.stop_guaranteed)?;
+    if guaranteed.as_ref().is_some_and(|v| {
+        matches!(v, NativeScalar::Boolean(true))
+            || matches!(v, NativeScalar::Text(s) if s == "true" || s == "cutfee")
+    }) && working_type.as_deref() != Some("CONTRACT_PRICE")
+    {
+        return None;
+    }
+    Some(Original {
+        symbol: native.symbol.to_string(),
+        native_kind: native.kind.to_string(),
+        side: native.side.to_string(),
+        position_side: native.position_side.to_string(),
+        quantity,
+        price,
+        stop_price,
+        working_type,
+        time_in_force,
+        close_position: native.close_position,
+        reduce_only: (native.position_side == "BOTH" && !native.close_position)
+            .then_some(native.reduce_only),
+        client_order_id: (!stop)
+            .then(|| native.client_order_id.as_deref().map(str::to_owned))
+            .flatten(),
+        stop_guaranteed: guaranteed,
+        price_protect: scalar(native.price_protect)?,
+        position_id: scalar(native.position_id)?,
+    })
 }
 
 pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Option<Order> {
@@ -2750,5 +2868,33 @@ mod tests {
         assert!(!account.first_execution((RETAINED_EXECUTIONS + 99).to_string()));
         assert!(account.first_execution("0".into()));
         assert_eq!(account.seen_executions.len(), RETAINED_EXECUTIONS);
+    }
+}
+
+#[cfg(test)]
+mod protective_provenance_tests {
+    use super::*;
+    #[test]
+    fn only_complete_standalone_unfilled_native_rows_supply_restoration() {
+        let good = r#"{"orderId":"1","symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL","status":"NEW","origQty":"2","executedQty":"0","stopPrice":"90","positionSide":"BOTH","workingType":"MARK_PRICE","reduceOnly":true}"#;
+        let native: NativeOrder<'_> = serde_json::from_str(good).unwrap();
+        assert_eq!(original_protection(&native).unwrap().quantity, 2.0);
+        for bad in [
+            good.replace("STOP_MARKET", "TRAILING_STOP_MARKET"),
+            good.replace("\"NEW\"", "\"PARTIALLY_FILLED\""),
+            good.replace("\"executedQty\":\"0\"", "\"executedQty\":\"1\""),
+            good.replace("MARK_PRICE", "UNKNOWN"),
+            good.replace(
+                "\"reduceOnly\":true",
+                "\"parentOrderId\":\"parent\",\"reduceOnly\":true",
+            ),
+            good.replace(
+                "\"reduceOnly\":true",
+                "\"stopLoss\":{\"stopPrice\":90},\"reduceOnly\":true",
+            ),
+        ] {
+            let native: NativeOrder<'_> = serde_json::from_str(&bad).unwrap();
+            assert!(original_protection(&native).is_none(), "{bad}");
+        }
     }
 }

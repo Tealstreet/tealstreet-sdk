@@ -147,8 +147,10 @@ struct Connection {
     private_bootstrap: socket_codec::PrivateBootstrap,
     // Transport liveness and epoch retirement cannot forgive a missing private bootstrap.
     private_bootstrap_misses: u8,
-    /// Canonical subscriptions the venue acknowledged on the current socket.
-    acked: HashSet<String>,
+    /// Subscribe (true) and unsubscribe frames encoded for the current socket and not
+    /// yet answered, oldest first, and whether the engine's ledger shows each was sent.
+    /// The venue answers every sent frame, in order, with an ack or an error.
+    unanswered: std::cell::RefCell<VecDeque<socket_codec::Unanswered>>,
     /// Interest keys the venue refused; left out until the socket or the topic is renewed.
     refused: HashSet<String>,
     refusal_notices: u8,
@@ -637,6 +639,7 @@ impl Hyperliquid {
             let desired = self.bounded_socket_interests(cx);
             self.report_subscriptions(cx, &desired);
             let admitted = desired.iter().map(|i| i.key.clone()).collect();
+            self.forget_unsent(cx, feed);
             if let Err(error) = cx.set_socket_interests(feed, desired) {
                 Self::socket_refused(cx, error);
             } else {
@@ -1499,6 +1502,13 @@ impl Venue for Hyperliquid {
         topic: &SubscriptionTopic,
     ) -> Vec<(FeedId, String)> {
         self.topic_interests(store, topic)
+    }
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        self.retry_refused(cx, topic)
     }
     fn socket_control(
         &self,

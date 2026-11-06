@@ -593,6 +593,247 @@ fn a_refusal_naming_its_subscription_drops_that_one_and_a_fresh_subscribe_retrie
     );
 }
 
+// HL answers frames in the order sent, so an unnamed cap refusal answers the oldest frame
+// still unanswered: here the candle, never the book that desired order lists ahead of it.
+#[test]
+fn an_unnamed_refusal_answers_the_oldest_unanswered_frame_not_desired_order() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    for ack in [
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"allMids"}}}"#,
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"fastAssetCtxs"}}}"#,
+    ] {
+        message(&mut e, s, ack);
+    }
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    // The host takes the candle frame, so it goes out before the book is asked for.
+    assert_eq!(sent(&prepared_now(&mut e)).len(), 1);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ETH-PERP".into(),
+        }),
+    );
+    prepared_now(&mut e).into_iter().for_each(drop);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Cannot subscribe to more than 1000 channels."}"#,
+    );
+    let actions = prepared_now(&mut e);
+    assert_eq!(
+        notices(&actions),
+        ["Hyperliquid refused candle BTC 1m: Cannot subscribe to more than 1000 channels."]
+    );
+    assert_eq!(
+        sent(&actions),
+        [
+            r#"{"method":"unsubscribe","subscription":{"type":"candle","coin":"BTC","interval":"1m"}}"#
+        ],
+        "the working book keeps its subscription"
+    );
+}
+
+fn ack(e: &mut Engine<Hyperliquid>, socket: SocketId, at: f64, text: &str) {
+    let subscription = text.trim_start_matches(r#"{"method":"subscribe","subscription":"#);
+    let subscription = &subscription[..subscription.len() - 1];
+    let reply = format!(
+        r#"{{"channel":"subscriptionResponse","data":{{"method":"subscribe","subscription":{subscription}}}}}"#
+    );
+    e.handle(
+        at,
+        Event::WsMessage {
+            socket,
+            text: &reply,
+        },
+    );
+}
+
+fn reconnected_socket(actions: &[Action]) -> Option<SocketId> {
+    actions.iter().find_map(|a| match a {
+        Action::WsConnect { socket, .. } => Some(*socket),
+        _ => None,
+    })
+}
+
+// claude-fe7lgm's probe on #3151: a book asked for while reconnecting was encoded but never
+// sent on the old socket, and Ready replays everything. The refusal must still answer the
+// frame actually sent last, not allMids.
+#[test]
+fn a_reconnect_with_an_interim_proposal_keeps_the_refusal_on_the_frame_sent() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    e.handle(
+        2000.0,
+        Event::WsClosed {
+            socket: s,
+            code: 1006,
+        },
+    );
+    let closed = prepared_now(&mut e);
+    e.handle(
+        2001.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ETH-PERP".into(),
+        }),
+    );
+    let mut pending: Vec<Action> = closed;
+    pending.extend(prepared_now(&mut e));
+    let mut timers: Vec<_> = pending
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let mut replay = Vec::new();
+    let mut socket = None;
+    let mut now = 2002.0;
+    for (timer, due) in timers {
+        now = due.max(now);
+        e.handle(now, Event::TimerFired { timer });
+        let batch = prepared_now(&mut e);
+        if let Some(next) = reconnected_socket(&batch) {
+            e.handle(now, Event::WsOpened { socket: next });
+            replay = sent(&prepared_now(&mut e));
+            socket = Some(next);
+            break;
+        }
+    }
+    let socket = socket.expect("reconnect");
+    assert!(
+        replay
+            .iter()
+            .any(|t| t.contains(r#""type":"l2Book","coin":"ETH""#)),
+        "{replay:?}"
+    );
+    for text in &replay {
+        ack(&mut e, socket, now + 1.0, text);
+    }
+    e.handle(
+        now + 2.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    assert_eq!(sent(&prepared_now(&mut e)).len(), 1, "the candle goes out");
+    e.handle(
+        now + 3.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"channel":"error","data":"Cannot subscribe to more than 1000 channels."}"#,
+        },
+    );
+    let actions = prepared_now(&mut e);
+    assert_eq!(
+        notices(&actions),
+        ["Hyperliquid refused candle BTC 1m: Cannot subscribe to more than 1000 channels."]
+    );
+    assert_eq!(
+        sent(&actions),
+        [
+            r#"{"method":"unsubscribe","subscription":{"type":"candle","coin":"BTC","interval":"1m"}}"#
+        ],
+        "allMids and the book keep their subscriptions"
+    );
+}
+
+// A proposal made before the host takes the previous one's frames supersedes them: the
+// engine drops the queued candle and re-encodes it after the book, in desired order. The
+// refusal names what actually went out first (the book), never the superseded encode.
+#[test]
+fn a_superseded_revision_never_answers_for_frames_it_did_not_send() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    for ack in [
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"allMids"}}}"#,
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"fastAssetCtxs"}}}"#,
+    ] {
+        message(&mut e, s, ack);
+    }
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ETH-PERP".into(),
+        }),
+    );
+    let wire = sent(&prepared_now(&mut e));
+    assert!(
+        wire[0].contains(r#""type":"l2Book""#),
+        "the book goes out first: {wire:?}"
+    );
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Cannot subscribe to more than 1000 channels."}"#,
+    );
+    assert_eq!(
+        notices(&prepared_now(&mut e)),
+        ["Hyperliquid refused l2Book ETH: Cannot subscribe to more than 1000 channels."]
+    );
+}
+
+// Open, close and reopen one book inside a round trip: the first subscribe's key has left
+// the released ledger by the time the reopen is proposed, yet it was sent and HL answers
+// it. The refusal after the four answers is the reopened l2Book's, not one frame later.
+#[test]
+fn a_book_reopened_within_a_round_trip_keeps_the_refusal_on_the_right_frame() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    for ack in [
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"allMids"}}}"#,
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"fastAssetCtxs"}}}"#,
+    ] {
+        message(&mut e, s, ack);
+    }
+    let book = |subscribe: bool| {
+        if subscribe {
+            Command::SubscribeOrderBook {
+                symbol: "ETH-PERP".into(),
+            }
+        } else {
+            Command::UnsubscribeOrderBook {
+                symbol: "ETH-PERP".into(),
+            }
+        }
+    };
+    for (subscribe, frames) in [(true, 2), (false, 2), (true, 2)] {
+        e.handle(2000.0, Event::Command(book(subscribe)));
+        assert_eq!(sent(&prepared_now(&mut e)).len(), frames);
+    }
+    // HL answers the first subscribe and unsubscribe pairs in order.
+    for method in ["subscribe", "subscribe", "unsubscribe", "unsubscribe"] {
+        let reply = format!(
+            r#"{{"channel":"subscriptionResponse","data":{{"method":"{method}","subscription":{{"type":"l2Book","coin":"ETH"}}}}}}"#
+        );
+        message(&mut e, s, &reply);
+    }
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Cannot subscribe to more than 1000 channels."}"#,
+    );
+    assert_eq!(
+        notices(&prepared_now(&mut e)),
+        ["Hyperliquid refused l2Book ETH: Cannot subscribe to more than 1000 channels."]
+    );
+}
+
 fn sent_texts(actions: &[Action]) -> Vec<String> {
     actions
         .iter()
@@ -660,5 +901,60 @@ fn the_public_stream_starts_before_hip3_discovery_finishes() {
             .iter()
             .any(|t| t.contains(r#""type":"l2Book","coin":"xyz:FOO""#)),
         "the dex's book joins the open socket: {added:?}"
+    );
+}
+
+// A chart's forced reset repairs its candle: a refused subscribe left the desired set, so
+// the engine would only answer "not subscribed". The venue sends it once more instead.
+#[test]
+fn a_repair_of_a_refused_candle_sends_its_subscribe_once_more() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    let candle = safe_cex_engine::SubscriptionTopic::Candles {
+        symbol: "BTC-PERP".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    };
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    prepared_now(&mut e).into_iter().for_each(drop);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Invalid subscription {\"type\":\"candle\",\"coin\":\"BTC\",\"interval\":\"1m\"}"}"#,
+    );
+    assert_eq!(
+        sent(&prepared_now(&mut e)),
+        [
+            r#"{"method":"unsubscribe","subscription":{"type":"candle","coin":"BTC","interval":"1m"}}"#
+        ]
+    );
+    e.handle(
+        2000.0,
+        Event::Command(Command::RepairSubscription(candle.clone())),
+    );
+    let repaired = prepared_now(&mut e);
+    assert_eq!(
+        sent(&repaired),
+        [r#"{"method":"subscribe","subscription":{"type":"candle","coin":"BTC","interval":"1m"}}"#]
+    );
+    assert!(notices(&repaired).is_empty(), "{:?}", notices(&repaired));
+    // A topic nobody subscribed is still the engine's "not subscribed".
+    e.handle(
+        2000.0,
+        Event::Command(Command::RepairSubscription(
+            safe_cex_engine::SubscriptionTopic::OrderBook {
+                symbol: "ETH-PERP".into(),
+            },
+        )),
+    );
+    assert!(
+        notices(&prepared_now(&mut e))
+            .iter()
+            .any(|n| n.contains("is not subscribed"))
     );
 }
