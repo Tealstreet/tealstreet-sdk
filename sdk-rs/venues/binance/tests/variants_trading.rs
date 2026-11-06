@@ -860,3 +860,55 @@ fn coin_m_trailing_stop_from_the_snapshot_can_be_amended() {
     let cancel = h.take("/dapi/v1/order");
     assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
 }
+
+/// COIN-M ignores stopPrice for trailing stops, so a native row may list it as 0: after
+/// a refused replacement the put-back still restores the captured rate and activation.
+#[test]
+fn coin_m_zero_price_trailing_put_back_uses_its_native_parameters() {
+    for stop in ["98", "0"] {
+        let mut h = ready_keeping_reads(Variant::CoinM);
+        h.respond(
+            "/dapi/v1/positionSide/dual",
+            200,
+            r#"{"dualSidePosition":false}"#,
+        );
+        let row = r#"[{"avgPrice":"0","clientOrderId":"coin-trail","cumBase":"0","executedQty":"0","orderId":77,"origQty":"2","origType":"TRAILING_STOP_MARKET","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","status":"NEW","stopPrice":"98","closePosition":false,"symbol":"BTCUSD_PERP","time":1,"timeInForce":"GTC","type":"TRAILING_STOP_MARKET","updateTime":1,"workingType":"CONTRACT_PRICE","priceProtect":false,"priceRate":"1.5","activatePrice":"103"}]"#;
+        h.respond(
+            "/dapi/v1/openOrders",
+            200,
+            &row.replace(r#""stopPrice":"98""#, &format!(r#""stopPrice":"{stop}""#)),
+        );
+        h.requests.clear();
+        h.event(Event::Command(Command::AmendOrder {
+            command: 72,
+            id: "77".into(),
+            price: Some(97.0),
+            amount: None,
+        }));
+        let cancel = h.take("/dapi/v1/order");
+        assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
+        h.reply(cancel.id, 200, "", r#"{"symbol":"BTCUSD_PERP","orderId":77,"clientOrderId":"coin-trail","status":"CANCELED","origQty":"2","executedQty":"0"}"#);
+        let replacement = h.take("/dapi/v1/order");
+        assert_eq!(
+            param(&replacement.url, "callbackRate").as_deref(),
+            Some("3")
+        );
+        h.reply(
+            replacement.id,
+            400,
+            "",
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let put_back = h.take("/dapi/v1/order");
+        assert_eq!(
+            put_back.method,
+            safe_cex_engine::Method::Post,
+            "stopPrice {stop}"
+        );
+        assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+        assert_eq!(
+            param(&put_back.url, "activationPrice").as_deref(),
+            Some("103")
+        );
+    }
+}

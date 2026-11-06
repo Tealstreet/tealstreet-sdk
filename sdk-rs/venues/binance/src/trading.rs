@@ -1998,11 +1998,8 @@ impl BinanceFutures {
                 )?),
             );
         } else if opts.kind == OrderType::TrailingStopLoss {
-            let target = positive_price(opts.price, market.precision.price)?;
-            let last = cx.store.ticker(&opts.symbol).map_or(0.0, |t| t.last);
-            if !last.is_finite() || last <= 0.0 {
-                return Err("Binance COIN-M trailing orders require a valid ticker".into());
-            }
+            // A put-back restores the captured native parameters: COIN-M ignores stopPrice
+            // for trailing stops, so the row's price may be 0 and is never re-validated.
             match &self.trading.restoring_trailing {
                 Some(native) => {
                     p.set("callbackRate", number(native.rate));
@@ -2011,6 +2008,11 @@ impl BinanceFutures {
                     }
                 }
                 None => {
+                    let target = positive_price(opts.price, market.precision.price)?;
+                    let last = cx.store.ticker(&opts.symbol).map_or(0.0, |t| t.last);
+                    if !last.is_finite() || last <= 0.0 {
+                        return Err("Binance COIN-M trailing orders require a valid ticker".into());
+                    }
                     let rate = ((last - target).abs() * 1000.0 / last).round() / 10.0;
                     trailing_rate_in_range((last - target).abs(), rate, 10.0)?;
                     p.set("callbackRate", number(rate));
