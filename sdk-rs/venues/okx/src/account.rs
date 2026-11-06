@@ -2494,24 +2494,30 @@ impl Okx {
             }
             "move_order_stop" => {
                 // moveTriggerPx is OKX's live trigger level, where the line is drawn and
-                // dragged. Unpublished, the stop sits a callback behind the current last:
-                // the row's own `last` is its placement-time fill price, not today's.
+                // dragged. Unpublished, the stop sits a callback behind where it trails from:
+                // its activePx while activation is pending, else the current last (the
+                // row's own `last` is its placement-time fill price, not today's).
                 let trigger = num::parse(o.move_trigger_px);
-                let last = cx.store.ticker(&m.symbol).map_or(0.0, |t| t.last);
+                let activation = num::parse(o.active_px);
+                let base = if activation > 0.0 {
+                    activation
+                } else {
+                    cx.store.ticker(&m.symbol).map_or(0.0, |t| t.last)
+                };
                 let price = if trigger > 0.0 {
                     trigger
-                } else if last > 0.0 {
+                } else if base > 0.0 {
                     let spread = num::parse(o.callback_spread);
                     let distance = if spread > 0.0 {
                         spread
                     } else {
-                        last * num::parse(o.callback_ratio)
+                        base * num::parse(o.callback_ratio)
                     };
                     num::adjust(
                         if o.side == "buy" {
-                            last + distance
+                            base + distance
                         } else {
-                            last - distance
+                            base - distance
                         },
                         m.precision.price,
                     )

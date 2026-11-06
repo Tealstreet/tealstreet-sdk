@@ -103,3 +103,85 @@ fn a_ratio_trailing_row_without_a_trigger_sits_its_ratio_behind_last() {
     let e = loaded(&ratio, None);
     assert_eq!(e.store().order("91_tsl").unwrap().price, 39600.);
 }
+
+/// A stop whose activation price is not reached yet: OKX publishes no moveTriggerPx.
+fn pending_row(side: &str, activation: &str) -> String {
+    row(side, "").replace(
+        "\"activePx\":\"\"",
+        &format!("\"activePx\":\"{activation}\""),
+    )
+}
+
+#[test]
+fn an_activation_pending_row_sits_its_callback_behind_the_activation_price() {
+    let ratio = pending_row("sell", "41000").replace(
+        "\"callbackSpread\":\"50\",\"callbackRatio\":\"\"",
+        "\"callbackSpread\":\"\",\"callbackRatio\":\"0.01\"",
+    );
+    for (row, position, shown) in [
+        (pending_row("sell", "41000"), None, 40950.),
+        (pending_row("sell", "41000"), Some(LONG), 40950.),
+        (pending_row("buy", "39000"), None, 39050.),
+        (pending_row("buy", "39000"), Some(SHORT), 39050.),
+        (ratio, None, 40590.),
+    ] {
+        let e = loaded(&row, position);
+        assert_eq!(e.store().order("91_tsl").unwrap().price, shown, "{row}");
+    }
+}
+
+fn edit(e: &mut Engine<Okx>, price: Option<f64>, amount: Option<f64>) -> Vec<Action> {
+    e.handle(
+        5.,
+        safe_cex_engine::Event::Command(safe_cex_engine::Command::AmendOrder {
+            command: 20,
+            id: "91_tsl".into(),
+            price,
+            amount,
+        }),
+    );
+    prepared(e, 5.)
+}
+
+fn writes(out: &[Action]) -> Vec<String> {
+    out.iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.method != safe_cex_engine::Method::Get => Some(r.url.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_activation_pending_trailing_price_edit_is_refused_before_any_cancel() {
+    for (side, activation, level) in [("sell", "41000", 40900.), ("buy", "39000", 39100.)] {
+        let mut e = loaded(&pending_row(side, activation), None);
+        let before = e.store().order("91_tsl").unwrap().clone();
+        let out = edit(&mut e, Some(level), None);
+        assert!(writes(&out).is_empty(), "{side}: {out:?}");
+        let error = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command: 20, error }) => {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .expect("refused edit");
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert_eq!(
+            error.message,
+            "OKX trailing stop not active yet; re-place it to change its distance"
+        );
+        assert_eq!(e.store().order("91_tsl"), Some(&before));
+        // A size edit has no level to convert, so it still re-places the stop.
+        let mut e = loaded(&pending_row(side, activation), None);
+        let out = edit(&mut e, None, Some(5.));
+        assert!(
+            writes(&out)
+                .iter()
+                .any(|url| url.ends_with("/cancel-algos")),
+            "{side}: {out:?}"
+        );
+    }
+}
