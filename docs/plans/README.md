@@ -11,6 +11,7 @@ including historical JSON receipts and this index. Add a row when adding a plan.
 
 | Topic | Status | Read trigger | File |
 | --- | --- | --- | --- |
+| KuCoin Futures managed protective edits | Source and scoped controls; CI/review pending | Before changing final-Claim stop vetoes, target-terminal proof or one-shot native-type restoration | [kucoin-managed-protective-edits.md](callers/kucoin-managed-protective-edits.md) |
 | BloFin managed public/private sockets | Plan and production-binding originals; one venue PR | Before changing authenticated login custody, public interest recovery or full order-census epoch | [RUST_BLOFIN_MANAGED_SOCKETS.md](RUST_BLOFIN_MANAGED_SOCKETS.md) |
 | Frame-fed fence read covers and bounded refresh ask | Design for review; supersedes parked #2990; no source | Before changing how a frame-fed page lifts an uncertain-write fence, the ORDERS_READ section, or source refresh reads | [RUST_FRAME_FED_READ_COVER.md](RUST_FRAME_FED_READ_COVER.md) |
 | Legacy to stable-subject nonce handoff | Engine-only plan GO; no consumer activation | Before transferring an owned legacy nonce issuer into managed NonceClaim custody. | [RUST_NONCE_DOMAIN_HANDOFF.md](RUST_NONCE_DOMAIN_HANDOFF.md) |
