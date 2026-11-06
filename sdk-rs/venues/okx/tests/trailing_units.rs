@@ -184,6 +184,54 @@ fn a_trailing_edit_level_that_would_not_trail_is_refused_before_any_cancel() {
     }
 }
 
+fn place(e: &mut Engine<Okx>, now: f64, side: &str, price: f64) -> Vec<Action> {
+    let order: PlaceOrderOpts = serde_json::from_str(&format!(
+        r#"{{"symbol":"BTCUSDT","type":"trailing_stop_market","side":"{side}","amount":1,"price":{price},"reduceOnly":true}}"#
+    ))
+    .unwrap();
+    e.handle(
+        now,
+        Event::Command(Command::PlaceOrders {
+            command: 30,
+            orders: vec![order],
+        }),
+    );
+    prepared(e, now)
+}
+
+#[test]
+fn a_trailing_placement_sends_the_distance_from_last_to_its_level() {
+    for (side, level, spread) in [("sell", 39940., "60"), ("buy", 40100., "100")] {
+        let mut e = trading_engine();
+        let out = place(&mut e, 5., side, level);
+        let b = body(&post(&out, "/order-algo"));
+        assert_eq!(b["ordType"], "move_order_stop");
+        assert_eq!(b["callbackSpread"], spread, "{side} {level}");
+        // Master's empty ratio and activation fields are kept as they were.
+        assert_eq!(b["callbackRatio"], "", "{b}");
+        assert_eq!(b["activePx"], "", "{b}");
+    }
+}
+
+#[test]
+fn a_trailing_placement_that_would_not_trail_or_has_no_fresh_last_is_refused() {
+    for (side, level, now) in [
+        ("sell", 40000., 5.),
+        ("sell", 40100., 5.),
+        ("buy", 39900., 5.),
+        ("sell", 39940., 10_000.),
+    ] {
+        let mut e = trading_engine();
+        let out = place(&mut e, now, side, level);
+        assert_eq!(writes(&out), 0, "{side} {level} at {now}: {out:?}");
+        assert_eq!(
+            failure(&out, 30).outcome,
+            Some(Outcome::NotSent),
+            "{side} {level} at {now}"
+        );
+    }
+}
+
 /// Ordinary limit edits and placements keep master's exact bytes.
 #[test]
 fn ordinary_limit_placement_and_amend_bodies_are_unchanged() {

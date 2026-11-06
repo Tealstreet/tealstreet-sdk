@@ -848,10 +848,15 @@ impl Okx {
             OrderType::TrailingStopLoss => {
                 p.active_px = Some("");
                 p.callback_ratio = Some("");
-                p.callback_spread = Some(num::format(adjusted(
+                let last = fresh_last(cx, &o.symbol).ok_or(
+                    "OKX trailing stop needs a last price under 5 s old; nothing was placed",
+                )?;
+                p.callback_spread = Some(num::format(trailing_distance(
+                    m,
+                    o.side,
                     o.price.unwrap_or(0.0),
-                    m.precision.price,
-                    false,
+                    last,
+                    "nothing was placed",
                 )?));
                 // OKX refuses closeFraction here with 50014 "sz can not be empty".
                 if size <= 0.0 {
