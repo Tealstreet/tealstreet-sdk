@@ -430,8 +430,9 @@ fn keyed_hip3_topic_budget_includes_private_topics_books_and_candles() {
             .filter(|f| f.contains("\"method\":\"subscribe\""))
             .count()
     };
-    // Two core markets, one HIP-3 scope: 9 + 2 + 5 = 16 fixed topics.
-    assert_eq!(topics(initial), 16);
+    // Two core markets, one HIP-3 scope: 9 + 2 + 1 = 12 fixed topics (only
+    // clearinghouseState is per dex; fastAssetCtxs carries the dex's mids).
+    assert_eq!(topics(initial), 12);
     for symbol in ["BTC-PERP", "ETH-PERP", "XYZ|FOO-PERP"] {
         e.handle(
             2000.,
