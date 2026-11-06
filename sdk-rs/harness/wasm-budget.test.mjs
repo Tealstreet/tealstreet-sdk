@@ -203,7 +203,6 @@ test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain he
   for (const [venue, measured, cap] of [
     ['bitunix', 1_838_517, 1_849_344],
     ['cryptocom', 1_716_657, 1_727_488],
-    ['kucoin', 1_670_273, 1_681_408],
     ['kucoinspot', 2_253_260, 2_264_064],
     ['lighter', 1_991_579, 2_001_920],
   ]) {
@@ -288,6 +287,16 @@ test('#3122 protective stop edits (run 42126229513) retain Paradex and BloFin he
     ['paradex', 2_239_351, 2_249_728],
     ['blofin', 1_979_025, 1_989_632],
   ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3127 KuCoin guarded stop edits (run 42140111861) retain KuCoin headroom', () => {
+  for (const [venue, measured, cap] of [['kucoin', 1_681_540, 1_692_672]]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
