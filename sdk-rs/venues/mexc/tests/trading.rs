@@ -2959,6 +2959,7 @@ fn protective_rate_limit_on_replacement_or_put_back_is_unknown_without_protectio
                 .unwrap();
             assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
             assert!(error.protection.is_none());
+            assert!(error.message.contains("status is unknown"), "{error:?}");
             assert!(error.message.contains("Open Orders") && error.message.contains("position"));
             assert!(!error.message.contains("both refused"));
         }
@@ -3004,6 +3005,7 @@ fn protective_native_rate_limit_is_unknown_without_not_changed_or_cancel() {
             .unwrap();
         assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
         assert!(error.protection.is_none());
+        assert!(error.message.contains("status is unknown"), "{error:?}");
         assert!(
             error.message.contains("Open Orders") && error.message.contains("position"),
             "{error:?}"
@@ -3182,6 +3184,11 @@ fn protective_ambiguous_envelope_codes_never_restore_or_report_not_sent() {
                     "mode={mode}, status={status}, code={code}"
                 );
                 assert!(errors[0].protection.is_none());
+                assert!(
+                    errors[0].message.contains("status is unknown"),
+                    "{:?}",
+                    errors[0]
+                );
                 assert!(
                     errors[0].message.contains("Open Orders")
                         && errors[0].message.contains("position")
@@ -3987,5 +3994,184 @@ fn protective_ambiguous_success_data_is_unknown_without_store_effects() {
             );
             assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:91,error}) if error.outcome==Some(safe_cex_engine::Outcome::Unknown))),"native={native}, data={data}: {actions:?}");
         }
+    }
+}
+
+#[test]
+fn protective_engine_sealed_unknown_reports_uncertainty_on_every_write_leg() {
+    use safe_cex_engine::request_context::HttpAction;
+    for leg in ["cancel", "replacement", "put-back"] {
+        for status in [408, 500, 503] {
+            let (mut e, _, _) = guarded_fixture();
+            let request = if leg == "cancel" {
+                let inspect = protective_amend(&mut e, Some(70.), 300.);
+                inspect_reply(&mut e, &inspect, 310., &protective_plan_row(1));
+                let request = requests(&mut e).remove(0);
+                assert!(request.url.ends_with("/planorder/cancel"));
+                request
+            } else {
+                let replacement = guarded_replacement(&mut e, 300.);
+                if leg == "put-back" {
+                    reply(
+                        &mut e,
+                        &replacement,
+                        335.,
+                        r#"{"success":false,"code":2006,"message":"replacement refused"}"#,
+                    );
+                    let restore = requests(&mut e).remove(0);
+                    let body: serde_json::Value =
+                        serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+                    assert_eq!(body["vol"], 60.);
+                    assert_eq!(body["triggerPrice"], 55000.);
+                    restore
+                } else {
+                    replacement
+                }
+            };
+            e.handle(
+                340.,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body: "{}",
+                    },
+                },
+            );
+            let actions = drained(&mut e);
+            let errors: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(errors.len(), 1, "{leg}/{status}: {actions:?}");
+            let error = errors[0];
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            assert!(error.protection.is_none(), "{leg}/{status}: {error:?}");
+            assert_eq!(
+                error.message,
+                "The outcome of your BTCUSDT protection update is unknown. Check Open Orders and your position before replacing protection.",
+                "{leg}/{status}"
+            );
+            assert!(!actions.iter().any(|a| match a {
+                Action::Http(r) => r.method != safe_cex_engine::Method::Get,
+                Action::ManagedHttp(a) => matches!(&**a, HttpAction::Prepare { request, .. } | HttpAction::Bind { request, .. }
+                    if request.method != safe_cex_engine::Method::Get),
+                Action::Notice(Notice::CommandDone { command: 91, .. }) => true,
+                _ => false,
+            }), "{leg}/{status}: no restore or resend: {actions:?}");
+            e.handle(
+                341.,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body: "{}",
+                    },
+                },
+            );
+            let late = drained(&mut e);
+            assert!(
+                !late.iter().any(|a| matches!(
+                    a,
+                    Action::Http(_)
+                        | Action::ManagedHttp(_)
+                        | Action::Notice(
+                            Notice::CommandDone { command: 91, .. }
+                                | Notice::CommandFailed { command: 91, .. }
+                        )
+                )),
+                "{leg}/{status}: duplicate failure is inert: {late:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn protective_replacement_rechecks_after_the_signed_bind() {
+    use safe_cex_engine::request_context::{Claim, HttpAction};
+    for changed in [
+        "allowed",
+        "stale",
+        "crossed",
+        "position",
+        "not-canceled",
+        "order",
+    ] {
+        let (mut e, private, public) = guarded_fixture();
+        let inspect = protective_amend(&mut e, Some(70.), 300.);
+        inspect_reply(&mut e, &inspect, 310., &protective_plan_row(1));
+        let cancel = requests(&mut e).remove(0);
+        assert!(cancel.url.ends_with("/planorder/cancel"));
+        reply(&mut e, &cancel, 320., r#"{"success":true,"code":0}"#);
+        let terminal = requests(&mut e).remove(0);
+        assert!(terminal.url.contains("states=2"));
+        inspect_reply(&mut e, &terminal, 330., &protective_plan_row(2));
+        let packet = held_protective_packet(&mut e);
+        assert!(packet.1.url.ends_with("/planorder/place/v2"));
+        let (permit, request) = bind_protective_packet(&mut e, packet, 340.);
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["vol"], 70.);
+        assert_eq!(body["triggerPrice"], 54000.);
+        match changed {
+            "crossed" => quote(&mut e, public, 345., "\"fairPrice\":54000"),
+            "position" | "not-canceled" | "order" => {
+                let text = match changed {
+                    "position" => r#"{"channel":"push.personal.position","data":{"positionId":"pos","symbol":"BTC_USDT","positionType":1,"holdVol":0,"holdAvgPrice":60000}}"#.to_owned(),
+                    "not-canceled" => format!(r#"{{"channel":"push.personal.plan.order","data":{}}}"#, protective_plan_row(3)),
+                    _ => format!(r#"{{"channel":"push.personal.plan.order","data":{}}}"#, protective_plan_row(2).replace("55000", "56000")),
+                };
+                e.handle(
+                    345.,
+                    Event::WsMessage {
+                        socket: private,
+                        text: &text,
+                    },
+                );
+                assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+            }
+            _ => {}
+        }
+        if changed == "not-canceled" {
+            assert_ne!(
+                e.store().order("guarded").unwrap().status,
+                OrderStatus::Canceled
+            );
+        }
+        let claim = e.claim_http(if changed == "stale" { 6000. } else { 350. }, permit);
+        if changed == "allowed" {
+            assert!(
+                matches!(claim, Ok(Claim::Released(_))),
+                "healthy replacement claim: {claim:?}"
+            );
+            continue;
+        }
+        assert!(!matches!(claim, Ok(Claim::Released(_))), "{changed}");
+        let actions = drained(&mut e);
+        assert!(
+            !actions.iter().any(|a| match a {
+                Action::Http(_) | Action::Sign { .. } => true,
+                Action::ManagedHttp(a) => !matches!(&**a, HttpAction::Cancel { .. }),
+                _ => false,
+            }),
+            "{changed}: no replacement or restore: {actions:?}"
+        );
+        let errors: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "{changed}: {actions:?}");
+        assert_eq!(
+            errors[0].protection,
+            Some(safe_cex_engine::error::Protection::Unprotected)
+        );
     }
 }

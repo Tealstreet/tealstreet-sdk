@@ -254,17 +254,10 @@ impl MexcFutures {
             };
             if operation == Operation::Mutation {
                 let edit = job.protection.as_ref().ok_or(Error::State)?;
-                let words = if edit.restoring {
-                    format!(
-                        "Your {} protection's replacement was refused and its put-back could not be confirmed. Check Open Orders and your position before replacing protection",
-                        edit.observed.symbol
-                    )
-                } else {
-                    format!(
-                        "Your {} protection update could not be completed. Check Open Orders and your position before replacing protection",
-                        edit.observed.symbol
-                    )
-                };
+                let words = format!(
+                    "The outcome of your {} protection update is unknown. Check Open Orders and your position before replacing protection.",
+                    edit.observed.symbol
+                );
                 cx.present_plan_failure(&plan, words)?;
             }
             run.current = Some((slot.clone(), context.clone()));

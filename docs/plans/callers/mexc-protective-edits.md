@@ -89,8 +89,9 @@ Managed DATA is validated and its write fact recorded before native reducers.
 Malformed or conflicting success payloads remain Unknown without optimistic Store
 effects, a restore or a resend.
 Only definitive replacement refusal can continue to the exact original put-back;
-Unknown never continues. `present_plan_failure` supplies actionable Open Orders /
-position wording that also remains truthful for an unsent preparation refusal.
+Unknown never continues. Before each mutation, `present_plan_failure` states that
+the protection update's outcome is unknown and asks the user to check Open Orders
+and their position; a NotSent preparation refusal replaces this with its own cause.
 A retired managed owner discards only its own continuation; the existing
 reconciliation callback resumes an ordinary FIFO successor and requests fresh
 account state. A parked managed successor resumes through Preflight readiness.
