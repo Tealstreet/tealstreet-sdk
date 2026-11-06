@@ -114,8 +114,11 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
 
   subscribe = () => {
     this.subscribeSystemTopics();
-    // Subscribe to activeAssetData for all markets (leverage/margin info)
-    this.subscribeAllActiveAssetData();
+    // activeAssetData only for symbols with open orders (one per market filled
+    // Hyperliquid's 1,000-per-IP cap with about five accounts).
+    this.assetDataCoins.clear();
+    this.subscribeOrderAssetData();
+    this.unsubscribeOrderWatch ??= this.parent.store.subscribe(() => this.subscribeOrderAssetData());
   };
 
   ping = () => {
@@ -228,36 +231,31 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
     }
   };
 
-  /**
-   * Subscribe to activeAssetData for all markets (leverage/margin info)
-   * Skips HIP-3 and spot markets as they may not be supported or could exceed
-   * subscription limits
-   */
-  private subscribeAllActiveAssetData = () => {
-    const user = this.parent.options.vault || this.parent.options.applicationId;
-    const markets = this.parent.store.markets;
+  private assetDataCoins = new Set<string>();
+  private unsubscribeOrderWatch?: () => void;
 
-    for (const market of markets) {
-      const coin = market.id;
-      // Skip spot: activeAssetData carries leverage/margin-mode, which is
-      // meaningless for spot (always 1x, no margin mode). Spot roughly
-      // doubles the market count, so subscribing would burn ~300 channels
-      // against the 1000 limit for data we'd discard. Note this must be an
-      // `isSpot` check, NOT a name heuristic — the canonical spot pair is
-      // literally named `PURR/USDC` and would slip past the HIP-3 ':' guard.
-      if (market.isSpot) continue;
-      // Skip HIP-3 markets (contain ':') to avoid exceeding 1000 channel limit
-      if (coin.includes(':')) continue;
-      this.sendWithDiagnostics(
-        JSON.stringify({
-          method: 'subscribe',
-          subscription: {
-            type: 'activeAssetData',
-            user,
-            coin,
-          },
-        }),
-      );
+  /** Stream activeAssetData exactly for the perp symbols holding open orders on this connection. */
+  private subscribeOrderAssetData = () => {
+    if (this.isDisposed || !this.isConnected) return;
+    const user = this.parent.options.vault || this.parent.options.applicationId;
+    const wanted = new Set<string>();
+    for (const order of this.parent.store.orders) {
+      const market = this.parent.store.marketsBySymbol[order.symbol];
+      if (market && !market.isSpot && !market.id.includes(':')) wanted.add(market.id);
+    }
+    const send = (method: 'subscribe' | 'unsubscribe', coin: string) =>
+      this.sendWithDiagnostics(JSON.stringify({ method, subscription: { type: 'activeAssetData', user, coin } }));
+    for (const coin of this.assetDataCoins) {
+      if (!wanted.has(coin)) {
+        this.assetDataCoins.delete(coin);
+        send('unsubscribe', coin);
+      }
+    }
+    for (const coin of wanted) {
+      if (!this.assetDataCoins.has(coin)) {
+        this.assetDataCoins.add(coin);
+        send('subscribe', coin);
+      }
     }
   };
 

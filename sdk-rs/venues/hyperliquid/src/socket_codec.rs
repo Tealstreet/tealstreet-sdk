@@ -105,6 +105,19 @@ struct DepthOrder<'a> {
     fast: bool,
 }
 
+/// Public market data and pongs: frames that cannot change which symbols hold orders.
+pub(super) fn public_market_frame(text: &str) -> bool {
+    text.trim_start()
+        .strip_prefix(r#"{"channel":""#)
+        .and_then(|rest| rest.split('"').next())
+        .is_some_and(|channel| {
+            matches!(
+                channel,
+                "allMids" | "fastAssetCtxs" | "l2Book" | "bbo" | "candle" | "trades" | "pong"
+            )
+        })
+}
+
 impl Hyperliquid {
     /// Track early native snapshots too: delivery can beat the release continuation.
     fn prepare_private_snapshots(&mut self, cx: &mut Cx<'_, Pending>, epoch: Epoch) {
@@ -369,6 +382,41 @@ impl Hyperliquid {
         desired
     }
 
+    /// One account's subscription count, when it changes and at most once a minute:
+    /// Hyperliquid caps an IP at 1,000, shared by every account behind it.
+    pub(super) fn report_subscriptions(&mut self, cx: &mut Cx<'_, Pending>, desired: &[Interest]) {
+        let total = desired.len();
+        if self
+            .connection
+            .reported_subscriptions
+            .is_some_and(|(count, at)| count == total || cx.now - at < 60_000.)
+        {
+            return;
+        }
+        self.connection.reported_subscriptions = Some((total, cx.now));
+        let private = desired
+            .iter()
+            .filter(|interest| interest.wire_args.contains("\"user\":"))
+            .count();
+        let settings = desired
+            .iter()
+            .filter(|interest| interest.wire_args.contains("\"type\":\"activeAssetData\""))
+            .count();
+        cx.event(
+            safe_cex_engine::Level::Info,
+            code::SUBSCRIPTION_COUNT,
+            format!(
+                "Hyperliquid account holds {total} subscriptions ({private} private, {settings} activeAssetData)"
+            ),
+            vec![
+                ("subscriptions", (total as f64).into()),
+                ("publicSubscriptions", ((total - private) as f64).into()),
+                ("privateSubscriptions", (private as f64).into()),
+                ("activeAssetDataSubscriptions", (settings as f64).into()),
+            ],
+        );
+    }
+
     pub(super) fn managed_connect(&mut self, cx: &mut Cx<'_, Pending>) -> Result<(), SocketError> {
         let feed = if let Some(feed) = self.connection.feed {
             feed
@@ -427,6 +475,7 @@ impl Hyperliquid {
             return;
         };
         let desired = self.bounded_socket_interests(cx);
+        self.report_subscriptions(cx, &desired);
         let admitted: HashSet<_> = desired.iter().map(|i| i.key.clone()).collect();
         let required: Vec<_> = private
             .iter()

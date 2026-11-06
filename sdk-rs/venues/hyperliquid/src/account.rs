@@ -160,6 +160,10 @@ fn backoff_ms(tries: u32) -> f64 {
 #[derive(Default)]
 pub struct Account {
     pub started: bool,
+    /// The symbol a caller last read leverage for: the page's selection.
+    selected: Option<String>,
+    /// Symbols whose activeAssetData streams: the selection and open orders.
+    asset_scope: std::collections::BTreeSet<String>,
     mode: Mode,
     mode_resolved: bool,
     pub(crate) mode_refresh_due: bool,
@@ -1107,12 +1111,118 @@ impl Hyperliquid {
                 send(kind, Some(dex), None, None);
             }
         }
+        // One activeAssetData per market filled the 1,000-per-IP cap with ~5 keyed
+        // accounts; held symbols take settings from clearinghouseState instead.
         for m in markets {
-            if !m.id.contains(':') && m.is_spot != Some(true) {
+            if !m.id.contains(':')
+                && m.is_spot != Some(true)
+                && self.account.asset_scope.contains(&m.symbol)
+            {
                 send("activeAssetData", None, Some(&m.id), None);
             }
         }
         interests
+    }
+
+    /// Re-subscribe settings when the selection or the set of symbols with open orders changes.
+    pub(crate) fn refresh_asset_scope(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.spot || self.options.public_data_only {
+            return;
+        }
+        let scope: std::collections::BTreeSet<String> = cx
+            .store
+            .orders()
+            .iter()
+            .map(|order| order.symbol.clone())
+            .chain(self.account.selected.clone())
+            .collect();
+        if scope != self.account.asset_scope {
+            self.account.asset_scope = scope;
+            self.propose_socket_interests(cx);
+        }
+    }
+
+    /// A caller read of `symbol`'s leverage, answered from a fresh activeAssetData read;
+    /// the symbol becomes the selection, whose settings then stream.
+    pub(crate) fn fetch_leverage(&mut self, cx: &mut Cx<'_, Pending>, symbol: String) {
+        let Ok(context) = cx.admit_http_command(safe_cex_engine::request_context::Policy {
+            operation: safe_cex_engine::request_context::Operation::Read,
+            credential: None,
+            timeout_ms: 20_000,
+            pacing: None,
+            retry: safe_cex_engine::request_context::RetryPolicy::Never,
+        }) else {
+            return;
+        };
+        let (Some(user), Some(coin)) = (self.user(), self.coin(cx, &symbol)) else {
+            let _ = cx.fail_context(
+                &context,
+                VenueError::new(format!("Hyperliquid has no account leverage for {symbol}"))
+                    .kind(ErrorKind::InvalidInput)
+                    .outcome(safe_cex_engine::Outcome::NotSent),
+            );
+            return;
+        };
+        #[derive(Serialize)]
+        struct Read<'a> {
+            r#type: &'static str,
+            user: &'a str,
+            coin: &'a str,
+        }
+        let body = serde_json::to_string(&Read {
+            r#type: "activeAssetData",
+            user,
+            coin,
+        })
+        .unwrap();
+        if self.account.selected.as_deref() != Some(symbol.as_str()) {
+            self.account.selected = Some(symbol.clone());
+            self.refresh_asset_scope(cx);
+        }
+        let pending = Pending::Leverage(Box::new(crate::LeverageRead {
+            context: context.clone(),
+            symbol,
+        }));
+        if let Err((_pending, error)) = cx.request_managed_with_headers(
+            context.clone(),
+            None,
+            Method::Post,
+            format!("{}/info", self.rest()),
+            &[("Content-Type", "application/json")],
+            Some(body),
+            pending,
+        ) {
+            let _ = cx.fail_context(&context, error.venue_error());
+        }
+    }
+
+    /// The rails a leverage read reports: the venue's row, applied where settings may move.
+    pub(crate) fn leverage_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: crate::LeverageRead,
+        body: &str,
+    ) {
+        let row = serde_json::from_str::<ActiveAsset>(body)
+            .ok()
+            .filter(|row| self.symbol(&row.coin) == Some(read.symbol.as_str()));
+        let Some(row) = row else {
+            let _ = cx.fail_context(&read.context, "Malformed Hyperliquid active asset settings");
+            return;
+        };
+        let held = cx.store.positions().iter().any(|p| p.symbol == read.symbol);
+        if !held && !self.settings_uncertain(&read.symbol) {
+            self.apply_asset_setting(cx, &read.symbol, &row);
+        }
+        let isolated = row.leverage.kind != "cross";
+        let _ = cx.done_context(
+            &read.context,
+            format!(
+                "{{\"buyLeverage\":{0},\"sellLeverage\":{0},\"marginType\":\"{1}\",\"positionMode\":\"oneway\"}}",
+                row.leverage.value,
+                if isolated { "isolated" } else { "cross" }
+            ),
+        );
     }
     pub(crate) fn account_response(
         &mut self,

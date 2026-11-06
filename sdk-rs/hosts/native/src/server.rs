@@ -23,9 +23,16 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 const MIRROR_EVERY: Duration = Duration::from_secs(60);
 const START_FAILED_CODE: &str = "hosted.start_failed";
 
-/// Notices the journal gets at any level, unthrottled: each subscription repair's outcome.
+/// Notices the journal gets at any level, unthrottled: each subscription repair's outcome,
+/// and the per-account subscription counts a box sums against a venue's per-IP cap.
 fn always_journaled(code: Option<&str>) -> bool {
-    code == Some(safe_cex_engine::log::code::SUBSCRIPTION_REPAIRED)
+    matches!(
+        code,
+        Some(
+            safe_cex_engine::log::code::SUBSCRIPTION_REPAIRED
+                | safe_cex_engine::log::code::SUBSCRIPTION_COUNT
+        )
+    )
 }
 
 /// `safe-cex warn hosted.start_failed [user account venue]: kind=… venue_code=… signing_mode=… message="…"`:
@@ -2016,6 +2023,7 @@ mod tests {
     #[test]
     fn every_subscription_repair_outcome_reaches_the_journal() {
         assert!(always_journaled(Some("subscription.repaired")));
+        assert!(always_journaled(Some("subscription.count")));
         assert!(!always_journaled(Some("subscription.rejected")));
         assert!(!always_journaled(None));
     }
