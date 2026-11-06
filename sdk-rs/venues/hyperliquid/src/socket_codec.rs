@@ -1,12 +1,94 @@
 //! Native topic projection and wire encoding; the shared core owns transport.
 use super::*;
 use safe_cex_engine::socket_lifecycle::{
-    AuthMode, AuthRecovery, ControlPolicy, EncodedBatch, Epoch, FeedPolicy, Interest, Invalidation,
-    LifecycleEvent, RetireReason, TrafficPolicy,
+    AuthMode, AuthRecovery, Control, ControlPolicy, DataSilence, EncodedBatch, Epoch, FeedPolicy,
+    Interest, Invalidation, LifecycleEvent, RetireReason, TrafficPolicy,
 };
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 const PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 30_000.;
 const MAX_PRIVATE_SNAPSHOT_TIMEOUT_MS: f64 = 300_000.;
+/// Mids and asset contexts tick every second; half a minute without them is a dead feed.
+const PUBLIC_SILENCE_MS: f64 = 30_000.;
+const PUBLIC_STREAMS: &[&str] = &[
+    r#"{"method":"subscribe","subscription":{"type":"allMids""#,
+    r#"{"method":"subscribe","subscription":{"type":"fastAssetCtxs""#,
+    r#"{"method":"subscribe","subscription":{"type":"l2Book""#,
+    r#"{"method":"subscribe","subscription":{"type":"bbo""#,
+];
+/// Refusals named per socket; a capped IP refuses every later subscription.
+const REFUSAL_NOTICES: u8 = 3;
+
+/// Only public market data proves the public streams alive; account frames
+/// sharing the socket and subscription replies are delivered without counting.
+pub(super) fn managed_control(text: &str) -> Control {
+    let channel = match text
+        .trim_start()
+        .strip_prefix(r#"{"channel":""#)
+        .and_then(|rest| rest.split('"').next())
+    {
+        Some(channel) => Cow::Borrowed(channel),
+        None => match serde_json::from_str::<Envelope>(text) {
+            Ok(frame) => frame.channel,
+            Err(_) => return Control::Unwatched,
+        },
+    };
+    match channel.as_ref() {
+        "pong" => Control::Pong,
+        "allMids" | "fastAssetCtxs" | "l2Book" | "bbo" | "candle" => Control::Other,
+        _ => Control::Unwatched,
+    }
+}
+
+/// A subscription reply or request: the method, and the subscription it names.
+#[derive(serde::Deserialize)]
+struct Subscribing<'a> {
+    #[serde(borrow, default)]
+    method: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    subscription: &'a serde_json::value::RawValue,
+}
+
+/// The subscription a frame names, alone or as the `subscription` member of a request.
+fn named_subscription(raw: &str) -> &str {
+    serde_json::from_str::<Subscribing<'_>>(raw).map_or(raw, |request| request.subscription.get())
+}
+
+/// A subscription as the venue echoes it, order-free and without the defaults
+/// it adds (`dex: ""`, `aggregateByTime: false`).
+fn canonical_subscription(raw: &str) -> Option<String> {
+    let mut fields: BTreeMap<Cow<'_, str>, &serde_json::value::RawValue> =
+        serde_json::from_str(named_subscription(raw)).ok()?;
+    fields.retain(|_, value| !matches!(value.get(), r#""""# | "false" | "null"));
+    fields
+        .contains_key("type")
+        .then(|| serde_json::to_string(&fields).ok())?
+}
+
+/// The refused subscription's label for a notice: its type and market, never the user.
+fn subscription_label(key: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Label<'a> {
+        #[serde(borrow, rename = "type")]
+        kind: Cow<'a, str>,
+        #[serde(borrow, default)]
+        coin: Option<Cow<'a, str>>,
+        #[serde(borrow, default)]
+        interval: Option<Cow<'a, str>>,
+        #[serde(borrow, default)]
+        dex: Option<Cow<'a, str>>,
+    }
+    let Ok(label) = serde_json::from_str::<Label<'_>>(named_subscription(key)) else {
+        return String::from("a subscription");
+    };
+    [Some(label.kind), label.coin, label.interval, label.dex]
+        .into_iter()
+        .flatten()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 #[derive(Default)]
 pub(super) struct PrivateBootstrap {
@@ -318,13 +400,9 @@ impl Hyperliquid {
             )));
         };
         add(&mut interests, "allMids", None, None, None);
+        // Carries every HIP-3 dex's mids and marks, so no per-dex allMids.
         if !self.spot {
             add(&mut interests, "fastAssetCtxs", None, None, None);
-        }
-        if !self.options.public_data_only && self.user().is_some() {
-            for dex in &self.dex_names {
-                add(&mut interests, "allMids", None, None, Some(dex.as_str()));
-            }
         }
         for symbol in self.books.keys() {
             let Some(market) = store.market(symbol) else {
@@ -341,7 +419,96 @@ impl Hyperliquid {
                 )));
             }
         }
+        if !self.connection.refused.is_empty() {
+            interests.retain(|interest| !self.connection.refused.contains(interest.key.as_ref()));
+        }
         interests
+    }
+
+    /// A topic subscribed afresh may try its refused keys again.
+    pub(super) fn forget_refusals(
+        &mut self,
+        store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) {
+        if self.connection.refused.is_empty() {
+            return;
+        }
+        for (_, key) in self.topic_interests(store, topic) {
+            self.connection.refused.remove(&key);
+        }
+    }
+
+    /// Acknowledgements and refusals answer this engine's subscribe frames, in order.
+    pub(super) fn subscription_reply(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
+        let Ok(frame) = serde_json::from_str::<Envelope>(text) else {
+            return false;
+        };
+        match frame.channel.as_ref() {
+            "subscriptionResponse" => {
+                let raw = frame.data.get();
+                let subscribed = serde_json::from_str::<Subscribing<'_>>(raw)
+                    .is_ok_and(|reply| reply.method.as_deref() != Some("unsubscribe"));
+                if let Some(key) = canonical_subscription(raw) {
+                    if subscribed {
+                        self.connection.acked.insert(key);
+                    } else {
+                        self.connection.acked.remove(&key);
+                    }
+                }
+                true
+            }
+            "error" => {
+                if let Ok(message) = serde_json::from_str::<Cow<'_, str>>(frame.data.get()) {
+                    self.subscription_refused(cx, &message);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// A refusal names its subscription, except the per-IP cap's; that one
+    /// answers the oldest subscription still unacknowledged.
+    fn subscription_refused(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
+        if message.starts_with("Already subscribed") || message.starts_with("Already unsubscribed")
+        {
+            return;
+        }
+        let named = message.find('{').and_then(|at| {
+            let raw = serde_json::Deserializer::from_str(&message[at..])
+                .into_iter::<&serde_json::value::RawValue>()
+                .next()?
+                .ok()?;
+            canonical_subscription(raw.get())
+        });
+        let desired = self.desired_socket_interests(cx.store, cx.public_feed_policy());
+        let canonical = |interest: &Interest| canonical_subscription(&interest.wire_args);
+        let refused = desired
+            .iter()
+            .find(|interest| {
+                let key = canonical(interest);
+                match &named {
+                    Some(named) => key.as_ref() == Some(named),
+                    None => key.is_some_and(|key| !self.connection.acked.contains(&key)),
+                }
+            })
+            .map(|interest| interest.key.to_string());
+        if self.connection.refusal_notices < REFUSAL_NOTICES {
+            self.connection.refusal_notices += 1;
+            let label = refused
+                .as_deref()
+                .map_or_else(|| "a subscription".to_owned(), subscription_label);
+            cx.notice(
+                safe_cex_engine::Level::Warn,
+                code::SUBSCRIPTION_REJECTED,
+                format!("Hyperliquid refused {label}: {message}"),
+            );
+        }
+        if let Some(key) = refused {
+            self.connection.refused.insert(key);
+            self.propose_socket_interests(cx);
+        }
     }
 
     /// Never evict admitted demand when catalogue/private projection grows.
@@ -390,11 +557,15 @@ impl Hyperliquid {
                 recovery: AuthRecovery::Reconnect,
                 permanent_refusal_group: None,
                 traffic: TrafficPolicy::AnyText,
-                controls: ControlPolicy::None,
+                controls: ControlPolicy::Native,
                 invalidation: Invalidation::Required,
                 subscription_interval_ms: 0.,
                 close_floors: &[],
-                data_silence: None,
+                // Pongs and account frames never count, so a keyed socket is watched too.
+                data_silence: Some(DataSilence {
+                    after_ms: PUBLIC_SILENCE_MS,
+                    streams: PUBLIC_STREAMS,
+                }),
             })?;
             self.connection.feed = Some(feed);
             feed
@@ -474,6 +645,8 @@ impl Hyperliquid {
                     return Err(SocketError::Stale);
                 }
                 self.connection.open = true;
+                self.connection.acked.clear();
+                self.connection.refusal_notices = 0;
                 if cx.public_feed_policy() == PublicFeedPolicy::Direct {
                     for ladder in self.books.values_mut() {
                         ladder.spot_depth = Default::default();
@@ -492,6 +665,8 @@ impl Hyperliquid {
                 }
                 self.clear_private_snapshot_watch(cx);
                 self.connection.open = false;
+                // A new socket tries every topic again; a repeat refusal is reported again.
+                self.connection.refused.clear();
                 for ladder in self.books.values_mut() {
                     ladder.spot_depth = Default::default();
                     ladder.depth_time = None;
