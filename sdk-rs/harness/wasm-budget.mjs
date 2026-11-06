@@ -165,7 +165,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bybit: 2_225_152,
   coinbase: 1_826_816,
   cryptocom: 1_727_488,
-  grvt: 1_780_736,
+  // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
+  grvt: 1_817_600,
   hyperliquid: 2_117_632,
   hyperliquidspot: 2_117_632,
   kraken: 2_136_064,
