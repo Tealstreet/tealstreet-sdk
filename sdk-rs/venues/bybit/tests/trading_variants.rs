@@ -5077,3 +5077,54 @@ fn a_trigger_no_op_compares_the_store_as_it_stands_when_answered() {
     );
     assert!(h.result(87).unwrap().is_err(), "{:?}", h.result(87));
 }
+
+fn not_modified_with(result: &str, ext: &str) -> String {
+    format!(
+        r#"{{"retCode":10001,"retMsg":"order not modified","result":{result},"retExtInfo":{ext}}}"#
+    )
+}
+
+/// Only a provably clean answer is a no-op: unreadable identities, duplicated native
+/// ids or item lists are never read as clean absence.
+#[test]
+fn a_trigger_no_op_rejects_unreadable_or_duplicated_answers() {
+    for (result, ext) in [
+        (r#"{"orderId":"foreign","orderLinkId":123}"#, "{}"),
+        (r#"{"orderId":"foreign","orderId":"stop"}"#, "{}"),
+        (r#"{"orderId":123}"#, "{}"),
+        (
+            "{}",
+            r#"{"list":[{"code":10001,"msg":"invalid trigger"}],"list":[]}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        let request = pending_trigger_amend(&mut h, 60000.0);
+        h.reply(request.id, 200, &not_modified_with(result, ext));
+        assert!(
+            h.result(87).unwrap().is_err(),
+            "{result} {ext}: {:?}",
+            h.result(87)
+        );
+    }
+}
+
+/// A clean empty answer, or one echoing only its own order, is still done.
+#[test]
+fn a_trigger_no_op_accepts_a_clean_empty_or_own_echo() {
+    for (result, ext) in [
+        ("{}", "{}"),
+        (r#"{"orderId":"stop"}"#, "{}"),
+        ("{}", r#"{"list":[]}"#),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        let request = pending_trigger_amend(&mut h, 60000.0);
+        h.reply(request.id, 200, &not_modified_with(result, ext));
+        assert!(
+            h.result(87).unwrap().is_ok(),
+            "{result} {ext}: {:?}",
+            h.result(87)
+        );
+    }
+}

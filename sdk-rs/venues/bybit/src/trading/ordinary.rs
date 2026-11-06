@@ -1634,18 +1634,17 @@ impl BybitLinear {
                 Decision::Lost
             };
         }
-        // A trigger amend is done only when the whole answer is a clean refusal (a 2xx,
-        // no item rows, no other order's ID) and every value it carries already equals
-        // the stored stop's: compared directly, so a genuine refusal is never masked.
+        // A trigger amend is done only when the whole answer is provably clean (a 2xx
+        // naming nothing but its own order, strictly decoded) and every value it carries
+        // already equals the stored stop's: compared directly, never masking a refusal.
         if code == 10001
             && matches!(planned.call, Call::Amend)
             && message == "order not modified"
             && planned.body.contains("\"triggerPrice\"")
             && http_ok
-            && !ack::carries_rows(result, ext)
-            && ack::evidence_ids(result)
-                .iter()
-                .all(|echo| fields(&planned.body).order_id.as_ref() == Some(echo))
+            && fields(&planned.body)
+                .order_id
+                .is_some_and(|own| ack::clean_amend_refusal(result, ext, &own).is_ok())
             && trigger_amend_matches_store(cx.store, &planned.body)
         {
             let target = fields(&planned.body).order_id.unwrap_or_default();
