@@ -878,6 +878,24 @@ impl Venue for Bitrue {
     fn guard_order_mutations(&self) -> bool {
         true
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        match &pending.job {
+            Job::Trade(request) => self.trade_release_veto(store, request, release),
+            _ => Ok(()),
+        }
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
     fn capture_http_reconciliation(
         &self,
         pending: &Pending,

@@ -156,6 +156,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // and put-back). CI size plus 10 KiB, rounded up to the KiB.
 // #3130 run 42154583609 measured backpack 1,926,668 B: trigger amends stream as serial Plans
 // (proof read and put-back). CI size plus 10 KiB, rounded up to the KiB.
+// #3138 run 42166643605 measured bitrue 1,829,700 B: guarded stop edits, cancel-proof polling and
+// put-back. CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
@@ -164,7 +166,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bingx: 2_036_736,
   bitget: 2_345_984,
   bitgetusdc: 2_345_984,
-  bitrue: 1_821_696,
+  bitrue: 1_840_128,
   bitunix: 1_849_344,
   blofin: 1_989_632,
   breakoutprop: 1_512_448,
