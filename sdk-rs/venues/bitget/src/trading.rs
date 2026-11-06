@@ -2768,14 +2768,26 @@ impl BitgetFutures {
             }
         }
         if let Some(mut message) = error {
+            let batch_unknown = if let Answer::Batch { failures, .. } = &answer {
+                failures.iter().any(|(code, _)| {
+                    let verdict = CODES.verdict(
+                        &Native {
+                            code: code.map_or(NativeCode::None, NativeCode::Int),
+                            message: "",
+                        },
+                        request.call.intent(),
+                    );
+                    matches!(verdict, Verdict::Unknown(_))
+                })
+            } else {
+                false
+            };
             let uncertain = unproven
                 || (!explicit_rejection
                     && !parsed
                         .as_ref()
                         .is_ok_and(|reply| status == 200 && reply.code.0 == Some(0.0)))
-                || matches!(&answer, Answer::Batch { failures, .. } if failures.iter().any(|(code, _)| {
-                    matches!(CODES.verdict(&Native { code: code.map_or(NativeCode::None, NativeCode::Int), message: "" }, request.call.intent()), Verdict::Unknown(_))
-                }));
+                || batch_unknown;
             if uncertain && !request.call.read() {
                 message.push_str("; outcome unknown, check Open Orders");
             }
