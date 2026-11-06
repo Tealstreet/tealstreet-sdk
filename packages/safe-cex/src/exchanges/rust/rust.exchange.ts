@@ -2300,6 +2300,8 @@ export class RustEngineExchange extends BaseExchange {
       this.refreshSourceOrders(named.includes('') ? undefined : named);
     }
     this.emitter.emit('engine-event', event);
+    // Hosts render actionable clock advice from the numeric calibration evidence.
+    if (event.code === 'bybit.clock.corrected' && event.level === 'info') return;
     if (event.level === 'error')
       this.emitAndLogError(
         event.code === 'ws.public_unavailable'

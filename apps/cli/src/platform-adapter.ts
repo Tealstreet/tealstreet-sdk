@@ -1,3 +1,4 @@
+import { warnAboutClockSkew } from './clock-skew-warning';
 import chalk from 'chalk';
 import type { CLIPlatformAdapter, ExchangeLike, ExchangeAccountConfig } from '@tealstreet/cli-core';
 import {
@@ -240,6 +241,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
       // including tealstreetProxy, tealstreetTunnel, proxyRegion, etc.
       const createExchangeFromAccount = await getCreateExchangeFromAccount();
       const exchange = await createExchangeFromAccount(account);
+      exchange.on('engine-event', warnAboutClockSkew);
       return exchange as ExchangeLike;
     },
 

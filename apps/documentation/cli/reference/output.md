@@ -41,6 +41,10 @@ Where each stream goes:
 - `print()` / `originalConsoleLog()` → terminal only, no rate limit — what
   command handlers use for primary output.
 
+Bybit timestamp refusals use the Rust engine's per-account clock correction and
+one bounded re-signed retry. A detected system-clock skew prints one warning per
+CLI session, including the measured fast/slow offset and Windows time-sync steps.
+
 Verbose HoW/tradetunnel request diagnostics also use the existing console
 pipeline: start the CLI with `DEBUG=1` or `DEBUG=true` to add sanitized
 `[TradeTunnel]` request/response summaries to the same

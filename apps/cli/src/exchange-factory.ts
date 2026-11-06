@@ -1,3 +1,4 @@
+import { warnAboutClockSkew } from './clock-skew-warning';
 import { createExchangeFromAccount } from '../../../packages/safe-cex/src/createExchangeFromAccount';
 import type { BaseExchange } from '../../../packages/safe-cex/src/exchanges/base';
 import {
@@ -19,7 +20,9 @@ export function getExchangeInfo(name: string) {
  * exchange-options conversion used by web and every other runtime.
  */
 export async function createExchangeFromConfig(account: AccountConfig): Promise<BaseExchange> {
-  return createExchangeFromAccount(account);
+  const exchange = await createExchangeFromAccount(account);
+  exchange.on('engine-event', warnAboutClockSkew);
+  return exchange;
 }
 
 export async function startExchange(exchange: BaseExchange): Promise<void> {

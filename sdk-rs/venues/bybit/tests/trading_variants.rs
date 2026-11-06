@@ -5128,3 +5128,70 @@ fn a_trigger_no_op_accepts_a_clean_empty_or_own_echo() {
         );
     }
 }
+
+#[test]
+fn fast_713_second_clock_write_retry_is_re_signed_and_never_replayed_twice() {
+    let mut h = ready(Variant::Spot);
+    let initial_stamp = h.engine.signing_clock(h.now).0.floor();
+    place(&mut h, 601, vec![order("BTCUSDT", 0.1)]);
+    let first = h.take("/v5/order/create");
+    let server = initial_stamp - 713_451.;
+    let refusal = format!(
+        r#"{{"retCode":10002,"retMsg":"recv_window server_timestamp[{server}]","result":{{}}}}"#
+    );
+    h.reply(first.id, 200, &refusal);
+    let second = h.take("/v5/order/create");
+    assert_eq!(
+        Harness::header(&first, "X-BAPI-TIMESTAMP"),
+        Some(initial_stamp.to_string())
+    );
+    assert_eq!(
+        Harness::header(&second, "X-BAPI-TIMESTAMP"),
+        Some(server.to_string())
+    );
+    assert_ne!(
+        Harness::header(&first, "X-BAPI-SIGN"),
+        Harness::header(&second, "X-BAPI-SIGN")
+    );
+    assert_eq!(
+        second.body, first.body,
+        "same client-order identity and economics"
+    );
+    h.reply(second.id, 200, &refusal);
+    assert!(
+        !h.has_request("/v5/order/create"),
+        "a second refusal grants no third placement"
+    );
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 601).count(), 1);
+}
+
+#[test]
+fn ambiguous_clock_like_write_failures_never_calibrate_or_replay() {
+    for (status, body) in [
+        (
+            504,
+            r#"{"retCode":10002,"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10016,"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retMsg":"recv_window server_timestamp[1793989307022]","result":{}}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Spot);
+        place(&mut h, 602, vec![order("BTCUSDT", 0.1)]);
+        let first = h.take("/v5/order/create");
+        h.reply(first.id, status, body);
+        assert!(
+            !h.has_request("/v5/order/create"),
+            "ambiguous answer cannot grant a resend"
+        );
+        assert!(h.unknown.contains(&602));
+        assert!(!h.notices.iter().any(
+            |n| matches!(n, safe_cex_engine::Notice::Event(e) if e.code == "bybit.clock.corrected")
+        ));
+    }
+}

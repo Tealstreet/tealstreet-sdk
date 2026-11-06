@@ -215,6 +215,10 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
 - **`print()` / `originalConsoleLog()` bypass all of the above** — use them for
   primary command output, prompts, progress, and anything the user explicitly
   asked for.
+- **Clock skew.** Bybit timestamp refusals use per-account Rust clock correction
+  and one bounded re-signed retry. The CLI prints one warning per session with
+  the measured fast/slow offset and Windows time-sync steps.
+
 - **Verbose transport diagnostics share `cli.log`.** When the CLI runs with
   `DEBUG=1` or `DEBUG=true`, tunneled HoW/tradetunnel REST requests emit
   sanitized `[TradeTunnel]` request/response summaries through the existing

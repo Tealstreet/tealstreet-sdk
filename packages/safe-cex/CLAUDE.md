@@ -1861,3 +1861,7 @@ sync publishes them without a new polling loop. The wasm binary is unchanged.
 `updateSymbolMetadata` rechecks exact symbol membership after native market readiness
 before querying leverage. A foreign symbol or an engine retired during readiness
 starts no metadata command. UI callers also validate their account market binding.
+
+Bybit native receive-window corrections emit bybit.clock.corrected with numeric
+offsetMs only. The Rust adapter forwards this informational host event without a
+duplicate console log; CLI consumers provide one clock-sync warning per session.
