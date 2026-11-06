@@ -1865,22 +1865,6 @@ impl Lighter {
             .map(Bool::get)
             .or_else(|| existing.map(|o| o.reduce_only))
             .unwrap_or(false);
-        if kind == OrderType::Limit
-            && reduce_only
-            && price > 0.0
-            && let Some(t) = cx.store.ticker(symbol)
-        {
-            let reference = [t.mark, t.last, t.index].into_iter().find(|v| *v > 0.0);
-            if reference.is_some_and(|reference| {
-                if side == OrderSide::Sell {
-                    price <= reference
-                } else {
-                    price >= reference
-                }
-            }) {
-                kind = OrderType::StopLoss;
-            }
-        }
         let remaining_notional = wire
             .remaining_quote_amount
             .as_ref()

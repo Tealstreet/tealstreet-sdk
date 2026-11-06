@@ -879,15 +879,8 @@ fn closing_limit_edit_preserves_native_limit_type() {
         e.handle(NOW + 100.0, Event::TimerFired { timer: t });
         let replacement = http(&mut e, "sendTx");
         let tx = wire(&replacement);
-        assert_eq!(
-            tx["Type"],
-            0,
-            "{side:?}: {old_price} -> {new_price}"
-        );
-        assert_eq!(
-            tx["TriggerPrice"],
-            0
-        );
+        assert_eq!(tx["Type"], 0, "{side:?}: {old_price} -> {new_price}");
+        assert_eq!(tx["TriggerPrice"], 0);
     }
 }
 

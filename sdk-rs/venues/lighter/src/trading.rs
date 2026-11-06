@@ -474,7 +474,7 @@ impl Lighter {
                         return;
                     }
                 };
-                let kind = protective_kind(cx, &old, price.unwrap_or(old.price));
+                let kind = old.kind;
                 let opts = PlaceOrderOpts {
                     symbol: old.symbol.clone(),
                     kind,
@@ -1877,25 +1877,6 @@ fn snap_leverage(requested: f64) -> f64 {
         .into_iter()
         .min_by(|a, b| (requested - a).abs().total_cmp(&(requested - b).abs()))
         .unwrap()
-}
-fn protective_kind(cx: &Cx<'_, Pending>, order: &Order, price: f64) -> OrderType {
-    if !order.reduce_only || order.kind != OrderType::Limit {
-        return order.kind;
-    }
-    let Some(reference) = cx.store.ticker(&order.symbol).and_then(|t| {
-        [t.mark, t.last, t.index]
-            .into_iter()
-            .find(|n| n.is_finite() && *n > 0.0)
-    }) else {
-        return order.kind;
-    };
-    if (order.side == OrderSide::Sell && price <= reference)
-        || (order.side == OrderSide::Buy && price >= reference)
-    {
-        OrderType::StopLoss
-    } else {
-        OrderType::Limit
-    }
 }
 /// Lighter lets a maker-only key send only 0ms speed-bump transactions.
 const MAKER_ONLY_MESSAGE: &str = "This Lighter API key is maker-only, which allows only post-only orders and cancels; change leverage or place market and stop orders from a key that is not maker-only";
