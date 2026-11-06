@@ -7864,8 +7864,14 @@ fn copy_shared_tickers(
     store: &mut Store,
     shared: &HashMap<String, crate::public_feed::PublicTicker>,
 ) {
+    let mut added = false;
     for ticker in shared.values() {
-        store.ensure_ticker(&ticker.symbol);
+        if store.ticker(&ticker.symbol).is_none() && store.ensure_ticker(&ticker.symbol).is_some() {
+            added = true;
+        }
+    }
+    if added {
+        store.set_loaded(|loaded| loaded.tickers = true);
     }
     // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
     for ticker in shared.values() {

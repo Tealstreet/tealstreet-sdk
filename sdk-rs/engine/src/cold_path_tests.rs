@@ -39,6 +39,7 @@ fn quote(json: &str) -> PublicTicker {
 #[test]
 fn shared_quotes_add_missing_rows_then_overwrite_only_the_fields_they_carry() {
     let mut store = Store::default();
+    store.set_clock(1_000.);
     store.set_markets(vec![market("BTC"), market("ETH")]);
     store.set_tickers(vec![Ticker {
         id: "native-ETH".into(),
@@ -55,6 +56,7 @@ fn shared_quotes_add_missing_rows_then_overwrite_only_the_fields_they_carry() {
     .into_iter()
     .collect();
     let before = store.ticker_revision();
+    store.set_clock(20_000.);
     copy_shared_tickers(&mut store, &shared);
     assert_ne!(store.ticker_revision(), before);
     let btc = store.ticker("BTC").unwrap();
@@ -70,6 +72,11 @@ fn shared_quotes_add_missing_rows_then_overwrite_only_the_fields_they_carry() {
     );
     assert!(store.ticker("GONE").is_none(), "no row without a market");
     assert_eq!(store.tickers().len(), 2);
+    assert_eq!(
+        store.reference_seen_at("ETH", crate::model::StopTriggerType::MarkPrice),
+        Some(1_000.),
+        "adding a shared row cannot re-date an existing reference"
+    );
 }
 
 #[cfg(feature = "order-locks")]
