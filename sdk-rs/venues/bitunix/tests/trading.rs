@@ -1136,11 +1136,18 @@ fn a_ws_only_order_is_modified_natively_but_never_re_placed() {
         "{}",
         modify.url
     );
-    reply(&mut e, modify.id, r#"{"code":0,"data":{"orderId":"stray"}}"#);
+    reply(
+        &mut e,
+        modify.id,
+        r#"{"code":0,"data":{"orderId":"stray"}}"#,
+    );
     safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()
         .for_each(drop);
-    assert!(e.store().order("stray__tp").is_some(), "the attached take profit");
+    assert!(
+        e.store().order("stray__tp").is_some(),
+        "the attached take profit"
+    );
 
     e.handle(
         3.0,
