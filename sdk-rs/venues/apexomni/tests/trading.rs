@@ -1088,12 +1088,7 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
     response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
     prove_cancel(&mut e);
     let replacement = requests(&mut e).remove(0);
-    response(
-        &mut e,
-        &replacement,
-        NOW + 16.0,
-        r#"{"code":429,"msg":"too many requests"}"#,
-    );
+    response(&mut e, &replacement, NOW + 16.0, REFUSED);
     let error = e
         .drain_actions()
         .find_map(|a| match a {
@@ -1127,12 +1122,7 @@ fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
         response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
         prove_cancel(&mut e);
         let replacement = requests(&mut e).remove(0);
-        response(
-            &mut e,
-            &replacement,
-            NOW + 16.0,
-            r#"{"code":429,"msg":"too many requests"}"#,
-        );
+        response(&mut e, &replacement, NOW + 16.0, REFUSED);
         let error = e
             .drain_actions()
             .find_map(|a| match a {
@@ -2365,7 +2355,9 @@ fn placements(requests: &[HttpRequest]) -> Vec<&HttpRequest> {
         .filter(|r| r.url.ends_with("/v3/order") || r.url.ends_with("/v3/delete-order"))
         .collect()
 }
-const REFUSED: &str = r#"{"code":429,"msg":"too many requests"}"#;
+/// A definite refusal from the code table; a 429 is unknown for a stop's put-back.
+const REFUSED: &str = r#"{"code":10002,"msg":"Requires Login: Your API key is wrong"}"#;
+const RATE_LIMITED: &str = r#"{"code":429,"msg":"too many requests"}"#;
 /// Amends the resting stop to 56000 and lands its cancel; its replacement is next.
 fn to_stop_replacement(e: &mut TestEngine) -> HttpRequest {
     let cancel = amend_to(e, "stop", 56000.0).remove(0);
@@ -2513,6 +2505,41 @@ fn a_refused_put_back_is_unprotected_and_never_retried() {
     );
     assert_eq!(error.protection, Some(Protection::Unprotected));
     assert!(placements(&http(out)).is_empty());
+}
+
+/// A 429 may have placed the order, so it is unknown: never "refused" or Unprotected.
+fn assert_unknown_stop(out: &[Action]) {
+    let error = failure_of(out);
+    assert!(
+        error
+            .message
+            .contains("outcome is unknown. Check Open Orders"),
+        "{}",
+        error.message
+    );
+    assert!(!error.message.contains("both refused"), "{}", error.message);
+    assert_eq!(error.protection, None);
+    assert!(placements(&http(out.to_vec())).is_empty());
+}
+
+#[test]
+fn a_rate_limited_put_back_is_unknown_not_unprotected() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(&mut e, &replacement, NOW + 200.0, REFUSED);
+    let restore = requests(&mut e).remove(0);
+    response(&mut e, &restore, NOW + 201.0, RATE_LIMITED);
+    assert_unknown_stop(&actions(&mut e));
+}
+
+#[test]
+fn a_rate_limited_stop_replacement_is_unknown_and_never_put_back() {
+    let (mut e, socket) = ready_with_socket();
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(&mut e, &replacement, NOW + 200.0, RATE_LIMITED);
+    assert_unknown_stop(&actions(&mut e));
 }
 
 #[test]
