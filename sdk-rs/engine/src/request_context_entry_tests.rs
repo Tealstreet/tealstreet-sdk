@@ -1156,7 +1156,7 @@ fn candle_commands_preserve_the_ts_clients_explicit_twenty_second_bound() {
 }
 
 #[test]
-fn warm_background_discovery_keeps_the_cleared_sixty_second_budget() {
+fn background_issuance_reserves_a_bounded_catalogue_ceiling() {
     let mut e = crate::test_support::seeded_engine(Probe {
         fill: Some(0),
         outside: Some(|cx| {
@@ -1167,7 +1167,7 @@ fn warm_background_discovery_keeps_the_cleared_sixty_second_budget() {
             let context = cx.http_context(Scope::Background, read_policy()).unwrap();
             assert_eq!(
                 context.request_class(),
-                crate::request_budget::RequestClass::Discovery
+                crate::request_budget::RequestClass::Read
             );
             assert_eq!(context.deadline(), cx.now + 60_000.);
             let context = cx
@@ -1184,4 +1184,63 @@ fn warm_background_discovery_keeps_the_cleared_sixty_second_budget() {
         ..Default::default()
     });
     e.start(0.);
+}
+
+#[test]
+fn background_http_preparation_distinguishes_catalogues_from_live_data() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        outside: Some(|cx| {
+            cx.store.set_loaded(|loaded| {
+                loaded.markets = true;
+                loaded.tickers = true;
+            });
+            for path in [
+                "markets",
+                "markets/summary",
+                "depth",
+                "tickers",
+                "trades",
+                "funding",
+                "mark-price",
+            ] {
+                let context = cx.http_context(Scope::Background, read_policy()).unwrap();
+                cx.request_managed(
+                    context,
+                    None,
+                    Method::Get,
+                    format!("https://background.test/{path}"),
+                    None,
+                    (),
+                )
+                .unwrap();
+            }
+        }),
+        ..Default::default()
+    });
+    e.start(100.);
+    let requests = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::ManagedHttp(action) => match *action {
+                crate::request_context::HttpAction::Prepare {
+                    preparation,
+                    request,
+                    ..
+                } => Some((preparation, request)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 7);
+    for (index, (preparation, request)) in requests.into_iter().enumerate() {
+        let class = if index == 0 {
+            crate::request_budget::RequestClass::Discovery
+        } else {
+            crate::request_budget::RequestClass::Read
+        };
+        assert_eq!(request.timeout_ms, Some(class.budget_ms()));
+        assert_eq!(e.http_request_class(preparation), Some(class));
+    }
 }

@@ -53,13 +53,20 @@ existing bounds.
 
 The TS HOW package's `requestBudget.ts` defines the parity reference: catalogue
 reads have 60 s, history pages 30 s, and order reads, writes and other reads 20 s.
-Engine policies on the standard 20 s bound select the class at issuance:
-credential-free background snapshots are discovery, caller history Query reads
-are history (client-ID order lookups stay short), and live account/order reads and mutations keep 20 s. The existing
-90 s startup discovery bound above remains intact. Explicit nonstandard venue
-bounds, Plan/Preflight call windows and caller-wait roots remain authoritative.
-Candle commands use OrderRead with an explicit 20 s bound, matching TS.
-A child or retry never extends its original root deadline.
+Engine history queries (fills, order history and income) use 30 s. Candles,
+public trades, live account/order reads and mutations use 20 s. Background
+catalogue/metadata reads alone use discovery: markets, instruments, contracts,
+symbol/asset/product catalogues and closed catalogue RPC kinds. Discovery keeps
+60 s, or the existing 90 s startup discovery/readiness allowance.
+
+Background issuance reserves a bounded catalogue ceiling while the semantic
+request is not yet available. The shared managed-HTTP boundary resolves the
+request and caps its physical deadline from the original Context issuance time.
+Depth/order books, tickers/market summaries, trades, candle polls, funding/mark
+prices and unknown public read kinds use 20 s on every family. Catalogue matching
+uses closed path components/RPC discriminators, never query parameter values.
+Explicit nonstandard venue bounds and shorter Plan/caller caps still win.
+Re-preparation and retry cannot restart the original class deadline.
 
 Native hosts query `http_request_class` only for an exact pending preparation.
 Browser preparation actions carry a compact `u8` class outside signed packet

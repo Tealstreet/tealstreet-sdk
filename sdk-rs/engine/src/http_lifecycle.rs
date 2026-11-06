@@ -830,6 +830,19 @@ impl<P> Cx<'_, P> {
         pending: P,
         #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
+        let request_class = if (matches!(context.owner(), Owner::Background { .. })
+            || context.request_class() == crate::request_budget::RequestClass::Discovery)
+            && context.operation() == Operation::Read
+            && context.credential().is_none()
+        {
+            crate::request_budget::RequestClass::background(&url, body.as_deref())
+        } else {
+            context.request_class()
+        };
+        let class_deadline = context.background_deadline(request_class);
+        if self.now >= class_deadline {
+            return Err((pending, Error::TimedOut));
+        }
         #[cfg(feature = "sign-meta")]
         let mut explicit = None;
         let (step, public_headers, selected_claim) = match recipe {
@@ -996,6 +1009,7 @@ impl<P> Cx<'_, P> {
                 context.deadline(),
             )
         };
+        let deadline = deadline.min(class_deadline);
         let http = HttpRequest {
             id: request,
             method,
@@ -1076,7 +1090,7 @@ impl<P> Cx<'_, P> {
             bearer.floor = floor;
             bearer
         });
-        let lifecycle = Lifecycle::with_deadline(
+        let mut lifecycle = Lifecycle::with_deadline(
             context,
             Attempt {
                 request,
@@ -1086,9 +1100,10 @@ impl<P> Cx<'_, P> {
             deadline,
         )
         .expect("validated physical HTTP window");
+        lifecycle.set_request_class(request_class);
         let preparation = lifecycle.preparation();
         #[cfg(target_arch = "wasm32")]
-        let request_class = lifecycle.context().request_class() as u8;
+        let request_class = lifecycle.request_class() as u8;
         #[cfg(feature = "release-domains")]
         self.io.core.domain_accept(
             request,
@@ -1528,7 +1543,6 @@ impl<V: Venue> Engine<V> {
         self.http_preparation_pending(token).then(|| {
             self.io.core.managed_http[&token.attempt().request]
                 .lifecycle
-                .context()
                 .request_class()
         })
     }
@@ -3061,7 +3075,7 @@ impl crate::engine::IoCore {
         self.actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
                 #[cfg(target_arch = "wasm32")]
-                request_class: managed.lifecycle.context().request_class() as u8,
+                request_class: managed.lifecycle.request_class() as u8,
                 preparation: managed.lifecycle.preparation(),
                 intent: managed.intent,
                 request: http,

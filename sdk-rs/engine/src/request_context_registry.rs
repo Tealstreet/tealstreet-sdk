@@ -121,7 +121,7 @@ impl ContextRegistry {
                 || self.dispatch_request_class(id),
                 |owner| owner.request_class,
             ),
-            Scope::Background if policy.credential.is_none() => RequestClass::Discovery,
+            Scope::Background if policy.credential.is_none() => RequestClass::Read,
             _ => RequestClass::OrderRead,
         }
     }
@@ -1733,7 +1733,6 @@ impl<P> Cx<'_, P> {
         parent: Option<&Context>,
         egress: Option<Egress>,
     ) -> Result<Context, Error> {
-        let policy = discovery_bound(scope, policy, self.store.loaded());
         self.core().make_http_context(scope, policy, parent, egress)
     }
 
@@ -2340,25 +2339,61 @@ impl crate::engine::CoreCx<'_> {
                 .domain_pacing(policy.operation, policy.pacing)?,
             ..policy
         };
+        // Reserve a bounded catalogue ceiling until the request bytes exist.
+        // queue_managed_admitted selects catalogue versus live data and narrows
+        // the physical deadline from the original Context issuance time.
+        let background = scope == Scope::Background
+            && policy.operation == Operation::Read
+            && policy.credential.is_none()
+            && policy.timeout_ms == READ_TIMEOUT_MS;
+        let policy = discovery_bound(scope, policy, self.store.loaded());
         let class = parent.map_or_else(
             || self.io.core.request_contexts.request_class(scope, &policy),
             Context::request_class,
         );
         let class = class.for_operation(policy.operation);
+        let default_discovery = class == crate::request_budget::RequestClass::Discovery
+            && policy.timeout_ms == READ_TIMEOUT_MS;
         let policy = if policy.timeout_ms == READ_TIMEOUT_MS {
             Policy {
-                timeout_ms: class.budget_ms(),
+                timeout_ms: if background {
+                    DISCOVERY_TIMEOUT_MS
+                } else {
+                    class.budget_ms()
+                },
                 ..policy
             }
         } else {
             policy
         };
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
-        let context = self
+        let background_seconds = if background || default_discovery {
+            (policy.timeout_ms / 1_000) as u8
+        } else {
+            0
+        };
+        let mut context = self
             .io
             .core
             .request_contexts
             .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
+        if background || default_discovery {
+            context.set_background_budget(background_seconds);
+            *self
+                .io
+                .core
+                .request_contexts
+                .contexts
+                .get_mut(&context.leg())
+                .expect("just issued") = context.clone();
+            if let Owner::Command { id, .. } = context.owner()
+                && let Some(owner) = self.io.core.request_contexts.commands.get_mut(&id)
+                && let CommandPhase::Context { root, .. } = &mut owner.phase
+                && root.leg() == context.leg()
+            {
+                *root = context.clone();
+            }
+        }
         #[cfg(feature = "order-locks")]
         if context.operation() == Operation::Mutation
             && let Owner::Command { id, .. } = context.owner()

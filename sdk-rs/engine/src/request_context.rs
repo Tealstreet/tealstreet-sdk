@@ -439,8 +439,10 @@ pub struct Context {
     leg: u64,
     operation: Operation,
     request_class: crate::request_budget::RequestClass,
-    #[cfg(not(target_arch = "wasm32"))]
     created_at: f64,
+    // Upper bound reserved before a Background request's semantic bytes exist.
+    // The physical read is classified once against this original issuance time.
+    background_budget_seconds: u8,
     credential: Option<Credential>,
     /// Egress declared at issuance; it may only confirm a credential's intent.
     egress: Option<Egress>,
@@ -499,8 +501,8 @@ impl Context {
                 crate::request_budget::RequestClass::Read
             },
             credential,
-            #[cfg(not(target_arch = "wasm32"))]
             created_at,
+            background_budget_seconds: 0,
             egress: None,
             deadline,
             pacing,
@@ -514,6 +516,22 @@ impl Context {
 
     pub(crate) fn set_request_class(&mut self, class: crate::request_budget::RequestClass) {
         self.request_class = class.for_operation(self.operation);
+    }
+
+    pub(crate) fn set_background_budget(&mut self, seconds: u8) {
+        self.background_budget_seconds = seconds;
+    }
+
+    pub(crate) fn background_deadline(&self, class: crate::request_budget::RequestClass) -> f64 {
+        if self.background_budget_seconds == 0 {
+            return self.deadline;
+        }
+        let budget = if class == crate::request_budget::RequestClass::Discovery {
+            u32::from(self.background_budget_seconds) * 1_000
+        } else {
+            class.budget_ms()
+        };
+        self.deadline.min(self.created_at + f64::from(budget))
     }
 
     /// Capture egress before issuer binding: unsigned reads declare it, a
@@ -866,6 +884,7 @@ pub struct Lifecycle {
     #[cfg(not(target_arch = "wasm32"))]
     created_at: f64,
     context: Context,
+    request_class: crate::request_budget::RequestClass,
     deadline: f64,
     attempt: Attempt,
     state: State,
@@ -895,6 +914,7 @@ impl Lifecycle {
             #[cfg(not(target_arch = "wasm32"))]
             created_at: context.created_at,
             deadline: context.deadline(),
+            request_class: context.request_class(),
             context,
             attempt,
             state: State::Preparing,
@@ -933,10 +953,18 @@ impl Lifecycle {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn timeout_diagnostic(&self, now: f64) -> String {
-        self.context.request_class().diagnostic(
+        self.request_class.diagnostic(
             (self.deadline - self.created_at).max(0.) as u32,
             (now - self.created_at).max(0.) as u128,
         )
+    }
+
+    pub(crate) fn request_class(&self) -> crate::request_budget::RequestClass {
+        self.request_class
+    }
+
+    pub(crate) fn set_request_class(&mut self, class: crate::request_budget::RequestClass) {
+        self.request_class = class;
     }
 
     /// Immutable physical cap; it never grants more time than the Context.
