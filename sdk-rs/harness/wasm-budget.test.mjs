@@ -582,3 +582,15 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
   }
   assert.equal(wasmBudgetError(16_830_742, 'combined'), undefined);
 });
+
+test('#3207 telemetry (run 42279265759) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
+  const measured = 2_390_477;
+  const cap = 2_401_280;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
