@@ -503,13 +503,13 @@ impl Hyperliquid {
     fn next_dex(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some((dex, offset)) = self.dex_queue.pop_front() {
             self.meta(cx, dex, offset);
-        } else if self.connection.feed.is_none() {
+        } else if !self.perps_published {
             self.perps_published = true;
             if let Some(catalog) = self.spot_catalog.take() {
                 self.commit_spot_catalog(cx, catalog);
             }
             self.account_start(cx);
-            self.start_socket(cx);
+            self.propose_socket_interests(cx);
         }
     }
     fn start_socket(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -525,6 +525,13 @@ impl Hyperliquid {
     fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
         if !self.advanced_scopes.insert(dex.into()) {
             return;
+        }
+        // Streams start with the first catalogue (5b15cb sat 2 min with none while HIP-3
+        // dexes loaded); each later scope adds its topics to the open socket.
+        if self.connection.feed.is_none() {
+            self.start_socket(cx);
+        } else {
+            self.propose_socket_interests(cx);
         }
         if !self.spot && dex.is_empty() {
             self.info(
