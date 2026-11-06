@@ -2062,7 +2062,7 @@ mod tests {
             let encoded = std::cell::Cell::new(0);
             let fields = vec![
                 ("accountMode", Value::from("uta")),
-                ("requestedSize", Value::from(0.6)),
+                ("requestedSize", Value::from("0.6")),
                 ("nativeCode", Value::from("040757")),
                 ("nativeMsg", Value::from("native\n\"msg\"")),
             ];
@@ -2088,7 +2088,7 @@ mod tests {
                 serde_json::from_str(line.split_once(": ").unwrap().1).unwrap();
             assert_eq!(value["fields"]["nativeCode"], "040757");
             assert_eq!(value["fields"]["nativeMsg"], "native\n\"msg\"");
-            assert_eq!(value["fields"]["requestedSize"], 0.6);
+            assert_eq!(value["fields"]["requestedSize"], "0.6");
             assert_eq!(value["fields"]["accountMode"], "uta");
             assert_eq!(value["message"], "native\nmessage");
             assert_eq!(value["code"], code);

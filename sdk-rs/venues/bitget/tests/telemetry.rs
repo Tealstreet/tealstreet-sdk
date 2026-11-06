@@ -119,12 +119,12 @@ fn close_refusal_reports_native_reason_and_only_matching_open_reservations() {
     assert_eq!(field(e, "reason"), &Value::from("rejected"));
     assert_eq!(field(e, "symbol"), &Value::from("BTCUSDT"));
     assert_eq!(field(e, "side"), &Value::from("long"));
-    assert_eq!(field(e, "requestedSize"), &Value::Num(0.6));
-    assert_eq!(field(e, "positionTotal"), &Value::Num(1.0));
+    assert_eq!(field(e, "requestedSize"), &Value::from("0.6"));
+    assert_eq!(field(e, "positionTotal"), &Value::from("1"));
     assert_eq!(field(e, "reduceOnlyOrderCount"), &Value::Num(1.0));
-    assert_eq!(field(e, "reduceOnlyOrderSize"), &Value::Num(0.4));
+    assert_eq!(field(e, "reduceOnlyOrderSize"), &Value::from("0.4"));
     assert_eq!(field(e, "planOrderCount"), &Value::Num(1.0));
-    assert_eq!(field(e, "planOrderSize"), &Value::Num(0.2));
+    assert_eq!(field(e, "planOrderSize"), &Value::from("0.2"));
     assert_eq!(field(e, "nativeCode"), &Value::from("40757"));
     assert_eq!(
         field(e, "nativeMsg"),
@@ -142,6 +142,7 @@ fn batch_close_refusal_is_visible_but_opening_failure_is_not_a_close_diagnostic(
         let rows = events(&h, "bitget.close.diagnostic");
         assert_eq!(rows.len(), usize::from(reduce));
         if reduce {
+            assert_eq!(field(rows[0], "reason"), &Value::from("rejected"));
             assert_eq!(field(rows[0], "nativeCode"), &Value::from("40757"));
             assert_eq!(
                 field(rows[0], "nativeMsg"),
@@ -168,8 +169,8 @@ fn native_booking_size_mismatch_is_reported_once_even_before_the_ack() {
             field(rows[0], "reason"),
             &Value::from("booked-size-mismatch")
         );
-        assert_eq!(field(rows[0], "requestedSize"), &Value::Num(0.6));
-        assert_eq!(field(rows[0], "bookedSize"), &Value::Num(0.4));
+        assert_eq!(field(rows[0], "requestedSize"), &Value::from("0.6"));
+        assert_eq!(field(rows[0], "bookedSize"), &Value::from("0.4"));
         assert_eq!(
             h.engine.store().order("42").unwrap().amount,
             0.3,
@@ -290,7 +291,7 @@ fn a_native_stop_amend_refusal_retains_the_raw_close_diagnostic() {
     let rows = events(&h, "bitget.close.diagnostic");
     assert_eq!(rows.len(), 1);
     assert_eq!(field(rows[0], "nativeCode"), &Value::from("040757"));
-    assert_eq!(field(rows[0], "requestedSize"), &Value::from(0.5));
+    assert_eq!(field(rows[0], "requestedSize"), &Value::from("0.5"));
     assert_eq!(field(rows[0], "side"), &Value::from("long"));
 }
 
@@ -315,11 +316,12 @@ fn hedge_batch_failure_is_attributed_only_to_its_own_close_or_marked_ambiguous()
         h.reply(r.id, 200, &json!({"code":"00000","data":{"successList":[{"orderId":"long-id","clientOid":"long-close"}],"failureList":[failure]}}).to_string());
         let rows = events(&h, "bitget.close.diagnostic");
         assert_eq!(rows.len(), 1, "one event per native failure");
+        assert_eq!(field(rows[0], "reason"), &Value::from("rejected"));
         assert_eq!(field(rows[0], "nativeCode"), &Value::from("040757"));
         if identity == Some("short-close") {
             assert_eq!(field(rows[0], "requestAttribution"), &Value::from("exact"));
             assert_eq!(field(rows[0], "side"), &Value::from("short"));
-            assert_eq!(field(rows[0], "requestedSize"), &Value::from(0.2));
+            assert_eq!(field(rows[0], "requestedSize"), &Value::from("0.2"));
         } else {
             assert_eq!(
                 field(rows[0], "requestAttribution"),
@@ -355,4 +357,57 @@ fn an_identified_opening_failure_does_not_borrow_another_rows_close_metadata() {
     let r = h.take("/batch-place-order");
     h.reply(r.id, 200, r#"{"code":"00000","data":{"successList":[{"orderId":"close-id","clientOid":"close-row"}],"failureList":[{"clientOid":"opening-row","errorCode":"40757","errorMsg":"Not enough position is available"}]}}"#);
     assert!(events(&h, "bitget.close.diagnostic").is_empty());
+}
+
+#[test]
+fn native_lot_round_trip_noise_does_not_report_a_booking_mismatch() {
+    for (booked, mismatched) in [("0.6000000000000001", false), ("0.601", true)] {
+        let mut h = Harness::classic();
+        let r = place(&mut h, true);
+        h.reply(r.id, 200, r#"{"code":"00000","data":{"successList":[{"orderId":"42","clientOid":"close-telemetry"}],"failureList":[]}}"#);
+        booking(&mut h, booked);
+        let rows = events(&h, "bitget.close.diagnostic");
+        assert_eq!(rows.len(), usize::from(mismatched), "{booked}");
+        if mismatched {
+            assert_eq!(field(rows[0], "requestedSize"), &Value::from("0.6"));
+            assert_eq!(field(rows[0], "bookedSize"), &Value::from("0.601"));
+        }
+    }
+}
+
+#[test]
+fn summed_reservations_are_emitted_as_native_lot_formatted_sizes() {
+    let mut h = Harness::classic();
+    let template = h.engine.store().orders()[0].clone();
+    let mut orders = vec![];
+    for (index, size) in [0.6, 0.3].into_iter().enumerate() {
+        for plan in [false, true] {
+            let mut order = template.clone();
+            order.id = format!("sum-{plan}-{index}");
+            order.side = OrderSide::Sell;
+            order.kind = if plan {
+                OrderType::StopLoss
+            } else {
+                OrderType::Limit
+            };
+            order.reduce_only = true;
+            order.status = OrderStatus::Open;
+            order.amount = size;
+            order.remaining = size;
+            orders.push(order);
+        }
+    }
+    h.engine.store_mut().set_orders(orders);
+    let r = place(&mut h, true);
+    h.reply(
+        r.id,
+        200,
+        r#"{"code":"40757","msg":"Not enough position is available","data":null}"#,
+    );
+    let rows = events(&h, "bitget.close.diagnostic");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(field(rows[0], "reduceOnlyOrderSize"), &Value::from("0.9"));
+    assert_eq!(field(rows[0], "planOrderSize"), &Value::from("0.9"));
+    assert_eq!(field(rows[0], "reduceOnlyOrderCount"), &Value::from(2.0));
+    assert_eq!(field(rows[0], "planOrderCount"), &Value::from(2.0));
 }

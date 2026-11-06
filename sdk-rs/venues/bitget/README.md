@@ -58,11 +58,15 @@ engines do not emit it.
 
 `bitget.close.diagnostic` is a Warn engine event for a closing request's native
 failure or a different first native booking size. It carries symbol/position
-side, the exact native `requestedSize`/`submittedSize`, the store's
+side, native-lot-formatted `requestedSize`/`submittedSize`, the store's
 `positionTotal`, and counts/sums of remaining open regular reduce-only orders
 and plan orders for that symbol/side. The counts exclude terminal and opposite
 side rows; shared plan identities count once. Inverse order/request quantities
 are native contract units; `positionTotal` remains the store's base quantity.
+Size fields are decimal strings normalized to native lot precision; counts stay
+numeric. Booking comparisons use the same normalization, so binary floating-point
+round-trip noise does not report a mismatch; a one-lot difference does. Inverse
+base `positionTotal` is formatted without applying the native-contract lot.
 The event never rewrites an order, classifies a command, or authorizes a retry.
 
 `nativeCode` and `nativeMsg` come from the original top-level response or each
@@ -76,7 +80,9 @@ single-row request). A proven opening-row failure emits no close diagnostic.
 Missing, foreign or conflicting identities in a multi-row batch emit one event
 with `requestAttribution=ambiguous` and the raw code/message, without guessing a
 symbol, side, size or reservation count. Exact matches and booking observations
-carry `requestAttribution=exact`.
+carry `requestAttribution=exact`. A native failure-list row has reason `rejected`
+even when its request attribution is ambiguous; this is a diagnostic label,
+independent of the command's unchanged native-code outcome classification.
 
 Booking correlation retains at most 512 closing requests for five minutes and
 consumes each on its first matching native observation. Older REST reads cannot

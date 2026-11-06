@@ -2,11 +2,17 @@
 use crate::{BitgetFutures, Pending};
 use safe_cex_engine::log::Value;
 use safe_cex_engine::model::*;
-use safe_cex_engine::{Cx, Level};
+use safe_cex_engine::{Cx, Level, num};
 use std::collections::{HashSet, VecDeque};
 
 const PENDING_LIMIT: usize = 512;
 const BOOKING_WINDOW_MS: f64 = 300_000.0;
+
+// Normalize diagnostic quantities to the native lot before formatting/comparing.
+// This never changes a submitted request or an admitted store value.
+fn formatted_size(value: f64, step: f64) -> String {
+    num::format(num::adjust(value, step))
+}
 
 #[derive(Clone)]
 pub(crate) struct CloseRequest {
@@ -141,7 +147,7 @@ impl BitgetFutures {
         rejected: bool,
     ) {
         let [request] = requests else {
-            return self.unattributed_close_failure(cx, code, message);
+            return self.unattributed_close_failure(cx, code, message, rejected);
         };
         self.close_event(
             cx,
@@ -160,6 +166,7 @@ impl BitgetFutures {
         cx: &mut Cx<'_, Pending>,
         code: Option<&str>,
         message: Option<&str>,
+        rejected: bool,
     ) {
         // An ambiguous batch row must not borrow another request's position or size.
         cx.event(
@@ -167,7 +174,10 @@ impl BitgetFutures {
             "bitget.close.diagnostic",
             "Bitget close order diagnostic",
             vec![
-                ("reason", "unconfirmed".into()),
+                (
+                    "reason",
+                    if rejected { "rejected" } else { "unconfirmed" }.into(),
+                ),
                 ("requestAttribution", "ambiguous".into()),
                 (
                     "accountMode",
@@ -208,7 +218,11 @@ impl BitgetFutures {
                 .pending
                 .remove(index)
                 .expect("matched booking");
-            if order.amount != pending.close.submitted {
+            let step = cx
+                .store
+                .market(&order.symbol)
+                .map_or(0.0, |m| m.precision.amount);
+            if formatted_size(order.amount, step) != formatted_size(pending.close.submitted, step) {
                 self.close_event(
                     cx,
                     &pending.close,
@@ -262,6 +276,10 @@ impl BitgetFutures {
             .positions()
             .iter()
             .find(|p| p.symbol == request.symbol && p.side == request.side);
+        let step = cx
+            .store
+            .market(&request.symbol)
+            .map_or(0.0, |m| m.precision.amount);
         let mut reduce_count = 0;
         let mut reduce_size = 0.0;
         let mut plan_count = 0;
@@ -317,11 +335,21 @@ impl BitgetFutures {
                 }
                 .into(),
             ),
-            ("requestedSize", request.requested.into()),
-            ("submittedSize", request.submitted.into()),
+            (
+                "requestedSize",
+                formatted_size(request.requested, step).into(),
+            ),
+            (
+                "submittedSize",
+                formatted_size(request.submitted, step).into(),
+            ),
             (
                 "positionTotal",
-                position.map_or(0.0, |p| p.contracts).into(),
+                formatted_size(
+                    position.map_or(0.0, |p| p.contracts),
+                    if self.inverse() { 0.0 } else { step },
+                )
+                .into(),
             ),
             (
                 "quantityUnits",
@@ -333,16 +361,19 @@ impl BitgetFutures {
                 .into(),
             ),
             ("reduceOnlyOrderCount", (reduce_count as f64).into()),
-            ("reduceOnlyOrderSize", reduce_size.into()),
+            (
+                "reduceOnlyOrderSize",
+                formatted_size(reduce_size, step).into(),
+            ),
             ("planOrderCount", (plan_count as f64).into()),
-            ("planOrderSize", plan_size.into()),
+            ("planOrderSize", formatted_size(plan_size, step).into()),
             ("nativeCode", code.unwrap_or("").into()),
             ("nativeMsg", message.unwrap_or("").into()),
             ("nativeCodePresent", code.is_some().into()),
             ("nativeMsgPresent", message.is_some().into()),
         ];
         if let Some(booked) = booked {
-            fields.push(("bookedSize", booked.into()));
+            fields.push(("bookedSize", formatted_size(booked, step).into()));
         }
         // PR A's venue-private available/locked receipt will be bound after it lands.
         cx.event(

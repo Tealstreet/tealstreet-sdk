@@ -2854,7 +2854,7 @@ impl BitgetFutures {
                                     std::slice::from_ref(close),
                                     failure.code.as_deref(),
                                     failure.message.as_deref(),
-                                    false,
+                                    true,
                                 );
                             } else if rows.len() == 1 {
                                 self.close_rejection_event(
@@ -2862,7 +2862,7 @@ impl BitgetFutures {
                                     &closes,
                                     failure.code.as_deref(),
                                     failure.message.as_deref(),
-                                    false,
+                                    true,
                                 );
                             }
                             // A matched opening row has no closing metadata.
@@ -2871,6 +2871,7 @@ impl BitgetFutures {
                                 cx,
                                 failure.code.as_deref(),
                                 failure.message.as_deref(),
+                                true,
                             );
                         }
                     }
