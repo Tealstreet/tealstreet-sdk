@@ -176,6 +176,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // FetchLeverage read and subscription.count. CI size plus 10 KiB, rounded up; siblings equal.
 // #3158 run 42215250423, job 127884302751 measured lighter 2,068,697 B.
 // CI size plus 10 KiB, rounded up to the KiB; lighter-robinhood equal.
+// #3168 run 42227488436, job 127925185663 measured bybit 2,246,685 B.
+// Guarded Partial edits add serial Plans, terminal/lineage reads and one-shot put-back.
+// ddi2il standing rule: CI + 10 KiB rounded up; all Bybit variants share this family cap.
 // #3145 run 42218930349 job 127896386942 measured hyperliquid 2,153,944 B: trades as last for
 // watched coins. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
@@ -190,7 +193,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitunix: 1_849_344,
   blofin: 1_989_632,
   breakoutprop: 1_565_696,
-  bybit: 2_225_152,
+  bybit: 2_257_920,
   coinbase: 1_826_816,
   cryptocom: 1_727_488,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
@@ -203,8 +206,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kucoinspot: 2_264_064,
   lighter: 2_079_744,
   'lighter-robinhood': 2_079_744,
-  // #3131, CI run 42150228180: MEXC measured 1,777,946 B + 10 KiB, rounded up.
-  mexc: 1_788_928,
+  // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
+  mexc: 1_858_560,
   okx: 1_973_248,
   orderly: 1_732_608,
   paradex: 2_249_728,

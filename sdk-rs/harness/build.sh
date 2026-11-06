@@ -110,8 +110,9 @@ if [[ ${1:-} == --families ]]; then
   done
   exit 0
 fi
-# The broad shared size profile misses combined Bitget/KuCoin Spot CPU gates.
-# Measure a narrower host-only profile without changing their engine/dependencies.
+# safe-cex-wasm performs the fat-LTO link, so its "z" sets the whole module's
+# post-link pipeline (rustc back/lto.rs run_pass_manager): Oz inlining and no
+# unrolling for every crate. Package opt-levels only shape each crate's pre-link.
 build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
   --config 'profile.release.package.safe-cex-wasm.opt-level="z"'
   "${wasm_throughput_args[@]}")

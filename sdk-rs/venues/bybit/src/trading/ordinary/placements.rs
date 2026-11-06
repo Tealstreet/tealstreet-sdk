@@ -506,6 +506,7 @@ impl BybitLinear {
         }
         entry.stage = Stage::Plan(Box::new(Run {
             plan,
+            partial: None,
             queue: legs,
             active: None,
             continue_on_error: false,

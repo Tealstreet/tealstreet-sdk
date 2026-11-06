@@ -793,7 +793,16 @@ impl Bitrue {
         guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
         // Only an untouched original is put back, exactly as the Inspect read
         // showed it: never the edit's size or trigger.
-        let restore = if original.filled == 0.0 {
+        let restore = if original.filled == 0.0
+            && order.parent_id.is_none()
+            && order.take_profit.is_none()
+            && order.stop_loss.is_none()
+            && !cx
+                .store
+                .orders()
+                .iter()
+                .any(|leg| leg.parent_id.as_ref() == Some(&order.id))
+        {
             let precision = cx
                 .store
                 .market(&order.symbol)
@@ -821,7 +830,16 @@ impl Bitrue {
                 bybit_slippage_tolerance_ticks: None,
                 implied_volatility: None,
             };
-            Some(self.placement(cx, &put_back)?)
+            let rows = self.placement(cx, &put_back)?;
+            // Current precision/limits may differ from the original venue order.
+            // Never guess a rounded quantity/trigger or a split/grouped put-back.
+            let exact = matches!(rows.as_slice(), [(payload, restored)]
+                if restored.kind == order.kind
+                    && restored.amount == original.amount
+                    && payload.volume.as_ref().and_then(|value| value.parse::<f64>().ok()) == Some(original.amount)
+                    && payload.trigger_price == Some(original.trigger)
+                    && payload.trigger_order_create_params.is_empty());
+            exact.then_some(rows)
         } else {
             None
         };
@@ -910,6 +928,11 @@ impl Bitrue {
                 let order = cx.store.order(&id).ok_or("Unknown Bitrue order to amend")?;
                 if terminal(order.status) {
                     return Err("Cannot amend a terminal Bitrue order".into());
+                }
+                if order.parent_id.is_some()
+                    && matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                {
+                    return Err("Bitrue attached protection was not changed: direct leg edits are unsupported; re-place protection through the parent order".into());
                 }
                 if price.is_none() && amount.is_none() {
                     return Err("Bitrue amendment requires a price or amount".into());
@@ -2190,7 +2213,12 @@ impl Bitrue {
                 data: Option<&'a serde_json::value::RawValue>,
             }
             let parsed = serde_json::from_str::<Rejected<'_>>(response.body).ok();
-            let rejected = (200..500).contains(&response.status)
+            let guarded =
+                work.stop.is_some() && matches!(request.step.effect, Effect::Place { .. });
+            let no_order_data = parsed
+                .as_ref()
+                .is_some_and(|reply| reply.data.is_none_or(|data| data.get() == "null"));
+            let mut rejected = (200..500).contains(&response.status)
                 && response.status != 408
                 && parsed.as_ref().is_some_and(|reply| {
                     // Futures error list: signature, mandatory parameter, contract, balance.
@@ -2203,35 +2231,58 @@ impl Bitrue {
             let code = parsed
                 .as_ref()
                 .and_then(|reply| decode_int(&reply.code))
-                .filter(|_| rejected);
+                .filter(|_| {
+                    if guarded {
+                        // A rate status cannot become a refusal through its body.
+                        !matches!(response.status, 418 | 429)
+                    } else {
+                        rejected
+                    }
+                });
             let native = code.map(|code| Native {
                 code: NativeCode::Int(code),
                 message: "",
             });
-            let error = answer_failure(response, message, rejected);
-            let answer = match cx.classify_write(
-                context,
-                &codes::BITRUE,
-                native.as_ref(),
-                error.message.clone(),
-            ) {
-                Ok(fact) => match cx.http_write_fact(
-                    context,
-                    WriteFact::Failed {
-                        fact,
-                        known_effects: false,
-                    },
-                    None,
-                ) {
-                    Ok(Some(grant)) if !request.resent => Answer::Resend(grant),
-                    Ok(_) => Answer::Failed(error),
-                    Err(_) => Answer::Stopped,
-                },
-                Err(_) => match cx.http_write_unproven(context, error.message.clone()) {
-                    Ok(_) => Answer::Failed(error),
-                    Err(_) => Answer::Stopped,
-                },
+            let mut error = answer_failure(response, message, rejected);
+            let table = if guarded {
+                &codes::GUARDED_REPLACEMENT
+            } else {
+                &codes::BITRUE
             };
+            let answer =
+                match cx.classify_write(context, table, native.as_ref(), error.message.clone()) {
+                    Ok(fact) => {
+                        let fact = if guarded && !no_order_data {
+                            fact.unproven()
+                        } else {
+                            fact
+                        };
+                        if guarded {
+                            rejected = matches!(
+                                fact.verdict(),
+                                safe_cex_engine::classify::Verdict::Refused(_)
+                                    | safe_cex_engine::classify::Verdict::RefusedResend(_)
+                            );
+                            error = fact.error().clone();
+                        }
+                        match cx.http_write_fact(
+                            context,
+                            WriteFact::Failed {
+                                fact,
+                                known_effects: false,
+                            },
+                            None,
+                        ) {
+                            Ok(Some(grant)) if !request.resent => Answer::Resend(grant),
+                            Ok(_) => Answer::Failed(error),
+                            Err(_) => Answer::Stopped,
+                        }
+                    }
+                    Err(_) => match cx.http_write_unproven(context, error.message.clone()) {
+                        Ok(_) => Answer::Failed(error),
+                        Err(_) => Answer::Stopped,
+                    },
+                };
             // A resent placement keeps its fence until its own answer: a lost
             // resend may still leave native protection live.
             if rejected

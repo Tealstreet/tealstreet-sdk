@@ -1336,8 +1336,9 @@ impl Venue for Hyperliquid {
         true
     }
     fn http_release() -> safe_cex_engine::HttpRelease<Self> {
-        safe_cex_engine::HttpRelease::NonceUnscheduled(|_, pending, release| {
+        safe_cex_engine::HttpRelease::NonceUnscheduled(|venue, pending, release| {
             if let Pending::Trade(request) = pending {
+                venue.check_trade_intent(request, release.time.raw_ms)?;
                 request.check_cancel_deadline(release.time.raw_ms)?;
             }
             Ok(())
