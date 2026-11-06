@@ -109,7 +109,14 @@ fn wrong_side_and_stale_mark_never_cancel() {
 }
 #[test]
 fn cancel_ack_requires_exact_unfilled_terminal_target_before_replacement() {
-    for change in ["empty", "foreign", "filled", "open", "valid"] {
+    for change in [
+        "empty",
+        "foreign",
+        "filled",
+        "quote-filled",
+        "open",
+        "valid",
+    ] {
         let (mut e, _, mut t) = boot();
         let c = cancel(&mut e, NOW);
         let p = proof(&mut e, &mut t, &c);
@@ -125,6 +132,7 @@ fn cancel_ack_requires_exact_unfilled_terminal_target_before_replacement() {
         match change {
             "foreign" => row["order_index"] = json!("43"),
             "filled" => row["filled_base_amount"] = json!("0.1"),
+            "quote-filled" => row["filled_quote_amount"] = json!("10"),
             "open" => row["status"] = json!("open"),
             _ => {}
         }

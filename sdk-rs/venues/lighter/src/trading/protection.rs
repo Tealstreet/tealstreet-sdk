@@ -60,6 +60,7 @@ struct NativeRow {
     initial_base_amount: Option<Scalar>,
     remaining_base_amount: Option<Scalar>,
     filled_base_amount: Option<Scalar>,
+    filled_quote_amount: Option<Scalar>,
     price: Option<Scalar>,
     trigger_price: Option<Scalar>,
     order_expiry: Option<Scalar>,
@@ -81,6 +82,7 @@ impl NativeRow {
             "initial_base_amount" => self.initial_base_amount.as_ref(),
             "remaining_base_amount" => self.remaining_base_amount.as_ref(),
             "filled_base_amount" => self.filled_base_amount.as_ref(),
+            "filled_quote_amount" => self.filled_quote_amount.as_ref(),
             "price" => self.price.as_ref(),
             "trigger_price" => self.trigger_price.as_ref(),
             "order_expiry" => self.order_expiry.as_ref(),
@@ -147,6 +149,10 @@ impl Original {
         if row.is_ask? != (observed.side == OrderSide::Sell)
             || row.reduce_only? != observed.reduce_only
             || number(row, "filled_base_amount")? != 0.0
+            || row
+                .filled_quote_amount
+                .as_ref()
+                .is_some_and(|n| n.number() != Some(0.0))
             || number(row, "initial_base_amount")? != observed.amount
             || number(row, "remaining_base_amount")? != observed.remaining
         {
@@ -379,6 +385,10 @@ pub(super) fn terminal_proof(body: &str, old: &Original) -> bool {
         && integer(row, "client_order_index") == Some(old.client)
         && matches!(Some(row.status.as_str()), Some("canceled" | "cancelled"))
         && number(row, "filled_base_amount") == Some(0.0)
+        && row
+            .filled_quote_amount
+            .as_ref()
+            .is_none_or(|n| n.number() == Some(0.0))
         && number(row, "initial_base_amount") == Some(old.observed.amount)
 }
 
@@ -481,6 +491,10 @@ pub(super) fn restored_proof(body: &str, edit: &Edit, client: &str) -> bool {
         && number(row, "initial_base_amount") == Some(edit.original.observed.amount)
         && number(row, "remaining_base_amount") == Some(edit.original.observed.amount)
         && number(row, "filled_base_amount") == Some(0.0)
+        && row
+            .filled_quote_amount
+            .as_ref()
+            .is_none_or(|n| n.number() == Some(0.0))
         && integer(row, "time_in_force") == Some(native.time_in_force as u64)
         && integer(row, "order_expiry") == native.order_expiry
         && number(row, "trigger_price")
