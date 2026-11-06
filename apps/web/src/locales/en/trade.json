@@ -701,6 +701,7 @@
     "close-all-everywhere-button-orders": "Orders",
     "leverage-updated": "Updated leverage",
     "failed-leverage-update": "Failed updating leverage",
+    "binance-tradfi-agreement-required": "Binance requires a one-time agreement before you can trade its TradFi perpetuals (stock and commodity markets such as NVDA or UVXY). Log in to Binance, open this market on Binance Futures, accept the TradFi Perpetuals agreement shown there, then place the order again. Tealstreet cannot sign it for you.",
     "bybit-insufficient-balance-new-leverage": "Bybit rejected this leverage change because your account does not have enough available balance to support the new margin requirement. Free up balance, reduce the position, or choose a leverage that requires less margin.",
     "leverage-not-changed": "Leverage not changed",
     "failed-position-mode-update": "Failed updating position mode",
