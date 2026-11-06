@@ -3,7 +3,7 @@ import type { Candle, Market, OHLCVOptions, OrderBook, PublicDataSource, StoreDa
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { inProcessPortPair, RustPublicFeedClient, serveInProcessPublicData } from '../../exchanges/rust/publicFeed';
+import { inProcessPortPair, RustPublicFeedClient, rustPublicFeedIdentity, serveInProcessPublicData } from '../../exchanges/rust/publicFeed';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 
@@ -228,4 +228,14 @@ describe('Rust in-process shared public data (exchange-server externalPublicData
     expect(mode(false)).toBe('shared');
     expect(mode(true)).toBe('direct');
   });
+});
+
+
+it('isolates opted-in Hyperliquid fast-depth sources without splitting default-off callers', () => {
+  const options = { key: '', secret: '' };
+  const defaultId = rustPublicFeedIdentity('hyperliquid', options);
+  expect(defaultId).toBe(rustPublicFeedIdentity('hyperliquid', { ...options, hyperliquidFastBook: false }));
+  expect(defaultId).not.toBe(rustPublicFeedIdentity('hyperliquid', { ...options, hyperliquidFastBook: true }));
+  expect(rustPublicFeedIdentity('hyperliquidspot', { ...options, hyperliquidFastBook: true }))
+    .toBe(rustPublicFeedIdentity('hyperliquidspot', options));
 });

@@ -129,6 +129,8 @@ export type ExchangeOptions = {
     readonly address: string;
     readonly feeTenthsBps: number;
   };
+  /** Extra fast HL perp depth topic per book. Default off; budget all sockets against the per-IP cap. */
+  readonly hyperliquidFastBook?: boolean;
   readonly testnet?: boolean;
   /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
   readonly enableSpotMarkets?: boolean;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
@@ -140,7 +141,6 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
 test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
     ['coinbase', 1_816_299, 1_826_816],
-    ['okx', 1_936_660, 1_947_648],
     ['txflow', 1_827_125, 1_838_080],
     ['weex', 1_925_507, 1_936_384],
     ['woo', 2_388_474, 2_399_232],
@@ -274,9 +274,9 @@ test('#3118 Aster protection guard (run 42112075305) retains measured headroom',
   assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
 
-test('#3114 cold-path sharing (run 42104530272) retains Hyperliquid headroom and siblings match', () => {
-  const measured = 2_106_596;
-  const cap = 2_117_632;
+test('#3143 public data watch (run 42181736999) retains Hyperliquid headroom and siblings match', () => {
+  const measured = 2_126_281;
+  const cap = 2_137_088;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -366,4 +366,18 @@ test('BreakoutProp native protective edits retain measured headroom and the exac
   assert.equal(wasmBudgetError(measured, 'venue', 'breakoutprop'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'breakoutprop'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'breakoutprop'), /exceeds/);
+});
+
+test('#3121 protective amendments (run 42122802638) retain OKX headroom and all siblings share the cap', () => {
+  const measured = 1_962_129;
+  const cap = 1_973_248;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['okx', 'okxeu', 'okxdemo', 'okxeudemo']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'okx');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
 });

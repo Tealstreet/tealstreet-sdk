@@ -2265,6 +2265,7 @@ pub fn build_with_signer<T: Visit>(
                     f: b.fee_tenths_bps,
                 }),
                 enable_spot_markets: venue == "hyperliquid" && options.enable_spot_markets,
+                fast_book: venue == "hyperliquid" && options.hyperliquid_fast_book,
             };
             let mut engine = Engine::new(
                 if venue == "hyperliquidspot" {
@@ -2531,6 +2532,9 @@ pub struct EngineOptions {
     #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     pub hyperliquid_builder: Option<HyperliquidBuilder>,
+    #[cfg(feature = "hyperliquid")]
+    #[serde(default)]
+    pub hyperliquid_fast_book: bool,
     #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     pub enable_spot_markets: bool,

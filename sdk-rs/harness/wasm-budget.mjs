@@ -162,6 +162,10 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // put-back. CI size plus 10 KiB, rounded up to the KiB.
 // #3140 run 42172778210 measured breakoutprop 1,554,817 B on composed checkout 451287ba0229.
 // CI size plus 10 KiB, rounded up to the KiB.
+// #3121 run 42122802638, job 127583372751 at cce3b8d1f5f measured okx 1,962,129 B.
+// CI size plus 10 KiB rounded up to the KiB; all OKX variants share the okx family cap.
+// #3143 run 42181736999 measured hyperliquid 2,126,281 B: the public data watch, error-channel
+// refusals and Control::Unwatched. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
@@ -179,8 +183,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   cryptocom: 1_727_488,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_117_632,
-  hyperliquidspot: 2_117_632,
+  hyperliquid: 2_137_088,
+  hyperliquidspot: 2_137_088,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
@@ -189,7 +193,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   'lighter-robinhood': 2_044_928,
   // #3131, CI run 42150228180: MEXC measured 1,777,946 B + 10 KiB, rounded up.
   mexc: 1_788_928,
-  okx: 1_947_648,
+  okx: 1_973_248,
   orderly: 1_732_608,
   paradex: 2_249_728,
   phemex: 2_065_408,
