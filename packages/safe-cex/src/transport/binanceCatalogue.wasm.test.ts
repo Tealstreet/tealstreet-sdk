@@ -15,6 +15,8 @@ import { DefaultStore } from '../store/store.base';
 
 // fake-indexeddb declares a constructor parameter, but its runtime takes a database instance.
 const closeDatabase = forceCloseDatabase as unknown as (database: IDBDatabase) => void;
+// Host identity entropy also drives native retry jitter; each fixture account owns its stream.
+const seededEntropy = (seed: number) => (length: number) => Uint8Array.from({ length }, () => seed++ & 255);
 
 const hosts: EngineHost[] = [];
 const transports: Transport[] = [];
@@ -60,7 +62,11 @@ const response = (status = 200, headers = '', body = CATALOGUE): HttpResponse =>
   body: new TextEncoder().encode(body),
 });
 
-async function sixEngines(answer: (attempt: number) => Promise<HttpResponse>, unavailable = false) {
+async function sixEngines(
+  answer: (attempt: number) => Promise<HttpResponse>,
+  unavailable = false,
+  entropySeed?: number,
+) {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   vi.setSystemTime(1_000_000);
   const factory = new IDBFactory();
@@ -139,7 +145,10 @@ async function sixEngines(answer: (attempt: number) => Promise<HttpResponse>, un
       new WasmEngine('binance', JSON.stringify({ publicDataOnly: true })),
       transport,
       { onFrame: (buffer) => applier.apply(new Frame(buffer)) },
-      { ownsEngine: true },
+      {
+        ownsEngine: true,
+        ...(entropySeed === undefined ? {} : { entropy: seededEntropy(entropySeed + account * 16) }),
+      },
     );
     hosts.push(host);
     host.start();
@@ -238,7 +247,7 @@ it('the first native retry after a closed-database pause physically dispatches b
   const pending = new Promise<HttpResponse>((resolve) => {
     release = resolve;
   });
-  const r = await sixEngines(async (attempt) => (attempt === 1 ? pending : response()));
+  const r = await sixEngines(async (attempt) => (attempt === 1 ? pending : response()), false, 17);
   await r.advance(500);
   expect(r.sends).toHaveLength(1);
   expect(r.databases.size).toBe(6);
