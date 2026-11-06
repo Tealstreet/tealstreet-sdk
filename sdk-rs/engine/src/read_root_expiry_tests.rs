@@ -379,18 +379,33 @@ fn root_expiry_with_a_page_still_preparing_is_strict() {
 #[test]
 fn a_leg_only_timeout_under_a_live_root_keeps_accepted_rows() {
     let mut e = engine(Probe::default());
-    receive(&mut e, 0., 7, 300_000);
+    // Exercise a medium history leg; candles have their own 20 s bound.
+    e.handle_command(
+        0.,
+        Command::Query {
+            command: 7,
+            query: Query::Fills {
+                symbol: None,
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        },
+        Some(300_000),
+    )
+    .unwrap();
     let page = released(&mut e, 0.).pop().expect("first page");
     respond(&mut e, 10_000., &page, "row-1");
     released(&mut e, 10_000.).pop().expect("second page");
     let timer = leg_timer(&e);
-    e.handle(20_000., Event::TimerFired { timer });
+    e.handle(30_000., Event::TimerFired { timer });
     assert!(
         outcome(&e.drain_actions().collect::<Vec<_>>(), 7)
             .0
             .is_empty()
     );
-    e.handle(30_000., Event::TimerFired { timer });
+    e.handle(40_000., Event::TimerFired { timer });
     let (terminals, markers) = outcome(&e.drain_actions().collect::<Vec<_>>(), 7);
     assert!(matches!(terminals.as_slice(), [Ok(rows)] if rows == r#"["row-1"]"#));
     assert_eq!(markers, 1);

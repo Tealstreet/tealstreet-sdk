@@ -1041,21 +1041,21 @@ fn a_refusal_outside_a_genuine_entry_is_a_caller_bug() {
 }
 
 #[test]
-fn explicit_history_bounds_override_class_defaults_and_never_renew() {
+fn history_default_is_medium_and_issued_deadlines_never_renew() {
     let mut e = crate::test_support::seeded_engine(Probe {
         fill: Some(0),
         callback: Some(|cx| {
             use crate::request_budget::RequestClass;
             let context = cx.admit_http_command(read_policy()).unwrap();
             assert_eq!(context.request_class(), RequestClass::History);
-            assert_eq!(context.deadline(), cx.now + 20_000.);
+            assert_eq!(context.deadline(), cx.now + 30_000.);
             let retry = context.retry(
                 crate::request_context::RetryEvidence::ReadFailure,
                 cx.now + 5_000.,
             );
             assert!(retry.is_err(), "a budget grants no retry authority");
             let child = cx.http_leg_context(&context, read_policy()).unwrap();
-            assert_eq!(child.deadline(), cx.now + 20_000.);
+            assert_eq!(child.deadline(), context.deadline());
             assert_eq!(child.request_class(), RequestClass::History);
             let explicit = Policy {
                 timeout_ms: 1_234,
@@ -1153,4 +1153,35 @@ fn candle_commands_preserve_the_ts_clients_explicit_twenty_second_bound() {
     e.drain_actions().for_each(drop);
     e.handle(1., Event::Command(command()));
     assert_eq!(e.venue.calls, 1);
+}
+
+#[test]
+fn warm_background_discovery_keeps_the_cleared_sixty_second_budget() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        outside: Some(|cx| {
+            cx.store.set_loaded(|loaded| {
+                loaded.markets = true;
+                loaded.tickers = true;
+            });
+            let context = cx.http_context(Scope::Background, read_policy()).unwrap();
+            assert_eq!(
+                context.request_class(),
+                crate::request_budget::RequestClass::Discovery
+            );
+            assert_eq!(context.deadline(), cx.now + 60_000.);
+            let context = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        timeout_ms: 1_234,
+                        ..read_policy()
+                    },
+                )
+                .unwrap();
+            assert_eq!(context.deadline(), cx.now + 1_234.);
+        }),
+        ..Default::default()
+    });
+    e.start(0.);
 }
