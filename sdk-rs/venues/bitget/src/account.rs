@@ -881,6 +881,7 @@ impl BitgetFutures {
                             row.strategy_type = std::borrow::Cow::Borrowed("trailing_stop");
                         }
                         let orders = self.map_order(cx, &row)?;
+                        self.observe_close_bookings(cx, &orders, snapshot.started);
                         if let Some(price) = execution_price(&row, !self.account.uta) {
                             for order in &orders {
                                 snapshot.execution_prices.push((order.id.clone(), price));
@@ -2456,6 +2457,7 @@ impl BitgetFutures {
                         self.reject_stream_order(cx, item.get());
                         continue;
                     };
+                    self.observe_close_bookings(cx, &orders, cx.now);
                     let Some(order) = orders.first() else {
                         continue;
                     };

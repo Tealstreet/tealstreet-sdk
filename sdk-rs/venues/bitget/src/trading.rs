@@ -318,6 +318,9 @@ struct CancelId {
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Payload {
+    /// Local diagnostic custody only; never part of signed native bytes.
+    #[serde(skip)]
+    close_diagnostic: Option<crate::telemetry::CloseRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     long_leverage: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -930,6 +933,9 @@ impl BitgetFutures {
 
     #[inline(never)]
     fn send_call(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, request: Request) {
+        if request.call.is_place() {
+            self.remember_close_requests(cx.now, &request.call.close_requests(cx));
+        }
         job.live = (!request.call.read()).then(|| request.call.clone());
         if let Effect::Cancel { orders, .. } = &request.call.effect {
             for order in orders {
@@ -1837,7 +1843,7 @@ impl BitgetFutures {
             p.preset_stop_surplus_price = o.take_profit.map(|v| number(v, m.precision.price));
             p.preset_stop_loss_price = o.stop_loss.map(|v| number(v, m.precision.price));
         }
-        Ok(p)
+        Ok(diagnostic_payload(o, p))
     }
 
     fn plan_size(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<(String, f64), String> {
@@ -1916,7 +1922,7 @@ impl BitgetFutures {
                 "sell"
             });
         }
-        Ok(p)
+        Ok(diagnostic_payload(o, p))
     }
 
     fn trailing_values(
@@ -1982,38 +1988,41 @@ impl BitgetFutures {
         if o.kind == OrderType::TrailingStopLoss {
             let (size, distance, _) = self.trailing_values(cx, o, retained)?;
             let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
-            return Ok(Payload {
-                category: Some(self.product().to_uppercase()),
-                symbol: Some(o.symbol.clone()),
-                kind: Some("trailing_stop"),
-                side: Some(side_text(o.side)),
-                pos_side: cx.store.hedged().then_some(protected_side(o.side)),
-                qty: Some(num::format(size)),
-                reduce_only: (!cx.store.hedged()).then_some("yes"),
-                margin_mode: Some(margin_text(
-                    cx.store
-                        .setting(&o.symbol)
-                        .and_then(|s| s.margin_type)
-                        .unwrap_or(MarginType::Cross),
-                )),
-                // UTA only accepts clientOid for tpsl. Distance avoids an
-                // undocumented ratio unit conversion and keeps chart prices exact.
-                trailing_stop_params: Some(vec![TrailingParams {
-                    activation_price: number(
-                        o.price.ok_or("trailing price is required")?,
-                        m.precision.price,
-                    ),
-                    activation_type: uta_trigger(o.sl_trigger_type.or(o.trigger_type)),
-                    trail_type: if retained.is_some_and(|(kind, _)| kind == "ratio") {
-                        "ratio"
-                    } else {
-                        "distance"
-                    },
-                    trail_variance: num::format(distance),
-                    pre_order_type: "market",
-                }]),
-                ..Payload::default()
-            });
+            return Ok(diagnostic_payload(
+                o,
+                Payload {
+                    category: Some(self.product().to_uppercase()),
+                    symbol: Some(o.symbol.clone()),
+                    kind: Some("trailing_stop"),
+                    side: Some(side_text(o.side)),
+                    pos_side: cx.store.hedged().then_some(protected_side(o.side)),
+                    qty: Some(num::format(size)),
+                    reduce_only: (!cx.store.hedged()).then_some("yes"),
+                    margin_mode: Some(margin_text(
+                        cx.store
+                            .setting(&o.symbol)
+                            .and_then(|s| s.margin_type)
+                            .unwrap_or(MarginType::Cross),
+                    )),
+                    // UTA only accepts clientOid for tpsl. Distance avoids an
+                    // undocumented ratio unit conversion and keeps chart prices exact.
+                    trailing_stop_params: Some(vec![TrailingParams {
+                        activation_price: number(
+                            o.price.ok_or("trailing price is required")?,
+                            m.precision.price,
+                        ),
+                        activation_type: uta_trigger(o.sl_trigger_type.or(o.trigger_type)),
+                        trail_type: if retained.is_some_and(|(kind, _)| kind == "ratio") {
+                            "ratio"
+                        } else {
+                            "distance"
+                        },
+                        trail_variance: num::format(distance),
+                        pre_order_type: "market",
+                    }]),
+                    ..Payload::default()
+                },
+            ));
         }
         if !matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit) {
             return Err("unsupported Bitget UTA strategy type".into());
@@ -2058,7 +2067,7 @@ impl BitgetFutures {
             p.sl_trigger_by = Some(uta_trigger(o.sl_trigger_type.or(o.trigger_type)));
             p.sl_order_type = Some("market");
         }
-        Ok(p)
+        Ok(diagnostic_payload(o, p))
     }
 
     fn cancel_calls(
@@ -2218,14 +2227,17 @@ impl BitgetFutures {
             let (_, _, ratio) = self.trailing_values(cx, &opts, retained)?;
             job.calls.push_back(Planned {
                 path: "/api/v2/mix/order/modify-plan-order",
-                payload: Payload {
-                    product_type: Some(self.product().into()),
-                    order_id: Some(native_id(&order)),
-                    new_size: amount.map(|_| num::format(next_amount)),
-                    new_trigger_price: price.map(|_| num::format(next_price)),
-                    new_callback_ratio: Some(num::format(ratio)),
-                    ..Payload::default()
-                },
+                payload: diagnostic_payload(
+                    &opts,
+                    Payload {
+                        product_type: Some(self.product().into()),
+                        order_id: Some(native_id(&order)),
+                        new_size: amount.map(|_| num::format(next_amount)),
+                        new_trigger_price: price.map(|_| num::format(next_price)),
+                        new_callback_ratio: Some(num::format(ratio)),
+                        ..Payload::default()
+                    },
+                ),
                 effect: Effect::Place { expected: 1 },
             });
             return Ok(());
@@ -2266,7 +2278,7 @@ impl BitgetFutures {
             });
             job.calls.push_back(Planned {
                 path: paths::MODIFY_TPSL,
-                payload: p,
+                payload: diagnostic_payload(&place_opts(&order), p),
                 effect: Effect::Place { expected: 1 },
             });
             return Ok(());
@@ -2531,6 +2543,7 @@ impl BitgetFutures {
                 Err(error) => self.end(cx, job, current, not_sent(error)),
             };
         }
+        let diagnostic = crate::telemetry::NativeReply::parse(response.body);
         let status = response.status;
         let parsed = serde_json::from_str::<Reply>(response.body).map_err(|e| e.to_string());
         if let Effect::ResolveAmend { id, .. } = &request.call.effect {
@@ -2587,9 +2600,27 @@ impl BitgetFutures {
                 };
                 return self.send_call(cx, job, request);
             }
-            return self.call_settled(cx, job, request, parsed, status, explicit_rejection, true);
+            return self.call_settled(
+                cx,
+                job,
+                request,
+                parsed,
+                status,
+                explicit_rejection,
+                true,
+                &diagnostic,
+            );
         }
-        self.call_settled(cx, job, request, parsed, status, explicit_rejection, false)
+        self.call_settled(
+            cx,
+            job,
+            request,
+            parsed,
+            status,
+            explicit_rejection,
+            false,
+            &diagnostic,
+        )
     }
 
     /// The native answer of a call that will not be resent: record its write
@@ -2605,6 +2636,7 @@ impl BitgetFutures {
         status: u16,
         explicit_rejection: bool,
         mut recorded: bool,
+        diagnostic: &crate::telemetry::NativeReply,
     ) {
         let current = Some((&request.slot, &request.context));
         let native = native_code(parsed.as_ref().ok(), status);
@@ -2834,6 +2866,20 @@ impl BitgetFutures {
                     ));
                 }
                 if !ids.is_empty() {
+                    let closes = request.call.close_requests(cx);
+                    if let Some(data) = data {
+                        for item in &data.success_list {
+                            if let Some(ReplyClientId::Known(client)) = &item.client_oid {
+                                self.bind_close_identity(
+                                    client.text().as_ref(),
+                                    item.order_id.text().as_ref(),
+                                );
+                            }
+                        }
+                    }
+                    if closes.len() == 1 && ids.len() == 1 {
+                        self.bind_close_identity(&closes[0].client, &ids[0]);
+                    }
                     self.acknowledge(cx, &request, data, &ids);
                     self.note_write(cx);
                     write_noted = true;
@@ -2845,6 +2891,69 @@ impl BitgetFutures {
             }
         }
         if let Some(mut message) = error {
+            let closes = request.call.close_requests(cx);
+            if !closes.is_empty() {
+                if diagnostic.failures.is_empty() {
+                    self.close_rejection_event(
+                        cx,
+                        &closes,
+                        diagnostic.code.as_deref(),
+                        diagnostic.message.as_deref(),
+                        explicit_rejection,
+                    );
+                } else {
+                    let rows = request
+                        .call
+                        .payload
+                        .order_list
+                        .as_deref()
+                        .unwrap_or(std::slice::from_ref(&request.call.payload));
+                    for failure in &diagnostic.failures {
+                        let matching: Vec<_> =
+                            rows.iter()
+                                .filter(|row| {
+                                    failure.client.as_deref().is_some_and(|client| {
+                                        row.client_oid.as_deref() == Some(client)
+                                    })
+                                })
+                                .collect();
+                        let row = if matching.len() == 1 {
+                            Some(matching[0])
+                        } else if failure.client.is_none() && rows.len() == 1 {
+                            Some(&rows[0])
+                        } else {
+                            None
+                        };
+                        if let Some(row) = row {
+                            if let Some(close) = &row.close_diagnostic {
+                                self.close_rejection_event(
+                                    cx,
+                                    std::slice::from_ref(close),
+                                    failure.code.as_deref(),
+                                    failure.message.as_deref(),
+                                    true,
+                                );
+                            } else if rows.len() == 1 {
+                                self.close_rejection_event(
+                                    cx,
+                                    &closes,
+                                    failure.code.as_deref(),
+                                    failure.message.as_deref(),
+                                    true,
+                                );
+                            }
+                            // A matched opening row has no closing metadata.
+                        } else {
+                            self.unattributed_close_failure(
+                                cx,
+                                failure.code.as_deref(),
+                                failure.message.as_deref(),
+                                true,
+                            );
+                        }
+                    }
+                }
+            }
             let batch_unknown = if let Answer::Batch { failures, .. } = &answer {
                 failures.iter().any(|(code, _)| {
                     let verdict = CODES.verdict(
@@ -4049,5 +4158,55 @@ mod code_tests {
                 "{code}"
             );
         }
+    }
+}
+
+/// Keeps diagnostic metadata off the serialized/native request.
+fn diagnostic_payload(order: &PlaceOrderOpts, mut payload: Payload) -> Payload {
+    if order.reduce_only.unwrap_or(false) || is_algo(order.kind) {
+        payload.close_diagnostic = Some(crate::telemetry::CloseRequest {
+            symbol: order.symbol.clone(),
+            side: protected_position(order.side),
+            requested: payload
+                .size
+                .as_deref()
+                .or(payload.qty.as_deref())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(order.amount),
+            submitted: payload
+                .size
+                .as_deref()
+                .or(payload.qty.as_deref())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0),
+            client: payload.client_oid.clone().unwrap_or_default(),
+        });
+    }
+    payload
+}
+impl Planned {
+    fn close_requests(&self, cx: &Cx<'_, Pending>) -> Vec<crate::telemetry::CloseRequest> {
+        if let Some(rows) = &self.payload.order_list {
+            return rows
+                .iter()
+                .filter_map(|row| row.close_diagnostic.clone())
+                .collect();
+        }
+        if let Some(close) = &self.payload.close_diagnostic {
+            return vec![close.clone()];
+        }
+        if let Effect::Amend { id, amount, .. } = &self.effect
+            && let Some(order) = cx.store.order(id)
+            && (order.reduce_only || order.close == Some(true) || is_algo(order.kind))
+        {
+            return vec![crate::telemetry::CloseRequest {
+                symbol: order.symbol.clone(),
+                side: protected_position(order.side),
+                requested: *amount,
+                submitted: *amount,
+                client: order.client_order_id.clone().unwrap_or_default(),
+            }];
+        }
+        vec![]
     }
 }

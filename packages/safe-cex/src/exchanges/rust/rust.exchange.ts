@@ -2388,8 +2388,14 @@ export class RustEngineExchange extends BaseExchange {
           sentryTags: startupDiagnosticTags(event),
         },
       );
-    else if (event.level !== 'debug')
-      this.log(event.message, event.level === 'warn' ? LogSeverity.Warning : LogSeverity.Info, event);
+    else if (event.level !== 'debug') {
+      // Browser logging consumes the string, not the optional structured third argument.
+      const message =
+        event.code === 'bitget.account.mode' || event.code === 'bitget.close.diagnostic'
+          ? JSON.stringify(event)
+          : event.message;
+      this.log(message, event.level === 'warn' ? LogSeverity.Warning : LogSeverity.Info, event);
+    }
   };
 
   get socketHost() {

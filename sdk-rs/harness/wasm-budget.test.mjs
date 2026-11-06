@@ -174,8 +174,10 @@ test('#3148 protective edit live fixes (run 42196761441) retain headroom and sib
 
 test('#3198 + #3201 combined on master 6228bbef939 retain Bitget headroom and siblings match', () => {
   const measured = 2_364_891;
-  const cap = 2_375_680;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(measuredCap, 2_375_680);
+  const cap = WASM_VENUE_OVERRIDES.bitget;
+  assert.ok(cap >= measuredCap);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
@@ -564,4 +566,16 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
     assert.match(wasmBudgetError(cap + 1, 'venue', sibling), /exceeds/);
   }
   assert.equal(wasmBudgetError(16_830_742, 'combined'), undefined);
+});
+
+test('#3207 telemetry (run 42279265759) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
+  const measured = 2_390_477;
+  const cap = 2_401_280;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
