@@ -817,7 +817,6 @@ impl<P> Cx<'_, P> {
         }
     }
 
-    #[cfg_attr(feature = "dispatch-nonce", inline(never))]
     #[allow(clippy::too_many_arguments)]
     fn queue_managed_admitted(
         &mut self,
@@ -830,6 +829,45 @@ impl<P> Cx<'_, P> {
         pending: P,
         #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
+        match self.core().queue_managed_admitted(
+            context,
+            bearer,
+            method,
+            url,
+            body,
+            recipe,
+            #[cfg(feature = "http-plans")]
+            admission,
+        ) {
+            Ok(request) => {
+                self.io.pending.insert(
+                    request,
+                    PendingHttp {
+                        value: pending,
+                        auth: None,
+                    },
+                );
+                Ok(request)
+            }
+            Err(error) => Err((pending, error)),
+        }
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    /// The venue-independent body of `Cx::queue_managed_admitted`, compiled once.
+    #[cfg_attr(feature = "dispatch-nonce", inline(never))]
+    #[allow(clippy::too_many_arguments)]
+    fn queue_managed_admitted(
+        &mut self,
+        context: Context,
+        bearer: Option<u64>,
+        method: Method,
+        url: String,
+        body: Option<String>,
+        recipe: ManagedRecipe,
+        #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
+    ) -> Result<RequestId, Error> {
         #[cfg(feature = "sign-meta")]
         let mut explicit = None;
         let (step, public_headers, selected_claim) = match recipe {
@@ -847,30 +885,22 @@ impl<P> Cx<'_, P> {
                 (Some(step), &[][..], None)
             }
         };
-        if let Err(error) = self
-            .io
+        self.io
             .core
             .request_contexts
-            .validate_send(&context, self.now)
-        {
-            return Err((pending, error));
-        }
+            .validate_send(&context, self.now)?;
         #[cfg(feature = "http-mutation-barriers")]
-        let group = match self
-            .io
-            .core
-            .request_contexts
-            .validate_mutation_group_submission(&context)
-        {
-            Ok(key) => key.map(|key| Box::new(mutation_group::Member::new(key))),
-            Err(error) => return Err((pending, error)),
+        let group = {
+            let key = self
+                .io
+                .core
+                .request_contexts
+                .validate_mutation_group_submission(&context)?;
+            key.map(|key| Box::new(mutation_group::Member::new(key)))
         };
-        if let Err(error) = self.io.core.http_pacing.check(context.pacing(), self.now) {
-            return Err((pending, error));
-        }
+        self.io.core.http_pacing.check(context.pacing(), self.now)?;
         #[cfg(feature = "release-domains")]
-        if let Err(error) = self
-            .io
+        self.io
             .core
             .domain_admits(context.operation(), context.pacing(), {
                 #[cfg(feature = "http-mutation-barriers")]
@@ -878,21 +908,15 @@ impl<P> Cx<'_, P> {
                 #[cfg(not(feature = "http-mutation-barriers"))]
                 let grouped = false;
                 grouped
-            })
-        {
-            return Err((pending, error));
-        }
+            })?;
         #[cfg(feature = "dispatch-nonce")]
-        let nonce_claim = match validate_nonce_recipe(
+        let nonce_claim = validate_nonce_recipe(
             step.as_deref(),
             &selected_claim,
             self.io.core.nonce_unscheduled && self.io.core.nonce_enabled,
             &self.io.core.identities,
             &context,
-        ) {
-            Ok(claim) => claim,
-            Err(error) => return Err((pending, error)),
-        };
+        )?;
         #[cfg(not(feature = "dispatch-nonce"))]
         let nonce_claim = {
             let nonce_claim = step
@@ -900,7 +924,7 @@ impl<P> Cx<'_, P> {
                 .and_then(|step| step.nonce_claim())
                 .map(|claim| claim.authority());
             if nonce_claim.is_some() && !self.io.core.nonce_unscheduled {
-                return Err((pending, Error::Invalid));
+                return Err(Error::Invalid);
             }
             if let Some(expected) = selected_claim {
                 let matches = match (&expected, &nonce_claim) {
@@ -909,24 +933,21 @@ impl<P> Cx<'_, P> {
                     _ => false,
                 };
                 if !matches {
-                    return Err((pending, Error::Invalid));
+                    return Err(Error::Invalid);
                 }
             }
             if nonce_claim.is_some() {
-                return Err((pending, Error::Invalid));
+                return Err(Error::Invalid);
             }
             nonce_claim
         };
         #[cfg(feature = "sign-meta")]
-        let role = match sign_role(nonce_claim.as_deref(), explicit, &context) {
-            Ok(role) => role,
-            Err(error) => return Err((pending, error)),
-        };
+        let role = sign_role(nonce_claim.as_deref(), explicit, &context)?;
         if context.credential().is_some() != step.is_some() {
-            return Err((pending, Error::Invalid));
+            return Err(Error::Invalid);
         }
         if self.io.core.managed_http.len() >= 256 {
-            return Err((pending, Error::Capacity));
+            return Err(Error::Capacity);
         }
         // Public codec declarations are captured exactly once. Validate borrowed
         // bytes before allocating IDs or publishing any preparation resource.
@@ -936,13 +957,13 @@ impl<P> Cx<'_, P> {
         // On a bound request the engine alone sets `Authorization`, and it is
         // never routed to explicit public egress. Unbound requests are unchanged.
         if crate::signing_headers::validate_unsigned(headers).is_err() {
-            return Err((pending, Error::Invalid));
+            return Err(Error::Invalid);
         }
         #[cfg(feature = "session-bearer")]
         if bearer.is_some()
             && (headers.iter().any(|(name, _)| is_authorization(name)) || context.route().is_some())
         {
-            return Err((pending, Error::Invalid));
+            return Err(Error::Invalid);
         }
         let headers = headers
             .iter()
@@ -958,18 +979,18 @@ impl<P> Cx<'_, P> {
             && (!self.io.core.next_id.available(3)
                 || (step.is_some() && !self.io.core.signing.available_id()))
         {
-            return Err((pending, Error::Capacity));
+            return Err(Error::Capacity);
         }
         #[cfg(feature = "dispatch-nonce")]
         if let Some(authority) = &nonce_claim
             && authority.bind_once().is_err()
         {
-            return Err((pending, Error::Invalid));
+            return Err(Error::Invalid);
         }
         #[cfg(feature = "http-plans")]
         let (request, generation, timer, deadline) = if let Some(admission) = admission {
             if !self.now.is_finite() || self.now >= admission.deadline {
-                return Err((pending, Error::TimedOut));
+                return Err(Error::TimedOut);
             }
             (
                 admission.attempt.request,
@@ -1021,8 +1042,7 @@ impl<P> Cx<'_, P> {
                 deadline,
                 nonce_claim,
             ) {
-                return Err((
-                    pending,
+                return Err(
                     if matches!(
                         error,
                         crate::signing::SignError::InvalidRequest
@@ -1032,7 +1052,7 @@ impl<P> Cx<'_, P> {
                     } else {
                         Error::Capacity
                     },
-                ));
+                );
             }
             Some(attempt)
         } else {
@@ -1047,7 +1067,7 @@ impl<P> Cx<'_, P> {
             if signing_attempt.is_some() {
                 self.io.core.signing.remove_request(request);
             }
-            return Err((pending, error));
+            return Err(error);
         }
         #[cfg(feature = "http-plans")]
         if let Some(admission) = admission {
@@ -1117,13 +1137,6 @@ impl<P> Cx<'_, P> {
         {
             bound.push(request);
         }
-        self.io.pending.insert(
-            request,
-            PendingHttp {
-                value: pending,
-                auth: None,
-            },
-        );
         self.io.core.timers.insert(timer, ());
         self.io.core.actions.push(Action::SetTimer {
             timer,
