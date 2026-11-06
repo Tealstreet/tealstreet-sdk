@@ -1897,9 +1897,10 @@ fn protective_failure(code: i64, message: String) -> VenueError {
                 .filter(|_| code == -1000)
                 .unwrap_or(&message),
         };
-        matches!(
+        // Every refusal verdict is listed; only an unknown or satisfied answer is not.
+        !matches!(
             ASTER_PROTECTIVE.verdict(&native, Intent::Place),
-            Verdict::Refused(_) | Verdict::RefusedResend(_) | Verdict::NonceRefused
+            Verdict::Unknown(_) | Verdict::Satisfied(_)
         )
     };
     let mut error = failure(code, message);
