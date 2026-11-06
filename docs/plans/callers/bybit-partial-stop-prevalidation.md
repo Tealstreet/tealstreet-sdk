@@ -30,11 +30,14 @@ an explicit empty parentOrderLinkId, a native Partial row with its own orderId,
 exact original quantity and execution terms, a nonempty creation link and a
 valid creation time. Complete bounded live and history peer censuses must show
 no sibling sharing that link, parent link or creation time on the same side.
+Any other same-side Partial peer within the ±5 s window also prevents put-back,
+even with a different creation time and unrelated link.
 The History request is bound when issued to the proved target's native
 createdTime ±5 s (with a positive lower bound), never Store last_update or an
 account-wide seven-day default. Missing, malformed, zero or future native
-creation time stops before History and replacement, reports Unprotected and
-asks the user to re-place. A nonempty cursor or missing/out-of-window returned
+creation time skips History and disables put-back, while allowing the guarded
+replacement after terminal proof. A definite replacement refusal then reports
+Unprotected and asks the user to re-place; no lineage is guessed. A nonempty cursor or missing/out-of-window returned
 creation time never grants restoration authority.
 Missing lineage, an incomplete census, attached/grouped/split shapes, or an
 opposite leg whose binding was lost grants no restoration authority. Creation

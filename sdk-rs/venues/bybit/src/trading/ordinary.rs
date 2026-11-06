@@ -654,26 +654,10 @@ impl BybitLinear {
             self.park(id, entry);
             return;
         }
-        let (Ok([slot]), Some(mut leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front())
-        else {
+        let (Ok([slot]), Some(leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front()) else {
             let _ = cx.fail_plan(&run.plan, internal("Bybit trading plan is not serial"));
             return;
         };
-        if matches!(leg.planned.call, Call::PartialProof(partial::Axis::History)) {
-            let Some(planned) = run.partial.as_mut().and_then(|flow| flow.history_proof()) else {
-                let error = VenueError {
-                    kind: Some(ErrorKind::Network),
-                    protection: Some(safe_cex_engine::error::Protection::Unprotected),
-                    presents: true,
-                    ..VenueError::new(
-                        "The old stop was canceled but its native creation time is unproven; re-place protection on Bybit",
-                    )
-                };
-                let _ = cx.fail_plan(&run.plan, error);
-                return;
-            };
-            leg.planned = planned;
-        }
         let context = match leg.intent {
             LegIntent::Setting => {
                 cx.plan_leg_context_with_intent(&run.plan, &slot, Intent::Setting)
@@ -1012,7 +996,18 @@ impl BybitLinear {
                             self.local_order_lifecycle(),
                         );
                     }
-                    if axis == partial::Axis::History && !run.partial.as_ref().unwrap().restorable()
+                    if axis == partial::Axis::Live {
+                        let flow = run.partial.as_mut().unwrap();
+                        if let Some(history) = flow.history_proof() {
+                            run.queue.front_mut().unwrap().planned = history;
+                        } else {
+                            flow.skip_history();
+                            run.queue.pop_front();
+                        }
+                    }
+                    if matches!(axis, partial::Axis::Live | partial::Axis::History)
+                        && !run.partial.as_ref().unwrap().restorable()
+                        && run.partial.as_ref().unwrap().history_done()
                     {
                         for leg in &mut run.queue {
                             if let Call::PartialStop { restore, .. } = &mut leg.planned.call {

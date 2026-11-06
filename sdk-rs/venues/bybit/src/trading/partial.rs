@@ -132,7 +132,8 @@ fn standalone_provenance(
     else {
         return false;
     };
-    let created_ms = created.parse::<f64>().unwrap_or(f64::NAN);
+    let created_time = created.parse::<u64>().unwrap();
+    let created_ms = created_time as f64;
     if !created_ms.is_finite() || created_ms > now || now - created_ms > 86_400_000.0 {
         return false;
     }
@@ -157,7 +158,14 @@ fn standalone_provenance(
                         .is_some_and(|time| time.parse::<u64>().is_ok_and(|n| n > 0))
                     && peer.order_link_id.as_deref() != Some(link)
                     && peer.parent_order_link_id.as_deref() != Some(link)
-                    && !(peer.created_time.as_deref() == Some(created) && peer.side == target.side))
+                    && !(peer.side == target.side
+                        && (peer.created_time.as_deref() == Some(created)
+                            || (peer.tpsl_mode.as_deref() == Some("Partial")
+                                && peer.created_time.as_deref().is_some_and(|time| {
+                                    time.parse::<u64>().is_ok_and(|time| {
+                                        time.abs_diff(created_time) <= CREATION_WINDOW_MS
+                                    })
+                                })))))
         })
 }
 
@@ -200,6 +208,15 @@ impl Flow {
             .push_str(&format!("&startTime={start}&endTime={end}"));
         self.history_window = Some((start, end));
         Some(planned)
+    }
+
+    pub(super) fn skip_history(&mut self) {
+        self.history_done = true;
+        self.complete = false;
+    }
+
+    pub(super) fn history_done(&self) -> bool {
+        self.history_done
     }
 
     pub(super) fn proof(&self, axis: Axis) -> Planned {
