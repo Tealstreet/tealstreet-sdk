@@ -710,6 +710,11 @@ impl ApexOmni {
                     let Some(symbol) = symbol else {
                         continue;
                     };
+                    // A delta row restating an unchanged price still observes it.
+                    let observed = u16::from(row.p.is_some()) << 2
+                        | u16::from(row.mp.or(row.xp).is_some()) << 3
+                        | u16::from(row.xp.is_some()) << 4;
+                    cx.store.observe_ticker_fields(&symbol, observed);
                     cx.store.update_ticker(&symbol, |t| {
                         if let Some(n) = row.p {
                             t.last = n;
