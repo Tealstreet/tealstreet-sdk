@@ -1126,7 +1126,12 @@ fn plan_stop_amend_keeps_latest_native_source_after_ws() {
     use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, StopTriggerType};
     let (mut e, socket, reads, _) = private_started();
     for r in reads {
-        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+        let body = if r.url.contains("open_positions") {
+            r#"{"success":true,"code":0,"data":[{"positionId":"pos","symbol":"BTC_USDT","positionType":1,"holdVol":60,"holdAvgPrice":60000}]}"#
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#
+        };
+        response(&mut e, &r, body);
     }
     e.drain_actions().for_each(drop);
     let opts = PlaceOrderOpts {
@@ -2548,7 +2553,7 @@ fn protective_native_endpoints_preserve_peer_prices_and_sources() {
         let (channel,row,id,path)=match class {
             "stop"=>("push.personal.stop.order",exact_stop_row().replace("\"takeProfitPrice\":0","\"takeProfitPrice\":65000"),"guarded__stop_loss","/stoporder/change_plan_price"),
             "limit-parent"=>("push.personal.order",r#"{"orderId":"parent","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":0,"price":59000,"state":2,"stopLossPrice":55000,"takeProfitPrice":65000,"lossTrend":2,"profitTrend":3}"#.into(),"parent__stop_loss","/stoporder/change_price"),
-            _=>("push.personal.plan.order",protective_plan_row(1).replace("\"stopLossPrice\":0","\"stopLossPrice\":52000").replace("\"takeProfitPrice\":0","\"takeProfitPrice\":65000").replace("\"lossTrend\":1","\"lossTrend\":2").replace("\"profitTrend\":1","\"profitTrend\":3"),"guarded__stop_loss","/planorder/change_stop_order"),
+            _=>("push.personal.plan.order",protective_plan_row(1).replace("\"side\":4","\"side\":1").replace("\"reduceOnly\":true","\"reduceOnly\":false").replace("\"stopLossPrice\":0","\"stopLossPrice\":52000").replace("\"takeProfitPrice\":0","\"takeProfitPrice\":65000").replace("\"lossTrend\":1","\"lossTrend\":2").replace("\"profitTrend\":1","\"profitTrend\":3"),"guarded__stop_loss","/planorder/change_stop_order"),
         };
         ws(
             &mut e,
@@ -2921,12 +2926,19 @@ fn protective_final_guard_uses_the_rounded_trigger_that_will_be_sent() {
 }
 
 #[test]
-fn protective_429_on_replacement_or_put_back_is_unknown_without_protection_claim() {
+fn protective_rate_limit_on_replacement_or_put_back_is_unknown_without_protection_claim() {
     for put_back in [false, true] {
-        for body in [
-            "",
-            r#"{"success":false,"code":510,"message":"rate limited"}"#,
-            r#"{"success":false,"code":2006,"message":"refused"}"#,
+        for (status, body) in [
+            (429, ""),
+            (
+                429,
+                r#"{"success":false,"code":510,"message":"rate limited"}"#,
+            ),
+            (429, r#"{"success":false,"code":2006,"message":"refused"}"#),
+            (
+                200,
+                r#"{"success":false,"code":510,"message":"rate limited"}"#,
+            ),
         ] {
             let (mut e, _, _) = guarded_fixture();
             let replacement = guarded_replacement(&mut e, 300.);
@@ -2946,7 +2958,7 @@ fn protective_429_on_replacement_or_put_back_is_unknown_without_protection_claim
                 Event::HttpResponse {
                     request: pending.id,
                     response: Response {
-                        status: 429,
+                        status,
                         headers: "",
                         body,
                     },
@@ -2971,6 +2983,172 @@ fn protective_429_on_replacement_or_put_back_is_unknown_without_protection_claim
                     && error.message.contains("Open Orders")
             );
             assert!(!error.message.contains("both refused"));
+        }
+    }
+}
+
+#[test]
+fn protective_native_rate_limit_is_unknown_without_not_changed_or_cancel() {
+    for (status, body) in [
+        (429, ""),
+        (429, r#"{"success":false,"code":2006,"message":"refused"}"#),
+        (
+            200,
+            r#"{"success":false,"code":510,"message":"rate limited"}"#,
+        ),
+    ] {
+        let (mut e, _) = protective_plan_fixture();
+        let inspect = protective_amend(&mut e, None, 300.);
+        inspect_reply(&mut e, &inspect, 310., &protective_plan_row(1));
+        let edit = requests(&mut e).remove(0);
+        e.handle(
+            320.,
+            Event::HttpResponse {
+                request: edit.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions = drained(&mut e);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "{actions:?}"
+        );
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert!(error.protection.is_none());
+        assert!(
+            error.message.contains("status is unknown") && error.message.contains("Open Orders"),
+            "{error:?}"
+        );
+        assert!(!error.message.contains("not changed"));
+    }
+}
+
+#[test]
+fn protective_native_modify_requires_fresh_own_reference_and_uncrossed_trigger() {
+    for class in ["plan", "stop", "limit-parent", "plan-parent"] {
+        for refusal in ["stale", "crossed", "allowed"] {
+            let (mut e, private, public) = guarded_fixture();
+            let (channel, row, id) = match class {
+                "plan" => ("push.personal.plan.order", protective_plan_row(1), "guarded"),
+                "stop" => ("push.personal.stop.order", exact_stop_row(), "guarded__stop_loss"),
+                "limit-parent" => ("push.personal.order", r#"{"orderId":"parent","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":0,"price":59000,"state":2,"stopLossPrice":55000,"takeProfitPrice":65000,"lossTrend":2,"profitTrend":3}"#.into(), "parent__stop_loss"),
+                _ => ("push.personal.plan.order", protective_plan_row(1).replace("\"side\":4", "\"side\":1").replace("\"reduceOnly\":true", "\"reduceOnly\":false").replace("\"stopLossPrice\":0", "\"stopLossPrice\":52000").replace("\"takeProfitPrice\":0", "\"takeProfitPrice\":65000").replace("\"lossTrend\":1", "\"lossTrend\":2").replace("\"profitTrend\":1", "\"profitTrend\":3"), "guarded__stop_loss"),
+            };
+            ws(
+                &mut e,
+                private,
+                &format!(r#"{{"channel":"{channel}","data":{row}}}"#),
+            );
+            e.drain_actions().for_each(drop);
+            let now = if refusal == "stale" { 6000. } else { 300. };
+            e.handle(
+                now,
+                Event::Command(Command::AmendOrder {
+                    command: 91,
+                    id: id.into(),
+                    price: Some(53000.),
+                    amount: None,
+                }),
+            );
+            let inspect = requests(&mut e).remove(0);
+            if refusal == "crossed" {
+                quote(
+                    &mut e,
+                    public,
+                    now + 5.,
+                    "\"lastPrice\":70000,\"fairPrice\":53000,\"indexPrice\":70000",
+                );
+            }
+            if class == "limit-parent" {
+                reply(
+                    &mut e,
+                    &inspect,
+                    now + 10.,
+                    &format!(r#"{{"success":true,"code":0,"data":{row}}}"#),
+                );
+            } else {
+                inspect_reply(&mut e, &inspect, now + 10., &row);
+            }
+            let actions = drained(&mut e);
+            assert_eq!(
+                actions.iter().any(|a| matches!(a, Action::Http(_))),
+                refusal == "allowed",
+                "{class} {refusal}: {actions:?}"
+            );
+            if refusal != "allowed" {
+                assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error,..}) if error.outcome==Some(safe_cex_engine::Outcome::NotSent) && error.message.contains(if refusal=="stale" {"reference stale"} else {"crossed"}))), "{class} {refusal}: {actions:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn protective_native_paced_send_rechecks_reference_after_admission() {
+    for refusal in ["stale", "crossed", "allowed"] {
+        let (mut e, _, public) = guarded_fixture();
+        let inspect = protective_amend(&mut e, None, 4900.);
+        inspect_reply(&mut e, &inspect, 4910., &protective_plan_row(1));
+        let native = requests(&mut e).remove(0);
+        reply(&mut e, &native, 4920., r#"{"success":true,"code":0}"#);
+        e.drain_actions().for_each(drop);
+        e.handle(
+            4930.,
+            Event::Command(Command::AmendOrder {
+                command: 92,
+                id: "guarded".into(),
+                price: Some(53000.),
+                amount: None,
+            }),
+        );
+        let inspect = requests(&mut e).remove(0);
+        inspect_reply(
+            &mut e,
+            &inspect,
+            4940.,
+            &protective_plan_row(1).replace("55000", "54000"),
+        );
+        let actions = drained(&mut e);
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        let (timer, at) = actions
+            .into_iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(at, 5410.);
+        if refusal != "stale" {
+            quote(
+                &mut e,
+                public,
+                5400.,
+                if refusal == "crossed" {
+                    "\"fairPrice\":53000"
+                } else {
+                    "\"fairPrice\":60000"
+                },
+            );
+        }
+        e.handle(at, Event::TimerFired { timer });
+        let actions = drained(&mut e);
+        assert_eq!(
+            actions.iter().any(|a| matches!(a, Action::Http(_))),
+            refusal == "allowed",
+            "{refusal}: {actions:?}"
+        );
+        if refusal != "allowed" {
+            assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error,..}) if error.outcome==Some(safe_cex_engine::Outcome::NotSent))), "{actions:?}");
         }
     }
 }

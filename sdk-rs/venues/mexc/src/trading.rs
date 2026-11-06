@@ -1260,7 +1260,7 @@ impl MexcFutures {
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
             if let Some(edit) = job.protection.as_ref()
-                && edit.canceled
+                && (edit.canceled || error.outcome == Some(Outcome::Unknown))
                 && error.protection.is_none()
             {
                 error.presents = true;
@@ -1966,7 +1966,9 @@ impl MexcFutures {
                 {
                     error.outcome = Some(Outcome::Unknown);
                 }
-                if response.status == 429 && (protective_place.is_some() || guarded_regular_place) {
+                if (response.status == 429 || error.kind == Some(ErrorKind::RateLimited))
+                    && (protective_place.is_some() || guarded_regular_place || native_edit)
+                {
                     error.outcome = Some(Outcome::Unknown);
                 }
                 if native_edit && error.outcome == Some(Outcome::Rejected) {

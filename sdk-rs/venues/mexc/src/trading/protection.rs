@@ -184,7 +184,7 @@ pub fn guard(
                 original.kind == OrderType::TakeProfit,
                 raw.trigger_price,
                 raw.trend,
-                true,
+                original.reduce_only,
             )?;
         }
     }
@@ -544,16 +544,11 @@ impl MexcFutures {
         let Some(edit) = job.protection.as_ref() else {
             return Ok(());
         };
-        if let Call::Cancel { .. } = request.call {
+        if let Call::Cancel { .. } | Call::NativeEdit = request.call {
             guard(cx, &self.references, edit, false)?;
         }
         if let Call::ProtectivePlace { restore: true } = request.call {
             guard(cx, &self.references, edit, true)?;
-        }
-        if let Call::NativeEdit = request.call
-            && cx.store.order(&edit.observed.id) != Some(&edit.observed)
-        {
-            return Err("MEXC original order changed; stop not changed".into());
         }
         Ok(())
     }

@@ -47,7 +47,10 @@ a later valid edit.
 A sized amendment of a full-position TP/SL order becomes a partial TP/SL order
 (`volType=1`) with the requested native contract count, preserving its native
 execution parameters. A price-only/full-zero-sentinel edit uses native modify
-without resizing the position's stop.
+without resizing the position's stop. The caller must omit `amount` (or send 0
+for full-position stops) for price-only edits; an explicit positive amount
+requests fixed-size protection. Web price drags send only `{price}` in `update`;
+the Rust adapter forwards only fields present there, not `order.amount`.
 
 After a definitive replacement refusal, a standalone stop with complete native
 provenance gets one put-back of its original quantity, side/direction, trigger,
@@ -57,8 +60,11 @@ send. Its venue-assigned ID changes; these plan/position-stop placement APIs hav
 no caller-ID parameter to reuse. Success reports typed Restored. Refused or
 withheld put-back reports typed Unprotected with a visible “re-place” message;
 there is no loop and no immediate market fallback. Partial, attached and grouped
-orders never borrow standalone restore authority. HTTP 429 on replacement or put-back is Unknown regardless of its body, with
-no protection claim or restore/resend. An unknown placement or
+orders never borrow standalone restore authority. HTTP 429 or typed RateLimited
+(including HTTP 200/code 510) on replacement, put-back or native modify is
+Unknown, with no protection claim or restore/resend. A native modify may have
+applied; its visible error asks the user to check Open Orders, never “not changed”.
+An unknown placement or
 put-back outcome never restores/resends and reports status unknown, asking the
 user to check Open Orders and their position before acting.
 
@@ -68,6 +74,11 @@ migration follow-up. No engine release-veto API, transport inventory, replay
 allowance, CPU threshold or combined wasm ceiling changes here.
 
 ## Native controls and fixture changes
+
+Native modify goes through the same final source-freshness, crossed-trigger,
+unchanged/unfilled-order and closing-position guard, including deferred sends.
+An opening plan parent needs no position before it opens; its attached bracket
+still uses the direction opposite that parent.
 
 The native controls cover the four routes; peer preservation; definitive refusal
 and 404 without fallback; both trigger directions and all three references;
@@ -83,7 +94,8 @@ Existing fixture changes:
   assertions for both prices and references remain.
 - `plan_stop_amend_keeps_latest_native_source_after_ws`: replace the assumed cancel
   acknowledgement with a native inspection, then assert native modify and the
-  original latest-source payload assertion.
+  original latest-source payload assertion. Its closed-long stop now has a real
+  long position in the account snapshot, required by final native admission.
 - `amend_full_position_stop` callers: enrich the native inspection with complete
   TP/SL provenance. Price-only/zero-sentinel cases assert native modify with no
   volume change; positive quantity cases assert guarded cancellation, authoritative
@@ -91,6 +103,9 @@ Existing fixture changes:
 - `reloaded_full_position_stop_amend_refuses_until_position_data_arrives`: retain
   every original no-position refusal assertion; after positions arrive, assert
   inspection and native price modify rather than destructive cancel/recreate.
+- `protective_native_endpoints_preserve_peer_prices_and_sources`: the plan-parent
+  fixture is an opening Buy (side 1, not reduce-only), consistent with its
+  long-side attached SL/TP. Prices, sources, native path and peer assertions stay.
 - Test support optionally exposes the real public socket for receipt controls;
   the existing helpers keep their prior signatures and behavior.
 
