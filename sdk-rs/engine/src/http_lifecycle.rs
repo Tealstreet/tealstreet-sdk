@@ -2452,26 +2452,30 @@ impl<V: Venue> Engine<V> {
         }
         let first_action = self.io.core.actions.len();
         let managed = &self.io.core.managed_http[&request];
-        #[cfg(target_arch = "wasm32")]
-        let timeout_message = "HTTP request timed out";
         #[cfg(not(target_arch = "wasm32"))]
         let timeout_message = format!(
             "HTTP request timed out ({})",
             managed.lifecycle.timeout_diagnostic(now)
         );
+        #[cfg(not(target_arch = "wasm32"))]
+        let timeout_text = timeout_message.as_str();
+        #[cfg(target_arch = "wasm32")]
+        let timeout_text = "HTTP request timed out";
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.core.http_failure_kind, ErrorKind::Timeout);
             self.handle_event_with_read_timeout(
                 now,
                 Event::HttpFailed {
                     request,
-                    error: timeout_message.as_ref(),
+                    error: timeout_text,
                 },
                 true,
             );
             self.io.core.http_failure_kind = kind;
             self.io.discard_managed(request);
         } else {
+            #[cfg(target_arch = "wasm32")]
+            let timeout_message = timeout_text;
             self.http_preparation_failed(
                 now,
                 managed.lifecycle.preparation(),
