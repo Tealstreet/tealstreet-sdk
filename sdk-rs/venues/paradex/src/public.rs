@@ -616,6 +616,9 @@ impl Paradex {
             t.open_interest = row.open_interest.0;
             t.funding_rate = row.funding_rate.0;
         });
+        // An unchanged mark or last is still a fresh observation of it.
+        cx.store
+            .observe_ticker_fields(&row.symbol, supplied & ((1 << 2) | (1 << 3)));
         self.public
             .live_tickers
             .record(cx.store, &row.symbol, supplied);

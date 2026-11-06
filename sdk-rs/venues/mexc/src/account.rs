@@ -1645,6 +1645,13 @@ impl MexcFutures {
         payload: String,
         pending: Pending,
     ) {
+        if let Pending::Trade(request) = &pending
+            && let Err(error) = self.protective_send_guard(cx, request)
+        {
+            let command = request.command;
+            self.trade_failed(cx, command, super::trading::protective_not_sent(error));
+            return;
+        }
         use safe_cex_engine::credential_selection::{CredentialRole, Slots};
         let slots = Slots::new(
             self.credentials.clone(),

@@ -1852,3 +1852,7 @@ plus maximum hidden timer lateness across engine/HOW callbacks. These are TS
 host observations, not native venue health or server-managed browser evidence.
 Snapshots retain object identity until a bucket changes; the existing health
 sync publishes them without a new polling loop. The wasm binary is unchanged.
+
+`updateSymbolMetadata` rechecks exact symbol membership after native market readiness
+before querying leverage. A foreign symbol or an engine retired during readiness
+starts no metadata command. UI callers also validate their account market binding.

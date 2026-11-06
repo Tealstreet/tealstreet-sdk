@@ -39,6 +39,11 @@ enum Call {
         hedged: bool,
     },
 }
+impl Call {
+    fn confirms_cancel(&self) -> bool {
+        matches!(self, Call::ConfirmCancel(_))
+    }
+}
 #[derive(Clone)]
 struct Replacement {
     /// The amended order's side and kind: a virtual leg's own, not its parent's.
@@ -48,6 +53,77 @@ struct Replacement {
     filled: f64,
     polls: u8,
     read_retries: u8,
+    /// A stop, take-profit or trigger edit: its cancel's final check and put-back.
+    stop: Option<Box<StopProtect>>,
+}
+/// An amended stop's final pre-cancel check, and what puts it back.
+#[derive(Clone)]
+struct StopProtect {
+    guard: StopGuard,
+    /// The original placed again, unchanged, once its replacement is refused.
+    restore: Step,
+    /// False when the original cannot be proven again (its entry has fills):
+    /// a refused replacement then says the stop was removed.
+    restorable: bool,
+}
+/// The amended order (and its entry, for a leg) as planned, and the
+/// replacement trigger's reference.
+#[derive(Clone)]
+struct StopGuard {
+    order: Order,
+    parent: Option<Order>,
+    trigger: f64,
+    reference: StopTriggerType,
+    /// The side a live trigger must stay on; None while nothing can fire at
+    /// once (a leg of an unfilled entry).
+    below: Option<bool>,
+    /// A reduce-only or closing stop needs a position on the side it closes.
+    closes: Option<PositionSide>,
+}
+impl StopGuard {
+    /// A refusal is typed NotSent and leaves the order untouched.
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        let unchanged = || format!("Your {} order was not changed", self.order.symbol);
+        let same = |planned: &Order| store.order(&planned.id) == Some(planned);
+        if !same(&self.order) || self.parent.as_ref().is_some_and(|parent| !same(parent)) {
+            return Err(refused(Some(format!(
+                "{}: it changed or filled before cancellation",
+                unchanged()
+            ))));
+        }
+        if let Some(side) = self.closes
+            && !store
+                .positions()
+                .iter()
+                .any(|p| p.symbol == self.order.symbol && p.side == side && p.contracts > 0.0)
+        {
+            return Err(refused(Some(format!(
+                "{}: no position for it to protect",
+                unchanged()
+            ))));
+        }
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::IndexPrice => "index",
+            StopTriggerType::LastPrice => "last",
+        };
+        let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
+            return Err(refused(Some(format!(
+                "{}: the {label} price reference is stale",
+                unchanged()
+            ))));
+        };
+        if let Some(below) = self.below
+            && ((below && self.trigger >= price) || (!below && self.trigger <= price))
+        {
+            return Err(refused(Some(format!(
+                "{}: the new trigger has already crossed the {label} price",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
 }
 #[derive(Clone)]
 struct Step {
@@ -74,6 +150,10 @@ struct Job {
     metadata_started: HashSet<String>,
     /// A write took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    /// The amended stop's put-back, once its cancel is proven.
+    protect: Option<Box<StopProtect>>,
+    /// The put-back is under way: the replacement was refused.
+    restoring: bool,
 }
 impl Job {
     /// Keeps the first failure's text. An Unknown leg makes the whole command
@@ -524,6 +604,86 @@ impl Kucoin {
         Ok((parent.clone(), opts))
     }
 
+    /// For a stop, take-profit or trigger edit: the final pre-cancel check and
+    /// the original's exact put-back (`opts` is the edited replacement).
+    fn stop_protect(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        id: &str,
+        parent: &Order,
+        opts: &PlaceOrderOpts,
+    ) -> Result<Option<Box<StopProtect>>, String> {
+        let order = cx
+            .store
+            .order(id)
+            .ok_or_else(|| format!("Order not found: {id}"))?
+            .clone();
+        let leg = order.id != parent.id;
+        if !leg
+            && !matches!(
+                order.kind,
+                OrderType::StopLoss | OrderType::TakeProfit | OrderType::Conditional
+            )
+        {
+            return Ok(None);
+        }
+        let market = cx
+            .store
+            .market(&parent.symbol)
+            .ok_or("KuCoin order market unavailable")?;
+        let trigger = if leg {
+            if order.kind == OrderType::TakeProfit {
+                opts.take_profit
+            } else {
+                opts.stop_loss
+            }
+        } else {
+            opts.price
+        }
+        .map(|p| num::adjust(p, market.precision.price))
+        .ok_or("KuCoin amendment has no trigger")?;
+        let stops = matches!(order.kind, OrderType::StopLoss | OrderType::Conditional);
+        // A leg acts only once its entry fills; a standalone stop acts at once.
+        let live = !leg || parent.filled > 0.0;
+        let below = live.then_some(stops == (order.side == OrderSide::Sell));
+        let closes =
+            (!leg && (opts.reduce_only == Some(true) || opts.close == Some(true))).then(|| {
+                if order.side == OrderSide::Sell {
+                    PositionSide::Long
+                } else {
+                    PositionSide::Short
+                }
+            });
+        // The source the replacement is sent with (format_placement's
+        // stopPriceType), so the veto checks the price KuCoin triggers on.
+        let source = if leg {
+            opts.tp_trigger_type.or(opts.sl_trigger_type)
+        } else if order.kind == OrderType::StopLoss {
+            opts.sl_trigger_type.or(opts.trigger_type)
+        } else {
+            opts.tp_trigger_type.or(opts.trigger_type)
+        };
+        let guard = StopGuard {
+            order: order.clone(),
+            parent: leg.then(|| parent.clone()),
+            trigger,
+            reference: source.unwrap_or(StopTriggerType::LastPrice),
+            below,
+            closes,
+        };
+        guard
+            .validate(cx.store, cx.now)
+            .map_err(|error| error.message)?;
+        let (_, original) = self.replacement(cx, id, None, None)?;
+        let mut restore = self.format_placement(cx, &original)?;
+        restore.call = Call::Place;
+        Ok(Some(Box::new(StopProtect {
+            guard,
+            restore,
+            restorable: parent.filled == 0.0,
+        })))
+    }
+
     fn plan_trading(
         &mut self,
         cx: &Cx<'_, Pending>,
@@ -542,6 +702,7 @@ impl Kucoin {
             } => {
                 let (parent, opts) = self.replacement(cx, &id, price, amount)?;
                 self.format_placement(cx, &opts)?;
+                let stop = self.stop_protect(cx, &id, &parent, &opts)?;
                 let amended = cx
                     .store
                     .order(&id)
@@ -563,6 +724,7 @@ impl Kucoin {
                         filled,
                         polls: 0,
                         read_retries: 0,
+                        stop,
                     },
                     &api_symbol(cx.store, &parent.symbol),
                 ));
@@ -730,6 +892,8 @@ impl Kucoin {
                 error: None,
                 metadata_started: HashSet::new(),
                 effective: false,
+                protect: None,
+                restoring: false,
             },
         );
         self.trading.queue.push_back(id);
@@ -857,6 +1021,22 @@ impl Kucoin {
         true
     }
     fn send_trade(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+        // The amended stop's cancel, its stop-family fallback and any re-signed
+        // resend are checked once more as each is sent.
+        if let Call::Cancel { .. } = &request.step.call
+            && let Some(job) = self.trading.jobs.get_mut(&request.command)
+            && let Some(Call::ConfirmCancel(replacement)) = job.steps.front().map(|s| &s.call)
+            && let Some(stop) = &replacement.stop
+            && let Err(error) = stop.guard.validate(cx.store, cx.now)
+        {
+            cx.command_error(request.command, &error.message);
+            job.error = Some(error);
+            job.steps.clear();
+            self.trading.active = false;
+            self.trading.queue.push_front(request.command);
+            self.trading.timer = Some(cx.set_timer(20.0));
+            return;
+        }
         if let Call::PlaceAfterCancel { id, filled, .. } = &request.step.call
             && self.account_order_filled(id) > *filled
         {
@@ -949,18 +1129,15 @@ impl Kucoin {
                     fallback: true,
                 },
             };
-            self.signed(
+            self.send_trade(
                 cx,
-                step.method,
-                &step.path,
-                None,
-                Pending::Trade(Request {
+                Request {
                     command: request.command,
-                    step: step.clone(),
+                    step,
                     retried: false,
                     position_open: false,
                     position_invalid: false,
-                }),
+                },
             );
             return;
         }
@@ -991,12 +1168,21 @@ impl Kucoin {
                         if let Some(body) = request.step.body.as_deref() {
                             self.account_placed_order(cx, created.order_id, body);
                         }
-                        self.trading
-                            .jobs
-                            .get_mut(&request.command)
-                            .unwrap()
-                            .ids
-                            .push(created.order_id.into());
+                        let job = self.trading.jobs.get_mut(&request.command).unwrap();
+                        job.ids.push(created.order_id.into());
+                        if job.restoring {
+                            let symbol = job
+                                .protect
+                                .as_ref()
+                                .map_or("", |p| p.guard.order.symbol.as_str());
+                            let mut error = VenueError::new(format!(
+                                "Your {symbol} stop is unchanged: its replacement was refused, so the original was put back as a new order"
+                            ));
+                            error.protection =
+                                Some(safe_cex_engine::error::Protection::Restored);
+                            error.presents = true;
+                            job.error = Some(error);
+                        }
                     }
                     Call::ConfirmCancel(mut replacement) => {
                         #[derive(Deserialize)]
@@ -1066,6 +1252,12 @@ impl Kucoin {
                             replacement.options.amount -= filled - replacement.filled;
                         }
                         self.account_order_terminal(cx, &replacement.id);
+                        let filled_during_cancel = filled > replacement.filled;
+                        if let Some(mut stop) = replacement.stop.take() {
+                            stop.restorable &= !filled_during_cancel;
+                            self.trading.jobs.get_mut(&request.command).unwrap().protect =
+                                Some(stop);
+                        }
                         if full_position_stop && canceled && !fully_filled
                             || !full_position_stop && replacement.options.amount > 0.0
                         {
@@ -1151,6 +1343,7 @@ impl Kucoin {
                 } => Some((symbol.clone(), *amended)),
                 _ => None,
             };
+            let confirming = request.step.call.confirms_cancel();
             if let Call::ConfirmCancel(mut replacement) = request.step.call
                 && replacement.read_retries < 2
             {
@@ -1169,19 +1362,77 @@ impl Kucoin {
             }
             cx.command_error(request.command, &error);
             let mut error = write_failure(status, body, error);
-            // Reads (cancel proof, position check) precede a write that was never sent.
-            if read {
+            if confirming {
+                // The cancel was accepted; only its outcome is unproven. Whether
+                // the order still stands is unknown, so nothing replaces it.
+                error.outcome = Some(Outcome::Unknown);
+                error.message = format!(
+                    "{}: the cancel was sent but could not be confirmed, so whether the order still stands is unknown and no replacement was sent. Check Open Orders",
+                    error.message
+                );
+            } else if read {
+                // Reads (position check) precede a write that was never sent.
                 error.outcome = Some(Outcome::NotSent);
             }
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
+            let guarded = replacing.is_some() || job.restoring;
+            // A 429 may have placed the order: for a guarded stop it is unknown, not refused.
+            if guarded && error.kind == Some(ErrorKind::RateLimited) {
+                error.outcome = Some(Outcome::Unknown);
+            }
+            let refused = error.outcome == Some(Outcome::Rejected);
+            // A definite refusal proves no replacement exists: put the original back once.
+            if replacing.is_some()
+                && refused
+                && let Some(restore) = job
+                    .protect
+                    .as_ref()
+                    .filter(|p| p.restorable)
+                    .map(|p| p.restore.clone())
+            {
+                job.restoring = true;
+                job.steps.push_front(restore);
+                self.trading.active = false;
+                self.trading.queue.push_front(request.command);
+                self.trading.timer = Some(cx.set_timer(20.0));
+                return;
+            }
+            let lost_stop = guarded && job.protect.is_some();
             if let Some((symbol, (side, kind))) = replacing.filter(|_| job.ids.is_empty()) {
-                let unknown = error.outcome == Some(Outcome::Unknown);
+                let unknown = !refused;
                 let gone = if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
                     safe_cex_engine::error::stop_gone_text(&symbol, side, kind, unknown)
                 } else {
                     safe_cex_engine::error::order_gone_text(&symbol, unknown)
                 };
-                error.message = format!("{gone}: {}", error.message);
+                error.message = if refused && !job.protect.as_ref().is_some_and(|p| p.restorable) {
+                    format!(
+                        "Your {symbol} stop was removed: its replacement was refused, please re-place it ({gone}: {})",
+                        error.message
+                    )
+                } else {
+                    format!("{gone}: {}", error.message)
+                };
+            } else if job.restoring && job.ids.is_empty() {
+                let symbol = job
+                    .protect
+                    .as_ref()
+                    .map_or(String::new(), |p| p.guard.order.symbol.clone());
+                error.message = if refused {
+                    format!(
+                        "Your {symbol} stop was removed: its replacement and the put-back were both refused, please re-place it ({})",
+                        error.message
+                    )
+                } else {
+                    format!(
+                        "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders ({})",
+                        error.message
+                    )
+                };
+            }
+            if lost_stop && refused {
+                error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+                error.presents = true;
             }
             job.record(error);
             if !job.keep_going {

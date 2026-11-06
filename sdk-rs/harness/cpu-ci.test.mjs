@@ -69,6 +69,41 @@ test('only eligible suites enter the second matrix; complete PASS means zero sec
   value.suites.pop(); assert.throws(() => secondMatrix(value), /suite roster/);
 });
 
+test('only Bitget may plan a non-certified oracle refusal without a second measurement', () => {
+  const value = plan(), bitget = value.suites.find(row => row.suite === 'bitget');
+  bitget.cases[0].decision = 'not-certified';
+  bitget.oracleRefusal = { artifactId: 900, name: 'bitget-paired-steady', digest: 'sha256:' + 'd'.repeat(64), bytes: 10 };
+  assert.equal(validatePlannedCases(value), value);
+  assert.deepEqual(secondMatrix(value), { include: [] });
+  const wrongSuite = structuredClone(value);
+  wrongSuite.suites.find(row => row.suite === 'bybit').cases[0].decision = 'not-certified';
+  assert.throws(() => validatePlannedCases(wrongSuite));
+  assert.equal(requireSecondState(bitget.cases, []), false);
+  assert.throws(() => requireSecondState(bitget.cases, [job()]));
+  for (const change of [x => { delete x.oracleRefusal; },
+    x => { x.oracleRefusal.name = 'other'; }, x => { x.oracleRefusal.digest = 'bad'; }]) {
+    const invalid = structuredClone(value); change(invalid.suites.find(row => row.suite === 'bitget'));
+    assert.throws(() => validatePlannedCases(invalid));
+  }
+});
+
+test('a recorded Bitget refusal leaves 31 gates usable but never certifies Bitget', async () => {
+  const reason = 'NOT-CERTIFIED: Bitget TS oracle output changed';
+  const { results, certificates } = await certifySuites(GATE_SUITES, async suite => {
+    if (suite === 'bitget') throw new Error(reason);
+    return { suite };
+  });
+  assert.equal(results.certified, false);
+  assert.equal(results.suites.bitget, false);
+  assert.equal(certificates.bitget, undefined);
+  const complete = { schema: 1, runId: 10, checkoutSha: 'c'.repeat(40), ...results };
+  for (const suite of GATE_SUITES) {
+    const args = { suite, results: complete, result: 'success', runId: 10, checkoutSha: complete.checkoutSha };
+    if (suite === 'bitget') assert.throws(() => requireCertifiedSuite(args), /NOT-CERTIFIED/);
+    else assert.equal(requireCertifiedSuite(args), true);
+  }
+});
+
 test('current upload producer binds first and second execution; old same-source payload cannot replace a measurement', () => {
   const checkoutSha = 'c'.repeat(40), runId = 1, suite = 'bitget';
   const first = { run_id: 1, id: 2, runner_id: 3, run_attempt: 1, name: 'Rust / replay measurement (bitget)' };

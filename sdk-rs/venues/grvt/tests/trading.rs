@@ -27,7 +27,16 @@ fn boot_with_builders(
     catalog: &str,
     builders: Option<&str>,
 ) -> (Engine<Grvt>, SocketId, Option<HttpRequest>) {
+    let (e, private_socket, held, _) = boot_capturing_public(catalog, builders, OPEN_ORDERS);
+    (e, private_socket, held)
+}
+fn boot_capturing_public(
+    catalog: &str,
+    builders: Option<&str>,
+    open_orders: &str,
+) -> (Engine<Grvt>, SocketId, Option<HttpRequest>, SocketId) {
     let mut private_socket = None;
+    let mut public_socket = None;
     let mut held = None;
     let mut e = safe_cex_engine::test_support::seeded_engine(Grvt::new(Options {
         key: Some("grvt-test-key".into()),
@@ -71,7 +80,7 @@ fn boot_with_builders(
         } else if request.url.ends_with("get_all_initial_leverage") {
             ("", r#"{"r":[{"i":"BTC_USDT_Perp","l":"10"}]}"#)
         } else if request.url.ends_with("open_orders") {
-            ("", OPEN_ORDERS)
+            ("", open_orders)
         } else {
             ("", r#"{"r":[]}"#)
         };
@@ -94,12 +103,22 @@ fn boot_with_builders(
                     channel: Some(SocketChannel::Private),
                     ..
                 } => private_socket = Some(socket),
+                Action::WsConnect {
+                    socket,
+                    channel: Some(SocketChannel::Public),
+                    ..
+                } => public_socket = Some(socket),
                 _ => {}
             }
         }
     }
     assert!(pending.is_empty());
-    (e, private_socket.expect("GRVT private socket"), held)
+    (
+        e,
+        private_socket.expect("GRVT private socket"),
+        held,
+        public_socket.expect("GRVT public socket"),
+    )
 }
 fn authenticated() -> (Engine<Grvt>, SocketId) {
     let (mut engine, socket) = boot_with_socket();
@@ -914,19 +933,15 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
 }
 #[test]
 fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
-    let mut e = boot();
-    seed(&mut e);
-    e.store_mut().update_order("42", |o| {
-        o.kind = OrderType::StopLoss;
-        o.side = OrderSide::Sell;
-        o.reduce_only = true;
-        o.close = Some(false);
-        o.price = 90.;
-        o.trigger_type = Some(StopTriggerType::MarkPrice);
-        o.time_in_force = Some(TimeInForce::GoodTillCancel);
-    });
+    // The cancel guard requires an unfilled stop, its position and a fresh true Mark receipt.
+    let (mut e, public, _) = protective_engine(
+        OrderType::StopLoss,
+        OrderSide::Sell,
+        StopTriggerType::MarkPrice,
+    );
+    protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
     let stop = |json: &str| {
-        json.replace("\"po\":true", "\"po\":false")
+        json.replace("0.2", "0").replace("\"po\":true", "\"po\":false")
             .replace("\"ro\":false", "\"ro\":true")
             .replace("\"ib\":true", "\"ib\":false")
             .replace(
@@ -1989,5 +2004,864 @@ fn public_rest_book_headers_and_rejections_cannot_replace_private_session() {
         );
         let actions = reply(&mut e, &private, 200, r#"{"r":{"te":"1000"}}"#);
         assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { command,result }) if *command==owner+10 && serde_json::from_str::<serde_json::Value>(result).unwrap()["userId"]=="test-account")));
+    }
+}
+
+fn protective_engine(
+    kind: OrderType,
+    side: OrderSide,
+    reference: StopTriggerType,
+) -> (Engine<Grvt>, SocketId, String) {
+    let (mut e, _, _, public) =
+        boot_capturing_public(CATALOG, Some(AUTHORIZED), &OPEN_ORDERS.replace("0.2", "0"));
+    seed(&mut e);
+    e.store_mut().update_order("42", |o| {
+        o.kind = kind;
+        o.side = side;
+        o.filled = 0.;
+        o.remaining = 1.;
+        o.reduce_only = true;
+        o.close = Some(false);
+        o.price = 90.;
+        o.trigger_type = Some(reference);
+        o.time_in_force = Some(TimeInForce::GoodTillCancel);
+    });
+    let position = Position {
+        id: "protected".into(),
+        symbol: "BTC_USDT_PERP".into(),
+        side: if side == OrderSide::Sell {
+            PositionSide::Long
+        } else {
+            PositionSide::Short
+        },
+        entry_price: 100.,
+        notional: 100.,
+        leverage: 10.,
+        margin_type: None,
+        position_mode: None,
+        unrealized_pnl: 0.,
+        realized_pnl: None,
+        contracts: 1.,
+        liquidation_price: 0.,
+        margin_size: None,
+        last_update: Some(NOW),
+    };
+    e.store_mut().upsert_position(position);
+    let source = serde_json::json!({"r":{
+        "sa":"9007199254740993", "oi":"0x1234", "im":false, "ti":"GOOD_TILL_TIME", "po":false, "ro":true,
+        "l":[{"i":"BTC_USDT_Perp","s":"1","lp":"87","ib":side == OrderSide::Buy}],
+        "b":"0xee8f3559f298fffa79b8253437969d15b5dccff3", "bf":"0.03",
+        "m":{"co":"42","ct":"1699999999000000000","t":{"tt":if kind == OrderType::StopLoss {"STOP_LOSS"} else {"TAKE_PROFIT"},
+            "t":{"tb":match reference { StopTriggerType::LastPrice => "LAST", StopTriggerType::MarkPrice => "MARK", StopTriggerType::IndexPrice => "INDEX" }, "tp":"90", "cp":false, "is":false}}},
+        "s1":{"s":"OPEN","ts":["0"],"ut":"1700000000000000000"}
+    }}).to_string();
+    (e, public, source)
+}
+fn protective_quote(e: &mut Engine<Grvt>, socket: SocketId, at: f64, fields: &str) {
+    e.handle(
+        at,
+        Event::WsMessage {
+            socket,
+            text: &format!(r#"{{"s":"v1.ticker.s","f":{{"i":"BTC_USDT_Perp",{fields}}}}}"#),
+        },
+    );
+    drain(e).for_each(drop);
+}
+fn protective_reply(
+    e: &mut Engine<Grvt>,
+    request: &HttpRequest,
+    at: f64,
+    status: u16,
+    body: &str,
+) -> Vec<Action> {
+    e.handle(
+        at,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status,
+                headers: "",
+                body,
+            },
+        },
+    );
+    safe_cex_engine::test_support::prepared_actions(e, at)
+}
+fn protective_start(e: &mut Engine<Grvt>, price: f64) -> HttpRequest {
+    let actions = command(
+        e,
+        Command::AmendOrder {
+            command: 91,
+            id: "42".into(),
+            price: Some(price),
+            amount: None,
+        },
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/order"))),
+        "{actions:?}"
+    );
+    http(actions, "/order")
+}
+fn no_protective_cancel(actions: &[Action], cause: &str) {
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("cancel_order"))),
+        "destructive cancel escaped"
+    );
+    assert!(
+        done(actions, 91).unwrap().unwrap_err().contains(cause),
+        "{actions:?}"
+    );
+}
+#[test]
+fn protective_crossed_trigger_is_refused_for_each_own_source_and_side() {
+    for reference in [
+        StopTriggerType::LastPrice,
+        StopTriggerType::MarkPrice,
+        StopTriggerType::IndexPrice,
+    ] {
+        for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+            for side in [OrderSide::Buy, OrderSide::Sell] {
+                let (mut e, public, source) = protective_engine(kind, side, reference);
+                protective_quote(
+                    &mut e,
+                    public,
+                    NOW + 1.,
+                    r#""lp":"100","mp":"100","ip":"100""#,
+                );
+                let greater = (kind == OrderType::StopLoss && side == OrderSide::Buy)
+                    || (kind == OrderType::TakeProfit && side == OrderSide::Sell);
+                let price = if greater { 120. } else { 80. };
+                let get = protective_start(&mut e, price);
+                protective_quote(
+                    &mut e,
+                    public,
+                    NOW + 2.,
+                    &format!(r#""lp":"{price}","mp":"{price}","ip":"{price}""#),
+                );
+                let actions = protective_reply(&mut e, &get, NOW + 3., 200, &source);
+                no_protective_cancel(&actions, "trigger");
+                assert_eq!(e.store().order("42").unwrap().status, OrderStatus::Open);
+            }
+        }
+    }
+}
+#[test]
+fn protective_sparse_or_substituted_reference_does_not_authorize_cancel() {
+    for (reference, fields) in [
+        (StopTriggerType::LastPrice, r#""mp":"100""#),
+        (StopTriggerType::MarkPrice, r#""lp":"100""#),
+        (StopTriggerType::IndexPrice, r#""mp":"100""#),
+    ] {
+        let (mut e, public, source) =
+            protective_engine(OrderType::StopLoss, OrderSide::Sell, reference);
+        protective_quote(&mut e, public, NOW + 1., fields);
+        let get = protective_start(&mut e, 80.);
+        no_protective_cancel(
+            &protective_reply(&mut e, &get, NOW + 3., 200, &source),
+            "reference stale",
+        );
+    }
+    let (mut e, public, source) = protective_engine(
+        OrderType::StopLoss,
+        OrderSide::Sell,
+        StopTriggerType::MarkPrice,
+    );
+    protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+    let get = protective_start(&mut e, 80.);
+    protective_quote(&mut e, public, NOW + 5001., r#""lp":"100""#);
+    no_protective_cancel(
+        &protective_reply(&mut e, &get, NOW + 5002., 200, &source),
+        "reference stale",
+    );
+}
+#[test]
+fn protective_valid_edit_keeps_cancellation_proof_and_exact_reference_boundary() {
+    for age in [4999., 5000., 5001.] {
+        let (mut e, public, source) = protective_engine(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            StopTriggerType::MarkPrice,
+        );
+        protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+        let get = protective_start(&mut e, 80.);
+        let actions = protective_reply(&mut e, &get, NOW + 1. + age, 200, &source);
+        if age > 5000. {
+            no_protective_cancel(&actions, "reference stale");
+            continue;
+        }
+        let cancel = http(actions, "cancel_order");
+        let verify = http(
+            protective_reply(&mut e, &cancel, NOW + 1. + age, 200, r#"{"r":{"a":true}}"#),
+            "/order",
+        );
+        let canceled = source.replace("\"OPEN\"", "\"CANCELLED\"");
+        let replacement = http(
+            protective_reply(&mut e, &verify, NOW + 1. + age, 200, &canceled),
+            "create_order",
+        );
+        let wire = body(&replacement).o;
+        assert_eq!(wire.m.t.unwrap().t.tp, "80");
+        assert_eq!(wire.l[0].lp.as_deref(), Some("87"));
+        assert!(wire.ro);
+    }
+}
+#[test]
+fn protective_definitive_refusal_puts_back_exact_standalone_once() {
+    for restore_refused in [false, true] {
+        let (mut e, public, source) = protective_engine(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            StopTriggerType::MarkPrice,
+        );
+        e.store_mut().update_order("42", |o| o.close = Some(true));
+        let source = source.replace("\"cp\":false", "\"cp\":true");
+        protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+        let get = protective_start(&mut e, 80.);
+        let cancel = http(
+            protective_reply(&mut e, &get, NOW + 3., 200, &source),
+            "cancel_order",
+        );
+        let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+        let replacement = http(
+            reply(
+                &mut e,
+                &verify,
+                200,
+                &source.replace("\"OPEN\"", "\"CANCELLED\""),
+            ),
+            "create_order",
+        );
+        let restore = http(
+            reply(
+                &mut e,
+                &replacement,
+                400,
+                r#"{"c":1001,"m":"replacement refused"}"#,
+            ),
+            "create_order",
+        );
+        let wire = body(&restore).o;
+        assert!(wire.ro);
+        assert!(!wire.im);
+        assert!(!wire.l[0].ib);
+        assert_eq!(wire.l[0].s, "1");
+        assert_eq!(wire.l[0].lp.as_deref(), Some("87"));
+        assert_eq!(wire.m.co, "42");
+        let t = wire.m.t.unwrap();
+        assert_eq!(t.t.tp, "90");
+        assert_eq!(t.t.tb, "MARK");
+        assert!(t.t.cp && !t.t.is);
+        let actions = if restore_refused {
+            reply(
+                &mut e,
+                &restore,
+                400,
+                r#"{"c":1001,"m":"old trigger crossed"}"#,
+            )
+        } else {
+            reply(
+                &mut e,
+                &restore,
+                200,
+                r#"{"r":{"oi":"0x5678","m":{"co":"42"},"s1":{"s":"OPEN"}}}"#,
+            )
+        };
+        let error = actions
+            .iter()
+            .find_map(|a| {
+                if let Action::Notice(Notice::CommandFailed { command: 91, error }) = a {
+                    Some(error)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(error).unwrap()["protection"],
+            if restore_refused {
+                "unprotected"
+            } else {
+                "restored"
+            }
+        );
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order")))
+        );
+    }
+}
+#[test]
+fn protective_unknown_replacement_never_puts_back_or_resends() {
+    let (mut e, public, source) = protective_engine(
+        OrderType::StopLoss,
+        OrderSide::Sell,
+        StopTriggerType::MarkPrice,
+    );
+    protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+    let get = protective_start(&mut e, 80.);
+    let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let replacement = http(
+        reply(
+            &mut e,
+            &verify,
+            200,
+            &source.replace("\"OPEN\"", "\"CANCELLED\""),
+        ),
+        "create_order",
+    );
+    let actions = reply(&mut e, &replacement, 503, "unavailable");
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order")))
+    );
+    assert!(done(&actions, 91).unwrap().is_err());
+}
+
+#[test]
+fn protective_foreign_trigger_without_standalone_provenance_is_not_guessed_back() {
+    let (mut e, public, source) = protective_engine(
+        OrderType::StopLoss,
+        OrderSide::Sell,
+        StopTriggerType::MarkPrice,
+    );
+    protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+    let get = protective_start(&mut e, 80.);
+    let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let replacement = http(
+        reply(
+            &mut e,
+            &verify,
+            200,
+            &source.replace("\"OPEN\"", "\"CANCELLED\""),
+        ),
+        "create_order",
+    );
+    let actions = reply(
+        &mut e,
+        &replacement,
+        400,
+        r#"{"c":1001,"m":"replacement refused"}"#,
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order")))
+    );
+    let error = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::Notice(Notice::CommandFailed { command: 91, error }) = a {
+                Some(error)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(error).unwrap()["protection"],
+        "unprotected"
+    );
+    assert!(error.message.contains("re-place"));
+}
+
+#[test]
+fn protective_cancel_auth_refresh_rechecks_freshness_crossing_and_fill() {
+    for change in ["stale", "crossed", "filled", "gone", "position", "changed"] {
+        let (mut e, public, source) = protective_engine(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            StopTriggerType::MarkPrice,
+        );
+        protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+        let get = protective_start(&mut e, 80.);
+        let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+        let login = http(
+            reply(&mut e, &cancel, 401, r#"{"c":1000,"m":"expired"}"#),
+            "auth/api_key/login",
+        );
+        let at = if change == "stale" {
+            NOW + 6002.
+        } else {
+            NOW + 4.
+        };
+        match change {
+            "crossed" => protective_quote(&mut e, public, at, r#""mp":"70""#),
+            "filled" => {
+                e.store_mut().update_order("42", |o| o.filled = 0.1);
+            }
+            "changed" => {
+                e.store_mut().update_order("42", |o| o.price = 95.);
+            }
+            "gone" => {
+                e.store_mut().remove_orders(&["42"]);
+            }
+            "position" => e.store_mut().update_positions(|p| p.contracts = 0.),
+            _ => {}
+        }
+        e.handle(at,Event::HttpResponse{request:login.id,response:Response{status:200,headers:"Set-Cookie: gravity=renewed-session; Path=/\nX-Grvt-Account-Id: renewed-account",body:r#"{"sub_account_id":"9007199254740993"}"#}});
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, at);
+        no_protective_cancel(
+            &actions,
+            if change == "stale" {
+                "reference stale"
+            } else if change == "crossed" {
+                "trigger"
+            } else if change == "position" {
+                "position"
+            } else if change == "gone" {
+                "disappeared"
+            } else if change == "changed" {
+                "changed"
+            } else {
+                "execution"
+            },
+        );
+    }
+}
+
+#[test]
+fn protective_veto_releases_queue_and_does_not_make_follow_up_edit_busy() {
+    let (mut e, public, source) = protective_engine(
+        OrderType::StopLoss,
+        OrderSide::Sell,
+        StopTriggerType::MarkPrice,
+    );
+    let get = protective_start(&mut e, 80.);
+    no_protective_cancel(&reply(&mut e, &get, 200, &source), "reference stale");
+    protective_quote(&mut e, public, NOW + 3., r#""mp":"100""#);
+    let get = protective_start(&mut e, 80.);
+    assert!(
+        reply(&mut e, &get, 200, &source)
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("cancel_order")))
+    );
+}
+
+#[test]
+fn protective_known_local_standalone_retains_exact_client_and_native_parameters() {
+    let (mut e, public, _) = protective_engine(
+        OrderType::StopLoss,
+        OrderSide::Sell,
+        StopTriggerType::MarkPrice,
+    );
+    protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+    let mut o = opts();
+    o.kind = OrderType::StopLoss;
+    o.side = OrderSide::Sell;
+    o.price = Some(90.);
+    o.trigger_price = Some(90.);
+    o.client_order_id = None;
+    o.reduce_only = Some(true);
+    o.close = Some(false);
+    o.sl_trigger_type = Some(StopTriggerType::MarkPrice);
+    o.time_in_force = Some(TimeInForce::GoodTillCancel);
+    let create = http(
+        command(
+            &mut e,
+            Command::PlaceOrders {
+                command: 90,
+                orders: vec![o],
+            },
+        ),
+        "create_order",
+    );
+    let mut original: serde_json::Value =
+        serde_json::from_str(create.body.as_deref().unwrap()).unwrap();
+    let id = original["o"]["m"]["co"].as_str().unwrap().to_owned();
+    reply(
+        &mut e,
+        &create,
+        200,
+        &serde_json::json!({"r":{"oi":"0xaaaa","m":{"co":id}}}).to_string(),
+    );
+    original["o"]["oi"] = "0xaaaa".into();
+    original["o"]["s1"] = serde_json::json!({"s":"OPEN","ts":["0"],"ut":"1700000000003000000"});
+    let source = serde_json::json!({"r":original["o"]}).to_string();
+    let get = http(
+        command(
+            &mut e,
+            Command::AmendOrder {
+                command: 91,
+                id: id.clone(),
+                price: Some(80.),
+                amount: None,
+            },
+        ),
+        "/order",
+    );
+    let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let replacement = http(
+        reply(
+            &mut e,
+            &verify,
+            200,
+            &source.replace("\"OPEN\"", "\"CANCELLED\""),
+        ),
+        "create_order",
+    );
+    let restore = http(
+        reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#),
+        "create_order",
+    );
+    let wire: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    for field in ["sa", "im", "ti", "po", "ro", "l", "b", "bf"] {
+        assert_eq!(wire["o"][field], original["o"][field], "{field}");
+    }
+    assert_eq!(wire["o"]["m"]["co"], id);
+    assert_eq!(wire["o"]["m"]["t"], original["o"]["m"]["t"]);
+    let actions = reply(
+        &mut e,
+        &restore,
+        200,
+        &serde_json::json!({"r":{"oi":"0xbbbb","m":{"co":id},"s1":{"s":"OPEN"}}}).to_string(),
+    );
+    let error = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::Notice(Notice::CommandFailed { command: 91, error }) = a {
+                Some(error)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(error).unwrap()["protection"],
+        "restored"
+    );
+}
+
+#[test]
+fn protective_final_guard_uses_the_replacements_exact_source_not_a_shared_price() {
+    for reference in [
+        StopTriggerType::LastPrice,
+        StopTriggerType::MarkPrice,
+        StopTriggerType::IndexPrice,
+    ] {
+        let (mut e, public, source) =
+            protective_engine(OrderType::StopLoss, OrderSide::Sell, reference);
+        protective_quote(
+            &mut e,
+            public,
+            NOW + 1.,
+            r#""lp":"100","mp":"100","ip":"100""#,
+        );
+        let get = protective_start(&mut e, 80.);
+        protective_quote(
+            &mut e,
+            public,
+            NOW + 2.,
+            r#""lp":"50","mp":"70","ip":"150""#,
+        );
+        let actions = reply(&mut e, &get, 200, &source);
+        if reference == StopTriggerType::IndexPrice {
+            http(actions, "cancel_order");
+        } else {
+            no_protective_cancel(&actions, "trigger");
+        }
+    }
+}
+#[test]
+fn protective_refused_restore_never_renews_session_or_sends_a_second_restore() {
+    let (mut e, public, source) = protective_engine(
+        OrderType::StopLoss,
+        OrderSide::Sell,
+        StopTriggerType::MarkPrice,
+    );
+    e.store_mut().update_order("42", |o| o.close = Some(true));
+    let source = source.replace("\"cp\":false", "\"cp\":true");
+    protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+    let get = protective_start(&mut e, 80.);
+    let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let replacement = http(
+        reply(
+            &mut e,
+            &verify,
+            200,
+            &source.replace("\"OPEN\"", "\"CANCELLED\""),
+        ),
+        "create_order",
+    );
+    let restore = http(
+        reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#),
+        "create_order",
+    );
+    let actions = reply(&mut e, &restore, 401, r#"{"c":1000,"m":"expired"}"#);
+    assert!(!actions.iter().any(|a|matches!(a,Action::Http(r) if r.url.ends_with("create_order")||r.url.ends_with("auth/api_key/login"))));
+    let error = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::Notice(Notice::CommandFailed { command: 91, error }) = a {
+                Some(error)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(error).unwrap()["protection"],
+        "unprotected"
+    );
+}
+
+#[test]
+fn protective_disconnect_or_invalid_own_field_revokes_reference() {
+    for disconnect in [false, true] {
+        let (mut e, public, source) = protective_engine(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            StopTriggerType::MarkPrice,
+        );
+        protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+        let get = protective_start(&mut e, 80.);
+        if disconnect {
+            e.handle(
+                NOW + 2.,
+                Event::WsClosed {
+                    socket: public,
+                    code: 1006,
+                },
+            );
+            drain(&mut e).for_each(drop);
+        } else {
+            protective_quote(&mut e, public, NOW + 2., r#""mp":"0","lp":"100""#);
+        }
+        no_protective_cancel(&reply(&mut e, &get, 200, &source), "reference stale");
+    }
+}
+#[test]
+fn protective_attached_or_extended_native_trigger_cannot_be_guessed_back() {
+    for attached in [false, true] {
+        let (mut e, public, source) = protective_engine(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            StopTriggerType::MarkPrice,
+        );
+        e.store_mut().update_order("42", |o| {
+            o.close = Some(true);
+            if attached {
+                o.parent_id = Some("parent".into());
+            }
+        });
+        let mut native: serde_json::Value = serde_json::from_str(&source).unwrap();
+        native["r"]["m"]["t"]["t"]["cp"] = true.into();
+        if !attached {
+            native["r"]["m"]["extra_group"] = "unrecognized".into();
+        }
+        let source = native.to_string();
+        protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+        let get = protective_start(&mut e, 80.);
+        let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+        let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+        let replacement = http(
+            reply(
+                &mut e,
+                &verify,
+                200,
+                &source.replace("\"OPEN\"", "\"CANCELLED\""),
+            ),
+            "create_order",
+        );
+        let actions = reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#);
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order")))
+        );
+        let error = actions
+            .iter()
+            .find_map(|a| {
+                if let Action::Notice(Notice::CommandFailed { command: 91, error }) = a {
+                    Some(error)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(error).unwrap()["protection"],
+            "unprotected"
+        );
+        assert!(error.message.contains("re-place"));
+    }
+}
+#[test]
+fn protective_missing_cancellation_proof_never_places_or_puts_back() {
+    let (mut e, public, source) = protective_engine(
+        OrderType::StopLoss,
+        OrderSide::Sell,
+        StopTriggerType::MarkPrice,
+    );
+    protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+    let get = protective_start(&mut e, 80.);
+    let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let actions = reply(&mut e, &verify, 200, r#"{"r":[]}"#);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order")))
+    );
+    assert!(done(&actions, 91).unwrap().is_err());
+}
+
+#[test]
+fn protective_put_back_ack_needs_positive_native_state() {
+    for state in [None, Some("REJECTED"), Some("CANCELLED")] {
+        let (mut e, public, source) = protective_engine(
+            OrderType::StopLoss,
+            OrderSide::Sell,
+            StopTriggerType::MarkPrice,
+        );
+        e.store_mut().update_order("42", |o| o.close = Some(true));
+        let source = source.replace("\"cp\":false", "\"cp\":true");
+        protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+        let get = protective_start(&mut e, 80.);
+        let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+        let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+        let replacement = http(
+            reply(
+                &mut e,
+                &verify,
+                200,
+                &source.replace("\"OPEN\"", "\"CANCELLED\""),
+            ),
+            "create_order",
+        );
+        let restore = http(
+            reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#),
+            "create_order",
+        );
+        let mut answer = serde_json::json!({"r":{"oi":"0x5678","m":{"co":"42"}}});
+        if let Some(state) = state {
+            answer["r"]["s1"] = serde_json::json!({"s":state});
+        }
+        let actions = reply(&mut e, &restore, 200, &answer.to_string());
+        let error = actions
+            .iter()
+            .find_map(|a| {
+                if let Action::Notice(Notice::CommandFailed { command: 91, error }) = a {
+                    Some(error)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let error = serde_json::to_value(error).unwrap();
+        if state.is_some() {
+            assert_eq!(error["protection"], "unprotected");
+        } else {
+            assert!(error["protection"].is_null());
+            assert_eq!(error["outcome"], "unknown");
+        }
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("create_order")))
+        );
+    }
+}
+
+#[test]
+fn protective_unknown_response_with_session_code_does_not_refresh_or_resend() {
+    let (mut e, public, source) = protective_engine(
+        OrderType::StopLoss,
+        OrderSide::Sell,
+        StopTriggerType::MarkPrice,
+    );
+    protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+    let get = protective_start(&mut e, 80.);
+    let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+    let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+    let replacement = http(
+        reply(
+            &mut e,
+            &verify,
+            200,
+            &source.replace("\"OPEN\"", "\"CANCELLED\""),
+        ),
+        "create_order",
+    );
+    let actions = reply(
+        &mut e,
+        &replacement,
+        503,
+        r#"{"c":1000,"m":"uncertain upstream"}"#,
+    );
+    assert!(!actions.iter().any(|a|matches!(a,Action::Http(r) if r.url.ends_with("create_order")||r.url.ends_with("auth/api_key/login"))));
+    let error = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::Notice(Notice::CommandFailed { command: 91, error }) = a {
+                Some(error)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(serde_json::to_value(error).unwrap()["outcome"], "unknown");
+}
+
+#[test]
+fn protective_429_on_replacement_or_put_back_stays_unknown_without_retry_or_protection_claim() {
+    for put_back in [false, true] {
+        for body in [
+            "",
+            r#"{"c":1001,"m":"refused"}"#,
+            r#"{"c":1000,"m":"expired"}"#,
+        ] {
+            let (mut e, public, source) = protective_engine(
+                OrderType::StopLoss,
+                OrderSide::Sell,
+                StopTriggerType::MarkPrice,
+            );
+            e.store_mut().update_order("42", |o| o.close = Some(true));
+            let source = source.replace("\"cp\":false", "\"cp\":true");
+            protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+            let get = protective_start(&mut e, 80.);
+            let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+            let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+            let replacement = http(
+                reply(
+                    &mut e,
+                    &verify,
+                    200,
+                    &source.replace("\"OPEN\"", "\"CANCELLED\""),
+                ),
+                "create_order",
+            );
+            let pending = if put_back {
+                http(
+                    reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#),
+                    "create_order",
+                )
+            } else {
+                replacement
+            };
+            let actions = reply(&mut e, &pending, 429, body);
+            assert!(!actions.iter().any(|a|matches!(a,Action::Http(r) if r.url.ends_with("create_order") || r.url.ends_with("cancel_order") || r.url.ends_with("auth/api_key/login"))),"{actions:?}");
+            let error = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            assert!(error.protection.is_none());
+            assert!(error.message.contains("unknown") && error.message.contains("Open Orders"));
+            assert!(!error.message.contains("both refused"));
+        }
     }
 }

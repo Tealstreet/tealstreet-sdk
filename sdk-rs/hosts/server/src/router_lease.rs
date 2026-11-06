@@ -235,6 +235,8 @@ pub struct Counts {
     pub tracked_users: usize,
     pub fenced_users: usize,
     pub would_fence_users: usize,
+    /// Live hosted users whose record would fence; tracked users who left count only above.
+    pub live_would_fence_users: usize,
     pub live_users_without_lease: usize,
 }
 
@@ -354,10 +356,14 @@ impl Users {
             counts.fenced_users += usize::from(status.fenced);
             counts.would_fence_users += usize::from(status.would_fence);
         }
-        counts.live_users_without_lease = live_users
-            .iter()
-            .filter(|user| !entries.contains_key(*user))
-            .count();
+        for user in live_users {
+            match entries.get(user) {
+                Some(entry) => {
+                    counts.live_would_fence_users += usize::from(entry.status().would_fence)
+                }
+                None => counts.live_users_without_lease += 1,
+            }
+        }
         counts
     }
     pub fn summary(&self, counts: Counts) -> Summary {
@@ -880,6 +886,7 @@ mod tests {
             .accept(&beat(now.load(Ordering::Relaxed), 1, 1))
             .unwrap();
         let granted = users.get("u").unwrap();
+        let departed = users.get("departed").unwrap();
         let live = HashSet::from([
             "u".into(),
             "empty".into(),
@@ -887,19 +894,30 @@ mod tests {
             "account-only".into(),
         ]);
         let before = users.counts(&live);
-        assert_eq!(before.tracked_users, 2);
+        assert_eq!(before.tracked_users, 3);
         assert_eq!(before.fenced_users, 0);
         assert_eq!(
             before.would_fence_users,
+            usize::from(empty.status().would_fence)
+                + usize::from(granted.status().would_fence)
+                + usize::from(departed.status().would_fence)
+        );
+        assert_eq!(before.would_fence_users, 2);
+        assert_eq!(
+            before.live_would_fence_users,
             usize::from(empty.status().would_fence) + usize::from(granted.status().would_fence)
         );
-        assert_eq!(before.would_fence_users, 1);
+        assert_eq!(before.live_would_fence_users, 1);
         assert_eq!(before.live_users_without_lease, 2);
         advance(&now, 45_001).await;
         let after = users.counts(&live);
-        assert_eq!(after.would_fence_users, 2);
+        assert_eq!(after.would_fence_users, 3);
+        assert_eq!(
+            after.live_would_fence_users, 2,
+            "the departed record is not live"
+        );
         assert_eq!(after.fenced_users, 0);
-        assert_eq!(after.tracked_users, 2);
+        assert_eq!(after.tracked_users, 3);
         assert_eq!(after.live_users_without_lease, 2);
     }
     #[tokio::test(start_paused = true)]
