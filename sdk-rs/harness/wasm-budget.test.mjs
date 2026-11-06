@@ -186,7 +186,6 @@ test('#3018 after merging 78bc1ae5a39 (run 41870743418 at c9d4de158d5) retains h
 
 test('#3018 protective-amend caps (run 41854021043 at 824ff543b6d) retain the ruled headroom', () => {
   for (const [venue, measured, cap] of [
-    ['grvt', 1_770_412, 1_780_736],
     ['polymarket', 1_590_031, 1_600_512],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
@@ -291,6 +290,16 @@ test('#3122 protective stop edits (run 42126229513) retain Paradex and BloFin he
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+});
+
+
+test('#3129 guarded GRVT edits (run 42145552491) retain measured headroom', () => {
+  const [venue, measured, cap] = ['grvt', 1_806_590, 1_817_600];
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
 
 test('#3127 KuCoin guarded stop edits (run 42140111861) retain KuCoin headroom', () => {
