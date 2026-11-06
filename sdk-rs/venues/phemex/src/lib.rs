@@ -456,6 +456,14 @@ impl Venue for PhemexPerpetuals {
     fn managed_sockets() -> bool {
         true
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.stop_release_veto(store, pending, release)
+    }
 
     fn fence_uncertain_placements(&self) -> bool {
         true
