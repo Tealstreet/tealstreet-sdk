@@ -1635,6 +1635,8 @@ impl ApexOmni {
             "Your {what} was not replaced: its cancel was sent but could not be confirmed, so whether it still stands is unknown. Check Open Orders"
         ));
         error.presents = true;
+        // Only here is it unknown whether the original stands: reconcile it.
+        let _ = cx.inherit_plan_uncertainty(&delivery.plan);
         if data {
             let _ = cx.finish_plan_call(&delivery.plan, &delivery.slot, &delivery.context);
         }

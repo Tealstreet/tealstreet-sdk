@@ -2463,6 +2463,11 @@ fn a_refused_stop_replacement_puts_the_original_back_once() {
         error.message
     );
     assert_eq!(error.protection, Some(Protection::Restored));
+    assert_ne!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "a proven cancel is never typed unknown"
+    );
     assert!(placements(&http(out)).is_empty(), "one put-back only");
 }
 
@@ -2573,6 +2578,7 @@ fn a_stop_that_filled_during_its_cancel_or_a_partly_filled_entry_leg_is_not_put_
 
 #[test]
 fn an_unproven_cancel_sends_no_replacement_or_put_back() {
+    use safe_cex_engine::Outcome;
     for lost in [true, false] {
         let (mut e, socket) = ready_with_socket();
         resting_stop(&mut e, socket, 0.0);
@@ -2617,8 +2623,15 @@ fn an_unproven_cancel_sends_no_replacement_or_put_back() {
             "lost {lost}: {}",
             error.message
         );
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "lost {lost}");
         assert_eq!(error.protection, None);
-        assert!(placements(&http(out)).is_empty(), "lost {lost}");
+        let sent = http(out);
+        assert!(placements(&sent).is_empty(), "lost {lost}");
+        assert!(
+            sent.iter().any(|r| r.url.contains("/v3/open-orders")),
+            "lost {lost}: the unknown original is reconciled: {:?}",
+            sent.iter().map(|r| &r.url).collect::<Vec<_>>()
+        );
     }
 }
 
