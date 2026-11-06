@@ -369,6 +369,7 @@ struct Parked {
 }
 
 pub struct Registry {
+    pub public_topics: Arc<crate::public_topics::PublicTopics>,
     pub user_drains: crate::user_drain::Users,
     pub router_leases: Arc<crate::router_lease::Users>,
     pub interruptions: Arc<crate::interruption::Notices>,
@@ -697,6 +698,7 @@ fn usable_builder(builder: &crate::envelope::HyperliquidBuilder) -> bool {
 impl Registry {
     pub fn new(threads: EngineThreads, account_flush: Duration, resume_grace: Duration) -> Self {
         Self {
+            public_topics: Arc::default(),
             user_drains: crate::user_drain::Users::default(),
             router_leases: Arc::new(crate::router_lease::Users::new(Default::default())),
             interruptions: Default::default(),
@@ -1036,6 +1038,9 @@ impl Registry {
             account: init.account_name.clone(),
             venue: venue.clone(),
         };
+        if public_only {
+            config.interest_observer = Some(self.public_topics.observer(&venue));
+        }
         let (spawned, receive) = tokio::sync::oneshot::channel();
         let placed = self.threads.place(move |placement| {
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
