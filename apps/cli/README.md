@@ -208,6 +208,9 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
   noisy prefixes there, not in `logger.ts`.
 - **Everything else prints _above_ the prompt** via `writeAbovePrompt`
   (readline-aware), so async output never corrupts what the user is typing.
+- **Error lines always name the cause.** `src/error-cause.ts` turns every
+  non-string `console.error/warn` argument into its message, code or a bounded
+  serialization, so a prefix like `bybitdemo error` never prints alone.
   `console.warn` / `console.error` (and any line `log-classify.ts` rates
   `critical`) are additionally mirrored on the **top status bar**
   (`src/status-line.ts`). ("critical" is a severity classification, not a

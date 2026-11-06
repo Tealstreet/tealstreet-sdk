@@ -424,6 +424,8 @@ delegated to the client over WebSocket.
 
 ² Non-`print` terminal output goes through `writeAbovePrompt` (readline-aware redraw) so async lines don't shred the input buffer; `console.warn`/`console.error` (and lines the taxonomy classifies `critical`) additionally call `setStatus` to mirror the latest notable event on the pinned **top alert bar** (`src/status-line.ts`). The always-on **bottom footer** (`src/footer.ts`) is the other pinned surface — both over one shared scroll region (`src/scroll-region.ts`). See the "Output surfaces" row of the doc-sync table.
 
+**No bare error prefixes.** `console.error/warn` terminal text comes from `terminalErrorText` (`src/error-cause.ts`): every non-string argument contributes `describeCause(arg)` — message fields (including inside `raw_response`, `cause`, `data`, `response`), else code/kind/status, else a 300-character serialization — so `console.error('bybitdemo error', body)` can never print only the prefix.
+
 ³ `console.debug` routes to `logger.debug`, which is gated by `MIN_LOG_LEVEL` (`logger.ts`) — default `info`, so debug lines are **dropped entirely** unless `DEBUG=1`/`DEBUG=true` is set. Don't rely on debug output being in `cli.log` by default.
 
 HoW/tradetunnel request diagnostics use this same existing console/logging
