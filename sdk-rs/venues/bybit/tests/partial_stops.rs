@@ -1911,6 +1911,45 @@ fn tp_amend_native_rows_keep_real_reference_or_use_last_when_unknown() {
 }
 
 #[test]
+fn new_sl_placements_keep_the_existing_index_to_mark_wire_policy() {
+    for profile in PROFILES {
+        for path in ["standalone", "attached", "position"] {
+            let mut h = ready(profile);
+            h.message("/v5/private", &serde_json::json!({"topic":"position","data":[{
+                "category":profile.category(),"symbol":profile.symbol(),"side":"Buy","size":if path == "position" {"20"} else {"0"},"avgPrice":"100","markPrice":"100","leverage":"10","unrealisedPnl":"0","positionIdx":0
+            }]}).to_string());
+            let mut order = serde_json::json!({
+                "symbol":profile.symbol(),"type":"stop_market","side":"sell",
+                "amount":7,"price":90,"slTriggerType":"index_price"
+            });
+            if path == "attached" {
+                order["type"] = "limit".into();
+                order["stopLoss"] = 85.into();
+            }
+            h.command(Command::PlaceOrders {
+                command: 95,
+                orders: vec![serde_json::from_value(order).unwrap()],
+            });
+            let request = if path == "position" {
+                h.take("/v5/position/trading-stop")
+            } else if h.has_request("/v5/order/create-batch") {
+                h.take("/v5/order/create-batch")
+            } else {
+                h.take("/v5/order/create")
+            };
+            let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            let payload = payload.get("request").map_or(&payload, |rows| &rows[0]);
+            let field = if path == "standalone" {
+                "triggerBy"
+            } else {
+                "slTriggerBy"
+            };
+            assert_eq!(payload[field], "MarkPrice", "{profile:?}/{path}");
+        }
+    }
+}
+
+#[test]
 fn tp_add_uses_a_known_requested_reference_for_linear_and_inverse() {
     for profile in PROFILES {
         for (typed, expected) in [

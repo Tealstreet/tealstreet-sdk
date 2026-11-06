@@ -29,6 +29,9 @@ exact-old-stop restoration path remains intact for that race. No new retry,
 refresh or position-setting behavior is introduced. Known Last/Mark/Index sources
 are preserved in both replacement and exact-old-stop payloads, including Index
 stop-losses. In-place standalone/full/attached amendments are unchanged.
+New SL placement keeps its existing policy: Last when requested, otherwise Mark,
+including an Index request. A wire control covers standalone, attached and
+position trading-stop placement across the five supported profiles.
 
 The additive-fallback fix leaves the existing cancel/recreate flow in place.
 Target-terminal proof after its cancel ACK, expanded unchanged/unfilled/position

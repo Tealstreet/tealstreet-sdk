@@ -252,7 +252,10 @@ fn trigger_by(opts: &PlaceOrderOpts) -> Option<&'static str> {
 
 /// Stop-losses default to mark; take-profits default to last.
 fn sl_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
-    stop_loss_reference(opts.sl_trigger_type)
+    match opts.sl_trigger_type {
+        Some(StopTriggerType::LastPrice) => "LastPrice",
+        _ => "MarkPrice",
+    }
 }
 
 fn stop_loss_reference(trigger: Option<StopTriggerType>) -> &'static str {
