@@ -158,8 +158,10 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
 
 test('#3148 protective edit live fixes (run 42196761441) retain headroom and siblings match', () => {
   const measured = 2_348_153;
-  const cap = 2_359_296;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const historicalCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(historicalCap, 2_359_296);
+  const cap = WASM_VENUE_OVERRIDES.bitget;
+  assert.ok(cap >= historicalCap);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
@@ -488,6 +490,19 @@ test('#3178 intent cleanup (run 42239151280, job 127965614325) retains HL headro
   const cap = WASM_VENUE_OVERRIDES.hyperliquid;
   assert.ok(cap >= measuredCap);
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+
+test('#3207 telemetry (run 42279265759) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
+  const measured = 2_390_477;
+  const cap = 2_401_280;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
