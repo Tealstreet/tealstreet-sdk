@@ -1956,7 +1956,9 @@ impl PhemexPerpetuals {
         if let Some(protect) = guard.stop.take() {
             job.protect = Some(protect);
         }
-        if let Some(gone) = job.gone_note(true) {
+        if job.protect.is_some()
+            && let Some(gone) = job.gone_note(true)
+        {
             let _ = cx.present_plan_failure(
                 &job.plan,
                 format!("{gone}; check Open Orders and re-place it if missing"),
@@ -1990,7 +1992,7 @@ impl PhemexPerpetuals {
             return;
         };
         if cx.now < self.paused_until {
-            if job.replacing.is_some() {
+            if job.protect.is_some() {
                 let _ = cx.inherit_plan_uncertainty(&job.plan);
                 let error = VenueError::new("Phemex requests are rate limited after cancellation")
                     .kind(ErrorKind::RateLimited)
@@ -2975,5 +2977,128 @@ impl PhemexPerpetuals {
                 ),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use safe_cex_engine::signing::{Identities, Identity, KeyRef};
+    use safe_cex_engine::{Action, CredentialSlot, Event, Notice, SocketId, TimerId, Venue};
+
+    // Fault injection only: a real admitted Plan whose venue-local slot was lost.
+    // No test-only hook is exposed to production or integration consumers.
+    struct MissingSlot(PhemexPerpetuals);
+    impl Venue for MissingSlot {
+        type Pending = Pending;
+        fn start(&mut self, _: &mut Cx<'_, Pending>) {}
+        fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
+        fn on_command(&mut self, cx: &mut Cx<'_, Pending>, _: Command) {
+            let identity = Identity::new(KeyRef("fixture".into()), Some(KeyRef("signing".into())));
+            let credential = safe_cex_engine::request_context::Credential {
+                slot: CredentialSlot::Primary,
+                reference: identity.credential.clone(),
+            };
+            let preflight = cx
+                .begin_preflight(PreflightPolicy {
+                    purpose: PreflightPurpose::WriteAfterReads,
+                    read_credential: None,
+                    write_credential: Some(credential.clone()),
+                })
+                .unwrap();
+            let (plan, _slot) = cx
+                .admit_serial_plan(
+                    &preflight,
+                    serial_call(),
+                    SerialPolicy {
+                        credential: Some(credential),
+                        pacing: None,
+                        refusals_complete: false,
+                    },
+                )
+                .unwrap();
+            self.0.trading.jobs.insert(
+                1,
+                Job {
+                    plan,
+                    slot: None,
+                    identity,
+                    steps: VecDeque::from([Step {
+                        method: Method::Delete,
+                        path: "/g-orders/all",
+                        query: String::new(),
+                        call: Call::CancelAccount,
+                        replacement: None,
+                    }]),
+                    ids: vec![],
+                    settings: false,
+                    placing: vec![],
+                    effective: false,
+                    revision: 0,
+                    signed_until: None,
+                    live: None,
+                    cancel_wait: None,
+                    replacing: None,
+                    protect: None,
+                    restoring: false,
+                },
+            );
+            self.0.trade_next(cx, 1);
+            assert!(!self.0.trading.jobs.contains_key(&1));
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[test]
+    fn a_missing_send_slot_terminates_once_without_io() {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(MissingSlot(
+            PhemexPerpetuals::new(Default::default()),
+        ));
+        engine
+            .set_identities(Identities {
+                primary: Some(Identity::new(
+                    KeyRef("fixture".into()),
+                    Some(KeyRef("signing".into())),
+                )),
+                secondary: None,
+            })
+            .unwrap();
+        engine.handle(
+            1000.,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "old".into(),
+                price: Some(67900.),
+                amount: None,
+            }),
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+        );
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(
+            failures[0].message,
+            "Phemex replacement has no send authority"
+        );
     }
 }

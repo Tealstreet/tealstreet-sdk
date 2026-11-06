@@ -623,6 +623,7 @@ impl Venue for PhemexPerpetuals {
     }
     fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
         self.cancel_landed_from_frames(cx);
+        self.wake_replacements(cx);
         let client_ids = cx
             .store
             .orders()

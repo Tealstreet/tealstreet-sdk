@@ -9,6 +9,11 @@ and the remaining retry delay; it never says the whole mutation was not sent,
 restores, or resends.
 
 Native sparse executions retain their symbol alongside the order identity.
+This scoped fence intentionally applies to ordinary limit amends as well: an
+unrelated-symbol fill permits both cancel planning and replacement, while a
+same-symbol fill still refuses. Ordinary refusal/5xx presentation is unchanged.
+The ordinary post-cancel pause wording is deliberately deferred to a separate
+follow-up; this PR narrows the new pause handling to protective jobs.
 Amend admission, the final protective cancel claim, and the post-cancel fence
 check the edited symbol and original order. A fill on another symbol no longer
 blocks a native replacement. Unknown or overflowed fill evidence remains a
@@ -20,8 +25,10 @@ account-wide fill boolean, so **a fill on another symbol can still abort their
 replacement**. After a proven cancellation, that abort now reports typed
 `Unprotected` with **re-place** wording instead of silently dropping the
 replacement. The regression exercises both same-symbol and other-symbol source
-fills. A scoped source format is a separate, consumer-first rollout after this
-PR lands and requires overseer approval before any v2 source ships.
+fills. Terminal cancel frames also wake an already-waiting replacement, just
+as native socket messages do. A scoped source format is a separate,
+consumer-first rollout after this PR lands and requires overseer approval
+before any v2 source ships.
 
 The existing selected-field trigger receipt (at most 5 seconds old, equality is
 crossed), unchanged-order, unfilled-order and protected-position checks remain

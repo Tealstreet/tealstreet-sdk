@@ -4321,7 +4321,7 @@ fn a_partly_filled_standalone_stop_is_vetoed_before_cancel() {
 
 #[test]
 fn protective_post_cancel_frame_fed_fill_refusal_is_explicit_even_on_another_symbol() {
-    for symbol in ["BTCUSDT", "ETHUSDT"] {
+    for symbol in [Some("BTCUSDT"), Some("ETHUSDT"), None] {
         let (mut source, socket) = authenticated("OneWay");
         let btc = source.store().market("BTCUSDT").unwrap().clone();
         let mut eth = btc.clone();
@@ -4352,18 +4352,30 @@ fn protective_post_cancel_frame_fed_fill_refusal_is_explicit_even_on_another_sym
             }),
         );
         let cancel = writes(&a).remove(0);
-        protective_exit_frame(&mut source, socket, vec![protective_sparse_fill(symbol)]);
-        protective_exit_frame(&mut source, socket, vec![protective_canceled_stop()]);
-        let uncertain = source.snapshot_frame(1004.).to_vec();
-        fed.apply_frame(1004., &uncertain, false).unwrap();
-        safe_cex_engine::test_support::prepared_actions(&mut fed, 1004.);
         let a = reply(
             &mut fed,
-            1005.,
+            1004.,
             &cancel,
             200,
-            &json!({"code":0,"data":protective_canceled_stop()}).to_string(),
+            &json!({"code":0,"data":pending_cancel_ack("old")}).to_string(),
         );
+        assert!(writes(&a).is_empty(), "wait for terminal cancel proof");
+        if let Some(symbol) = symbol {
+            protective_exit_frame(&mut source, socket, vec![protective_sparse_fill(symbol)]);
+        }
+        protective_exit_frame(&mut source, socket, vec![protective_canceled_stop()]);
+        let uncertain = source.snapshot_frame(1006.).to_vec();
+        fed.apply_frame(1006., &uncertain, false).unwrap();
+        let a = safe_cex_engine::test_support::prepared_actions(&mut fed, 1006.);
+        if symbol.is_none() {
+            assert_eq!(
+                writes(&a).len(),
+                1,
+                "a terminal frame wakes the replacement"
+            );
+            assert_eq!(p(&writes(&a)[0], "stopPxRp").as_deref(), Some("67900"));
+            continue;
+        }
         assert!(
             writes(&a).is_empty(),
             "v1 retains its conservative global fill veto"
@@ -4373,16 +4385,16 @@ fn protective_post_cancel_frame_fed_fill_refusal_is_explicit_even_on_another_sym
                 action,
                 Action::Notice(Notice::CommandFailed { command: 1, .. })
             )),
-            "{symbol}: {a:?}; old={:?}",
+            "{symbol:?}: {a:?}; old={:?}",
             fed.store().order("old")
         );
         let error = failure(&a);
         assert_eq!(
             error.protection,
             Some(safe_cex_engine::error::Protection::Unprotected),
-            "{symbol}: {error:?}"
+            "{symbol:?}: {error:?}"
         );
-        assert!(error.message.contains("re-place"), "{symbol}: {error:?}");
+        assert!(error.message.contains("re-place"), "{symbol:?}: {error:?}");
     }
 }
 
@@ -4411,4 +4423,110 @@ fn an_unreconciled_same_symbol_fill_at_final_claim_vetoes_the_cancel() {
             .contains("fills are awaiting order reconciliation")
     );
     assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+}
+
+#[test]
+fn ordinary_replacement_text_matches_master() {
+    for (status, body) in [
+        (
+            200,
+            r#"{"code":11082,"msg":"TE_RISK_LIMIT_EXCEEDED","data":null}"#,
+        ),
+        (503, ""),
+    ] {
+        let (mut e, _) = authenticated("OneWay");
+        e.store_mut().upsert_order(order("old"));
+        let cancel = amend_old(&mut e);
+        let a = respond(
+            &mut e,
+            &cancel,
+            json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+        );
+        let a = reply(&mut e, 1002., &writes(&a)[0], status, body);
+        let error = failure(&a);
+        let expected = if status == 200 {
+            "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order is gone: it was canceled and its replacement refused"
+        } else {
+            "HTTP response does not prove the write outcome"
+        };
+        assert_eq!(error.message, expected);
+        assert_eq!(error.legacy_text(), expected);
+        assert_eq!(error.protection, None);
+        assert!(writes(&a).is_empty());
+    }
+}
+
+#[test]
+fn ordinary_cross_symbol_fills_allow_planning_and_replacement() {
+    for before_plan in [true, false] {
+        let (mut e, socket) = authenticated("OneWay");
+        let btc = e.store().market("BTCUSDT").unwrap().clone();
+        let mut eth = btc.clone();
+        eth.id = "ETHUSDT".into();
+        eth.symbol = "ETHUSDT".into();
+        e.store_mut().set_markets(vec![btc, eth]);
+        e.store_mut().upsert_order(order("old"));
+        if before_plan {
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("ETHUSDT")]);
+        }
+        protective_cancel_wait(&mut e);
+        if !before_plan {
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("ETHUSDT")]);
+        }
+        let a = protective_exit_frame(&mut e, socket, vec![canceled_row("old")]);
+        assert_eq!(writes(&a).len(), 1, "before_plan={before_plan}: {a:?}");
+        assert_eq!(p(&writes(&a)[0], "priceRp").as_deref(), Some("67900"));
+    }
+}
+
+#[test]
+fn ordinary_same_symbol_fills_veto_planning_or_replacement() {
+    for before_plan in [true, false] {
+        let (mut e, socket) = authenticated("OneWay");
+        e.store_mut().upsert_order(order("old"));
+        if before_plan {
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("BTCUSDT")]);
+        } else {
+            protective_cancel_wait(&mut e);
+            protective_exit_frame(&mut e, socket, vec![protective_sparse_fill("BTCUSDT")]);
+        }
+        let a = if before_plan {
+            command(
+                &mut e,
+                Command::AmendOrder {
+                    command: 1,
+                    id: "old".into(),
+                    price: Some(67900.),
+                    amount: None,
+                },
+            )
+        } else {
+            protective_exit_frame(&mut e, socket, vec![canceled_row("old")])
+        };
+        assert!(writes(&a).is_empty());
+        assert!(done(&a).is_err());
+        assert_eq!(failure(&a).protection, None);
+    }
+}
+
+#[test]
+fn ordinary_post_cancel_pause_retains_master_behavior_in_this_slice() {
+    let (mut e, socket) = authenticated("OneWay");
+    e.store_mut().upsert_order(order("old"));
+    protective_cancel_wait(&mut e);
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 88,
+            orders: vec![opts("throttle")],
+        },
+    );
+    raw_status(&mut e, &writes(&a)[0], 429);
+    let a = protective_exit_frame(&mut e, socket, vec![canceled_row("old")]);
+    assert!(writes(&a).is_empty());
+    assert_eq!(
+        failure(&a).message,
+        "Phemex requests are rate limited; mutation was not sent"
+    );
+    assert_eq!(failure(&a).protection, None);
 }
