@@ -6,8 +6,8 @@ import { parseArgs } from 'node:util';
 
 // Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
-// total package size; Sam raised the combined ceiling to 16 MiB on 2026-10-27.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_216 });
+// total package size; Sam raised the combined ceiling to 17 MiB on 2026-11-06 after #3140 measured 16,778,652 B.
+export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_792 });
 // #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB);
 // #2224 serial call pacing: CI 1,482,920, +1 KiB under the 2 KiB shared-code rule.
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
@@ -145,6 +145,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // #3073 run 41931095253 measured bitget and bitgetusdc 2,334,811 B.
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB; siblings equal.
 // #3094 run 42062090938 measured bybit 2,214,254 B; CI size plus 10 KiB rounded up to the KiB.
+// #3106 run 42097859473, job 127493304972: hyperliquid 2,108,435 B at 8d94727188a.
+// CI size plus 10 KiB rounded up to the KiB; hyperliquidspot shares the family cap.
 // #2314 Lighter managed sockets: job 127434185656 measured lighter 2,034,142 B;
 // CI size plus 10 KiB rounded up to the KiB, lighter-robinhood equal to lighter.
 // #3118 run 42112075305 measured asterdex 2,139,837 B; CI size plus 10 KiB, rounded up to the KiB.
@@ -160,33 +162,45 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // (proof read and put-back). CI size plus 10 KiB, rounded up to the KiB.
 // #3138 run 42166643605 measured bitrue 1,829,700 B: guarded stop edits, cancel-proof polling and
 // put-back. CI size plus 10 KiB, rounded up to the KiB.
+// #3140 run 42172778210 measured breakoutprop 1,554,817 B on composed checkout 451287ba0229.
+// CI size plus 10 KiB, rounded up to the KiB.
 // #3121 run 42122802638, job 127583372751 at cce3b8d1f5f measured okx 1,962,129 B.
 // CI size plus 10 KiB rounded up to the KiB; all OKX variants share the okx family cap.
+// #3148 run 42196761441 measured bitget 2,348,153 B; CI size plus 10 KiB rounded up
+// to the KiB, bitgetusdc equal to bitget.
+// #3143 run 42181736999 measured hyperliquid 2,126,281 B: the public data watch, error-channel
+// refusals and Control::Unwatched. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
+// #3152 run 42200843544, job 127838799471 measured bingx 2,063,923 B.
+// CI size plus 10 KiB, rounded up to the KiB.
+// #3149 run 42197163575 measured hyperliquid 2,143,008 B: activeAssetData scoping, the
+// FetchLeverage read and subscription.count. CI size plus 10 KiB, rounded up; siblings equal.
+// #3158 run 42215250423, job 127884302751 measured lighter 2,068,697 B.
+// CI size plus 10 KiB, rounded up to the KiB; lighter-robinhood equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
   backpack: 1_937_408,
   binance: 2_206_720,
-  bingx: 2_036_736,
-  bitget: 2_345_984,
-  bitgetusdc: 2_345_984,
+  bingx: 2_074_624,
+  bitget: 2_359_296,
+  bitgetusdc: 2_359_296,
   bitrue: 1_840_128,
   bitunix: 1_849_344,
   blofin: 1_989_632,
-  breakoutprop: 1_512_448,
+  breakoutprop: 1_565_696,
   bybit: 2_225_152,
   coinbase: 1_826_816,
   cryptocom: 1_727_488,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_117_632,
-  hyperliquidspot: 2_117_632,
+  hyperliquid: 2_153_472,
+  hyperliquidspot: 2_153_472,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
   kucoinspot: 2_264_064,
-  lighter: 2_044_928,
-  'lighter-robinhood': 2_044_928,
+  lighter: 2_079_744,
+  'lighter-robinhood': 2_079_744,
   // #3131, CI run 42150228180: MEXC measured 1,777,946 B + 10 KiB, rounded up.
   mexc: 1_788_928,
   okx: 1_973_248,

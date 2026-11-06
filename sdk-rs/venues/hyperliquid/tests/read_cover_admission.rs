@@ -115,6 +115,10 @@ impl Source {
         for action in support::prepared_now(&mut self.engine) {
             if let Action::Http(request) = action {
                 assert_eq!(support::kind(&request), "frontendOpenOrders");
+                assert_eq!(
+                    self.engine.http_read_class(request.id),
+                    safe_cex_engine::HttpReadClass::Critical
+                );
                 self.reads.push_back((request, self.now));
             }
         }

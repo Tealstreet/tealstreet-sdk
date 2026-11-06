@@ -834,6 +834,7 @@ impl Venue for BitgetFutures {
             self.account.uta,
             &self.account.plans,
             &self.account.trailing,
+            &self.account.execution_prices,
         ))
     }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
@@ -845,6 +846,7 @@ impl Venue for BitgetFutures {
         self.account.uta = state.uta;
         self.account.plans = state.plans;
         self.account.trailing = state.trailing;
+        self.account.execution_prices = state.execution_prices;
         // Writes waiting on detection may now plan.
         self.wake_trading(cx);
     }

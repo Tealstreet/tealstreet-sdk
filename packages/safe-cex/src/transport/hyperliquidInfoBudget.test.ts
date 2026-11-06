@@ -12,7 +12,7 @@ const ORIGIN = 'https://api.hyperliquid.xyz';
 const ORDERS = JSON.stringify({ type: 'frontendOpenOrders', user: 'local-only' });
 const signal = () => new AbortController().signal;
 const flushDatabase = async () => {
-  for (let i = 0; i < 12; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+  for (let i = 0; i < 32; i++) await new Promise<void>((resolve) => setImmediate(resolve));
 };
 let factory: IDBFactory;
 let budgetModule: typeof import('./hyperliquidInfoBudget');
@@ -24,7 +24,8 @@ const admit = async (
   deadline: number,
   signal: AbortSignal,
 ) => {
-  const grant = await budget.wait(origin, body, deadline, signal);
+  // These existing controls exercise the full aggregate bucket; normal/bulk reserves have dedicated controls.
+  const grant = await budget.wait(origin, body, deadline, signal, 'critical');
   return budget.admitDispatch(origin, grant, deadline, signal, () => 0);
 };
 const spend = async (budget: HyperliquidInfoBudget, weight = 1000) => {
@@ -65,7 +66,7 @@ describe('unavailable shared storage', () => {
     } as unknown as IDBFactory;
     const a = new budgetModule.HyperliquidInfoBudget(new budgetModule.IndexedInfoBudgetStorage(unavailable));
     if (opened) {
-      const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+      const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
       const send = vi.fn();
       const result = Promise.allSettled([a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)]);
       await vi.advanceTimersByTimeAsync(20_000);
@@ -425,22 +426,29 @@ describe('cross-worker Hyperliquid info admission', () => {
     const a = client();
     const b = client();
     const sends: number[] = [];
+    // Renewing leases performs real IDB I/O; settle it between simulated polling turns.
+    const advance = async (ms: number) => {
+      for (let left = ms; left > 0; left -= 100) {
+        await vi.advanceTimersByTimeAsync(Math.min(left, 100));
+        await flushDatabase();
+      }
+    };
     await spend(a);
     const old = admit(b, ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => sends.push(Date.now()));
     await flushDatabase();
     await a.response(ORIGIN, 429, 'Retry-After: 10\r\n');
     const fresh = admit(client(), ORIGIN, ORDERS, Date.now() + 20_000, signal()).then(() => sends.push(Date.now()));
     await flushDatabase();
-    await vi.advanceTimersByTimeAsync(1200);
+    await advance(1200);
     await flushDatabase();
     expect(sends).toEqual([]);
-    await vi.advanceTimersByTimeAsync(8800);
+    await advance(8800);
     await flushDatabase();
     expect(sends).toEqual([]);
-    await vi.advanceTimersByTimeAsync(1200);
+    await advance(1200);
     await flushDatabase();
     expect(sends).toEqual([1_011_200]);
-    await vi.advanceTimersByTimeAsync(1200);
+    await advance(1200);
     await Promise.all([old, fresh]);
     expect(sends).toEqual([1_011_200, 1_012_400]);
   });
@@ -643,8 +651,9 @@ describe('managed transport admission', () => {
         return prepared.bind(request).dispatch();
       };
       try {
-        const initial = Math.floor(1000 / weight);
-        const delay = ((initial + 1) * weight - 1000) * 60;
+        const capacity = 800;
+        const initial = Math.floor(capacity / weight);
+        const delay = ((initial + 1) * weight - capacity) * 60;
         for (let request = 1; request <= initial; request++) await execute(a, { ...packet, request });
         const next = execute(b, { ...packet, request: initial + 1 });
         await flushDatabase();
@@ -787,7 +796,7 @@ it('does not repeat a physical send when its final admission transaction fails a
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   const budget = client();
   const controller = new AbortController();
-  const generation = await budget.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal);
+  const generation = await budget.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal, 'critical');
   const put = IDBObjectStore.prototype.put;
   vi.spyOn(IDBObjectStore.prototype, 'put')
     .mockImplementationOnce(function (this: IDBObjectStore, ...args) {
@@ -836,7 +845,7 @@ it.each(['memory', 'indexed'] as const)(
     await flushDatabase();
     expect(sent).toBe(true);
     await peer;
-    await b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    await b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
     await admit(a, ORIGIN, ORDERS, Date.now() + 20_000, signal());
   },
 );
@@ -844,7 +853,7 @@ it.each(['memory', 'indexed'] as const)(
 it('never refunds a request handed to fetch when the caller aborts', async () => {
   const a = client();
   const controller = new AbortController();
-  const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal);
+  const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal, 'critical');
   const send = vi.fn();
   await a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, controller.signal, send);
   controller.abort();
@@ -897,7 +906,7 @@ it('atomically charges concurrent dispatches across workers while granting prepa
   const b = client();
   const deadline = Date.now() + 20_000;
   const grants = await Promise.all(
-    Array.from({ length: 60 }, (_, index) => (index % 2 ? a : b).wait(ORIGIN, ORDERS, deadline, signal())),
+    Array.from({ length: 60 }, (_, index) => (index % 2 ? a : b).wait(ORIGIN, ORDERS, deadline, signal(), 'critical')),
   );
   const sends: number[] = [];
   const requests = Promise.all(
@@ -926,7 +935,7 @@ it.each([false, true])(
     const a = client();
     await spend(a, 980);
     await flushDatabase();
-    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal());
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
     if (failure)
       vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(() => {
         throw new DOMException('full', 'QuotaExceededError');
@@ -958,7 +967,7 @@ it.each(['cancel', 'pause'] as const)(
     const a = new budgetModule.HyperliquidInfoBudget(storage);
     const b = client();
     const controller = new AbortController();
-    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal);
+    const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal, 'critical');
     const update = storage.update.bind(storage);
     vi.spyOn(storage, 'update').mockImplementationOnce(async (...args) => {
       const reserved = await update(...args);
@@ -989,13 +998,17 @@ it('does not let newer cheap reads overtake an older cross-realm dispatch waiter
   await spend(a);
   const deadline = Date.now() + 20_000;
   const sent: string[] = [];
-  const older = a.admitDispatch(ORIGIN, { generation: 0, weight: 20 }, deadline, signal(), () => sent.push('orders'));
+  const older = a.admitDispatch(ORIGIN, { generation: 0, weight: 20, readClass: 'critical' }, deadline, signal(), () =>
+    sent.push('orders'),
+  );
   await flushDatabase();
   vi.resetModules();
   const realm = await import('./hyperliquidInfoBudget');
   const b = new realm.HyperliquidInfoBudget(new realm.IndexedInfoBudgetStorage(factory));
   await vi.advanceTimersByTimeAsync(120);
-  const newer = b.admitDispatch(ORIGIN, { generation: 0, weight: 2 }, deadline, signal(), () => sent.push('state'));
+  const newer = b.admitDispatch(ORIGIN, { generation: 0, weight: 2, readClass: 'critical' }, deadline, signal(), () =>
+    sent.push('state'),
+  );
   await flushDatabase();
   expect(sent).toEqual([]);
   for (let step = 0; step < 15; step++) {
@@ -1016,18 +1029,24 @@ it.each(['expired', 'cancelled'] as const)('a %s dispatch waiter cannot block a 
   let abandoned: Promise<unknown> | undefined;
   if (cause === 'expired')
     await backend.update(ORIGIN, (state) => {
-      state.dispatchQueue = [{ id: 'dead-worker', until: Date.now() + 2000 }];
+      state.dispatchQueue = [{ id: 'dead-worker', until: Date.now() + 2000, readClass: 'critical' }];
     });
   else {
     abandoned = a
-      .admitDispatch(ORIGIN, { generation: 0, weight: 20 }, deadline, controller.signal, () => sent.push('cancelled'))
+      .admitDispatch(ORIGIN, { generation: 0, weight: 20, readClass: 'critical' }, deadline, controller.signal, () =>
+        sent.push('cancelled'),
+      )
       .catch(() => undefined);
     await flushDatabase();
     controller.abort();
     await abandoned;
   }
-  const peer = client().admitDispatch(ORIGIN, { generation: 0, weight: 20 }, deadline, signal(), () =>
-    sent.push('peer'),
+  const peer = client().admitDispatch(
+    ORIGIN,
+    { generation: 0, weight: 20, readClass: 'critical' },
+    deadline,
+    signal(),
+    () => sent.push('peer'),
   );
   await flushDatabase();
   for (let step = 0; step < 21; step++) {
@@ -1041,6 +1060,221 @@ it.each(['expired', 'cancelled'] as const)('a %s dispatch waiter cannot block a 
 it('does not require crypto.randomUUID to schedule ordinary reads', async () => {
   vi.stubGlobal('crypto', {});
   const sent = vi.fn();
-  await client().admitDispatch(ORIGIN, { generation: 0, weight: 20 }, Date.now() + 20_000, signal(), sent);
+  await client().admitDispatch(
+    ORIGIN,
+    { generation: 0, weight: 20, readClass: 'critical' },
+    Date.now() + 20_000,
+    signal(),
+    sent,
+  );
   expect(sent).toHaveBeenCalledOnce();
+});
+
+describe('critical order reads', () => {
+  it('holds 200 weight for critical reads across workers', async () => {
+    const ordinary = client();
+    const critical = client();
+    const grant = await ordinary.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'normal');
+    await spend(ordinary, 800);
+    const send = vi.fn();
+    const waiting = ordinary.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send);
+    await flushDatabase();
+    expect(send).not.toHaveBeenCalled();
+    const urgent = await critical.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    const sent = vi.fn();
+    await critical.admitDispatch(ORIGIN, urgent, Date.now() + 20_000, signal(), sent);
+    expect(sent).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(2400);
+    await waiting;
+  });
+
+  it('a critical read passes an older bulk waiter without minting total budget', async () => {
+    const a = client();
+    const b = client();
+    const abort = new AbortController();
+    const bulk = await a.wait(
+      ORIGIN,
+      JSON.stringify({ type: 'candleSnapshot' }),
+      Date.now() + 20_000,
+      abort.signal,
+      'bulk',
+    );
+    const urgent = await b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    await spend(a, 900);
+    const bulkSend = vi.fn();
+    const waiting = Promise.allSettled([a.admitDispatch(ORIGIN, bulk, Date.now() + 20_000, abort.signal, bulkSend)]);
+    await flushDatabase();
+    const sent = vi.fn();
+    const finish = b.admitDispatch(ORIGIN, urgent, Date.now() + 20_000, signal(), sent);
+    await flushDatabase();
+    expect(sent).toHaveBeenCalledOnce();
+    expect(bulkSend).not.toHaveBeenCalled();
+    await finish;
+    abort.abort();
+    await waiting;
+    await spend(b, 80);
+    await expect(b.wait(ORIGIN, ORDERS, Date.now() + 1, signal(), 'critical')).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+  });
+
+  it('critical grants cannot bypass a shared 429 pause', async () => {
+    const a = client();
+    const b = client();
+    const grant = await b.wait(ORIGIN, ORDERS, Date.now() + 20_000, signal(), 'critical');
+    await a.response(ORIGIN, 429, 'Retry-After: 5');
+    const send = vi.fn();
+    await expect(b.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), send)).rejects.toMatchObject({
+      code: 'HTTP_PREPARATION_TIMED_OUT',
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+it('preserves critical FIFO when the older high-weight read starts waiting before Prepare completes', async () => {
+  const a = client();
+  const b = client();
+  const abort = new AbortController();
+  await spend(a);
+  const sent: string[] = [];
+  const older = (async () => {
+    const grant = await a.wait(ORIGIN, '{"type":"userRole"}', Date.now() + 20_000, abort.signal, 'critical');
+    await a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, abort.signal, () => sent.push('role'));
+  })();
+  const settled = Promise.allSettled([older]);
+  try {
+    await flushDatabase();
+    await vi.advanceTimersByTimeAsync(120);
+    const grant = await b.wait(ORIGIN, '{"type":"clearinghouseState"}', Date.now() + 20_000, abort.signal, 'critical');
+    const newer = b.admitDispatch(ORIGIN, grant, Date.now() + 20_000, abort.signal, () => sent.push('state'));
+    const joined = Promise.allSettled([newer]);
+    await flushDatabase();
+    expect(sent).toEqual([]);
+    for (let i = 0; i < 40; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+      await flushDatabase();
+    }
+    await joined;
+    await settled;
+    expect(sent).toEqual(['role', 'state']);
+  } finally {
+    abort.abort();
+    await settled;
+  }
+});
+
+it('the real managed transport admits a critical sizing read while its bulk lookup peer waits', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  const { createEngineTransport } = await import('./engine');
+  await spend(client(), 800);
+  const sends: string[] = [];
+  const raw = {
+    ...nativeTransport(),
+    prepareHttp: () => ({
+      bind: (packet: { readClass?: string }) => ({
+        ready: () => true,
+        dispatch: async () => {
+          sends.push(packet.readClass ?? 'normal');
+          return { status: 200, headers: '', body: new Uint8Array() };
+        },
+      }),
+    }),
+  };
+  const transport = createEngineTransport('hyperliquid', { key: '', secret: '', publicDataOnly: true }, raw);
+  const packet = {
+    request: 123,
+    method: 'POST' as const,
+    intent: 'public' as const,
+    url: ORIGIN + '/info',
+    headers: {},
+    timeoutMs: 20_000,
+    body: '{"type":"orderStatus","oid":9,"user":"fixture"}',
+    readClass: 'critical' as const,
+  };
+  try {
+    let prepared: Awaited<ReturnType<NonNullable<typeof transport.prepareHttp>>> | undefined;
+    const pending = Promise.resolve(transport.prepareHttp!(packet)).then((value) => {
+      prepared = value;
+    });
+    void pending.catch(() => undefined);
+    await flushDatabase();
+    expect(prepared).toBeDefined();
+    await pending;
+    await prepared!.bind(packet).dispatch();
+    expect(sends).toEqual(['critical']);
+    const bulkPacket = { ...packet, request: 124, readClass: 'bulk' as const };
+    const bulk = (async () => {
+      const ready = await transport.prepareHttp!(bulkPacket);
+      await ready.bind(bulkPacket).dispatch();
+    })();
+    await flushDatabase();
+    expect(sends).toEqual(['critical']);
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(100);
+      await flushDatabase();
+    }
+    await bulk;
+    expect(sends).toEqual(['critical', 'bulk']);
+  } finally {
+    transport.dispose?.();
+  }
+});
+
+it('cancelling a quota-waiting critical preparation cannot retire its peer or spend weight', async () => {
+  const a = client();
+  const b = client();
+  const abort = new AbortController();
+  await spend(a);
+  const sends: string[] = [];
+  const first = (async () => {
+    const grant = await a.wait(ORIGIN, '{"type":"userRole"}', Date.now() + 20_000, abort.signal, 'critical');
+    await a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, abort.signal, () => sends.push('disposed'));
+  })();
+  const stopped = Promise.allSettled([first]);
+  await flushDatabase();
+  const peer = (async () => {
+    const grant = await b.wait(ORIGIN, '{"type":"userRole"}', Date.now() + 20_000, signal(), 'critical');
+    await b.admitDispatch(ORIGIN, grant, Date.now() + 20_000, signal(), () => sends.push('peer'));
+  })();
+  await flushDatabase();
+  abort.abort();
+  await stopped;
+  for (let i = 0; i < 40; i++) {
+    await vi.advanceTimersByTimeAsync(100);
+    await flushDatabase();
+  }
+  await peer;
+  expect(sends).toEqual(['peer']);
+});
+
+it('financial reconciliation shares the critical reserve and never exceeds the total quota', async () => {
+  const a = client();
+  await spend(a, 800);
+  const controller = new AbortController();
+  const grant = await a.wait(
+    ORIGIN,
+    '{"type":"clearinghouseState"}',
+    Date.now() + 20_000,
+    controller.signal,
+    'reconciliation',
+  );
+  const send = vi.fn();
+  await a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, controller.signal, send);
+  expect(send).toHaveBeenCalledOnce();
+  await spend(a, 198);
+  await expect(
+    a.wait(ORIGIN, '{"type":"clearinghouseState"}', Date.now() + 1, controller.signal, 'reconciliation'),
+  ).rejects.toMatchObject({ code: 'HTTP_PREPARATION_TIMED_OUT' });
+});
+
+it('financial reconciliation cannot bypass the shared 429 pause', async () => {
+  const a = client();
+  const controller = new AbortController();
+  const grant = await a.wait(ORIGIN, ORDERS, Date.now() + 20_000, controller.signal, 'reconciliation');
+  await a.response(ORIGIN, 429, 'Retry-After: 5');
+  const send = vi.fn();
+  await expect(a.admitDispatch(ORIGIN, grant, Date.now() + 20_000, controller.signal, send)).rejects.toMatchObject({
+    code: 'HTTP_PREPARATION_TIMED_OUT',
+  });
+  expect(send).not.toHaveBeenCalled();
 });

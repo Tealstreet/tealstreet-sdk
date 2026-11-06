@@ -176,6 +176,11 @@ fn cold_portfolio_wallet_does_not_load_a_fabricated_zero_collateral_balance() {
                     socket = Some(connected);
                     engine.handle(1000.0, Event::WsOpened { socket: connected });
                 }
+                // The socket opens with the catalogue, so the mode lands on an open socket:
+                // its private topics are handed off on an immediate wake before the spot read.
+                Action::SetTimer { timer, at_ms } if at_ms <= 1001.0 => {
+                    engine.handle(at_ms, Event::TimerFired { timer });
+                }
                 _ => {}
             }
         }

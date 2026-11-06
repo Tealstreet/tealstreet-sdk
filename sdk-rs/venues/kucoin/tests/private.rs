@@ -1638,3 +1638,45 @@ fn local_signing_refusal_reports_a_sign_error_and_sends_no_private_read() {
         |action| matches!(action, Action::Http(request) if request.url.contains("account-overview"))
     ));
 }
+
+#[test]
+fn native_stop_limit_rows_keep_limit_price_across_sparse_stop_events() {
+    let mut h = Harness::new();
+    h.ready();
+    let row = r#"{"orderId":"stop-limit","symbol":"XBTUSDTM","type":"open","orderType":"limit","status":"open","side":"sell","stop":"down","stopPrice":"80","price":"79","stopPriceType":"MP","size":10,"filledSize":0,"reduceOnly":true,"closeOrder":false,"postOnly":false,"timeInForce":"GTC"}"#;
+    h.ws("/contractMarket/advancedOrders", row);
+    let original = h.engine.store().order("stop-limit").unwrap();
+    assert_eq!(original.kind, OrderType::StopLoss);
+    assert_eq!(original.price, 80.0);
+    assert_eq!(
+        original.extra.as_ref().unwrap().conditional_order_price,
+        Some(79.0)
+    );
+    h.ws("/contractMarket/advancedOrders", r#"{"orderId":"stop-limit","symbol":"XBTUSDTM","type":"open","orderType":"stop","side":"sell","stop":"down","stopPrice":"80","stopPriceType":"MP","size":10,"ts":1610000000500000000}"#);
+    let sparse = h.engine.store().order("stop-limit").unwrap();
+    assert_eq!(
+        sparse.extra.as_ref().unwrap().conditional_order_price,
+        Some(79.0)
+    );
+    assert_eq!(sparse.close, Some(false));
+}
+
+#[test]
+fn native_stop_limit_rest_rows_keep_a_separate_limit_price() {
+    let mut h = Harness::new();
+    h.ready();
+    h.poll();
+    h.reply("/stopOrders?", &Harness::page(r#"{"id":"rest-limit","symbol":"XBTUSDTM","type":"limit","status":"open","side":"sell","stop":"down","stopPrice":"80","price":"79","stopPriceType":"MP","size":10,"filledSize":0,"reduceOnly":true,"closeOrder":false,"postOnly":false,"timeInForce":"GTC"}"#, 1));
+    h.reply("/orders?", EMPTY);
+    h.reply(
+        "/positions",
+        &format!(r#"{{"code":"200000","data":[{POSITION}]}}"#),
+    );
+    let order = h.engine.store().order("rest-limit").unwrap();
+    assert_eq!(order.kind, OrderType::StopLoss);
+    assert_eq!(order.price, 80.0);
+    assert_eq!(
+        order.extra.as_ref().unwrap().conditional_order_price,
+        Some(79.0)
+    );
+}

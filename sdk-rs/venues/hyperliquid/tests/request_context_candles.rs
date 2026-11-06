@@ -511,9 +511,42 @@ fn streamed_prefix_is_never_published_and_progress_cannot_extend_deadline() {
 fn capacity_denial_precedes_invalid_input_and_does_not_retire_a_peer() {
     let mut e = boot(false);
     let mut tokens = Vec::new();
+    let mut short_timers = Vec::new();
     for command in 1..=256 {
-        tokens.push(preparation(&ask(&mut e, NOW, command)).0);
+        let actions = if command <= 2 {
+            ask(&mut e, NOW, command)
+        } else {
+            e.handle_command(
+                NOW,
+                Command::FetchCandles {
+                    command,
+                    symbol: "BTC-PERP".into(),
+                    interval: Interval::M1,
+                    limit: Some(1),
+                    from_ms: None,
+                    to_ms: Some(60_000.),
+                },
+                Some(1),
+            )
+            .unwrap();
+            e.drain_actions().collect()
+        };
+        for action in actions {
+            match action {
+                Action::ManagedHttp(action) => {
+                    if let HttpAction::Prepare { preparation, .. } = *action {
+                        tokens.push(preparation);
+                    }
+                }
+                Action::SetTimer { timer, at_ms } if at_ms == NOW + 1. => short_timers.push(timer),
+                _ => {}
+            }
+        }
     }
+    assert!(
+        tokens.len() >= 2,
+        "two original peers own genuine preparations"
+    );
     e.handle(
         NOW,
         Event::Command(Command::FetchCandles {
@@ -537,6 +570,13 @@ fn capacity_denial_precedes_invalid_input_and_does_not_retire_a_peer() {
         Action::Http(_) | Action::ManagedHttp(_) | Action::SetTimer { .. } | Action::Sign { .. }
     )));
     assert!(e.http_preparation_pending(tokens[1]));
+    // The other 254 genuine caller roots expire; the original two peers stay live.
+    assert!(!short_timers.is_empty());
+    for timer in short_timers {
+        e.handle(NOW + 1., Event::TimerFired { timer });
+    }
+    e.drain_actions().for_each(drop);
+    assert!(e.http_preparation_pending(tokens[1]));
     e.http_preparation_failed(
         NOW + 1.,
         tokens[0],
@@ -547,9 +587,19 @@ fn capacity_denial_precedes_invalid_input_and_does_not_retire_a_peer() {
     assert!(matches!(results(&actions, 1).as_slice(), [Err(_)]));
     assert!(results(&actions, 2).is_empty());
     assert!(e.http_preparation_pending(tokens[1]));
-    let (next, _) = preparation(&ask(&mut e, NOW + 2., 612));
-    let request = release(&mut e, next, NOW + 3., false);
-    reply(&mut e, NOW + 4., &request, CANDLES);
+    let mut actions = ask(&mut e, NOW + 2., 612);
+    let mut at = NOW + 2.;
+    if !actions.iter().any(|a| matches!(a, Action::ManagedHttp(action) if matches!(action.as_ref(), HttpAction::Prepare { .. }))) {
+        let (timer, wake) = actions.iter().find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms < NOW + 20_000. => Some((*timer, *at_ms)), _ => None,
+        }).expect("admitted candle waits only for its native refill");
+        at = wake;
+        e.handle(at, Event::TimerFired { timer });
+        actions = e.drain_actions().collect();
+    }
+    let (next, _) = preparation(&actions);
+    let request = release(&mut e, next, at + 1., false);
+    reply(&mut e, at + 2., &request, CANDLES);
     assert!(matches!(
         results(&e.drain_actions().collect::<Vec<_>>(), 612).as_slice(),
         [Ok(_)]

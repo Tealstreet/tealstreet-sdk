@@ -1,5 +1,6 @@
 //! DXtrade writes have no transport retry. A placement batch is sequential;
 //! cancellation waits for every result in each bounded group of ten.
+pub(crate) mod protection;
 use crate::{BreakoutProp, Operation, Pending, not_sent};
 use safe_cex_engine::model::{
     Market, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, StopTriggerType,
@@ -177,6 +178,12 @@ fn prepare_orders(store: &Store, orders: &[PlaceOrderOpts]) -> Result<Vec<Prepar
 
 #[derive(Clone)]
 enum Step {
+    ProtectiveInspect {
+        intent: Box<protection::Intent>,
+    },
+    ProtectiveModify {
+        edit: Box<protection::Edit>,
+    },
     Place {
         order: PreparedOrder,
         code: String,
@@ -203,6 +210,27 @@ pub(crate) struct Request {
 }
 
 impl Request {
+    pub(crate) fn conditional_etag(&self) -> Option<&str> {
+        if let Step::ProtectiveModify { edit } = &self.step {
+            Some(&edit.etag)
+        } else {
+            None
+        }
+    }
+    pub(crate) fn protective_guard(
+        &self,
+        cx: &Cx<'_, Pending>,
+        venue: &BreakoutProp,
+    ) -> Result<(), String> {
+        if let Step::ProtectiveModify { edit } = &self.step {
+            edit.guard(cx, venue)
+        } else {
+            Ok(())
+        }
+    }
+    pub(crate) fn protective_write(&self) -> bool {
+        matches!(self.step, Step::ProtectiveModify { .. })
+    }
     pub(crate) fn report_progress(&self, cx: &mut Cx<'_, Pending>) {
         if let Step::Place { order, code } = &self.step {
             cx.command_progress(
@@ -225,6 +253,7 @@ struct Job {
     error: Option<VenueError>,
     /// A step took effect, so a later failure cannot mean nothing happened.
     effective: bool,
+    native_protection: bool,
     ids: Vec<String>,
     reserved_places: usize,
     cancel_targets: Vec<String>,
@@ -236,6 +265,22 @@ impl Job {
     fn note_replacement_lost(&self, error: &mut VenueError) {
         if let Some(symbol) = self.replaces.as_deref().filter(|_| self.ids.is_empty()) {
             let unknown = error.outcome == Some(Outcome::Unknown);
+            if self.native_protection {
+                error.presents = true;
+                if unknown {
+                    error.message = format!(
+                        "Your {symbol} protection status is unknown: {}; check Open Orders before editing again",
+                        error.message
+                    );
+                } else {
+                    error.outcome = Some(Outcome::NotSent);
+                    error.message = format!(
+                        "Your {symbol} protection was not changed: {}",
+                        error.message
+                    );
+                }
+                return;
+            }
             error.message = format!(
                 "{}: {}",
                 safe_cex_engine::error::order_gone_text(symbol, unknown),
@@ -624,6 +669,53 @@ impl BreakoutProp {
         {
             return Err("Breakout Prop cannot safely replace a partially filled order".into());
         }
+        if matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            || (order.reduce_only && order.kind == OrderType::Limit)
+        {
+            if order.parent_id.is_some() || order.stop_loss.is_some() || order.take_profit.is_some()
+            {
+                return Err(
+                    "Breakout Prop grouped or attached protection cannot be edited safely".into(),
+                );
+            }
+            let market = store
+                .market(&order.symbol)
+                .ok_or("Breakout Prop market unavailable")?;
+            let price = num::adjust(
+                positive(price.unwrap_or(order.price), "trigger price")?,
+                market.precision.price,
+            );
+            if price <= 0. {
+                return Err("Breakout Prop rounded trigger must be positive".into());
+            }
+            if let Some(v) = amount {
+                let zero = zero_close && v == 0.;
+                if !zero
+                    && (!v.is_finite()
+                        || v <= 0.
+                        || v < market.limits.amount.min
+                        || v > market.limits.amount.max
+                        || num::adjust(v, market.precision.amount) != v)
+                {
+                    return Err(
+                        "Breakout Prop protective edit size is outside market limits".into(),
+                    );
+                }
+            }
+            return Ok(Job {
+                steps: VecDeque::from([Step::ProtectiveInspect {
+                    intent: Box::new(protection::Intent {
+                        original: order.clone(),
+                        price,
+                        amount,
+                    }),
+                }]),
+                cancel_targets: vec![self.trading.canonical_code(store, id).to_owned()],
+                replaces: Some(order.symbol.clone()),
+                native_protection: true,
+                ..Default::default()
+            });
+        }
         let mut opts = PlaceOrderOpts {
             symbol: order.symbol.clone(),
             kind: order.kind,
@@ -715,6 +807,20 @@ impl BreakoutProp {
             };
             let base = format!("/accounts/{}/orders", safe_cex_engine::url::encode(account));
             let request = match &step {
+                Step::ProtectiveInspect { .. } => Request {
+                    command: id,
+                    method: Method::Get,
+                    path: base,
+                    body: None,
+                    step,
+                },
+                Step::ProtectiveModify { edit } => Request {
+                    command: id,
+                    method: Method::Put,
+                    path: base,
+                    body: Some(edit.body.clone()),
+                    step,
+                },
                 Step::Place { order, code } => match order.body(code) {
                     Ok(body) => Request {
                         command: id,
@@ -754,11 +860,47 @@ impl BreakoutProp {
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        body: &str,
+        response: safe_cex_engine::Response<'_>,
     ) {
+        let body = response.body;
         let command = request.command;
         let was_place = matches!(request.step, Step::Place { .. });
+        let native_write = request.protective_write();
+        let native_read = matches!(request.step, Step::ProtectiveInspect { .. });
         let outcome = match request.step {
+            Step::ProtectiveInspect { intent } => protection::Edit::inspect(
+                *intent,
+                &response,
+                self.account_code().unwrap_or_default(),
+            )
+            .map_err(not_sent)
+            .map(|edit| {
+                if let Some(job) = self.trading.jobs.get_mut(&command) {
+                    job.steps.push_front(Step::ProtectiveModify {
+                        edit: Box::new(edit),
+                    });
+                }
+            }),
+            Step::ProtectiveModify { edit } => serde_json::from_str::<PlaceAck>(body)
+                .ok()
+                .and_then(|ack| ack.order_id.text().ok())
+                .filter(|id| id == &edit.native_id)
+                .ok_or_else(|| unproven("Breakout Prop native modify acknowledgement is unproven"))
+                .map(|_| {
+                    if cx.store.order(&edit.intent.original.id) == Some(&edit.intent.original) {
+                        let mut updated = edit.intent.original.clone();
+                        updated.price = edit.intent.price;
+                        if let Some(amount) = edit.intent.amount {
+                            updated.amount = amount;
+                            updated.remaining = amount;
+                        }
+                        cx.store.upsert_order(updated);
+                    }
+                    self.order_revision = self.order_revision.wrapping_add(1);
+                    if let Some(job) = self.trading.jobs.get_mut(&command) {
+                        job.ids.push(edit.intent.original.id.clone());
+                    }
+                }),
             Step::Place { code, order } => serde_json::from_str::<PlaceAck>(body)
                 .map_err(|_| "Invalid DXtrade placement acknowledgement".to_owned())
                 .and_then(|ack| ack.order_id.text())
@@ -861,15 +1003,16 @@ impl BreakoutProp {
             // A read before the replacement: nothing new was sent.
             .map_err(not_sent),
         };
-        if was_place && outcome.is_err() {
+        if (was_place || native_write) && outcome.is_err() {
             self.order_revision = self.order_revision.wrapping_add(1);
         }
         if let Some(job) = self.trading.jobs.get_mut(&command) {
             job.in_flight = job.in_flight.saturating_sub(1);
             match outcome {
-                Ok(()) => job.effective = true,
+                Ok(()) if !native_read => job.effective = true,
+                Ok(()) => {}
                 Err(mut error) => {
-                    if was_place {
+                    if was_place || native_write {
                         job.note_replacement_lost(&mut error);
                     }
                     job.record(error);
@@ -885,7 +1028,10 @@ impl BreakoutProp {
         request: Request,
         mut error: VenueError,
     ) {
-        if matches!(request.step, Step::Place { .. }) {
+        if matches!(request.step, Step::Place { .. })
+            || request.protective_write()
+            || matches!(request.step, Step::ProtectiveInspect { .. })
+        {
             self.order_revision = self.order_revision.wrapping_add(1);
             if let Some(job) = self.trading.jobs.get(&request.command) {
                 job.note_replacement_lost(&mut error);
