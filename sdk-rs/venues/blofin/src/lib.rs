@@ -183,7 +183,12 @@ impl Blofin {
         }
     }
     fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
-        let context = match cx.http_context(Scope::Background, Self::read_policy()) {
+        let issue = if matches!(&pending, Pending::Tickers { .. } | Pending::Candles { .. }) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, Self::read_policy()) {
             Ok(context) => context,
             Err(_) => {
                 self.public_failed(

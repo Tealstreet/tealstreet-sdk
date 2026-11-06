@@ -113,7 +113,6 @@ pub enum HttpReadClass {
     Normal = 0,
     Critical = 1,
     Bulk = 2,
-    #[cfg(feature = "address-nonce")]
     Reconciliation = 3,
 }
 
@@ -7130,6 +7129,7 @@ impl<V: Venue> Engine<V> {
     ) {
         self.assert_live();
         self.flush_http_owner_retirements();
+        self.apply_account_read_budgets(self.io.core.dispatch_now, emitted);
         for action in self.io.core.actions.split_off(emitted).into_iter().rev() {
             queued.push_front(action);
         }
@@ -7138,6 +7138,7 @@ impl<V: Venue> Engine<V> {
     #[inline(always)]
     fn dispatch_actions(&mut self, now: f64) {
         self.assert_live();
+        self.apply_account_read_budgets(now, 0);
         if self.io.core.actions.is_empty()
             && self.io.core.signing_admission.is_empty()
             && self.io.core.signing.is_empty()

@@ -270,3 +270,83 @@ fn managed_reads_keep_the_native_public_and_signed_header_vectors() {
         ]
     );
 }
+
+#[test]
+fn catalogue_and_live_public_classes_are_declared_at_issuance() {
+    use safe_cex_engine::{
+        request_budget::RequestClass,
+        request_context::{Claim, Prepared},
+    };
+    let mut engine = keyless();
+    for (path, class, budget, body) in [
+        (
+            "contracts",
+            RequestClass::Discovery,
+            90_000,
+            r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":4,"pricePrecision":1,"tradeMinLimit":"0","tradeMinQuantity":"0.0001","maxLongLeverage":125}]}"#,
+        ),
+        (
+            "ticker",
+            RequestClass::Read,
+            20_000,
+            r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#,
+        ),
+        (
+            "premiumIndex",
+            RequestClass::Read,
+            20_000,
+            r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#,
+        ),
+    ] {
+        let (token, request) = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } => Some((preparation, request)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("native public preparation");
+        assert!(request.url.ends_with(path));
+        assert_eq!(engine.http_request_class(token), Some(class));
+        assert_eq!(request.timeout_ms, Some(budget));
+        engine.http_prepared(
+            0.,
+            token,
+            Prepared {
+                id: request.id.0,
+                expires_at: None,
+            },
+        );
+        let permit = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("native public binding");
+        assert!(matches!(
+            engine.claim_http(0., permit),
+            Ok(Claim::Released(_))
+        ));
+        engine.handle(
+            0.,
+            Event::HttpResponse {
+                request: request.id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+}

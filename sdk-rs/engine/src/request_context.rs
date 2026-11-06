@@ -965,6 +965,18 @@ impl Lifecycle {
         self.request_class = class;
     }
 
+    pub(crate) fn narrow_account_read(&mut self) -> bool {
+        let deadline = self
+            .context
+            .background_deadline(crate::request_budget::RequestClass::Read);
+        if self.context.operation() != Operation::Read || deadline >= self.deadline {
+            return false;
+        }
+        self.deadline = deadline;
+        self.request_class = crate::request_budget::RequestClass::Read;
+        true
+    }
+
     /// Immutable physical cap; it never grants more time than the Context.
     pub fn deadline(&self) -> f64 {
         self.deadline

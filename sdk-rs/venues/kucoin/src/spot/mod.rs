@@ -187,7 +187,13 @@ impl KucoinSpot {
         }
     }
     fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        let context = match cx.http_context(
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,

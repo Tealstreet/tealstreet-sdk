@@ -90,6 +90,18 @@ impl Paradex {
 }
 
 impl Venue for Paradex {
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::Account(
+                account::Request::Margins { .. }
+                | account::Request::Positions { .. }
+                | account::Request::Balance { .. }
+                | account::Request::Orders { .. },
+            ) => safe_cex_engine::HttpReadClass::Reconciliation,
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
+
     type Pending = Pending;
     /// A host-answered provider binds its Stark public key before start; a
     /// trusted local provider keeps the key it sealed at setup.

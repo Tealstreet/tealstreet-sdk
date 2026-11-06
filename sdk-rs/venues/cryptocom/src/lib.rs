@@ -202,7 +202,12 @@ impl Skipped {
 
 impl Cryptocom {
     fn discovery_read(&mut self, cx: &mut Cx<'_, Pending>, tickers: bool) {
-        let context = match cx.http_context(Scope::Background, read_policy()) {
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, read_policy()) {
             Ok(context) => context,
             Err(_) => {
                 self.discovery.failed(cx, tickers);

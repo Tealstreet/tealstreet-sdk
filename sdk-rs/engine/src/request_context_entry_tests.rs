@@ -1167,7 +1167,7 @@ fn background_issuance_reserves_a_bounded_catalogue_ceiling() {
             let context = cx.http_context(Scope::Background, read_policy()).unwrap();
             assert_eq!(
                 context.request_class(),
-                crate::request_budget::RequestClass::Read
+                crate::request_budget::RequestClass::Discovery
             );
             assert_eq!(context.deadline(), cx.now + 60_000.);
             let context = cx
@@ -1204,7 +1204,12 @@ fn background_http_preparation_distinguishes_catalogues_from_live_data() {
                 "funding",
                 "mark-price",
             ] {
-                let context = cx.http_context(Scope::Background, read_policy()).unwrap();
+                let context = if path == "markets" {
+                    cx.http_context(Scope::Background, read_policy())
+                } else {
+                    cx.http_live_context(Scope::Background, read_policy())
+                }
+                .unwrap();
                 cx.request_managed(
                     context,
                     None,

@@ -847,7 +847,15 @@ impl BybitLinear {
                 Err("Bybit has no API key for a signed read"),
             );
         };
-        let context = match cx.http_context(Scope::Background, policy) {
+        let issue = if matches!(
+            &then,
+            Then::Tickers(_) | Then::OptionSeed { .. } | Then::Candles(_)
+        ) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, policy) {
             Ok(context) => context,
             Err(error) => {
                 self.note_local_read_refusal();

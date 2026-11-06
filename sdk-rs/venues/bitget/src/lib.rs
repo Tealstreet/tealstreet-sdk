@@ -278,7 +278,12 @@ impl BitgetFutures {
             self.live_tickers.begin();
         }
         let scope = safe_cex_engine::request_context::Scope::Background;
-        let context = match cx.http_context(scope, read_policy(None)) {
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, scope, read_policy(None)) {
             Ok(context) => context,
             Err(reason) => return self.public_failed(cx, tickers, reason.read_venue_error()),
         };

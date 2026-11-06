@@ -121,7 +121,7 @@ impl ContextRegistry {
                 || self.dispatch_request_class(id),
                 |owner| owner.request_class,
             ),
-            Scope::Background if policy.credential.is_none() => RequestClass::Read,
+            Scope::Background if policy.credential.is_none() => RequestClass::Discovery,
             _ => RequestClass::OrderRead,
         }
     }
@@ -1689,6 +1689,39 @@ impl<P> Cx<'_, P> {
         self.make_http_context(scope, policy, None, None)
     }
 
+    /// Declare a live public read (book/depth, ticker, trades or candles).
+    /// Catalogue Background reads use `http_context` and keep the longer default.
+    /// Command classes and explicit venue timeouts retain their existing bounds.
+    pub fn http_live_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
+        self.live_http_context(scope, policy, None)
+    }
+
+    pub fn http_live_context_with_egress(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        egress: Egress,
+    ) -> Result<Context, Error> {
+        if matches!(egress, Egress::Session(_)) {
+            return Err(Error::Invalid);
+        }
+        self.live_http_context(scope, policy, Some(egress))
+    }
+
+    fn live_http_context(
+        &mut self,
+        scope: Scope,
+        policy: Policy,
+        egress: Option<Egress>,
+    ) -> Result<Context, Error> {
+        if policy.operation != Operation::Read {
+            return Err(Error::Invalid);
+        }
+        let loaded = self.store.loaded();
+        self.core()
+            .make_http_context(scope, policy, None, egress, loaded, true)
+    }
+
     /// As `http_context`, with egress declared at issuance. Only unsigned
     /// reads declare egress; a credentialed context may only confirm Primary.
     pub fn http_context_with_egress(
@@ -1735,7 +1768,7 @@ impl<P> Cx<'_, P> {
     ) -> Result<Context, Error> {
         let loaded = self.store.loaded();
         self.core()
-            .make_http_context(scope, policy, parent, egress, loaded)
+            .make_http_context(scope, policy, parent, egress, loaded, false)
     }
 
     /// Validate context provenance and retry policy without extending its bound.
@@ -2320,6 +2353,7 @@ impl crate::engine::CoreCx<'_> {
         parent: Option<&Context>,
         egress: Option<Egress>,
         loaded: crate::model::Loaded,
+        live: bool,
     ) -> Result<Context, Error> {
         #[cfg(feature = "http-plans")]
         if self.io.core.http_preflight_ready.is_some() {
@@ -2342,28 +2376,26 @@ impl crate::engine::CoreCx<'_> {
                 .domain_pacing(policy.operation, policy.pacing)?,
             ..policy
         };
-        // Reserve a bounded catalogue ceiling until the request bytes exist.
-        // queue_managed_admitted selects catalogue versus live data and narrows
-        // the physical deadline from the original Context issuance time.
-        let background = scope == Scope::Background
-            && policy.operation == Operation::Read
-            && policy.credential.is_none()
-            && policy.timeout_ms == READ_TIMEOUT_MS;
-        let policy = discovery_bound(scope, policy, loaded);
-        let class = parent.map_or_else(
-            || self.io.core.request_contexts.request_class(scope, &policy),
-            Context::request_class,
-        );
-        let class = class.for_operation(policy.operation);
+        let class = if live && scope == Scope::Background {
+            crate::request_budget::RequestClass::Read
+        } else {
+            parent
+                .map_or_else(
+                    || self.io.core.request_contexts.request_class(scope, &policy),
+                    Context::request_class,
+                )
+                .for_operation(policy.operation)
+        };
         let default_discovery = class == crate::request_budget::RequestClass::Discovery
             && policy.timeout_ms == READ_TIMEOUT_MS;
+        let policy = if default_discovery {
+            discovery_bound(scope, policy, loaded)
+        } else {
+            policy
+        };
         let policy = if policy.timeout_ms == READ_TIMEOUT_MS {
             Policy {
-                timeout_ms: if background {
-                    DISCOVERY_TIMEOUT_MS
-                } else {
-                    class.budget_ms()
-                },
+                timeout_ms: class.budget_ms(),
                 ..policy
             }
         } else {
@@ -2375,8 +2407,11 @@ impl crate::engine::CoreCx<'_> {
             .core
             .request_contexts
             .issue_with_egress(identity, scope, policy, self.now, parent, egress)?;
-        if background || default_discovery {
-            context.set_background_budget(self.now);
+        if live || default_discovery {
+            context.set_request_class(class);
+            if default_discovery {
+                context.set_background_budget(self.now);
+            }
             *self
                 .io
                 .core

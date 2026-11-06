@@ -1266,3 +1266,20 @@ fn cleanup_matcher_uses_genuine_resources_and_preserves_a_finite_peer() {
         Ok(())
     );
 }
+
+#[test]
+fn catalogue_and_live_seed_classes_are_declared_at_issuance() {
+    use safe_cex_engine::request_budget::RequestClass;
+    for (seed, class, budget) in [
+        (Seed::Markets, RequestClass::Discovery, 90_000),
+        (Seed::Tickers, RequestClass::Read, 20_000),
+        (Seed::Funding, RequestClass::Read, 20_000),
+    ] {
+        let (engine, packet, _, _) = issued(seed, false);
+        assert_eq!(
+            engine.http_request_class(packet.preparation.unwrap()),
+            Some(class)
+        );
+        assert_eq!(packet.request.timeout_ms, Some(budget));
+    }
+}

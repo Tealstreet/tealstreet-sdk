@@ -84,108 +84,6 @@ impl RequestClass {
             _ => Self::OrderRead,
         }
     }
-    /// Resolve an unsigned Background read from its semantic request bytes.
-    /// Only closed catalogue paths/RPC kinds receive discovery time. Unknown
-    /// routes and live-data reads keep the short read bound on every family.
-    pub(crate) fn background(url: &str, body: Option<&str>) -> Self {
-        let Some((scheme, rest)) = url.split_once("://") else {
-            return Self::Read;
-        };
-        if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-            return Self::Read;
-        }
-        let Some(start) = rest.find(['/', '?', '#']) else {
-            return Self::Read;
-        };
-        if !rest[start..].starts_with('/') {
-            return Self::Read;
-        }
-        let path = rest[start..].split(['?', '#']).next().unwrap_or("");
-        let has = |names: &[&str]| {
-            path.split('/')
-                .any(|part| names.iter().any(|name| part.eq_ignore_ascii_case(name)))
-        };
-        if has(&[
-            "depth",
-            "orderbook",
-            "book",
-            "orderBookOrders",
-            "orderBookDetails",
-            "ticker",
-            "tickers",
-            "trades",
-            "funding",
-            "funding-rates",
-            "mark",
-            "mark-price",
-            "candles",
-            "klines",
-        ]) {
-            return Self::Read;
-        }
-        if path
-            .rsplit('/')
-            .find(|part| !part.is_empty())
-            .is_some_and(|part| {
-                [
-                    "markets",
-                    "instruments",
-                    "instruments-info",
-                    "all_instruments",
-                    "get-instruments",
-                    "contracts",
-                    "symbols",
-                    "products",
-                    "exchangeInfo",
-                    "AssetPairs",
-                    "trading_pairs",
-                    "currencies",
-                    "get-currencies",
-                    "assets",
-                    "tick-size",
-                    "neg-risk",
-                ]
-                .iter()
-                .any(|name| part.eq_ignore_ascii_case(name))
-            })
-            || path.eq_ignore_ascii_case("/api/v1/orderBooks")
-            || path.ends_with("/public/info")
-            || path.ends_with("/contract/detail")
-            || path.ends_with("/contracts/active")
-        {
-            return Self::Discovery;
-        }
-        #[derive(serde::Deserialize)]
-        struct Rpc<'a> {
-            #[serde(borrow)]
-            r#type: Option<&'a str>,
-            #[serde(borrow)]
-            method: Option<&'a str>,
-        }
-        let catalogue = body
-            .and_then(|body| serde_json::from_str::<Rpc<'_>>(body).ok())
-            .is_some_and(|rpc| {
-                [rpc.r#type, rpc.method].into_iter().flatten().any(|kind| {
-                    matches!(
-                        kind,
-                        "meta"
-                            | "spotMeta"
-                            | "metaAndAssetCtxs"
-                            | "spotMetaAndAssetCtxs"
-                            | "perpDexs"
-                            | "allPerpMetas"
-                            | "public/get-instruments"
-                            | "public/get-currencies"
-                    )
-                })
-            });
-        if catalogue {
-            Self::Discovery
-        } else {
-            Self::Read
-        }
-    }
-
     /// Legacy GET classification. Managed posted reads carry their semantic label.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn legacy(method: Method, url: &str) -> Self {
@@ -274,7 +172,6 @@ mod tests {
         assert_eq!(crate::HttpReadClass::Normal as u8, 0);
         assert_eq!(crate::HttpReadClass::Critical as u8, 1);
         assert_eq!(crate::HttpReadClass::Bulk as u8, 2);
-        #[cfg(feature = "address-nonce")]
         assert_eq!(crate::HttpReadClass::Reconciliation as u8, 3);
     }
     #[test]
@@ -330,76 +227,6 @@ mod tests {
             "class=history budget=30000ms elapsed=30012ms"
         );
     }
-    #[test]
-    fn background_catalogues_are_closed_and_live_data_stays_short() {
-        for path in [
-            "/v5/market/instruments-info",
-            "/api/v2/mix/market/contracts",
-            "/api/v3/symbols",
-            "/v1/markets",
-            "/0/public/AssetPairs",
-            "/api/v1/orderBooks",
-            "/v1/public/info",
-        ] {
-            assert_eq!(
-                RequestClass::background(&format!("https://example.test{path}"), None),
-                RequestClass::Discovery,
-                "{path}"
-            );
-        }
-        for path in [
-            "/depth",
-            "/markets/1/orderbook",
-            "/tickers",
-            "/trades",
-            "/funding-rates",
-            "/mark-price",
-            "/api/v1/orderBookOrders",
-            "/api/v1/orderBookDetails",
-            "/unknown?kind=markets",
-            "/markets/summary",
-            "/products/BTC/ticker",
-            "/candles",
-        ] {
-            assert_eq!(
-                RequestClass::background(&format!("https://example.test{path}"), None),
-                RequestClass::Read,
-                "{path}"
-            );
-        }
-        for kind in [
-            "meta",
-            "spotMeta",
-            "metaAndAssetCtxs",
-            "spotMetaAndAssetCtxs",
-            "perpDexs",
-            "allPerpMetas",
-        ] {
-            assert_eq!(
-                RequestClass::background(
-                    "https://example.test/info",
-                    Some(&format!(r#"{{"type":"{kind}"}}"#))
-                ),
-                RequestClass::Discovery
-            );
-        }
-        for kind in [
-            "l2Book",
-            "allMids",
-            "candleSnapshot",
-            "fundingHistory",
-            "clearinghouseState",
-        ] {
-            assert_eq!(
-                RequestClass::background(
-                    "https://example.test/info",
-                    Some(&format!(r#"{{"type":"{kind}"}}"#))
-                ),
-                RequestClass::Read
-            );
-        }
-    }
-
     #[test]
     fn background_deadlines_use_original_issuance_and_preserve_explicit_bounds() {
         use crate::request_context::{Context, Operation, Owner};

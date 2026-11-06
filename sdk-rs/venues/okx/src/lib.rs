@@ -386,7 +386,12 @@ impl Okx {
             pacing: None,
             retry: RetryPolicy::Never,
         };
-        let context = match cx.http_context(Scope::Background, policy) {
+        let issue = if !markets {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, policy) {
             Ok(context) => context,
             Err(error) => {
                 self.public_failed(cx, markets, error.read_venue_error());

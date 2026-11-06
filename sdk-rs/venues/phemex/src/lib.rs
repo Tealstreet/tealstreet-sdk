@@ -174,7 +174,7 @@ impl PhemexPerpetuals {
         }
     }
     fn discovery_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, true) {
             Ok(read) => read,
             Err(_) => {
                 self.discovery.failed(cx, true);
@@ -332,7 +332,7 @@ impl PhemexPerpetuals {
         b.fetching = true;
         b.deadline = Some(cx.set_timer(20_000.));
         let generation = b.generation;
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, true) {
             Ok(read) => read,
             Err(_) => {
                 self.book_failed(cx, symbol);
@@ -524,7 +524,7 @@ impl Venue for PhemexPerpetuals {
             return;
         }
         self.catalogue_partial = false;
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, false) {
             Ok(read) => read,
             Err(_) => {
                 self.discovery.failed(cx, false);

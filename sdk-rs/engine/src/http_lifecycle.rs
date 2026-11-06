@@ -8,6 +8,10 @@ use crate::request_context::{
     SessionPlacement,
 };
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "http_read_budget_tests.rs"]
+mod read_budget_tests;
+
 #[cfg(test)]
 #[path = "http_unsigned_headers_tests.rs"]
 mod unsigned_headers_tests;
@@ -830,12 +834,11 @@ impl<P> Cx<'_, P> {
         pending: P,
         #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
-        let request_class = if (matches!(context.owner(), Owner::Background { .. })
-            || context.request_class() == crate::request_budget::RequestClass::Discovery)
-            && context.operation() == Operation::Read
-            && context.credential().is_none()
+        let request_class = if context.operation() == Operation::Read
+            && bearer.is_some()
+            && context.request_class() == crate::request_budget::RequestClass::Discovery
         {
-            crate::request_budget::RequestClass::background(&url, body.as_deref())
+            crate::request_budget::RequestClass::Read
         } else {
             context.request_class()
         };
@@ -1534,6 +1537,79 @@ impl crate::engine::CoreIo<'_> {
 }
 
 impl<V: Venue> Engine<V> {
+    /// Read priority and account evidence are available after the venue callback
+    /// has attached its Pending value and AccountReadScope. Narrow before any
+    /// preparation leaves the engine; retries keep the same original ceiling.
+    pub(super) fn apply_account_read_budgets(&mut self, now: f64, from: usize) {
+        let mut index = from;
+        while index < self.io.core.actions.len() {
+            let token = match &self.io.core.actions[index] {
+                Action::ManagedHttp(action) => match action.as_ref() {
+                    HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                    _ => None,
+                },
+                _ => None,
+            };
+            index += 1;
+            let Some(token) = token else { continue };
+            let request = token.attempt().request;
+            let account = self.io.pending.get(&request).is_some_and(|pending| {
+                pending.auth.is_some()
+                    || matches!(
+                        self.venue.http_read_class(&pending.value),
+                        HttpReadClass::Critical | HttpReadClass::Reconciliation
+                    )
+            });
+            let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
+                continue;
+            };
+            if managed.lifecycle.preparation() != token
+                || managed.lifecycle.context().operation() != Operation::Read
+            {
+                continue;
+            }
+            if account {
+                managed.lifecycle.narrow_account_read();
+            }
+            #[cfg(target_arch = "wasm32")]
+            let class = managed.lifecycle.request_class();
+            let deadline = managed.lifecycle.deadline();
+            let timer = managed.timer;
+            let timeout = (deadline - now).ceil().max(1.) as u32;
+            managed.original.timeout_ms =
+                Some(managed.original.timeout_ms.unwrap_or(u32::MAX).min(timeout));
+            for action in self.io.core.actions.iter_mut() {
+                match action {
+                    Action::SetTimer { timer: id, at_ms } if *id == timer => *at_ms = deadline,
+                    Action::ManagedHttp(action) => {
+                        if let HttpAction::Prepare {
+                            preparation,
+                            request: http,
+                            #[cfg(target_arch = "wasm32")]
+                            request_class,
+                            ..
+                        } = action.as_mut()
+                            && *preparation == token
+                        {
+                            http.timeout_ms =
+                                Some(http.timeout_ms.unwrap_or(u32::MAX).min(timeout));
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                *request_class = class as u8;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if now >= deadline {
+                self.io.core.actions.remove(index - 1);
+                self.expire_http_timer(now, &Event::TimerFired { timer });
+                index = from;
+            }
+        }
+    }
+
     /// Closed diagnostic label for this exact live preparation; no send authority.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn http_request_class(
