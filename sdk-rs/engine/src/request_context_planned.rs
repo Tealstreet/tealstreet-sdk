@@ -1551,6 +1551,53 @@ impl<P> Cx<'_, P> {
         self.fail_plan_checked(plan, error.into(), Some(note))
     }
 
+    #[inline]
+    fn fail_plan_checked(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+        note: Option<&str>,
+    ) -> Result<(), Error> {
+        self.core().fail_plan_checked(plan, error, note)
+    }
+
+    #[inline]
+    pub(in crate::engine) fn fail_plan_owned(
+        &mut self,
+        plan: &Plan,
+        error: VenueError,
+    ) -> Result<(), Error> {
+        self.core().fail_plan_owned(plan, error)
+    }
+
+    #[inline]
+    fn seal_plan(
+        &mut self,
+        plan: &Plan,
+        result: Option<String>,
+        error: Option<VenueError>,
+        note: Option<&str>,
+    ) -> Result<(), Error> {
+        self.core().seal_plan(plan, result, error, note)
+    }
+
+    #[inline]
+    fn commit_plan_terminal(
+        &mut self,
+        plan: &Plan,
+        result: Option<String>,
+        prepared: conditional::PreparedPlanSeal,
+    ) -> Result<(), Error> {
+        self.core().commit_plan_terminal(plan, result, prepared)
+    }
+
+    #[inline]
+    fn rearm_plan(&mut self, plan: &Plan) {
+        self.core().rearm_plan(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     fn fail_plan_checked(
         &mut self,
         plan: &Plan,
@@ -1607,29 +1654,10 @@ impl<P> Cx<'_, P> {
         error: Option<VenueError>,
         note: Option<&str>,
     ) -> Result<(), Error> {
-        let prepared = self
-            .core()
-            .prepare_plan_terminal(plan, error, note, result.as_deref())?;
+        let prepared = self.prepare_plan_terminal(plan, error, note, result.as_deref())?;
         self.commit_plan_terminal(plan, result, prepared)
     }
 
-    #[inline]
-    fn commit_plan_terminal(
-        &mut self,
-        plan: &Plan,
-        result: Option<String>,
-        prepared: conditional::PreparedPlanSeal,
-    ) -> Result<(), Error> {
-        self.core().commit_plan_terminal(plan, result, prepared)
-    }
-
-    #[inline]
-    fn rearm_plan(&mut self, plan: &Plan) {
-        self.core().rearm_plan(plan)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     /// A resume drained with no delivery is the resumed attempt's custody for
     /// the rest of this event only.
     fn note_session_resume(&mut self, plan: &Plan, leg: &Context) {

@@ -138,6 +138,47 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreRef<'_> {
+    pub(in crate::engine) fn owned_http_admission(
+        &self,
+        context: &Context,
+    ) -> Result<Option<super::super::owned_call::Admission>, Error> {
+        self.validate_preflight_ready_owner(context.owner())?;
+        if self
+            .io
+            .core
+            .http_plan_ready
+            .as_ref()
+            .is_some_and(|ready| ready.owner() != context.owner())
+        {
+            return Err(Error::Revoked);
+        }
+        let admission = self
+            .io
+            .core
+            .request_contexts
+            .owned_admission(context, self.io.core.http_delivery.as_ref())?;
+        if admission.as_ref().is_some_and(|a| {
+            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
+        }) && let Some(plan) = self.io.core.request_contexts.plan_from_context(context)
+            && !self.io.core.request_contexts.initial_plan_custody(&plan)?
+            && !self
+                .io
+                .core
+                .http_plan_ready
+                .as_ref()
+                .is_some_and(|ready| ready.same_plan(&plan))
+        {
+            return Err(Error::Revoked);
+        }
+        if admission.as_ref().is_some_and(|a| {
+            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
+        }) && let Ok(handle) = self.io.core.request_contexts.owner_from_context(context)
+        {
+            self.validate_preflight_activation(&handle)?;
+        }
+        Ok(admission)
+    }
+
     pub(in crate::engine) fn validate_preflight_ready_owner(
         &self,
         owner: Owner,
@@ -280,45 +321,12 @@ impl<P> Cx<'_, P> {
         self.io.core.request_contexts.queue_preflight_ready(handle)
     }
 
+    #[inline]
     pub(in crate::engine) fn owned_http_admission(
         &self,
         context: &Context,
     ) -> Result<Option<super::super::owned_call::Admission>, Error> {
-        self.validate_preflight_ready_owner(context.owner())?;
-        if self
-            .io
-            .core
-            .http_plan_ready
-            .as_ref()
-            .is_some_and(|ready| ready.owner() != context.owner())
-        {
-            return Err(Error::Revoked);
-        }
-        let admission = self
-            .io
-            .core
-            .request_contexts
-            .owned_admission(context, self.io.core.http_delivery.as_ref())?;
-        if admission.as_ref().is_some_and(|a| {
-            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
-        }) && let Some(plan) = self.io.core.request_contexts.plan_from_context(context)
-            && !self.io.core.request_contexts.initial_plan_custody(&plan)?
-            && !self
-                .io
-                .core
-                .http_plan_ready
-                .as_ref()
-                .is_some_and(|ready| ready.same_plan(&plan))
-        {
-            return Err(Error::Revoked);
-        }
-        if admission.as_ref().is_some_and(|a| {
-            a.predecessor.is_none() && !self.io.core.session_resumed.contains(&a.attempt.request)
-        }) && let Ok(handle) = self.io.core.request_contexts.owner_from_context(context)
-        {
-            self.validate_preflight_activation(&handle)?;
-        }
-        Ok(admission)
+        self.core_ref().owned_http_admission(context)
     }
 }
 
