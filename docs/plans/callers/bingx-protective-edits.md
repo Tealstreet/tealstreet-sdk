@@ -56,9 +56,9 @@ leg, present_plan_failure registers its current unknown words, so an engine-seal
 408/5xx/transport loss or timeout cannot present a stale replacement refusal about
 a put-back that may already be resting. Outcome and protection remain engine-owned.
 
-VENUE_STATE version 2 transports the typed native original with the existing
-observation across frame-fed engines. Unknown versions fail closed; the data
-source and execution engine must use the same SDK schema. The real native
+VENUE_STATE exports version 2 with the typed native original and existing
+observation. Readers also accept version 1 from older sources, loading mode and
+observations without any put-back provenance. Unknown versions fail closed. The real native
 snapshot -> frame control pins this contract. Frame-fed engines retain orders,
 cancels and ordinary LIMIT edits, but protective price edits refuse "reference
 stale": frame arrival never grants local freshness. Enabling those edits needs
