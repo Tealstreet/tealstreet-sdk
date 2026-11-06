@@ -781,3 +781,49 @@ fn a_superseded_revision_never_answers_for_frames_it_did_not_send() {
         ["Hyperliquid refused l2Book ETH: Cannot subscribe to more than 1000 channels."]
     );
 }
+
+// Open, close and reopen one book inside a round trip: the first subscribe's key has left
+// the released ledger by the time the reopen is proposed, yet it was sent and HL answers
+// it. The refusal after the four answers is the reopened l2Book's, not one frame later.
+#[test]
+fn a_book_reopened_within_a_round_trip_keeps_the_refusal_on_the_right_frame() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    for ack in [
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"allMids"}}}"#,
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"fastAssetCtxs"}}}"#,
+    ] {
+        message(&mut e, s, ack);
+    }
+    let book = |subscribe: bool| {
+        if subscribe {
+            Command::SubscribeOrderBook {
+                symbol: "ETH-PERP".into(),
+            }
+        } else {
+            Command::UnsubscribeOrderBook {
+                symbol: "ETH-PERP".into(),
+            }
+        }
+    };
+    for (subscribe, frames) in [(true, 2), (false, 2), (true, 2)] {
+        e.handle(2000.0, Event::Command(book(subscribe)));
+        assert_eq!(sent(&prepared_now(&mut e)).len(), frames);
+    }
+    // HL answers the first subscribe and unsubscribe pairs in order.
+    for method in ["subscribe", "subscribe", "unsubscribe", "unsubscribe"] {
+        let reply = format!(
+            r#"{{"channel":"subscriptionResponse","data":{{"method":"{method}","subscription":{{"type":"l2Book","coin":"ETH"}}}}}}"#
+        );
+        message(&mut e, s, &reply);
+    }
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Cannot subscribe to more than 1000 channels."}"#,
+    );
+    assert_eq!(
+        notices(&prepared_now(&mut e)),
+        ["Hyperliquid refused l2Book ETH: Cannot subscribe to more than 1000 channels."]
+    );
+}

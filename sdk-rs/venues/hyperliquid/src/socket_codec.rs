@@ -448,13 +448,20 @@ impl Hyperliquid {
 
     /// A new proposal supersedes the engine's queued but unsent frames: keep only frames
     /// its released ledger shows went out (a subscribe released, an unsubscribe gone).
-    /// A subscribe and an unsubscribe of one key both unanswered here misread the
-    /// subscribe as unsent; the next reply then names one frame later.
+    /// A subscribe followed by an unsubscribe of its key was sent: the engine encodes
+    /// an unsubscribe only for a released key, though the ledger no longer holds it.
     pub(super) fn forget_unsent(&self, cx: &Cx<'_, Pending>, feed: FeedId) {
-        self.connection.unanswered.borrow_mut().retain_mut(|frame| {
-            frame.sent |= cx.socket_released(feed, &frame.key) == frame.subscribe;
-            frame.sent
-        });
+        let mut frames = self.connection.unanswered.borrow_mut();
+        for index in 0..frames.len() {
+            let undone = frames[index].subscribe
+                && frames
+                    .iter()
+                    .skip(index + 1)
+                    .any(|later| !later.subscribe && later.key == frames[index].key);
+            let frame = &mut frames[index];
+            frame.sent |= undone || cx.socket_released(feed, &frame.key) == frame.subscribe;
+        }
+        frames.retain(|frame| frame.sent);
     }
 
     /// Acknowledgements and refusals answer this engine's subscribe frames, in order.
