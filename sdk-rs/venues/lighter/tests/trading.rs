@@ -118,6 +118,50 @@ fn caller_id_on_later_batch_item_rejects_before_any_read_or_write() {
     );
 }
 
+#[test]
+fn native_stop_limit_edit_never_converts_to_a_market_stop() {
+    for kind in [3, 5] {
+        let (mut e, socket) = ready_unattributed();
+        message(
+            &mut e,
+            socket,
+            NOW + 1.0,
+            &json!({
+                "type":"update/account_all_orders", "orders":[{
+                    "order_index":"42", "market_id":1, "status":"open", "type":kind,
+                    "is_ask":true, "reduce_only":true, "initial_base_amount":"2",
+                    "filled_base_amount":"0", "remaining_base_amount":"2",
+                    "trigger_price":"80", "price":"79", "time_in_force":1
+                }]
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            e.store()
+                .order("42")
+                .unwrap()
+                .extra
+                .as_ref()
+                .unwrap()
+                .conditional_order_price,
+            Some(79.0)
+        );
+        e.handle(
+            NOW + 1.0,
+            Event::Command(Command::AmendOrder {
+                command: 8,
+                id: "42".into(),
+                price: Some(81.0),
+                amount: None,
+            }),
+        );
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW + 1.0);
+        assert!(!out.iter().any(|a| matches!(a, Action::Http(_))), "{out:?}");
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error, ..}) if error.outcome == Some(Outcome::NotSent))), "{out:?}");
+        assert!(e.store().order("42").is_some());
+    }
+}
+
 fn rejects_bybit_control_without_batch_effects(bad: PlaceOrderOpts) {
     let (mut e, _) = ready_unattributed();
     let before = e.snapshot_frame(NOW).to_vec();

@@ -1917,6 +1917,11 @@ impl Lighter {
             take_profit: None,
             stop_loss: None,
             extra: Some(OrderExtra {
+                conditional_order_price: matches!(
+                    normalized(&wire.kind.0).as_str(),
+                    "3" | "5" | "STOP_LIMIT" | "STOP_LOSS_LIMIT" | "TAKE_PROFIT_LIMIT"
+                )
+                .then(|| wire.price.as_ref().map_or(f64::NAN, |p| p.0)),
                 remaining_native: Some(remaining),
                 remaining_notional: Some(remaining_notional),
                 reject_reason,

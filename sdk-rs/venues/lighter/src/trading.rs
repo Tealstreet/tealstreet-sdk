@@ -453,6 +453,17 @@ impl Lighter {
                     refuse(cx, not_sent("Lighter order is not open for amendment"));
                     return;
                 }
+                if old
+                    .extra
+                    .as_ref()
+                    .is_some_and(|extra| extra.conditional_order_price.is_some())
+                {
+                    refuse(
+                        cx,
+                        not_sent("Lighter stop-limit edit is unsupported; stop not changed"),
+                    );
+                    return;
+                }
                 let left = match amount
                     .map(|total| safe_cex_engine::num::left_of_total(total, old.filled))
                     .transpose()
