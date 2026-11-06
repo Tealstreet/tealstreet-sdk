@@ -81,6 +81,15 @@ pub(crate) const CODES: CodeTable = CodeTable {
         refused(45110, ErrorKind::InvalidInput),
         refused(45113, ErrorKind::InvalidInput),
         refused(45122, ErrorKind::InvalidInput),
+        // "Not enough position is available": a reduce-only size above the
+        // position, refused at any price until the position changes. No capture
+        // has carried 40757 yet, so the text names it under any code or none.
+        refused(40757, ErrorKind::InvalidInput),
+        Row {
+            key: Key::Phrase("Not enough position is available"),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
         Row {
             key: Key::Int(40010),
             verdict: Verdict::Unknown(None),
@@ -475,8 +484,17 @@ fn listed_failures(list: &[ListResult]) -> Vec<(Option<i64>, String)> {
 struct Failure {
     #[serde(default)]
     error_msg: String,
+    /// Which order of the batch this row refuses; anything unreadable names none.
+    #[serde(default)]
+    client_oid: Option<FailureClient>,
     #[serde(default)]
     error_code: Number,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum FailureClient {
+    Text(String),
+    Other(serde::de::IgnoredAny),
 }
 #[derive(Deserialize)]
 struct Reply<'a> {
@@ -1608,6 +1626,51 @@ impl BitgetFutures {
         }
     }
 
+    /// Bitget's refusal of a close beyond the position's unlocked size, worded
+    /// as the action it needs. `client` names the refused order; without it only
+    /// a batch whose closes share one side names that side.
+    fn closable_refusal(call: &Planned, message: &str, client: Option<&str>) -> Option<String> {
+        if call.path != paths::BATCH_PLACE
+            || !message
+                .to_ascii_lowercase()
+                .contains("not enough position is available")
+        {
+            return None;
+        }
+        let symbol = call.payload.symbol.as_deref()?;
+        let rows = call.payload.order_list.as_deref()?;
+        // A hedged close names its position's side; a one-way close sells a long.
+        let closes_long = |o: &Payload| {
+            (o.reduce_only == Some("YES") || o.trade_side == Some("close")).then(|| {
+                if o.trade_side == Some("close") {
+                    o.side == Some("buy")
+                } else {
+                    o.side == Some("sell")
+                }
+            })
+        };
+        let named = client.and_then(|client| {
+            rows.iter()
+                .find(|o| o.client_oid.as_deref() == Some(client))
+        });
+        let long = match named {
+            Some(row) => closes_long(row),
+            None => {
+                let mut sides = rows.iter().filter_map(closes_long);
+                let first = sides.next();
+                first.filter(|long| sides.all(|other| other == *long))
+            }
+        };
+        let side = match long {
+            Some(true) => " long",
+            Some(false) => " short",
+            None => "",
+        };
+        Some(format!(
+            "part of your {symbol}{side} position is held by open close orders; cancel them first ({message})"
+        ))
+    }
+
     fn classic(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<Payload, String> {
         Ok(Payload {
             symbol: Some(symbol.into()),
@@ -2547,11 +2610,14 @@ impl BitgetFutures {
         let native = native_code(parsed.as_ref().ok(), status);
         let mut error = match &parsed {
             Ok(reply) if status == 200 && reply.code.0 == Some(0.0) => None,
-            Ok(reply) => Some(format!(
-                "Bitget {}: {} (HTTP {status})",
-                reply.code.get(),
-                reply.msg
-            )),
+            Ok(reply) => {
+                let text = Self::closable_refusal(&request.call, &reply.msg, None)
+                    .unwrap_or_else(|| reply.msg.to_string());
+                Some(format!(
+                    "Bitget {}: {text} (HTTP {status})",
+                    reply.code.get()
+                ))
+            }
             Err(error) => Some(error.clone()),
         };
         // 25204 means the order is gone, which is what a cancel wants. Not an amend's cancel:
@@ -2735,10 +2801,21 @@ impl BitgetFutures {
                     }
                 }
                 answer = Answer::Accepted(ids.clone());
-                if let Some(failures) = data
+                if let Some(mut failures) = data
                     .map(|d| failure_messages(&d.failure_list))
                     .filter(|f| !f.is_empty())
                 {
+                    let rows = data.map_or(&[][..], |d| d.failure_list.as_slice());
+                    for (row, (_, message)) in rows.iter().zip(&mut failures) {
+                        let client = match &row.client_oid {
+                            Some(FailureClient::Text(client)) => Some(client.as_str()),
+                            _ => None,
+                        };
+                        if let Some(clear) = Self::closable_refusal(&request.call, message, client)
+                        {
+                            *message = clear;
+                        }
+                    }
                     error = Some(format!(
                         "Bitget batch failure after ids {ids:?}: {}",
                         failure_text(&failures)
@@ -3931,6 +4008,27 @@ mod code_table_tests {
                 assert_eq!(row.key, Key::Int(40009), "{row:?}");
             }
             assert!(!matches!(row.verdict, Verdict::Satisfied(_)), "{row:?}");
+        }
+    }
+
+    /// The position refusal's code is fixed from the venue's text when the rows are
+    /// read, so a message reworded after that (the close-locked wording) still classifies.
+    #[test]
+    fn a_code_less_position_refusal_keeps_its_kind_after_rewording() {
+        let rows: Vec<Failure> = serde_json::from_str(
+            r#"[{"errorMsg":"Not enough position is available"},{"errorMsg":"Not enough position is available","errorCode":"40999"}]"#,
+        )
+        .unwrap();
+        for (code, _) in failure_messages(&rows) {
+            let reworded = "only 0.4 of the 1 BTCUSDT long is free to close; 0.6 is held by open close orders, cancel them first (Not enough position is available)";
+            let native = Native {
+                code: code.map_or(NativeCode::None, NativeCode::Int),
+                message: reworded,
+            };
+            assert_eq!(
+                CODES.verdict(&native, Intent::Place),
+                Verdict::Refused(ErrorKind::InvalidInput)
+            );
         }
     }
 }

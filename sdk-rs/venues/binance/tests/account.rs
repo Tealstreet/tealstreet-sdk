@@ -1280,9 +1280,16 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         (
             400,
             r#"{"code":-5022,"msg":"Due to the order could not be executed as maker, the Post Only order will be rejected."}"#,
-            Some(ErrorKind::InvalidInput),
+            Some(ErrorKind::Rejected),
             Outcome::Rejected,
             Some("-5022"),
+        ),
+        (
+            400,
+            r#"{"code":-5021,"msg":"Due to the order could not be filled immediately, the FOK order has been rejected."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Rejected,
+            Some("-5021"),
         ),
         (
             400,
