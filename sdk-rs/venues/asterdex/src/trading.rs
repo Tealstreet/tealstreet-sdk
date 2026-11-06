@@ -166,9 +166,39 @@ pub(crate) const ASTER: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
+        // Aster futures v3 "20xx - Processing Issues": the order was rejected.
+        Row {
+            key: Key::Int(-2010),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2016),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Range(-2028, -2018),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(-2031),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
     ],
     success: &[Key::Int(200)],
     unlisted: Verdict::Refused(ErrorKind::Rejected),
+    status: ASTER_STATUS,
+};
+
+/// A stop's replacement or put-back: an undocumented code may have placed the
+/// order, so it is unknown, never a refusal that earns a put-back or a resend.
+pub(crate) const ASTER_PROTECTIVE: CodeTable = CodeTable {
+    rows: ASTER.rows,
+    success: ASTER.success,
+    unlisted: Verdict::Unknown(None),
     status: ASTER_STATUS,
 };
 
@@ -950,8 +980,9 @@ impl AsterDex {
             outcome => outcome,
         };
         let replied = outcome.is_ok();
-        // A 429 may have placed the order: a guarded stop's outcome is unknown, not refused.
-        let rate_limited = status_429 || matches!(outcome, Err((-1003, _)));
+        // A 429 or a documented rate-limit code (-1003 TOO_MANY_REQUESTS, -1015
+        // TOO_MANY_ORDERS) may have placed the order: a guarded leg's outcome is unknown.
+        let rate_limited = status_429 || matches!(outcome, Err((-1003 | -1015, _)));
         let mut placed = None;
         let mut result = None;
         let outcome = match (request.call, outcome) {
@@ -1110,6 +1141,12 @@ impl AsterDex {
         }
         // A status-only refusal takes its kind and outcome from the table's status rows.
         let mut status_error = None;
+        let protective = was_place
+            && self
+                .trading
+                .jobs
+                .get(&command)
+                .is_some_and(|job| job.replacing_stop.is_some());
         if let Some(leg) = leg.filter(|_| !reported) {
             let _ = match &outcome {
                 _ if replied
@@ -1137,12 +1174,23 @@ impl AsterDex {
                         .jobs
                         .get(&command)
                         .filter(|_| was_place)
-                        .and_then(|job| job.gone_text(rate_limited))
-                    {
+                        .and_then(|job| {
+                            job.gone_text(
+                                rate_limited
+                                    || protective
+                                        && protective_failure(*code, message.clone()).outcome
+                                            == Some(Outcome::Unknown),
+                            )
+                        }) {
                         Some(gone) => format!("{gone}: {message}"),
                         None => message.clone(),
                     };
-                    match cx.classify_write(leg, &ASTER, native, told) {
+                    let table = if protective {
+                        &ASTER_PROTECTIVE
+                    } else {
+                        &ASTER
+                    };
+                    match cx.classify_write(leg, table, native, told) {
                         Ok(fact) => {
                             if native.is_none() {
                                 status_error = Some(fact.error().clone());
@@ -1169,7 +1217,7 @@ impl AsterDex {
             if outcome.is_err() && !job.restoring && !transport && !unproven && !replied {
                 let definitive = outcome.as_ref().err().is_some_and(|(code, message)| {
                     matches!(
-                        failure(*code, message.clone()).outcome,
+                        protective_failure(*code, message.clone()).outcome,
                         Some(Outcome::Rejected)
                     )
                 });
@@ -1240,7 +1288,11 @@ impl AsterDex {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     let guarded = was_place && job.gone_text(true).is_some();
-                    if guarded && rate_limited {
+                    if guarded && rate_limited
+                        || protective
+                            && protective_failure(code, message.clone()).outcome
+                                == Some(Outcome::Unknown)
+                    {
                         error.outcome = Some(Outcome::Unknown);
                     }
                     let unknown = error.outcome == Some(Outcome::Unknown);
@@ -1411,7 +1463,7 @@ impl AsterDex {
             ..empty_order()
         };
         // Format and validate before canceling the live order.
-        let place = self.plan_place_inner(cx, &[replacement], Some(id), position_side)?;
+        let mut place = self.plan_place_inner(cx, &[replacement], Some(id), position_side)?;
         if let Some(error) = place.error {
             return Err(error.message);
         }
@@ -1420,6 +1472,14 @@ impl AsterDex {
             let native = self.trading.protections.get(id)
                 .filter(|native| native.order == *order)
                 .ok_or_else(|| format!("Your {} stop was not changed: its exact native parameters must be refreshed before cancellation", order.symbol))?;
+            // STOP and TAKE_PROFIT rest a limit: the replacement places only market stops, and
+            // moving the trigger alone would leave a stale limit, so they are not edited at all.
+            if matches!(native.query.value("type"), Some("STOP" | "TAKE_PROFIT")) {
+                return Err(format!(
+                    "Your {} stop-limit was not changed: AsterDEX limit stops cannot be edited without losing their limit price; cancel it and place a new one",
+                    order.symbol
+                ));
+            }
             if order.filled != 0.0 {
                 return Err(format!(
                     "Your {} stop was not changed: it already has fills",
@@ -1441,6 +1501,17 @@ impl AsterDex {
                 reference: native.reference,
             };
             guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
+            // The replacement keeps the original's price protection, as its put-back does.
+            if let Some(step) = place.steps.front_mut() {
+                step.query = std::mem::replace(&mut step.query, Query::new()).str(
+                    "priceProtect",
+                    if native.price_protect {
+                        "TRUE"
+                    } else {
+                        "FALSE"
+                    },
+                );
+            }
             job.guard = Some(guard);
             job.restore = Some(Planned {
                 method: Method::Post,
@@ -1816,6 +1887,28 @@ fn working_type(opts: &PlaceOrderOpts) -> &'static str {
     }
 }
 
+/// `failure` for a stop's replacement or put-back: a code `ASTER` does not list as a
+/// refusal leaves the write unknown, as `ASTER_PROTECTIVE` classifies it.
+fn protective_failure(code: i64, message: String) -> VenueError {
+    let listed = {
+        let native = Native {
+            code: NativeCode::Int(code),
+            message: refusal_1000(&message)
+                .filter(|_| code == -1000)
+                .unwrap_or(&message),
+        };
+        // Every refusal verdict is listed; only an unknown or satisfied answer is not.
+        !matches!(
+            ASTER_PROTECTIVE.verdict(&native, Intent::Place),
+            Verdict::Unknown(_) | Verdict::Satisfied(_)
+        )
+    };
+    let mut error = failure(code, message);
+    if !listed && error.outcome == Some(Outcome::Rejected) {
+        error.outcome = Some(Outcome::Unknown);
+    }
+    error
+}
 /// A trading failure classified by its Aster code; code 0 is a transport
 /// failure, a non-JSON HTTP error or an unproven acknowledgement.
 fn failure(code: i64, message: String) -> VenueError {

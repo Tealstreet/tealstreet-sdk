@@ -145,6 +145,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3073 run 41931095253 measured bitget and bitgetusdc 2,334,811 B.
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB; siblings equal.
 // #3094 run 42062090938 measured bybit 2,214,254 B; CI size plus 10 KiB rounded up to the KiB.
+// #3106 run 42097859473, job 127493304972: hyperliquid 2,108,435 B at 8d94727188a.
+// CI size plus 10 KiB rounded up to the KiB; hyperliquidspot shares the family cap.
 // #2314 Lighter managed sockets: job 127434185656 measured lighter 2,034,142 B;
 // CI size plus 10 KiB rounded up to the KiB, lighter-robinhood equal to lighter.
 // #3118 run 42112075305 measured asterdex 2,139,837 B; CI size plus 10 KiB, rounded up to the KiB.
@@ -172,6 +174,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB, rounded up to the KiB.
 // #3149 run 42197163575 measured hyperliquid 2,143,008 B: activeAssetData scoping, the
 // FetchLeverage read and subscription.count. CI size plus 10 KiB, rounded up; siblings equal.
+// #3158 run 42215250423, job 127884302751 measured lighter 2,068,697 B.
+// CI size plus 10 KiB, rounded up to the KiB; lighter-robinhood equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
@@ -195,8 +199,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
   kucoinspot: 2_264_064,
-  lighter: 2_044_928,
-  'lighter-robinhood': 2_044_928,
+  lighter: 2_079_744,
+  'lighter-robinhood': 2_079_744,
   // #3131, CI run 42150228180: MEXC measured 1,777,946 B + 10 KiB, rounded up.
   mexc: 1_788_928,
   okx: 1_973_248,

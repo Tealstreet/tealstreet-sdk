@@ -1820,21 +1820,8 @@ fn amend_full_position_stop(amount: Option<f64>, updated_position: Option<f64>) 
             e.handle(425.,Event::WsMessage{socket,text:&format!(r#"{{"channel":"push.personal.position","data":{{"positionId":"native","symbol":"BTC_USDT","positionType":1,"holdVol":{volume},"holdAvgPrice":60000}}}}"#)});
             e.drain_actions().for_each(drop);
         }
-        let replacement = if amount.is_none() || amount == Some(0.) {
-            assert!(first.url.ends_with("/stoporder/change_plan_price"));
-            first
-        } else {
-            assert!(first.url.ends_with("/stoporder/cancel"));
-            reply(&mut e, &first, 450., r#"{"success":true,"code":0}"#);
-            let terminal = requests(&mut e).remove(0);
-            inspect_reply(
-                &mut e,
-                &terminal,
-                460.,
-                &row.replace("\"state\":1", "\"state\":2"),
-            );
-            requests(&mut e).remove(0)
-        };
+        assert!(first.url.ends_with("/stoporder/change_plan_price"));
+        let replacement = first;
         let body: serde_json::Value =
             serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
         let price = if take_profit {
@@ -1842,16 +1829,8 @@ fn amend_full_position_stop(amount: Option<f64>, updated_position: Option<f64>) 
         } else {
             "stopLossPrice"
         };
-        if amount.is_none() || amount == Some(0.) {
-            assert_eq!(body[price], if take_profit { "64000" } else { "54000" });
-            assert!(body.get("vol").is_none());
-        } else {
-            assert!(replacement.url.ends_with("/stoporder/place"));
-            assert_eq!(body["positionId"], "native");
-            assert_eq!(body["vol"], amount.unwrap_or_default());
-            assert_eq!(body["volType"], 1.);
-            assert_eq!(body[price], if take_profit { 64000. } else { 54000. });
-        }
+        assert_eq!(body[price], if take_profit { "64000" } else { "54000" });
+        assert!(body.get("vol").is_none());
     }
 }
 
@@ -1862,9 +1841,8 @@ fn price_only_full_position_stop_amend_uses_native_edit_without_resizing() {
 }
 
 #[test]
-fn explicit_full_position_stop_amend_keeps_zero_sentinel_and_positive_contract_amounts() {
+fn explicit_full_position_stop_amend_keeps_zero_sentinel() {
     amend_full_position_stop(Some(0.0), None);
-    amend_full_position_stop(Some(20.0), None);
 }
 
 #[test]
@@ -2688,7 +2666,10 @@ fn protective_partial_or_paired_refusal_is_unprotected_without_guessing_restore(
     for grouped in [false, true] {
         let (mut e, private, _) = guarded_fixture();
         let row = if grouped {
-            exact_stop_row().replace("\"takeProfitPrice\":0", "\"takeProfitPrice\":65000")
+            // A sized pair still proves Unprotected after refusal; full-position resizing is vetoed earlier.
+            exact_stop_row()
+                .replace("\"volType\":2", "\"volType\":1")
+                .replace("\"takeProfitPrice\":0", "\"takeProfitPrice\":65000")
         } else {
             exact_stop_row().replace("\"volType\":2", "\"volType\":1")
         };
@@ -3150,5 +3131,395 @@ fn protective_native_paced_send_rechecks_reference_after_admission() {
         if refusal != "allowed" {
             assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error,..}) if error.outcome==Some(safe_cex_engine::Outcome::NotSent))), "{actions:?}");
         }
+    }
+}
+
+#[test]
+fn protective_ambiguous_envelope_codes_never_restore_or_report_not_sent() {
+    for mode in ["replacement", "restore", "native"] {
+        for status in [200, 400, 409, 499] {
+            for code in [500., 501., 9999., 8888., 513., 2006.5] {
+                let (mut e, _, _) = guarded_fixture();
+                let request = if mode == "native" {
+                    let inspect = protective_amend(&mut e, None, 300.);
+                    inspect_reply(&mut e, &inspect, 310., &protective_plan_row(1));
+                    let request = requests(&mut e).remove(0);
+                    assert!(request.url.ends_with("/planorder/change_price"));
+                    request
+                } else {
+                    let replacement = guarded_replacement(&mut e, 300.);
+                    if mode == "restore" {
+                        reply(
+                            &mut e,
+                            &replacement,
+                            335.,
+                            r#"{"success":false,"code":2006,"message":"definitive replacement refusal"}"#,
+                        );
+                        requests(&mut e).remove(0)
+                    } else {
+                        replacement
+                    }
+                };
+                e.handle(340., Event::HttpResponse {
+                    request: request.id,
+                    response: Response {status, headers: "", body: &format!(
+                        r#"{{"success":false,"code":{code},"message":"ambiguous write failure"}}"#,
+                    )},
+                });
+                let actions = drained(&mut e);
+                assert!(
+                    !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                    "mode={mode}, status={status}, code={code}: {actions:?}"
+                );
+                let errors: Vec<_> = actions
+                    .iter()
+                    .filter_map(|a| match a {
+                        Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(errors.len(), 1, "{actions:?}");
+                assert_eq!(
+                    errors[0].outcome,
+                    Some(safe_cex_engine::Outcome::Unknown),
+                    "mode={mode}, status={status}, code={code}"
+                );
+                assert!(errors[0].protection.is_none());
+                assert!(
+                    errors[0].message.contains("status is unknown")
+                        && errors[0].message.contains("Open Orders")
+                );
+                assert!(!errors[0].message.contains("restored"));
+            }
+        }
+    }
+}
+
+#[test]
+fn protective_ambiguous_row_codes_never_restore_or_report_not_sent() {
+    for native in [false, true] {
+        for code in [500, 501, 9999, 8888, 510] {
+            let (mut e, _, _) = guarded_fixture();
+            let request = if native {
+                let inspect = protective_amend(&mut e, None, 300.);
+                inspect_reply(&mut e, &inspect, 310., &protective_plan_row(1));
+                requests(&mut e).remove(0)
+            } else {
+                guarded_replacement(&mut e, 300.)
+            };
+            reply(
+                &mut e,
+                &request,
+                340.,
+                &format!(
+                    r#"{{"success":true,"code":0,"data":{{"id":"0","errorCode":{code},"errorMsg":"ambiguous row failure"}}}}"#,
+                ),
+            );
+            let actions = drained(&mut e);
+            assert!(
+                !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                "native={native}, code={code}: {actions:?}"
+            );
+            let error = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                    _ => None,
+                })
+                .expect("one terminal failure");
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "native={native}, code={code}"
+            );
+            assert!(error.protection.is_none());
+        }
+    }
+}
+
+#[test]
+fn protective_stop_limit_trigger_edit_refuses_before_native_modify_or_cancel() {
+    for amount in [None, Some(70.)] {
+        let (mut e, private, _) = guarded_fixture();
+        let row = protective_plan_row(1)
+            .replace("\"orderType\":5", "\"orderType\":1")
+            .replace("\"price\":0", "\"price\":54500");
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"channel":"push.personal.plan.order","data":{row}}}"#),
+        );
+        e.drain_actions().for_each(drop);
+        let original = e.store().order("guarded").unwrap().clone();
+        let inspect = protective_amend(&mut e, amount, 300.);
+        inspect_reply(&mut e, &inspect, 310., &row);
+        let actions = drained(&mut e);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "{actions:?}"
+        );
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .expect("one terminal refusal");
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert!(error.message.contains("stop-limit"));
+        assert_eq!(e.store().order("guarded"), Some(&original));
+    }
+}
+
+#[test]
+fn protective_full_position_resize_refuses_before_cancel() {
+    for take in [false, true] {
+        let (mut e, private, _) = guarded_fixture();
+        let row = if take {
+            exact_stop_row()
+                .replace("\"triggerSide\":2", "\"triggerSide\":1")
+                .replace("\"stopLossPrice\":55000", "\"stopLossPrice\":0")
+                .replace("\"takeProfitPrice\":0", "\"takeProfitPrice\":65000")
+        } else {
+            exact_stop_row()
+        };
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"channel":"push.personal.stop.order","data":{row}}}"#),
+        );
+        e.drain_actions().for_each(drop);
+        let original = e.store().order("guarded").unwrap().clone();
+        assert_eq!(original.amount, 0.);
+        e.handle(
+            300.,
+            Event::Command(Command::AmendOrder {
+                command: 91,
+                id: "guarded".into(),
+                price: Some(if take { 64000. } else { 54000. }),
+                amount: Some(20.),
+            }),
+        );
+        let inspect = requests(&mut e).remove(0);
+        inspect_reply(&mut e, &inspect, 310., &row);
+        let actions = drained(&mut e);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "{actions:?}"
+        );
+        let error = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .expect("one terminal refusal");
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+        assert!(error.message.contains("full-position"));
+        assert_eq!(e.store().order("guarded"), Some(&original));
+    }
+}
+
+#[test]
+fn protective_malformed_or_conflicting_refusals_never_authorize_put_back() {
+    for status in [200, 400] {
+        for body in [
+            "not JSON",
+            r#"{"success":true,"code":2006}"#,
+            r#"{"code":2006}"#,
+            r#"{"success":false,"code":0}"#,
+            r#"{"success":true,"code":0,"data":[{"id":"live","errorCode":0},{"id":"0","errorCode":2006}]}"#,
+            r#"{"success":true,"code":0,"data":{"id":"live","errorCode":2006}}"#,
+        ] {
+            let (mut e, _, _) = guarded_fixture();
+            let request = guarded_replacement(&mut e, 300.);
+            e.handle(
+                340.,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            let actions = drained(&mut e);
+            assert!(
+                !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                "{status}, {body}: {actions:?}"
+            );
+            let error = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "{status}, {body}"
+            );
+            assert!(error.protection.is_none());
+        }
+    }
+}
+
+#[test]
+fn protective_documented_row_refusal_still_permits_one_exact_restore() {
+    for code in [2006, 3001] {
+        for array in [false, true] {
+            let (mut e, _, _) = guarded_fixture();
+            let request = guarded_replacement(&mut e, 300.);
+            let row = format!(r#"{{"id":"0","errorCode":{code},"errorMsg":"definitive refusal"}}"#);
+            let rows = if array { format!("[{row}]") } else { row };
+            reply(
+                &mut e,
+                &request,
+                340.,
+                &format!(r#"{{"success":true,"code":0,"data":{rows}}}"#),
+            );
+            let restore = requests(&mut e);
+            assert_eq!(restore.len(), 1);
+            let body: serde_json::Value =
+                serde_json::from_str(restore[0].body.as_deref().unwrap()).unwrap();
+            assert_eq!(body["vol"], 60.);
+            assert_eq!(body["triggerPrice"], 55000.);
+            assert_eq!(body["orderType"], 5.);
+            reply(
+                &mut e,
+                &restore[0],
+                350.,
+                r#"{"success":true,"code":0,"data":"restored"}"#,
+            );
+            let actions = drained(&mut e);
+            assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+            assert_eq!(actions.iter().filter(|a| matches!(a,Action::Notice(Notice::CommandFailed {error,..}) if error.protection==Some(safe_cex_engine::error::Protection::Restored))).count(),1);
+        }
+    }
+}
+
+#[test]
+fn protective_stop_limit_quantity_only_recreate_keeps_both_native_prices() {
+    let (mut e, private, _) = guarded_fixture();
+    let row = protective_plan_row(1)
+        .replace("\"orderType\":5", "\"orderType\":1")
+        .replace("\"price\":0", "\"price\":54500");
+    ws(
+        &mut e,
+        private,
+        &format!(r#"{{"channel":"push.personal.plan.order","data":{row}}}"#),
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        300.,
+        Event::Command(Command::AmendOrder {
+            command: 91,
+            id: "guarded".into(),
+            price: None,
+            amount: Some(70.),
+        }),
+    );
+    let inspect = requests(&mut e).remove(0);
+    inspect_reply(&mut e, &inspect, 310., &row);
+    let cancel = requests(&mut e).remove(0);
+    assert!(cancel.url.ends_with("/planorder/cancel"));
+    reply(&mut e, &cancel, 320., r#"{"success":true,"code":0}"#);
+    let terminal = requests(&mut e).remove(0);
+    inspect_reply(
+        &mut e,
+        &terminal,
+        330.,
+        &row.replace("\"state\":1", "\"state\":2"),
+    );
+    let place = requests(&mut e).remove(0);
+    let body: serde_json::Value = serde_json::from_str(place.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["price"], 54500.);
+    assert_eq!(body["triggerPrice"], 55000.);
+    assert_eq!(body["vol"], 70.);
+    assert_eq!(body["orderType"], 1.);
+}
+
+#[test]
+fn ordinary_single_row_refusals_keep_the_unclassified_contract() {
+    for code in [2006, 500, 8888] {
+        let mut e = ready();
+        e.handle(
+            200.,
+            Event::Command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![order()],
+            }),
+        );
+        let request = requests(&mut e).remove(0);
+        reply(
+            &mut e,
+            &request,
+            300.,
+            &format!(
+                r#"{{"success":true,"code":0,"data":{{"orderId":"0","errorCode":{code},"errorMsg":"ordinary row refusal"}}}}"#,
+            ),
+        );
+        let actions = drained(&mut e);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "{actions:?}"
+        );
+        let errors: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "code={code}: {actions:?}");
+        let error = errors[0];
+        assert_eq!(error.outcome, None, "code={code}: {error:?}");
+        assert_eq!(error.kind, None, "code={code}: {error:?}");
+        assert_eq!(error.venue_code, None, "code={code}: {error:?}");
+        assert_eq!(error.venue_message, None, "code={code}: {error:?}");
+        assert_eq!(
+            error.message,
+            format!("MEXC refused the order [{code}]: ordinary row refusal")
+        );
+    }
+}
+
+#[test]
+fn ordinary_failure_envelopes_keep_the_base_classification() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (body, code, outcome) in [
+        (r#"{"code":2006}"#, "2006", Some(Outcome::Rejected)),
+        (
+            r#"{"success":true,"code":2006}"#,
+            "2006",
+            Some(Outcome::Rejected),
+        ),
+        (
+            r#"{"success":false,"code":2006.5}"#,
+            "2006.5",
+            Some(Outcome::Rejected),
+        ),
+        (r#"{"success":false,"code":3001}"#, "3001", None),
+    ] {
+        let mut e = ready();
+        e.handle(
+            200.,
+            Event::Command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![order()],
+            }),
+        );
+        let request = requests(&mut e).remove(0);
+        reply(&mut e, &request, 300., body);
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(error.outcome, outcome, "{body}: {error:?}");
+        assert_eq!(
+            error.kind,
+            outcome.map(|_| ErrorKind::Rejected),
+            "{body}: {error:?}"
+        );
+        assert_eq!(error.venue_code.as_deref(), Some(code), "{body}: {error:?}");
     }
 }

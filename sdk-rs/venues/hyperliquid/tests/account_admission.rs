@@ -137,15 +137,15 @@ fn background_reads_are_bounded_and_core_bootstrap_is_the_first_batch() {
     let (mode, state, orders) = h.core_batch();
     assert!(h.requests.is_empty());
     h.reply(&mode, r#""disabled""#);
-    let fees = h.take("userFees");
-    assert!(
-        h.requests.is_empty(),
-        "only the completed read releases a slot"
-    );
+    h.pump();
+    assert!(h.requests.is_empty(), "startup ancillary stays queued");
     h.reply(&state, support::STATE);
+    h.pump();
+    assert!(h.requests.is_empty(), "orders retains its original slot");
+    h.reply(&orders, "[]");
+    let fees = h.take("userFees");
     let builder = h.take("maxBuilderFee");
     assert!(h.requests.is_empty());
-    h.reply(&orders, "[]");
     h.reply(
         &fees,
         r#"{"userCrossRate":"0.0002","userAddRate":"0.00005"}"#,
@@ -158,7 +158,11 @@ fn background_reads_are_bounded_and_core_bootstrap_is_the_first_batch() {
 #[test]
 fn failure_releases_one_slot_and_a_late_answer_cannot_release_its_successor() {
     let mut h = Admission::start();
-    let (mode, _state, _orders) = h.core_batch();
+    let (mode, state, orders) = h.core_batch();
+    h.reply(&state, support::STATE);
+    h.reply(&orders, "[]");
+    h.pump();
+    assert!(h.requests.is_empty(), "Mode remains pending");
     h.engine.handle(
         h.now,
         Event::HttpFailed {
@@ -166,6 +170,7 @@ fn failure_releases_one_slot_and_a_late_answer_cannot_release_its_successor() {
             error: "test network failure",
         },
     );
+    let builder = h.take("maxBuilderFee");
     let fees = h.take("userFees");
     h.reply(&mode, r#""disabled""#);
     h.pump();
@@ -173,11 +178,13 @@ fn failure_releases_one_slot_and_a_late_answer_cannot_release_its_successor() {
         h.requests.is_empty(),
         "late completion cannot release a second slot"
     );
+    h.reply(&builder, "30");
     h.reply(
         &fees,
         r#"{"userCrossRate":"0.0002","userAddRate":"0.00005"}"#,
     );
-    h.take("maxBuilderFee");
+    h.pump();
+    assert!(h.requests.is_empty());
 }
 
 #[test]
@@ -197,7 +204,11 @@ fn the_original_twenty_second_deadline_releases_only_its_background_slots() {
 #[test]
 fn a_malformed_stream_releases_one_slot_without_replaying_an_old_end() {
     let mut h = Admission::start();
-    let (_mode, _state, orders) = h.core_batch();
+    let (mode, state, orders) = h.core_batch();
+    h.reply(&mode, r#""disabled""#);
+    h.reply(&state, support::STATE);
+    h.pump();
+    assert!(h.requests.is_empty(), "Orders remains pending");
     h.engine.handle(
         h.now,
         Event::HttpStart {
@@ -215,6 +226,7 @@ fn a_malformed_stream_releases_one_slot_without_replaying_an_old_end() {
     );
     h.engine
         .handle(h.now, Event::HttpEnd { request: orders.id });
+    h.take("maxBuilderFee");
     h.take("userFees");
     h.engine
         .handle(h.now, Event::HttpEnd { request: orders.id });
@@ -250,5 +262,58 @@ fn caller_owned_positions_read_does_not_wait_for_a_never_issued_routine_dex_read
         h.requests.len(),
         1,
         "foreground completion cannot release an extra ordinary slot"
+    );
+}
+
+#[test]
+fn financial_scopes_keep_the_reserve_but_ancillary_reads_are_normal() {
+    use safe_cex_engine::HttpReadClass;
+    let mut h = Admission::with_dex(true);
+    let mut financial = std::collections::HashSet::new();
+    for _ in 0..20 {
+        h.pump();
+        let requests = std::mem::take(&mut h.requests);
+        if requests.is_empty() {
+            break;
+        }
+        for request in requests {
+            let kind = support::kind(&request);
+            let dex = request.body.as_deref().unwrap().contains("\"xyz\"");
+            let financial_read =
+                matches!(kind.as_str(), "clearinghouseState" | "frontendOpenOrders");
+            assert_eq!(
+                h.engine.http_read_class(request.id),
+                if financial_read || kind == "userAbstraction" {
+                    HttpReadClass::Reconciliation
+                } else {
+                    HttpReadClass::Normal
+                },
+                "{kind} dex={dex}"
+            );
+            if financial_read {
+                financial.insert((kind.clone(), dex));
+            }
+            h.reply(
+                &request,
+                match kind.as_str() {
+                    "clearinghouseState" if dex => r#"{"assetPositions":[],"time":1000}"#,
+                    "clearinghouseState" => support::STATE,
+                    "frontendOpenOrders" => "[]",
+                    "userAbstraction" => r#""disabled""#,
+                    "userFees" => r#"{"userCrossRate":"0.0002","userAddRate":"0.00005"}"#,
+                    "maxBuilderFee" => "30",
+                    _ => panic!("unexpected {kind}"),
+                },
+            );
+        }
+    }
+    assert_eq!(financial.len(), 4, "core and HIP-3 positions and orders");
+    assert!(h.requests.is_empty());
+    h.advance(121_000.);
+    let warm = h.take("clearinghouseState");
+    assert!(warm.body.as_deref().unwrap().contains("\"xyz\""));
+    assert_eq!(
+        h.engine.http_read_class(warm.id),
+        HttpReadClass::Reconciliation
     );
 }

@@ -1798,6 +1798,21 @@ dispatch waiters use FIFO leases so newer cheap reads cannot starve older Orders
 100 ms renewal and 2 s expiry bound a dead worker's obstruction without charging
 its abandoned work.
 
+Explicit native prerequisites and fence reconciliation precede account financial
+reconciliation, then normal ancillary reads and bulk caller history/candles in both
+admission layers. Account State/Orders, reconnect snapshots and Role/Mode/Spot
+use the reconciliation class; its 1,000-weight ceiling shares the critical reserve,
+while explicit fence/amend reads retain first rank. The three-slot financial bound
+stays in place. Startup fees/builder are queued until financial reads settle; a live
+placement can release its queued builder check with its ordinary class and bound. The 1,000-weight
+bucket refills at 1,000/min; noncritical work can occupy 800, reserving 200 for
+critical reads. Native refill is continuous. Pending native metadata supplies the
+closed class through the Hyperliquid-only WASM `httpReadClass` export; a caller
+orderStatus lookup stays bulk. Classes never enter HTTP bytes or grant authority.
+Weight-blocked preparations keep their leased FIFO position through dispatch.
+Candles retain their original 20 s native bound, capped by a shorter caller wait;
+queued expiry cannot turn into a late send. See `docs/plans/callers/hl-critical-read-priority.md`.
+
 The worker's unchanged 120 s timeout preserves closed native startup fields and
 per-account `/info` route, 429, quota-wait, undispatched and in-flight counters.
 `startup_native_sample_age_ms` identifies the age of the last native watchdog

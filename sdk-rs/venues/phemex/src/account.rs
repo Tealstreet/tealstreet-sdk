@@ -210,7 +210,7 @@ pub struct State {
     fills: HashSet<String>,
     fill_queue: VecDeque<(String, u64)>,
     fill_floor: u64,
-    uncertain_fills: HashMap<String, u64>,
+    uncertain_fills: HashMap<String, (String, u64)>,
     uncertainty_overflow: bool,
     reconcile: HashMap<String, Reconcile>,
     reconcile_timer: Option<TimerId>,
@@ -445,6 +445,16 @@ impl State {
         self.uncertainty_overflow
             || !self.uncertain_fills.is_empty()
             || self.source_unreconciled_fills
+    }
+    pub fn has_unreconciled_fills_for(&self, symbol: &str, id: &str) -> bool {
+        self.uncertainty_overflow
+            || self.source_unreconciled_fills
+            || self
+                .uncertain_fills
+                .iter()
+                .any(|(order, (filled_symbol, _))| {
+                    order == id || filled_symbol.eq_ignore_ascii_case(symbol)
+                })
     }
     pub fn order_pos_side(&self, id: &str) -> Option<&str> {
         self.order_sides
@@ -1595,7 +1605,7 @@ impl PhemexPerpetuals {
                             .account
                             .uncertain_fills
                             .get(row.order_id.as_ref())
-                            .is_some_and(|time| version >= *time)
+                            .is_some_and(|(_, time)| version >= *time)
                     {
                         self.account.uncertain_fills.remove(row.order_id.as_ref());
                     }
@@ -2370,8 +2380,13 @@ impl PhemexPerpetuals {
                 self.account
                     .uncertain_fills
                     .entry(row.order_id.to_string())
-                    .and_modify(|time| *time = (*time).max(version))
-                    .or_insert(version);
+                    .and_modify(|(symbol, time)| {
+                        *time = (*time).max(version);
+                        if !symbol.eq_ignore_ascii_case(&row.symbol) {
+                            self.account.uncertainty_overflow = true;
+                        }
+                    })
+                    .or_insert_with(|| (row.symbol.to_string(), version));
             } else {
                 self.account.uncertainty_overflow = true;
                 cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,"Phemex execution reconciliation capacity exceeded; reconnecting for an authoritative snapshot");
