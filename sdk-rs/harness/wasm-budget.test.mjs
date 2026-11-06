@@ -261,12 +261,25 @@ test('#3073 cancel confirmation (run 41931095253) retains headroom and siblings 
 
 test('#3094 batch acknowledgements (run 42062090938) retain Bybit headroom', () => {
   const measured = 2_214_254;
-  const cap = 2_225_152;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES.bybit, cap);
+  const cap = WASM_VENUE_OVERRIDES.bybit;
+  assert.ok(cap >= Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   assert.equal(wasmBudgetError(measured, 'venue', 'bybit'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'bybit'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bybit'), /exceeds/);
+});
+
+test('#3168 guarded Partial edits (run 42227488436) retain measured headroom for every Bybit alias', () => {
+  const measured = 2_246_685;
+  const cap = 2_257_920;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.bybit, cap);
+  for (const venue of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot', 'hyrotrader']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'bybit');
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
 });
 
 test('#3106 critical reads (run 42097859473) retain measured headroom and equal HL siblings', () => {
