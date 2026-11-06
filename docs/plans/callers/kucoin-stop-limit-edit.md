@@ -6,9 +6,12 @@ private order rows retain both; a sparse stop event keeps the previously known
 execution price. An edit moves the trigger while retaining the execution price,
 limit type, native lots, time in force, trigger source and explicit close flag.
 A definitive replacement refusal puts back the original type, execution price,
-trigger and original native lots once. A native `closeOrder: true` remains a
+trigger and original native lots once. An edit of a native `closeOrder: true` remains a
 full-position close even when the venue row reports a nonzero size; its request
-omits size. A full-position size edit is refused before cancellation. Invalid
+omits size. New placements keep the house sizing contract: an explicit nonzero
+amount stays sized even with `close: true`. New SL/TP orders remain stop-market,
+including the app convention `triggerPrice == price`; only proven native
+execution-price metadata on an edit or put-back selects stop-limit. A full-position size edit is refused before cancellation. Invalid
 or sub-tick limit prices also refuse before cancellation.
 
 KuCoin documents limit and market as independent from the stop direction and

@@ -2044,3 +2044,91 @@ fn stop_limit_with_unusable_limit_price_is_refused_before_cancel() {
         assert!(h.engine.store().order("old").is_some());
     }
 }
+
+#[test]
+fn new_app_protection_with_redundant_trigger_remains_stop_market() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut h = Harness::new();
+        let mut opts = order();
+        opts.kind = kind;
+        opts.client_order_id = None;
+        opts.price = Some(110.0);
+        opts.trigger_price = Some(110.0);
+        place(&mut h, vec![opts]);
+        h.metadata(false, "CROSS");
+        let request = h.take("/api/v1/orders");
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["type"], "market");
+        assert_eq!(body["stopPrice"], "110");
+        assert!(body.get("price").is_none());
+        assert!(body.get("timeInForce").is_none());
+    }
+}
+
+#[test]
+fn new_redundant_trigger_stop_cannot_bypass_post_only_refusal() {
+    let mut h = Harness::new();
+    let mut opts = order();
+    opts.kind = OrderType::StopLoss;
+    opts.client_order_id = None;
+    opts.trigger_price = opts.price;
+    opts.time_in_force = Some(TimeInForce::PostOnly);
+    place(&mut h, vec![opts]);
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. }))),
+        "new PostOnly stop must refuse synchronously"
+    );
+    assert!(writes(&h).is_empty());
+    assert_eq!(failure(&h).outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn new_sized_close_market_or_stop_keeps_the_explicit_native_size() {
+    for kind in [
+        OrderType::Market,
+        OrderType::StopLoss,
+        OrderType::TakeProfit,
+    ] {
+        let mut h = Harness::new();
+        let mut opts = order();
+        opts.kind = kind;
+        opts.client_order_id = None;
+        opts.close = Some(true);
+        opts.amount = 10.0;
+        place(&mut h, vec![opts]);
+        h.metadata(false, "CROSS");
+        let request = h.take("/api/v1/orders");
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["size"], "10");
+        assert_ne!(body["closeOrder"], true);
+        assert_eq!(body["type"], "market");
+    }
+}
+
+#[test]
+fn native_stop_limit_equal_to_its_trigger_stays_limit_on_replacement_and_put_back() {
+    let mut h = Harness::new();
+    resting_stop_limit(&mut h, OrderType::StopLoss, false);
+    h.engine.store_mut().update_order("old", |o| {
+        o.price = 130.0;
+    });
+    h.fresh_ticker(110.0);
+    amend_stop(&mut h, "old", 130.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["price"], "130");
+    assert_eq!(body["stopPrice"], "130");
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let restore = h.take("/api/v1/orders");
+    let body: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["price"], "130");
+    assert_eq!(body["stopPrice"], "130");
+}

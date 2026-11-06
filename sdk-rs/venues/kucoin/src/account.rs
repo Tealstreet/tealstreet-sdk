@@ -361,12 +361,13 @@ impl OrderRow<'_> {
             extra: Some(OrderExtra {
                 remaining_native: Some(remaining),
                 filled_in_placement_units: Some(self.filled_size.get()),
-                conditional_order_price: ((is_stop || raw_type == "stop") && raw_type == "limit")
-                    .then_some(if self.price.get() != 0.0 {
+                conditional_order_price: (is_stop && raw_type == "limit").then_some(
+                    if self.price.get() != 0.0 {
                         self.price.get()
                     } else {
                         self.order_price.get()
-                    }),
+                    },
+                ),
                 ..Default::default()
             }),
         };
