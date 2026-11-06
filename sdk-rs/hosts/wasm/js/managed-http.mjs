@@ -19,6 +19,10 @@ function preparationReason(error, fallback) {
   }
 }
 
+// Numeric ABI follows the engine's repr(u8) RequestClass. Strings and formatting
+// stay in the host; labels grant no release, credential or retry authority.
+const requestClasses = Object.freeze(['discovery', 'orderRead', 'orderWrite', 'history', 'read']);
+
 // Host-owned route resources. Engine tokens remain strings through every hop.
 // No asynchronous work is allowed between claim and bound.dispatch().
 export class ManagedHttp {
@@ -51,12 +55,23 @@ export class ManagedHttp {
     }
   }
 
+  timeoutFacts(resource) {
+    return { requestClass: resource.requestClass, budgetMs: resource.budgetMs,
+      elapsedMs: Math.max(0, Math.floor(this.host.transport.now() - resource.startedAt)) };
+  }
+
+  timeoutMessage(resource) {
+    const facts = this.timeoutFacts(resource);
+    return `class=${facts.requestClass} budget=${facts.budgetMs}ms elapsed=${facts.elapsedMs}ms`;
+  }
+
   failure(resource, kind) {
     if (resource.failureReported || this.host.disposed) return;
     resource.failureReported = true;
     try {
-      this.host.handlers.onEvent?.({ level: 'debug', code: 'http.request_failed', message: 'HTTP request failed',
-        fields: { ...resource.diagnostic, kind, phase: resource.phase } });
+      this.host.handlers.onEvent?.({ level: 'debug', code: 'http.request_failed',
+        message: kind === 'timeout' ? `HTTP request timed out (${this.timeoutMessage(resource)})` : 'HTTP request failed',
+        fields: { ...resource.diagnostic, kind, phase: resource.phase, ...(kind === 'timeout' ? this.timeoutFacts(resource) : {}) } });
     } catch { /* Diagnostic consumers cannot change request settlement or cleanup. */ }
   }
 
@@ -108,11 +123,15 @@ export class ManagedHttp {
     if (this.resources.has(token) || host.disposed
       || !host.invoke(host.engine.httpPreparationPending, token)) return;
     const resource = { controller: new AbortController(), phase: 'preparing',
-      diagnostic: requestFailureFields(action.packet), request: action.packet.request };
+      diagnostic: requestFailureFields(action.packet), request: action.packet.request,
+      startedAt: host.transport.now(), budgetMs: action.packet.timeoutMs,
+      requestClass: action.packet.method.toUpperCase() === 'GET' ? 'read' : 'orderWrite' };
     this.resources.set(token, resource);
     if (typeof host.transport.prepareHttp !== 'function') { this.fail(token, resource, 'unsupported'); return; }
     try {
-      const requestClass = typeof host.engine.httpRequestClass === 'function' ? host.invoke(host.engine.httpRequestClass, token) : undefined;
+      const classCode = action.requestClass;
+      const requestClass = Number.isInteger(classCode) ? requestClasses[classCode] : undefined;
+      if (requestClass) resource.requestClass = requestClass;
       const prepared = await host.transport.prepareHttp({ ...action.packet, headers: Object.fromEntries(action.packet.headers), intent: action.intent, ...(requestClass ? { requestClass } : {}), signal: resource.controller.signal });
       if (!this.live(token, resource) || !host.invoke(host.engine.httpPreparationPending, token)) {
         prepared?.cancel?.();

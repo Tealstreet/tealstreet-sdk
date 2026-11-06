@@ -1087,6 +1087,8 @@ impl<P> Cx<'_, P> {
         )
         .expect("validated physical HTTP window");
         let preparation = lifecycle.preparation();
+        #[cfg(target_arch = "wasm32")]
+        let request_class = lifecycle.context().request_class() as u8;
         #[cfg(feature = "release-domains")]
         self.io.core.domain_accept(
             request,
@@ -1135,6 +1137,8 @@ impl<P> Cx<'_, P> {
             .core
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class,
                 preparation,
                 intent,
                 request: http,
@@ -1516,6 +1520,7 @@ impl crate::engine::CoreIo<'_> {
 
 impl<V: Venue> Engine<V> {
     /// Closed diagnostic label for this exact live preparation; no send authority.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn http_request_class(
         &self,
         token: Preparation,
@@ -1861,6 +1866,7 @@ impl<V: Venue> Engine<V> {
             return;
         }
         let delivery = managed.delivery();
+        #[cfg(not(target_arch = "wasm32"))]
         if reason == Error::TimedOut
             && !error.message.starts_with("Signing ")
             && !error.message.contains(" budget=")
@@ -2446,6 +2452,9 @@ impl<V: Venue> Engine<V> {
         }
         let first_action = self.io.core.actions.len();
         let managed = &self.io.core.managed_http[&request];
+        #[cfg(target_arch = "wasm32")]
+        let timeout_message = "HTTP request timed out";
+        #[cfg(not(target_arch = "wasm32"))]
         let timeout_message = format!(
             "HTTP request timed out ({})",
             managed.lifecycle.timeout_diagnostic(now)
@@ -2456,7 +2465,7 @@ impl<V: Venue> Engine<V> {
                 now,
                 Event::HttpFailed {
                     request,
-                    error: &timeout_message,
+                    error: timeout_message.as_ref(),
                 },
                 true,
             );
@@ -3038,6 +3047,8 @@ impl crate::engine::IoCore {
         http.timeout_ms = Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
         self.actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class: managed.lifecycle.context().request_class() as u8,
                 preparation: managed.lifecycle.preparation(),
                 intent: managed.intent,
                 request: http,

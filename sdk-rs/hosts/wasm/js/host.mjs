@@ -1183,7 +1183,8 @@ export class EngineHost {
       if (typeof request !== 'string' || !/^[1-9][0-9]{0,19}$/.test(request)) continue;
       for (const resource of this.managedHttp.resources.values()) {
         if (!Number.isSafeInteger(resource.request) || String(resource.request) !== request) continue;
-        action.fields = { ...action.fields, httpMethod: resource.diagnostic.method, httpPath: resource.diagnostic.path, httpPhase: resource.phase };
+        action.fields = { ...action.fields, httpMethod: resource.diagnostic.method, httpPath: resource.diagnostic.path, httpPhase: resource.phase, ...this.managedHttp.timeoutFacts(resource) };
+        if (action.message && !action.message.startsWith("Signing ") && !action.message.includes(" budget=")) action.message += ` (${this.managedHttp.timeoutMessage(resource)})`;
         this.managedHttp.failure(resource, 'timeout');
         break;
       }

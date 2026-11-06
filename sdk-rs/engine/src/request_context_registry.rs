@@ -102,22 +102,25 @@ enum CommandPhase {
 }
 
 impl ContextRegistry {
+    fn dispatch_request_class(&self, id: CommandId) -> crate::request_budget::RequestClass {
+        if self.dispatch.is_some_and(|(command, _)| command == id) {
+            self.dispatch_class
+        } else {
+            crate::request_budget::RequestClass::Read
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     fn request_class(&self, scope: Scope, policy: &Policy) -> crate::request_budget::RequestClass {
         use crate::request_budget::RequestClass;
         if policy.operation == Operation::Mutation {
             return RequestClass::OrderWrite;
         }
         match scope {
-            Scope::Command(id) => self
-                .commands
-                .get(&id)
-                .map(|owner| owner.request_class)
-                .or_else(|| {
-                    self.dispatch_class
-                        .filter(|(command, _)| *command == id)
-                        .map(|(_, class)| class)
-                })
-                .unwrap_or(RequestClass::Read),
+            Scope::Command(id) => self.commands.get(&id).map_or_else(
+                || self.dispatch_request_class(id),
+                |owner| owner.request_class,
+            ),
             Scope::Background if policy.credential.is_none() => RequestClass::Discovery,
             _ => RequestClass::OrderRead,
         }
@@ -253,7 +256,7 @@ pub(super) struct ContextRegistry {
     bearer_legs: Vec<(u64, u64)>,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
-    pub(super) dispatch_class: Option<(CommandId, crate::request_budget::RequestClass)>,
+    pub(super) dispatch_class: crate::request_budget::RequestClass,
     executions: execution::Executions,
     #[cfg(feature = "http-plans")]
     retirements: VecDeque<HttpOwnerRetirement>,
@@ -657,8 +660,8 @@ impl ContextRegistry {
             policy.pacing,
         )?
         .with_retry(policy.retry)?
-        .with_egress(egress)?
-        .with_request_class(class);
+        .with_egress(egress)?;
+        context.set_request_class(class);
         if self.contexts.len() + self.reserved_context_count() >= CAPACITY
             || matches!(owner, Owner::Command { id, .. }
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
@@ -785,8 +788,8 @@ impl ContextRegistry {
                 policy.pacing,
             )?
             .with_retry(policy.retry)?
-            .with_egress(parent.egress())?
-            .with_request_class(parent.request_class());
+            .with_egress(parent.egress())?;
+            child.set_request_class(parent.request_class());
             child.bind_issuer(&self.issuer);
             legs.push(leg);
             children.push(child);

@@ -257,14 +257,16 @@ test('a native deadline cancellation names the exact pending endpoint without si
   const failures = [];
   r.host.handlers.onEvent = (event) => failures.push(event);
   const request = { ...packet, method: 'GET', url: 'https://api.bybit.com/v5/market/instruments-info?apiKey=SECRET&signature=SECRET#SECRET' };
-  r.host.execute({ ...prepare, packet: request });
+  r.host.execute({ ...prepare, requestClass: 0, packet: request });
   r.at(1000);
   r.host.run(JSON.stringify([
     { op: 'event', level: 'error', code: 'request.failed', message: 'HTTP request timed out', fields: { httpTimeoutRequest: '7' } }, cancel,
   ]));
   r.host.execute(cancel);
   assert.equal(failures.filter((event) => event.code === 'http.request_failed').length, 1);
-  assert.deepEqual(failures[0].fields, { method: 'GET', path: '/v5/market/instruments-info', kind: 'timeout', phase: 'preparing' });
+  assert.deepEqual(failures[0].fields, { method: 'GET', path: '/v5/market/instruments-info', kind: 'timeout', phase: 'preparing', requestClass: 'discovery', budgetMs: 1000, elapsedMs: 1000 });
+  assert.match(failures[0].message, /class=discovery budget=1000ms elapsed=1000ms/);
+  assert.match(failures[1].message, /class=discovery budget=1000ms elapsed=1000ms/);
   assert.doesNotMatch(JSON.stringify(failures), /SECRET|api\.bybit|signature|apiKey/);
   r.host.dispose();
 });
@@ -320,18 +322,19 @@ test('late provider answers and broken diagnostic observers cannot alter cleanup
   r.host.dispose();
 });
 
-test('copies the closed engine class into preparation without changing the signed packet', async () => {
-  let seen, bound;
-  const r = rig(async request => {
-    seen = request;
-    return { bind(packet) { bound = packet; return { ready: () => true, dispatch: () => new Promise(() => {}) }; } };
+for (const [code, label] of ['discovery', 'orderRead', 'orderWrite', 'history', 'read'].entries()) {
+  test(`copies compact class ${code} (${label}) into preparation without changing the signed packet`, async () => {
+    let seen, bound;
+    const r = rig(async request => {
+      seen = request;
+      return { bind(packet) { bound = packet; return { ready: () => true, dispatch: () => new Promise(() => {}) }; } };
+    });
+    r.host.execute({ ...prepare, requestClass: code }); await tick();
+    assert.equal(seen.requestClass, label);
+    assert.equal(seen.timeoutMs, 1000);
+    assert.equal(bound.url, packet.url);
+    assert.equal(bound.body, packet.body);
+    assert.equal(bound.requestClass, undefined);
+    r.host.dispose();
   });
-  r.host.engine.httpRequestClass = value => { assert.equal(value, token); return 'history'; };
-  r.host.execute(prepare); await tick();
-  assert.equal(seen.requestClass, 'history');
-  assert.equal(seen.timeoutMs, 1000);
-  assert.equal(bound.url, packet.url);
-  assert.equal(bound.body, packet.body);
-  assert.equal(bound.requestClass, undefined);
-  r.host.dispose();
-});
+}

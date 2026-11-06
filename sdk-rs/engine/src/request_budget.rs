@@ -1,19 +1,24 @@
 //! Closed HTTP wait budgets. TypeScript's requestBudget.ts is the parity reference.
 //! These labels grant no retry, credential or execution authority.
-use crate::{Command, Method};
+use crate::Command;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::Method;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RequestClass {
     Discovery,
     OrderRead,
     OrderWrite,
     History,
+    #[default]
     Read,
 }
 
 pub const MAX_REQUEST_BUDGET_MS: u32 = 2_147_483_647;
 
 impl RequestClass {
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub(crate) fn for_operation(self, operation: crate::request_context::Operation) -> Self {
         if operation == crate::request_context::Operation::Mutation {
             Self::OrderWrite
@@ -23,6 +28,7 @@ impl RequestClass {
             self
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Discovery => "discovery",
@@ -39,12 +45,14 @@ impl RequestClass {
             _ => 20_000,
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn timeout_ms(self, timeout: Option<u32>) -> u32 {
         match timeout {
             Some(ms) if ms > 0 => ms.min(MAX_REQUEST_BUDGET_MS),
             _ => self.budget_ms(),
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn diagnostic(self, budget_ms: u32, elapsed_ms: u128) -> String {
         format!(
             "class={} budget={budget_ms}ms elapsed={elapsed_ms}ms",
@@ -58,6 +66,7 @@ impl RequestClass {
             _ => Self::OrderRead,
         }
     }
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub(crate) fn command(command: &Command) -> Self {
         match command {
             Command::Query {
@@ -66,11 +75,14 @@ impl RequestClass {
             } => Self::OrderRead,
             Command::Venue { action, .. } => Self::venue_action(action),
             Command::Query { .. } | Command::FetchCandles { .. } => Self::History,
-            _ if command.write_intent() != crate::classify::Intent::Read => Self::OrderWrite,
+            // The issued operation selects OrderWrite. Keeping dispatch metadata
+            // read-shaped also covers read legs of a mutation without reclassifying
+            // the entire command or granting any execution authority.
             _ => Self::OrderRead,
         }
     }
     /// Legacy GET classification. Managed posted reads carry their semantic label.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn legacy(method: Method, url: &str) -> Self {
         if method != Method::Get {
             return Self::OrderWrite;
@@ -124,7 +136,7 @@ impl RequestClass {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     #[derive(serde::Deserialize)]
@@ -135,6 +147,42 @@ mod tests {
         request_class: String,
         timeout_ms: Option<u32>,
         budget_ms: u32,
+    }
+    #[test]
+    fn compact_host_abi_has_no_string_payload() {
+        assert_eq!(std::mem::size_of::<RequestClass>(), 1);
+        for (code, class) in [
+            RequestClass::Discovery,
+            RequestClass::OrderRead,
+            RequestClass::OrderWrite,
+            RequestClass::History,
+            RequestClass::Read,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(class as u8, code as u8);
+        }
+    }
+    #[test]
+    fn diagnostic_metadata_preserves_the_issued_operation() {
+        use crate::request_context::Operation;
+        for class in [
+            RequestClass::Discovery,
+            RequestClass::OrderRead,
+            RequestClass::OrderWrite,
+            RequestClass::History,
+            RequestClass::Read,
+        ] {
+            assert_eq!(
+                class.for_operation(Operation::Mutation),
+                RequestClass::OrderWrite
+            );
+            assert_ne!(
+                class.for_operation(Operation::Read),
+                RequestClass::OrderWrite
+            );
+        }
     }
     #[test]
     fn ts_reference_class_budgets_and_explicit_bounds_match() {

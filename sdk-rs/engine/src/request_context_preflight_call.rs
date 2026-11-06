@@ -792,7 +792,7 @@ impl crate::engine::CoreCx<'_> {
             .owner_entry(handle.owner())
             .ok_or(Error::Revoked)?
             .request_class;
-        context = context.with_request_class(class);
+        context.set_request_class(class);
         context.bind_issuer(&self.io.core.request_contexts.issuer);
         let signing = signed.then(|| {
             self.io

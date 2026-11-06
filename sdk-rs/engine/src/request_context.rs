@@ -439,6 +439,7 @@ pub struct Context {
     leg: u64,
     operation: Operation,
     request_class: crate::request_budget::RequestClass,
+    #[cfg(not(target_arch = "wasm32"))]
     created_at: f64,
     credential: Option<Credential>,
     /// Egress declared at issuance; it may only confirm a credential's intent.
@@ -498,6 +499,7 @@ impl Context {
                 crate::request_budget::RequestClass::Read
             },
             credential,
+            #[cfg(not(target_arch = "wasm32"))]
             created_at,
             egress: None,
             deadline,
@@ -510,9 +512,8 @@ impl Context {
         self.request_class
     }
 
-    pub(crate) fn with_request_class(mut self, class: crate::request_budget::RequestClass) -> Self {
+    pub(crate) fn set_request_class(&mut self, class: crate::request_budget::RequestClass) {
         self.request_class = class.for_operation(self.operation);
-        self
     }
 
     /// Capture egress before issuer binding: unsigned reads declare it, a
@@ -650,6 +651,9 @@ pub struct Prepared {
 #[derive(Clone, Debug, PartialEq)]
 pub enum HttpAction {
     Prepare {
+        /// Browser-only diagnostic metadata; outside immutable signed request bytes.
+        #[cfg(target_arch = "wasm32")]
+        request_class: u8,
         preparation: Preparation,
         intent: RoutingIntent,
         request: crate::HttpRequest,
@@ -859,6 +863,7 @@ enum State {
 /// One physical attempt. A retry constructs another lifecycle with the same
 /// context; command evidence is retained separately until command sealing.
 pub struct Lifecycle {
+    #[cfg(not(target_arch = "wasm32"))]
     created_at: f64,
     context: Context,
     deadline: f64,
@@ -887,6 +892,7 @@ pub(crate) mod group_lifecycle;
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             created_at: context.created_at,
             deadline: context.deadline(),
             context,
@@ -917,11 +923,15 @@ impl Lifecycle {
             return Err(Error::Invalid);
         }
         let mut lifecycle = Self::new(context, attempt);
-        lifecycle.created_at = created_at;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            lifecycle.created_at = created_at;
+        }
         lifecycle.deadline = deadline;
         Ok(lifecycle)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn timeout_diagnostic(&self, now: f64) -> String {
         self.context.request_class().diagnostic(
             (self.deadline - self.created_at).max(0.) as u32,

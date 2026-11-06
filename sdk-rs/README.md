@@ -60,12 +60,16 @@ are history (client-ID order lookups stay short), and live account/order reads a
 bounds, Plan/Preflight call windows and caller-wait roots remain authoritative.
 A child or retry never extends its original root deadline.
 
-The engine exposes `http_request_class` only for an exact pending preparation.
-Native and WASM hosts pass that closed label into transport diagnostics. TS
-conservatively labels non-GET methods `orderWrite` regardless of hints while
-honoring the explicit remaining engine deadline. The label grants no send or retry authority and never changes signed wire bytes.
-Timeouts name class, budget and elapsed milliseconds, including engine expiry
-when it wins the race with the host timer. HOW readiness remains capped at 30 s
+Native hosts query `http_request_class` only for an exact pending preparation.
+Browser preparation actions carry a compact `u8` class outside signed packet
+bytes (discovery 0, orderRead 1, orderWrite 2, history 3, read 4). The JS host
+maps that code to a closed label and formats timeout diagnostics. Native-only
+class names, legacy path classification and diagnostic formatting are excluded
+from wasm; engine issuance retains numeric bounded deadlines. TS conservatively
+labels non-GET methods `orderWrite` regardless of hints while honoring the
+explicit remaining engine deadline. Labels grant no send or retry authority.
+Timeouts name class, budget and elapsed milliseconds, including host diagnostics
+when engine expiry wins the timer race. HOW readiness remains capped at 30 s
 inside the same original deadline. Legacy GET paths use exact catalogue/history/
 order components; unknown paths use the 20 s read default and non-GET requests
 conservatively use the short write default. Explicit transport deadlines win.

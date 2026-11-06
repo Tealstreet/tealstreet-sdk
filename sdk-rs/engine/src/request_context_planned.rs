@@ -1252,7 +1252,7 @@ impl<P> Cx<'_, P> {
                 .ok_or(Error::Revoked)?
                 .request_class
         };
-        context = context.with_request_class(class);
+        context.set_request_class(class);
         context.bind_issuer(&self.io.core.request_contexts.issuer);
         let call = Call::open(
             context.clone(),
