@@ -224,6 +224,15 @@ impl Harness {
             }),
         });
     }
+    /// A reference price observed now, as a final stop check needs one.
+    fn fresh_ticker(&mut self, price: f64) {
+        self.event(Event::PollCeilingChanged { ceiling_ms: None });
+        self.engine.store_mut().update_ticker("BTCUSDT", |t| {
+            t.mark = price;
+            t.last = price;
+            t.index = price;
+        });
+    }
     fn confirm_cancel(&mut self, id: &str, size: f64, filled: f64) {
         let request = self.take(&format!("/api/v1/orders/{id}"));
         assert_eq!(request.method, Method::Get);
@@ -602,7 +611,9 @@ fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
         let mut h = Harness::new();
         if id == "old" {
             h.set_order("old", OrderType::StopLoss, 6.0);
+            h.fresh_ticker(80.0);
         } else {
+            h.fresh_ticker(95.0);
             h.set_order("parent", OrderType::Limit, 6.0);
             h.set_order(id, OrderType::StopLoss, 6.0);
             h.engine
@@ -661,6 +672,10 @@ fn virtual_leg_amend_keeps_both_protections_and_uses_st_orders() {
     h.set_order("parent", OrderType::Limit, 6.0);
     h.set_order("parent__stop_loss", OrderType::StopLoss, 6.0);
     h.set_order("parent__take_profit", OrderType::TakeProfit, 6.0);
+    h.engine
+        .store_mut()
+        .update_order("parent__stop_loss", |o| o.side = OrderSide::Sell);
+    h.fresh_ticker(95.0);
     h.command(Command::AmendOrder {
         command: 1,
         id: "parent__stop_loss".into(),
@@ -1462,4 +1477,239 @@ fn an_unknown_symbol_leverage_read_sends_nothing() {
     });
     assert!(h.done(74).unwrap_err().contains("unknown market"));
     assert!(!h.has("getMarginMode"));
+}
+
+/// A buy stop of 6 lots at 100 (it closes a short), whose trigger moves to
+/// 120 against a fresh mark of 110; nothing has filled, so the original can
+/// be put back exactly.
+fn resting_stop(h: &mut Harness) {
+    h.set_order("old", OrderType::StopLoss, 6.0);
+    h.engine.store_mut().update_order("old", |o| o.filled = 0.0);
+    h.fresh_ticker(110.0);
+}
+fn amend_stop(h: &mut Harness, id: &str, price: f64) {
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: id.into(),
+        price: Some(price),
+        amount: None,
+    });
+}
+fn writes(h: &Harness) -> Vec<String> {
+    h.actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.method != Method::Get => Some(r.url.clone()),
+            _ => None,
+        })
+        .collect()
+}
+/// The cancel lands, reads as cancelled with `filled` lots, and the
+/// replacement is the next write.
+fn to_replacement(h: &mut Harness, id: &str, filled: f64) -> HttpRequest {
+    h.metadata(false, "CROSS");
+    let cancel = h.take(&format!("/api/v1/orders/{id}"));
+    assert_eq!(cancel.method, Method::Delete);
+    h.response(
+        &cancel,
+        200,
+        &format!(r#"{{"code":"200000","data":{{"cancelledOrderIds":["{id}"]}}}}"#),
+    );
+    h.pace();
+    h.confirm_cancel(id, 10.0, filled);
+    let index = h
+        .actions
+        .iter()
+        .position(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+        .unwrap_or_else(|| panic!("no replacement: {:?}", h.actions));
+    let Action::Http(request) = h.actions.remove(index) else {
+        unreachable!()
+    };
+    request
+}
+const REFUSED: &str = r#"{"code":"300003","msg":"Balance insufficient"}"#;
+fn failure(h: &Harness) -> safe_cex_engine::VenueError {
+    h.failures.last().cloned().expect("a typed failure")
+}
+
+#[test]
+fn a_stale_crossed_changed_or_flat_stop_at_the_final_send_cancels_nothing() {
+    for case in ["stale", "crossed", "filled", "flat"] {
+        let mut h = Harness::new();
+        resting_stop(&mut h);
+        h.engine.store_mut().update_order("old", |o| o.reduce_only = true);
+        h.engine.store_mut().set_positions(vec![short_position()]);
+        amend_stop(&mut h, "old", 120.0);
+        match case {
+            "stale" => h.now += 6_000.0,
+            // The mark rose through the new trigger before the cancel left.
+            "crossed" => h.engine.store_mut().update_ticker("BTCUSDT", |t| t.mark = 125.0),
+            "filled" => h.engine.store_mut().update_order("old", |o| o.filled = 0.002),
+            _ => h.engine.store_mut().set_positions(vec![]),
+        }
+        h.metadata(false, "CROSS");
+        assert!(writes(&h).is_empty(), "{case}: {:?}", writes(&h));
+        let error = failure(&h);
+        let why = match case {
+            "stale" => "mark price reference is stale",
+            "crossed" => "already crossed the mark price",
+            "filled" => "changed or filled before cancellation",
+            _ => "no position for it to protect",
+        };
+        assert!(
+            error.message.contains("was not changed") && error.message.contains(why),
+            "{case}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::NotSent), "{case}");
+        assert_eq!(error.protection, None, "{case}: the stop still stands");
+        assert!(h.engine.store().order("old").is_some(), "{case}");
+    }
+}
+
+#[test]
+fn a_refused_replacement_puts_the_original_stop_back_once() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    assert!(replacement.body.as_deref().unwrap().contains(r#""stopPrice":"120""#));
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let restore = h.take("/api/v1/");
+    let body = restore.body.clone().unwrap();
+    for expected in [r#""stopPrice":"100""#, r#""size":"6""#, r#""side":"buy""#] {
+        assert!(body.contains(expected), "the original, not the edit: {body}");
+    }
+    h.response(
+        &restore,
+        200,
+        r#"{"code":"200000","data":{"orderId":"restored"}}"#,
+    );
+    h.pace();
+    let error = failure(&h);
+    assert!(
+        error.message.contains("is unchanged") && error.message.contains("put back"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Restored));
+    assert!(writes(&h).is_empty(), "one put-back only: {:?}", writes(&h));
+}
+
+#[test]
+fn a_refused_put_back_is_typed_unprotected_and_never_retried() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let restore = h.take("/api/v1/");
+    h.response(&restore, 200, REFUSED);
+    h.pace();
+    let error = failure(&h);
+    assert!(
+        error.message.contains("both refused") && error.message.contains("re-place"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+}
+
+#[test]
+fn a_stop_that_filled_during_its_cancel_is_not_put_back() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 2.0);
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let error = failure(&h);
+    assert!(
+        error.message.contains("stop was removed") && error.message.contains("please re-place it"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+}
+
+#[test]
+fn a_leg_of_a_partly_filled_entry_says_its_stop_was_removed() {
+    let mut h = Harness::new();
+    h.set_order("parent", OrderType::Limit, 6.0);
+    h.set_order("parent__stop_loss", OrderType::StopLoss, 6.0);
+    h.engine
+        .store_mut()
+        .update_order("parent__stop_loss", |o| o.side = OrderSide::Sell);
+    h.fresh_ticker(95.0);
+    amend_stop(&mut h, "parent__stop_loss", 90.0);
+    let replacement = to_replacement(&mut h, "parent", 4.0);
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let error = failure(&h);
+    assert!(
+        error.message.contains("stop was removed") && error.message.contains("please re-place it"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+}
+
+#[test]
+fn an_unknown_replacement_is_never_put_back_or_resent() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    h.event(Event::HttpFailed {
+        request: replacement.id,
+        error: "lost create response",
+    });
+    h.pace();
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.protection, None);
+    assert!(writes(&h).is_empty(), "no put-back over an unknown: {:?}", writes(&h));
+}
+
+#[test]
+fn a_lost_cancel_confirmation_is_unknown_with_no_put_back_or_resend() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    h.metadata(false, "CROSS");
+    h.reply(
+        "/api/v1/orders/old",
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    for attempt in 0..3 {
+        let read = h.take("/api/v1/orders/old");
+        assert_eq!(read.method, Method::Get);
+        h.event(Event::HttpFailed {
+            request: read.id,
+            error: "lost confirmation read",
+        });
+        if attempt < 2 {
+            h.advance(100.0);
+        } else {
+            h.pace();
+        }
+    }
+    let error = failure(&h);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.protection, None);
+    assert!(
+        error.message.contains("could not be confirmed")
+            && error.message.contains("unknown")
+            && error.message.contains("no replacement was sent"),
+        "{}",
+        error.message
+    );
+    assert!(writes(&h).is_empty(), "{:?}", writes(&h));
+    assert!(!h.has("/api/v1/orders/old"), "no further reads");
 }
