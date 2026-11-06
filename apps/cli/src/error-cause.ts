@@ -13,7 +13,7 @@ const LEGACY_FIELDS = ['message', 'retMsg', 'msg'] as const;
 const MAX_SERIALIZED = 300;
 const MAX_DEPTH = 3;
 /** Never print values under these keys: request headers and configs carry credentials. */
-const SECRET_KEY = /key|secret|sign|pass|token|auth|cookie|session|private|mnemonic|seed/i;
+const SECRET_KEY = /key|secret|sign|pass|token|auth|cookie|session|private|mnemonic|seed|jwt|credential/i;
 
 /** Strings redundant with the CLI's own framing. */
 const REDUNDANT_PREFIXES = new Set(['exchange error', 'Exchange error:']);
@@ -34,7 +34,13 @@ function parsed(value: unknown): unknown {
   }
 }
 
-const maskSecrets = (key: string, value: unknown) => (key && SECRET_KEY.test(key) ? '[redacted]' : value);
+/** A JSON string value (a proxied raw_response) is parsed so its inner keys are masked too. */
+function maskSecrets(key: string, value: unknown): unknown {
+  if (key && SECRET_KEY.test(key)) return '[redacted]';
+  if (typeof value !== 'string') return value;
+  const inner = parsed(value);
+  return inner !== null && typeof inner === 'object' ? inner : value;
+}
 
 function serialize(value: unknown): string {
   let json: string | undefined;

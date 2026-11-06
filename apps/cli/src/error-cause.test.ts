@@ -67,6 +67,23 @@ describe('terminalErrorText', () => {
     expect(text).toContain('"X-BAPI-TIMESTAMP":"1"');
   });
 
+  it('masks credentials inside a JSON string body and under jwt/credential keys', () => {
+    const text = terminalErrorText([
+      'bybitdemo error',
+      {
+        raw_response: JSON.stringify({
+          headers: { 'X-BAPI-API-KEY': 'live-key', 'X-BAPI-SIGN': 'deadbeef', 'X-BAPI-TIMESTAMP': '1' },
+        }),
+        jwt: 'eyJhbGciOi',
+        credentials: { id: 'c1' },
+      },
+    ]);
+    for (const leaked of ['live-key', 'deadbeef', 'eyJhbGciOi', 'c1']) expect(text).not.toContain(leaked);
+    expect(text).toContain('"X-BAPI-API-KEY":"[redacted]"');
+    expect(text).toContain('"X-BAPI-SIGN":"[redacted]"');
+    expect(text).toContain('"X-BAPI-TIMESTAMP":"1"');
+  });
+
   it('prints nothing for blank or redundant strings', () => {
     expect(terminalErrorText([])).toBeNull();
     expect(terminalErrorText([''])).toBe('');
