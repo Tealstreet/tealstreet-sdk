@@ -24,6 +24,7 @@ import chalk from 'chalk';
 
 import type { LogCategory } from './log-classify';
 import { addResizeListener, reserveTop, resumeRegion, suspendRegion } from './scroll-region';
+import { G } from './console-glyphs';
 
 const ESC = '\x1b';
 const SAVE_CURSOR = `${ESC}7`;
@@ -73,7 +74,7 @@ const BAR_STYLES: Record<
 };
 
 export function formatStatusContent(text: string, category: LogCategory, width: number, dim: boolean): string {
-  const icon = category === 'warn' ? '⚠' : category === 'critical' ? '⛔' : '✗';
+  const icon = category === 'warn' ? G.warn : category === 'critical' ? G.critical : G.error;
   const prefix = `${icon} `;
   const clean = text.replace(/\s+/g, ' ').trim();
   const max = Math.max(0, width - prefix.length);

@@ -1,3 +1,5 @@
+// Must load before the console is captured below (it wraps it on ASCII consoles).
+import { G } from './console-glyphs';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -109,7 +111,10 @@ function shouldRateLimit(): boolean {
       rateLimitWarningShown = true;
       // Use original console to avoid recursion
       writeAbovePrompt(() =>
-        originalConsoleWarn('\x1b[33m⚠\x1b[0m', 'Some output hidden (too many messages). Check log file for details.'),
+        originalConsoleWarn(
+          `\x1b[33m${G.warn}\x1b[0m`,
+          'Some output hidden (too many messages). Check log file for details.',
+        ),
       );
     }
     return true;
@@ -366,7 +371,7 @@ export function interceptConsole(): void {
     if (shouldRateLimit()) return;
 
     // Format with red X like watch mode
-    writeAbovePrompt(() => originalConsoleError('\x1b[31m✗\x1b[0m', cleanMessage));
+    writeAbovePrompt(() => originalConsoleError(`\x1b[31m${G.error}\x1b[0m`, cleanMessage));
     setStatus(cleanMessage, classifyLog(cleanMessage, 'error'));
   };
 
@@ -385,7 +390,7 @@ export function interceptConsole(): void {
     // Apply rate limiting
     if (shouldRateLimit()) return;
 
-    writeAbovePrompt(() => originalConsoleWarn('\x1b[33m⚠\x1b[0m', cleanMessage));
+    writeAbovePrompt(() => originalConsoleWarn(`\x1b[33m${G.warn}\x1b[0m`, cleanMessage));
     setStatus(cleanMessage, classifyLog(cleanMessage, 'warn'));
   };
 

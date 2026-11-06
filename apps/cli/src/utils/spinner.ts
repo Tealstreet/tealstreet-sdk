@@ -7,6 +7,7 @@
 
 import chalk from 'chalk';
 import { originalConsoleLog } from '../logger';
+import { G } from '../console-glyphs';
 
 const print = originalConsoleLog;
 
@@ -33,15 +34,15 @@ export function createSpinner(initialText: string): Spinner {
       return instance;
     },
     succeed: (text: string) => {
-      print(chalk.green(`  ✓ ${text}`));
+      print(chalk.green(`  ${G.ok} ${text}`));
       return instance;
     },
     fail: (text: string) => {
-      print(chalk.red(`  ✗ ${text}`));
+      print(chalk.red(`  ${G.error} ${text}`));
       return instance;
     },
     warn: (text: string) => {
-      print(chalk.yellow(`  ⚠ ${text}`));
+      print(chalk.yellow(`  ${G.warn} ${text}`));
       return instance;
     },
     stop: () => instance,

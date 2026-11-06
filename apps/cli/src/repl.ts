@@ -77,6 +77,7 @@ import {
 } from '../../../packages/safe-cex/src/types';
 import type { Exchange } from '../../../packages/safe-cex/src/exchanges/base';
 import { loadConfig, saveConfig, getAccount } from './config';
+import { G } from './console-glyphs';
 // TWAP support for taskAction handling
 import { commandRegistry } from '../../../packages/cli-core/src/commands/CommandRegistry';
 import { ensureCommandsRegistered } from '../../../packages/cli-core/src/commands/CommandExecutor';
@@ -251,7 +252,8 @@ function formatWatchMessages(): string {
   let output = '\n' + DIM + '─── Recent Messages ───' + RESET + '\n';
   for (const msg of messages) {
     const color = msg.type === 'error' ? RED : msg.type === 'warning' ? YELLOW : msg.type === 'fill' ? GREEN : CYAN;
-    const prefix = msg.type === 'error' ? '✗' : msg.type === 'warning' ? '⚠' : msg.type === 'fill' ? '✓' : 'ℹ';
+    const prefix =
+      msg.type === 'error' ? G.error : msg.type === 'warning' ? G.warn : msg.type === 'fill' ? G.ok : G.info;
     output += `${color}${prefix}${RESET} ${msg.message}\n`;
   }
   return output;
@@ -953,7 +955,7 @@ function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): v
     if (isMonitorMode) {
       addWatchMessage('fill', fillMsg);
     } else {
-      adapter.printSuccess(`✓ Fill: ${fillMsg}`);
+      adapter.printSuccess(`${G.ok} Fill: ${fillMsg}`);
     }
   });
 
@@ -2540,19 +2542,19 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
       onWarning: (msg) => {
         if (isMonitorMode || !rlInstance) return;
         process.stdout.write(CLEAR_LINE);
-        console.log(chalk.yellow(`⚠️  ${msg}`));
+        console.log(chalk.yellow(`${G.warnEmoji}  ${msg}`));
         rlInstance.prompt(true);
       },
       onError: (msg) => {
         if (isMonitorMode || !rlInstance) return;
         process.stdout.write(CLEAR_LINE);
-        console.log(chalk.red(`❌ ${msg}`));
+        console.log(chalk.red(`${G.errorEmoji} ${msg}`));
         rlInstance.prompt(true);
       },
       onRecovered: (msg) => {
         if (isMonitorMode || !rlInstance) return;
         process.stdout.write(CLEAR_LINE);
-        console.log(chalk.green(`✅ ${msg}`));
+        console.log(chalk.green(`${G.okEmoji} ${msg}`));
         rlInstance.prompt(true);
       },
       onTick: () => {
@@ -2578,13 +2580,13 @@ export async function startRepl(accountName?: string, options: StartReplOptions 
     onOffline: (msg) => {
       if (isMonitorMode || !rlInstance) return;
       process.stdout.write(CLEAR_LINE);
-      console.log(chalk.yellow(`🌐 ${msg}`));
+      console.log(chalk.yellow(`${G.online} ${msg}`));
       rlInstance.prompt(true);
     },
     onOnline: (msg) => {
       if (isMonitorMode || !rlInstance) return;
       process.stdout.write(CLEAR_LINE);
-      console.log(chalk.green(`🌐 ${msg}`));
+      console.log(chalk.green(`${G.online} ${msg}`));
       rlInstance.prompt(true);
     },
   });

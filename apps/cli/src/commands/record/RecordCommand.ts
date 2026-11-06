@@ -20,6 +20,7 @@ import {
   // BaseCommand.execute.
   type NewCommandResult as CommandResult,
 } from '@tealstreet/cli-core';
+import { G } from '../../console-glyphs';
 
 export class RecordCommand extends BaseCommand {
   readonly name = 'record';
@@ -206,7 +207,7 @@ export class RecordCommand extends BaseCommand {
       for (const recorder of activeRecorders) {
         const status = recorder.getStatus();
         rows.push([
-          '🟢 Running',
+          `${G.running} Running`,
           status.dataType,
           status.exchange,
           status.symbol,
@@ -231,7 +232,7 @@ export class RecordCommand extends BaseCommand {
 
         if (!isRunning) {
           rows.push([
-            config.active ? '⏸️  Paused' : '⭕ Inactive',
+            config.active ? `${G.paused}  Paused` : `${G.inactive} Inactive`,
             config.dataType,
             config.exchange,
             config.symbol,

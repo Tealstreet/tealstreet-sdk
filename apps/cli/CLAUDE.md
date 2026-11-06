@@ -424,6 +424,8 @@ delegated to the client over WebSocket.
 
 ² Non-`print` terminal output goes through `writeAbovePrompt` (readline-aware redraw) so async lines don't shred the input buffer; `console.warn`/`console.error` (and lines the taxonomy classifies `critical`) additionally call `setStatus` to mirror the latest notable event on the pinned **top alert bar** (`src/status-line.ts`). The always-on **bottom footer** (`src/footer.ts`) is the other pinned surface — both over one shared scroll region (`src/scroll-region.ts`). See the "Output surfaces" row of the doc-sync table.
 
+**Glyphs: never print a raw `✗ ⚠ ✓ ℹ`, emoji or `Σ`.** Use `G` from `src/console-glyphs.ts`, which picks ASCII (`[x] [!] [ok] [i]`) on the legacy Windows console (no `WT_SESSION`, or a non-UTF-8 code page) and when `TEALSTREET_ASCII=1` is set. On an ASCII console that module also wraps `console.*` and `stdout`/`stderr` writes to transliterate box-drawing and punctuation one cell per glyph, so `cli-core` tables stay aligned. `console-glyphs.test.ts` fails on any printed glyph outside `G` or its transliteration table. User doc: [Windows console glyphs](../documentation/cli/reference/output.md#windows-console-glyphs).
+
 ³ `console.debug` routes to `logger.debug`, which is gated by `MIN_LOG_LEVEL` (`logger.ts`) — default `info`, so debug lines are **dropped entirely** unless `DEBUG=1`/`DEBUG=true` is set. Don't rely on debug output being in `cli.log` by default.
 
 HoW/tradetunnel request diagnostics use this same existing console/logging
