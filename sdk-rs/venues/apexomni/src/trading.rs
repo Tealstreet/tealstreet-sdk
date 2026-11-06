@@ -16,6 +16,11 @@ use safe_cex_engine::{
 };
 use serde::Deserialize;
 
+/// A 429 may have placed the order: never a definite refusal for a stop's put-back.
+fn rate_limited(error: &VenueError) -> bool {
+    error.kind == Some(ErrorKind::RateLimited)
+}
+
 const APEX: CodeTable = CodeTable {
     rows: &[
         Row {
@@ -1315,7 +1320,8 @@ impl ApexOmni {
             return self.confirm_failed(cx, &delivery, false);
         }
         // A released call that failed without a refusal may have executed.
-        let unknown = !matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent));
+        let unknown = !matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+            || rate_limited(&error);
         let _ = self.fail_delivery(cx, &delivery, error, unknown);
     }
 
@@ -1711,6 +1717,7 @@ impl ApexOmni {
         };
         if !matches!(delivery.accepted, Accepted::Place)
             || error.outcome != Some(Outcome::Rejected)
+            || rate_limited(error)
             || job.restoring
             || !job.ids.is_empty()
         {
@@ -1824,7 +1831,7 @@ impl ApexOmni {
                     }
                 }
             } else if !self.put_back(cx, &delivery, &error) {
-                let unknown = error.outcome == Some(Outcome::Unknown);
+                let unknown = error.outcome == Some(Outcome::Unknown) || rate_limited(&error);
                 let _ = self.fail_delivery(cx, &delivery, error, unknown);
             }
             return;
