@@ -235,13 +235,17 @@ test('#3018 after merging d171fbb0e31 (run 41893192741 at b94d76fa368) retains t
   }
 });
 
-test('master b0d2122742d release cut (run 41901638294) retains the ruled binance headroom', () => {
-  const [measured, cap] = [2_195_793, 2_206_720];
+test('#3187 PM algo migration (run 42251340763) retains headroom for every Binance alias', () => {
+  const [measured, cap] = [2_212_299, 2_223_104];
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES.binance, cap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'binance'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'binance'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'binance'), /exceeds/);
+  for (const venue of ['binance', 'binanceinverse', 'binancepm', 'binanceoptions', 'binancespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'binance');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
 });
 
 test('#3073 cancel confirmation (run 41931095253) retains headroom and siblings match', () => {
