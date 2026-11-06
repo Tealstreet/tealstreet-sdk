@@ -271,3 +271,90 @@ fn an_acknowledged_plan_cancel_is_unchanged() {
     );
     assert!(!h.requests.iter().any(|r| r.url.contains("orderId=target")));
 }
+
+// Review probes (#3202): contradictory evidence, a mode change and a loose ack.
+#[test]
+fn duplicate_keys_never_prove_absence() {
+    for page in [
+        r#"{"code":"00000","data":{"entrustedList":[{"orderId":"target"}],"entrustedList":[]}}"#,
+        r#"{"code":"40010","code":"00000","data":{"entrustedList":[]}}"#,
+        r#"{"code":"00000","data":{"entrustedList":[]},"data":{"entrustedList":[]}}"#,
+        r#"{"code":"00000","data":{"entrustedList":[{"orderId":"target","orderId":"sibling"}]}}"#,
+    ] {
+        let mut h = ready();
+        cancel(&mut h, EMPTY_ACK);
+        let read = confirming_read(&mut h);
+        h.reply(read, 200, page);
+        assert!(result(&h).is_err(), "{page}: {:?}", h.done);
+        assert_eq!(
+            h.failures.last().unwrap().outcome,
+            Some(Outcome::Unknown),
+            "{page}"
+        );
+        assert_eq!(
+            h.engine.store().order("target").unwrap().status,
+            OrderStatus::Open,
+            "{page}"
+        );
+    }
+}
+
+#[test]
+fn a_mode_change_answering_the_read_never_resends_the_cancel() {
+    let mut h = ready();
+    cancel(&mut h, EMPTY_ACK);
+    let read = confirming_read(&mut h);
+    h.reply(
+        read,
+        200,
+        r#"{"code":"40085","msg":"account upgraded","data":null}"#,
+    );
+    for _ in 0..10 {
+        if !h
+            .requests
+            .iter()
+            .any(|r| r.url.contains("/account/settings"))
+        {
+            break;
+        }
+        h.respond(
+            "/account/settings",
+            200,
+            r#"{"code":"00000","data":{"holdMode":"one_way_mode"}}"#,
+        );
+    }
+    assert!(
+        !h.requests.iter().any(|r| r.url.contains("cancel")),
+        "{:?}",
+        h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+    );
+    assert!(result(&h).is_err());
+    let error = h.failures.last().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.message, UNACKNOWLEDGED);
+}
+
+#[test]
+fn only_exactly_empty_lists_enter_confirmation() {
+    for ack in [
+        r#"{"code":"00000","data":{"unexpected":{"orderId":"target","status":"failed"}}}"#,
+        r#"{"code":"00000","data":{"successList":[],"failureList":[],"unexpected":1}}"#,
+        r#"{"code":"00000","data":{"successList":[]}}"#,
+        r#"{"code":"00000","data":{"failureList":[]}}"#,
+        r#"{"code":"00000","data":{}}"#,
+        r#"{"code":"00000","data":{"successList":[],"successList":[],"failureList":[]}}"#,
+    ] {
+        let mut h = ready();
+        cancel(&mut h, ack);
+        assert!(result(&h).is_err(), "{ack}: {:?}", h.done);
+        assert_eq!(
+            h.failures.last().unwrap().outcome,
+            Some(Outcome::Unknown),
+            "{ack}"
+        );
+        assert!(
+            !h.requests.iter().any(|r| r.url.contains("orderId=target")),
+            "{ack}"
+        );
+    }
+}

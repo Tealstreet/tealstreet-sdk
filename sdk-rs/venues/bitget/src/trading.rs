@@ -183,6 +183,8 @@ struct Job {
     retry: Option<Request>,
     /// The write call in flight, kept for an engine-sealed retirement.
     live: Option<Planned>,
+    /// The current cancel-plan answer is exactly empty success and failure lists.
+    empty_plan_ack: bool,
     /// '; <note>' appended to the projected failure (a failed protection rollback).
     note: Option<String>,
     intent: Command,
@@ -684,6 +686,7 @@ impl BitgetFutures {
             parked: None,
             retry: None,
             live: None,
+            empty_plan_ack: false,
             note: None,
             original: if let Command::AmendOrder { id, .. } = &intent {
                 cx.store.order(id).cloned()
@@ -2409,6 +2412,23 @@ impl BitgetFutures {
             return;
         }
         let current = Some((&request.slot, &request.context));
+        // Before any mode promotion: a confirming read never replans its cancel.
+        if let Effect::ConfirmPlanGone {
+            order,
+            plan_type,
+            unproven,
+        } = &request.call.effect
+        {
+            let listed = (response.status == 200)
+                .then(|| pending_plan_listed(response.body, &native_id(order)))
+                .flatten();
+            let (order, plan_type, unproven) = (order.clone(), *plan_type, unproven.clone());
+            if listed == Some(false) {
+                self.plan_cancel_proven_gone(cx, &order, plan_type);
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            return self.plan_cancel_unproven(cx, job, current, &order, unproven);
+        }
         let read = request.call.read();
         if serde_json::from_str::<Envelope<serde::de::IgnoredAny>>(response.body)
             .ok()
@@ -2498,23 +2518,10 @@ impl BitgetFutures {
             };
         }
         let status = response.status;
-        if let Effect::ConfirmPlanGone {
-            order,
-            plan_type,
-            unproven,
-        } = &request.call.effect
-        {
-            let listed = (status == 200)
-                .then(|| pending_plan_listed(response.body, &native_id(order)))
-                .flatten();
-            let (order, plan_type, unproven) = (order.clone(), *plan_type, unproven.clone());
-            if listed == Some(false) {
-                self.plan_cancel_proven_gone(cx, &order, plan_type);
-                return self.drive(cx, job, At::Data(&request.slot, &request.context));
-            }
-            return self.plan_cancel_unproven(cx, job, current, &order, unproven);
-        }
         let parsed = serde_json::from_str::<Reply>(response.body).map_err(|e| e.to_string());
+        job.empty_plan_ack = request.call.path == paths::CANCEL_PLAN
+            && status == 200
+            && empty_plan_ack(response.body);
         if let Effect::ResolveAmend { id, .. } = &request.call.effect {
             let ready = parsed.as_ref().is_ok_and(|reply| {
                 status == 200
@@ -2732,26 +2739,20 @@ impl BitgetFutures {
                 confirm_plan = (request.call.path == paths::CANCEL_PLAN
                     && job.is_plain_cancel()
                     && accepted.is_empty()
-                    && data.is_some_and(|d| {
-                        d.success_list.is_empty()
-                            && d.failure_list.is_empty()
-                            && d.list.is_empty()
-                            && d.order_id.text().is_empty()
-                            && d.client_oid.text().is_empty()
-                    }))
-                .then(|| {
-                    request
-                        .call
-                        .payload
-                        .plan_type
-                        .as_deref()
-                        .and_then(pending_plan_type)
-                })
-                .flatten()
-                .zip(match orders.as_slice() {
-                    [order] => Some(order.clone()),
-                    _ => None,
-                });
+                    && job.empty_plan_ack)
+                    .then(|| {
+                        request
+                            .call
+                            .payload
+                            .plan_type
+                            .as_deref()
+                            .and_then(pending_plan_type)
+                    })
+                    .flatten()
+                    .zip(match orders.as_slice() {
+                        [order] => Some(order.clone()),
+                        _ => None,
+                    });
                 // Name them: the user otherwise believes every order is gone.
                 let rest: Vec<_> = orders
                     .iter()
@@ -3962,26 +3963,58 @@ fn pending_plan_type(cancel: &str) -> Option<&'static str> {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingPlanPage<'a> {
+    /// Outer `None`: the field is missing; inner `None`: Bitget's null empty list.
+    #[serde(default, borrow, deserialize_with = "present")]
+    entrusted_list: Option<Option<Vec<PendingPlanRow<'a>>>>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingPlanRow<'a> {
+    #[serde(default, borrow)]
+    order_id: Identifier<'a>,
+}
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
+/// `{"code":"00000","data":{"successList":[],"failureList":[]}}` and nothing
+/// else in `data`; duplicate keys refuse.
+fn empty_plan_ack(body: &str) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Lists {
+        success_list: Vec<serde::de::IgnoredAny>,
+        failure_list: Vec<serde::de::IgnoredAny>,
+    }
+    serde_json::from_str::<Envelope<Lists>>(body)
+        .ok()
+        .and_then(|e| e.checked().ok())
+        .is_some_and(|l| l.success_list.is_empty() && l.failure_list.is_empty())
+}
+
 /// Whether a pending-plan page lists `id`: `None` unless the page is a clean,
 /// complete answer (code 0, an entrustedList, every row identified, under the limit).
 fn pending_plan_listed(body: &str, id: &str) -> Option<bool> {
     const PAGE_LIMIT: usize = 100;
-    let reply: serde_json::Value = serde_json::from_str(body).ok()?;
-    if reply.get("code")?.as_str() != Some("00000") {
-        return None;
-    }
-    let data = reply.get("data")?.as_object()?;
-    let rows = match data.get("entrustedList")? {
-        serde_json::Value::Null => &Vec::new(),
-        serde_json::Value::Array(rows) => rows,
-        _ => return None,
-    };
+    let page = serde_json::from_str::<Envelope<PendingPlanPage>>(body)
+        .ok()?
+        .checked()
+        .ok()?;
+    let rows = page.entrusted_list?.unwrap_or_default();
     if rows.len() >= PAGE_LIMIT {
         return None;
     }
     let mut listed = false;
-    for row in rows {
-        let row_id = row.get("orderId")?.as_str().filter(|s| !s.is_empty())?;
+    for row in &rows {
+        let row_id = row.order_id.text();
+        if row_id.is_empty() {
+            return None;
+        }
         listed |= row_id == id;
     }
     Some(listed)
