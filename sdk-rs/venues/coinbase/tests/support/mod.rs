@@ -2,8 +2,8 @@
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_coinbase::{Coinbase, Options};
 pub type Driver = Engine<Coinbase>;
-// Coinbase INTX instrument schema, https://docs.cdp.coinbase.com/api-reference/international-exchange-api/rest-api/instruments/list-instruments
-pub const INSTRUMENTS: &str = r#"[{"symbol":"BTC-PERP","type":"PERP","trading_state":"TRADING","base_asset_name":"BTC","quote_asset_name":"USDC","base_increment":"0.0001","quote_increment":"0.1","min_quantity":"0.0001","qty_24hr":"20","notional_24hr":"1200000","open_interest":"100","funding_interval":"3600000000","quote":{"best_bid_price":"59999","best_ask_price":"60001","trade_price":"60000","mark_price":"60002","index_price":"60003","predicted_funding":"0.0001"}}]"#;
+/// One keyless spot product: the public catalogue Coinbase still serves.
+pub const PRODUCTS: &str = r#"{"products":[{"product_type":"SPOT","product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.0001","price_increment":"0.1","base_min_size":"0.0001","base_max_size":"10000","price":"60000","volume_24h":"20","price_percentage_change_24h":"1"}],"pagination":{"has_next":false}}"#;
 pub fn requests(e: &mut Driver) -> Vec<HttpRequest> {
     e.drain_actions()
         .filter_map(|a| {
@@ -32,13 +32,14 @@ pub fn ready() -> (Driver, SocketId) {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: true,
             ..Options::default()
         })
         .unwrap(),
     );
     e.start(1000.);
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 200, INSTRUMENTS);
+    reply(&mut e, &r, 200, PRODUCTS);
     let socket = e
         .drain_actions()
         .find_map(|a| {

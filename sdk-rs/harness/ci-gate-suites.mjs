@@ -70,7 +70,7 @@ const suiteCases = (suite) => {
       cases.push(privateCase(venue), privateCase(venue, `${venue}-testnet`));
     }
   } else if (suite === 'coinbase') {
-    for (const profile of ['intx', 'cfm', 'spot'])
+    for (const profile of ['cfm', 'spot'])
       for (const algorithm of ['ES256', 'EdDSA']) cases.push(privateCase('coinbase', `coinbase-${profile}-${algorithm}`));
     for (const algorithm of ['ES256', 'EdDSA']) cases.push(privateCase('coinbasespot', `coinbasespot-spot-${algorithm}`));
   } else if (suite === 'asterdex') {

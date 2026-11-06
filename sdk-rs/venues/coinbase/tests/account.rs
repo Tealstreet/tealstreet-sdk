@@ -8,13 +8,11 @@ use safe_cex_venue_coinbase::{Coinbase, Options};
 const POLL_MS: f64 = 5_000.0;
 
 const SPOT: &str = r#"{"products":[{"product_id":"BTC-USD","product_type":"SPOT","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1"}]}"#;
-const INTX: &str = r#"{"products":[{"product_id":"BTC-PERP-INTX","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USDC","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"PERPETUAL","contract_root_unit":"BTC","contract_size":"1"}}]}"#;
+/// A CFM future sized in whole units, so order and fill quantities read as written.
+const UNIT_CFM: &str = r#"{"products":[{"product_id":"BTC-CDE","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.001","price_increment":"0.01","base_min_size":"0.001","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"EXPIRING","contract_root_unit":"BTC","contract_size":"1"}}]}"#;
 const CFM: &str = r#"{"products":[{"product_id":"BTC-CDE","product_type":"FUTURE","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"1","price_increment":"0.01","base_min_size":"1","base_max_size":"100","price":"100","volume_24h":"2","price_percentage_change_24h":"1","future_product_details":{"contract_expiry_type":"EXPIRING","contract_root_unit":"BTC","contract_size":"0.01","perpetual_details":{"funding_time":"2025-12-15T12:00:00Z","open_interest":"30"}}}]}"#;
 const CFM_BALANCE: &str = r#"{"balance_summary":{"total_usd_balance":{"value":"10"},"available_margin":{"value":"8"},"unrealized_pnl":{"value":"1.5"}}}"#;
 const BREAKDOWN: &str = r#"{"breakdown":{"spot_positions":[{"account_type":"ACCOUNT_TYPE_WALLET","asset":"BTC","total_balance_crypto":1.5,"available_to_trade_crypto":1,"total_balance_fiat":150}]}}"#;
-const INTX_BALANCE: &str =
-    r#"{"summary":{"total_balance":{"value":"1000"},"buying_power":{"value":"800"}}}"#;
-const INTX_POSITIONS: &str = r#"{"positions":[{"symbol":"BTC-PERP-INTX","position_side":"POSITION_SIDE_LONG","net_size":"2","entry_vwap":{"value":"100"},"mark_price":{"value":"110"},"liquidation_price":{"value":"50"},"leverage":"10"}]}"#;
 const CFM_POSITIONS: &str = r#"{"positions":[{"product_id":"BTC-CDE","product_type":"FUTURE","side":"SHORT","number_of_contracts":"2","avg_entry_price":"100","current_price":"90","unrealized_pnl":"0.2"}]}"#;
 
 struct Session {
@@ -65,6 +63,12 @@ impl Session {
             closes: vec![],
             privates: vec![],
         }
+    }
+    /// A CFM portfolio whose future is sized in whole units.
+    fn unit_futures() -> Self {
+        let mut session = Self::new("DEFAULT", false);
+        session.products = Some(UNIT_CFM.into());
+        session
     }
     fn reply(&mut self, r: HttpRequest, status: u16, body: &str) {
         self.e.handle(
@@ -128,12 +132,6 @@ impl Session {
             CFM_BALANCE.into()
         } else if url.contains("/portfolios/portfolio-one") {
             self.breakdown.clone().unwrap_or_else(|| BREAKDOWN.into())
-        } else if url.contains("/intx/portfolio/") {
-            INTX_BALANCE.into()
-        } else if url.contains("/intx/positions/") {
-            self.positions
-                .clone()
-                .unwrap_or_else(|| INTX_POSITIONS.into())
         } else if url.contains("/cfm/positions") {
             self.positions
                 .clone()
@@ -143,15 +141,11 @@ impl Session {
                 .clone()
                 .unwrap_or_else(|| r#"{"orders":[],"has_next":false}"#.into())
         } else if url.contains("/products") {
-            if url.contains("contract_expiry_type=PERPETUAL") {
-                self.products.clone().unwrap_or_else(|| INTX.into())
-            } else if url.contains("product_type=FUTURE") {
-                CFM.into()
+            if url.contains("product_type=FUTURE") {
+                self.products.clone().unwrap_or_else(|| CFM.into())
             } else {
                 SPOT.into()
             }
-        } else if url.contains("international") {
-            "[]".into()
         } else {
             panic!("unhandled {}", url)
         };
@@ -374,11 +368,7 @@ fn us_default_portfolio_aggregates_wallet_rows_without_derivatives_sections() {
             ),
             (2600., 2400., 200.)
         );
-        assert!(
-            !s.urls
-                .iter()
-                .any(|url| url.contains("/intx/") || url.contains("/cfm/"))
-        );
+        assert!(!s.urls.iter().any(|url| url.contains("/cfm/")));
     }
 }
 
@@ -595,14 +585,8 @@ fn cfm_contracts_are_normalized_and_settings_are_cross_oneway() {
     assert!(s.e.store().market("BTC-USD").is_some());
 }
 #[test]
-fn intx_balance_upnl_is_recomputed_from_positions() {
-    let s = Session::new("INTX", false).ready();
-    assert_eq!(s.e.store().balance().upnl, 20.0);
-    assert_eq!(s.e.store().balance().total, 1000.0);
-}
-#[test]
 fn user_subscriptions_have_distinct_jwts_without_uri_claims() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let sent =
         s.e.drain_actions()
             .filter_map(|a| {
@@ -646,8 +630,8 @@ fn user_snapshot_and_updates_preserve_base_quantities_and_terminal_identity() {
 }
 #[test]
 fn invalid_nonempty_snapshot_preserves_prior_orders() {
-    let mut s = Session::new("INTX", false).ready();
-    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let mut s = Session::unit_futures().ready();
+    let row = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     s.message(0, "snapshot", &format!("[{row}]"));
     s.message(1, "snapshot", r#"[{"order_id":"broken"}]"#);
     assert!(s.e.store().order("order-a").is_some());
@@ -656,8 +640,8 @@ fn invalid_nonempty_snapshot_preserves_prior_orders() {
 }
 #[test]
 fn user_sequence_gap_closes_socket_and_preserves_orders() {
-    let mut s = Session::new("INTX", false).ready();
-    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let mut s = Session::unit_futures().ready();
+    let row = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     s.message(0, "snapshot", &format!("[{row}]"));
     s.message(2, "update", "[]");
     assert!(s.e.store().order("order-a").is_some());
@@ -669,7 +653,7 @@ fn user_sequence_gap_closes_socket_and_preserves_orders() {
 }
 #[test]
 fn transient_portfolio_failure_is_retried_without_committing_empty() {
-    let mut s = Session::new("INTX", false);
+    let mut s = Session::unit_futures();
     let r = s.collect().pop().unwrap();
     s.reply(r, 429, "too many requests");
     assert!(!s.e.store().loaded().markets);
@@ -680,7 +664,7 @@ fn transient_portfolio_failure_is_retried_without_committing_empty() {
 }
 #[test]
 fn connection_sequence_includes_subscriptions_and_heartbeats() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     for text in [
         r#"{"channel":"subscriptions","sequence_num":0,"events":[{"subscriptions":{"user":[],"heartbeats":[]}}]}"#,
         r#"{"channel":"heartbeats","sequence_num":1,"events":[{"heartbeat_counter":1}]}"#,
@@ -693,7 +677,7 @@ fn connection_sequence_includes_subscriptions_and_heartbeats() {
             },
         );
     }
-    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let row = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     s.message(2, "snapshot", &format!("[{row}]"));
     assert!(s.e.store().order("order-a").is_some());
     assert!(
@@ -703,16 +687,16 @@ fn connection_sequence_includes_subscriptions_and_heartbeats() {
 }
 #[test]
 fn fifty_row_snapshot_preserves_update_before_last_batch() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let rows = (0..50)
-        .map(|i| user_order(&format!("order-{i}"), "BTC-PERP-INTX", "OPEN", "0", "1"))
+        .map(|i| user_order(&format!("order-{i}"), "BTC-CDE", "OPEN", "0", "1"))
         .collect::<Vec<_>>()
         .join(",");
     s.message(0, "snapshot", &format!("[{rows}]"));
     assert!(s.e.store().orders().is_empty());
-    let update = user_order("order-0", "BTC-PERP-INTX", "OPEN", "0.5", "0.5");
+    let update = user_order("order-0", "BTC-CDE", "OPEN", "0.5", "0.5");
     s.message(1, "update", &format!("[{update}]"));
-    let stale = user_order("order-0", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let stale = user_order("order-0", "BTC-CDE", "OPEN", "0", "1");
     s.message(2, "snapshot", &format!("[{stale}]"));
     assert_eq!(s.e.store().orders().len(), 50);
     assert_eq!(s.e.store().order("order-0").unwrap().filled, 0.5);
@@ -746,8 +730,8 @@ fn fills(e: &mut Engine<Coinbase>) -> Vec<f64> {
 }
 #[test]
 fn cumulative_user_fills_emit_only_new_quantity_once() {
-    let mut s = Session::new("INTX", false).ready();
-    let initial = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "3");
+    let mut s = Session::unit_futures().ready();
+    let initial = user_order("order-a", "BTC-CDE", "OPEN", "0", "3");
     s.message(0, "snapshot", &format!("[{initial}]"));
     fills(&mut s.e);
     for (seq, filled, left, status) in [
@@ -756,23 +740,23 @@ fn cumulative_user_fills_emit_only_new_quantity_once() {
         (3, "3", "0", "FILLED"),
         (4, "3", "0", "FILLED"),
     ] {
-        let row = user_order("order-a", "BTC-PERP-INTX", status, filled, left);
+        let row = user_order("order-a", "BTC-CDE", status, filled, left);
         s.message(seq, "update", &format!("[{row}]"));
     }
     assert_eq!(fills(&mut s.e), vec![1.0, 1.0, 1.0]);
 }
 #[test]
 fn first_live_fill_after_empty_snapshot_is_emitted_once() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     s.message(0, "snapshot", "[]");
     fills(&mut s.e);
-    let row = user_order("external-order", "BTC-PERP-INTX", "FILLED", "1", "0");
+    let row = user_order("external-order", "BTC-CDE", "FILLED", "1", "0");
     s.message(1, "update", &format!("[{row}]"));
     s.message(2, "update", &format!("[{row}]"));
     assert_eq!(fills(&mut s.e), vec![1.0]);
 }
 fn held_scan() -> (Session, HttpRequest) {
-    let mut s = Session::new("INTX", false);
+    let mut s = Session::unit_futures();
     for _ in 0..150 {
         let requests = s.collect();
         if requests.is_empty() {
@@ -801,8 +785,10 @@ fn complete_scan(s: &mut Session, held: HttpRequest, body: &str) {
             continue;
         }
         for r in requests {
-            let final_page =
-                r.url.contains("orders/historical/batch") && r.url.contains("EDIT_QUEUED");
+            // A CFM scan reads FUTURE then SPOT; the last family's last status ends it.
+            let final_page = r.url.contains("orders/historical/batch")
+                && r.url.contains("EDIT_QUEUED")
+                && !r.url.contains("product_type=FUTURE");
             if r.url.contains("orders/historical/batch") {
                 s.reply(r, 200, body)
             } else {
@@ -818,7 +804,7 @@ fn complete_scan(s: &mut Session, held: HttpRequest, body: &str) {
 #[test]
 fn user_snapshot_survives_older_rest_scan() {
     let (mut s, held) = held_scan();
-    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let row = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     s.message(0, "snapshot", &format!("[{row}]"));
     complete_scan(&mut s, held, r#"{"orders":[],"has_next":false}"#);
     assert!(s.e.store().order("order-a").is_some());
@@ -826,7 +812,7 @@ fn user_snapshot_survives_older_rest_scan() {
 #[test]
 fn empty_user_snapshot_removal_survives_older_rest_scan() {
     let (mut s, held) = held_scan();
-    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let row = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     s.message(0, "snapshot", &format!("[{row}]"));
     s.message(1, "snapshot", "[]");
     complete_scan(
@@ -838,16 +824,16 @@ fn empty_user_snapshot_removal_survives_older_rest_scan() {
 }
 #[test]
 fn incomplete_execution_price_does_not_consume_later_valid_fill() {
-    let mut s = Session::new("INTX", false).ready();
-    let initial = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let mut s = Session::unit_futures().ready();
+    let initial = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     s.message(0, "snapshot", &format!("[{initial}]"));
     fills(&mut s.e);
-    let missing = user_order("order-a", "BTC-PERP-INTX", "FILLED", "1", "0")
-        .replace(",\"avg_price\":\"100\"", "");
+    let missing =
+        user_order("order-a", "BTC-CDE", "FILLED", "1", "0").replace(",\"avg_price\":\"100\"", "");
     s.message(1, "update", &format!("[{missing}]"));
     assert!(fills(&mut s.e).is_empty());
     assert_eq!(s.e.store().order("order-a").unwrap().filled, 0.0);
-    let valid = user_order("order-a", "BTC-PERP-INTX", "FILLED", "1", "0")
+    let valid = user_order("order-a", "BTC-CDE", "FILLED", "1", "0")
         .replace("\"avg_price\":\"100\"", "\"avg_price\":\"90\"");
     s.message(2, "update", &format!("[{valid}]"));
     assert_eq!(fills(&mut s.e), vec![1.0]);
@@ -1018,12 +1004,12 @@ fn next_read(s: &mut Session, suffix: &str) -> HttpRequest {
 
 #[test]
 fn rest_fill_observation_does_not_consume_delayed_user_execution() {
-    let mut s = Session::new("INTX", false).ready();
-    let initial = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "2");
+    let mut s = Session::unit_futures().ready();
+    let initial = user_order("order-a", "BTC-CDE", "OPEN", "0", "2");
     s.message(0, "snapshot", &format!("[{initial}]"));
     assert!(fills(&mut s.e).is_empty());
     let held = next_read(&mut s, "/orders/historical/batch");
-    let filled = user_order("order-a", "BTC-PERP-INTX", "OPEN", "1", "1");
+    let filled = user_order("order-a", "BTC-CDE", "OPEN", "1", "1");
     complete_scan(
         &mut s,
         held,
@@ -1039,16 +1025,16 @@ fn rest_fill_observation_does_not_consume_delayed_user_execution() {
 
 #[test]
 fn rest_open_order_removal_retains_previously_emitted_fill_baseline() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     s.message(0, "snapshot", "[]");
     fills(&mut s.e);
-    let partial = user_order("order-a", "BTC-PERP-INTX", "OPEN", "1", "1");
+    let partial = user_order("order-a", "BTC-CDE", "OPEN", "1", "1");
     s.message(1, "update", &format!("[{partial}]"));
     assert_eq!(fills(&mut s.e), vec![1.0]);
     let held = next_read(&mut s, "/orders/historical/batch");
     complete_scan(&mut s, held, r#"{"orders":[],"has_next":false}"#);
     assert!(s.e.store().order("order-a").is_none());
-    let terminal = user_order("order-a", "BTC-PERP-INTX", "FILLED", "2", "0");
+    let terminal = user_order("order-a", "BTC-CDE", "FILLED", "2", "0");
     s.message(2, "update", &format!("[{terminal}]"));
     assert_eq!(fills(&mut s.e), vec![1.0]);
     s.message(3, "update", &format!("[{terminal}]"));
@@ -1455,15 +1441,57 @@ fn unmappable_cfm_position_row_keeps_the_known_position() {
     }
     assert_eq!(s.e.store().position("BTC-CDE").unwrap().contracts, 0.02);
 }
+const INTX_MOVED: &str =
+    "Coinbase INTX perpetuals moved to the Deribit gateway on 2026-10-01 and are not yet supported";
+
+#[test]
+fn an_intx_portfolio_fails_startup_visibly_and_requests_nothing_intx() {
+    let mut s = Session::new("INTX", false);
+    let mut failed = None;
+    for _ in 0..50 {
+        let mut idle = true;
+        for action in s.e.drain_actions().collect::<Vec<_>>() {
+            match action {
+                Action::Http(r) => {
+                    idle = false;
+                    s.urls.push(r.url.clone());
+                    s.answer(r)
+                }
+                Action::SetTimer { timer, at_ms } => s.timers.push((at_ms, timer)),
+                Action::ClearTimer { timer } => s.timers.retain(|(_, t)| *t != timer),
+                Action::Notice(Notice::StartupFailed { error, .. }) => failed = Some(error),
+                _ => {}
+            }
+        }
+        if failed.is_some() || idle && s.timers.is_empty() {
+            break;
+        }
+        if idle {
+            s.fire();
+        }
+    }
+    let error = failed.expect("an INTX portfolio ends startup");
+    assert_eq!(error.message, INTX_MOVED);
+    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
+    assert!(
+        !s.urls
+            .iter()
+            .any(|u| u.contains("/intx/") || u.contains("international")),
+        "{:?}",
+        s.urls
+    );
+    assert!(!s.e.store().loaded().markets);
+}
+
 #[test]
 fn portfolio_probe_advances_past_a_missing_portfolio() {
-    let mut s = Session::new("INTX", false);
+    let mut s = Session::unit_futures();
     let r = s.collect().pop().unwrap();
     assert!(r.url.ends_with("/portfolios"));
     s.reply(
         r,
         200,
-        r#"{"portfolios":[{"uuid":"gone","type":"DEFAULT"},{"uuid":"portfolio-one","type":"INTX"}]}"#,
+        r#"{"portfolios":[{"uuid":"gone","type":"DEFAULT"},{"uuid":"portfolio-one","type":"DEFAULT"}]}"#,
     );
     let r = s.next_request();
     assert!(r.url.ends_with("/portfolios/gone"));
@@ -1524,11 +1552,7 @@ fn no_cfm_account_still_finishes_private_startup(body: &str) {
             .iter()
             .all(|m| m.is_spot == Some(true))
     );
-    assert!(
-        !s.urls
-            .iter()
-            .any(|url| url.contains("/cfm/positions") || url.contains("/intx/"))
-    );
+    assert!(!s.urls.iter().any(|url| url.contains("/cfm/positions")));
     assert_eq!(
         s.urls
             .iter()
@@ -1598,12 +1622,12 @@ fn a_selected_cfm_accounts_null_balance_is_unknown_and_keeps_its_cash() {
 
 #[test]
 fn portfolio_probe_retries_the_same_portfolio_on_server_failure() {
-    let mut s = Session::new("INTX", false);
+    let mut s = Session::unit_futures();
     let r = s.collect().pop().unwrap();
     s.reply(
         r,
         200,
-        r#"{"portfolios":[{"uuid":"busy","type":"DEFAULT"},{"uuid":"portfolio-one","type":"INTX"}]}"#,
+        r#"{"portfolios":[{"uuid":"busy","type":"DEFAULT"},{"uuid":"portfolio-one","type":"DEFAULT"}]}"#,
     );
     let r = s.next_request();
     s.reply(r, 503, "unavailable");
@@ -1611,20 +1635,17 @@ fn portfolio_probe_retries_the_same_portfolio_on_server_failure() {
     assert!(r.url.ends_with("/portfolios/busy"), "{}", r.url);
 }
 #[test]
-fn flat_intx_row_without_a_side_clears_the_position() {
-    let mut s = Session::new("INTX", false).ready();
-    assert_eq!(
-        s.e.store().position("BTC-PERP-INTX").unwrap().contracts,
-        2.0
-    );
+fn flat_position_row_without_a_side_clears_the_position() {
+    let mut s = Session::unit_futures().ready();
+    assert_eq!(s.e.store().position("BTC-CDE").unwrap().contracts, 2.0);
     s.positions = Some(
-        r#"{"positions":[{"symbol":"BTC-PERP-INTX","position_side":"POSITION_SIDE_UNKNOWN","net_size":"0","entry_vwap":{"value":"0"},"mark_price":{"value":"110"},"liquidation_price":{"value":"0"},"leverage":"10"}]}"#.into(),
+        r#"{"positions":[{"product_id":"BTC-CDE","product_type":"FUTURE","side":"UNKNOWN","number_of_contracts":"0","avg_entry_price":"0","current_price":"110","unrealized_pnl":"0"}]}"#.into(),
     );
     for _ in 0..20 {
         for r in s.collect() {
             s.answer(r);
         }
-        if s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 0.0 {
+        if s.e.store().position("BTC-CDE").unwrap().contracts == 0.0 {
             return;
         }
         s.fire();
@@ -1633,27 +1654,27 @@ fn flat_intx_row_without_a_side_clears_the_position() {
 }
 #[test]
 fn unmappable_update_for_an_unknown_order_does_not_spoil_the_user_snapshot() {
-    let mut s = Session::new("INTX", false).ready();
-    let site = r#"{"order_id":"twap-1","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"120","stop_price":"0","avg_price":"0"}"#;
+    let mut s = Session::unit_futures().ready();
+    let site = r#"{"order_id":"twap-1","client_order_id":"","product_id":"BTC-CDE","status":"OPEN","order_side":"SELL","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"120","stop_price":"0","avg_price":"0"}"#;
     s.message(0, "update", &format!("[{site}]"));
-    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let row = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     s.message(1, "snapshot", &format!("[{row}]"));
     assert!(s.e.store().order("order-a").is_some());
 }
 #[test]
 fn snapshot_holding_only_a_site_order_still_removes_ended_orders() {
-    let mut s = Session::new("INTX", false).ready();
-    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let mut s = Session::unit_futures().ready();
+    let row = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     s.message(0, "snapshot", &format!("[{row}]"));
     assert!(s.e.store().order("order-a").is_some());
-    let site = r#"{"order_id":"twap-1","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"SELL","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"120","stop_price":"0","avg_price":"0"}"#;
+    let site = r#"{"order_id":"twap-1","client_order_id":"","product_id":"BTC-CDE","status":"OPEN","order_side":"SELL","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"120","stop_price":"0","avg_price":"0"}"#;
     s.message(1, "snapshot", &format!("[{site}]"));
     assert!(s.e.store().order("order-a").is_none());
 }
 #[test]
 fn snapshot_holding_only_an_order_on_an_unloaded_market_still_removes_ended_orders() {
-    let mut s = Session::new("INTX", false).ready();
-    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let mut s = Session::unit_futures().ready();
+    let row = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     s.message(0, "snapshot", &format!("[{row}]"));
     assert!(s.e.store().order("order-a").is_some());
     let other = user_order("spot-1", "ETH-USD", "OPEN", "0", "1");
@@ -1662,28 +1683,28 @@ fn snapshot_holding_only_an_order_on_an_unloaded_market_still_removes_ended_orde
 }
 #[test]
 fn unmappable_update_for_a_staged_order_spoils_the_snapshot() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let rows = (0..50)
-        .map(|i| user_order(&format!("ours-{i}"), "BTC-PERP-INTX", "OPEN", "0", "1"))
+        .map(|i| user_order(&format!("ours-{i}"), "BTC-CDE", "OPEN", "0", "1"))
         .collect::<Vec<_>>()
         .join(",");
     s.message(0, "snapshot", &format!("[{rows}]"));
-    let update = r#"{"order_id":"ours-0","client_order_id":"","product_id":"BTC-PERP-INTX","status":"OPEN","order_side":"BUY","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"100","stop_price":"0","avg_price":"0"}"#;
+    let update = r#"{"order_id":"ours-0","client_order_id":"","product_id":"BTC-CDE","status":"OPEN","order_side":"BUY","order_type":"Twap","cumulative_quantity":"0","leaves_quantity":"1","limit_price":"100","stop_price":"0","avg_price":"0"}"#;
     s.message(1, "update", &format!("[{update}]"));
     s.message(2, "snapshot", "[]");
     assert!(s.e.store().order("ours-0").is_none());
 }
 #[test]
 fn skipped_position_row_beside_a_mapped_row_does_not_duplicate_the_position() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     s.positions = Some(
-        r#"{"positions":[{"symbol":"BTC-PERP-INTX","position_side":"POSITION_SIDE_LONG","net_size":"3","entry_vwap":{"value":"100"},"mark_price":{"value":"110"},"liquidation_price":{"value":"50"},"leverage":"10"},{"symbol":"BTC-PERP-INTX","position_side":"BOGUS","net_size":"1","entry_vwap":{"value":"100"},"mark_price":{"value":"110"},"liquidation_price":{"value":"50"},"leverage":"10"}]}"#.into(),
+        r#"{"positions":[{"product_id":"BTC-CDE","product_type":"FUTURE","side":"LONG","number_of_contracts":"3","avg_entry_price":"100","current_price":"110","unrealized_pnl":"30"},{"product_id":"BTC-CDE","product_type":"FUTURE","side":"BOGUS","number_of_contracts":"1","avg_entry_price":"100","current_price":"110","unrealized_pnl":"10"}]}"#.into(),
     );
     for _ in 0..20 {
         for r in s.collect() {
             s.answer(r);
         }
-        if s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 3.0 {
+        if s.e.store().position("BTC-CDE").unwrap().contracts == 3.0 {
             break;
         }
         s.fire();
@@ -1692,7 +1713,7 @@ fn skipped_position_row_beside_a_mapped_row_does_not_duplicate_the_position() {
         s.e.store()
             .positions()
             .iter()
-            .filter(|p| p.symbol == "BTC-PERP-INTX")
+            .filter(|p| p.symbol == "BTC-CDE")
             .count();
     assert_eq!(held, 1);
 }
@@ -1766,7 +1787,7 @@ impl Session {
 
 #[test]
 fn private_flaps_back_off_exponentially_even_after_valid_snapshots() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     for attempt in 0..7 {
         s.snapshot();
         let (timer, delay) = s.drop_private();
@@ -1782,7 +1803,7 @@ fn private_flaps_back_off_exponentially_even_after_valid_snapshots() {
 
 #[test]
 fn private_reconnect_resubscribes_and_ignores_the_retired_socket() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     s.collect();
     let old = s.private.unwrap();
     let (timer, delay) = s.drop_private();
@@ -1804,7 +1825,7 @@ fn private_reconnect_resubscribes_and_ignores_the_retired_socket() {
         })
         .collect();
     assert_eq!(channels, ["user", "heartbeats"]);
-    let row = user_order("retired", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let row = user_order("retired", "BTC-CDE", "OPEN", "0", "1");
     let text = format!(
         r#"{{"channel":"user","sequence_num":0,"events":[{{"type":"snapshot","orders":[{row}]}}]}}"#
     );
@@ -1824,7 +1845,7 @@ fn private_reconnect_resubscribes_and_ignores_the_retired_socket() {
 
 #[test]
 fn private_connect_timeout_closes_a_socket_that_never_opens() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let (timer, delay) = s.drop_private();
     let fresh = s.reconnect(timer, delay);
     let connected = s.now;
@@ -1837,7 +1858,7 @@ fn private_connect_timeout_closes_a_socket_that_never_opens() {
 
 #[test]
 fn private_snapshot_deadline_ignores_heartbeats() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let (timer, delay) = s.drop_private();
     let fresh = s.reconnect(timer, delay);
     s.event(Event::WsOpened { socket: fresh });
@@ -1854,7 +1875,7 @@ fn private_snapshot_deadline_ignores_heartbeats() {
 
 #[test]
 fn private_idle_timeout_counts_only_sequence_valid_frames_and_sends_no_pings() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let socket = s.private.unwrap();
     s.collect();
     s.sends.clear();
@@ -1880,7 +1901,7 @@ fn private_idle_timeout_counts_only_sequence_valid_frames_and_sends_no_pings() {
 
 #[test]
 fn private_stable_traffic_resets_backoff() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     for _ in 0..3 {
         s.snapshot();
         let (timer, delay) = s.drop_private();
@@ -1898,7 +1919,7 @@ fn private_stable_traffic_resets_backoff() {
 
 #[test]
 fn private_pending_snapshot_survives_while_user_frames_arrive() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let (timer, delay) = s.drop_private();
     let fresh = s.reconnect(timer, delay);
     s.event(Event::WsOpened { socket: fresh });
@@ -1921,11 +1942,11 @@ fn private_pending_snapshot_survives_while_user_frames_arrive() {
 
 #[test]
 fn private_resent_snapshot_on_the_same_connection_expires_without_user_frames() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let socket = s.private.unwrap();
     s.snapshot();
     let rows: Vec<_> = (0..50)
-        .map(|i| user_order(&format!("page-{i}"), "BTC-PERP-INTX", "OPEN", "0", "1"))
+        .map(|i| user_order(&format!("page-{i}"), "BTC-CDE", "OPEN", "0", "1"))
         .collect();
     s.message(1, "snapshot", &format!("[{}]", rows.join(",")));
     let resent = s.now + 1.0;
@@ -1960,37 +1981,35 @@ impl Session {
 
 #[test]
 fn position_row_without_a_symbol_keeps_stored_positions_while_valid_peers_commit() {
-    let mut s = Session::new("INTX", false);
-    s.products = Some(INTX.replace(
+    let mut s = Session::unit_futures();
+    s.products = Some(UNIT_CFM.replace(
         "}]}",
         &format!(
             "}},{}]}}",
-            INTX.trim_start_matches(r#"{"products":["#)
+            UNIT_CFM
+                .trim_start_matches(r#"{"products":["#)
                 .trim_end_matches("]}")
                 .replace("BTC", "ETH")
         ),
     ));
     let row = |symbol: &str, side: &str, size: &str| {
         format!(
-            r#"{{"symbol":"{symbol}","position_side":"POSITION_SIDE_{side}","net_size":"{size}","entry_vwap":{{"value":"100"}},"mark_price":{{"value":"110"}},"liquidation_price":{{"value":"50"}},"leverage":"10"}}"#
+            r#"{{"product_id":"{symbol}","product_type":"FUTURE","side":"{side}","number_of_contracts":"{size}","avg_entry_price":"100","current_price":"110","unrealized_pnl":"10"}}"#
         )
     };
     let positions = |rows: &[String]| Some(format!(r#"{{"positions":[{}]}}"#, rows.join(",")));
-    s.positions = positions(&[
-        row("BTC-PERP-INTX", "LONG", "2"),
-        row("ETH-PERP-INTX", "LONG", "1"),
-    ]);
+    s.positions = positions(&[row("BTC-CDE", "LONG", "2"), row("ETH-CDE", "LONG", "1")]);
     let mut s = s.ready();
-    let eth = s.e.store().position("ETH-PERP-INTX").unwrap().clone();
+    let eth = s.e.store().position("ETH-CDE").unwrap().clone();
     assert_eq!(eth.contracts, 1.0);
     s.logs.clear();
 
     s.positions = positions(&[
-        row("BTC-PERP-INTX", "LONG", "3"),
-        r#"{"position_side":"POSITION_SIDE_LONG","net_size":"7"}"#.into(),
+        row("BTC-CDE", "LONG", "3"),
+        r#"{"side":"LONG","number_of_contracts":"7"}"#.into(),
     ]);
-    s.poll_until(|s| s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 3.0);
-    assert_eq!(s.e.store().position("ETH-PERP-INTX"), Some(&eth));
+    s.poll_until(|s| s.e.store().position("BTC-CDE").unwrap().contracts == 3.0);
+    assert_eq!(s.e.store().position("ETH-CDE"), Some(&eth));
     assert!(
         s.logs
             .iter()
@@ -1998,21 +2017,21 @@ fn position_row_without_a_symbol_keeps_stored_positions_while_valid_peers_commit
     );
     assert!(!s.logs.iter().any(|l| l.contains('7')));
 
-    s.positions = positions(&[row("BTC-PERP-INTX", "LONG", "3")]);
-    s.poll_until(|s| s.e.store().position("ETH-PERP-INTX").unwrap().contracts == 0.0);
+    s.positions = positions(&[row("BTC-CDE", "LONG", "3")]);
+    s.poll_until(|s| s.e.store().position("ETH-CDE").unwrap().contracts == 0.0);
 }
 
 #[test]
 fn order_row_without_an_id_keeps_stored_orders_while_valid_peers_commit() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let orders = |rows: &[String]| {
         Some(format!(
             r#"{{"orders":[{}],"has_next":false}}"#,
             rows.join(",")
         ))
     };
-    let a = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
-    let b = user_order("order-b", "BTC-PERP-INTX", "OPEN", "0", "2");
+    let a = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
+    let b = user_order("order-b", "BTC-CDE", "OPEN", "0", "2");
     s.orders = orders(&[a.clone(), b]);
     s.poll_until(|s| s.e.store().order("order-b").is_some());
     let stored = s.e.store().order("order-b").unwrap().clone();
@@ -2077,62 +2096,32 @@ fn one_invalid_spot_holding_keeps_its_stored_copy_while_valid_peers_commit() {
     s.poll_until(|s| total(s, "ETH").is_none());
 }
 
-fn intx_position(symbol: &str, size: &str) -> String {
-    format!(
-        r#"{{"symbol":"{symbol}","position_side":"POSITION_SIDE_LONG","net_size":"{size}","entry_vwap":{{"value":"100"}},"mark_price":{{"value":"110"}},"liquidation_price":{{"value":"50"}},"leverage":"10"}}"#
-    )
-}
-fn intx_positions(rows: &[String]) -> Option<String> {
+fn cfm_positions(rows: &[String]) -> Option<String> {
     Some(format!(r#"{{"positions":[{}]}}"#, rows.join(",")))
 }
-const SYMBOLLESS_POSITION: &str = r#"{"position_side":"POSITION_SIDE_LONG","net_size":"7"}"#;
-impl Session {
-    /// Answers every read, positions last in each batch, until `done` holds.
-    fn poll_positions_last_until(&mut self, done: impl Fn(&Self) -> bool) {
-        for _ in 0..80 {
-            let (positions, mut requests): (Vec<_>, Vec<_>) = self
-                .collect()
-                .into_iter()
-                .partition(|r| r.url.contains("/intx/positions/"));
-            requests.extend(positions);
-            if requests.is_empty() {
-                if done(self) {
-                    return;
-                }
-                self.fire();
-            }
-            for r in requests {
-                self.answer(r);
-                if done(self) {
-                    return;
-                }
-            }
-        }
-        panic!("condition never held");
-    }
-}
+const SYMBOLLESS_POSITION: &str = r#"{"side":"LONG","number_of_contracts":"7"}"#;
 
 #[test]
 fn startup_position_row_without_a_symbol_is_an_error_logged_once_until_a_clean_snapshot() {
-    let mut s = Session::new("INTX", false);
-    s.positions = intx_positions(&[SYMBOLLESS_POSITION.into()]);
+    let mut s = Session::unit_futures();
+    s.positions = cfm_positions(&[SYMBOLLESS_POSITION.into()]);
     let mut s = s.ready();
     let message = "Coinbase skipped unmappable position without a symbol";
     assert_eq!(s.errors, [message]);
     let reads = |s: &Session| {
         s.urls
             .iter()
-            .filter(|u| u.contains("/intx/positions/"))
+            .filter(|u| u.contains("/cfm/positions"))
             .count()
     };
     let seen = reads(&s);
     s.poll_until(|s| reads(s) > seen + 1);
     assert_eq!(s.logs.iter().filter(|l| *l == message).count(), 1);
 
-    s.positions = intx_positions(&[]);
+    s.positions = cfm_positions(&[]);
     let seen = reads(&s);
     s.poll_until(|s| reads(s) > seen + 1);
-    s.positions = intx_positions(&[SYMBOLLESS_POSITION.into()]);
+    s.positions = cfm_positions(&[SYMBOLLESS_POSITION.into()]);
     let seen = reads(&s);
     s.poll_until(|s| reads(s) > seen + 1);
     assert_eq!(s.logs.iter().filter(|l| *l == message).count(), 2);
@@ -2141,56 +2130,16 @@ fn startup_position_row_without_a_symbol_is_an_error_logged_once_until_a_clean_s
 }
 
 #[test]
-fn intx_upnl_sums_committed_positions_including_retained_copies_across_a_balance_poll() {
-    let mut s = Session::new("INTX", false);
-    s.products = Some(INTX.replace(
-        "}]}",
-        &format!(
-            "}},{}]}}",
-            INTX.trim_start_matches(r#"{"products":["#)
-                .trim_end_matches("]}")
-                .replace("BTC", "ETH")
-        ),
-    ));
-    s.positions = intx_positions(&[
-        intx_position("BTC-PERP-INTX", "2"),
-        intx_position("ETH-PERP-INTX", "1"),
-    ]);
-    let mut s = s.ready();
-    assert_eq!(s.e.store().balance().upnl, 30.0);
-
-    // BTC now 3 (UPnL 30); the symbol-less row keeps ETH's stored copy (UPnL 10).
-    s.positions = intx_positions(&[
-        intx_position("BTC-PERP-INTX", "3"),
-        SYMBOLLESS_POSITION.into(),
-    ]);
-    s.poll_positions_last_until(|s| {
-        s.e.store().position("BTC-PERP-INTX").unwrap().contracts == 3.0
-    });
-    assert_eq!(s.e.store().balance().upnl, 40.0);
-
-    let reads = |s: &Session| {
-        s.urls
-            .iter()
-            .filter(|u| u.contains("/intx/portfolio/"))
-            .count()
-    };
-    let seen = reads(&s);
-    s.poll_until(|s| reads(s) > seen);
-    assert_eq!(s.e.store().balance().upnl, 40.0);
-}
-
-#[test]
 fn a_skipped_order_is_an_error_only_when_no_stored_copy_is_kept() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let orders = |rows: &[String]| {
         Some(format!(
             r#"{{"orders":[{}],"has_next":false}}"#,
             rows.join(",")
         ))
     };
-    let a = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
-    let b = user_order("order-b", "BTC-PERP-INTX", "OPEN", "0", "2");
+    let a = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
+    let b = user_order("order-b", "BTC-CDE", "OPEN", "0", "2");
     let unmappable = |row: &str| row.replace(r#""order_type":"Limit""#, r#""order_type":"Odd""#);
     s.orders = orders(std::slice::from_ref(&a));
     s.poll_until(|s| s.e.store().order("order-a").is_some());
@@ -2261,8 +2210,8 @@ fn a_skipped_spot_holding_is_an_error_only_when_no_stored_copy_is_kept() {
 
 #[test]
 fn user_snapshot_skip_errors_escalate_once_and_rearm_after_mapping() {
-    let mut s = Session::new("INTX", false).ready();
-    let row = user_order("order-a", "BTC-PERP-INTX", "OPEN", "0", "1");
+    let mut s = Session::unit_futures().ready();
+    let row = user_order("order-a", "BTC-CDE", "OPEN", "0", "1");
     let bad = row.replace(r#""order_type":"Limit""#, r#""order_type":"Odd""#);
     let report = |s: &mut Session, seq, row: &str| {
         s.message(seq, "snapshot", &format!("[{row}]"));
@@ -2363,25 +2312,9 @@ fn execution_prices_and_amounts(e: &mut Engine<Coinbase>) -> Vec<(f64, f64)> {
 
 #[test]
 fn cumulative_quote_prices_and_equal_endpoint_corrections_preserve_native_units() {
-    for (kind, spot, nonunit_intx, native_scale) in [
-        ("DEFAULT", true, false, 1),
-        ("INTX", false, false, 1),
-        ("INTX", false, true, 1),
-        ("DEFAULT", false, false, 100),
-    ] {
-        let mut s = Session::new(kind, spot);
-        if nonunit_intx {
-            s.products =
-                Some(INTX.replace("\"contract_size\":\"1\"", "\"contract_size\":\"0.01\""));
-        }
-        let mut s = s.ready();
-        let product = if spot {
-            "BTC-USD"
-        } else if kind == "INTX" {
-            "BTC-PERP-INTX"
-        } else {
-            "BTC-CDE"
-        };
+    for (spot, native_scale) in [(true, 1), (false, 100)] {
+        let mut s = Session::new("DEFAULT", spot).ready();
+        let product = if spot { "BTC-USD" } else { "BTC-CDE" };
         let row = |filled: usize, average: &str| {
             let mut row = user_order(
                 "quote-progress",
@@ -2416,9 +2349,9 @@ fn cumulative_quote_prices_and_equal_endpoint_corrections_preserve_native_units(
 
 #[test]
 fn invalid_incremental_quote_preserves_eligibility_for_its_corrected_receipt() {
-    let mut s = Session::new("INTX", false).ready();
+    let mut s = Session::unit_futures().ready();
     let row = |filled: &str, average: &str| {
-        user_order("quote-retry", "BTC-PERP-INTX", "OPEN", filled, "2").replace(
+        user_order("quote-retry", "BTC-CDE", "OPEN", filled, "2").replace(
             "\"avg_price\":\"100\"",
             &format!("\"avg_price\":\"{average}\""),
         )

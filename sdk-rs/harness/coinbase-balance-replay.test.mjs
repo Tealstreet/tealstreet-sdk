@@ -8,14 +8,13 @@ import { validateAcceptedDifferences, validateKnownFailures } from './known-fail
 const known = JSON.parse(readFileSync(new URL('./known-gate-failures.json', import.meta.url)));
 const accepted = JSON.parse(readFileSync(new URL('./accepted-differences.json', import.meta.url)));
 const diagnosticSets = {
-  intx: '97d83999434cafc1ddcf1d5645c3a1937c68d3a715ded6d36c65c17d4a206378',
   cfm: 'fee3474fe2f37db23083768f72b4e4ff4ba02a9f34d1fe6f9e4722ae114f8549',
   spot: '44031bc9fe03b0d09e4849ba9931341dd301b58990ac29f4db4f1a839eba99ed',
 };
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 
 for (const venue of ['coinbase', 'coinbasespot'])
-  for (const profile of venue === 'coinbase' ? ['intx', 'cfm', 'spot'] : ['spot'])
+  for (const profile of venue === 'coinbase' ? ['cfm', 'spot'] : ['spot'])
     for (const algorithm of ['ES256', 'EdDSA']) {
       const tape = `sdk-rs/harness/tapes/${venue}-${profile}-${algorithm}-private.jsonl`;
       const { records } = coinbasePrivateTape({ venue, profile, algorithm });

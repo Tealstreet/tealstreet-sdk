@@ -1735,7 +1735,7 @@ impl Coinbase {
                     if self.options.spot_only {
                         self.select_portfolio(cx, p, ProductKind::Spot)
                     } else if p.kind == "INTX" {
-                        self.select_portfolio(cx, p, ProductKind::Intx)
+                        crate::public::intx_unsupported(cx)
                     } else {
                         self.account_read(cx, Request::DetectCfm { portfolio: p })
                     }
