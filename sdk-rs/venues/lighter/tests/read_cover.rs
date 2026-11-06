@@ -48,7 +48,7 @@ fn next_census_read(e: &mut Engine<Lighter>, now: f64) -> HttpRequest {
 /// read, never its last.
 #[test]
 fn a_census_cover_is_its_earliest_reads_send_beside_orders() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     let sent = NOW + 1_000.0;
     let all = census(&mut e, s, sent);
     reply_at(
@@ -76,7 +76,7 @@ fn a_census_cover_is_its_earliest_reads_send_beside_orders() {
 /// it, keeps the row, and the cover stays at the census before it.
 #[test]
 fn a_stream_order_after_the_census_went_out_keeps_the_older_cover() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     assert_eq!(
         account_cover(&mut e, NOW).1,
         Some(NOW),
@@ -100,7 +100,7 @@ fn an_unmappable_working_row_proves_no_newer_cover() {
         (format!("{unmapped},{mapped}"), NOW),
         (mapped.to_owned(), NOW + 1_000.0),
     ] {
-        let (mut e, s) = ready();
+        let (mut e, s) = ready_unopened();
         let sent = NOW + 1_000.0;
         let read = census(&mut e, s, sent);
         let body = format!(r#"{{"code":200,"orders":[{rows}]}}"#);
@@ -115,7 +115,7 @@ fn an_unmappable_working_row_proves_no_newer_cover() {
 /// start, so a busy symbol cannot drive back-to-back census reads; it reads once.
 #[test]
 fn the_follow_up_to_a_refused_census_is_rate_bounded() {
-    let (mut e, s) = ready();
+    let (mut e, s) = ready_unopened();
     let sent = NOW + 1_000.0;
     let read = census(&mut e, s, sent);
     message(&mut e, s, sent + 1.0, STREAM_ORDER);

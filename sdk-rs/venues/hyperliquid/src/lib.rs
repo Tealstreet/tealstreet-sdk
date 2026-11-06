@@ -34,6 +34,8 @@ pub struct Options {
     pub builder: Option<Builder>,
     /// TS `enableSpotMarkets`: spot pairs, holdings and orders in the perp account.
     pub enable_spot_markets: bool,
+    /// Extra fast depth topic per book; callers must budget aggregate per-IP subscriptions.
+    pub fast_book: bool,
 }
 safe_cex_crypto::redacted_debug!(Options);
 
@@ -143,11 +145,15 @@ struct Connection {
     /// Interest keys the venue refused; left out until the socket or the topic is renewed.
     refused: HashSet<String>,
     refusal_notices: u8,
+    // Successful proposal admission persists across epochs and catalogue growth.
+    admitted_interests: HashSet<std::sync::Arc<str>>,
+    capacity_excess: usize,
 }
 #[derive(Default)]
 struct Ladder {
     subscribers: usize,
     depth: [Vec<Level>; 2],
+    fast_depth: Option<[Vec<Level>; 2]>,
     depth_time: Option<f64>,
     spot_depth: [Option<[Vec<Level>; 2]>; 7],
     bbo: Option<(f64, [Option<Level>; 2])>,
@@ -602,9 +608,12 @@ impl Hyperliquid {
             return;
         }
         if let Some(feed) = self.connection.feed {
-            let desired = self.desired_socket_interests(cx.store, cx.public_feed_policy());
+            let desired = self.bounded_socket_interests(cx);
+            let admitted = desired.iter().map(|i| i.key.clone()).collect();
             if let Err(error) = cx.set_socket_interests(feed, desired) {
                 Self::socket_refused(cx, error);
+            } else {
+                self.connection.admitted_interests = admitted;
             }
         }
     }
@@ -716,7 +725,35 @@ impl Hyperliquid {
                         cx.book_changed(&symbol);
                         return;
                     }
-                    ladder.depth = depth.levels;
+                    if !depth.time.is_finite()
+                        || ladder.depth_time.is_some_and(|time| depth.time < time)
+                        || !valid_perp_depth(&depth)
+                    {
+                        return;
+                    }
+                    if depth.fast {
+                        ladder.fast_depth = Some(depth.levels);
+                    } else {
+                        ladder.depth = depth.levels;
+                        if ladder.depth_time.is_none_or(|time| depth.time > time) {
+                            ladder.fast_depth = None;
+                        }
+                    }
+                    // Once shallow coverage removes a level it cannot return on a retreat.
+                    if let Some(fast) = &ladder.fast_depth {
+                        for (index, side) in ladder.depth.iter_mut().enumerate() {
+                            side.retain(|level| {
+                                fast[index].len() == 5
+                                    && fast[index].last().is_some_and(|last| {
+                                        if index == 0 {
+                                            level.px < last.px
+                                        } else {
+                                            level.px > last.px
+                                        }
+                                    })
+                            });
+                        }
+                    }
                     ladder.depth_time = Some(depth.time);
                     Self::combine(ladder);
                     cx.book_changed(&symbol);
@@ -758,7 +795,11 @@ impl Hyperliquid {
     }
     fn combine(ladder: &mut Ladder) {
         for (index, side) in [BookSide::Bids, BookSide::Asks].into_iter().enumerate() {
-            let depth = &ladder.depth[index];
+            let fast = ladder
+                .fast_depth
+                .as_ref()
+                .map_or(&[][..], |fast| fast[index].as_slice());
+            let depth = fast.iter().chain(ladder.depth[index].iter());
             if let Some((time, bbo)) = &ladder.bbo
                 && *time >= ladder.depth_time.unwrap_or(0.0)
             {
@@ -782,7 +823,7 @@ impl Hyperliquid {
             } else {
                 ladder
                     .book
-                    .load_sorted(side, depth.iter().map(|l| (l.px, l.sz)));
+                    .load_sorted(side, depth.take(20).map(|l| (l.px, l.sz)));
             }
         }
     }
@@ -806,10 +847,43 @@ impl Hyperliquid {
             }
             self.books.remove(&symbol);
         }
+        if add
+            && self
+                .desired_socket_interests(cx.store, cx.public_feed_policy())
+                .len()
+                > 1000
+        {
+            self.books.remove(&symbol);
+            Self::socket_refused(cx, SocketError::Capacity);
+            return;
+        }
         if self.coin(cx, &symbol).is_some() {
             self.propose_socket_interests(cx);
         }
     }
+}
+
+fn valid_perp_depth(depth: &Depth<'_>) -> bool {
+    for (index, side) in depth.levels.iter().enumerate() {
+        if (depth.fast && side.len() > 5)
+            || side
+                .iter()
+                .any(|l| !l.px.is_finite() || l.px <= 0. || !l.sz.is_finite() || l.sz <= 0.)
+            || side.windows(2).any(|pair| {
+                if index == 0 {
+                    pair[0].px <= pair[1].px
+                } else {
+                    pair[0].px >= pair[1].px
+                }
+            })
+        {
+            return false;
+        }
+    }
+    depth.levels[0]
+        .first()
+        .zip(depth.levels[1].first())
+        .is_none_or(|(bid, ask)| bid.px < ask.px)
 }
 /// Spot frames do not say which nSigFigs subscription sent them. A tier's
 /// prices are all multiples of its bucket, so the coarsest power-of-ten tick
@@ -1866,6 +1940,15 @@ impl Venue for Hyperliquid {
                             interval,
                         },
                     );
+                    if self
+                        .desired_socket_interests(cx.store, cx.public_feed_policy())
+                        .len()
+                        > 1000
+                    {
+                        self.candles.remove(&(symbol, interval));
+                        Self::socket_refused(cx, SocketError::Capacity);
+                        return;
+                    }
                     if self.coin(cx, &symbol).is_some() {
                         self.propose_socket_interests(cx);
                     }

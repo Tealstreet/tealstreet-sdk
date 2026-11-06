@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 //! A frame-fed OKX engine (the browser's main-thread engine for one account):
-//! public instrument metadata only, no sockets, no account reads or polls, and
-//! each write emits exactly its planned venue requests and never a read.
+//! public instrument metadata, no sockets or account polls. Ordinary writes emit
+//! only their planned mutations; protective edits read missing native parameters
+//! before mutation (covered in protective_amend.rs).
 mod support;
 use safe_cex_engine::frame_fed::{DATA_SOURCE_ONLY, MARKETS_NOT_LOADED};
 use safe_cex_engine::model::{Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts};

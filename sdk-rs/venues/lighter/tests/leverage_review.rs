@@ -7,9 +7,16 @@ use serde_json::{Value, json};
 use support::*;
 
 fn ready_unattributed() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
+    ready_with(unattributed())
+}
+/// The private socket's first open is the test's own resync.
+fn unopened_unattributed() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
+    ready_unopened_meta(unattributed(), META)
+}
+fn unattributed() -> Options {
     let mut options = options();
     options.testnet = true;
-    ready_with(options)
+    options
 }
 fn http(e: &mut Engine<Lighter>, path: &str) -> HttpRequest {
     let actions = safe_cex_engine::test_support::prepared_actions(e, NOW);
@@ -71,7 +78,11 @@ fn position_fraction_reads_percent_strings_and_tick_integers_on_rest_and_ws() {
         (json!(20.0), 5.0),
     ] {
         for websocket in [false, true] {
-            let (mut e, socket) = ready_unattributed();
+            let (mut e, socket) = if websocket {
+                ready_unattributed()
+            } else {
+                unopened_unattributed()
+            };
             if websocket {
                 message(
                     &mut e,
@@ -184,7 +195,7 @@ fn an_amend_recreates_only_what_is_left_of_the_total() {
 #[test]
 fn invalid_leverage_bounds_reject_setting_write_and_preserve_account_state() {
     for (min, max) in [(30.0, 20.0), (f64::NAN, 20.0), (1.0, 0.0)] {
-        let (mut e, socket) = ready_unattributed();
+        let (mut e, socket) = unopened_unattributed();
         let before_positions = e.store().positions().to_vec();
         let before_setting = e.store().setting("ETH").unwrap();
         e.store_mut().update_markets(|market| {
@@ -230,6 +241,12 @@ fn ready_with_defaults() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
     let mut options = options();
     options.testnet = true;
     ready_with_meta(options, DEFAULTS_META)
+}
+/// The private socket's first open is the test's own resync.
+fn unopened_with_defaults() -> (Engine<Lighter>, safe_cex_engine::SocketId) {
+    let mut options = options();
+    options.testnet = true;
+    ready_unopened_meta(options, DEFAULTS_META)
 }
 
 /// daxx on preview-next: lighter-robinhood showed 20x for a market the account
@@ -304,7 +321,11 @@ fn defaults_clamp_to_limits_and_absent_or_nonpositive_defaults_keep_maximum() {
 #[test]
 fn explicit_account_imf_overrides_nonmax_default_on_rest_and_stream() {
     for streamed in [false, true] {
-        let (mut e, socket) = ready_with_defaults();
+        let (mut e, socket) = if streamed {
+            ready_with_defaults()
+        } else {
+            unopened_with_defaults()
+        };
         if streamed {
             message(
                 &mut e,
@@ -396,10 +417,10 @@ fn position_without_fraction_uses_default_and_no_row_refresh_keeps_explicit_sett
         r#"{"channel":"account_all:718895","positions":{"2":{"market_id":2,"position":"0","initial_margin_fraction":2000,"margin_mode":0}}}"#,
     );
     assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
-    e.handle(NOW, Event::WsOpened { socket });
-    let reads = requests(&mut e);
+    let (_, opened) = reopen(&mut e, socket, NOW);
+    let reads = requests_at(&mut e, opened);
     let account = reads.iter().find(|r| r.url.contains("/account?")).unwrap();
-    reply(&mut e, account, 200, ACCOUNT);
+    reply_at(&mut e, opened, account, 200, ACCOUNT);
     assert_eq!(e.store().setting("BTC").unwrap().leverage, 5.0);
 }
 
@@ -432,7 +453,11 @@ fn live_flat_rows_read_their_percent_fraction_on_rest_and_ws() {
         {"market_id":2,"symbol":"BTC","position":"0.00","initial_margin_fraction":"5.00","margin_mode":0}
     ]);
     for websocket in [false, true] {
-        let (mut e, socket) = ready_with_defaults();
+        let (mut e, socket) = if websocket {
+            ready_with_defaults()
+        } else {
+            unopened_with_defaults()
+        };
         if websocket {
             let positions: serde_json::Map<String, Value> = rows
                 .as_array()
