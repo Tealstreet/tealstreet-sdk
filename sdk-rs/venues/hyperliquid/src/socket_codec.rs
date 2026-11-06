@@ -445,6 +445,24 @@ impl Hyperliquid {
         interests
     }
 
+    /// A repair of a topic whose subscribe the venue refused (a chart's forced reset)
+    /// sends it once more; another refusal withdraws it again, with a notice.
+    pub(super) fn retry_refused(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        let mut retried = false;
+        for (_, key) in self.topic_interests(cx.store, topic) {
+            retried |= self.connection.refused.remove(&key);
+        }
+        if !retried {
+            return None;
+        }
+        self.propose_socket_interests(cx);
+        Some(Ok(()))
+    }
+
     /// A topic subscribed afresh may try its refused keys again.
     pub(super) fn forget_refusals(
         &mut self,
