@@ -181,6 +181,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // ddi2il standing rule: CI + 10 KiB rounded up; all Bybit variants share this family cap.
 // #3145 run 42218930349 job 127896386942 measured hyperliquid 2,153,944 B: trades as last for
 // watched coins. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
+// #3187 run 42251340763 measured binance 2,212,299 B: PM algo migration and cancel proof.
+// CI size plus 10 KiB, rounded up; all Binance aliases use this single family cap.
 // #3178 run 42239151280, job 127965614325: Hyperliquid 2,154,756 B at 81206ca3c02.
 // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
 // #3188 startup attribution, run 42260192686 at cda38ed52a9: CI + 10 KiB rounded up.
@@ -189,7 +191,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_161_664,
   backpack: 1_937_408,
-  binance: 2_220_032,
+  binance: 2_223_104,
   bingx: 2_074_624,
   bitget: 2_359_296,
   bitgetusdc: 2_359_296,

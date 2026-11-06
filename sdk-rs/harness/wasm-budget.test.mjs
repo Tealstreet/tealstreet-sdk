@@ -250,6 +250,19 @@ test('master b0d2122742d release cut (run 41901638294) retains the ruled binance
   assert.match(wasmBudgetError(cap + 1, 'venue', 'binance'), /exceeds/);
 });
 
+test('#3187 PM algo migration (run 42251340763) retains headroom for every Binance alias', () => {
+  const [measured, cap] = [2_212_299, 2_223_104];
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['binance', 'binanceinverse', 'binancepm', 'binanceoptions', 'binancespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'binance');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
 test('#3073 cancel confirmation (run 41931095253) retains headroom and siblings match', () => {
   const measured = 2_334_811;
   const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -511,7 +524,7 @@ test('#3178 intent cleanup (run 42239151280, job 127965614325) retains HL headro
 test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroom and exact boundaries', () => {
   for (const [venue, measured, incomingCap, cap] of [
     ['asterdex', 2_150_517, 2_150_400, 2_161_664],
-    ['binance', 2_208_976, 2_206_720, 2_220_032],
+    ['binance', 2_208_976, 2_223_104, 2_223_104],
     ['bitunix', 1_853_221, 1_849_344, 1_863_680],
     ['bybit', 2_259_153, 2_257_920, 2_270_208],
     ['cryptocom', 1_730_308, 1_727_488, 1_740_800],
