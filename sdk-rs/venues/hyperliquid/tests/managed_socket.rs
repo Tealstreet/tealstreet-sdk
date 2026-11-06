@@ -338,7 +338,11 @@ fn standalone_spot_keeps_all_mids_and_five_native_depth_variants() {
             _ => None,
         })
         .collect();
-    assert_eq!(depths.len(), 5);
+    assert_eq!(depths.len(), 6);
+    assert_eq!(
+        depths[5],
+        serde_json::json!({"method":"subscribe", "subscription":{"type":"trades", "coin":"PURR/USDC"}})
+    );
     for (depth, figures) in depths.iter().zip([
         serde_json::Value::Null,
         2.into(),
@@ -388,8 +392,12 @@ fn standalone_spot_keeps_all_mids_and_five_native_depth_variants() {
             _ => None,
         })
         .collect();
-    assert_eq!(sent,["null","2","3","4","5"].map(|figures|format!(
-        r#"{{"method":"unsubscribe","subscription":{{"type":"l2Book","coin":"PURR/USDC","nSigFigs":{figures}}}}}"#)));
+    let mut expected: Vec<_> = ["null","2","3","4","5"].map(|figures|format!(
+        r#"{{"method":"unsubscribe","subscription":{{"type":"l2Book","coin":"PURR/USDC","nSigFigs":{figures}}}}}"#)).into();
+    expected.push(
+        r#"{"method":"unsubscribe","subscription":{"type":"trades","coin":"PURR/USDC"}}"#.into(),
+    );
+    assert_eq!(sent, expected);
 }
 
 #[test]
@@ -717,6 +725,7 @@ fn final_perps_book_unsubscribe_preserves_native_topic_order() {
     let expected = [
         r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#,
         r#"{"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}"#,
+        r#"{"method":"subscribe","subscription":{"type":"trades","coin":"BTC"}}"#,
     ];
     assert_eq!(sent, expected);
     engine.handle(

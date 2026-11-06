@@ -320,6 +320,17 @@ impl Hyperliquid {
                 )));
             }
         }
+        // One trades stream per watched coin, shared by its books and charts.
+        for symbol in self.watched_symbols() {
+            if let Some(market) = store.market(symbol) {
+                interests.push(Interest::from_wire_args(public_topic(
+                    "trades",
+                    Some(&market.id),
+                    None,
+                    None,
+                )));
+            }
+        }
         interests
     }
 
@@ -439,6 +450,8 @@ impl Hyperliquid {
                 }
                 self.clear_private_snapshot_watch(cx);
                 self.connection.open = false;
+                // A reconnect resumes the mid as last until its first trade.
+                self.trade_last.clear();
                 for ladder in self.books.values_mut() {
                     ladder.spot_depth = Default::default();
                     ladder.depth_time = None;
@@ -482,7 +495,12 @@ impl Hyperliquid {
                 let value: EncodedTopic<'_> = serde_json::from_str(&interest.wire_args)
                     .map_err(|_| SocketError::InvalidInterest)?;
                 let figures = value.subscription.figures.unwrap_or(0);
-                let book_order = usize::from(value.subscription.kind == "bbo");
+                // Within a coin: depth, then bbo, then trades.
+                let book_order = match value.subscription.kind {
+                    "bbo" => 1,
+                    "trades" => 2,
+                    _ => 0,
+                };
                 Ok((
                     interest,
                     ranks

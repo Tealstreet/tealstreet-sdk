@@ -2176,11 +2176,17 @@ impl Hyperliquid {
             .positions()
             .iter()
             .map(|p| {
+                // The mid, as when `last` was always the mid; a trade print moves neither.
                 cx.store
                     .ticker(&p.symbol)
-                    .filter(|t| t.last > 0.0 && p.entry_price > 0.0)
-                    .map_or(p.unrealized_pnl, |t| {
-                        (t.last - p.entry_price)
+                    .and_then(|t| {
+                        [t.mid_price.unwrap_or(0.0), t.last]
+                            .into_iter()
+                            .find(|price| price.is_finite() && *price > 0.0)
+                    })
+                    .filter(|_| p.entry_price > 0.0)
+                    .map_or(p.unrealized_pnl, |price| {
+                        (price - p.entry_price)
                             * p.contracts
                             * if p.side == PositionSide::Long {
                                 1.0

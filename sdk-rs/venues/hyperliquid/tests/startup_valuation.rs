@@ -14,6 +14,7 @@ fn clear_prices(engine: &mut Engine<Hyperliquid>) {
     for ticker in &mut tickers {
         ticker.last = 0.0;
         ticker.mark = 0.0;
+        ticker.mid_price = None;
     }
     engine.store_mut().set_tickers(tickers);
 }
