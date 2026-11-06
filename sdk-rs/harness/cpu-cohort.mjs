@@ -194,6 +194,34 @@ export function authenticateArtifactExecution(input) {
   return receipt;
 }
 
+/** This failure-only upload proves an oracle refusal, never a CPU certificate. */
+export function authenticateBitgetOracleRefusalArtifact({ artifact, artifactBytes, run, job, logBytes, expectedCheckoutSha }) {
+  const name = 'Rust / Bitget counterbalanced steady CPU';
+  const stepName = 'Retain counterbalanced Bitget steady evidence';
+  validateRun(run, CPU_WORKFLOW_ID);
+  validateJob(job, run, name);
+  check(run.run_attempt === 1 && job.run_attempt === 1 && job.conclusion === 'failure', 'oracle refusal requires failed original Bitget job');
+  artifactIdentity(artifact, run, 'bitget-paired-steady');
+  uploaded(artifact, job, logBytes, stepName);
+  const failed = job.steps?.filter(step => step.conclusion === 'failure');
+  const measured = job.steps?.filter(step => step.name === 'Public counterbalanced Bitget steady CPU');
+  check(failed?.length === 1 && measured?.length === 1 && failed[0] === measured[0] &&
+    job.steps.every(step => step.status === 'completed' && ['success', 'failure', 'skipped'].includes(step.conclusion)),
+  'oracle refusal must be the only failed terminal step');
+  const start = instant(failed[0].started_at), end = instant(failed[0].completed_at) + 1000;
+  check(instant(job.started_at) <= start && start < end && end <= instant(job.completed_at) + 1000, 'refusal step outside physical job');
+  const message = 'NOT-CERTIFIED: Bitget TS oracle output changed between baseline and candidate; arm-matched correctness is not available';
+  const lines = logLines(logBytes).filter(line => line.text === message);
+  check(lines.length === 1 && lines[0].at !== null && lines[0].at >= start && lines[0].at < end, 'missing exact refusal inside failed step');
+  const checkout = loggedCheckout(job, logBytes);
+  check(gitId(expectedCheckoutSha) && checkout === expectedCheckoutSha &&
+    (run.event === 'pull_request' || checkout === run.head_sha), 'oracle refusal checkout differs');
+  const raw = bytes(artifactBytes);
+  check(raw.length === artifact.size_in_bytes && `sha256:${sha(raw)}` === artifact.digest, 'oracle refusal ZIP digest/length mismatch');
+  return { schema: 1, artifactId: artifact.id, artifactSha256: artifact.digest.slice(7), runId: run.id,
+    attempt: 1, jobId: job.id, runnerId: job.runner_id, measuredCheckoutSha: checkout, logSha256: sha(bytes(logBytes)) };
+}
+
 export function formatMeasurementMarker(kind, key, at) {
   check(['BEGIN', 'END'].includes(kind) && hash(key) && key.length === 64, 'invalid physical measurement marker');
   check(at === new Date(instant(at)).toISOString(), 'invalid physical marker timestamp');

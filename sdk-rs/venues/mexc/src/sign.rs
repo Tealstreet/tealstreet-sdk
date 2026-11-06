@@ -4,6 +4,7 @@ pub mod dispatch;
 use safe_cex_crypto::{Encoding, hmac_sha256};
 #[cfg(test)]
 use safe_cex_engine::num;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use std::collections::BTreeMap;
 
@@ -56,7 +57,7 @@ pub fn query(params: impl IntoIterator<Item = (&'static str, String)>) -> String
         .into_iter()
         .map(|(k, v)| format!("{k}={}", encode(&v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 #[cfg(test)]
 mod tests {

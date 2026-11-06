@@ -456,6 +456,14 @@ impl Venue for PhemexPerpetuals {
     fn managed_sockets() -> bool {
         true
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.stop_release_veto(store, pending, release)
+    }
 
     fn fence_uncertain_placements(&self) -> bool {
         true
@@ -958,13 +966,13 @@ impl Venue for PhemexPerpetuals {
                 cx.book_changed(&symbol);
             }
             Pending::Candles { root, mut rows, .. } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(root.context(), serde_json::to_string(&rows).unwrap());
             }
             Pending::PublicCandles {
                 context, mut rows, ..
             } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
             Pending::Account(p) => self.account_read_response(cx, p, r),

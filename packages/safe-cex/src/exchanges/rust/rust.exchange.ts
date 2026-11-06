@@ -2080,6 +2080,7 @@ export class RustEngineExchange extends BaseExchange {
     // Refreshed on every symbol selection, and a read can refuse routinely (portfolio margin).
     try {
       await this.untilNativeData(LOADED_FLAG.MARKETS, 'markets');
+      if (this.isDisposed || !Object.hasOwn(this.store.marketsBySymbol, symbol)) return;
       if (capabilities.maxLeverage === 'query') {
         await this.fetchSymbolMaxLeverage(symbol);
         return;

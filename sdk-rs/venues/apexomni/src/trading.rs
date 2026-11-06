@@ -5,7 +5,7 @@ use safe_cex_engine::classify::{
 };
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::plan::{
-    CallBound, MutationTerminalBound, RetryWindow, Slot, StepBound,
+    CallBound, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound,
 };
 use safe_cex_engine::request_context::{
     Context, Credential, HttpOwnerRetirement, Operation, Plan, PlanPolicy, Preflight,
@@ -51,6 +51,8 @@ enum Accepted {
     Place,
     Cancel(Vec<String>),
     AmendCancel,
+    /// A read of the amended order: its cancel's terminal proof.
+    ConfirmCancel,
     CancelSymbol(String),
     Leverage(String, f64),
 }
@@ -75,6 +77,10 @@ struct Job {
     amending: bool,
     /// The amended order: its replacement's refusal leaves it gone.
     replaces: Option<Replaced>,
+    /// An amended stop whose cancel landed: its put-back, if one is provable.
+    protect: Option<Box<StopProtect>>,
+    /// The put-back of a refused stop replacement is in flight.
+    restoring: bool,
 }
 pub struct Request {
     command: CommandId,
@@ -94,6 +100,14 @@ struct LateTrade {
 }
 /// The order an amend asked for: a virtual leg's own kind and closing side, not its parent's.
 type Replaced = (String, OrderSide, OrderType);
+/// How a message names an amended order of `kind`.
+fn what(kind: OrderType) -> &'static str {
+    match kind {
+        OrderType::StopLoss => "stop",
+        OrderType::TakeProfit => "take profit",
+        _ => "order",
+    }
+}
 fn gone_text((symbol, side, kind): &Replaced, unknown: bool) -> String {
     if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
         safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown)
@@ -101,8 +115,84 @@ fn gone_text((symbol, side, kind): &Replaced, unknown: bool) -> String {
         safe_cex_engine::error::order_gone_text(symbol, unknown)
     }
 }
+/// Cancel-proof reads before an amend's replacement is unproven: Unknown.
+const CONFIRM_POLLS: u32 = 30;
+const CONFIRM_MS: u32 = 100;
+/// Put-back order ids kept for a later cancel naming the original.
+const RESTORED_KEPT: usize = 64;
+
+/// The last check before an amended stop's cancel: a refusal leaves it untouched.
+#[derive(Clone)]
+struct StopGuard {
+    order: Order,
+    parent: Option<Order>,
+    trigger: f64,
+    reference: StopTriggerType,
+    /// The side a live trigger must stay on; None while nothing can fire at
+    /// once (a leg of an unfilled entry).
+    below: Option<bool>,
+    /// A reduce-only or closing stop needs a position on the side it closes.
+    closes: Option<PositionSide>,
+}
+impl StopGuard {
+    /// A refusal is typed NotSent and leaves the order untouched.
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        let unchanged = || format!("Your {} order was not changed", self.order.symbol);
+        let same = |planned: &Order| store.order(&planned.id) == Some(planned);
+        if !same(&self.order) || self.parent.as_ref().is_some_and(|parent| !same(parent)) {
+            return Err(refused(Some(format!(
+                "{}: it changed or filled before cancellation",
+                unchanged()
+            ))));
+        }
+        if let Some(side) = self.closes
+            && !store
+                .positions()
+                .iter()
+                .any(|p| p.symbol == self.order.symbol && p.side == side && p.contracts > 0.0)
+        {
+            return Err(refused(Some(format!(
+                "{}: no position for it to protect",
+                unchanged()
+            ))));
+        }
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::IndexPrice => "index",
+            StopTriggerType::LastPrice => "last",
+        };
+        let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
+            return Err(refused(Some(format!(
+                "{}: the {label} price reference is stale",
+                unchanged()
+            ))));
+        };
+        if let Some(below) = self.below
+            && ((below && self.trigger >= price) || (!below && self.trigger <= price))
+        {
+            return Err(refused(Some(format!(
+                "{}: the new trigger has already crossed the {label} price",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
+}
+/// An amended stop's final check and the exact original to put back.
+struct StopProtect {
+    guard: StopGuard,
+    restore: PlaceOrderOpts,
+    /// False once anything filled: only an untouched original is put back.
+    restorable: bool,
+    /// The original was a STOP_MARKET or TAKE_PROFIT_MARKET.
+    market_trigger: bool,
+}
+
 struct Amendment {
     id: String,
+    /// The amended order was a STOP_MARKET or TAKE_PROFIT_MARKET.
+    market_trigger: bool,
     replaced: Replaced,
     order: PlaceOrderOpts,
     total_amount: f64,
@@ -115,6 +205,11 @@ struct Amendment {
     overflow: bool,
     terminal: bool,
     started: f64,
+    stop: Option<Box<StopProtect>>,
+    /// A cancel, fill or expiry of this order was seen: the cancel's proof.
+    closed: bool,
+    polls: u32,
+    read_retried: bool,
 }
 impl Amendment {
     fn observe(&mut self) {
@@ -136,8 +231,28 @@ pub struct Trading {
     active: Option<Job>,
     waiting: bool,
     amendment: Option<Amendment>,
+    /// A put-back's original id and the ids standing in for it.
+    restored: VecDeque<(String, Vec<String>)>,
 }
 
+/// An amend's write: its one native resend of a proven refusal stays.
+fn mutation_call() -> SerialCall {
+    SerialCall {
+        auth: Default::default(),
+        operation: Operation::Mutation,
+        timeout_ms: 20_000,
+        attempts: 2,
+        pacing: None,
+    }
+}
+/// A cancel-proof read; its one failure retry is the serial Read retry.
+fn read_call() -> SerialCall {
+    SerialCall {
+        operation: Operation::Read,
+        attempts: 1,
+        ..mutation_call()
+    }
+}
 fn positive(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
@@ -357,12 +472,75 @@ fn replacement(
     Ok(order)
 }
 
+/// For a stop or take-profit edit: its final pre-cancel check, checked now
+/// too, and the exact original to put back (`order` is the edited replacement).
+fn stop_protect(
+    cx: &Cx<'_, Pending>,
+    id: &str,
+    order: &PlaceOrderOpts,
+) -> Result<Option<Box<StopProtect>>, VenueError> {
+    let (Some(target), Some(parent)) = (cx.store.order(id), cx.store.order(parent_id(id))) else {
+        return Err(not_sent(format!("ApeX Omni order {id} not found")));
+    };
+    if !matches!(target.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+        return Ok(None);
+    }
+    let market = cx
+        .store
+        .market(&parent.symbol)
+        .ok_or_else(|| not_sent("ApeX Omni market not found"))?;
+    let leg = target.id != parent.id;
+    let stops = target.kind == OrderType::StopLoss;
+    let trigger = if !leg {
+        order.trigger_price.or(order.price)
+    } else if stops {
+        order.stop_loss
+    } else {
+        order.take_profit
+    }
+    .map(|price| num::adjust(price, market.precision.price))
+    .ok_or_else(|| not_sent("ApeX Omni amendment has no trigger"))?;
+    // A leg acts only once its entry fills; a standalone stop acts at once.
+    let live = !leg || parent.filled > 0.0;
+    let closes = (!leg && (parent.reduce_only || parent.close == Some(true))).then(|| {
+        if target.side == OrderSide::Sell {
+            PositionSide::Long
+        } else {
+            PositionSide::Short
+        }
+    });
+    // The source prepare_order sends: a stop loss on INDEX unless asked for
+    // last, a take profit on MARKET (last) unless asked for index.
+    let reference = match (stops, order.sl_trigger_type, order.tp_trigger_type) {
+        (true, Some(StopTriggerType::LastPrice), _) => StopTriggerType::LastPrice,
+        (true, ..) => StopTriggerType::IndexPrice,
+        (false, _, Some(StopTriggerType::IndexPrice)) => StopTriggerType::IndexPrice,
+        (false, ..) => StopTriggerType::LastPrice,
+    };
+    let guard = StopGuard {
+        order: target.clone(),
+        parent: leg.then(|| parent.clone()),
+        trigger,
+        reference,
+        below: live.then_some(stops == (target.side == OrderSide::Sell)),
+        closes,
+    };
+    guard.validate(cx.store, cx.now)?;
+    Ok(Some(Box::new(StopProtect {
+        guard,
+        restore: replacement(cx, id, None, None).map_err(not_sent)?,
+        restorable: parent.filled == 0.0,
+        market_trigger: false,
+    })))
+}
+
 impl ApexOmni {
     fn prepare_order(
         &self,
         cx: &Cx<'_, Pending>,
         order: &PlaceOrderOpts,
         issued: &mut HashSet<String>,
+        market_trigger: bool,
     ) -> Result<Vec<Step>, String> {
         if !self.account.initialized {
             return Err("ApeX Omni account signing state is unavailable".into());
@@ -448,6 +626,8 @@ impl ApexOmni {
                     match order.kind {
                         OrderType::Limit => "LIMIT",
                         OrderType::Market => "MARKET",
+                        OrderType::StopLoss if market_trigger => "STOP_MARKET",
+                        OrderType::TakeProfit if market_trigger => "TAKE_PROFIT_MARKET",
                         OrderType::StopLoss => "STOP_LIMIT",
                         OrderType::TakeProfit => "TAKE_PROFIT_LIMIT",
                         _ => unreachable!(),
@@ -613,13 +793,15 @@ impl ApexOmni {
             slot: CredentialSlot::Primary,
             reference: identity.credential.clone(),
         });
+        // An amend reads its cancel's proof with the same (only) ApeX key.
+        let amend = matches!(&command, Command::AmendOrder { .. });
         let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
             purpose: if read_only {
                 PreflightPurpose::ReadOnly
             } else {
                 PreflightPurpose::WriteAfterReads
             },
-            read_credential: None,
+            read_credential: credential.clone().filter(|_| amend),
             write_credential: if read_only { None } else { credential },
         }) else {
             return Ok(());
@@ -649,7 +831,14 @@ impl ApexOmni {
                 }
                 (command, vec![Step::Amend(id, price, amount)], true)
             }
-            Command::CancelOrders { command, ids } => {
+            Command::CancelOrders { command, mut ids } => {
+                // A screen still showing a put-back's original cancels what stands for it.
+                for (old, new) in &self.trading.restored {
+                    if ids.iter().any(|id| parent_id(id) == old) {
+                        ids.retain(|id| parent_id(id) != old);
+                        ids.extend(new.iter().cloned());
+                    }
+                }
                 let mut unique = HashSet::new();
                 let mut steps = vec![];
                 for id in ids {
@@ -805,6 +994,8 @@ impl ApexOmni {
                 plan: None,
                 amending: false,
                 replaces: None,
+                protect: None,
+                restoring: false,
             });
         } else {
             self.trading.active = Some(Job {
@@ -816,6 +1007,8 @@ impl ApexOmni {
                 plan: None,
                 amending: false,
                 replaces: None,
+                protect: None,
+                restoring: false,
             });
             self.drive_trading(cx);
         }
@@ -840,7 +1033,7 @@ impl ApexOmni {
                         .collect();
                     for order in orders {
                         prepared.extend(
-                            self.prepare_order(cx, &order, &mut issued)
+                            self.prepare_order(cx, &order, &mut issued, false)
                                 .map_err(not_sent)?,
                         );
                     }
@@ -855,8 +1048,10 @@ impl ApexOmni {
                         .iter()
                         .filter_map(|o| o.client_order_id.clone())
                         .collect();
+                    // A standalone STOP_MARKET or TAKE_PROFIT_MARKET stays one.
+                    let market_trigger = self.account.market_trigger(parent_id(&id));
                     let replacement = self
-                        .prepare_order(cx, &order, &mut issued)
+                        .prepare_order(cx, &order, &mut issued, market_trigger)
                         .map_err(not_sent)?;
                     let parent = cx
                         .store
@@ -864,6 +1059,10 @@ impl ApexOmni {
                         .expect("replacement validated parent");
                     let amended = cx.store.order(&id).expect("replacement validated target");
                     let replaced = (amended.symbol.clone(), amended.side, amended.kind);
+                    let mut stop = stop_protect(cx, &id, &order)?;
+                    if let Some(stop) = stop.as_mut() {
+                        stop.market_trigger = market_trigger;
+                    }
                     job.replaces = Some(replaced.clone());
                     prepared.push_back(Step::Write(
                         sign::Request::form(
@@ -877,6 +1076,7 @@ impl ApexOmni {
                     prepared.extend(replacement);
                     self.trading.amendment = Some(Amendment {
                         id: parent.id.clone(),
+                        market_trigger,
                         replaced,
                         order,
                         total_amount: parent.amount,
@@ -889,6 +1089,10 @@ impl ApexOmni {
                         overflow: false,
                         terminal: false,
                         started: cx.now,
+                        stop,
+                        closed: false,
+                        polls: 0,
+                        read_retried: false,
                     });
                 }
                 step => prepared.push_back(step),
@@ -911,6 +1115,28 @@ impl ApexOmni {
             .identity
             .as_ref()
             .expect("preflight requires credential");
+        let credential = Credential {
+            slot: CredentialSlot::Primary,
+            reference: identity.credential.clone(),
+        };
+        // An amend streams: its cancel's proof is read before the replacement,
+        // and a refused stop replacement may be followed by one put-back.
+        if self.trading.amendment.is_some() {
+            let (plan, _) = cx
+                .admit_serial_plan(
+                    &job.preflight,
+                    mutation_call(),
+                    SerialPolicy {
+                        credential: Some(credential),
+                        pacing: None,
+                        refusals_complete: false,
+                    },
+                )
+                .map_err(|error| error.venue_error())?;
+            job.steps = prepared;
+            job.plan = Some(plan);
+            return Ok(());
+        }
         let mut waits = Vec::new();
         let mut wait = 0;
         for step in &prepared {
@@ -939,28 +1165,17 @@ impl ApexOmni {
             .zip(waits)
             .map(|(calls, wait_ms)| StepBound { wait_ms, calls })
             .collect();
-        let terminals: Vec<_> = if self.trading.amendment.is_some() {
-            (0..steps.len())
-                .map(|after_step| MutationTerminalBound { after_step })
-                .collect()
-        } else {
-            vec![]
-        };
         let plan = cx
-            .admit_plan_with_terminals(
+            .admit_plan(
                 &job.preflight,
                 &steps,
                 PlanPolicy {
                     independent_calls: false,
                     operation: Operation::Mutation,
-                    credential: Some(Credential {
-                        slot: CredentialSlot::Primary,
-                        reference: identity.credential.clone(),
-                    }),
+                    credential: Some(credential),
                     pacing: None,
                     retry: RetryPolicy::DefinitiveRefusal,
                 },
-                &terminals,
             )
             .map_err(|error| error.venue_error())?;
         prepared.retain(|step| !matches!(step, Step::Delay));
@@ -1011,12 +1226,17 @@ impl ApexOmni {
             return;
         };
         let intent = match &accepted {
-            Accepted::Place => Intent::Place,
-            Accepted::Cancel(_) | Accepted::CancelSymbol(_) => Intent::Cancel,
-            Accepted::AmendCancel => Intent::Amend,
-            Accepted::Leverage(..) => Intent::Setting,
+            Accepted::Place => Some(Intent::Place),
+            Accepted::Cancel(_) | Accepted::CancelSymbol(_) => Some(Intent::Cancel),
+            Accepted::AmendCancel => Some(Intent::Amend),
+            Accepted::ConfirmCancel => None,
+            Accepted::Leverage(..) => Some(Intent::Setting),
         };
-        let context = match cx.plan_leg_context_with_intent(&plan, &slot, intent) {
+        let context = match intent {
+            Some(intent) => cx.plan_leg_context_with_intent(&plan, &slot, intent),
+            None => cx.plan_leg_context(&plan, &slot),
+        };
+        let context = match context {
             Ok(context) => context,
             Err(error) => {
                 self.trading.active = Some(job);
@@ -1048,6 +1268,18 @@ impl ApexOmni {
                 .map(|receipt| receipt.identity.clone())
                 .collect(),
         };
+        // A 408 or 5xx on a put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        if job.restoring
+            && matches!(accepted, Accepted::Place)
+            && let Some((symbol, _, kind)) = &job.replaces
+        {
+            let words = format!(
+                "Your {symbol} {}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders",
+                what(*kind)
+            );
+            let _ = cx.present_plan_failure(&plan, words);
+        }
         cx.command_progress(job.command, receipts);
         let delivery = Request {
             command: job.command,
@@ -1105,7 +1337,11 @@ impl ApexOmni {
         delivery: Request,
         error: VenueError,
     ) {
-        let unknown = error.outcome == Some(Outcome::Unknown);
+        if matches!(delivery.accepted, Accepted::ConfirmCancel) {
+            return self.confirm_failed(cx, &delivery, false);
+        }
+        // A released call that failed without a refusal may have executed.
+        let unknown = !matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent));
         let _ = self.fail_delivery(cx, &delivery, error, unknown);
     }
 
@@ -1117,16 +1353,74 @@ impl ApexOmni {
         error: impl Into<VenueError>,
         unknown: bool,
     ) -> Result<(), safe_cex_engine::request_context::Error> {
-        let gone = self
+        let job = self
             .trading
             .active
             .as_ref()
-            .filter(|job| matches!(delivery.accepted, Accepted::Place) && job.ids.is_empty())
+            .filter(|job| matches!(delivery.accepted, Accepted::Place) && job.ids.is_empty());
+        let gone = job
             .and_then(|job| job.replaces.as_ref())
             .map(|replaced| gone_text(replaced, unknown));
+        let mut error = error.into();
+        // A stop's cancel landed and nothing stands in its place.
+        if let Some(job) = job.filter(|job| job.protect.is_some())
+            && let Some((symbol, _, kind)) = &job.replaces
+        {
+            let what = what(*kind);
+            error.presents = true;
+            // A put-back refused before it was sent never reached ApeX.
+            let unsent = job.restoring && error.outcome == Some(Outcome::NotSent);
+            error.message = match (unknown, job.restoring) {
+                (false, false) => format!(
+                    "Your {symbol} {what} was removed: its replacement was refused, please re-place it ({})",
+                    error.message
+                ),
+                (false, true) if unsent => format!(
+                    "Your {symbol} {what} was removed: its replacement was refused and the put-back could not be sent, please re-place it ({})",
+                    error.message
+                ),
+                (false, true) => format!(
+                    "Your {symbol} {what} was removed: its replacement and the put-back were both refused, please re-place it ({})",
+                    error.message
+                ),
+                (true, true) => format!(
+                    "Your {symbol} {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders ({})",
+                    error.message
+                ),
+                (true, false) => error.message,
+            };
+            if !unknown {
+                error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+            }
+        }
         match gone {
             Some(gone) => cx.fail_plan_noted(&delivery.plan, error, &gone),
             None => cx.fail_plan(&delivery.plan, error),
+        }
+    }
+
+    /// The final-claim re-check of an amended stop's cancel, every send of it.
+    pub(crate) fn trading_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Pending::Trade(Request {
+            accepted: Accepted::AmendCancel,
+            ..
+        }) = pending
+        else {
+            return Ok(());
+        };
+        match self
+            .trading
+            .amendment
+            .as_ref()
+            .and_then(|a| a.stop.as_ref())
+        {
+            Some(stop) => stop.guard.validate(store, release.time.raw_ms),
+            None => Ok(()),
         }
     }
 
@@ -1178,6 +1472,7 @@ impl ApexOmni {
         id: &str,
         filled: f64,
         terminal: bool,
+        closed: bool,
         timestamp: f64,
     ) {
         if let Some(amendment) = self.trading.amendment.as_mut()
@@ -1185,6 +1480,7 @@ impl ApexOmni {
             && filled.is_finite()
             && filled >= 0.0
         {
+            amendment.closed |= closed;
             if filled > amendment.reported && timestamp.is_finite() {
                 amendment.reported = filled;
                 amendment.reported_at = timestamp;
@@ -1211,6 +1507,281 @@ impl ApexOmni {
             amendment.observe();
         }
     }
+    /// The amended order's cancel is proven: size and queue its replacement.
+    /// False once the Plan has failed.
+    fn replace_after_cancel(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) -> bool {
+        let Some(mut amendment) = self.trading.amendment.take() else {
+            let _ = cx.fail_plan(plan, "ApeX Omni amendment state is unavailable");
+            return false;
+        };
+        if let Some(mut stop) = amendment.stop.take()
+            && let Some(job) = self.trading.active.as_mut()
+        {
+            stop.restorable &= amendment.filled <= amendment.baseline_filled;
+            job.protect = Some(stop);
+        }
+        if amendment.overflow {
+            let error = "ApeX Omni amendment exceeded the observed fill limit";
+            let _ = cx.fail_plan(plan, error);
+            return false;
+        }
+        // The amended total less fills: those since planning come off too.
+        let additional =
+            crate::account::subtract(amendment.filled, amendment.baseline_filled).max(0.0);
+        amendment.order.amount = crate::account::subtract(amendment.order.amount, additional);
+        if !amendment.terminal
+            && amendment.filled < amendment.total_amount
+            && amendment.order.amount > 0.0
+        {
+            let prepared = if amendment.filled > amendment.baseline_filled {
+                validate(std::slice::from_ref(&amendment.order), cx).and_then(|()| {
+                    let mut issued = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter_map(|o| o.client_order_id.clone())
+                        .collect();
+                    self.prepare_order(cx, &amendment.order, &mut issued, amendment.market_trigger)
+                })
+            } else {
+                Ok(self
+                    .trading
+                    .active
+                    .as_mut()
+                    .unwrap()
+                    .steps
+                    .drain(..)
+                    .collect())
+            };
+            match prepared {
+                Ok(prepared) => {
+                    if let Some(job) = self.trading.active.as_mut() {
+                        job.steps = prepared.into();
+                    }
+                }
+                Err(error) => {
+                    // The cancel landed: a replacement that cannot be built is refused.
+                    let gone = gone_text(&amendment.replaced, false);
+                    let _ = cx.fail_plan_noted(plan, error, &gone);
+                    return false;
+                }
+            }
+        } else if let Some(job) = self.trading.active.as_mut() {
+            job.steps.clear();
+        }
+        true
+    }
+
+    /// Reads the amended order again after a pause: its cancel's proof.
+    fn confirm_next(&mut self, cx: &mut Cx<'_, Pending>, delivery: &Request, id: &str) {
+        if let Some(job) = self.trading.active.as_mut() {
+            job.steps.push_front(Step::Write(
+                sign::Request::get("/v3/order", vec![pair("id", id)]),
+                Accepted::ConfirmCancel,
+                vec![],
+                vec![],
+            ));
+        }
+        self.trading.waiting = false;
+        if let Err(error) = cx.continue_serial_plan_after(
+            &delivery.plan,
+            &delivery.slot,
+            &delivery.context,
+            CONFIRM_MS,
+            read_call(),
+        ) {
+            let _ = cx.fail_plan(&delivery.plan, error.venue_error());
+        }
+    }
+
+    /// A cancel-proof read: CANCELED, FILLED or EXPIRED proves the cancel landed.
+    fn confirm_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        delivery: Request,
+        response: Response<'_>,
+    ) {
+        #[derive(Deserialize)]
+        struct Envelope<'a> {
+            #[serde(borrow)]
+            data: Option<crate::private_wire::OrderRow<'a>>,
+        }
+        let Some(amendment) = self.trading.amendment.as_mut() else {
+            let _ = cx.fail_plan(&delivery.plan, "ApeX Omni amendment state is unavailable");
+            return;
+        };
+        let row = serde_json::from_str::<Envelope<'_>>(response.body)
+            .ok()
+            .filter(|_| (200..300).contains(&response.status))
+            .and_then(|envelope| envelope.data)
+            .filter(|row| row.id == amendment.id);
+        let Some(row) = row else {
+            return self.confirm_failed(cx, &delivery, true);
+        };
+        if matches!(row.status.as_ref(), "CANCELED" | "FILLED" | "EXPIRED") {
+            amendment.filled = amendment
+                .filled
+                .max(row.cum_success_fill_size.unwrap_or(0.0));
+            amendment.terminal |= row.status != "CANCELED";
+            amendment.closed = true;
+        }
+        if !amendment.closed {
+            if amendment.polls >= CONFIRM_POLLS {
+                return self.cancel_unproven(cx, &delivery, true);
+            }
+            amendment.polls += 1;
+            let id = amendment.id.clone();
+            return self.confirm_next(cx, &delivery, &id);
+        }
+        if self.replace_after_cancel(cx, &delivery.plan) {
+            self.continue_amend(cx, &delivery);
+        }
+    }
+
+    /// A failed cancel-proof read is retried once; then the cancel is unproven.
+    fn confirm_failed(&mut self, cx: &mut Cx<'_, Pending>, delivery: &Request, data: bool) {
+        match self.trading.amendment.as_mut() {
+            Some(amendment) if !amendment.read_retried => {
+                amendment.read_retried = true;
+                let id = amendment.id.clone();
+                self.confirm_next(cx, delivery, &id);
+            }
+            _ => self.cancel_unproven(cx, delivery, data),
+        }
+    }
+
+    /// The cancel was taken but never proven: nothing replaces or restores it.
+    fn cancel_unproven(&mut self, cx: &mut Cx<'_, Pending>, delivery: &Request, data: bool) {
+        self.trading.waiting = false;
+        self.trading.amendment = None;
+        let what = self
+            .trading
+            .active
+            .as_ref()
+            .and_then(|job| job.replaces.as_ref())
+            .map_or_else(
+                || "order".to_owned(),
+                |(symbol, _, kind)| format!("{symbol} {}", what(*kind)),
+            );
+        let mut error = unknown(format!(
+            "Your {what} was not replaced: its cancel was sent but could not be confirmed, so whether it still stands is unknown. Check Open Orders"
+        ));
+        error.presents = true;
+        // Only here is it unknown whether the original stands: reconcile it.
+        let _ = cx.inherit_plan_uncertainty(&delivery.plan);
+        if data {
+            let _ = cx.finish_plan_call(&delivery.plan, &delivery.slot, &delivery.context);
+        }
+        let _ = cx.fail_plan(&delivery.plan, error);
+    }
+
+    /// An amend's accepted call: the next one, or its terminal.
+    fn continue_amend(&mut self, cx: &mut Cx<'_, Pending>, delivery: &Request) {
+        self.trading.waiting = false;
+        let job = self.trading.active.as_ref().expect("an active amend");
+        if !job.steps.is_empty() {
+            match cx.continue_serial_plan(
+                &delivery.plan,
+                &delivery.slot,
+                &delivery.context,
+                mutation_call(),
+            ) {
+                Ok(_) => self.drive_trading(cx),
+                Err(error) => {
+                    let _ = self.fail_delivery(cx, delivery, error.venue_error(), false);
+                }
+            }
+            return;
+        }
+        let _ = cx.finish_plan_call(&delivery.plan, &delivery.slot, &delivery.context);
+        if !job.restoring {
+            let _ = cx.done_plan(&delivery.plan, serde_json::to_string(&job.ids).unwrap());
+            return;
+        }
+        let (symbol, kind) = job
+            .replaces
+            .as_ref()
+            .map_or((String::new(), OrderType::StopLoss), |(symbol, _, kind)| {
+                (symbol.clone(), *kind)
+            });
+        let mut error = VenueError::new(format!(
+            "Your {symbol} {} is unchanged: its replacement was refused, so the original was put back as a new order",
+            what(kind)
+        ));
+        error.protection = Some(safe_cex_engine::error::Protection::Restored);
+        error.presents = true;
+        let ids = job.ids.clone();
+        if let Some(protect) = &job.protect {
+            let guard = &protect.guard;
+            let old = guard.parent.as_ref().unwrap_or(&guard.order).id.clone();
+            if self.trading.restored.len() >= RESTORED_KEPT {
+                self.trading.restored.pop_front();
+            }
+            self.trading.restored.push_back((old, ids.clone()));
+        }
+        let _ = cx.fail_plan(&delivery.plan, error.partial_ids(&ids));
+    }
+
+    /// A definite refusal of a stop's replacement proves nothing replaced it:
+    /// put the untouched original back, once.
+    fn put_back(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        delivery: &Request,
+        error: &VenueError,
+    ) -> bool {
+        let Some(job) = self.trading.active.as_ref() else {
+            return false;
+        };
+        let Some((restore, market_trigger)) = job
+            .protect
+            .as_ref()
+            .filter(|protect| protect.restorable)
+            .map(|protect| (protect.restore.clone(), protect.market_trigger))
+        else {
+            return false;
+        };
+        if !matches!(delivery.accepted, Accepted::Place)
+            || error.outcome != Some(Outcome::Rejected)
+            || job.restoring
+            || !job.ids.is_empty()
+        {
+            return false;
+        }
+        let mut issued = cx
+            .store
+            .orders()
+            .iter()
+            .filter_map(|o| o.client_order_id.clone())
+            .collect();
+        let Ok(steps) = self.prepare_order(cx, &restore, &mut issued, market_trigger) else {
+            return false;
+        };
+        // One attempt: no native resend can send the put-back twice. A refused
+        // continuation leaves the job as it was: the stop was removed.
+        let put_back_call = SerialCall {
+            attempts: 1,
+            ..mutation_call()
+        };
+        if cx
+            .continue_serial_plan(
+                &delivery.plan,
+                &delivery.slot,
+                &delivery.context,
+                put_back_call,
+            )
+            .is_err()
+        {
+            return false;
+        }
+        let job = self.trading.active.as_mut().expect("an active amend");
+        job.steps = steps.into();
+        job.restoring = true;
+        self.trading.waiting = false;
+        self.drive_trading(cx);
+        true
+    }
+
     pub(crate) fn trading_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1230,6 +1801,9 @@ impl ApexOmni {
             .is_some_and(|job| job.command == delivery.command)
         {
             return;
+        }
+        if matches!(delivery.accepted, Accepted::ConfirmCancel) {
+            return self.confirm_response(cx, delivery, response);
         }
         let envelope = serde_json::from_str::<crate::Envelope<'_>>(response.body).ok();
         let code = envelope
@@ -1281,7 +1855,7 @@ impl ApexOmni {
                         let _ = self.fail_delivery(cx, &delivery, error, false);
                     }
                 }
-            } else {
+            } else if !self.put_back(cx, &delivery, &error) {
                 let unknown = error.outcome == Some(Outcome::Unknown);
                 let _ = self.fail_delivery(cx, &delivery, error, unknown);
             }
@@ -1339,7 +1913,7 @@ impl ApexOmni {
             }
             Accepted::Cancel(ids) => self.note_cancel(cx, &ids),
             Accepted::AmendCancel => {
-                let Some(mut amendment) = self.trading.amendment.take() else {
+                let Some(amendment) = self.trading.amendment.as_mut() else {
                     let _ =
                         cx.fail_plan(&delivery.plan, "ApeX Omni amendment state is unavailable");
                     return;
@@ -1349,58 +1923,18 @@ impl ApexOmni {
                     amendment.terminal |=
                         parent.remaining <= 0.0 || parent.status == OrderStatus::Closed;
                 }
-                self.note_cancel(cx, &[amendment.id]);
-                if amendment.overflow {
-                    let error = "ApeX Omni amendment exceeded the observed fill limit";
-                    let _ = cx.fail_plan(&delivery.plan, error);
+                amendment.closed |= amendment.terminal;
+                let (id, closed) = (amendment.id.clone(), amendment.closed);
+                self.note_cancel(cx, std::slice::from_ref(&id));
+                // A 2xx only says the cancel was taken: its proof is read first.
+                if !closed {
+                    return self.confirm_next(cx, &delivery, &id);
+                }
+                if !self.replace_after_cancel(cx, &delivery.plan) {
                     return;
                 }
-                // The amended total less fills: those since planning come off too.
-                let additional =
-                    crate::account::subtract(amendment.filled, amendment.baseline_filled).max(0.0);
-                amendment.order.amount =
-                    crate::account::subtract(amendment.order.amount, additional);
-                if !amendment.terminal
-                    && amendment.filled < amendment.total_amount
-                    && amendment.order.amount > 0.0
-                {
-                    let prepared = if amendment.filled > amendment.baseline_filled {
-                        validate(std::slice::from_ref(&amendment.order), cx).and_then(|()| {
-                            let mut issued = cx
-                                .store
-                                .orders()
-                                .iter()
-                                .filter_map(|o| o.client_order_id.clone())
-                                .collect();
-                            self.prepare_order(cx, &amendment.order, &mut issued)
-                        })
-                    } else {
-                        Ok(self
-                            .trading
-                            .active
-                            .as_mut()
-                            .unwrap()
-                            .steps
-                            .drain(..)
-                            .collect())
-                    };
-                    match prepared {
-                        Ok(prepared) => {
-                            if let Some(job) = self.trading.active.as_mut() {
-                                job.steps = prepared.into();
-                            }
-                        }
-                        Err(error) => {
-                            // The cancel landed: a replacement that cannot be built is refused.
-                            let gone = gone_text(&amendment.replaced, false);
-                            let _ = cx.fail_plan_noted(&delivery.plan, error, &gone);
-                            return;
-                        }
-                    }
-                } else if let Some(job) = self.trading.active.as_mut() {
-                    job.steps.clear();
-                }
             }
+            Accepted::ConfirmCancel => unreachable!("cancel proof is read apart"),
             Accepted::CancelSymbol(symbol) => {
                 let ids = cx
                     .store
@@ -1431,20 +1965,16 @@ impl ApexOmni {
         }
         self.trading.waiting = false;
         let job = self.trading.active.as_ref().unwrap();
+        if job.amending {
+            return self.continue_amend(cx, &delivery);
+        }
         if job.steps.is_empty() {
             let result = if job.placements {
                 serde_json::to_string(&job.ids).unwrap()
             } else {
                 "[]".into()
             };
-            if job.amending {
-                let _ = cx.done_mutation_plan_after_data(
-                    &delivery.plan,
-                    &delivery.slot,
-                    &delivery.context,
-                    result,
-                );
-            } else if cx
+            if cx
                 .finish_plan_call(&delivery.plan, &delivery.slot, &delivery.context)
                 .is_ok()
             {

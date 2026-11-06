@@ -15,6 +15,7 @@ use safe_cex_engine::model::{
     TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, ErrorKind, Fill, Response, SocketId, Store, TimerId, VenueError, num};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -2028,7 +2029,7 @@ impl BybitLinear {
                 });
                 error.message = format!(
                     "Bybit private startup timed out waiting for {}. Last failure: {}",
-                    missing.join(", "),
+                    missing.join_with(", "),
                     error.message
                 );
                 cx.startup_failed(error.kind(ErrorKind::Timeout));

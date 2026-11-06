@@ -3,6 +3,7 @@
 pub mod dispatch;
 #[path = "sign/timestamp.rs"]
 pub(crate) mod timestamp;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url::encode;
 use safe_cex_engine::{Method, num};
 use serde::Serialize;
@@ -114,7 +115,7 @@ impl Params {
             .iter()
             .map(|(key, value)| format!("{}={}", encode(key), encode(&value.text())))
             .collect::<Vec<_>>()
-            .join("&")
+            .join_with("&")
     }
     /// Native wire shape, shared by legacy construction and dispatch recipes.
     pub(crate) fn render(

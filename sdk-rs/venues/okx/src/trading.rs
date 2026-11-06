@@ -11,6 +11,7 @@ use safe_cex_engine::request_context::{
     PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -1756,7 +1757,7 @@ impl Okx {
                 &CODES,
                 expected,
                 &items,
-                errors.join("; "),
+                errors.join_with("; "),
                 None,
             )
         } else {
@@ -1779,7 +1780,7 @@ impl Okx {
             let message = if errors.is_empty() {
                 format!("OKX {}: {}", envelope.code, envelope.msg)
             } else {
-                errors.join("; ")
+                errors.join_with("; ")
             };
             let error = VenueError::new(message).outcome(Outcome::Unknown);
             return self.end(cx, request.command, Some(&request), error, true);
@@ -1801,7 +1802,11 @@ impl Okx {
                 let error = format!("OKX {}: {}", envelope.code, envelope.msg);
                 rejection(error, Some(envelope.code), response.status)
             } else {
-                refused(rejection(errors.join("; "), first_code, response.status))
+                refused(rejection(
+                    errors.join_with("; "),
+                    first_code,
+                    response.status,
+                ))
             };
             self.end(cx, request.command, Some(&request), error, false);
             if continue_cancel_errors && acks.iter().any(|a| a.s_code == "51400") {
@@ -1811,7 +1816,11 @@ impl Okx {
         }
         if !errors.is_empty() {
             if !continue_cancel_errors {
-                let error = refused(rejection(errors.join("; "), first_code, response.status));
+                let error = refused(rejection(
+                    errors.join_with("; "),
+                    first_code,
+                    response.status,
+                ));
                 return self.end(cx, request.command, Some(&request), error, false);
             }
             for error in errors {

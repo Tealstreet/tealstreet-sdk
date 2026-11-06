@@ -215,8 +215,8 @@ fn amend_final_fill_or_missing_protection_provenance_never_places() {
             cancel,
             r#"{"code":"0","data":{"orderId":2334151155877155281}}"#,
         );
-        let request = h.take(Method::Get, "/fapi/v2/order?");
-        h.reply(request, &final_reply);
+        // A cancel still processing is re-read to its bound, then unproven.
+        h.verify_until_unproven(&final_reply);
         assert!(
             !h.notices
                 .iter()
@@ -720,6 +720,12 @@ fn protective_amend_definite_parameter_rejection_does_not_fence_cancel_all() {
         create,
         r#"{"code":"-1102","msg":"Required parameter missing"}"#,
     );
+    // A definite refusal puts the original back once; it is refused the same way.
+    let put_back = h.take(Method::Post, "/fapi/v2/order");
+    h.reply(
+        put_back,
+        r#"{"code":"-1102","msg":"Required parameter missing"}"#,
+    );
     assert!(
         h.notices
             .iter()
@@ -801,6 +807,12 @@ fn protective_amend_rejection_preserves_an_earlier_lost_replacement_fence() {
     let create = h.take(Method::Post, "/fapi/v2/order");
     h.reply(
         create,
+        r#"{"code":"-1102","msg":"Required parameter missing"}"#,
+    );
+    // A definite refusal puts the original back once; it is refused the same way.
+    let put_back = h.take(Method::Post, "/fapi/v2/order");
+    h.reply(
+        put_back,
         r#"{"code":"-1102","msg":"Required parameter missing"}"#,
     );
     assert!(
