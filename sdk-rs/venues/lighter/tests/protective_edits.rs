@@ -593,3 +593,338 @@ fn core_and_robinhood_refuse_crossed_protection_before_builder_or_cancel() {
         assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.outcome==Some(Outcome::NotSent)&&error.message.contains("trigger"))),"{out:?}");
     }
 }
+
+fn native_boot() -> (Engine<Lighter>, Feeds, Timers) {
+    let (mut e, feeds, timers) = boot();
+    let mut row = original();
+    row["trigger_status"] = json!("mark-price");
+    message(
+        &mut e,
+        feeds.private,
+        NOW,
+        &json!({"channel":"account_all_orders","orders":[row]}).to_string(),
+    );
+    drain_at(&mut e, &mut vec![], NOW);
+    (e, feeds, timers)
+}
+#[test]
+fn untriggered_same_type_standalone_stop_modifies_in_place_without_cancel() {
+    for robinhood in [false, true] {
+        for (kind, ask, old_trigger, old_price, new_trigger, expected_price) in [
+            (2, true, 80., 79.2, 70., 6930),
+            (2, false, 120., 121.2, 130., 13130),
+            (4, true, 120., 118.8, 110., 10890),
+            (4, false, 80., 80.8, 90., 9090),
+            (3, true, 80., 79., 85., 7900),
+            (3, false, 120., 121., 115., 12100),
+            (5, true, 120., 119., 125., 11900),
+            (5, false, 80., 81., 75., 8100),
+            (3, true, 80., 79., 79., 7900),
+            (3, false, 120., 121., 121., 12100),
+            (5, true, 120., 119., 119., 11900),
+            (5, false, 80., 81., 81., 8100),
+        ] {
+            let (mut e, feeds, mut t) = ready_feeds(
+                Options {
+                    robinhood,
+                    testnet: true,
+                    ..options()
+                },
+                true,
+            );
+            let mut row = original();
+            row["type"] = json!(kind);
+            row["is_ask"] = json!(ask);
+            row["trigger_status"] = json!("mark-price");
+            row["trigger_price"] = json!(old_trigger.to_string());
+            row["price"] = json!(old_price.to_string());
+            e.store_mut().update_positions(|p| {
+                p.side = if ask {
+                    safe_cex_engine::model::PositionSide::Long
+                } else {
+                    safe_cex_engine::model::PositionSide::Short
+                }
+            });
+            message(
+                &mut e,
+                feeds.private,
+                NOW,
+                &json!({"channel":"account_all_orders","orders":[row]}).to_string(),
+            );
+            mark(&mut e, &feeds, NOW, json!({"mark_price":"100"}));
+            drain_at(&mut e, &mut vec![], NOW);
+            e.handle(
+                NOW,
+                Event::Command(Command::AmendOrder {
+                    command: 8,
+                    id: "42".into(),
+                    price: Some(new_trigger),
+                    amount: Some(1.),
+                }),
+            );
+            let n = request(&mut e, NOW, "nextNonce");
+            reply_at(&mut e, NOW, &n, 200, r#"{"code":200,"nonce":10}"#);
+            let r = request(&mut e, NOW, "sendTx");
+            assert_eq!(new_type(&r), 17);
+            let wire = tx(&r);
+            assert!(wire.get("Type").is_none());
+            assert_eq!(wire["Index"], 42);
+            assert_eq!(wire["BaseAmount"], 1000);
+            assert_eq!(wire["Price"], expected_price, "kind={kind}, ask={ask}");
+            assert_eq!(wire["TriggerPrice"], (new_trigger * 100.) as u64);
+            ack(&mut e, &r, NOW);
+            let out = advance(&mut e, &mut t, NOW + 1000.);
+            assert!(!out.iter().any(|a|matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("accountOrders"))),"{out:?}");
+            assert!(
+                out.iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 8, .. }))),
+                "{out:?}"
+            );
+        }
+    }
+}
+fn new_type(r: &HttpRequest) -> u64 {
+    r.body
+        .as_ref()
+        .unwrap()
+        .split('&')
+        .find_map(|s| s.strip_prefix("tx_type="))
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+#[test]
+fn stop_limits_with_non_executable_kept_limits_refuse_before_any_write() {
+    for (kind, ask, old_trigger, limit, new_trigger) in [
+        (3, true, 80., 79., 70.),
+        (3, false, 120., 121., 130.),
+        (5, true, 120., 119., 110.),
+        (5, false, 80., 81., 90.),
+    ] {
+        for status in ["mark-price", "untriggered", "pending", "na"] {
+            let (mut e, feeds, _) = boot();
+            let mut row = original();
+            row["type"] = json!(kind);
+            row["is_ask"] = json!(ask);
+            row["trigger_status"] = json!(status);
+            row["trigger_price"] = json!(old_trigger.to_string());
+            row["price"] = json!(limit.to_string());
+            e.store_mut().update_positions(|p| {
+                p.side = if ask {
+                    safe_cex_engine::model::PositionSide::Long
+                } else {
+                    safe_cex_engine::model::PositionSide::Short
+                }
+            });
+            message(
+                &mut e,
+                feeds.private,
+                NOW,
+                &json!({"channel":"account_all_orders","orders":[row]}).to_string(),
+            );
+            drain_at(&mut e, &mut vec![], NOW);
+            let old = e.store().order("42").unwrap().clone();
+            e.handle(
+                NOW,
+                Event::Command(Command::AmendOrder {
+                    command: 8,
+                    id: "42".into(),
+                    price: Some(new_trigger),
+                    amount: None,
+                }),
+            );
+            let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+            assert!(
+                !out.iter().any(|a| matches!(a, Action::Http(_))),
+                "{kind}/{ask}/{status}: {out:?}"
+            );
+            assert_eq!(e.store().order("42"), Some(&old));
+            assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
+                if error.outcome == Some(Outcome::NotSent)
+                    && if status == "mark-price" {
+                        error.message.contains("limit") && error.message.contains("trigger") && error.message.contains("re-place")
+                    } else {
+                        error.message.contains("stop-limit edit is unsupported")
+                    })), "{kind}/{ask}/{status}: {out:?}");
+        }
+    }
+}
+
+#[test]
+fn native_modify_refusals_and_unknowns_never_cancel_restore_or_resend() {
+    for (status, body, unknown) in [
+        (404, r#"{"code":21702,"message":"not found"}"#, false),
+        (200, r#"{"code":21702,"message":"refused"}"#, false),
+        (200, r#"{"code":21104,"message":"invalid nonce"}"#, false),
+        (429, r#"{"code":23000,"message":"rate"}"#, true),
+        (405, r#"{"code":21104,"message":"rate"}"#, true),
+        (200, r#"{"code":23000,"message":"rate"}"#, true),
+        (200, r#"{"code":23100,"message":"rate"}"#, true),
+        (500, r#"{"code":21702,"message":"refused"}"#, true),
+        (408, r#"{"code":21104,"message":"timeout"}"#, true),
+        (200, r#"{"code":200}"#, true),
+        (200, "bad json", true),
+    ] {
+        let (mut e, _, mut t) = native_boot();
+        let r = cancel(&mut e, NOW);
+        assert_eq!(new_type(&r), 17);
+        reply_at(&mut e, NOW, &r, status, body);
+        let out = advance(&mut e, &mut t, NOW + 1000.);
+        assert!(!out.iter().any(|a|matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))),"{status}/{body}: {out:?}");
+        assert!(e.store().order("42").is_some());
+        assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.outcome==Some(if unknown{Outcome::Unknown}else{Outcome::Rejected})&&error.protection.is_none())),"{status}/{body}: {out:?}");
+    }
+}
+#[test]
+fn native_modify_keeps_the_original_amount_for_a_price_only_edit() {
+    let (mut e, _, _) = native_boot();
+    e.handle(
+        NOW,
+        Event::Command(Command::AmendOrder {
+            command: 8,
+            id: "42".into(),
+            price: Some(85.),
+            amount: None,
+        }),
+    );
+    let n = request(&mut e, NOW, "nextNonce");
+    reply_at(&mut e, NOW, &n, 200, r#"{"code":200,"nonce":10}"#);
+    let r = request(&mut e, NOW, "sendTx");
+    assert_eq!(new_type(&r), 17);
+    assert_eq!(tx(&r)["BaseAmount"], 2000);
+}
+
+#[test]
+fn native_modify_final_claim_rechecks_after_signing() {
+    use safe_cex_engine::request_context::{HttpAction, Prepared};
+    for cause in ["crossed", "changed", "position", "stale"] {
+        let (mut e, feeds, _) = native_boot();
+        let positions = e.store().positions().to_vec();
+        amend(&mut e, NOW);
+        let n = request(&mut e, NOW, "nextNonce");
+        reply_at(&mut e, NOW, &n, 200, r#"{"code":200,"nonce":10}"#);
+        e.prepare_dispatch(NOW);
+        let out = e.drain_actions().collect::<Vec<_>>();
+        let prep = out
+            .iter()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match a.as_ref() {
+                    HttpAction::Prepare {
+                        preparation,
+                        request,
+                        ..
+                    } if request.url.contains("sendTx") => Some(*preparation),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{out:?}"));
+        e.http_prepared(
+            NOW,
+            prep,
+            Prepared {
+                id: prep.attempt().request.0,
+                expires_at: None,
+            },
+        );
+        let out = e.drain_actions().collect::<Vec<_>>();
+        let permit = out
+            .into_iter()
+            .find_map(|a| match a {
+                Action::ManagedHttp(a) => match *a {
+                    HttpAction::Bind { permit, .. } => Some(permit),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        match cause {
+            "crossed" => mark(&mut e, &feeds, NOW + 1.0, json!({"mark_price":"85"})),
+            "changed" => {
+                e.store_mut().update_order("42", |o| o.remaining = 1.0);
+            }
+            "position" => e.store_mut().update_positions(|p| p.contracts = 0.0),
+            _ => {}
+        }
+        let now = if cause == "stale" {
+            NOW + 5001.0
+        } else {
+            NOW + 1.0
+        };
+        assert!(e.claim_http(now, permit).is_err(), "{cause}");
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+        assert!(
+            !out.iter()
+                .any(|a| matches!(a,Action::Http(r) if r.url.contains("sendTx"))),
+            "{out:?}"
+        );
+        assert!(e.store().order("42").is_some());
+        mark(&mut e, &feeds, now, json!({"mark_price":"100"}));
+        e.store_mut().update_order("42", |o| o.remaining = 2.0);
+        e.store_mut().set_positions(positions);
+        e.handle(
+            now,
+            Event::Command(Command::AmendOrder {
+                command: 9,
+                id: "42".into(),
+                price: Some(85.0),
+                amount: None,
+            }),
+        );
+        let n = request(&mut e, now, "nextNonce");
+        reply_at(&mut e, now, &n, 200, r#"{"code":200,"nonce":20}"#);
+        assert!(request(&mut e, now, "sendTx").url.contains("sendTx"));
+    }
+}
+
+#[test]
+fn a_pre_modify_census_cannot_regrant_old_provenance_after_success_or_unknown() {
+    for unknown in [false, true] {
+        let (mut e, feeds, mut timers) = native_boot();
+        let now = NOW + 6000.;
+        let old_read = advance(&mut e, &mut timers, now)
+            .into_iter()
+            .find_map(|a| match a {
+                Action::Http(r) if r.url.contains("accountActiveOrders") => Some(r),
+                _ => None,
+            })
+            .expect("recurring order census");
+        mark(&mut e, &feeds, now, json!({"mark_price":"100"}));
+        let modify = cancel(&mut e, now);
+        assert_eq!(new_type(&modify), 17);
+        if unknown {
+            reply_at(
+                &mut e,
+                now,
+                &modify,
+                429,
+                r#"{"code":23000,"message":"rate"}"#,
+            );
+        } else {
+            ack(&mut e, &modify, now);
+        }
+        let mut row = original();
+        row["trigger_status"] = json!("mark-price");
+        row["updated_at"] = json!(e.store().order("42").unwrap().last_update);
+        reply_at(
+            &mut e,
+            now + 1.,
+            &old_read,
+            200,
+            &json!({"code":200,"orders":[row]}).to_string(),
+        );
+        let _ = advance(&mut e, &mut timers, now + 1.);
+        e.handle(
+            now + 2.,
+            Event::Command(Command::AmendOrder {
+                command: 9,
+                id: "42".into(),
+                price: Some(84.),
+                amount: None,
+            }),
+        );
+        let out = safe_cex_engine::test_support::prepared_actions(&mut e, now + 2.);
+        assert!(!out.iter().any(|a|matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))),"{unknown}: {out:?}");
+        assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{command:9,error}) if (error.message.contains("original unavailable") || (unknown && error.message.contains("outcome is uncertain")))&&error.outcome==Some(Outcome::NotSent))),"{unknown}: {out:?}");
+    }
+}

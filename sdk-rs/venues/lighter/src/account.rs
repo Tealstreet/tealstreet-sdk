@@ -1081,6 +1081,13 @@ impl Lighter {
         self.account.suppressed.insert(id.into());
         self.account.records.remove(id);
     }
+    pub(crate) fn record_modify(&mut self, id: &str) {
+        self.protection.originals.remove(id);
+        self.account.revision += 1;
+        self.account
+            .order_revision
+            .insert(id.into(), self.account.revision);
+    }
     pub(crate) fn record_placement(&mut self, order: Order) {
         self.account.revision += 1;
         self.account
@@ -2193,7 +2200,16 @@ impl Lighter {
             return;
         }
         for (order, raw) in census.originals {
-            if !refused.contains(&order.symbol) && cx.store.order(&order.id) == Some(&order) {
+            if !refused.contains(&order.symbol)
+                && self
+                    .account
+                    .order_revision
+                    .get(&order.id)
+                    .copied()
+                    .unwrap_or(0)
+                    <= revision
+                && cx.store.order(&order.id) == Some(&order)
+            {
                 self.observe_original(cx.store, &raw, &order);
             }
         }

@@ -37,6 +37,16 @@ pub struct Order {
     pub order_expiry: Option<u64>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase", deny_unknown_fields)]
+pub struct Modify {
+    pub market_index: u32,
+    pub index: u64,
+    pub base_amount: u64,
+    pub price: u32,
+    pub trigger_price: u32,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Builder {
     pub account_index: u64,
@@ -46,6 +56,7 @@ pub struct Builder {
 
 #[derive(Clone, Debug)]
 pub enum Transaction {
+    Modify(Modify),
     Create {
         order: Order,
         builder: Option<Builder>,
@@ -168,6 +179,18 @@ struct CancelInfo<'a> {
     api_key_index: u8,
     market_index: u32,
     index: u64,
+    expired_at: u64,
+    nonce: u64,
+    sig: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct ModifyInfo<'a> {
+    account_index: u64,
+    api_key_index: u8,
+    #[serde(flatten)]
+    modify: &'a Modify,
     expired_at: u64,
     nonce: u64,
     sig: &'a str,
@@ -328,6 +351,7 @@ fn signing_preimage(data: &[u8], attributes: Option<&Attributes>) -> Result<Vec<
 
 #[derive(Clone)]
 enum Fields {
+    Modify(Modify),
     Create(OrderInfo, Option<Attributes>),
     Grouped(u8, Vec<OrderInfo>, Option<Attributes>),
     Cancel {
@@ -346,6 +370,7 @@ impl Fields {
         match self {
             Self::Create(..) => 14,
             Self::Cancel { .. } => 15,
+            Self::Modify(..) => 17,
             Self::Leverage { .. } => 20,
             Self::Grouped(..) => 28,
         }
@@ -374,6 +399,7 @@ fn tx_input(
         .checked_add(TX_TTL)
         .ok_or("Lighter expiry overflow")?;
     let fields = match tx {
+        Transaction::Modify(order) => Fields::Modify(order.clone()),
         Transaction::Create { order, builder } => {
             Fields::Create(OrderInfo::new(order, now_ms)?, attributes(*builder)?)
         }
@@ -439,6 +465,28 @@ fn encode(
         ],
     );
     match &fields {
+        Fields::Modify(order) => {
+            if !valid_market(order.market_index)
+                || order.index == 0
+                || order.index > MAX_ORDER_INDEX
+                || order.base_amount == 0
+                || order.base_amount > MAX_ORDER_VALUE
+                || order.price == 0
+                || order.trigger_price == 0
+            {
+                return Err("Invalid Lighter protective modification".into());
+            }
+            append_words(
+                &mut data,
+                &[
+                    order.market_index.into(),
+                    order.index,
+                    order.base_amount,
+                    order.price.into(),
+                    order.trigger_price.into(),
+                ],
+            );
+        }
         Fields::Create(order, _) => {
             order.validate()?;
             order.append(&mut data);
@@ -523,6 +571,14 @@ impl TxInput {
         } = self;
         let encoded = safe_cex_crypto::encode(signature_bytes, safe_cex_crypto::Encoding::Base64);
         let tx_info = match fields {
+            Fields::Modify(order) => serde_json::to_string(&ModifyInfo {
+                account_index: account.account_index,
+                api_key_index: account.api_key_index,
+                modify: &order,
+                expired_at,
+                nonce,
+                sig: &encoded,
+            }),
             Fields::Create(order, attributes) => serde_json::to_string(&CreateInfo {
                 account_index: account.account_index,
                 api_key_index: account.api_key_index,
@@ -1069,3 +1125,7 @@ mod grouped_shape_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/modify_signing.rs"]
+mod modify_tests;

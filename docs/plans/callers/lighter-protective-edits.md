@@ -1,11 +1,13 @@
 # Lighter guarded protection edits
 
-Lighter Core and lighter-robinhood share the guarded serial edit path. Native
-ModifyOrder (transaction 17) is a separate follow-up, including its signing
-security review. This change does not add that transaction or a cancel fallback.
+Lighter Core and lighter-robinhood share the guarded serial edit path. Proven
+untriggered standalone SL/TP edits use native ModifyOrder (transaction 17), with
+no cancel fallback. The remaining eligible shapes use the guarded replacement.
 
-Native stop-limit types 3/5 refuse before any cancel. Their execution price is
-retained in conditional order metadata; they cannot become market stops 2/4.
+Native stop-limit types 3/5 preserve their captured execution price and native
+type on tx17. Otherwise they refuse before cancel; they cannot become market
+stops 2/4.
+
 A closing native LIMIT keeps its LIMIT type when repriced across the market.
 Sparse ambiguous updates may retain prior display metadata, but cannot grant
 native restoration provenance.
@@ -62,3 +64,45 @@ as lookup by client indices, covering recent active/inactive orders. The
 names the native size, type, expiry, trigger status and group-link fields.
 [Trigger conditions](https://docs.lighter.xyz/trading/order-types-and-matching)
 use MARK. No live or demo orders are required by these controls.
+
+## Native ModifyOrder
+
+A complete native row waiting on MARK (`trigger_status=mark-price`), with zero
+fills and explicit standalone links/flags, permits tx17 for native types 2/3/4/5.
+The transaction changes amount/trigger and recomputes market-stop execution
+prices from the new trigger's slippage band. Stop-limits retain their original
+user limit. It cannot change side, type, reduce-only, TIF or expiry. Price-only edits
+retain the original venue amount. A stale/missing mark or any source/position
+change vetoes the final managed Claim. Frame-fed edits still refuse stale.
+
+Stop-limit edits refuse before any write if the kept sell limit exceeds the new
+trigger or the kept buy limit is below it; equality is allowed. The user must
+re-place with their intended limit. The PR 1 guarded path already refused all
+stop-limit edits before cancel; legacy trigger-status controls pin that refusal.
+
+The native [OpenAPI order enum](https://github.com/elliottech/lighter-python/blob/38a34672e7cb43c67d807ece25f125fda2dfdecf/openapi.json)
+separates `mark-price` from `ready`, `na`, `parent-order` and `twap`; only the
+first admits native modification. Legacy aliases keep the guarded path.
+
+The transaction signs chain, type 17, nonce, transaction expiry, account, API key,
+market, target index, base amount, execution price and trigger price. Native and
+WASM use the same encoder; the device re-derives that exact field order from a
+canonical typed statement, refusing unknown/unsigned fields and other scopes.
+No new L2 attributes or order-version feature is introduced.
+
+An accepted transaction returns the same target ID and refreshes orders; it does
+not invent native provenance from the ACK. A refusal, 404, invalid nonce, rate
+limit, timeout, transport loss or malformed ACK never cancels, puts back or
+resends a tx17. Rate/405/429/408/5xx and ambiguous outcomes remain unknown and ask
+the user to check Open Orders. A subsequent fresh source read is needed before
+another native edit can rely on modified parameters.
+
+Offline vectors in `tests/fixtures/modify-signing.json` were captured using the
+[official Python SDK signer](https://github.com/elliottech/lighter-python/tree/38a34672e7cb43c67d807ece25f125fda2dfdecf/lighter/signers)
+(binary SHA-256 recorded in the fixture) across chains 300/304/466324. The
+[official tx17 field order](https://github.com/elliottech/lighter-go/blob/aefa96848a105d82a6bbb55d3d05663293a71713/types/txtypes/modify_order.go)
+is checked against its hashes and signatures, including high market/target
+indices and amount/price boundaries. The capture script takes only that pinned
+library, uses the public fixture scalar and explicit nonces, and points its
+client at loopback port 1; it never sends an order. Signing changes require a
+dedicated security review before merge.
