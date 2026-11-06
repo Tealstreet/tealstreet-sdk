@@ -176,6 +176,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // FetchLeverage read and subscription.count. CI size plus 10 KiB, rounded up; siblings equal.
 // #3158 run 42215250423, job 127884302751 measured lighter 2,068,697 B.
 // CI size plus 10 KiB, rounded up to the KiB; lighter-robinhood equal.
+// #3170 run 42232257311 measured kucoin 1,780,364 B and kucoinspot 2,327,462 B.
+// Independent family caps: CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
@@ -197,8 +199,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   hyperliquidspot: 2_153_472,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
-  kucoin: 1_692_672,
-  kucoinspot: 2_264_064,
+  kucoin: 1_790_976,
+  kucoinspot: 2_337_792,
   lighter: 2_079_744,
   'lighter-robinhood': 2_079_744,
   // #3131, CI run 42150228180: MEXC measured 1,777,946 B + 10 KiB, rounded up.
