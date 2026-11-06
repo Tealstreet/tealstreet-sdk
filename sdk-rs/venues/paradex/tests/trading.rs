@@ -2547,7 +2547,7 @@ fn a_failed_cancel_proof_read_never_restores_or_retries_a_write() {
 
 #[test]
 fn a_terminal_proof_cannot_override_an_observed_fill_or_a_new_cancel() {
-    for observed in ["fill", "cancel", "crossed"] {
+    for observed in ["fill", "cancel", "symbol-cancel", "crossed"] {
         let mut h = with_untriggered_stop();
         amend_stop(&mut h, 13);
         let cancel = take_method(&mut h, Method::Delete, "/orders/123");
@@ -2566,6 +2566,20 @@ fn a_terminal_proof_cannot_override_an_observed_fill_or_a_new_cancel() {
                 h.command(Command::CancelOrders { command: 14, ids: vec!["123".into()] });
                 let user_cancel = take_method(&mut h, Method::Delete, "/orders/123");
                 h.respond(user_cancel, 204, "");
+                assert_eq!(h.result(14), Ok("[]"));
+            }
+            "symbol-cancel" => {
+                let socket = h.actions.iter().find_map(|a| match a {
+                    Action::WsConnect { socket, channel: Some(safe_cex_engine::SocketChannel::Private), .. } => Some(*socket),
+                    _ => None,
+                }).unwrap();
+                amendment_update(&mut h, socket, canceled_stop_row());
+                assert_eq!(h.e.store().order("123").unwrap().status, safe_cex_engine::model::OrderStatus::Canceled);
+                h.command(Command::CancelSymbolOrders { command: 14, symbol: "BTC-USD-PERP".into() });
+                let stop_cancel = take_method(&mut h, Method::Delete, "/orders/123");
+                h.respond(stop_cancel, 204, "");
+                let user_cancel = take_method(&mut h, Method::Delete, "/orders?market=");
+                h.respond(user_cancel, 200, r#"{"message":"cancel requests queued"}"#);
                 assert_eq!(h.result(14), Ok("[]"));
             }
             _ => h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"markets_summary","data":{"symbol":"BTC-USD-PERP","last_traded_price":"90","mark_price":"90"}}}"#),

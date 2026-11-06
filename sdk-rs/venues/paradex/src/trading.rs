@@ -663,7 +663,14 @@ impl Trading {
             _ => (Vec::new(), None),
         };
         for (id, job) in &self.replacing {
-            let symbol = account.native_order(id).map(|raw| raw.market.as_str());
+            let symbol = account
+                .native_order(id)
+                .map(|raw| raw.market.as_str())
+                .or_else(|| {
+                    self.cancel_proofs
+                        .get(job)
+                        .map(|proof| proof.guard.symbol.as_str())
+                });
             if (cancelled_ids.contains(id)
                 || (cancelled_symbol.is_some() && symbol == cancelled_symbol.as_deref()))
                 && let Some(state) = self.jobs.get_mut(job)
