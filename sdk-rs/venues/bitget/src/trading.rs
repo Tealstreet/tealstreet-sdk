@@ -2602,12 +2602,15 @@ impl BitgetFutures {
         let native = native_code(parsed.as_ref().ok(), status);
         let mut error = match &parsed {
             Ok(reply) if status == 200 && reply.code.0 == Some(0.0) => None,
-            Ok(reply) => Some(format!(
-                "Bitget {}: {} (HTTP {status})",
-                reply.code.get(),
-                self.closable_refusal(cx, &request.call, &reply.msg)
-                    .unwrap_or_else(|| reply.msg.to_string())
-            )),
+            Ok(reply) => {
+                let text = self
+                    .closable_refusal(cx, &request.call, &reply.msg)
+                    .unwrap_or_else(|| reply.msg.to_string());
+                Some(format!(
+                    "Bitget {}: {text} (HTTP {status})",
+                    reply.code.get()
+                ))
+            }
             Err(error) => Some(error.clone()),
         };
         // 25204 means the order is gone, which is what a cancel wants. Not an amend's cancel:
