@@ -245,6 +245,21 @@ test('master b0d2122742d release cut (run 41901638294) retains the ruled binance
   assert.match(wasmBudgetError(cap + 1, 'venue', 'binance'), /exceeds/);
 });
 
+test('#3073 cancel confirmation (run 41931095253) retains headroom and siblings match', () => {
+  const measured = 2_334_811;
+  const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(measuredCap, 2_345_984);
+  const cap = WASM_VENUE_OVERRIDES.bitget;
+  assert.ok(cap >= measuredCap);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
+});
+
 test('#3094 batch acknowledgements (run 42062090938) retain Bybit headroom', () => {
   const measured = 2_214_254;
   const cap = 2_225_152;
@@ -289,7 +304,6 @@ test('#3118 Aster protection guard (run 42112075305) retains measured headroom',
   assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
 
-<<<<<<< HEAD
 test('#3114 cold-path sharing (run 42104530272) retains Hyperliquid headroom and siblings match', () => {
   const measured = 2_106_596;
   const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -306,12 +320,21 @@ test('#3114 cold-path sharing (run 42104530272) retains Hyperliquid headroom and
 
 test('#3143 public data watch (run 42181736999) retains Hyperliquid headroom and siblings match', () => {
   const measured = 2_126_281;
-  const cap = 2_137_088;
-=======
+  const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(measuredCap, 2_137_088);
+  const cap = WASM_VENUE_OVERRIDES.hyperliquid;
+  assert.ok(cap >= measuredCap);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('#3149 activeAssetData scoping (run 42197163575) retains Hyperliquid headroom and siblings match', () => {
   const measured = 2_143_008;
   const cap = 2_153_472;
->>>>>>> master
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
