@@ -21,15 +21,20 @@ and their independent trigger references are retained, including the unchanged
 peer. In particular, the plan-parent endpoint interprets an omitted/zero price
 as a removal, so a missing peer's provenance refuses the edit rather than
 silently deleting protection. Documented definitive native refusal (including code 3001 in HTTP 200/404)
-is NotSent with no cancel fallback; server, unlisted and ambiguous codes remain Unknown. Native price edits share a 500 ms per-engine write floor
+is Rejected on the managed closing-stop path, with no cancel fallback; the legacy
+opening-parent path keeps its NotSent projection. Server, unlisted and ambiguous
+codes remain Unknown. Native price edits share a 500 ms per-engine write floor
 with the existing submission pacing. An unproven response remains Unknown. A newer stream update
 wins over the optimistic local native-edit acknowledgement.
 
 ## Guarded quantity / other edits
 
-A protective edit requiring replacement runs the veto in `queue_trade`, the
-single venue-side signed-send path. Deferred sends pass through it again. The
-veto checks the original's complete local row, zero fills, a genuine receipt
+Standalone closing stops use a genuine retained Preflight while queued, followed
+by one serial Plan for inspection, cancel, terminal proof, replacement and any
+permitted one-shot put-back. Read signing keeps its selected read identity;
+mutations keep the captured Primary identity. Every physical mutation claim,
+including a re-preparation or re-sign, runs `http_release_veto` against the actual
+release clock and current Store. The pre-sign check also remains. The veto checks the original's complete local row, zero fills, a genuine receipt
 of each replacement trigger's own Last/Mark/Index source no older than 5 seconds
 (inclusive), strict uncrossed direction for the rounded trigger actually sent and an open protected-side
 position for a closing stop. A missing, zero, disconnected, future or stale
@@ -73,11 +78,34 @@ An unknown placement or
 put-back outcome never restores/resends and reports status unknown, asking the
 user to check Open Orders and their position before acting.
 
-These writes remain legacy `cx.request` plus `sign_http` requests. The guard
-runs before signing: there is no final-claim `http_release_veto` or
-`present_plan_failure` on this path. Managed protective Plans are a separate
-follow-up; this live fix does not claim to close the host-signer latency window.
-No engine release-veto API, transport inventory, replay allowance, CPU threshold or combined wasm ceiling changes here.
+The managed selector is limited to position TP/SL rows and standalone reduce-only
+plan stops without an attached-leg alias. Opening-parent edits, documented native
+bracket modifications on those parents and ordinary trading retain their legacy
+`cx.request` plus `sign_http` path. Their existing signing, wire and classification
+are preserved; the actual four-request opening-parent wire is pinned byte for
+byte, including both bracket prices, independent sources and original size.
+
+Managed DATA is validated and its write fact recorded before native reducers.
+Malformed or conflicting success payloads remain Unknown without optimistic Store
+effects, a restore or a resend.
+Only definitive replacement refusal can continue to the exact original put-back;
+Unknown never continues. Before each mutation, `present_plan_failure` states that
+the protection update's outcome is unknown and asks the user to check Open Orders
+and their position; a NotSent preparation refusal replaces this with its own cause.
+A retired managed owner discards only its own continuation; the existing
+reconciliation callback resumes an ordinary FIFO successor and requests fresh
+account state. A parked managed successor resumes through Preflight readiness.
+No engine, transport inventory, replay allowance or CPU threshold changes here.
+
+The journal owns terminal projection. A physically sent, definitively refused
+native modify is Rejected rather than the legacy NotSent. If cancel was Accepted
+but its terminal read is unproven, no placement leg was issued: the terminal keeps
+the accepted cancel ID and has no aggregate outcome, with an actionable unknown
+protection message. It does not fabricate an Unknown mutation fact. Actual
+unproven writes remain typed Unknown with no restore or resend. These contracts
+replace the corresponding three old terminal assertions; financial payloads,
+terminal-proof requirements and no-create assertions remain. Two native control
+collectors now release genuine Prepare/Bind/Claim at their original clocks.
 
 ## Native controls and fixture changes
 
@@ -131,8 +159,9 @@ Existing fixture changes:
 Error classification uses the documented closed refusal set for both the outer
 envelope and a single per-order result; HTTP 4xx alone is not definitive protective
 write evidence. [MEXC code 3001](https://www.mexc.com/api-docs/futures/error-code)
-is a trigger-order price-type refusal and remains Rejected (NotSent for native
-modify), while undocumented codes remain Unknown.
+is a trigger-order price-type refusal and remains Rejected on managed closing
+stops. Legacy native opening-parent modify keeps NotSent; undocumented codes
+remain Unknown.
 
 Two existing controls change their contracts:
 
@@ -145,7 +174,7 @@ Two existing controls change their contracts:
   sized pair, preserving the actual-cancel/refusal/Unprotected assertions; a
   full-position resize is covered by the earlier refusal regression.
 
-The native 3001/404 refusal test is unchanged: its code is documented. New controls
-reproduce the two unsafe write classifications and both recreate hazards, retain
+The native 3001/404 refusal test now pins the journal's Rejected projection with
+no cancel fallback. New controls reproduce the two unsafe write classifications and both recreate hazards, retain
 one-shot exact restore for documented refusals, and pin malformed/mixed results and
 quantity-only stop-limit preservation.

@@ -146,7 +146,7 @@ fn non_direct_account_socket_retains_private_topics_and_skips_public_topics_on_r
 fn shared_native_prices_revalue_private_account_without_venue_public_subscriptions() {
     let (mut engine, socket, _) = ready_with_policy("disabled", PublicFeedPolicy::Shared);
     let HostInput::PublicFeedUpdate(update) = decode_host_input(
-        r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"BTC-PERP","last":110}]}"#,
+        r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"BTC-PERP","last":110,"midPrice":110}]}"#,
     )
     .unwrap() else {
         panic!("shared update")
@@ -171,8 +171,8 @@ fn shared_native_prices_revalue_private_account_without_venue_public_subscriptio
     native_seed
         .iter_mut()
         .find(|ticker| ticker.symbol == "BTC-PERP")
-        .unwrap()
-        .last = 456.;
+        .map(|ticker| (ticker.last, ticker.mid_price) = (456., Some(456.)))
+        .unwrap();
     engine.store_mut().set_tickers(native_seed);
     message(
         &mut engine,
@@ -188,6 +188,16 @@ fn shared_native_prices_revalue_private_account_without_venue_public_subscriptio
     );
     assert_eq!(engine.store().balance().free, 1000.);
     assert_eq!(engine.store().positions()[0].contracts, 3.);
+    // A provider last that is a trade print leaves uPnL on the provider mid.
+    let HostInput::PublicFeedUpdate(update) = decode_host_input(
+        r#"{"op":"publicFeedUpdate","tickers":[{"symbol":"BTC-PERP","last":150,"midPrice":110}]}"#,
+    )
+    .unwrap() else {
+        panic!("shared update")
+    };
+    engine.apply_public_feed(4000., update).unwrap();
+    assert_eq!(engine.store().ticker("BTC-PERP").unwrap().last, 150.);
+    assert_eq!(engine.store().balance().upnl, 30.);
 }
 
 #[test]

@@ -848,10 +848,15 @@ impl Okx {
             OrderType::TrailingStopLoss => {
                 p.active_px = Some("");
                 p.callback_ratio = Some("");
-                p.callback_spread = Some(num::format(adjusted(
+                let last = fresh_last(cx, &o.symbol).ok_or(
+                    "OKX trailing stop needs a last price under 5 s old; nothing was placed",
+                )?;
+                p.callback_spread = Some(num::format(trailing_distance(
+                    m,
+                    o.side,
                     o.price.unwrap_or(0.0),
-                    m.precision.price,
-                    false,
+                    last,
+                    "nothing was placed",
                 )?));
                 // OKX refuses closeFraction here with 50014 "sz can not be empty".
                 if size <= 0.0 {
@@ -948,15 +953,17 @@ impl Okx {
         {
             return lookup_job(cx, order.clone(), price, amount, LookupStage::Order);
         }
-        self.plan_amend_known(cx, id, price, amount)
+        self.plan_amend_known(cx, id, price, amount, None)
     }
 
+    /// `quote` is a last price read for this edit when the store's was stale.
     fn plan_amend_known(
         &self,
         cx: &Cx<'_, Pending>,
         id: &str,
         price: Option<f64>,
         amount: Option<f64>,
+        quote: Option<f64>,
     ) -> Result<Job, String> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
@@ -1128,10 +1135,23 @@ impl Okx {
                 }
                 replacement.sz = num::format(size);
             }
-            if let Some(price) = price {
-                replacement.callback_spread =
-                    num::format(adjusted(price, m.precision.price, false)?);
-                replacement.callback_ratio.clear();
+            if let Some(level) = price {
+                let last = quote.or_else(|| fresh_last(cx, &o.symbol)).ok_or(
+                    "OKX trailing edit needs a last price under 5 s old; the stop is unchanged",
+                )?;
+                let distance = trailing_distance(m, o.side, level, last, "the stop is unchanged")?;
+                // A ratio order stays a ratio: OKX takes one of the two, never both.
+                if replacement.callback_ratio.is_empty() {
+                    replacement.callback_spread = num::format(distance);
+                } else {
+                    let ratio = num::adjust(distance / last, TRAILING_RATIO_STEP);
+                    if ratio <= 0.0 {
+                        return Err(format!(
+                            "OKX trailing stop at {level} is too close to the last price {last}; the stop is unchanged"
+                        ));
+                    }
+                    replacement.callback_ratio = num::format(ratio);
+                }
             }
             replacement.algo_cl_ord_id = generated_order_id(cx)?;
             let mut restored = native.clone();
@@ -1440,8 +1460,13 @@ impl Okx {
                 if quote.inst_id != market.id {
                     return Err("Foreign OKX ticker; the stop is unchanged".into());
                 }
-                let mut next =
-                    self.plan_amend_known(cx, &lookup.order.id, lookup.price, lookup.amount)?;
+                let mut next = self.plan_amend_known(
+                    cx,
+                    &lookup.order.id,
+                    lookup.price,
+                    lookup.amount,
+                    Some(last),
+                )?;
                 let trailing = next
                     .trailing
                     .as_mut()
@@ -1505,7 +1530,7 @@ impl Okx {
             {
                 return lookup_job(cx, order, price, amount, LookupStage::Ticker);
             }
-            self.plan_amend_known(cx, &order.id, price, amount)
+            self.plan_amend_known(cx, &order.id, price, amount, None)
         })();
         let mut next = match prepared {
             Ok(next) => next,
@@ -2276,6 +2301,41 @@ fn trigger_name(value: Option<StopTriggerType>) -> &'static str {
         _ => "last",
     }
 }
+/// A callbackRatio's precision: 0.0001 is a hundredth of a percent.
+const TRAILING_RATIO_STEP: f64 = 0.0001;
+
+fn fresh_last(cx: &Cx<'_, Pending>, symbol: &str) -> Option<f64> {
+    safe_cex_engine::protective_amend::fresh_reference(
+        cx.store,
+        symbol,
+        StopTriggerType::LastPrice,
+        cx.now,
+    )
+}
+
+/// Tealstreet sends a trailing stop's price as its stop level (chart drags, `trail`), while
+/// OKX trails by a distance from last; Bybit and Binance convert the level the same way.
+fn trailing_distance(
+    m: &Market,
+    side: OrderSide,
+    level: f64,
+    last: f64,
+    outcome: &str,
+) -> Result<f64, String> {
+    let behind = match side {
+        OrderSide::Sell => level < last,
+        OrderSide::Buy => level > last,
+    };
+    if !level.is_finite() || level <= 0.0 || !behind {
+        return Err(format!(
+            "OKX trailing stop at {level} is not behind the last price {last}; {outcome}"
+        ));
+    }
+    adjusted((last - level).abs(), m.precision.price, false).map_err(|_| {
+        format!("OKX trailing stop at {level} is too close to the last price {last}; {outcome}")
+    })
+}
+
 fn adjusted(value: f64, precision: f64, allow_zero: bool) -> Result<f64, String> {
     if !value.is_finite() || value < 0.0 || !precision.is_finite() || precision <= 0.0 {
         return Err("order amount/price must be finite".into());

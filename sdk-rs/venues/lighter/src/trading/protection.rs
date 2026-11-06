@@ -144,6 +144,22 @@ fn standalone(row: &NativeRow) -> bool {
         )
 }
 impl Original {
+    pub(super) fn market_slippage_pct(&self) -> Option<f64> {
+        let native = &self.native;
+        if !matches!(native.order_type, 2 | 4) || native.trigger_price == 0 {
+            return None;
+        }
+        let distance = if native.is_buy {
+            native.price.checked_sub(native.trigger_price)?
+        } else {
+            native.trigger_price.checked_sub(native.price)?
+        };
+        // Recover the effective band after venue precision rounding, not a
+        // stop-limit's user price or an out-of-policy native bound.
+        (u64::from(distance) * 2 <= u64::from(native.trigger_price))
+            .then_some(f64::from(distance) * 100.0 / f64::from(native.trigger_price))
+    }
+
     fn from_row(store: &Store, row: &NativeRow, observed: &Order) -> Option<Self> {
         let native_kind = kind(row)?;
         if observed.status != OrderStatus::Open

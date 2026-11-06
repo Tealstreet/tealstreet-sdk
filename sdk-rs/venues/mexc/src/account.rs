@@ -1645,6 +1645,13 @@ impl MexcFutures {
         payload: String,
         pending: Pending,
     ) {
+        let pending = match pending {
+            Pending::Trade(request) if self.trading_is_protective(request.command) => {
+                self.queue_protective(cx, method, path, payload, request);
+                return;
+            }
+            pending => pending,
+        };
         if let Pending::Trade(request) = &pending
             && let Err(error) = self.protective_send_guard(cx, request)
         {
