@@ -384,13 +384,13 @@ fn a_leg_only_timeout_under_a_live_root_keeps_accepted_rows() {
     respond(&mut e, 10_000., &page, "row-1");
     released(&mut e, 10_000.).pop().expect("second page");
     let timer = leg_timer(&e);
-    e.handle(30_000., Event::TimerFired { timer });
+    e.handle(20_000., Event::TimerFired { timer });
     assert!(
         outcome(&e.drain_actions().collect::<Vec<_>>(), 7)
             .0
             .is_empty()
     );
-    e.handle(40_000., Event::TimerFired { timer });
+    e.handle(30_000., Event::TimerFired { timer });
     let (terminals, markers) = outcome(&e.drain_actions().collect::<Vec<_>>(), 7);
     assert!(matches!(terminals.as_slice(), [Ok(rows)] if rows == r#"["row-1"]"#));
     assert_eq!(markers, 1);

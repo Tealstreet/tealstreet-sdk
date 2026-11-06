@@ -1215,10 +1215,12 @@ policy fails explicitly; normal requests retain account routing and deadlines.
 
 Managed HTTP carries the engine's closed `requestClass` into HOW outside signed
 packet bytes. TS ignores non-write hints on non-GET methods; explicit remaining
-engine deadlines still govern managed posted reads. Standard engine budgets are 60 s for credential-free background
-catalogue snapshots (90 s during startup), 30 s for history Query/Candles contexts (client-ID order lookups stay short) and
-20 s for live account/order reads, writes and other reads. Explicit venue bounds,
-Plan/Preflight call windows and caller roots remain authoritative. Both the
+engine deadlines still govern managed posted reads. Transport defaults are 60 s
+for discovery, 30 s for history, and 20 s for order reads, writes and other reads.
+Engine policies carry explicit venue bounds, including the standard 20 s value;
+class labels never lengthen those bounds. Candle commands retain the TS clients'
+20 s bound. Startup discovery retains 90 s, and Plan/Preflight call windows and
+caller roots remain authoritative. Both the
 engine and transport timeout messages name class, budget and elapsed milliseconds;
 readiness is capped within that same original deadline, with no write replay.
 

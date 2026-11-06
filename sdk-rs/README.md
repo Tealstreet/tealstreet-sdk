@@ -53,11 +53,11 @@ existing bounds.
 
 The TS HOW package's `requestBudget.ts` defines the parity reference: catalogue
 reads have 60 s, history pages 30 s, and order reads, writes and other reads 20 s.
-Engine policies on the standard 20 s bound select the class at issuance:
-credential-free background snapshots are discovery, caller history Query/Candles reads
-are history (client-ID order lookups stay short), and live account/order reads and mutations keep 20 s. The existing
-90 s startup discovery bound above remains intact. Explicit nonstandard venue
-bounds, Plan/Preflight call windows and caller-wait roots remain authoritative.
+Engine policies always carry an explicit venue timeout, including the standard
+20 s value; class metadata never lengthens it. Caller history Query reads are
+labelled history, while candle commands retain the TypeScript clients' explicit
+20 s bound and orderRead label. The existing 90 s startup discovery bound above,
+Plan/Preflight call windows and caller-wait roots remain authoritative.
 A child or retry never extends its original root deadline.
 
 Native hosts query `http_request_class` only for an exact pending preparation.

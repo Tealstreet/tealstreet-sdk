@@ -842,7 +842,10 @@ fn preparation_timeout_is_strict_while_the_caller_is_live() {
     let values = outcomes(&actions, OWNER);
     assert_eq!(values.len(), 1);
     let error = values[0].as_ref().unwrap_err();
-    assert_eq!(error.message, "preparation timed out");
+    assert_eq!(
+        error.message,
+        "preparation timed out (class=orderRead budget=20000ms elapsed=1ms)"
+    );
     assert_eq!(error.kind, Some(ErrorKind::Timeout));
     assert_eq!(error.outcome, Some(Outcome::NotSent));
 }

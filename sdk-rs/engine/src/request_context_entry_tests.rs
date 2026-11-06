@@ -1041,21 +1041,21 @@ fn a_refusal_outside_a_genuine_entry_is_a_caller_bug() {
 }
 
 #[test]
-fn history_default_is_medium_and_issued_deadlines_never_renew() {
+fn explicit_history_bounds_override_class_defaults_and_never_renew() {
     let mut e = crate::test_support::seeded_engine(Probe {
         fill: Some(0),
         callback: Some(|cx| {
             use crate::request_budget::RequestClass;
             let context = cx.admit_http_command(read_policy()).unwrap();
             assert_eq!(context.request_class(), RequestClass::History);
-            assert_eq!(context.deadline(), cx.now + 30_000.);
+            assert_eq!(context.deadline(), cx.now + 20_000.);
             let retry = context.retry(
                 crate::request_context::RetryEvidence::ReadFailure,
                 cx.now + 5_000.,
             );
             assert!(retry.is_err(), "a budget grants no retry authority");
             let child = cx.http_leg_context(&context, read_policy()).unwrap();
-            assert_eq!(child.deadline(), context.deadline());
+            assert_eq!(child.deadline(), cx.now + 20_000.);
             assert_eq!(child.request_class(), RequestClass::History);
             let explicit = Policy {
                 timeout_ms: 1_234,
@@ -1068,7 +1068,19 @@ fn history_default_is_medium_and_issued_deadlines_never_renew() {
     });
     e.start(0.);
     e.drain_actions().for_each(drop);
-    e.handle(1., Event::Command(command()));
+    e.handle(
+        1.,
+        Event::Command(Command::Query {
+            command: 7,
+            query: Query::Fills {
+                symbol: None,
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        }),
+    );
     assert_eq!(e.venue.calls, 1);
 }
 
@@ -1121,4 +1133,24 @@ fn catalogue_refresh_and_closed_position_actions_use_read_budgets() {
         }),
         RequestClass::History
     );
+}
+
+#[test]
+fn candle_commands_preserve_the_ts_clients_explicit_twenty_second_bound() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        callback: Some(|cx| {
+            let context = cx.admit_http_command(read_policy()).unwrap();
+            assert_eq!(
+                context.request_class(),
+                crate::request_budget::RequestClass::OrderRead
+            );
+            assert_eq!(context.deadline(), cx.now + 20_000.);
+        }),
+        ..Default::default()
+    });
+    e.start(0.);
+    e.drain_actions().for_each(drop);
+    e.handle(1., Event::Command(command()));
+    assert_eq!(e.venue.calls, 1);
 }

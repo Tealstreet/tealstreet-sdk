@@ -72,9 +72,11 @@ impl RequestClass {
             Command::Query {
                 query: crate::Query::OrderByClientId { .. },
                 ..
-            } => Self::OrderRead,
+            }
+            // TS candle clients retain an explicit 20 s HTTP timeout.
+            | Command::FetchCandles { .. } => Self::OrderRead,
             Command::Venue { action, .. } => Self::venue_action(action),
-            Command::Query { .. } | Command::FetchCandles { .. } => Self::History,
+            Command::Query { .. } => Self::History,
             // The issued operation selects OrderWrite. Keeping dispatch metadata
             // read-shaped also covers read legs of a mutation without reclassifying
             // the entire command or granting any execution authority.

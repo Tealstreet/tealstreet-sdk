@@ -132,7 +132,7 @@
   },
   {
     "method": "GET",
-    "url": "https://venue.test/KLINE",
+    "url": "https://venue.test/\u212aLINE",
     "requestClass": "read",
     "budgetMs": 20000
   },
@@ -141,5 +141,12 @@
     "url": "https://venue.test/api/v3/allOrders",
     "requestClass": "history",
     "budgetMs": 30000
+  },
+  {
+    "method": "GET",
+    "url": "https://venue.test/api/v3/klines",
+    "requestClass": "history",
+    "timeoutMs": 20000,
+    "budgetMs": 20000
   }
 ]

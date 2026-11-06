@@ -2340,19 +2340,9 @@ impl crate::engine::CoreCx<'_> {
                 .domain_pacing(policy.operation, policy.pacing)?,
             ..policy
         };
-        let class = parent.map_or_else(
-            || self.io.core.request_contexts.request_class(scope, &policy),
-            Context::request_class,
-        );
-        let class = class.for_operation(policy.operation);
-        let policy = if policy.timeout_ms == READ_TIMEOUT_MS {
-            Policy {
-                timeout_ms: class.budget_ms(),
-                ..policy
-            }
-        } else {
-            policy
-        };
+        // Policy carries an explicit venue bound, including the conventional
+        // 20 s value. Class defaults apply only when the transport caller omits
+        // a timeout; never extend a root or child policy here.
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = self
             .io
