@@ -6,8 +6,10 @@ Open Orders. A released transport failure remains Unknown as before.
 
 Classic TP/SL native modification supplies the retained trigger on amount-only
 edits and keeps a known native execution price and trigger source. Source frames
-carry execution prices in Bitget VENUE_STATE version 2; an older or malformed
-version is refused, rather than silently converting a known limit stop to market.
+carry execution prices in Bitget VENUE_STATE version 2. Version 1 remains readable
+with no execution-price evidence, preserving account detection and other writes.
+A modify without retained execution evidence refuses NotSent and asks for a
+refresh; it never guesses zero (market). Unknown or malformed versions are refused.
 
 UTA TP/SL put-back uses the original venue quantity, independent of the current
 position. A full-position order keeps its zero/full sentinel through a price edit

@@ -322,3 +322,72 @@ fn account_nuke_includes_moving_plan_without_dropping_other_plan_types() {
         ]
     );
 }
+
+#[test]
+fn mixed_build_v1_frame_keeps_account_writes_but_refuses_unknown_execution() {
+    use safe_cex_engine::wire::{FrameWriter, section};
+    let mut source = Harness::classic();
+    classic_stop(&mut source, "loss_plan");
+    let mut frame = source.engine.snapshot_frame(source.now).to_vec();
+    let mut legacy = vec![1, 1];
+    legacy.extend_from_slice(&1u32.to_le_bytes());
+    for text in ["stop", "loss_plan"] {
+        legacy.extend_from_slice(&(text.len() as u16).to_le_bytes());
+        legacy.extend_from_slice(text.as_bytes());
+    }
+    legacy.extend_from_slice(&0u32.to_le_bytes());
+    let mut writer = FrameWriter::new(Vec::new(), source.now);
+    writer.venue_state(&legacy);
+    let replacement = writer.finish();
+    let mut at = 16;
+    loop {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let length = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == section::VENUE_STATE {
+            frame.splice(at..at + 8 + length, replacement[16..].iter().copied());
+            break;
+        }
+        at += 8 + length;
+    }
+    let mut h = Harness::started_configure(
+        FixtureOptions {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("pass".into()),
+            ..FixtureOptions::default()
+        },
+        false,
+        |engine| engine.set_frame_fed().unwrap(),
+    );
+    h.respond("/contracts", 200, CONTRACTS);
+    h.engine.apply_frame(h.now, &frame, true).unwrap();
+    h.collect();
+    assert!(h.engine.store().loaded().orders);
+    amend(&mut h, "stop", Some(85.0), None);
+    assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+    let error = h
+        .failures
+        .last()
+        .expect("unknown execution refused before I/O");
+    assert_eq!(error.outcome, Some(Outcome::NotSent));
+    assert!(
+        error.message.contains("execution price is unavailable"),
+        "{error:?}"
+    );
+    h.command(Command::CancelOrders {
+        command: 703,
+        ids: vec!["1".into()],
+    });
+    let (id, p) = body(&mut h, "/batch-cancel-orders");
+    assert_eq!(p["orderIdList"], json!([{"orderId":"1"}]));
+    h.reply(
+        id,
+        200,
+        r#"{"code":"00000","data":{"successList":[{"orderId":"1"}],"failureList":[]}}"#,
+    );
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 703 && result.is_ok())
+    );
+}

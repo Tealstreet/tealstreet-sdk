@@ -53,7 +53,8 @@ pub(crate) fn encode(
 /// `None` for another version or malformed bytes: the engine keeps its state.
 pub(crate) fn decode(bytes: &[u8]) -> Option<VenueState> {
     let mut reader = Reader(bytes);
-    if reader.take(1)? != [VERSION] {
+    let version = reader.take(1)?[0];
+    if !matches!(version, 1 | VERSION) {
         return None;
     }
     let flags = reader.take(1)?[0];
@@ -70,7 +71,11 @@ pub(crate) fn decode(bytes: &[u8]) -> Option<VenueState> {
         trailing.insert(id, (kind, variance));
     }
     let mut execution_prices = HashMap::new();
-    for _ in 0..reader.count()? {
+    for _ in 0..if version == VERSION {
+        reader.count()?
+    } else {
+        0
+    } {
         let id = reader.text()?;
         let price = f64::from_le_bytes(reader.take(8)?.try_into().ok()?);
         if !price.is_finite() || price < 0.0 {
@@ -152,7 +157,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
         );
-        assert!(decode(&[1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_none());
+        assert!(decode(&[3, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_none());
         assert!(decode(&bytes[..bytes.len() - 1]).is_none());
         let state = decode(&bytes).unwrap();
         assert!(state.detected && !state.uta);

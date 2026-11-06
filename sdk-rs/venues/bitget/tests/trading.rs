@@ -515,7 +515,7 @@ fn canceling_virtual_child_cancels_parent_and_tombstones_both_siblings() {
 #[test]
 fn classic_sized_stop_amend_zero_preserves_size() {
     let mut h = Harness::classic();
-    h.private_message(r#"{"arg":{"channel":"orders-algo"},"data":[{"orderId":"3","symbol":"BTCUSDT","size":"0.5","triggerPrice":"80","holdSide":"long","planType":"loss_plan","status":"live"}]}"#);
+    h.private_message(r#"{"arg":{"channel":"orders-algo"},"data":[{"orderId":"3","symbol":"BTCUSDT","size":"0.5","triggerPrice":"80","executePrice":"0","holdSide":"long","planType":"loss_plan","status":"live"}]}"#);
     h.command(Command::AmendOrder {
         command: 1,
         id: "3".into(),

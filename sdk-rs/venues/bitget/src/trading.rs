@@ -2191,7 +2191,7 @@ impl BitgetFutures {
                         .execution_prices
                         .get(&order.id)
                         .copied()
-                        .unwrap_or(0.0),
+                        .ok_or("Bitget execution price is unavailable; refresh before editing")?,
                 ));
             }
             p.size = Some(if amount.is_some_and(|a| a > 0.0) {
