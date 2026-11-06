@@ -110,6 +110,95 @@ pub struct PriceMessage<'a> {
     #[serde(borrow)]
     pub data: Price<'a>,
 }
+/// The fixed shape of a KuCoin ticker push, `{"topic":T,"type":K,"subject":S,"data":{R}}`,
+/// read the way serde reads it as a [`PriceMessage`]. `R` is one flat object: its
+/// known fields plain strings, other values plain strings or JSON integers. `None`
+/// (escapes, control bytes, null or non-string known values, malformed numbers,
+/// whitespace, other keys or order, a repeated field or alias) leaves it to serde.
+pub fn scan_price(text: &str) -> Option<PriceMessage<'_>> {
+    let (topic, rest) = plain(text.strip_prefix(r#"{"topic":""#)?)?;
+    let (kind, rest) = plain(rest.strip_prefix(r#"","type":""#)?)?;
+    let (subject, rest) = plain(rest.strip_prefix(r#"","subject":""#)?)?;
+    let mut rest = rest.strip_prefix(r#"","data":{""#)?;
+    let mut data = Price::default();
+    let mut seen = 0u8;
+    loop {
+        let (key, after) = plain(rest)?;
+        let after = after.strip_prefix(r#"":"#)?;
+        let (value, after) = match after.strip_prefix('"') {
+            Some(string) => {
+                let (value, after) = plain(string)?;
+                (Some(value), after.strip_prefix('"')?)
+            }
+            None => (None, integer(after)?),
+        };
+        let field = match key {
+            "symbol" => Some(0),
+            "buy" | "bestBid" | "bestBidPrice" => Some(1),
+            "sell" | "bestAsk" | "bestAskPrice" => Some(2),
+            "last" | "price" | "lastPrice" => Some(3),
+            "changeRate" => Some(4),
+            "vol" | "volume" | "volume24h" => Some(5),
+            "volValue" | "turnover" | "turnover24h" => Some(6),
+            _ => None,
+        };
+        if let Some(bit) = field {
+            let value = value?;
+            if seen & 1 << bit != 0 {
+                return None;
+            }
+            seen |= 1 << bit;
+            if bit == 0 {
+                data.symbol = value;
+            } else {
+                // Number reads blank as 0; a malformed string fails serde too.
+                let number = Some(Number(if value.is_empty() {
+                    0.0
+                } else {
+                    safe_cex_engine::num::parse_decimal(value)?
+                }));
+                match bit {
+                    1 => data.buy = number,
+                    2 => data.sell = number,
+                    3 => data.last = number,
+                    4 => data.change_rate = number,
+                    5 => data.vol = number,
+                    _ => data.vol_value = number,
+                }
+            }
+        }
+        if let Some(next) = after.strip_prefix(r#",""#) {
+            rest = next;
+        } else {
+            return (after == "}}").then_some(PriceMessage {
+                kind,
+                topic,
+                subject,
+                data,
+            });
+        }
+    }
+}
+
+/// A string body up to its closing quote, when it holds no escape or control byte.
+fn plain(text: &str) -> Option<(&str, &str)> {
+    let end = text
+        .bytes()
+        .position(|b| b == b'"' || b == b'\\' || b < 0x20)?;
+    (text.as_bytes()[end] == b'"').then(|| (&text[..end], &text[end..]))
+}
+
+/// The rest after one JSON integer: `-?(0|[1-9][0-9]*)`.
+fn integer(text: &str) -> Option<&str> {
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    let length = match digits.as_bytes().first()? {
+        b'0' => 1,
+        b'1'..=b'9' => digits.bytes().take_while(u8::is_ascii_digit).count(),
+        _ => return None,
+    };
+    Some(&digits[length..])
+}
+
 #[derive(Deserialize)]
 pub struct Message<'a> {
     #[serde(default, rename = "type")]
@@ -351,4 +440,212 @@ pub struct FillRow<'a> {
 // Balances must be present: a blank here is not a zero balance.
 fn required_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
     safe_cex_engine::de::number(d).map(Number)
+}
+
+#[cfg(test)]
+mod scan_price_tests {
+    use super::*;
+
+    const TICKER: &str = r#"{"topic":"/market/ticker:all","type":"message","subject":"ZKC-USDT","data":{"bestAsk":"0.0337","bestAskSize":"13572.63","bestBid":"0.0336","bestBidSize":"5801.46","price":"0.0335","sequence":"241725819","size":"1930","time":1792471145034}}"#;
+
+    type Read = (String, String, String, String, [Option<u64>; 6]);
+    fn read(m: &PriceMessage<'_>) -> Read {
+        let p = &m.data;
+        let bits = [p.buy, p.sell, p.last, p.change_rate, p.vol, p.vol_value]
+            .map(|n| n.map(|n| n.0.to_bits()));
+        (
+            m.kind.into(),
+            m.topic.into(),
+            m.subject.into(),
+            p.symbol.into(),
+            bits,
+        )
+    }
+
+    /// True when the scanner read `text`; it must then read exactly what serde reads.
+    fn scan_matches_serde(text: &str) -> bool {
+        let Some(scanned) = scan_price(text) else {
+            return false;
+        };
+        let serde = serde_json::from_str::<PriceMessage<'_>>(text)
+            .expect("a scanned push is valid for serde");
+        assert_eq!(read(&scanned), read(&serde), "{text}");
+        true
+    }
+
+    #[test]
+    fn the_ticker_push_scans_exactly_as_serde_reads_it() {
+        assert!(scan_matches_serde(TICKER));
+        for (from, to) in [
+            (r#""bestAsk":"0.0337""#, r#""bestAsk":"""#),
+            (r#""bestBid":"0.0336""#, r#""bestBidPrice":"0.0336""#),
+            (r#""price":"0.0335""#, r#""lastPrice":"1e-3""#),
+            (
+                r#""size":"1930""#,
+                r#""changeRate":"-0.0123","volValue":"9","symbol":"X-Y""#,
+            ),
+            (r#""time":1792471145034"#, r#""time":-0"#),
+            (r#""time":1792471145034"#, r#""time":0"#),
+            ("ZKC-USDT", "ZKC-USDT\u{e9}"),
+        ] {
+            let text = TICKER.replace(from, to);
+            assert!(scan_matches_serde(&text), "{text}");
+        }
+    }
+
+    #[test]
+    fn anything_off_the_fixed_shape_is_left_to_serde() {
+        let off = [
+            (r#""price":"0.0335""#, r#""price": "0.0335""#),
+            ("0.0335", "0.03BS u0033 5"),
+            ("0.0335", "0.03\t35"),
+            (r#""price":"0.0335""#, r#""price":null"#),
+            (r#""price":"0.0335""#, r#""price":0.0335"#),
+            (r#""price":"0.0335""#, r#""price":"abc""#),
+            (r#""price":"0.0335""#, r#""price":"1","lastPrice":"2""#),
+            (r#""bestBid":"0.0336""#, r#""bestBid":"1","buy":"2""#),
+            (r#""time":1792471145034"#, r#""time":01"#),
+            (r#""time":1792471145034"#, r#""time":1.5"#),
+            (r#""time":1792471145034"#, r#""time":1e3"#),
+            (r#""time":1792471145034"#, r#""time":-"#),
+            (r#""time":1792471145034"#, r#""time":true"#),
+            (r#""time":1792471145034"#, r#""time":{}"#),
+            (r#","subject":"ZKC-USDT""#, ""),
+            (r#"{"topic""#, r#"{"id":"1","topic""#),
+            ("}}", r#"},"x":1}"#),
+            (
+                r#""type":"message","subject":"ZKC-USDT""#,
+                r#""subject":"ZKC-USDT","type":"message""#,
+            ),
+        ];
+        for (case, (from, to)) in off.iter().enumerate() {
+            let text = TICKER.replace(from, &to.replace("BS u", "\\u").replace(" 5", "5"));
+            assert_ne!(text, TICKER, "case {case} did not apply");
+            assert!(scan_price(&text).is_none(), "case {case}: {text:?}");
+        }
+        assert!(scan_price(&format!("{TICKER}\n")).is_none());
+        assert!(scan_price(TICKER.trim_end_matches('}')).is_none());
+    }
+
+    /// Deterministic xorshift64 so a failure reproduces from its case number.
+    fn next(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    #[test]
+    fn differential_fuzz_never_scans_what_serde_reads_differently() {
+        let tokens = [
+            "\"",
+            "\\",
+            ",",
+            ":",
+            "{",
+            "}",
+            "[",
+            "]",
+            " ",
+            "\n",
+            "\t",
+            "\u{1}",
+            "0",
+            "9",
+            ".",
+            "-",
+            "e",
+            "null",
+            "true",
+            "\"price\"",
+            "\"buy\"",
+            "\"x\"",
+            "\\u0041",
+            "\u{e9}",
+            "\"\"",
+        ];
+        let (mut scanned, mut fallback, mut state) = (0, 0, 0x9e37_79b9_7f4a_7c15u64);
+        for _ in 0..20_000 {
+            let mut text = TICKER.to_owned();
+            for _ in 0..=next(&mut state) % 3 {
+                let mut at = next(&mut state) as usize % (text.len() + 1);
+                while !text.is_char_boundary(at) {
+                    at -= 1;
+                }
+                let token = tokens[next(&mut state) as usize % tokens.len()];
+                let mut end = (at + 1 + next(&mut state) as usize % 4).min(text.len());
+                while !text.is_char_boundary(end) {
+                    end += 1;
+                }
+                match next(&mut state) % 3 {
+                    0 => text.insert_str(at, token),
+                    1 => text.replace_range(at..end, ""),
+                    _ => text.replace_range(at..end, token),
+                }
+            }
+            if scan_matches_serde(&text) {
+                scanned += 1;
+            } else {
+                fallback += 1;
+            }
+        }
+        // Well-formed pushes with random keys, aliases, order, repeats and values.
+        let keys = [
+            "symbol",
+            "buy",
+            "bestBid",
+            "bestBidPrice",
+            "sell",
+            "bestAsk",
+            "bestAskPrice",
+            "last",
+            "price",
+            "lastPrice",
+            "changeRate",
+            "vol",
+            "volume",
+            "volume24h",
+            "volValue",
+            "turnover",
+            "turnover24h",
+            "sequence",
+            "size",
+            "time",
+        ];
+        let values = [
+            r#""""#,
+            r#""1""#,
+            r#""0.0337""#,
+            r#""-0.5""#,
+            r#""1e5""#,
+            r#"" 1""#,
+            r#""abc""#,
+            r#""ZKC-USDT""#,
+            "17924",
+            "0",
+            "-3",
+            "null",
+        ];
+        for _ in 0..5_000 {
+            let mut row = Vec::new();
+            for _ in 0..next(&mut state) % 8 {
+                let key = keys[next(&mut state) as usize % keys.len()];
+                let value = values[next(&mut state) as usize % values.len()];
+                row.push(format!(r#""{key}":{value}"#));
+            }
+            let text = format!(
+                r#"{{"topic":"/market/ticker:all","type":"message","subject":"S","data":{{{}}}}}"#,
+                row.join(",")
+            );
+            if scan_matches_serde(&text) {
+                scanned += 1;
+            } else {
+                fallback += 1;
+            }
+        }
+        assert!(
+            scanned > 2_000 && fallback > 5_000,
+            "{scanned} scanned, {fallback} fallback"
+        );
+    }
 }
