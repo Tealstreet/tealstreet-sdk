@@ -1120,7 +1120,8 @@ impl Venue for KucoinSpot {
         // Decode high-volume ticker envelopes and prices together, without a raw-data rescan.
         if channel == 0
             && self.sockets[channel].ready
-            && let Ok(m) = serde_json::from_str::<PriceMessage>(text)
+            && let Some(m) =
+                wire::scan_price(text).or_else(|| serde_json::from_str::<PriceMessage>(text).ok())
             && m.kind == "message"
             && m.topic.starts_with("/market/ticker")
         {

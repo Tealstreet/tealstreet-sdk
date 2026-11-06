@@ -1,4 +1,6 @@
 //! Native FIFO planning carries genuine engine owners; only their callbacks can issue work.
+#[cfg(test)]
+mod tests;
 use super::*;
 use safe_cex_engine::CredentialSlot;
 use safe_cex_engine::credential_selection::CredentialRole;
@@ -89,11 +91,7 @@ impl Hyperliquid {
                 return;
             }
             None => {
-                cx.refuse_command(
-                    Operation::Mutation,
-                    not_sent("Hyperliquid command has no caller deadline")
-                        .kind(ErrorKind::Internal),
-                );
+                let _ = cx.reject_unstamped_command(Operation::Mutation);
                 return;
             }
         };
@@ -482,10 +480,16 @@ impl Hyperliquid {
         &mut self,
         retired: &HttpOwnerRetirement,
     ) -> Option<Preflight> {
-        self.trading.queue.retain(|job| {
-            !job.custody
+        self.trading.queue.retain_mut(|job| {
+            let retired = job
+                .custody
                 .as_ref()
-                .is_some_and(|c| retired.matches_preflight(&c.preflight))
+                .is_some_and(|c| retired.matches_preflight(&c.preflight));
+            if retired && let Some(timer) = job.custody.as_mut().and_then(|c| c.intent_timer.take())
+            {
+                self.trading.retired_intent_timers.push(timer);
+            }
+            !retired
         });
         if self
             .trading
@@ -494,6 +498,15 @@ impl Hyperliquid {
             .and_then(|job| job.custody.as_ref())
             .is_some_and(|c| retired.matches_preflight(&c.preflight))
         {
+            if let Some(timer) = self
+                .trading
+                .active
+                .as_mut()
+                .and_then(|job| job.custody.as_mut())
+                .and_then(|c| c.intent_timer.take())
+            {
+                self.trading.retired_intent_timers.push(timer);
+            }
             self.trading.active = None;
             self.trading.inflight = false;
             self.trading.builder_wait = None;
@@ -508,6 +521,12 @@ impl Hyperliquid {
             .and_then(|job| job.custody.as_ref())
             .filter(|c| c.plan.is_none())
             .map(|c| c.preflight.clone())
+    }
+    pub(super) fn clear_retired_intent_timers(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Retirement has no Cx authority; clear its timers at the next trading or timer turn.
+        for timer in self.trading.retired_intent_timers.drain(..) {
+            cx.clear_timer(timer);
+        }
     }
 }
 

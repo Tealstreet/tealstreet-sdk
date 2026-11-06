@@ -184,6 +184,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3150 final runtime, same-run comparison 42258955401: PR merge d820d0d012d vs
 // exact master first-parent 0115ba8df07. Source head d04b192d1b1; URL/RPC tables removed.
 // Only over-cap families receive measured CI bytes + 10 KiB, rounded up to a KiB; HL siblings equal.
+// #3178 run 42239151280, job 127965614325: Hyperliquid 2,154,756 B at 81206ca3c02.
+// CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
