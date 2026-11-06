@@ -47,3 +47,41 @@ into the engine query shapes and reject incomplete financial results.
 
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
+
+## Account and close diagnostics
+
+`bitget.account.mode` is an Info engine event emitted once after the first loaded
+private account snapshot, including frame-fed startup. It reports `accountMode`
+(`classic`/`uta`), `posMode` (`one_way`/`hedge`, or `unknown` without evidence),
+and the known `marginMode` (`crossed`, `isolated`, `mixed`, or `unknown`). Public-only
+engines do not emit it.
+
+`bitget.close.diagnostic` is a Warn engine event for a closing request's native
+failure or a different first native booking size. It carries symbol/position
+side, the exact native `requestedSize`/`submittedSize`, the store's
+`positionTotal`, and counts/sums of remaining open regular reduce-only orders
+and plan orders for that symbol/side. The counts exclude terminal and opposite
+side rows; shared plan identities count once. Inverse order/request quantities
+are native contract units; `positionTotal` remains the store's base quantity.
+The event never rewrites an order, classifies a command, or authorizes a retry.
+
+`nativeCode` and `nativeMsg` come from the original top-level response or each
+`failureList` row, independently of classification and user-facing text. Numeric
+code spelling and string leading zeros are retained; missing values are empty
+strings with their `nativeCodePresent`/`nativeMsgPresent` flags false, never an
+inferred 40757. A booking observation without a native error uses those absent
+flags. Existing engine string limits still apply (512 UTF-8 bytes per field).
+A failed batch has one diagnostic per native failure and affected symbol/side
+group, summing its split requests without asserting which uncorrelated row failed.
+
+Booking correlation retains at most 512 closing requests for five minutes and
+consumes each on its first matching native observation. Older REST reads cannot
+answer a newer request. Matching bookings emit nothing; repeated stream/read
+frames cannot emit another mismatch. The observation is diagnostic only.
+
+The Rust adapter serializes exactly these two events in the ordinary browser log
+string, so the worker bridge and terminal logging retain every field. The native
+host journals their JSON-escaped event notices once, including startup without a
+browser peer; other event logging retains its existing behavior. No new Sentry
+tags are introduced. Venue-private available/locked receipt binding follows PR A's
+landing; this initial telemetry change does not guess those values from total.

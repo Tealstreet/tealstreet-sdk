@@ -6,6 +6,7 @@ mod identity;
 mod leverage;
 mod paths;
 mod sign;
+mod telemetry;
 mod trading;
 mod venue_state;
 mod wire;
@@ -134,6 +135,7 @@ pub struct BitgetFutures {
     discovery: PublicRetries,
     account: account::Account,
     trading: trading::Trading,
+    telemetry: telemetry::Telemetry,
     history: history::History,
     sockets: [Connection; 4],
     ticker_index: Vec<Option<u32>>,
@@ -259,6 +261,7 @@ impl BitgetFutures {
             discovery: Default::default(),
             account: account::Account::new(),
             trading: trading::Trading::default(),
+            telemetry: telemetry::Telemetry::default(),
             history: history::History::default(),
             sockets: Default::default(),
             ticker_index: Vec::new(),
@@ -837,6 +840,10 @@ impl Venue for BitgetFutures {
             &self.account.execution_prices,
         ))
     }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account_mode_event(cx);
+        self.observe_framed_close_bookings(cx);
+    }
     fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
         let Some(state) = venue_state::decode(state) else {
             cx.venue_state_unreadable("Unreadable Bitget venue state from the data source");
@@ -992,6 +999,7 @@ impl Venue for BitgetFutures {
         }
         if index == 3 {
             self.private_message(cx, text);
+            self.account_mode_event(cx);
         } else {
             self.public_message(cx, text);
         }
@@ -1137,6 +1145,7 @@ impl Venue for BitgetFutures {
                 && cx.validate_background_read_http_delivery(&context).is_ok()
             {
                 self.account_response(cx, request, response);
+                self.account_mode_event(cx);
                 self.wake_trading(cx);
             }
             let _ = cx.finish_http_context(&context);
