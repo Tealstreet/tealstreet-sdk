@@ -6,6 +6,8 @@ pub(crate) struct Original {
     pub observed: Order,
     pub native: sign::Order,
     pub client: u64,
+    pub index: u64,
+    pub waiting_mark: bool,
 }
 #[derive(Default)]
 pub(crate) struct ProtectionState {
@@ -105,11 +107,15 @@ fn integer(row: &NativeRow, key: &str) -> Option<u64> {
 }
 fn kind(row: &NativeRow) -> Option<u8> {
     match row.kind.as_ref()? {
-        Scalar::Integer(n) => u8::try_from(*n).ok().filter(|n| matches!(n, 0 | 2 | 4)),
+        Scalar::Integer(n) => u8::try_from(*n)
+            .ok()
+            .filter(|n| matches!(n, 0 | 2 | 3 | 4 | 5)),
         Scalar::Text(s) => match s.to_ascii_lowercase().as_str() {
             "0" | "limit" => Some(0),
             "2" | "stop_loss" => Some(2),
+            "3" | "stop_loss_limit" => Some(3),
             "4" | "take_profit" => Some(4),
+            "5" | "take_profit_limit" => Some(5),
             _ => None,
         },
         _ => None,
@@ -134,7 +140,7 @@ fn standalone(row: &NativeRow) -> bool {
     .all(|key| integer(row, key) == Some(0))
         && matches!(
             row.trigger_status.as_deref(),
-            Some("na" | "untriggered" | "pending")
+            Some("na" | "untriggered" | "pending" | "mark-price")
         )
 }
 impl Original {
@@ -171,8 +177,8 @@ impl Original {
             return None;
         }
         if (native_kind == 0 && observed.kind != OrderType::Limit)
-            || (native_kind == 2 && observed.kind != OrderType::StopLoss)
-            || (native_kind == 4 && observed.kind != OrderType::TakeProfit)
+            || (matches!(native_kind, 2 | 3) && observed.kind != OrderType::StopLoss)
+            || (matches!(native_kind, 4 | 5) && observed.kind != OrderType::TakeProfit)
         {
             return None;
         }
@@ -224,6 +230,8 @@ impl Original {
             observed: observed.clone(),
             native,
             client,
+            index: integer(row, "order_index")?,
+            waiting_mark: row.trigger_status.as_deref() == Some("mark-price"),
         })
     }
 }
@@ -299,7 +307,7 @@ impl Lighter {
         }
         Ok(())
     }
-    // Every edit cancel is revalidated at its final Claim, including nonce retries.
+    // Every edit write is revalidated at its final Claim, including nonce retries.
     // Only accepted native MARK fields grant freshness; frame arrivals never do.
     pub(crate) fn protective_release_veto(
         &self,
@@ -352,7 +360,10 @@ impl Lighter {
                     .protection
                     .originals
                     .get(&old.id)
-                    .is_none_or(|current| !native_same(&current.native, &edit.original.native)))
+                    .is_none_or(|current| {
+                        !native_same(&current.native, &edit.original.native)
+                            || current.waiting_mark != edit.original.waiting_mark
+                    }))
         {
             return Err(not_sent(
                 "Lighter stop not changed: source order changed or filled",
