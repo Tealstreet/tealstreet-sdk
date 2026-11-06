@@ -1254,6 +1254,18 @@ impl ApexOmni {
                 .map(|receipt| receipt.identity.clone())
                 .collect(),
         };
+        // A 408 or 5xx on a put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        if job.restoring
+            && matches!(accepted, Accepted::Place)
+            && let Some((symbol, _, kind)) = &job.replaces
+        {
+            let words = format!(
+                "Your {symbol} {}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders",
+                what(*kind)
+            );
+            let _ = cx.present_plan_failure(&plan, words);
+        }
         cx.command_progress(job.command, receipts);
         let delivery = Request {
             command: job.command,
