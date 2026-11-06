@@ -196,8 +196,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   cryptocom: 1_727_488,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_153_472,
-  hyperliquidspot: 2_153_472,
+  // #3191, CI run 42249705679: Hyperliquid measured 2,154,448 B; CI + 10 KiB rounded up, siblings equal.
+  hyperliquid: 2_164_736,
+  hyperliquidspot: 2_164_736,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
@@ -208,7 +209,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   mexc: 1_858_560,
   okx: 1_973_248,
   orderly: 1_732_608,
-  paradex: 2_249_728,
+  // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
+  paradex: 2_260_992,
   phemex: 2_065_408,
   polymarket: 1_600_512,
   txflow: 1_838_080,

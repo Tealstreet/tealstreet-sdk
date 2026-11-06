@@ -348,8 +348,10 @@ test('#3143 public data watch (run 42181736999) retains Hyperliquid headroom and
 
 test('#3149 activeAssetData scoping (run 42197163575) retains Hyperliquid headroom and siblings match', () => {
   const measured = 2_143_008;
-  const cap = 2_153_472;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(measuredCap, 2_153_472);
+  const cap = WASM_VENUE_OVERRIDES.hyperliquid;
+  assert.ok(cap >= measuredCap);
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
@@ -359,12 +361,13 @@ test('#3149 activeAssetData scoping (run 42197163575) retains Hyperliquid headro
 });
 
 test('#3122 protective stop edits (run 42126229513) retain Paradex and BloFin headroom', () => {
-  for (const [venue, measured, cap] of [
+  for (const [venue, measured, measuredCap] of [
     ['paradex', 2_239_351, 2_249_728],
     ['blofin', 1_979_025, 1_989_632],
   ]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(measuredCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= measuredCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -463,4 +466,20 @@ test('#3152 BingX protective edits (run 42200843544) retain measured headroom an
   assert.equal(wasmBudgetError(measured, 'venue', 'bingx'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'bingx'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
+});
+
+
+test('#3191 run 42249705679 caps retain measured headroom and shared-family equality', () => {
+  for (const [venue, measured, cap] of [
+    ['paradex', 2_249_779, 2_260_992],
+    ['hyperliquid', 2_154_448, 2_164_736],
+    ['hyperliquidspot', 2_154_448, 2_164_736],
+  ]) {
+    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.hyperliquid, WASM_VENUE_OVERRIDES.hyperliquidspot);
 });
