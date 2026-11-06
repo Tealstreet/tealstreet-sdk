@@ -99,7 +99,7 @@ fn put_str(out: &mut Vec<u8>, value: &str) {
     out.extend_from_slice(value.as_bytes());
 }
 
-/// A data source's snapshot: one open order and BingX's VENUE_STATE (version 1:
+/// A data source's snapshot: one open order and BingX's VENUE_STATE (version 2:
 /// mode known, that order observed as a NEW one-way LIMIT).
 fn source_frame() -> Vec<u8> {
     source_frame_with(false, true)
@@ -159,7 +159,7 @@ fn source_frame_with(hedged: bool, with_order: bool) -> Vec<u8> {
         extra: None,
     }];
     source.set_orders(if with_order { orders } else { Vec::new() });
-    let mut state = vec![1u8, 1];
+    let mut state = vec![2u8, 1];
     state.extend_from_slice(&u32::from(with_order).to_le_bytes());
     if with_order {
         for text in [ORDER_ID, "LIMIT", "BOTH"] {
@@ -167,6 +167,7 @@ fn source_frame_with(hedged: bool, with_order: bool) -> Vec<u8> {
         }
         state.push(0);
         put_str(&mut state, "NEW");
+        put_str(&mut state, "");
     }
     let pending = source.take_pending();
     let mut writer = safe_cex_engine::wire::FrameWriter::new(Vec::new(), 0.0);

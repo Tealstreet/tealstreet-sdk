@@ -3,14 +3,14 @@
 //! the position mode is known, and amends need each open order's native
 //! observation (kind, position side, attached, native status).
 //!
-//! Version 1, little-endian: a version byte; a flags byte (mode known); the
+//! Version 2, little-endian: a version byte; a flags byte (mode known); the
 //! observations sorted by order id, each as strings (a u32 length and UTF-8
 //! bytes) plus an attached byte. The observed order itself is the store's: a
 //! frame-fed engine's ingested ORDERS are its reconcile.
-use super::{Observation, Trading};
+use super::{Observation, Trading, protection};
 use safe_cex_engine::model::OrderStatus;
 
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 const MODE_KNOWN: u8 = 1;
 
 fn put_str(out: &mut Vec<u8>, value: &str) {
@@ -39,7 +39,14 @@ impl<'a> Reader<'a> {
 }
 
 /// One decoded observation: order id, native kind, position side, attached, native status.
-type Row = (String, String, String, bool, String);
+type Row = (
+    String,
+    String,
+    String,
+    bool,
+    String,
+    Option<protection::Original>,
+);
 
 fn decode(bytes: &[u8]) -> Option<(bool, Vec<Row>)> {
     let mut reader = Reader(bytes);
@@ -51,7 +58,14 @@ fn decode(bytes: &[u8]) -> Option<(bool, Vec<Row>)> {
     for _ in 0..reader.u32()? {
         let (id, kind, side) = (reader.string()?, reader.string()?, reader.string()?);
         let attached = reader.u8()? != 0;
-        rows.push((id, kind, side, attached, reader.string()?));
+        let status = reader.string()?;
+        let original = reader.string()?;
+        let original = if original.is_empty() {
+            None
+        } else {
+            Some(serde_json::from_str(&original).ok()?)
+        };
+        rows.push((id, kind, side, attached, status, original));
     }
     reader.0.is_empty().then_some((mode_known, rows))
 }
@@ -70,6 +84,14 @@ impl Trading {
             put_str(&mut out, &seen.position_side);
             out.push(u8::from(seen.attached));
             put_str(&mut out, &seen.native_status);
+            put_str(
+                &mut out,
+                &seen
+                    .original
+                    .as_ref()
+                    .map(|v| serde_json::to_string(v).expect("native scalar provenance"))
+                    .unwrap_or_default(),
+            );
         }
         out
     }
@@ -85,11 +107,15 @@ impl Trading {
             return false;
         };
         self.mode_known = mode_known;
+        // A frame arrival cannot translate the source's local receipt clock.
+        self.references.clear();
         self.observed.clear();
         // Held until their order is ingested: unchanged state is never resent.
         self.pending_observed = rows
             .into_iter()
-            .map(|(id, kind, side, attached, status)| (id, (kind, side, attached, status)))
+            .map(|(id, kind, side, attached, status, original)| {
+                (id, (kind, side, attached, status, original))
+            })
             .collect();
         self.refresh_observed(store);
         true
@@ -105,8 +131,10 @@ impl Trading {
             .cloned()
             .collect();
         for id in ready {
-            if let (Some((native_kind, position_side, attached, native_status)), Some(order)) =
-                (self.pending_observed.remove(&id), store.order(&id))
+            if let (
+                Some((native_kind, position_side, attached, native_status, original)),
+                Some(order),
+            ) = (self.pending_observed.remove(&id), store.order(&id))
             {
                 self.observed.insert(
                     id,
@@ -116,6 +144,7 @@ impl Trading {
                         position_side,
                         attached,
                         native_status,
+                        original,
                     },
                 );
             }
@@ -188,7 +217,7 @@ mod tests {
         assert!(seen.order == order);
 
         let mut other = bytes.clone();
-        other[0] = 2;
+        other[0] = 3;
         assert!(!copy.apply_venue_state(&other, &store));
         assert!(!copy.apply_venue_state(&bytes[..bytes.len() - 1], &store));
         let mut trailing = bytes.clone();

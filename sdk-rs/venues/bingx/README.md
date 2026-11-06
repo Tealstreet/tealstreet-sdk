@@ -48,3 +48,12 @@ History read refusals retain a typed kind, the numeric venue code, and a closed
 `causeCode` (rate limit, key/permission, invalid parameters, venue failure, or
 decode). These diagnostics do not change one-resend or strict history recovery
 rules. Code meanings follow [BingX's error reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/error-codes.md).
+
+Protective edits retain native closing authority and use a final managed-Claim
+veto with a genuine <=5 s Mark/Last receipt. Proven standalone stop-market edits
+use native cancelReplace; explicit partial refusal permits one exact put-back.
+Ambiguous replies and guarded rate limits are Unknown, with no resend or restore.
+Frame-fed protective price edits refuse `reference stale` until the engine maps
+genuine source receipt clocks; frame arrival never refreshes a reference.
+See [protective edits](../../../../docs/plans/callers/bingx-protective-edits.md)
+for the native classes, proof requirements and frame-state version contract.
