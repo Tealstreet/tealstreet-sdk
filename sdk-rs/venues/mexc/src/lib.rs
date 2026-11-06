@@ -55,6 +55,7 @@ pub enum Pending {
     Tickers {
         context: Context,
         rows: Vec<Ticker>,
+        references: Vec<(String, trading::protection::References)>,
         failed: bool,
     },
     Depth {
@@ -118,6 +119,7 @@ pub struct MexcFutures {
     books: HashMap<String, BookState>,
     volume_units: HashMap<String, f64>,
     ticker_symbols: Vec<String>,
+    references: HashMap<String, trading::protection::References>,
     ticker_subscriptions: BTreeSet<String>,
     candles: HashMap<(String, Interval), u32>,
     next_book_generation: u32,
@@ -168,6 +170,7 @@ impl MexcFutures {
             books: HashMap::new(),
             volume_units: HashMap::new(),
             ticker_symbols: vec![],
+            references: HashMap::new(),
             ticker_subscriptions: BTreeSet::new(),
             candles: HashMap::new(),
             next_book_generation: 0,
@@ -236,6 +239,7 @@ impl MexcFutures {
             Pending::Tickers {
                 context: context.clone(),
                 rows: vec![],
+                references: vec![],
                 failed: false,
             }
         } else {
@@ -313,7 +317,7 @@ impl MexcFutures {
             }
         }
     }
-    fn mini_ticker(&self, cx: &mut Cx<'_, Pending>, item: &str) {
+    fn mini_ticker(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
         #[derive(serde::Deserialize)]
         struct Identity<'a> {
             #[serde(borrow)]
@@ -356,6 +360,10 @@ impl MexcFutures {
             );
             return;
         }
+        self.references
+            .entry(symbol.clone())
+            .or_default()
+            .observe(cx.now, [raw.last_price, raw.fair_price, raw.index_price]);
         cx.store.update_ticker(&symbol, |t| {
             // A zero price is an unavailable quote (seen in the public feed),
             // not a reason to discard valid mark/index/volume fields.
@@ -714,7 +722,13 @@ impl MexcFutures {
             Pending::Trade(request) => {
                 let error = VenueError::new(error).kind(ErrorKind::Network);
                 // The amend read precedes the replacement, which was never sent.
-                let error = if matches!(request.call, trading::Call::AmendRead { .. }) {
+                let before_write = matches!(request.call, trading::Call::AmendRead { .. })
+                    || if let trading::Call::ProtectiveRead { after_cancel, .. } = &request.call {
+                        !*after_cancel
+                    } else {
+                        false
+                    };
+                let error = if before_write {
                     error.outcome(Outcome::NotSent)
                 } else {
                     error.outcome(Outcome::Unknown)
@@ -849,6 +863,14 @@ impl Venue for MexcFutures {
                     serde_json::from_str::<Tick<'_>>(data.get()),
                     cx.store.market(&symbol),
                 ) {
+                    self.references.entry(symbol.clone()).or_default().observe(
+                        cx.now,
+                        [
+                            Some(raw.last_price),
+                            Some(raw.fair_price),
+                            Some(raw.index_price),
+                        ],
+                    );
                     let ticker = Self::ticker(raw, market);
                     cx.store.update_ticker(&symbol, |t| *t = ticker);
                 }
@@ -884,6 +906,7 @@ impl Venue for MexcFutures {
         }
         self.public.socket = None;
         self.public.open = false;
+        self.references.clear();
         self.ticker_subscriptions.clear();
         self.public_supervisor.retry(cx);
         for state in self.books.values_mut() {
@@ -942,9 +965,21 @@ impl Venue for MexcFutures {
                     }
                 }
             },
-            Pending::Tickers { rows, .. } => match serde_json::from_str::<Tick<'_>>(item) {
+            Pending::Tickers {
+                rows, references, ..
+            } => match serde_json::from_str::<Tick<'_>>(item) {
                 Ok(raw) => {
                     if let Some(m) = cx.store.market_by_id(&raw.symbol) {
+                        let mut receipt = trading::protection::References::default();
+                        receipt.observe(
+                            cx.now,
+                            [
+                                Some(raw.last_price),
+                                Some(raw.fair_price),
+                                Some(raw.index_price),
+                            ],
+                        );
+                        references.push((m.symbol.clone(), receipt));
                         rows.push(Self::ticker(raw, m));
                     }
                 }
@@ -1091,7 +1126,10 @@ impl Venue for MexcFutures {
                 start_account_and_tickers = true;
             }
             Pending::Tickers {
-                mut rows, failed, ..
+                mut rows,
+                references,
+                failed,
+                ..
             } => {
                 if failed || rows.is_empty() {
                     cx.notice(
@@ -1102,6 +1140,7 @@ impl Venue for MexcFutures {
                     self.discovery.failed(cx, true);
                     return;
                 }
+                self.references.extend(references);
                 rows.sort_by_key(|t| cx.store.market_index(&t.symbol));
                 self.discovery.succeeded(cx, &true);
                 cx.store.set_tickers(rows);

@@ -30,3 +30,13 @@ safe integer from a successful envelope. Failed, malformed or late samples do
 not calibrate or replay. A second 513 ends that attempt. Writes and 602 never
 enter clock recovery. Signing already takes fresh protocol-clock milliseconds
 at dispatch; calibration changes outbound timestamps, not engine deadlines.
+
+## Protective edits
+
+Known-class price edits use MEXC's native plan/TP-SL modify endpoints without a
+cancel fallback. Quantity edits inspect the original, guard the destructive send
+with a genuine fresh trigger reference, and require a terminal cancellation read.
+Only a standalone stop with exact native provenance permits one put-back after a
+definitive refusal; unknown outcomes never restore or resend. See
+[`mexc-protective-edits.md`](../../../../docs/plans/callers/mexc-protective-edits.md)
+for the endpoint classes, legacy signer-window limit and native controls.
