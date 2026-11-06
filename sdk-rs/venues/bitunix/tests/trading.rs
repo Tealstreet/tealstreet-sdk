@@ -1107,15 +1107,16 @@ fn a_parent_that_filled_during_the_fallback_fails_the_tpsl_edit() {
     }
 }
 
-// The private channel omits reduceOnly, and the amend's fallback re-places the order with
-// it: an order whose flag neither the venue reported nor this session set is not amended.
+// The private channel omits reduceOnly. Native modify_order carries no reduceOnly, so an
+// order seen only there is modified as before; only the cancel-and-re-place fallback,
+// which would carry a guessed flag, is refused before anything is canceled.
 #[test]
-fn an_order_whose_reduce_only_was_never_reported_is_not_amended() {
+fn a_ws_only_order_is_modified_natively_but_never_re_placed() {
     let (mut e, s) = startup();
     event(
         &mut e,
         s,
-        r#"{"ch":"order","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"stray","side":"Buy","type":"LIMIT","qty":"1","price":"90","dealAmount":"0"}}"#,
+        r#"{"ch":"order","data":{"event":"CREATE","symbol":"BTCUSDT","orderId":"stray","side":"Buy","type":"LIMIT","qty":"1","price":"90","dealAmount":"0","tpPrice":"120"}}"#,
     );
     safe_cex_engine::test_support::prepared_now(&mut e)
         .into_iter()
@@ -1129,10 +1130,35 @@ fn an_order_whose_reduce_only_was_never_reported_is_not_amended() {
             amount: None,
         }),
     );
-    let (error, wrote) = failed_without_write(&mut e, 15);
-    assert!(!wrote, "no write");
+    let modify = requests(&mut e).remove(0);
     assert!(
-        error.contains("reduce-only state is not reconciled"),
-        "{error}"
+        modify.url.ends_with("/trade/modify_order"),
+        "{}",
+        modify.url
     );
+    reply(&mut e, modify.id, r#"{"code":0,"data":{"orderId":"stray"}}"#);
+    safe_cex_engine::test_support::prepared_now(&mut e)
+        .into_iter()
+        .for_each(drop);
+    assert!(e.store().order("stray__tp").is_some(), "the attached take profit");
+
+    e.handle(
+        3.0,
+        Event::Command(Command::AmendOrder {
+            command: 16,
+            id: "stray__tp".into(),
+            price: Some(121.0),
+            amount: None,
+        }),
+    );
+    let drag = requests(&mut e).remove(0);
+    assert!(drag.url.ends_with("/trade/modify_order"), "{}", drag.url);
+    reply(
+        &mut e,
+        drag.id,
+        r#"{"code":20003,"msg":"The order does not support this operation"}"#,
+    );
+    let (error, wrote) = failed_without_write(&mut e, 16);
+    assert!(!wrote, "nothing canceled or re-placed");
+    assert!(error.contains("reduce-only state"), "{error}");
 }

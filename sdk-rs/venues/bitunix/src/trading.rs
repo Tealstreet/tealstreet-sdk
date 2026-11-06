@@ -1430,19 +1430,6 @@ impl BitunixFutures {
             if parent.kind != OrderType::Limit {
                 return Err("Bitunix native amend requires a pending LIMIT order".into());
             }
-            // The cancel-and-recreate fallback re-places this flag: never one the venue
-            // did not report and this session did not set.
-            if !self
-                .account
-                .native
-                .get(&parent.id)
-                .is_some_and(|meta| meta.reduce_reconciled)
-            {
-                return Err(format!(
-                    "Bitunix cannot safely amend {}: reduce-only state is not reconciled",
-                    parent.id
-                ));
-            }
             p.symbol = Some(parent.symbol.clone());
             p.order_id = Some(parent.id.clone());
             p.qty = Some(num::format(positive(
@@ -2204,6 +2191,22 @@ impl BitunixFutures {
                 leg,
             } = &request.step.call
         {
+            // The re-place carries reduceOnly, and the private channel omits it: a flag the
+            // venue never reported nor this session set could reopen a closing order.
+            // Native modify_order carries no reduceOnly, so only this fallback is gated.
+            if !self
+                .account
+                .native
+                .get(parent)
+                .is_some_and(|meta| meta.reduce_reconciled)
+            {
+                let mut refusal = VenueError::new(format!(
+                    "Your TP/SL edit was not applied: Bitunix could not modify order {parent} in place, and re-placing it needs its reduce-only state, which is not reconciled yet; nothing was canceled"
+                ))
+                .outcome(Outcome::Rejected);
+                refusal.presents = true;
+                return self.end(cx, command, refusal);
+            }
             // Native fallback: cancel, prove the cancel final, then replace.
             let symbol = p.symbol.clone().unwrap_or_default();
             let ids: Vec<_> = cx
