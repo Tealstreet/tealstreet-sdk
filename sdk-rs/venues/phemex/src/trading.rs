@@ -2000,15 +2000,18 @@ impl PhemexPerpetuals {
                     .retry_after_ms(self.paused_until - cx.now);
                 self.fail_unissued_trade(cx, id, error);
             } else {
+                let message = if step.replacement.as_ref().is_some_and(|guard| {
+                    cx.store
+                        .order(&guard.id)
+                        .is_some_and(|order| order.status == OrderStatus::Canceled)
+                }) {
+                    "Phemex order was canceled; replacement not sent (rate limited); re-place it"
+                } else {
+                    "Phemex requests are rate limited; mutation was not sent"
+                };
                 let job = self.trading.jobs.remove(&id).unwrap();
-                cx.command_error(
-                    id,
-                    "Phemex requests are rate limited; mutation was not sent",
-                );
-                let _ = cx.fail_plan(
-                    &job.plan,
-                    "Phemex requests are rate limited; mutation was not sent",
-                );
+                cx.command_error(id, message);
+                let _ = cx.fail_plan(&job.plan, message);
                 self.orders_uncertain(cx, job.placing, None, cx.now);
             }
             return;
