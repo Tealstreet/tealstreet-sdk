@@ -179,6 +179,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3168 run 42227488436, job 127925185663 measured bybit 2,246,685 B.
 // Guarded Partial edits add serial Plans, terminal/lineage reads and one-shot put-back.
 // ddi2il standing rule: CI + 10 KiB rounded up; all Bybit variants share this family cap.
+// #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
+// CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
@@ -196,8 +198,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   cryptocom: 1_727_488,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_153_472,
-  hyperliquidspot: 2_153_472,
+  hyperliquid: 2_178_048,
+  hyperliquidspot: 2_178_048,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
