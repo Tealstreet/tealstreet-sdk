@@ -95,6 +95,7 @@ enum Step {
         orders: Vec<Prepared>,
     },
     Cancel(Box<Order>),
+    Modify(sign::Modify),
     CancelProof,
     RestoreProof,
     Setting {
@@ -122,6 +123,7 @@ pub struct Submission {
 }
 #[derive(Clone)]
 enum Effect {
+    Modify,
     Place,
     Cancel,
     Setting {
@@ -471,10 +473,20 @@ impl Lighter {
                     );
                     return;
                 }
-                if old
-                    .extra
-                    .as_ref()
-                    .is_some_and(|extra| extra.conditional_order_price.is_some())
+                let native_stop = self
+                    .protection
+                    .originals
+                    .get(&old.id)
+                    .is_some_and(|source| {
+                        source.observed == old
+                            && source.waiting_mark
+                            && matches!(source.native.order_type, 2..=5)
+                    });
+                if !native_stop
+                    && old
+                        .extra
+                        .as_ref()
+                        .is_some_and(|extra| extra.conditional_order_price.is_some())
                 {
                     refuse(
                         cx,
@@ -493,6 +505,23 @@ impl Lighter {
                     }
                 };
                 let kind = old.kind;
+                let original = self
+                    .protection
+                    .originals
+                    .get(&old.id)
+                    .filter(|original| original.observed == old);
+                let max_slippage_pct = original.and_then(protection::Original::market_slippage_pct);
+                if original.is_some_and(|original| matches!(original.native.order_type, 2 | 4))
+                    && max_slippage_pct.is_none()
+                {
+                    refuse(
+                        cx,
+                        not_sent(
+                            "Lighter stop not changed: original slippage bound unsupported; re-place it",
+                        ),
+                    );
+                    return;
+                }
                 let opts = PlaceOrderOpts {
                     symbol: old.symbol.clone(),
                     kind,
@@ -509,7 +538,7 @@ impl Lighter {
                     sl_trigger_type: None,
                     client_order_id: None,
                     close: old.close,
-                    max_slippage_pct: None,
+                    max_slippage_pct,
                     stp_mode: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,
@@ -560,6 +589,21 @@ impl Lighter {
                         );
                         return;
                     }
+                    if matches!(original.native.order_type, 3 | 5)
+                        && if original.native.is_buy {
+                            original.native.price < orders[0].native.trigger_price
+                        } else {
+                            original.native.price > orders[0].native.trigger_price
+                        }
+                    {
+                        refuse(
+                            cx,
+                            not_sent(
+                                "Lighter stop not changed: kept limit cannot execute at the new trigger; re-place with the intended limit",
+                            ),
+                        );
+                        return;
+                    }
                     if let Err(error) =
                         self.protective_reference(cx.store, &orders[0].order, cx.now)
                     {
@@ -574,7 +618,29 @@ impl Lighter {
                         refusal: None,
                     });
                 }
-                steps.push_front(Step::Cancel(Box::new(old.clone())));
+                if let Some(edit) = &protection
+                    && edit.original.waiting_mark
+                    && matches!(edit.original.native.order_type, 2..=5)
+                    && let Some(Step::Place(orders)) = steps.front()
+                    && matches!(
+                        (edit.original.native.order_type, orders[0].native.order_type),
+                        (2 | 3, 2) | (4 | 5, 4)
+                    )
+                {
+                    steps = VecDeque::from([Step::Modify(sign::Modify {
+                        market_index: edit.original.native.market_id,
+                        index: edit.original.index,
+                        base_amount: orders[0].native.amount,
+                        price: if matches!(edit.original.native.order_type, 2 | 4) {
+                            orders[0].native.price
+                        } else {
+                            edit.original.native.price
+                        },
+                        trigger_price: orders[0].native.trigger_price,
+                    })]);
+                } else {
+                    steps.push_front(Step::Cancel(Box::new(old.clone())));
+                }
                 amend = Some(old);
                 (command, steps)
             }
@@ -955,6 +1021,7 @@ impl Lighter {
         let count = txs.len();
         let intent = match &effect {
             Effect::Place => Some(safe_cex_engine::classify::Intent::Place),
+            Effect::Modify => Some(safe_cex_engine::classify::Intent::Amend),
             Effect::Setting { .. } => Some(safe_cex_engine::classify::Intent::Setting),
             Effect::Cancel => None,
         };
@@ -1078,6 +1145,10 @@ impl Lighter {
                     builder: self.builder(),
                 }],
                 Effect::Place,
+            )),
+            Step::Modify(order) => Ok((
+                vec![sign::Transaction::Modify(order.clone())],
+                Effect::Modify,
             )),
             Step::Cancel(order) => Ok((
                 vec![sign::Transaction::Cancel {
@@ -1346,6 +1417,7 @@ impl Lighter {
                 let code = reply.code.as_ref().and_then(Number::integer);
                 if submission.count == 1
                     && !submission.grouped
+                    && !matches!(submission.effect, Effect::Modify)
                     && code == Some(21104)
                     && response.status < 500
                     && !matches!(response.status, 405 | 429)
@@ -1412,6 +1484,16 @@ impl Lighter {
                         message.push_str(RATE_MESSAGE);
                     }
                     let mut error = VenueError::new(message);
+                    if matches!(submission.effect, Effect::Modify) {
+                        error.message = if unknown {
+                            format!(
+                                "Lighter stop edit outcome unknown: {}; check Open Orders",
+                                error.message
+                            )
+                        } else {
+                            format!("Lighter stop not changed: {}", error.message)
+                        };
+                    }
                     if let Some(code) = code {
                         error = error.venue_code(code.to_string());
                     }
@@ -1450,6 +1532,7 @@ impl Lighter {
                     return;
                 }
                 let ids: Vec<String> = match self.trading.active.as_ref().unwrap().steps.front() {
+                    Some(Step::Modify(order)) => vec![order.index.to_string()],
                     Some(Step::Place(orders) | Step::Group { orders, .. }) => {
                         orders.iter().map(|p| p.order.id.clone()).collect()
                     }
@@ -1507,6 +1590,9 @@ impl Lighter {
                                 cx.store.upsert_order(p.order);
                             }
                         }
+                    }
+                    Step::Modify(order) => {
+                        self.record_modify(&order.index.to_string());
                     }
                     Step::Cancel(order) => {
                         if let Some(job) = self.trading.active.as_mut()
@@ -1621,6 +1707,19 @@ impl Lighter {
 
     fn submission_uncertain(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
         self.trading.next_nonce.invalidate();
+        if matches!(effect, Effect::Modify) {
+            let id = self
+                .trading
+                .active
+                .as_ref()
+                .unwrap()
+                .amend
+                .as_ref()
+                .unwrap()
+                .id
+                .clone();
+            self.record_modify(&id);
+        }
         // Frame-fed settings come from the data source, which reconciles them.
         if let Effect::Setting { symbol, .. } = effect
             && !cx.frame_fed()
@@ -2487,6 +2586,11 @@ impl Lighter {
         {
             let job = self.trading.active.take().unwrap();
             if let Some(effect) = job.effect {
+                if matches!(effect, Effect::Modify)
+                    && let Some(old) = job.amend.as_ref()
+                {
+                    self.record_modify(&old.id);
+                }
                 self.trading.retired_effects.push(effect);
             }
             self.trading.inflight = false;

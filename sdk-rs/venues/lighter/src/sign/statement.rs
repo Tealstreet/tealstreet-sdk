@@ -1,7 +1,7 @@
 //! The canonical statement a remote signer reads before it signs a Lighter
 //! request: every signed field as plain JSON, which it re-derives into the
 //! exact signed words instead of signing opaque bytes.
-use super::{Account, Attributes, Fields, OrderInfo, TxInput, auth_message, encode};
+use super::{Account, Attributes, Fields, Modify, OrderInfo, TxInput, auth_message, encode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -19,6 +19,8 @@ struct Tx {
     expired_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     order: Option<OrderInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    modify: Option<Modify>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     grouping_type: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,6 +73,7 @@ impl Tx {
             nonce,
             expired_at,
             order: None,
+            modify: None,
             grouping_type: None,
             orders: None,
             attributes: None,
@@ -83,6 +86,7 @@ impl Tx {
     fn of(input: &TxInput) -> Self {
         let mut tx = Self::bare(input.tx_type, input.nonce, input.expired_at);
         match &input.fields {
+            Fields::Modify(order) => tx.modify = Some(order.clone()),
             Fields::Create(order, attributes) => {
                 tx.order = Some(order.clone());
                 tx.attributes = *attributes;
@@ -116,6 +120,20 @@ impl Tx {
         let refused = || "Lighter statement fields do not match the transaction type".to_owned();
         match self {
             Self {
+                tx_type: 17,
+                modify: Some(order),
+                order: None,
+                grouping_type: None,
+                orders: None,
+                attributes: None,
+                market_index: None,
+                index: None,
+                initial_margin_fraction: None,
+                margin_mode: None,
+                ..
+            } => Ok(Fields::Modify(order)),
+            Self {
+                modify: None,
                 tx_type: 14,
                 order: Some(order),
                 attributes,
@@ -128,6 +146,7 @@ impl Tx {
                 ..
             } => Ok(Fields::Create(order, attributes)),
             Self {
+                modify: None,
                 tx_type: 28,
                 grouping_type: Some(grouping),
                 orders: Some(orders),
@@ -140,6 +159,7 @@ impl Tx {
                 ..
             } => Ok(Fields::Grouped(grouping, orders, attributes)),
             Self {
+                modify: None,
                 tx_type: 15,
                 market_index: Some(market_id),
                 index: Some(order_id),
@@ -155,6 +175,7 @@ impl Tx {
                 order_id,
             }),
             Self {
+                modify: None,
                 tx_type: 20,
                 market_index: Some(market_id),
                 initial_margin_fraction: Some(fraction),

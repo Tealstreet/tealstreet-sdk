@@ -6,6 +6,7 @@
 pub(crate) mod acknowledgement;
 pub(crate) mod codes;
 pub(crate) mod ordinary;
+mod partial;
 
 use crate::sign::Body;
 use crate::wire::*;
@@ -77,8 +78,9 @@ enum Call {
     CancelPartialStop {
         id: String,
         batch: bool,
-        guard: PartialStopGuard,
+        guard: Box<PartialStopGuard>,
     },
+    PartialProof(partial::Axis),
     CancelAll {
         ids: Vec<String>,
     },
@@ -96,6 +98,9 @@ enum Call {
 
 #[derive(Clone)]
 struct PartialStopGuard {
+    original: Order,
+    category: String,
+    position_idx: i64,
     symbol: String,
     side: OrderSide,
     kind: OrderType,
@@ -104,6 +109,59 @@ struct PartialStopGuard {
 }
 
 impl PartialStopGuard {
+    fn validate_original(
+        &self,
+        store: &safe_cex_engine::Store,
+        now: f64,
+    ) -> Result<(), VenueError> {
+        let reference = self.original.trigger_type.ok_or_else(|| {
+            safe_cex_engine::protective_amend::refused(Some(
+                "The original trigger source is unknown; your protection is unchanged".into(),
+            ))
+        })?;
+        let mut original = self.clone();
+        original.kind = original.original.kind;
+        original.price = original.original.price;
+        original.reference = reference;
+        original.validate(store, now)
+    }
+
+    fn validate_order(
+        &self,
+        store: &safe_cex_engine::Store,
+        canceled: bool,
+    ) -> Result<(), VenueError> {
+        let unchanged = match store.order(&self.original.id) {
+            Some(current) => {
+                let mut current = current.clone();
+                current.last_update = self.original.last_update;
+                if canceled && current.status == OrderStatus::Canceled {
+                    current.status = self.original.status;
+                }
+                current == self.original
+            }
+            None => canceled,
+        };
+        let protected_side = if self.side == OrderSide::Sell {
+            PositionSide::Long
+        } else {
+            PositionSide::Short
+        };
+        let protected = store.positions().iter().any(|position| {
+            position.symbol == self.symbol
+                && position.side == protected_side
+                && position.contracts.is_finite()
+                && position.contracts > 0.0
+        });
+        if !unchanged || self.original.filled != 0.0 || !protected {
+            return Err(safe_cex_engine::protective_amend::refused(Some(format!(
+                "The original {} protection changed, filled, or no longer protects an open position; check Open Orders before editing it",
+                self.symbol
+            ))));
+        }
+        Ok(())
+    }
+
     fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
         let label = match self.reference {
             StopTriggerType::MarkPrice => "mark",
@@ -1252,6 +1310,9 @@ impl BybitLinear {
                 _ => StopTriggerType::MarkPrice,
             };
             let guard = PartialStopGuard {
+                original: order.clone(),
+                category: self.category_for(&order.symbol).as_str().into(),
+                position_idx: self.stop_position_idx(cx, &order.symbol, order.side),
                 symbol: order.symbol.clone(),
                 side: order.side,
                 kind,
@@ -1259,7 +1320,9 @@ impl BybitLinear {
                 reference: by,
             };
             guard
-                .validate(cx.store, cx.now)
+                .validate_order(cx.store, false)
+                .and_then(|()| guard.validate_original(cx.store, cx.now))
+                .and_then(|()| guard.validate(cx.store, cx.now))
                 .map_err(|error| error.message)?;
             // The stop as it stands, to put back exactly if its replacement is refused.
             let (restore, _) = self.trading_stop_body(
@@ -1268,7 +1331,7 @@ impl BybitLinear {
                 order.kind,
                 order.price,
                 order.trigger_type,
-                num::adjust(order.amount, market.precision.amount),
+                order.amount,
                 limit,
             );
             let mut job = self.plan_cancel(std::slice::from_ref(order));
@@ -1276,8 +1339,22 @@ impl BybitLinear {
                 planned.call = Call::CancelPartialStop {
                     id: order.id.clone(),
                     batch: self.paths.batch_orders,
-                    guard: guard.clone(),
+                    guard: Box::new(guard.clone()),
                 };
+            }
+            for axis in [
+                partial::Axis::Target,
+                partial::Axis::Live,
+                partial::Axis::History,
+            ] {
+                job.steps.push_back(Step {
+                    delay_ms: 0.0,
+                    requests: vec![partial::proof(
+                        self.category_for(&order.symbol).as_str(),
+                        order,
+                        axis,
+                    )],
+                });
             }
             job.steps.push_back(Step {
                 delay_ms: 0.0,
