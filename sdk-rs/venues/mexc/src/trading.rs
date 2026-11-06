@@ -13,6 +13,8 @@ use safe_cex_engine::{
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
+pub(crate) mod protection;
+
 const SUBMIT: &str = "/api/v1/private/order/submit";
 const BATCH: &str = "/api/v1/private/order/submit_batch";
 const PLAN: &str = "/api/v1/private/planorder/place/v2";
@@ -35,6 +37,15 @@ pub struct Request {
 }
 #[derive(Clone)]
 pub enum Call {
+    ProtectiveRead {
+        page: u8,
+        after_cancel: bool,
+        attempt: u8,
+    },
+    NativeEdit,
+    ProtectivePlace {
+        restore: bool,
+    },
     Place {
         opts: PlaceOrderOpts,
         scope: Scope,
@@ -86,6 +97,7 @@ pub struct Job {
     effective: bool,
     /// The symbol of an order this job cancels before placing its replacement.
     replaces: Option<String>,
+    protection: Option<Box<protection::Edit>>,
 }
 #[derive(Default)]
 pub struct Trading {
@@ -764,6 +776,7 @@ impl MexcFutures {
     }
     pub fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let mut refusal_kind = None;
+        let mut protection = None;
         let total_orders = match &command {
             Command::PlaceOrders { orders, .. } => orders.len(),
             Command::AmendOrder { .. } => 1,
@@ -783,12 +796,74 @@ impl MexcFutures {
                 amount,
             } => {
                 let result = (|| {
+                    let (native_id, leg) = protection::alias(&id);
                     let o = cx
                         .store
-                        .order(&id)
+                        .order(native_id)
                         .ok_or_else(|| format!("MEXC order {id} not found"))?;
                     if o.status != OrderStatus::Open {
                         return Err("MEXC only amends open orders".into());
+                    }
+                    if protection::protected(o) || leg.is_some() {
+                        if o.filled != 0. {
+                            return Err(
+                                "MEXC filled protective order cannot be edited; stop not changed"
+                                    .into(),
+                            );
+                        }
+                        let scope = if self.account.stop_ids.contains(native_id) {
+                            Scope::Stop
+                        } else if self.account.plan_ids.contains(native_id) {
+                            Scope::Plan
+                        } else {
+                            Scope::Regular
+                        };
+                        if scope == Scope::Stop && o.amount == 0. {
+                            let side = if o.side == OrderSide::Sell {
+                                PositionSide::Long
+                            } else {
+                                PositionSide::Short
+                            };
+                            if !cx
+                                .store
+                                .positions()
+                                .iter()
+                                .any(|p| p.symbol == o.symbol && p.side == side && p.contracts > 0.)
+                            {
+                                refusal_kind = Some(ErrorKind::VenueUnavailable);
+                                return Err("MEXC position not loaded yet; try again in a moment. The order is unchanged".into());
+                            }
+                        }
+                        protection = Some(Box::new(protection::Edit {
+                            observed: o.clone(),
+                            scope,
+                            leg,
+                            price: price.map(|p| {
+                                num::adjust(
+                                    p,
+                                    cx.store.market(&o.symbol).map_or(0., |m| m.precision.price),
+                                )
+                            }),
+                            amount,
+                            native: String::new(),
+                            replacement: None,
+                            restore: None,
+                            canceled: false,
+                            cancel_proven: false,
+                            restoring: false,
+                            refusal: None,
+                            started: cx.now,
+                        }));
+                        return Ok(VecDeque::from([Step {
+                            receipts: vec![],
+                            path: "",
+                            body: String::new(),
+                            call: Call::ProtectiveRead {
+                                page: 1,
+                                after_cancel: false,
+                                attempt: 0,
+                            },
+                        }]));
                     }
                     let opts = PlaceOrderOpts {
                         symbol: o.symbol.clone(),
@@ -1021,6 +1096,7 @@ impl MexcFutures {
                 failed_index: None,
                 effective: false,
                 replaces,
+                protection,
             });
             self.advance_trade(cx);
         }
@@ -1047,7 +1123,9 @@ impl MexcFutures {
             self.advance_trade(cx);
             return;
         };
-        if matches!(next.path, SUBMIT | BATCH) && cx.now < self.trading.next_submit {
+        let native_next = matches!(&next.call, Call::NativeEdit);
+        if (matches!(next.path, SUBMIT | BATCH) || native_next) && cx.now < self.trading.next_submit
+        {
             self.trading.timer = Some(cx.set_timer(self.trading.next_submit - cx.now));
             return;
         }
@@ -1055,6 +1133,15 @@ impl MexcFutures {
         let mut step = job.steps.pop_front().unwrap();
         let command = job.command;
         let gap = job.gap;
+        if let Call::ProtectiveRead {
+            page,
+            after_cancel,
+            attempt,
+        } = step.call
+        {
+            self.send_protective_read(cx, command, page, after_cancel, attempt);
+            return;
+        }
         if let Call::Place {
             opts,
             amend: Some(intent),
@@ -1090,6 +1177,8 @@ impl MexcFutures {
         }
         if matches!(step.path, SUBMIT | BATCH) {
             self.trading.next_submit = cx.now + gap.max(450.0);
+        } else if native_next {
+            self.trading.next_submit = cx.now + 500.0;
         }
         let refreshed=match step.call.clone() {
             Call::Place {mut opts,amend,..}=>{
@@ -1136,7 +1225,16 @@ impl MexcFutures {
             .is_some_and(|(t, _)| *t == timer)
         {
             let (_, request) = self.trading.read_retry.take().unwrap();
-            self.read_amend(cx, request);
+            if let Call::ProtectiveRead {
+                page,
+                after_cancel,
+                attempt,
+            } = request.call
+            {
+                self.send_protective_read(cx, request.command, page, after_cancel, attempt);
+            } else {
+                self.read_amend(cx, request);
+            }
             return;
         }
 
@@ -1151,8 +1249,34 @@ impl MexcFutures {
         command: CommandId,
         mut error: VenueError,
     ) {
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_none_or(|j| j.command != command)
+        {
+            return;
+        }
         self.trading.waiting = false;
         if let Some(job) = self.trading.active.take() {
+            if let Some(edit) = job.protection.as_ref()
+                && (edit.canceled || error.outcome == Some(Outcome::Unknown))
+                && error.protection.is_none()
+            {
+                error.presents = true;
+                if error.outcome == Some(Outcome::Unknown) {
+                    error.message = format!(
+                        "Your {} protection status is unknown: {}; check Open Orders and your position before replacing protection",
+                        edit.observed.symbol, error.message
+                    );
+                } else {
+                    error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+                    error.message = format!(
+                        "Your {} protection must be re-placed: {}; the original protection is no longer open",
+                        edit.observed.symbol, error.message
+                    );
+                }
+            }
             if job.effective
                 && job.ids.is_empty()
                 && let Some(symbol) = &job.replaces
@@ -1440,6 +1564,37 @@ impl MexcFutures {
         {
             return;
         }
+        if let Call::ProtectiveRead {
+            page,
+            after_cancel,
+            attempt,
+        } = request.call
+        {
+            self.protective_read_response(
+                cx,
+                request.command,
+                page,
+                after_cancel,
+                attempt,
+                response,
+            );
+            return;
+        }
+        let call = &request.call;
+        let native_edit = matches!(call, Call::NativeEdit);
+        let guarded_regular_place = if let Call::Place { .. } = request.call {
+            self.trading
+                .active
+                .as_ref()
+                .is_some_and(|j| j.protection.is_some())
+        } else {
+            false
+        };
+        let protective_place = if let Call::ProtectivePlace { restore } = request.call {
+            Some(restore)
+        } else {
+            None
+        };
         if matches!(&request.call, Call::AmendRead { .. }) {
             self.amend_response(cx, request, response);
             return;
@@ -1488,6 +1643,77 @@ impl MexcFutures {
             }
             let e = Envelope::checked(response.body)?;
             match request.call {
+                Call::NativeEdit => {
+                    if let Some(data) = e.data
+                        && let Some(error) = row_refusal(data.get())
+                    {
+                        refused = true;
+                        return Err(error);
+                    }
+                    let edit = self
+                        .trading
+                        .active
+                        .as_ref()
+                        .unwrap()
+                        .protection
+                        .as_ref()
+                        .unwrap();
+                    let id = edit.observed.id.clone();
+                    let price = edit.price;
+                    let leg = edit.leg;
+                    let unchanged = cx.store.order(&id) == Some(&edit.observed);
+                    if unchanged {
+                        cx.store.update_order(&id, |o| {
+                            if let Some(take) = leg {
+                                if take {
+                                    o.take_profit = price;
+                                } else {
+                                    o.stop_loss = price;
+                                }
+                            } else if let Some(price) = price {
+                                o.price = price;
+                            }
+                        });
+                    }
+                    self.trading.active.as_mut().unwrap().ids.push(id);
+                }
+                Call::ProtectivePlace { restore } => {
+                    if let Some(refusal) = row_refusal(e.payload()?) {
+                        refused = true;
+                        return Err(refusal);
+                    }
+                    let id = result_id(e.payload()?)?;
+                    if id == "0" {
+                        return Err("MEXC placement returned a zero order id".into());
+                    }
+                    let edit = self
+                        .trading
+                        .active
+                        .as_ref()
+                        .unwrap()
+                        .protection
+                        .as_ref()
+                        .unwrap();
+                    let mut order = edit.observed.clone();
+                    order.id = id.clone();
+                    order.status = OrderStatus::Open;
+                    order.last_update = cx.now;
+                    if !restore {
+                        order.price = edit.price.unwrap_or(order.price);
+                        if let Some(amount) = edit.amount {
+                            let size = cx
+                                .store
+                                .market(&order.symbol)
+                                .and_then(|m| m.contract_size)
+                                .unwrap_or(1.);
+                            order.amount = amount * size;
+                            order.remaining = order.amount;
+                        }
+                    }
+                    self.account.revision += 1;
+                    self.apply_order(cx, order, edit.scope, self.account.revision);
+                    self.trading.active.as_mut().unwrap().ids.push(id);
+                }
                 Call::Place { opts, scope, .. } => {
                     if let Some(refusal) = row_refusal(e.payload()?) {
                         refused = true;
@@ -1665,7 +1891,7 @@ impl MexcFutures {
                         }
                     });
                 }
-                Call::AmendRead { .. } => unreachable!(),
+                Call::AmendRead { .. } | Call::ProtectiveRead { .. } => unreachable!(),
                 Call::Mode { hedged } => {
                     if self.account.mode_revision > request.revision {
                         return Ok(());
@@ -1681,6 +1907,35 @@ impl MexcFutures {
         self.trading.waiting = false;
         match result {
             Ok(()) => {
+                if let Some(edit) = self
+                    .trading
+                    .active
+                    .as_mut()
+                    .and_then(|j| j.protection.as_mut())
+                    && !native_edit
+                    && protective_place.is_none()
+                {
+                    edit.canceled = true;
+                }
+                if protective_place == Some(true) {
+                    let edit = self
+                        .trading
+                        .active
+                        .as_ref()
+                        .unwrap()
+                        .protection
+                        .as_ref()
+                        .unwrap();
+                    let mut error = VenueError::new(format!(
+                        "Your {} protection is unchanged: {}; the original protection was restored",
+                        edit.observed.symbol,
+                        edit.refusal.as_deref().unwrap_or("replacement refused")
+                    ));
+                    error.protection = Some(safe_cex_engine::error::Protection::Restored);
+                    error.presents = true;
+                    self.trade_failed(cx, request.command, error);
+                    return;
+                }
                 if let Some(job) = self.trading.active.as_mut() {
                     job.effective = true;
                 }
@@ -1688,7 +1943,43 @@ impl MexcFutures {
             }
             Err(error) => {
                 cx.command_error(request.command, &error);
-                let error = write_failure(response.status, response.body, error, refused);
+                let mut error = write_failure(response.status, response.body, error, refused);
+                if refused
+                    && response.status == 200
+                    && (protective_place.is_some() || guarded_regular_place || native_edit)
+                {
+                    error.outcome = Some(Outcome::Rejected);
+                }
+                if (protective_place.is_some() || native_edit)
+                    && (200..500).contains(&response.status)
+                    && let Ok(e) = Envelope::checked(response.body).or_else(|_| {
+                        serde_json::from_str::<Envelope<'_>>(response.body)
+                            .map_err(|e| e.to_string())
+                    })
+                    && e.success == Some(false)
+                    && e.code != 0.
+                {
+                    error.outcome = Some(Outcome::Rejected);
+                }
+                if (protective_place.is_some() || guarded_regular_place || native_edit)
+                    && error.outcome.is_none()
+                {
+                    error.outcome = Some(Outcome::Unknown);
+                }
+                if (response.status == 429 || error.kind == Some(ErrorKind::RateLimited))
+                    && (protective_place.is_some() || guarded_regular_place || native_edit)
+                {
+                    error.outcome = Some(Outcome::Unknown);
+                }
+                if native_edit && error.outcome == Some(Outcome::Rejected) {
+                    error.outcome = Some(Outcome::NotSent);
+                }
+                if (protective_place == Some(false) || guarded_regular_place)
+                    && error.outcome == Some(Outcome::Rejected)
+                    && self.start_protective_restore(cx, request.command, &error)
+                {
+                    return;
+                }
                 self.trade_failed(cx, request.command, error);
             }
         }
@@ -1753,4 +2044,8 @@ fn replacement_fits(cx: &Cx<'_, Pending>, symbol: &str, native: f64) -> Result<(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn protective_not_sent(message: impl Into<String>) -> VenueError {
+    not_sent(message)
 }
