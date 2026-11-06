@@ -74,6 +74,7 @@ pub struct CensusRead {
     /// Rows naming a client order index (client, native, symbol), applied only
     /// once their symbol's rows are admitted.
     observed: Vec<(String, String, String)>,
+    originals: Vec<(Order, String)>,
 }
 #[derive(Clone)]
 pub struct Backfill {
@@ -1071,6 +1072,8 @@ impl Lighter {
         self.account.suppressed.contains(id)
     }
     pub(crate) fn record_cancel(&mut self, id: &str, _now: f64) {
+        self.protection.originals.remove(id);
+        self.protection.complex.remove(id);
         self.account.revision += 1;
         self.account
             .order_revision
@@ -1632,7 +1635,7 @@ impl Lighter {
         market_hint: Option<&str>,
         orders: &mut Vec<Order>,
         coverage: &mut SnapshotCoverage<String>,
-        observed: &mut Vec<(String, String, String)>,
+        census: &mut CensusRead,
     ) {
         match self.map_order_row(cx, raw, market_hint, true) {
             Ok(order) => {
@@ -1640,7 +1643,12 @@ impl Lighter {
                 if let Some(order) = &order
                     && let Some(client_index) = client_order_index(raw)
                 {
-                    observed.push((client_index, order.id.clone(), order.symbol.clone()));
+                    census
+                        .observed
+                        .push((client_index, order.id.clone(), order.symbol.clone()));
+                }
+                if let Some(order) = &order {
+                    census.originals.push((order.clone(), raw.get().into()));
                 }
                 return orders.extend(order);
             }
@@ -1759,6 +1767,7 @@ impl Lighter {
             _ => OrderType::Limit,
         };
         if kind == OrderType::Limit
+            && (wire.kind.0.is_empty() || wire.trigger_price.is_none())
             && let Some(o) = existing
             && o.kind != OrderType::Limit
         {
@@ -1905,7 +1914,7 @@ impl Lighter {
                     normalized(&wire.kind.0).as_str(),
                     "3" | "5" | "STOP_LIMIT" | "STOP_LOSS_LIMIT" | "TAKE_PROFIT_LIMIT"
                 )
-                .then(|| wire.price.as_ref().map_or(f64::NAN, |p| p.0)),
+                .then(|| wire.price.as_ref().map_or(0.0, |p| p.0)),
                 remaining_native: Some(remaining),
                 remaining_notional: Some(remaining_notional),
                 reject_reason,
@@ -1965,14 +1974,9 @@ impl Lighter {
                 market,
                 ..
             } => match serde_json::from_str::<&RawValue>(item) {
-                Ok(raw) => self.snapshot_order(
-                    cx,
-                    raw,
-                    market.as_deref(),
-                    orders,
-                    coverage,
-                    &mut census.observed,
-                ),
+                Ok(raw) => {
+                    self.snapshot_order(cx, raw, market.as_deref(), orders, coverage, census)
+                }
                 Err(_) => *valid = false,
             },
         }
@@ -2188,6 +2192,17 @@ impl Lighter {
             self.census_follow_up(cx, census.started);
             return;
         }
+        for (order, raw) in census.originals {
+            if !refused.contains(&order.symbol) && cx.store.order(&order.id) == Some(&order) {
+                self.observe_original(cx.store, &raw, &order);
+            }
+        }
+        self.protection
+            .originals
+            .retain(|id, original| cx.store.order(id) == Some(&original.observed));
+        self.protection
+            .complex
+            .retain(|id| cx.store.order(id).is_some());
         cx.store.set_orders_loaded();
         let active = cx
             .store
@@ -2466,7 +2481,7 @@ impl Lighter {
                         hint.or(market.as_deref()),
                         orders,
                         coverage,
-                        &mut census.observed,
+                        census,
                     )
                 });
                 *valid = result.is_ok();
@@ -2667,6 +2682,8 @@ impl Lighter {
                         cx.notice_error(Level::Error, code::ORDER_REJECTED, &error);
                     }
                     if matches!(order.status, OrderStatus::Canceled | OrderStatus::Closed) {
+                        self.protection.originals.remove(&order.id);
+                        self.protection.complex.remove(&order.id);
                         self.account.suppressed.insert(order.id.clone());
                         self.account.records.remove(&order.id);
                         if order.status == OrderStatus::Canceled {
@@ -2675,6 +2692,7 @@ impl Lighter {
                             cx.store.upsert_order(order);
                         }
                     } else {
+                        self.observe_original(cx.store, row.get(), &order);
                         cx.store.upsert_order(order);
                     }
                 }

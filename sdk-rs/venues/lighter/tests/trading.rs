@@ -500,7 +500,7 @@ fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
 }
 
 #[test]
-fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
+fn a_stop_without_native_provenance_is_refused_before_cancel() {
     let (mut e, _) = ready_unattributed();
     e.store_mut().update_order("42", |o| {
         o.kind = OrderType::StopLoss;
@@ -516,22 +516,10 @@ fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
             amount: None,
         }),
     );
-    let nonce = http(&mut e, "nextNonce");
-    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
-    let cancel = http(&mut e, "sendTx");
-    ack(&mut e, &cancel);
-    let t = timer(&mut e);
-    e.handle(NOW + 100.0, Event::TimerFired { timer: t });
-    let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
-    reply_at(
-        &mut e,
-        NOW + 100.0,
-        &replacement,
-        200,
-        r#"{"code":21702,"message":"replacement refused"}"#,
-    );
-    let error = failure(&mut e);
-    assert!(error.contains("long position has no stop"), "{error}");
+    let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error,..}) if error.outcome == Some(Outcome::NotSent) && error.message.contains("original unavailable"))));
+    assert!(e.store().order("42").is_some());
 }
 
 #[test]
@@ -849,7 +837,7 @@ fn closing_limit_edit_preserves_native_limit_type() {
         (OrderSide::Buy, 105.0, 90.0, false),
         (OrderSide::Buy, 90.0, 100.0, true),
     ] {
-        let (mut e, _) = ready_unattributed();
+        let (mut e, socket) = ready_unattributed();
         e.store_mut().update_order("42", |o| {
             o.side = side;
             o.price = old_price;
@@ -862,6 +850,17 @@ fn closing_limit_edit_preserves_native_limit_type() {
                 PositionSide::Long
             };
         });
+        let source = json!({"order_index":"42","client_order_index":"123","market_id":1,"status":"open","type":0,"time_in_force":1,
+            "is_ask":side==OrderSide::Sell,"reduce_only":true,"initial_base_amount":"2","filled_base_amount":"0","remaining_base_amount":"2",
+            "price":old_price.to_string(),"trigger_price":"0","order_expiry":NOW as u64+1_000_000,"trigger_status":"na",
+            "parent_order_index":0,"parent_order_id":"0","to_trigger_order_id_0":"0","to_trigger_order_id_1":"0","to_cancel_order_id_0":"0","order_flags":0});
+        message(
+            &mut e,
+            socket,
+            NOW,
+            &json!({"channel":"account_all_orders","orders":[source.clone()]}).to_string(),
+        );
+        assert_eq!(e.store().order("42").unwrap().kind, OrderType::Limit);
         e.handle(
             NOW,
             Event::Command(Command::AmendOrder {
@@ -877,7 +876,17 @@ fn closing_limit_edit_preserves_native_limit_type() {
         ack(&mut e, &cancel);
         let t = timer(&mut e);
         e.handle(NOW + 100.0, Event::TimerFired { timer: t });
-        let replacement = http(&mut e, "sendTx");
+        let proof = http_at(&mut e, NOW + 100.0, "accountOrders");
+        let mut canceled = source;
+        canceled["status"] = json!("canceled");
+        reply_at(
+            &mut e,
+            NOW + 100.0,
+            &proof,
+            200,
+            &json!({"code":200,"orders":[canceled]}).to_string(),
+        );
+        let replacement = http_at(&mut e, NOW + 100.0, "sendTx");
         let tx = wire(&replacement);
         assert_eq!(tx["Type"], 0, "{side:?}: {old_price} -> {new_price}");
         assert_eq!(tx["TriggerPrice"], 0);
