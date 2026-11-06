@@ -234,7 +234,7 @@ test('measured and unchanged family certificates cannot authorize a different mo
 });
 
 test('both independent comparisons are mandatory and cumulative creep blocks a passing tip', () => {
-  assert.equal(BITGET_CUMULATIVE_ANCHOR, '518d3953c09daf63c1345ea465bbc55bd313f53a');
+  assert.equal(BITGET_CUMULATIVE_ANCHOR, '38b69912e461e27198f5252c98cef73b7521b169');
   for (const [tipQ, anchorQ, expected] of [[1, 1, true], [1, 1.05, false], [1.05, 1, false]]) {
     const data = fixture(tipQ), tip = assessBitgetPairedSteady(data).certificate;
     const anchor = assessBitgetPairedSteady(anchorFixture(fixture(anchorQ))).certificate;
@@ -246,6 +246,24 @@ test('both independent comparisons are mandatory and cumulative creep blocks a p
   const anchor = assessBitgetPairedSteady(anchorFixture(data)).certificate;
   for (const absent of [null, tip, { ...anchor }]) assert.throws(() => combineBitgetPairedCertificates(tip, absent));
   assert.throws(() => bitgetAnchorAuthority({ ...data.authority }));
+});
+
+test('reset changes the protocol seal and refuses pre-reset evidence', () => {
+  const previousProtocol = '1b5ac9e04a188ffe6add61f3e9d45a3bdbbb7119ab79820bb538660a1f50bb9d';
+  assert.notEqual(BITGET_PAIRED_PROTOCOL_SHA256, previousProtocol);
+  const data = anchorFixture(fixture());
+  data.evidence.protocolSha256 = previousProtocol;
+  const result = assessBitgetPairedSteady(data);
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join('\n'), /protocol identity/);
+});
+
+test('pre-reset anchor cannot replace the newly issued anchor authority', () => {
+  const data = anchorFixture(fixture());
+  data.evidence.refs.baseline = '518d3953c09daf63c1345ea465bbc55bd313f53a';
+  const result = assessBitgetPairedSteady(data);
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join('\n'), /source\/composition differs/);
 });
 
 test('witnesses must share the physical job and canonical path with disjoint ordered windows', () => {
