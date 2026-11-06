@@ -468,9 +468,7 @@ impl Kucoin {
                 _ => "GTC",
             }),
             post_only: (order.time_in_force == Some(TimeInForce::PostOnly)).then_some(true),
-            close_order: close
-                .then_some(true)
-                .or(order.close.filter(|close| !*close)),
+            close_order: close.then_some(true),
             stop: is_stop.then_some(match (order.kind, order.side) {
                 (OrderType::StopLoss, OrderSide::Buy)
                 | (OrderType::TakeProfit, OrderSide::Sell) => "up",

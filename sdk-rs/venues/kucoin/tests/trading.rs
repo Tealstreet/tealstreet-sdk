@@ -1960,7 +1960,10 @@ fn stop_limit_replacement_preserves_price_type_and_native_lots() {
         assert_eq!(body["price"], "130");
         assert_eq!(body["stopPrice"], trigger.to_string());
         assert_eq!(body["size"], "6");
-        assert_eq!(body["closeOrder"], false);
+        assert_ne!(
+            body["closeOrder"], true,
+            "omitted closeOrder defaults to false"
+        );
         assert_eq!(body["stopPriceType"], "MP");
         assert_eq!(body["timeInForce"], "GTC");
     }
@@ -1994,7 +1997,10 @@ fn stop_limit_put_back_preserves_original_type_price_trigger_and_size() {
             body["size"], "6",
             "put-back uses original lots, not the edit"
         );
-        assert_eq!(body["closeOrder"], false);
+        assert_ne!(
+            body["closeOrder"], true,
+            "omitted closeOrder defaults to false"
+        );
         h.response(
             &restore,
             200,
@@ -2131,4 +2137,32 @@ fn native_stop_limit_equal_to_its_trigger_stays_limit_on_replacement_and_put_bac
     assert_eq!(body["type"], "limit");
     assert_eq!(body["price"], "130");
     assert_eq!(body["stopPrice"], "130");
+}
+
+#[test]
+fn an_ordinary_limit_amend_keeps_the_original_close_order_wire_shape() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    h.reply(
+        "/api/v1/orders/old",
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    h.confirm_cancel("old", 10.0, 4.0);
+    let replacement = h.take("/api/v1/orders");
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["size"], "6");
+    assert!(
+        body.get("closeOrder").is_none(),
+        "native default false needs no new field"
+    );
 }
