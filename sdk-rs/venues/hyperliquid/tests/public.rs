@@ -586,3 +586,58 @@ fn a_refusal_naming_its_subscription_drops_that_one_and_a_fresh_subscribe_retrie
         "the user asked again: {again:?}"
     );
 }
+
+// A chart's forced reset repairs its candle: a refused subscribe left the desired set, so
+// the engine would only answer "not subscribed". The venue sends it once more instead.
+#[test]
+fn a_repair_of_a_refused_candle_sends_its_subscribe_once_more() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    let candle = safe_cex_engine::SubscriptionTopic::Candles {
+        symbol: "BTC-PERP".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    };
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTC-PERP".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+        }),
+    );
+    prepared_now(&mut e).into_iter().for_each(drop);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Invalid subscription {\"type\":\"candle\",\"coin\":\"BTC\",\"interval\":\"1m\"}"}"#,
+    );
+    assert_eq!(
+        sent(&prepared_now(&mut e)),
+        [
+            r#"{"method":"unsubscribe","subscription":{"type":"candle","coin":"BTC","interval":"1m"}}"#
+        ]
+    );
+    e.handle(
+        2000.0,
+        Event::Command(Command::RepairSubscription(candle.clone())),
+    );
+    let repaired = prepared_now(&mut e);
+    assert_eq!(
+        sent(&repaired),
+        [r#"{"method":"subscribe","subscription":{"type":"candle","coin":"BTC","interval":"1m"}}"#]
+    );
+    assert!(notices(&repaired).is_empty(), "{:?}", notices(&repaired));
+    // A topic nobody subscribed is still the engine's "not subscribed".
+    e.handle(
+        2000.0,
+        Event::Command(Command::RepairSubscription(
+            safe_cex_engine::SubscriptionTopic::OrderBook {
+                symbol: "ETH-PERP".into(),
+            },
+        )),
+    );
+    assert!(
+        notices(&prepared_now(&mut e))
+            .iter()
+            .any(|n| n.contains("is not subscribed"))
+    );
+}

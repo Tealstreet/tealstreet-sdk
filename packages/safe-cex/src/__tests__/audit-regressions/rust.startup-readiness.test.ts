@@ -465,3 +465,31 @@ it('rejects a newly incompatible shared catalogue before private completion can 
   expect(requests.filter((request) => request.op === 'snapshot')).toHaveLength(1);
   await startup;
 });
+
+it('a chart repair on a shared-feed account goes to its source, never to its own engine', async () => {
+  const listeners = new Set<(event: { data: unknown }) => void>();
+  const send = (data: unknown) => listeners.forEach((listener) => listener({ data }));
+  const requests: Array<{ op: string; symbol?: string; interval?: string }> = [];
+  const market = (symbol: string) => ({ id: symbol, symbol, contractSize: 1, isSpot: false, isPerpetual: true, isInverse: false, isExpiring: false });
+  const port = {
+    addEventListener: (name: string, listener: (event: { data: unknown }) => void) => { if (name === 'message') listeners.add(listener); },
+    removeEventListener: (_name: string, listener: (event: { data: unknown }) => void) => listeners.delete(listener),
+    start() {}, close() {},
+    postMessage(message: { op: string }) {
+      requests.push(message);
+      if (message.op === 'hello') queueMicrotask(() => send({ op: 'ready', markets: [market('BTCUSDT')] }));
+      if (message.op === 'ping') queueMicrotask(() => send({ op: 'pong' }));
+      if (message.op === 'snapshot') queueMicrotask(() => send({ op: 'publicFeedUpdate', tickers: [{ symbol: 'BTCUSDT', last: 100 }] }));
+    },
+  } as unknown as MessagePort;
+  const { exchange } = setup({ publicFeed: { mode: 'shared', port } });
+  const startup = exchange.start();
+  await vi.advanceTimersByTimeAsync(250);
+  await startup;
+  exchange.listenOHLCV({ symbol: 'BTCUSDT', interval: '1m' }, vi.fn());
+  await vi.advanceTimersByTimeAsync(0);
+  exchange.repairOHLCV({ symbol: 'BTCUSDT', interval: '1m' });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(requests.filter((request) => request.op === 'repair')).toEqual([{ op: 'repair', symbol: 'BTCUSDT', interval: '1m' }]);
+  expect(ScriptedEngine.instances[0].commands.filter((command) => command.op === 'repairSubscription')).toEqual([]);
+});

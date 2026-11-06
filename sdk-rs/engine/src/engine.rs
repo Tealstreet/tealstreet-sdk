@@ -6202,6 +6202,15 @@ impl<V: Venue> Engine<V> {
                 }
             }
             if by_feed.is_empty() {
+                // A stream the venue itself withdrew (a refused subscribe) is its to retry.
+                let mut cx = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                };
+                if let Some(result) = self.venue.repair_subscription(&mut cx, topic) {
+                    return result;
+                }
                 return Err(format!("{} is not subscribed", skipped.join(", ")));
             }
             let mut cx = Cx {
