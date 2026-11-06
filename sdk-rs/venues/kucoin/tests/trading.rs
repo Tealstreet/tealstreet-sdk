@@ -1836,3 +1836,57 @@ fn a_stop_that_filled_before_its_resigned_cancel_is_left_alone() {
     assert_eq!(error.outcome, Some(Outcome::NotSent));
     assert_eq!(error.protection, None);
 }
+
+/// A cancel answered 404 falls back to the stop family a round trip later;
+/// that fallback, and its re-signed resend, are checked like the first.
+#[test]
+fn a_stop_family_fallback_cancel_is_vetoed_like_the_first() {
+    for case in ["crossed", "filled", "resigned"] {
+        let mut h = Harness::new();
+        resting_stop(&mut h);
+        amend_stop(&mut h, "old", 120.0);
+        h.metadata(false, "CROSS");
+        let cancel = h.take("/api/v1/orders/old");
+        let cross = |h: &mut Harness| {
+            h.engine
+                .store_mut()
+                .update_ticker("BTCUSDT", |t| t.mark = 125.0)
+        };
+        match case {
+            "crossed" => cross(&mut h),
+            "filled" => {
+                h.engine
+                    .store_mut()
+                    .update_order("old", |o| o.filled = 0.002);
+            }
+            _ => {}
+        }
+        h.response(&cancel, 404, r#"{"code":"404","msg":"Not Found"}"#);
+        if case == "resigned" {
+            let fallback = h.take("/api/v1/stopOrders/old");
+            assert_eq!(fallback.method, Method::Delete);
+            cross(&mut h);
+            h.response(
+                &fallback,
+                400,
+                r#"{"code":"400005","msg":"Invalid KC-API-SIGN"}"#,
+            );
+        }
+        assert!(!h.has("/api/v1/stopOrders"), "{case}: {:?}", writes(&h));
+        h.pace();
+        let error = failure(&h);
+        let why = if case == "filled" {
+            "changed or filled before cancellation"
+        } else {
+            "already crossed the mark price"
+        };
+        assert!(
+            error.message.contains("was not changed") && error.message.contains(why),
+            "{case}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::NotSent), "{case}");
+        assert_eq!(error.protection, None, "{case}");
+        assert!(writes(&h).is_empty(), "{case}: {:?}", writes(&h));
+    }
+}

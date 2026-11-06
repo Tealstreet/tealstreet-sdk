@@ -1021,10 +1021,9 @@ impl Kucoin {
         true
     }
     fn send_trade(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
-        // The amended stop's cancel is checked once more as it is sent.
-        if let Call::Cancel {
-            fallback: false, ..
-        } = &request.step.call
+        // The amended stop's cancel, its stop-family fallback and any re-signed
+        // resend are checked once more as each is sent.
+        if let Call::Cancel { .. } = &request.step.call
             && let Some(job) = self.trading.jobs.get_mut(&request.command)
             && let Some(Call::ConfirmCancel(replacement)) = job.steps.front().map(|s| &s.call)
             && let Some(stop) = &replacement.stop
@@ -1130,18 +1129,15 @@ impl Kucoin {
                     fallback: true,
                 },
             };
-            self.signed(
+            self.send_trade(
                 cx,
-                step.method,
-                &step.path,
-                None,
-                Pending::Trade(Request {
+                Request {
                     command: request.command,
-                    step: step.clone(),
+                    step,
                     retried: false,
                     position_open: false,
                     position_invalid: false,
-                }),
+                },
             );
             return;
         }
