@@ -46,6 +46,7 @@ pub enum Pending {
     History(history::Request),
     Identity(CommandId),
     Trade(trading::Request),
+    Protective(Box<trading::managed::ManagedRequest>),
     Account(account::Request),
     Markets {
         context: Context,
@@ -719,6 +720,9 @@ impl MexcFutures {
                 );
             }
             Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Protective(request) => {
+                self.protective_failed(cx, *request, VenueError::new(error))
+            }
             Pending::Trade(request) => {
                 let error = VenueError::new(error).kind(ErrorKind::Network);
                 // The amend read precedes the replacement, which was never sent.
@@ -989,6 +993,10 @@ impl Venue for MexcFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Protective(request) = pending {
+            self.protective_response(cx, *request, response);
+            return;
+        }
         if let Pending::Clock(request) = pending {
             self.clock_response(cx, *request, response);
             return;
@@ -1088,7 +1096,7 @@ impl Venue for MexcFutures {
                     self.refresh_stop_orders(cx);
                 }
             }
-            Pending::Trade(_) => unreachable!(),
+            Pending::Trade(_) | Pending::Protective(_) => unreachable!(),
             Pending::History(request) => self.query_response(cx, request, response),
             Pending::Markets {
                 rows, malformed, ..
@@ -1295,7 +1303,62 @@ impl Venue for MexcFutures {
             ),
         );
     }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.settle_protective_retirement(cx);
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        if let Pending::Protective(request) = pending {
+            self.protective_release(store, request, release.time.raw_ms)
+        } else {
+            Ok(())
+        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        match pending {
+            Pending::Protective(request) => {
+                safe_cex_engine::request_context::ReconciliationData::new(
+                    request.native.command.to_string(),
+                )
+            }
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
+        }
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.protective_preflight_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.protective_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.protective_retired(owner)
+    }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Pending::Protective(request) = pending {
+            self.protective_failed(cx, *request, error);
+            return;
+        }
         if let Pending::Clock(request) = pending {
             self.clock_failed(cx, *request, error);
             return;
@@ -1333,6 +1396,10 @@ impl Venue for MexcFutures {
         }
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Pending::Protective(request) = pending {
+            self.protective_failed(cx, *request, error);
+            return;
+        }
         if let Pending::Clock(request) = pending {
             self.clock_failed(cx, *request, error);
             return;
