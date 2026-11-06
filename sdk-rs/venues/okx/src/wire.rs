@@ -453,6 +453,129 @@ mod scan_price_tests {
         }
     }
 
+    /// Deterministic xorshift64 so a failure reproduces from its case number.
+    fn next(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    #[test]
+    fn differential_fuzz_never_scans_what_serde_reads_differently() {
+        let tokens = [
+            "\"",
+            "\\",
+            ",",
+            ":",
+            "{",
+            "}",
+            "[",
+            "]",
+            " ",
+            "\n",
+            "\t",
+            "\u{1}",
+            "0",
+            "9",
+            ".",
+            "-",
+            "e",
+            "null",
+            "true",
+            "\"markPx\"",
+            "\"instId\"",
+            "\"x\"",
+            "\\u0041",
+            "\u{e9}",
+            "\"\"",
+        ];
+        let seeds = [MARK, INDEX, TICKER];
+        let (mut scanned, mut fallback, mut state) = (0, 0, 0x9e37_79b9_7f4a_7c15u64);
+        for case in 0..20_000 {
+            let mut text = seeds[case % seeds.len()].to_owned();
+            for _ in 0..=next(&mut state) % 3 {
+                let mut at = next(&mut state) as usize % (text.len() + 1);
+                while !text.is_char_boundary(at) {
+                    at -= 1;
+                }
+                let token = &tokens[next(&mut state) as usize % tokens.len()];
+                match next(&mut state) % 3 {
+                    0 => text.insert_str(at, token),
+                    1 => {
+                        let mut end = (at + 1 + next(&mut state) as usize % 4).min(text.len());
+                        while !text.is_char_boundary(end) {
+                            end += 1;
+                        }
+                        text.replace_range(at..end, "");
+                    }
+                    _ => {
+                        let mut end = (at + 1).min(text.len());
+                        while !text.is_char_boundary(end) {
+                            end += 1;
+                        }
+                        text.replace_range(at..end, token);
+                    }
+                }
+            }
+            if assert_scan_matches_serde(&text) {
+                scanned += 1;
+            } else {
+                fallback += 1;
+            }
+        }
+        // Well-formed pushes with random keys, order, repeats and values.
+        let keys = [
+            "instId",
+            "markPx",
+            "idxPx",
+            "last",
+            "bidPx",
+            "askPx",
+            "open24h",
+            "volCcy24h",
+            "vol24h",
+            "oiCcy",
+            "fundingRate",
+            "fundingTime",
+            "ts",
+            "instType",
+            "sodUtc0",
+            "x",
+        ];
+        let values = [
+            "",
+            "1",
+            "2410.10",
+            "-0.5",
+            "1e5",
+            "\u{e9}",
+            "BTC-USD-SWAP",
+            " 1",
+        ];
+        for _ in 0..5_000 {
+            let mut row = Vec::new();
+            for _ in 0..next(&mut state) % 8 {
+                let key = keys[next(&mut state) as usize % keys.len()];
+                let value = values[next(&mut state) as usize % values.len()];
+                row.push(format!(r#""{key}":"{value}""#));
+            }
+            let text = format!(
+                r#"{{"arg":{{"channel":"mark-price","instId":"X"}},"data":[{{{}}}]}}"#,
+                row.join(",")
+            );
+            if assert_scan_matches_serde(&text) {
+                scanned += 1;
+            } else {
+                fallback += 1;
+            }
+        }
+        assert!(
+            scanned > 5_000 && fallback > 5_000,
+            "{scanned} scanned, {fallback} fallback"
+        );
+    }
+
     #[test]
     fn other_channels_scan_but_only_price_channels_take_the_fast_path() {
         let funding = MARK.replace("mark-price", "funding-rate");
