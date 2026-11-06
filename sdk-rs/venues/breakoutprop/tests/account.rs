@@ -367,6 +367,8 @@ fn amount_only_stop_amendment_uses_documented_trigger_after_reconciliation() {
     for legacy_price in [None, Some(0.0)] {
         let mut rig = rig();
         let mut row: serde_json::Value = serde_json::from_str(ZERO_CLOSE).unwrap();
+        row["legs"][0]["quantity"] = 0.01.into();
+        row["legs"][0]["remainingQuantity"] = 0.01.into();
         row["stopPrice"] = 3500.0.into();
         if let Some(price) = legacy_price {
             row["legs"][0]["price"] = price.into();
@@ -387,26 +389,32 @@ fn amount_only_stop_amendment_uses_documented_trigger_after_reconciliation() {
             price: None,
             amount: Some(0.02),
         });
-        let cancel = rig.next_request();
-        assert_eq!(cancel.method, safe_cex_engine::Method::Delete);
-        rig.reply(&cancel, 200, r#"{"orderId":76515504}"#);
-        let proof = rig.next_request();
-        assert!(
-            proof
-                .url
-                .ends_with("/orders/history?with-order-id=76515504&limit=2")
+        let q = rig.next_request();
+        assert_eq!(q.method, safe_cex_engine::Method::Get);
+        row["actionCode"] = "original-action".into();
+        row["version"] = 1.into();
+        row["legCount"] = 1.into();
+        row["side"] = "SELL".into();
+        row["tif"] = "GTC".into();
+        row["issueTime"] = "2024-12-11T05:55:49.900Z".into();
+        rig.reply_headers(
+            &q,
+            200,
+            "ETag: \"original\"",
+            &format!("{{\"orders\":[{row}]}}"),
         );
-        row["status"] = "CANCELED".into();
-        row["finalStatus"] = true.into();
-        rig.reply(&proof, 200, &format!("{{\"orders\":[{row}]}}"));
         let replacement = rig.next_request();
-        assert_eq!(replacement.method, safe_cex_engine::Method::Post);
+        assert_eq!(replacement.method, safe_cex_engine::Method::Put);
         let body: serde_json::Value =
             serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
-        assert_eq!(body["stopPrice"], 3500.0);
+        assert_eq!(body["stopPrice"], 3500.);
         assert_eq!(body["quantity"], 0.02);
         assert_eq!(body["positionEffect"], "CLOSE");
-        rig.reply(&replacement, 200, r#"{"orderId":42}"#);
-        assert_eq!(rig.result(90), Ok("[\"42\"]".into()));
+        rig.reply(
+            &replacement,
+            200,
+            r#"{"orderId":76515504,"updateOrderId":76515505}"#,
+        );
+        assert_eq!(rig.result(90), Ok("[\"4471153:55640\"]".into()));
     }
 }
