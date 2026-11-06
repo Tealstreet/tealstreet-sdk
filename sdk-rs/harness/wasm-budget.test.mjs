@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budget.mjs';
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
@@ -141,7 +142,6 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
   for (const [venue, measured, cap] of [
     ['breakoutprop', 1_501_277, 1_512_448],
     ['coinbase', 1_816_299, 1_826_816],
-    ['okx', 1_936_660, 1_947_648],
     ['txflow', 1_827_125, 1_838_080],
     ['weex', 1_925_507, 1_936_384],
     ['woo', 2_388_474, 2_399_232],
@@ -200,7 +200,6 @@ test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain he
     ['bitunix', 1_838_517, 1_849_344],
     ['cryptocom', 1_716_657, 1_727_488],
     ['kucoinspot', 2_253_260, 2_264_064],
-    ['lighter', 1_991_579, 2_001_920],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -266,6 +265,17 @@ test('#3106 critical reads (run 42097859473) retain measured headroom and equal 
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+});
+
+test('#2314 Lighter managed sockets (job 127434185656) retain headroom and siblings match', () => {
+  const measured = 2_034_142;
+  const cap = 2_044_928;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.lighter, cap);
+  assert.equal(WASM_VENUE_OVERRIDES['lighter-robinhood'], cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'lighter'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'lighter'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'lighter'), /exceeds/);
 });
 
 test('#3118 Aster protection guard (run 42112075305) retains measured headroom', () => {
@@ -360,5 +370,19 @@ test('#3138 Bitrue guarded stop edits (run 42166643605) retain Bitrue headroom',
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3121 protective amendments (run 42122802638) retain OKX headroom and all siblings share the cap', () => {
+  const measured = 1_962_129;
+  const cap = 1_973_248;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['okx', 'okxeu', 'okxdemo', 'okxeudemo']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'okx');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
