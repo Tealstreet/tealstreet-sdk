@@ -250,10 +250,18 @@ fn trigger_by(opts: &PlaceOrderOpts) -> Option<&'static str> {
     })
 }
 
-/// Stop-losses trigger on mark unless asked for last; take-profits the reverse.
+/// Stop-losses default to mark; take-profits default to last.
 fn sl_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
     match opts.sl_trigger_type {
         Some(StopTriggerType::LastPrice) => "LastPrice",
+        _ => "MarkPrice",
+    }
+}
+
+fn stop_loss_reference(trigger: Option<StopTriggerType>) -> &'static str {
+    match trigger {
+        Some(StopTriggerType::LastPrice) => "LastPrice",
+        Some(StopTriggerType::IndexPrice) => "IndexPrice",
         _ => "MarkPrice",
     }
 }
@@ -1119,11 +1127,7 @@ impl BybitLinear {
                 "stopLoss",
                 "slTriggerBy",
                 "slSize",
-                if trigger == Some(StopTriggerType::LastPrice) {
-                    "LastPrice"
-                } else {
-                    "MarkPrice"
-                },
+                stop_loss_reference(trigger),
             )
         } else {
             (
@@ -1181,14 +1185,16 @@ impl BybitLinear {
         }
         let mark = cx
             .store
-            .ticker(&order.symbol)
-            .map(|ticker| ticker.mark)
-            .filter(|mark| mark.is_finite() && *mark > 0.0);
-        let base = || {
-            Body::new()
-                .str("category", self.category_for(&order.symbol).as_str())
-                .str("symbol", &order.symbol)
-        };
+            .reference_seen_at(&order.symbol, StopTriggerType::MarkPrice)
+            .filter(|seen| *seen <= cx.now)
+            .and_then(|_| {
+                safe_cex_engine::protective_amend::fresh_reference(
+                    cx.store,
+                    &order.symbol,
+                    StopTriggerType::MarkPrice,
+                    cx.now,
+                )
+            });
         if let Some(mark) =
             mark.filter(|_| self.variant != crate::Variant::Inverse || price.is_some())
         {
@@ -1291,33 +1297,11 @@ impl BybitLinear {
         if self.variant == crate::Variant::Inverse && price.is_none() {
             return Err("Bybit inverse stop and take-profit sizes cannot be edited".into());
         }
-        // Missing mark (or inverse amount-only): TS updates the original leg directly.
-        let level = if order.kind == OrderType::StopLoss {
-            "stopLoss"
-        } else {
-            "takeProfit"
-        };
-        let size = if order.kind == OrderType::StopLoss {
-            "slSize"
-        } else {
-            "tpSize"
-        };
-        let mut body = base().int(
-            "positionIdx",
-            self.position_idx(cx, &order.symbol, order.side, order.reduce_only),
-        );
-        if self.variant != crate::Variant::Inverse {
-            body = body.str("tpslMode", "Partial");
-        }
-        body = body.opt_str(level, price.map(number).as_deref()).opt_str(
-            "tpTriggerBy",
-            (order.kind == OrderType::TakeProfit)
-                .then(|| take_profit_reference(order.trigger_type)),
-        );
-        if self.variant != crate::Variant::Inverse {
-            body = body.str(size, &number(amount.unwrap_or(order.amount)));
-        }
-        Ok(trading_stop_job(body.finish()))
+        // Partial trading-stop only adds protection; it cannot edit the existing leg.
+        Err(format!(
+            "A fresh mark price is required before replacing this protection; your {} order is unchanged",
+            order.symbol
+        ))
     }
 
     /// Partial position stops cancel/recreate; ordinary orders amend in place.
