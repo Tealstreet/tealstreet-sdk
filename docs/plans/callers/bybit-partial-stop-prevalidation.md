@@ -30,6 +30,12 @@ an explicit empty parentOrderLinkId, a native Partial row with its own orderId,
 exact original quantity and execution terms, a nonempty creation link and a
 valid creation time. Complete bounded live and history peer censuses must show
 no sibling sharing that link, parent link or creation time on the same side.
+The History request is bound when issued to the proved target's native
+createdTime ±5 s (with a positive lower bound), never Store last_update or an
+account-wide seven-day default. Missing, malformed, zero or future native
+creation time stops before History and replacement, reports Unprotected and
+asks the user to re-place. A nonempty cursor or missing/out-of-window returned
+creation time never grants restoration authority.
 Missing lineage, an incomplete census, attached/grouped/split shapes, or an
 opposite leg whose binding was lost grants no restoration authority. Creation
 must be within the 24 h retention window for unfilled cancelled history; older
@@ -49,7 +55,10 @@ not-modified replies, malformed bodies and transport loss never restore or
 resend. The protective classifier is derived from Bybit's ordinary table;
 ordinary writes and other setting calls keep their existing policy. Plan failure
 presentation supplies Open Orders wording even when the engine seals a request
-without a venue callback. Reads use Read authority and grant no write facts.
+without a venue callback. It is armed before the initial Partial cancel too:
+released transport loss and timeout keep typed Unknown, while definite native
+refusals and known unsent preparation failures retain their original cause and
+outcome. Reads use Read authority and grant no write facts.
 
 Controls cover all five derivative profiles, absent/live/filled/mismatched native
 proof, delayed completion, lost proof transport, standalone/attached/lost-binding

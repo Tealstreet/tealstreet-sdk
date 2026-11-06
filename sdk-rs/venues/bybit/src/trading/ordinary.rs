@@ -654,10 +654,26 @@ impl BybitLinear {
             self.park(id, entry);
             return;
         }
-        let (Ok([slot]), Some(leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front()) else {
+        let (Ok([slot]), Some(mut leg)) = (<[Slot; 1]>::try_from(slots), run.queue.pop_front())
+        else {
             let _ = cx.fail_plan(&run.plan, internal("Bybit trading plan is not serial"));
             return;
         };
+        if matches!(leg.planned.call, Call::PartialProof(partial::Axis::History)) {
+            let Some(planned) = run.partial.as_mut().and_then(|flow| flow.history_proof()) else {
+                let error = VenueError {
+                    kind: Some(ErrorKind::Network),
+                    protection: Some(safe_cex_engine::error::Protection::Unprotected),
+                    presents: true,
+                    ..VenueError::new(
+                        "The old stop was canceled but its native creation time is unproven; re-place protection on Bybit",
+                    )
+                };
+                let _ = cx.fail_plan(&run.plan, error);
+                return;
+            };
+            leg.planned = planned;
+        }
         let context = match leg.intent {
             LegIntent::Setting => {
                 cx.plan_leg_context_with_intent(&run.plan, &slot, Intent::Setting)
@@ -702,7 +718,10 @@ impl BybitLinear {
         if run.partial.is_some()
             && matches!(
                 leg.planned.call,
-                Call::PartialProof(_) | Call::PartialStop { .. } | Call::RestorePartialStop { .. }
+                Call::CancelPartialStop { .. }
+                    | Call::PartialProof(_)
+                    | Call::PartialStop { .. }
+                    | Call::RestorePartialStop { .. }
             )
         {
             let _ = cx.present_plan_failure(
@@ -1117,6 +1136,11 @@ impl BybitLinear {
                 }
             }
             Decision::Failed(mut error) => {
+                if matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
+                    && error.outcome != Some(Outcome::Unknown)
+                {
+                    error.presents = true;
+                }
                 if matches!(active.leg.planned.call, Call::PartialStop { .. })
                     && error.outcome != Some(Outcome::Unknown)
                 {
@@ -1384,6 +1408,14 @@ impl BybitLinear {
             .active
             .as_ref()
             .is_some_and(|active| active.context == request.context);
+        if matches
+            && error.outcome == Some(Outcome::NotSent)
+            && run.active.as_ref().is_some_and(|active| {
+                matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
+            })
+        {
+            let _ = cx.present_plan_failure(&run.plan, error.message.clone());
+        }
         if matches
             && run
                 .active
