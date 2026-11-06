@@ -18,10 +18,10 @@ describe('CLI clock correction warning', () => {
     const handler = createClockSkewWarning(warn, 'win32');
     const first = new ExchangeEmitter('bybit');
     const second = new ExchangeEmitter('bybitdemo');
-    for (const source of [first, second]) source.on('engine-event', handler);
-    first.emit('engine-event', corrected(-713_451));
-    first.emit('engine-event', corrected(-713_451));
-    second.emit('engine-event', corrected(-713_451));
+    for (const source of [first, second]) source.on('clock-advice', handler);
+    first.emit('clock-advice', corrected(-713_451));
+    first.emit('clock-advice', corrected(-713_451));
+    second.emit('clock-advice', corrected(-713_451));
     expect(warn.mock.calls).toEqual([
       [
         'Your system clock is 11.9 min fast; sync your system time (Windows: Settings → Time & language → Date & time → Sync now).',

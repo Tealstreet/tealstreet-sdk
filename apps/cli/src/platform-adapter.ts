@@ -241,7 +241,7 @@ export function createStandalonePlatformAdapter(): StandalonePlatformAdapter {
       // including tealstreetProxy, tealstreetTunnel, proxyRegion, etc.
       const createExchangeFromAccount = await getCreateExchangeFromAccount();
       const exchange = await createExchangeFromAccount(account);
-      exchange.on('engine-event', warnAboutClockSkew);
+      exchange.on('clock-advice', warnAboutClockSkew);
       return exchange as ExchangeLike;
     },
 

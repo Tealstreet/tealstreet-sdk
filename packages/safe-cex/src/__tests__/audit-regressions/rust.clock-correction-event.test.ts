@@ -17,10 +17,12 @@ const account = () => {
   return exchange;
 };
 
-it('forwards numeric clock evidence to the host without a duplicate generic log', () => {
+it('lets an explicit clock-advice listener replace the generic info log', () => {
   const exchange = account();
   const events = vi.fn();
   exchange.on('engine-event', events);
+  const advice = vi.fn();
+  exchange.on('clock-advice', advice);
   const log = vi.spyOn(exchange, 'log').mockImplementation(() => {});
   const event = {
     code: 'bybit.clock.corrected',
@@ -30,6 +32,7 @@ it('forwards numeric clock evidence to the host without a duplicate generic log'
   };
   (exchange as any).receiveEvent(event);
   expect(events).toHaveBeenCalledWith(event);
+  expect(advice).toHaveBeenCalledWith(event);
   expect(log).not.toHaveBeenCalled();
 });
 
@@ -42,4 +45,21 @@ it('keeps ordinary information and real errors on their existing routes', () => 
   expect(log).toHaveBeenCalledOnce();
   (exchange as any).receiveEvent({ code: 'bybit.clock.corrected', level: 'error', message: 'real error', fields: {} });
   expect(errors).toHaveBeenCalledOnce();
+});
+
+it('keeps the clock info log when the host has no advice listener, even with a telemetry observer', () => {
+  const exchange = account();
+  const events = vi.fn();
+  exchange.on('engine-event', events);
+  const log = vi.spyOn(exchange, 'log').mockImplementation(() => {});
+  const event = {
+    code: 'bybit.clock.corrected',
+    level: 'info',
+    message: 'Bybit protocol clock corrected',
+    fields: { offsetMs: -713_451 },
+  };
+  (exchange as any).receiveEvent(event);
+  expect(events).toHaveBeenCalledWith(event);
+  expect(log).toHaveBeenCalledOnce();
+  expect(log.mock.calls[0][2]).toBe(event);
 });

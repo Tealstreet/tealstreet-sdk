@@ -5153,6 +5153,21 @@ fn fast_713_second_clock_write_retry_is_re_signed_and_never_replayed_twice() {
         Harness::header(&first, "X-BAPI-SIGN"),
         Harness::header(&second, "X-BAPI-SIGN")
     );
+    let payload = format!(
+        "{}{}{}{}",
+        Harness::header(&second, "X-BAPI-TIMESTAMP").unwrap(),
+        Harness::header(&second, "X-BAPI-API-KEY").unwrap(),
+        Harness::header(&second, "X-BAPI-RECV-WINDOW").unwrap(),
+        second.body.as_deref().unwrap()
+    );
+    assert_eq!(
+        Harness::header(&second, "X-BAPI-SIGN"),
+        Some(safe_cex_crypto::hmac_sha256(
+            b"secret",
+            payload.as_bytes(),
+            safe_cex_crypto::Encoding::Hex
+        ))
+    );
     assert_eq!(
         second.body, first.body,
         "same client-order identity and economics"
@@ -5184,7 +5199,9 @@ fn ambiguous_clock_like_write_failures_never_calibrate_or_replay() {
         let mut h = ready(Variant::Spot);
         place(&mut h, 602, vec![order("BTCUSDT", 0.1)]);
         let first = h.take("/v5/order/create");
+        let clock = h.engine.signing_clock(h.now);
         h.reply(first.id, status, body);
+        assert_eq!(h.engine.signing_clock(h.now), clock);
         assert!(
             !h.has_request("/v5/order/create"),
             "ambiguous answer cannot grant a resend"

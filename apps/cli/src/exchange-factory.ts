@@ -21,7 +21,7 @@ export function getExchangeInfo(name: string) {
  */
 export async function createExchangeFromConfig(account: AccountConfig): Promise<BaseExchange> {
   const exchange = await createExchangeFromAccount(account);
-  exchange.on('engine-event', warnAboutClockSkew);
+  exchange.on('clock-advice', warnAboutClockSkew);
   return exchange;
 }
 
