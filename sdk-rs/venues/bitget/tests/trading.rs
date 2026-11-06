@@ -1362,7 +1362,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             r#"{"code":"429","msg":"Too Many Requests"}"#,
-            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
         ),
         // Ruled 2026-10-25: a 5xx write is the engine's unproven answer.
         (
@@ -1640,6 +1640,7 @@ fn a_nuke_account_cancel_on_classic_sends_the_product_wide_cancel_all() {
         "pos_profit",
         "pos_loss",
         "track_plan",
+        "moving_plan",
     ] {
         assert!(h.done.iter().all(|(id, _)| *id != 21), "{plan}");
         let (request, sent) = body(&mut h, "/api/v2/mix/order/cancel-plan-order");

@@ -70,6 +70,7 @@ pub struct OrderSnapshot {
     skipped: RowAdmission<String>,
     plans: Vec<(String, String)>,
     trailing: Vec<(String, (String, f64))>,
+    execution_prices: Vec<(String, f64)>,
     started: f64,
     stream_revision: u64,
     virtual_only: bool,
@@ -195,6 +196,7 @@ pub struct Account {
     opened: HashMap<String, f64>,
     pub plans: HashMap<String, String>,
     pub trailing: HashMap<String, (String, f64)>,
+    pub execution_prices: HashMap<String, f64>,
     ws_order_clock: u64,
     ws_order_revisions: HashMap<String, u64>,
     executed: HashSet<String>,
@@ -753,6 +755,7 @@ impl BitgetFutures {
                 skipped: RowAdmission::default(),
                 plans: vec![],
                 trailing: vec![],
+                execution_prices: vec![],
                 started: cx.now,
                 stream_revision: self.order_revision_clock(),
                 virtual_only,
@@ -878,6 +881,15 @@ impl BitgetFutures {
                             row.strategy_type = std::borrow::Cow::Borrowed("trailing_stop");
                         }
                         let orders = self.map_order(cx, &row)?;
+                        if let Some(price) = row
+                            .execute_price
+                            .0
+                            .filter(|price| price.is_finite() && *price >= 0.0)
+                        {
+                            for order in &orders {
+                                snapshot.execution_prices.push((order.id.clone(), price));
+                            }
+                        }
                         if let Some(trailing) = trailing_state(&row) {
                             for order in &orders {
                                 snapshot.trailing.push((order.id.clone(), trailing.clone()));
@@ -1241,6 +1253,18 @@ impl BitgetFutures {
                             self.account.plans.insert(id, plan);
                         }
                     }
+                    for (id, price) in snapshot.execution_prices {
+                        if admitted(&id)
+                            && self.order_metadata_current(
+                                cx,
+                                &id,
+                                snapshot.started,
+                                snapshot.stream_revision,
+                            )
+                        {
+                            self.account.execution_prices.insert(id, price);
+                        }
+                    }
                     // A rejected row keeps its market's fence; the rest of the census counts.
                     let mut unproven = snapshot.skipped.unproven().to_vec();
                     // Any unmapped row, or a virtual-only read of part of the account,
@@ -1258,6 +1282,7 @@ impl BitgetFutures {
                             if !present {
                                 self.account.plans.remove(&id);
                                 self.account.trailing.remove(&id);
+                                self.account.execution_prices.remove(&id);
                             }
                             cx.event(
                                 Level::Info,
@@ -2452,6 +2477,15 @@ impl BitgetFutures {
                         self.emit_execution(cx, &raw, order);
                     }
                     for order in orders {
+                        if let Some(price) = raw
+                            .execute_price
+                            .0
+                            .filter(|price| price.is_finite() && *price >= 0.0)
+                        {
+                            self.account
+                                .execution_prices
+                                .insert(order.id.clone(), price);
+                        }
                         self.account.ws_order_clock = self.account.ws_order_clock.saturating_add(1);
                         self.account
                             .ws_order_revisions
@@ -2873,6 +2907,9 @@ impl BitgetFutures {
             self.account
                 .trailing
                 .retain(|id, _| cx.store.order(id).is_some());
+            self.account
+                .execution_prices
+                .retain(|id, _| cx.store.order(id).is_some());
             self.account.ws_order_revisions.retain(|id, _| {
                 cx.store.order(id).is_some() || self.account.terminal.contains_key(id)
             });
@@ -3158,7 +3195,11 @@ impl BitgetFutures {
                 (raw.side.as_ref(), protected),
                 ("sell", "long") | ("buy", "short")
             );
-        let amount = first(&[raw.size, raw.sz, raw.qty, raw.amount]).unwrap_or(0.0);
+        let amount = if raw.tpsl_mode == "full" {
+            0.0
+        } else {
+            first(&[raw.size, raw.sz, raw.qty, raw.amount]).unwrap_or(0.0)
+        };
         let filled = first(&[
             raw.acc_base_volume,
             raw.filled_qty,
