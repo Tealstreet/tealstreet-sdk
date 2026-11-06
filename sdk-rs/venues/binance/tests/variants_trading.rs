@@ -838,7 +838,10 @@ fn coin_m_trailing_outside_the_callback_range_is_refused_not_clamped() {
             .find(|r| r.url.contains("/dapi/v1/algoOrder") || r.url.contains("/dapi/v1/order?"));
         match rate {
             Some(rate) => {
+                // Only the algo endpoint: /dapi/v1/order answers this type -4120.
                 let sent = sent.expect("an in-range trailing stop is placed");
+                assert!(sent.url.contains("/dapi/v1/algoOrder"), "{}", sent.url);
+                assert!(!h.has_request("/dapi/v1/order?"), "{:?}", h.paths());
                 assert_eq!(param(&sent.url, "callbackRate").as_deref(), Some(rate));
             }
             None => {
