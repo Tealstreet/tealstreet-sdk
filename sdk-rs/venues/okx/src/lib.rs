@@ -618,6 +618,104 @@ impl Okx {
         Ok(())
     }
 
+    /// One public price row: the generic serde path and the fixed-shape scanner share it.
+    fn price_row(&mut self, cx: &mut Cx<'_, Pending>, channel: PriceChannel, p: wire::Prices<'_>) {
+        // Each non-blank tickers field is validated and parsed in one pass.
+        let mut parsed = [0.0; 6];
+        if channel == PriceChannel::Tickers {
+            let fields = [
+                p.last,
+                p.open24h,
+                p.bid_px,
+                p.ask_px,
+                p.vol_ccy24h,
+                p.vol24h,
+            ];
+            for (slot, value) in parsed.iter_mut().zip(fields) {
+                if !value.is_empty() {
+                    let Some(value) = strict_decimal(value) else {
+                        return;
+                    };
+                    *slot = value;
+                }
+            }
+        }
+        let [last, open24h, bid, ask, volume, quote_volume] = parsed;
+        let mut update = |id: &str| {
+            let Some(index) = self.price_tickers.get(id).copied() else {
+                return;
+            };
+            if channel == PriceChannel::Mark && !self.marks.contains(id) {
+                self.marks.insert(id.to_owned());
+            }
+            if channel == PriceChannel::Index && !self.indexes.contains(id) {
+                self.indexes.insert(id.to_owned());
+            }
+            // Like TS, live prices only update rows the REST ticker read listed.
+            let Some(index) = index else {
+                return;
+            };
+            cx.store.update_ticker_at(index, |t| match channel {
+                PriceChannel::Tickers => {
+                    t.bid = bid;
+                    t.ask = ask;
+                    if !p.last.is_empty() {
+                        t.last = last;
+                    }
+                    if !p.last.is_empty() && !p.open24h.is_empty() {
+                        t.percentage = change(last, open24h);
+                    }
+                    t.volume = volume;
+                    t.quote_volume = quote_volume;
+                }
+                // A blank or null live value keeps the last good one.
+                PriceChannel::Mark if !p.mark_px.is_empty() => t.mark = num::parse(p.mark_px),
+                PriceChannel::Index if !p.idx_px.is_empty() => t.index = num::parse(p.idx_px),
+                PriceChannel::OpenInterest if !p.oi_ccy.is_empty() => {
+                    t.open_interest = num::parse(p.oi_ccy)
+                }
+                PriceChannel::Funding => {
+                    if !p.funding_rate.is_empty() {
+                        t.funding_rate = num::parse(p.funding_rate);
+                    }
+                    if !p.funding_time.is_empty() {
+                        t.funding_time = num::parse(p.funding_time);
+                    }
+                }
+                _ => {}
+            });
+            let mask = match channel {
+                PriceChannel::Tickers => {
+                    3 | (1 << 9)
+                        | (1 << 10)
+                        | if !p.last.is_empty() { 1 << 2 } else { 0 }
+                        | if !p.last.is_empty() && !p.open24h.is_empty() {
+                            1 << 5
+                        } else {
+                            0
+                        }
+                }
+                PriceChannel::Mark => 1 << 3,
+                PriceChannel::Index => 1 << 4,
+                PriceChannel::OpenInterest => 1 << 6,
+                PriceChannel::Funding => (1 << 7) | (1 << 8),
+                PriceChannel::Other => 0,
+            };
+            if let Some(ticker) = cx.store.tickers().get(index as usize) {
+                self.live_tickers.record(cx.store, &ticker.symbol, mask);
+            }
+        };
+        if channel == PriceChannel::Index {
+            if let Some(ids) = self.underlying_products.get(p.inst_id) {
+                for id in ids {
+                    update(id);
+                }
+            }
+        } else {
+            update(p.inst_id);
+        }
+    }
+
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, message: wire::Message<'_>) {
         let Some(data) = message.data else {
             return;
@@ -716,102 +814,7 @@ impl Okx {
             return;
         }
         let channel = PriceChannel::of(channel);
-        let _ = json::each::<wire::Prices<'_>>(data.get(), |p| {
-            // Each non-blank tickers field is validated and parsed in one pass.
-            let mut parsed = [0.0; 6];
-            if channel == PriceChannel::Tickers {
-                let fields = [
-                    p.last,
-                    p.open24h,
-                    p.bid_px,
-                    p.ask_px,
-                    p.vol_ccy24h,
-                    p.vol24h,
-                ];
-                for (slot, value) in parsed.iter_mut().zip(fields) {
-                    if !value.is_empty() {
-                        let Some(value) = strict_decimal(value) else {
-                            return;
-                        };
-                        *slot = value;
-                    }
-                }
-            }
-            let [last, open24h, bid, ask, volume, quote_volume] = parsed;
-            let mut update = |id: &str| {
-                let Some(index) = self.price_tickers.get(id).copied() else {
-                    return;
-                };
-                if channel == PriceChannel::Mark && !self.marks.contains(id) {
-                    self.marks.insert(id.to_owned());
-                }
-                if channel == PriceChannel::Index && !self.indexes.contains(id) {
-                    self.indexes.insert(id.to_owned());
-                }
-                // Like TS, live prices only update rows the REST ticker read listed.
-                let Some(index) = index else {
-                    return;
-                };
-                cx.store.update_ticker_at(index, |t| match channel {
-                    PriceChannel::Tickers => {
-                        t.bid = bid;
-                        t.ask = ask;
-                        if !p.last.is_empty() {
-                            t.last = last;
-                        }
-                        if !p.last.is_empty() && !p.open24h.is_empty() {
-                            t.percentage = change(last, open24h);
-                        }
-                        t.volume = volume;
-                        t.quote_volume = quote_volume;
-                    }
-                    // A blank or null live value keeps the last good one.
-                    PriceChannel::Mark if !p.mark_px.is_empty() => t.mark = num::parse(p.mark_px),
-                    PriceChannel::Index if !p.idx_px.is_empty() => t.index = num::parse(p.idx_px),
-                    PriceChannel::OpenInterest if !p.oi_ccy.is_empty() => {
-                        t.open_interest = num::parse(p.oi_ccy)
-                    }
-                    PriceChannel::Funding => {
-                        if !p.funding_rate.is_empty() {
-                            t.funding_rate = num::parse(p.funding_rate);
-                        }
-                        if !p.funding_time.is_empty() {
-                            t.funding_time = num::parse(p.funding_time);
-                        }
-                    }
-                    _ => {}
-                });
-                let mask = match channel {
-                    PriceChannel::Tickers => {
-                        3 | (1 << 9)
-                            | (1 << 10)
-                            | if !p.last.is_empty() { 1 << 2 } else { 0 }
-                            | if !p.last.is_empty() && !p.open24h.is_empty() {
-                                1 << 5
-                            } else {
-                                0
-                            }
-                    }
-                    PriceChannel::Mark => 1 << 3,
-                    PriceChannel::Index => 1 << 4,
-                    PriceChannel::OpenInterest => 1 << 6,
-                    PriceChannel::Funding => (1 << 7) | (1 << 8),
-                    PriceChannel::Other => 0,
-                };
-                if let Some(ticker) = cx.store.tickers().get(index as usize) {
-                    self.live_tickers.record(cx.store, &ticker.symbol, mask);
-                }
-            };
-            if channel == PriceChannel::Index {
-                if let Some(ids) = self.underlying_products.get(p.inst_id) {
-                    for id in ids {
-                        update(id);
-                    }
-                }
-            } else {
-                update(p.inst_id);
-            }
-        });
+        let _ = json::each::<wire::Prices<'_>>(data.get(), |p| self.price_row(cx, channel, p));
         self.account_prices(cx);
     }
 
@@ -1049,6 +1052,15 @@ impl Venue for Okx {
         let Some(channel) = self.channel(cx, socket) else {
             return;
         };
+        // The hot price pushes skip serde; anything off their fixed shape takes it.
+        if let Some((name, row)) = wire::scan_price(text)
+            && let price @ (PriceChannel::Tickers | PriceChannel::Mark | PriceChannel::Index) =
+                PriceChannel::of(name)
+        {
+            self.price_row(cx, price, row);
+            self.account_prices(cx);
+            return;
+        }
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
             return;
         };
