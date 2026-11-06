@@ -103,6 +103,15 @@ impl Venue for Paradex {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Public(request) => request.startup_sections(),
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     /// A host-answered provider binds its Stark public key before start; a
     /// trusted local provider keeps the key it sealed at setup.
     fn public_key_setup(
@@ -340,7 +349,7 @@ impl Venue for Paradex {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::BookQuery(context) => {
                 let _ = cx.fail_context(&context, error);
             }
@@ -357,7 +366,7 @@ impl Venue for Paradex {
                 self.failures(cx);
             }
             other => self.on_sign_failed(cx, other, &error.message),
-        }
+        });
     }
     fn on_http_preparation_failed(
         &mut self,
@@ -366,7 +375,7 @@ impl Venue for Paradex {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Public(request) if request.is_command_candle() => {
                 request.reject_command_candle(cx, error);
                 self.failures(cx);
@@ -376,7 +385,7 @@ impl Venue for Paradex {
                 self.failures(cx);
             }
             other => self.on_sign_error(cx, other, error),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

@@ -1108,3 +1108,17 @@ fn optional_native_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u
     struct Id(#[serde(deserialize_with = "native_id")] u64);
     Option::<Id>::deserialize(d).map(|id| id.map(|id| id.0))
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.kind {
+            Kind::Markets => S::MARKETS,
+            Kind::Tickers | Kind::Marks => S::TICKERS,
+            Kind::Balance => S::BALANCE,
+            Kind::Positions => S::POSITIONS,
+            Kind::Orders => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}

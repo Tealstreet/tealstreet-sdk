@@ -1799,6 +1799,31 @@ impl<P> Cx<'_, P> {
         self.io.core.request_contexts.validate(context, self.now)
     }
 
+    /// Raise a live issued Mutation command root's failure projection to Unknown.
+    /// Monotonic and failure-only: it grants no send, retry or success authority,
+    /// records no write fact, and cannot clear earlier uncertainty.
+    pub fn inherit_http_uncertainty(&mut self, root: &Context) -> Result<(), Error> {
+        self.validate_http_context(root)?;
+        if root.operation() != Operation::Mutation || !matches!(root.owner(), Owner::Command { .. })
+        {
+            return Err(Error::Invalid);
+        }
+        let owner = self
+            .io
+            .core
+            .request_contexts
+            .owner_entry_mut(root.owner())
+            .ok_or(Error::Revoked)?;
+        if owner.context_root() != Some(root) {
+            return Err(Error::Invalid);
+        }
+        owner.inherited_uncertain = true;
+        if let Some(writes) = owner.writes.as_mut() {
+            writes.inherit_uncertain();
+        }
+        Ok(())
+    }
+
     /// Read-only companion-event authority. A Read handle cannot publish a
     /// completion marker once its command has declared any mutation sibling.
     /// Complete synchronously after validation; this grants no send permission.
@@ -2594,7 +2619,7 @@ impl crate::engine::CoreRef<'_> {
 mod tests {
     use super::*;
     use crate::request_context::{Operation, RetryPolicy};
-    use crate::{Notice, Store};
+    use crate::{Action, Notice, Store};
 
     #[test]
     fn only_standard_public_background_discovery_gets_the_readiness_allowance() {
@@ -3031,6 +3056,161 @@ mod tests {
         );
         assert_eq!(cx.validate_completion_context(&replacement), Ok(()));
         assert_eq!(cx.io.core.actions.len(), 1);
+    }
+
+    #[test]
+    fn inherited_http_uncertainty_requires_a_live_issued_mutation_root() {
+        let mut io = super::super::Io::<()>::default();
+        let mut store = Store::default();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut store,
+            io: &mut io,
+        };
+        let mutation = Policy {
+            operation: Operation::Mutation,
+            retry: RetryPolicy::Never,
+            ..policy()
+        };
+        let background = cx.http_context(Scope::Background, policy()).unwrap();
+        let read = cx.http_context(Scope::Command(7), policy()).unwrap();
+        let root = cx
+            .http_context(Scope::Command(8), mutation.clone())
+            .unwrap();
+        let child = cx.http_leg_context(&root, mutation.clone()).unwrap();
+        let foreign = ContextRegistry::default()
+            .issue(1, Scope::Command(8), mutation.clone(), 0.)
+            .unwrap();
+        let counts = (
+            cx.io.core.next_id,
+            cx.io.core.actions.len(),
+            cx.io.core.timers.len(),
+        );
+        for (context, expected) in [
+            (&background, Error::Invalid),
+            (&read, Error::Invalid),
+            (&child, Error::Invalid),
+            (&foreign, Error::Revoked),
+        ] {
+            assert_eq!(cx.inherit_http_uncertainty(context), Err(expected));
+        }
+        assert_eq!(
+            (
+                cx.io.core.next_id,
+                cx.io.core.actions.len(),
+                cx.io.core.timers.len()
+            ),
+            counts
+        );
+        assert!(
+            !cx.io
+                .core
+                .request_contexts
+                .owner_entry_mut(root.owner())
+                .unwrap()
+                .inherited_uncertain
+        );
+        cx.fail_context(&root, "terminal").unwrap();
+        assert_eq!(cx.inherit_http_uncertainty(&root), Err(Error::Revoked));
+        let current = cx.http_context(Scope::Command(8), mutation).unwrap();
+        assert_eq!(cx.inherit_http_uncertainty(&root), Err(Error::Revoked));
+        cx.now = current.deadline();
+        assert_eq!(cx.inherit_http_uncertainty(&current), Err(Error::TimedOut));
+    }
+
+    #[test]
+    fn inherited_http_uncertainty_cannot_downgrade_or_authorize_a_write() {
+        for (fallback, retry) in [
+            (crate::Outcome::NotSent, RetryPolicy::Never),
+            (crate::Outcome::Rejected, RetryPolicy::Never),
+            (crate::Outcome::NotSent, RetryPolicy::DefinitiveRefusal),
+            (crate::Outcome::Rejected, RetryPolicy::DefinitiveRefusal),
+        ] {
+            for registered in [false, true] {
+                let mut io = super::super::Io::<()>::default();
+                let mut store = Store::default();
+                let mut cx = Cx {
+                    now: 0.,
+                    store: &mut store,
+                    io: &mut io,
+                };
+                let root = cx
+                    .http_context(
+                        Scope::Command(7),
+                        Policy {
+                            operation: Operation::Mutation,
+                            retry,
+                            ..policy()
+                        },
+                    )
+                    .unwrap();
+                if registered {
+                    cx.io
+                        .core
+                        .request_contexts
+                        .register_attempt(&root, RequestId(99), 0.)
+                        .unwrap();
+                }
+                let counts = (
+                    cx.io.core.next_id,
+                    cx.io.core.actions.len(),
+                    cx.io.core.timers.len(),
+                );
+                // A permissive policy can form a logical retry, but there is no
+                // physical refusal/resend grant, before or after inheritance.
+                assert_eq!(
+                    root.retry(RetryEvidence::DefinitiveRefusal, cx.now).is_ok(),
+                    retry == RetryPolicy::DefinitiveRefusal
+                );
+                assert_eq!(
+                    cx.http_retry_context(&root, RetryEvidence::DefinitiveRefusal),
+                    Err(Error::RetryForbidden)
+                );
+                cx.inherit_http_uncertainty(&root).unwrap();
+                cx.inherit_http_uncertainty(&root).unwrap();
+                assert_eq!(
+                    (
+                        cx.io.core.next_id,
+                        cx.io.core.actions.len(),
+                        cx.io.core.timers.len()
+                    ),
+                    counts
+                );
+                assert_eq!(
+                    cx.http_retry_context(&root, RetryEvidence::DefinitiveRefusal),
+                    Err(Error::RetryForbidden)
+                );
+                assert!(cx.io.pending.is_empty());
+                // Even a caller claiming success cannot confirm an unissued or unaccepted write.
+                cx.done_context(&root, "not accepted".into()).unwrap();
+                assert!(cx.io.core.actions.iter().any(|action| matches!(action,
+                    Action::Notice(Notice::CommandFailed { error, .. })
+                    if error.outcome == Some(crate::Outcome::Unknown))));
+
+                let root = cx
+                    .http_context(
+                        Scope::Command(8),
+                        Policy {
+                            operation: Operation::Mutation,
+                            retry: RetryPolicy::Never,
+                            ..policy()
+                        },
+                    )
+                    .unwrap();
+                cx.inherit_http_uncertainty(&root).unwrap();
+                cx.fail_context(
+                    &root,
+                    VenueError {
+                        outcome: Some(fallback),
+                        ..VenueError::new("less uncertain")
+                    },
+                )
+                .unwrap();
+                assert!(cx.io.core.actions.iter().any(|action| matches!(action,
+                    Action::Notice(Notice::CommandFailed { command: 8, error })
+                    if error.outcome == Some(crate::Outcome::Unknown))));
+            }
+        }
     }
 
     #[test]

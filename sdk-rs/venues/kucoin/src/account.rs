@@ -1532,3 +1532,16 @@ fn row_identity(item: &str, field: &str) -> Option<String> {
     let value = if field == "id" { row.id } else { row.symbol }?;
     (!value.is_empty()).then(|| value.into_owned())
 }
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &self.read {
+            Read::Balance => S::BALANCE,
+            Read::Positions => S::POSITIONS,
+            Read::Orders(_) => S::ORDERS,
+            Read::Mode => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
+}

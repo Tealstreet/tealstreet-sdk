@@ -1152,6 +1152,16 @@ impl Venue for Lighter {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account { request, .. } => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn on_http_preflight_ready(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1950,13 +1960,13 @@ impl Venue for Lighter {
         _reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(request) => self.identity_rejected(cx, request, error),
             other => self.on_sign_error(cx, other, error),
-        }
+        });
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Identity(request) => self.identity_rejected(cx, request, error),
             Pending::Trade(request) => self.trade_error(cx, request, error),
             Pending::Account { context, request } => {
@@ -1989,7 +1999,7 @@ impl Venue for Lighter {
                 }
             }
             pending => self.public_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_trades(cx);

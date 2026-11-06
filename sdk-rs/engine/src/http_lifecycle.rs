@@ -652,11 +652,19 @@ impl<P> Cx<'_, P> {
         recipe: ManagedRecipe,
         pending: P,
     ) -> Result<RequestId, (P, Error)> {
+        let startup = self.io.startup_issued(&pending);
         let leg = context.leg();
         #[cfg(feature = "http-plans")]
         let admission = match self.owned_http_admission(&context) {
             Ok(admission) => admission,
-            Err(error) => return Err((pending, error)),
+            Err(error) => {
+                self.io.core.startup_causes.failed(
+                    &mut crate::startup_causes::Delivery::new(startup, None),
+                    &error.read_venue_error(),
+                    true,
+                );
+                return Err((pending, error));
+            }
         };
         // After admission, so a refused binding fails an owning Plan like any
         // other issue refusal.
@@ -763,6 +771,13 @@ impl<P> Cx<'_, P> {
         }
         #[cfg(not(feature = "session-bearer"))]
         let _ = (leg, generation);
+        if let Err((_, error)) = &result {
+            self.io.core.startup_causes.failed(
+                &mut crate::startup_causes::Delivery::new(startup, None),
+                &error.read_venue_error(),
+                true,
+            );
+        }
         result
     }
 
@@ -1137,9 +1152,11 @@ impl<P> Cx<'_, P> {
         {
             bound.push(request);
         }
+        let startup = (self.io.startup_reads)(&pending);
         self.io.pending.insert(
             request,
             PendingHttp {
+                startup,
                 value: pending,
                 auth: None,
             },
@@ -1998,22 +2015,20 @@ impl<V: Venue> Engine<V> {
                 self.io.core.http_history_failure = None;
             }
             let previous = self.io.core.http_delivery.replace(delivery.clone());
-            self.venue.on_http_preparation_failed(
-                &mut Cx {
-                    now,
-                    store: &mut self.store,
-                    io: &mut self.io,
-                },
-                pending.value,
-                reason,
-                error.clone(),
-            );
             Cx {
                 now,
                 store: &mut self.store,
                 io: &mut self.io,
             }
-            .finish_owned_read_failure(&delivery, error);
+            .with_startup_delivery(pending.startup, |cx| {
+                cx.io
+                    .core
+                    .startup_causes
+                    .failed(&mut cx.io.core.startup_delivery, &error, true);
+                self.venue
+                    .on_http_preparation_failed(cx, pending.value, reason, error.clone());
+                cx.finish_owned_read_failure(&delivery, error);
+            });
             self.io.core.http_delivery = previous;
         }
         self.io.core.request_contexts.exit_delivery(&delivery);

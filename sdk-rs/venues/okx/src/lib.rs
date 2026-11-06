@@ -992,6 +992,16 @@ impl Venue for Okx {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::Okx,
@@ -1702,7 +1712,7 @@ impl Venue for Okx {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
             Pending::Closed(request) => Self::closed_sign_failed(cx, *request, error),
             Pending::Account(account::Request::Leverage { context, .. }) => {
@@ -1713,7 +1723,7 @@ impl Venue for Okx {
             }
             Pending::History(read) => Self::history_sign_failed(cx, *read, error),
             pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
 
     fn read_root_retired(

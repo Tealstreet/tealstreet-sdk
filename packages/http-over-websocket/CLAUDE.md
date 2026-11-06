@@ -226,6 +226,10 @@ so a socket that opens and never speaks is replaced. Both stalls ran every
 request out to its deadline for the connection's lifetime
 (`src/HOWWebSocket.reconnect.test.ts`).
 
+Initial readiness is latched only after socket creation and handler attachment.
+If the configured URL getter or URL construction throws before then, the next
+request may attempt initialization again; no HTTP was dispatched.
+
 **CONNECTING also has a wall-clock bound.** RWS has a 4 s `connectionTimeout`,
 armed only after creating its native socket; that one timer can be deferred, and
 `redialIfBackingOff` deliberately handles only `retry-scheduled`. HOW therefore

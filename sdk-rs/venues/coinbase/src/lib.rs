@@ -117,6 +117,17 @@ impl Venue for Coinbase {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Public(
+                public::Request::Products { .. } | public::Request::Instruments { .. },
+            ) => S::PUBLIC,
+            Pending::Account(request, _) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn repair_subscription(
         &mut self,
         cx: &mut Cx<'_, Pending>,
