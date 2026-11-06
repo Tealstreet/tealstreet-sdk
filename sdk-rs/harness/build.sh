@@ -110,10 +110,12 @@ if [[ ${1:-} == --families ]]; then
   done
   exit 0
 fi
-# The broad shared size profile misses combined Bitget/KuCoin Spot CPU gates.
-# Measure a narrower host-only profile without changing their engine/dependencies.
+# The broad shared size profile misses combined Bitget/KuCoin Spot CPU gates, so
+# dependencies keep their profiles; the engine takes "s", as the Bitget family does
+# within its CPU gate, saving 710,762 B locally on the combined module.
 build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
   --config 'profile.release.package.safe-cex-wasm.opt-level="z"'
+  --config 'profile.release.package.safe-cex-engine.opt-level="s"'
   "${wasm_throughput_args[@]}")
 if [[ ${1:-} == --venue ]]; then family_args "$2"; fi
 cargo build "${build_args[@]}"

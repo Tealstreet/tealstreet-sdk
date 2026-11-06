@@ -139,3 +139,34 @@ The family keeps size defaults for the host and engine, and its venue crate
 moves from 3 to "s". The counterbalanced CPU gate must pass. If it does, the
 AsterDEX per-venue budget drops to the CI-measured size plus 4 KiB. Local:
 1,444,620 bytes at 3, 1,326,996 at "s", 1,271,168 at "z".
+
+## Combined engine at "s"
+
+The combined module reached the fixed 16,777,216-byte ceiling (#3140 CI
+16,778,652 B). The combined build kept `safe-cex-engine` at its native level 3
+while every family builds it at "z", or "s" for Bitget. The engine is about a
+fifth of the combined code. Local measurements of master `414ed6a8e15` with the
+pinned toolchain (rustc 1.99.0, wasm-bindgen 0.2.129, Binaryen 132), through
+the combined path of `build.sh`:
+
+| Combined engine | Bytes | Saving |
+| --- | --- | --- |
+| 3 (before) | 16,738,633 | |
+| "s" (selected) | 16,027,871 | 710,762 |
+| "z" | 15,907,327 | 831,306 |
+
+"s" is selected over "z": the rejected broad candidate above moved the engine
+and every dependency to "z" and missed the combined Bitget and KuCoin Spot CPU
+gates, while the Bitget family already ships its engine at "s" within its gate.
+Dependencies, `serde_json` (3), Bitget (3) and KuCoin keep their throughput
+levels, and family and native profiles are unchanged. CI's combined public CPU
+gates certify the selection.
+
+Measured for a later, CPU-gated step (not in this change): dependencies at
+"z" with KuCoin kept at 3 and the engine at "s", 15,323,964 B (-1,414,669 B);
+`serde_json` at "s" or "z" (-316,364 / -318,865 B), which the shared JSON
+throughput policy keeps at 3; `--remap-path-prefix` for registry paths (-4,616 B).
+
+Measured and not taken: a third `wasm-opt -Oz` (-82 B), `--gufa` (-1,436 B),
+`--converge` and `--zero-filled-memory` (0), `-O4` then `-Oz` (+72,631 B).
+Panic-location paths total about 19.5 KB, and only `sha2` ships two versions.
