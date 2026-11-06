@@ -9,6 +9,7 @@ use support::*;
 
 const HELD: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","holdSide":"long","total":"0.749","available":"0.197","locked":"0.552","openPriceAvg":"90","markPrice":"100","leverage":"20","marginMode":"crossed","posMode":"one_way_mode","uTime":"100"}]}"#;
 const REFUSAL: &str = "Not enough position is available";
+const ONE_WAY: &str = "part of your BTCUSDT long position is held by open close orders; cancel them first (Not enough position is available)";
 
 fn held() -> Harness {
     let mut h = Harness::private_started();
@@ -41,24 +42,11 @@ fn result(h: &Harness, command: u32) -> &Result<String, String> {
     &h.done.iter().find(|(id, _)| *id == command).unwrap().1
 }
 
-fn drained(h: &mut Harness) {
-    let after = HELD
-        .replace(
-            r#""total":"0.749","available":"0.197""#,
-            r#""total":"0.552","available":"0""#,
-        )
-        .replace(r#""uTime":"100""#, r#""uTime":"200""#);
-    let rows: Value = serde_json::from_str(&after).unwrap();
-    h.private_message(
-        &json!({"arg":{"channel":"positions"},"action":"snapshot","data":rows["data"]}).to_string(),
-    );
-}
-
 #[test]
 fn bitget_shrinks_a_market_close_to_the_unlocked_size_and_the_store_follows() {
     let mut h = held();
     let (body, id) = close(&mut h, 1, 0.487);
-    // Sent as asked: no pre-send cap from the cached split.
+    // Sent as asked: nothing caps a close before the venue answers.
     assert_eq!(body["orderList"][0]["size"], "0.487");
     assert_eq!(body["orderList"][0]["reduceOnly"], "YES");
     h.reply(
@@ -75,7 +63,16 @@ fn bitget_shrinks_a_market_close_to_the_unlocked_size_and_the_store_follows() {
         }]})
         .to_string(),
     );
-    drained(&mut h);
+    let after = HELD
+        .replace(
+            r#""total":"0.749","available":"0.197""#,
+            r#""total":"0.552","available":"0""#,
+        )
+        .replace(r#""uTime":"100""#, r#""uTime":"200""#);
+    let rows: Value = serde_json::from_str(&after).unwrap();
+    h.private_message(
+        &json!({"arg":{"channel":"positions"},"action":"snapshot","data":rows["data"]}).to_string(),
+    );
     let position = h
         .engine
         .store()
@@ -91,9 +88,8 @@ fn bitget_shrinks_a_market_close_to_the_unlocked_size_and_the_store_follows() {
 }
 
 #[test]
-fn a_refused_close_names_the_held_size_in_the_failure_list() {
+fn a_refused_close_says_what_holds_the_position_in_the_failure_list() {
     let mut h = held();
-    drained(&mut h);
     let (_, id) = close(&mut h, 2, 0.138);
     h.reply(
         id,
@@ -104,12 +100,9 @@ fn a_refused_close_names_the_held_size_in_the_failure_list() {
         .to_string(),
     );
     let error = h.failures.last().unwrap();
-    assert!(
-        error.message.contains(
-            "only 0 of the 0.552 BTCUSDT long is free to close; 0.552 is held by open close orders, cancel them first (Not enough position is available)"
-        ),
-        "{}",
-        error.message
+    assert_eq!(
+        error.message,
+        format!("Bitget batch failure after ids []: {ONE_WAY}")
     );
     assert_ne!(error.outcome, Some(Outcome::Unknown));
     assert!(result(&h, 2).is_err());
@@ -122,9 +115,8 @@ fn a_refused_close_names_the_held_size_in_the_failure_list() {
 }
 
 #[test]
-fn a_coded_refusal_names_the_held_size() {
+fn a_coded_refusal_says_what_holds_the_position() {
     let mut h = held();
-    drained(&mut h);
     let (_, id) = close(&mut h, 3, 0.138);
     h.reply(
         id,
@@ -132,40 +124,14 @@ fn a_coded_refusal_names_the_held_size() {
         &json!({"code":"40757","msg":REFUSAL,"data":null}).to_string(),
     );
     let error = h.failures.last().unwrap();
-    assert_eq!(
-        error.message,
-        "Bitget 40757: only 0 of the 0.552 BTCUSDT long is free to close; 0.552 is held by open close orders, cancel them first (Not enough position is available) (HTTP 200)"
-    );
+    assert_eq!(error.message, format!("Bitget 40757: {ONE_WAY} (HTTP 200)"));
     assert_eq!(error.outcome, Some(Outcome::Rejected));
+    assert_eq!(error.venue_code.as_deref(), Some("40757"));
     assert!(
         !h.requests
             .iter()
             .any(|r| r.url.contains("/batch-place-order"))
     );
-}
-
-#[test]
-fn a_split_the_store_no_longer_matches_is_not_quoted() {
-    let mut h = held();
-    // A newer row without the split: its size is current, the split is not.
-    h.private_message(r#"{"arg":{"channel":"positions"},"action":"snapshot","data":[{"symbol":"BTCUSDT","holdSide":"long","total":"0.552","openPriceAvg":"90","posMode":"one_way_mode","marginMode":"crossed","uTime":"300"}]}"#);
-    let (_, id) = close(&mut h, 4, 0.138);
-    h.reply(
-        id,
-        200,
-        &json!({"code":"00000","data":{"successList":[],"failureList":[
-            {"clientOid":"c","errorMsg":REFUSAL}
-        ]}})
-        .to_string(),
-    );
-    let message = &h.failures.last().unwrap().message;
-    assert!(
-        message.contains(
-            "the BTCUSDT long is held by open close orders, cancel them first (Not enough position is available)"
-        ),
-        "{message}"
-    );
-    assert!(!message.contains("0.197"), "{message}");
 }
 
 #[test]
@@ -191,42 +157,6 @@ fn other_refusals_keep_the_venue_text_byte_for_byte() {
     assert_eq!(
         h.failures.last().unwrap().message,
         "Bitget 40762: order size too big (HTTP 200)"
-    );
-}
-
-// Review probes (#3203).
-#[test]
-fn a_late_rest_row_never_replaces_a_newer_stream_split() {
-    let mut h = held();
-    while h.requests.iter().any(|r| r.url.contains("/all-position")) {
-        h.respond("/all-position", 200, HELD);
-    }
-    h.command(Command::Venue {
-        command: 90,
-        action: safe_cex_engine::VenueAction::ReadPositions,
-    });
-    let old = h.take("/all-position");
-    h.now += 1.0;
-    let fresh = HELD
-        .replace(r#""available":"0.197""#, r#""available":"0""#)
-        .replace(r#""locked":"0.552""#, r#""locked":"0.749""#)
-        .replace(r#""uTime":"100""#, r#""uTime":"200""#);
-    let data: Value = serde_json::from_str(&fresh).unwrap();
-    h.private_message(
-        &json!({"arg":{"channel":"positions"},"action":"update","data":data["data"]}).to_string(),
-    );
-    h.reply(old.id, 200, HELD);
-    assert_eq!(h.engine.store().positions()[0].last_update, Some(200.0));
-    let (_, id) = close(&mut h, 91, 0.138);
-    h.reply(
-        id,
-        200,
-        &json!({"code":"40757","msg":REFUSAL,"data":null}).to_string(),
-    );
-    let message = &h.failures.last().unwrap().message;
-    assert!(
-        message.contains("only 0 of the 0.749 BTCUSDT long"),
-        "{message}"
     );
 }
 
@@ -265,17 +195,15 @@ fn each_failure_names_its_own_close_in_a_mixed_hedge_batch() {
     let mut h = hedged();
     let id = both_closes(&mut h, 92);
     h.reply(id, 200, &json!({"code":"00000","data":{"successList":[{"orderId":"long-ok","clientOid":"long-close"}],"failureList":[{"clientOid":"short-close","errorCode":"40757","errorMsg":REFUSAL}]}}).to_string());
-    let message = &h.failures.last().unwrap().message;
-    assert!(
-        message.contains("only 0 of the 0.5 BTCUSDT short"),
-        "{message}"
+    assert_eq!(
+        h.failures.last().unwrap().message,
+        "Bitget batch failure after ids [\"long-ok\"]: part of your BTCUSDT short position is held by open close orders; cancel them first (Not enough position is available)"
     );
-    assert!(!message.contains("BTCUSDT long"), "{message}");
 }
 
 #[test]
-fn an_unattributable_refusal_names_no_side_or_size() {
-    // No clientOid on the row, and a whole-batch refusal: either close may be the one.
+fn an_unattributable_refusal_names_no_side() {
+    // No clientOid on the row, an unknown one, or a whole-batch refusal: either close may be it.
     for reply in [
         json!({"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":REFUSAL}]}}),
         json!({"code":"00000","data":{"successList":[],"failureList":[{"clientOid":"unknown","errorMsg":REFUSAL}]}}),
@@ -286,143 +214,12 @@ fn an_unattributable_refusal_names_no_side_or_size() {
         h.reply(id, 200, &reply.to_string());
         let message = &h.failures.last().unwrap().message;
         assert!(
-            message.contains("part of the BTCUSDT position is held by open close orders, cancel them first (Not enough position is available)"),
+            message.contains("part of your BTCUSDT position is held by open close orders; cancel them first (Not enough position is available)"),
             "{reply}: {message}"
         );
         assert!(
-            !message.contains("long") && !message.contains("short") && !message.contains("0.5"),
+            !message.contains("long") && !message.contains("short"),
             "{message}"
         );
     }
-}
-
-// Review probes (#3203, second round): only an admitted row's split is quoted.
-fn settled() -> Harness {
-    let mut h = held();
-    while h.requests.iter().any(|r| r.url.contains("/all-position")) {
-        h.respond("/all-position", 200, HELD);
-    }
-    h
-}
-
-/// A newer stream row: nothing free, all locked, a new entry the store must keep.
-fn fresh_stream_row(h: &mut Harness, with_time: bool) {
-    let mut response: Value = serde_json::from_str(HELD).unwrap();
-    let row = &mut response["data"][0];
-    row["available"] = json!("0");
-    row["locked"] = json!("0.749");
-    row["openPriceAvg"] = json!("91");
-    if !with_time {
-        row.as_object_mut().unwrap().remove("uTime");
-    }
-    h.private_message(
-        &json!({"arg":{"channel":"positions"},"action":"update","data":response["data"]})
-            .to_string(),
-    );
-    assert_eq!(h.engine.store().positions()[0].entry_price, 91.0);
-}
-
-fn quotes_no_rejected_split(h: &mut Harness) {
-    assert_eq!(
-        h.engine.store().positions()[0].entry_price,
-        91.0,
-        "the guards kept the stream row"
-    );
-    let (_, id) = close(h, 91, 0.138);
-    h.reply(
-        id,
-        200,
-        &json!({"code":"40757","msg":REFUSAL,"data":null}).to_string(),
-    );
-    let message = &h.failures.last().unwrap().message;
-    assert!(!message.contains("only 0.197"), "{message}");
-}
-
-fn read_positions(h: &mut Harness) -> safe_cex_engine::RequestId {
-    h.command(Command::Venue {
-        command: 90,
-        action: safe_cex_engine::VenueAction::ReadPositions,
-    });
-    h.take("/all-position").id
-}
-
-#[test]
-fn a_rejected_rest_row_with_an_equal_update_time_never_writes_its_split() {
-    let mut h = settled();
-    let old = read_positions(&mut h);
-    h.now += 1.0;
-    fresh_stream_row(&mut h, true);
-    h.reply(old, 200, HELD);
-    quotes_no_rejected_split(&mut h);
-}
-
-#[test]
-fn a_rejected_rest_row_without_update_times_never_writes_its_split() {
-    let mut h = settled();
-    let old = read_positions(&mut h);
-    h.now += 1.0;
-    fresh_stream_row(&mut h, false);
-    h.reply(old, 200, &HELD.replace(r#","uTime":"100""#, ""));
-    quotes_no_rejected_split(&mut h);
-}
-
-#[test]
-fn a_pre_reconnect_rest_row_never_writes_its_split() {
-    use safe_cex_engine::Event;
-    let mut h = settled();
-    let old = read_positions(&mut h);
-    let socket = h
-        .sockets
-        .iter()
-        .rev()
-        .find(|(_, u)| u.ends_with("/private"))
-        .unwrap()
-        .0;
-    let timers: Vec<_> = h.timers.iter().map(|(id, _)| *id).collect();
-    h.event(Event::WsClosed { socket, code: 1006 });
-    let (timer, at) = h
-        .timers
-        .iter()
-        .copied()
-        .filter(|(id, _)| !timers.contains(id))
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .unwrap();
-    h.timers.retain(|(id, _)| *id != timer);
-    h.now = at;
-    h.event(Event::TimerFired { timer });
-    let next = h
-        .sockets
-        .iter()
-        .rev()
-        .find(|(_, u)| u.ends_with("/private"))
-        .unwrap()
-        .0;
-    assert_ne!(socket, next);
-    h.event(Event::WsOpened { socket: next });
-    h.private_message(r#"{"event":"login","code":0,"msg":""}"#);
-    h.now += 1.0;
-    fresh_stream_row(&mut h, true);
-    h.reply(old, 200, HELD);
-    quotes_no_rejected_split(&mut h);
-}
-
-#[test]
-fn an_absent_position_never_quotes_a_kept_split() {
-    let mut h = settled();
-    let (_, id) = close(&mut h, 91, 0.138);
-    h.now += 6000.0;
-    h.command(Command::Venue {
-        command: 90,
-        action: safe_cex_engine::VenueAction::ReadPositions,
-    });
-    h.respond("/all-position", 200, r#"{"code":"00000","data":[]}"#);
-    assert!(h.engine.store().positions().is_empty());
-    h.reply(
-        id,
-        200,
-        &json!({"code":"40757","msg":REFUSAL,"data":null}).to_string(),
-    );
-    let message = &h.failures.last().unwrap().message;
-    assert!(message.contains("the BTCUSDT long is held"), "{message}");
-    assert!(!message.contains("only 0.197"), "{message}");
 }
