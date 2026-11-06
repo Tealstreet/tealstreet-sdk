@@ -1,3 +1,5 @@
+#[path = "../src/venue_state.rs"]
+mod source_state;
 mod support;
 
 use safe_cex_engine::{Command, Method, Outcome, model::*, wire};
@@ -158,6 +160,65 @@ fn ambiguous_execution_never_borrows_market_mode_or_a_live_price() {
                 OrderStatus::Open
             );
         }
+    }
+    // Refuse the market sentinel itself outside Classic TPSL, regardless of
+    // the different amend routes those order classes normally use.
+    let mut uta = Harness::private_started();
+    uta.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"00000","data":{"holdMode":"one_way_mode"}}"#,
+    );
+    uta.respond(
+        "/current-position",
+        200,
+        r#"{"code":"00000","data":{"list":[]}}"#,
+    );
+    uta.respond("/account/assets", 200, r#"{"code":"00000","data":{"accountEquity":"1000","effEquity":"1000","unrealisedPnl":"0"}}"#);
+    uta.respond(
+        "/unfilled-orders",
+        200,
+        r#"{"code":"00000","data":{"list":[]}}"#,
+    );
+    while uta
+        .requests
+        .iter()
+        .any(|r| r.url.contains("/unfilled-strategy-orders"))
+    {
+        uta.respond(
+            "/unfilled-strategy-orders",
+            200,
+            r#"{"code":"00000","data":{"list":[]}}"#,
+        );
+    }
+    uta.login();
+    let mut uta_row = row("loss_plan", Some(json!("")), Some("market"));
+    uta_row["category"] = json!("USDT-FUTURES");
+    uta.private_message(&json!({"arg":{"topic":"strategy-order"},"data":[uta_row]}).to_string());
+    let mut tracking = row("track_plan", Some(json!("")), Some("market"));
+    tracking["callbackRatio"] = json!("0.7");
+    let mut normal = row("normal_plan", Some(json!("")), Some("market"));
+    normal["stopLoss"] = json!("80");
+    for (label, mut h) in [
+        ("UTA", uta),
+        ("track_plan", source(&tracking, false)),
+        ("normal_plan", source(&normal, false)),
+    ] {
+        assert!(
+            h.engine.store().order("stop").is_some(),
+            "{label}: row must be admitted"
+        );
+        let frame = h.engine.snapshot_frame(h.now).to_vec();
+        let (_, section) = wire::sections(&frame)
+            .find(|(kind, _)| *kind == wire::section::VENUE_STATE)
+            .unwrap();
+        let length = u32::from_le_bytes(section[..4].try_into().unwrap()) as usize;
+        let state = source_state::decode(&section[4..4 + length]).unwrap();
+        assert!(
+            !state.execution_prices.contains_key("stop"),
+            "unqualified row must not record market execution"
+        );
+        assert!(!h.requests.iter().any(|r| r.method == Method::Post));
     }
 }
 
