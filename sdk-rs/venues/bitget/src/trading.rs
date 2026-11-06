@@ -3963,12 +3963,45 @@ fn pending_plan_type(cancel: &str) -> Option<&'static str> {
     }
 }
 
+/// A JSON object only: derive(Deserialize) also takes a sequence for a struct,
+/// which no Bitget evidence is. Derived fields still refuse duplicate keys.
+struct ObjectOnly<T>(T);
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for ObjectOnly<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Object<T>(std::marker::PhantomData<T>);
+        impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Object<T> {
+            type Value = T;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<T, A::Error> {
+                T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
+        }
+        d.deserialize_map(Object(std::marker::PhantomData))
+            .map(ObjectOnly)
+    }
+}
+
+/// Proof envelopes: the literal success code, never a number that parses to 0.
+#[derive(Deserialize)]
+struct ProofEnvelope<T> {
+    code: String,
+    data: ObjectOnly<T>,
+}
+fn proof<'de, T: Deserialize<'de>>(body: &'de str) -> Option<T> {
+    serde_json::from_str::<ObjectOnly<ProofEnvelope<T>>>(body)
+        .ok()
+        .filter(|e| e.0.code == "00000")
+        .map(|e| e.0.data.0)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PendingPlanPage<'a> {
     /// Outer `None`: the field is missing; inner `None`: Bitget's null empty list.
     #[serde(default, borrow, deserialize_with = "present")]
-    entrusted_list: Option<Option<Vec<PendingPlanRow<'a>>>>,
+    entrusted_list: Option<Option<Vec<ObjectOnly<PendingPlanRow<'a>>>>>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -3991,26 +4024,21 @@ fn empty_plan_ack(body: &str) -> bool {
         success_list: Vec<serde::de::IgnoredAny>,
         failure_list: Vec<serde::de::IgnoredAny>,
     }
-    serde_json::from_str::<Envelope<Lists>>(body)
-        .ok()
-        .and_then(|e| e.checked().ok())
-        .is_some_and(|l| l.success_list.is_empty() && l.failure_list.is_empty())
+    proof::<Lists>(body).is_some_and(|l| l.success_list.is_empty() && l.failure_list.is_empty())
 }
 
 /// Whether a pending-plan page lists `id`: `None` unless the page is a clean,
-/// complete answer (code 0, an entrustedList, every row identified, under the limit).
+/// complete answer (code "00000", an entrustedList of objects, every row
+/// identified, under the limit).
 fn pending_plan_listed(body: &str, id: &str) -> Option<bool> {
     const PAGE_LIMIT: usize = 100;
-    let page = serde_json::from_str::<Envelope<PendingPlanPage>>(body)
-        .ok()?
-        .checked()
-        .ok()?;
+    let page = proof::<PendingPlanPage>(body)?;
     let rows = page.entrusted_list?.unwrap_or_default();
     if rows.len() >= PAGE_LIMIT {
         return None;
     }
     let mut listed = false;
-    for row in &rows {
+    for ObjectOnly(row) in &rows {
         let row_id = row.order_id.text();
         if row_id.is_empty() {
             return None;

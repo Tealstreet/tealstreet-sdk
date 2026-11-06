@@ -358,3 +358,68 @@ fn only_exactly_empty_lists_enter_confirmation() {
         );
     }
 }
+
+// Review probes (#3202, second round): literal success codes and object shapes.
+#[test]
+fn only_the_literal_success_code_proves_absence() {
+    for code in [
+        r#""1e-999""#,
+        r#""0e9""#,
+        r#""0""#,
+        r#""-0""#,
+        "0",
+        r#""00000.0""#,
+    ] {
+        let mut h = ready();
+        cancel(&mut h, EMPTY_ACK);
+        let read = confirming_read(&mut h);
+        let body = format!(r#"{{"code":{code},"data":{{"entrustedList":[]}}}}"#);
+        h.reply(read, 200, &body);
+        assert!(result(&h).is_err(), "{body}: {:?}", h.done);
+        assert_eq!(
+            h.failures.last().unwrap().outcome,
+            Some(Outcome::Unknown),
+            "{body}"
+        );
+    }
+    for code in [r#""1e-999""#, r#""0""#, "0"] {
+        let mut h = ready();
+        cancel(
+            &mut h,
+            &format!(r#"{{"code":{code},"data":{{"successList":[],"failureList":[]}}}}"#),
+        );
+        assert!(
+            !h.requests.iter().any(|r| r.url.contains("orderId=target")),
+            "{code}"
+        );
+    }
+}
+
+#[test]
+fn non_object_pages_rows_or_acks_prove_nothing() {
+    for page in [
+        r#"{"code":"00000","data":[[]]}"#,
+        r#"{"code":"00000","data":{"entrustedList":[["sibling"]]}}"#,
+        r#"["00000",{"entrustedList":[]}]"#,
+    ] {
+        let mut h = ready();
+        cancel(&mut h, EMPTY_ACK);
+        let read = confirming_read(&mut h);
+        h.reply(read, 200, page);
+        assert!(result(&h).is_err(), "{page}: {:?}", h.done);
+        assert_eq!(
+            h.failures.last().unwrap().outcome,
+            Some(Outcome::Unknown),
+            "{page}"
+        );
+    }
+    for ack in [r#"{"code":"00000","data":[[],[]]}"#, r#"["00000",[[],[]]]"#] {
+        let mut h = ready();
+        cancel(&mut h, ack);
+        assert!(
+            !h.requests.iter().any(|r| r.url.contains("orderId=target")),
+            "{ack}"
+        );
+        assert!(result(&h).is_err(), "{ack}");
+    }
+}
