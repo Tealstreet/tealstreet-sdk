@@ -1272,7 +1272,7 @@ fn catalogue_and_live_seed_classes_are_declared_at_issuance() {
     use safe_cex_engine::request_budget::RequestClass;
     for (seed, class, budget) in [
         (Seed::Markets, RequestClass::Discovery, 90_000),
-        (Seed::Tickers, RequestClass::Read, 20_000),
+        (Seed::Tickers, RequestClass::Discovery, 90_000),
         (Seed::Funding, RequestClass::Read, 20_000),
     ] {
         let (engine, packet, _, _) = issued(seed, false);

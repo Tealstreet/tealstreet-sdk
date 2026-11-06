@@ -90,7 +90,7 @@ fn an_admission_refused_discovery_read_retries_through_the_same_backoff() {
     assert!(
         retried
             .timeout_ms
-            .is_some_and(|ms| (20_000..=20_001).contains(&ms)),
+            .is_some_and(|ms| (90_000..=90_001).contains(&ms)),
         "{:?}",
         retried.timeout_ms
     );
@@ -117,12 +117,12 @@ fn a_managed_ticker_ban_keeps_its_pause_evidence() {
     h.respond("status=PreLaunch", 200, PRELAUNCH);
     h.respond("/v5/market/instruments-info", 200, INSTRUMENTS);
     let ticker = h.take("/v5/market/tickers");
-    assert_eq!(ticker.timeout_ms, Some(20_000));
+    assert_eq!(ticker.timeout_ms, WINDOW);
     h.reply(ticker.id, 403, "Forbidden");
     h.advance(599_000.);
     assert!(!h.has_request("/v5/market/tickers"));
     h.advance(2_000.);
-    assert_eq!(h.take("/v5/market/tickers").timeout_ms, Some(20_000));
+    assert_eq!(h.take("/v5/market/tickers").timeout_ms, WINDOW);
 }
 
 /// C5: an answer delivered after its window closed publishes no rows.

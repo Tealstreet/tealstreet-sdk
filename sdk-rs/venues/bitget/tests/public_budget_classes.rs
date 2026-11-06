@@ -18,7 +18,12 @@ fn catalogue_and_ticker_classes_are_declared_at_issuance() {
             90_000,
             support::CONTRACTS,
         ),
-        ("/tickers", RequestClass::Read, 20_000, support::TICKERS),
+        (
+            "/tickers",
+            RequestClass::Discovery,
+            90_000,
+            support::TICKERS,
+        ),
     ] {
         let (token, request) = engine
             .drain_actions()

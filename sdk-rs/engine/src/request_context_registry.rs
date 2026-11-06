@@ -1691,6 +1691,7 @@ impl<P> Cx<'_, P> {
 
     /// Declare a live public read (book/depth, ticker, trades or candles).
     /// Catalogue Background reads use `http_context` and keep the longer default.
+    /// Before public startup completes, live reads keep the discovery readiness bound.
     /// Command classes and explicit venue timeouts retain their existing bounds.
     pub fn http_live_context(&mut self, scope: Scope, policy: Policy) -> Result<Context, Error> {
         self.live_http_context(scope, policy, None)
@@ -2376,7 +2377,10 @@ impl crate::engine::CoreCx<'_> {
                 .domain_pacing(policy.operation, policy.pacing)?,
             ..policy
         };
-        let class = if live && scope == Scope::Background {
+        let class = if live
+            && scope == Scope::Background
+            && (policy.credential.is_some() || (loaded.markets && loaded.tickers))
+        {
             crate::request_budget::RequestClass::Read
         } else {
             parent

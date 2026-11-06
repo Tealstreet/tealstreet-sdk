@@ -287,14 +287,14 @@ fn catalogue_and_live_public_classes_are_declared_at_issuance() {
         ),
         (
             "ticker",
-            RequestClass::Read,
-            20_000,
+            RequestClass::Discovery,
+            90_000,
             r#"{"code":0,"data":[{"symbol":"BTC-USDT","lastPrice":"60000","priceChangePercent":"1","volume":"12","quoteVolume":"720000"}]}"#,
         ),
         (
             "premiumIndex",
-            RequestClass::Read,
-            20_000,
+            RequestClass::Discovery,
+            90_000,
             r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"60001","indexPrice":"60002","lastFundingRate":"0.01","nextFundingTime":1700000000000}]}"#,
         ),
     ] {

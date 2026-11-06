@@ -102,12 +102,20 @@ fn preparation(actions: &[Action]) -> (Preparation, &HttpRequest) {
         .unwrap_or_else(|| panic!("one live preparation: {actions:?}"))
 }
 #[test]
-fn undeclared_catalogues_keep_the_long_default_and_live_declarations_are_short() {
+fn live_reads_keep_startup_discovery_and_only_shorten_after_loading() {
     for priority in [HttpReadClass::Normal, HttpReadClass::Bulk] {
         for (loaded, catalogue) in [(false, 90_000), (true, 60_000)] {
             for (live, budget, class) in [
                 (false, catalogue, RequestClass::Discovery),
-                (true, 20_000, RequestClass::Read),
+                (
+                    true,
+                    if loaded { 20_000 } else { 90_000 },
+                    if loaded {
+                        RequestClass::Read
+                    } else {
+                        RequestClass::Discovery
+                    },
+                ),
             ] {
                 let mut e = engine(live, priority, false, loaded);
                 let actions: Vec<_> = e.drain_actions().collect();
@@ -193,4 +201,42 @@ fn an_account_read_expired_before_drain_never_reaches_the_host() {
     assert!(!actions.iter().any(|a| matches!(a, Action::ManagedHttp(a) if matches!(a.as_ref(), HttpAction::Prepare { .. } | HttpAction::Bind { .. }))));
     assert_eq!(e.venue.failures, [Error::TimedOut]);
     assert!(e.io.core.managed_http.is_empty());
+}
+
+#[test]
+fn a_live_read_issued_during_startup_keeps_its_original_ceiling_after_loading() {
+    let mut e = engine(true, HttpReadClass::Normal, false, false);
+    e.store_mut().set_loaded(|loaded| {
+        loaded.markets = true;
+        loaded.tickers = true;
+    });
+    e.prepare_dispatch(15_100.);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let (token, request) = preparation(&actions);
+    assert_eq!(request.timeout_ms, Some(75_000));
+    assert_eq!(e.http_request_class(token), Some(RequestClass::Discovery));
+    assert_eq!(
+        e.io.core.managed_http[&request.id].lifecycle.deadline(),
+        90_100.
+    );
+    e.http_prepared(
+        15_100.,
+        token,
+        Prepared {
+            id: 1,
+            expires_at: None,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    e.prepare_dispatch(21_100.);
+    e.reprepare_http(21_100., token);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let (renewed, request) = preparation(&actions);
+    assert_ne!(renewed, token);
+    assert_eq!(request.timeout_ms, Some(69_000));
+    assert_eq!(e.http_request_class(renewed), Some(RequestClass::Discovery));
+    assert_eq!(
+        e.io.core.managed_http[&request.id].lifecycle.deadline(),
+        90_100.
+    );
 }
