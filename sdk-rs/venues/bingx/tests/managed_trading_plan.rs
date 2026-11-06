@@ -1029,3 +1029,65 @@ fn undocumented_duplicate_and_unlisted_codes_stay_unknown_until_the_next_read() 
         assert_eq!(writes(&collect(&mut e, START + 4.)).len(), 1, "{code}");
     }
 }
+
+#[test]
+fn missing_order_cancel_uses_the_existing_primary_read_and_symbol_fence() {
+    for body in [
+        r#"{"code":109400,"msg":"order not exist"}"#,
+        r#"{"code":109421,"msg":"order does not exist"}"#,
+    ] {
+        let mut e = engine();
+        e.store_mut().set_orders(vec![open_order("old")]);
+        e.handle(
+            START,
+            Event::Command(Command::CancelOrders {
+                command: COMMAND,
+                ids: vec!["old".into()],
+            }),
+        );
+        let cancel = cancel_packet(&collect(&mut e, START));
+        let actions = respond(&mut e, &cancel, START + 1., 200, body);
+        assert!(
+            failures(&actions).is_empty(),
+            "{body}: {:?}",
+            failures(&actions)
+        );
+        assert_eq!(ids(&actions), Vec::<String>::new());
+        assert_eq!(
+            e.store().order("old").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+        assert_fence_clears_only_on_the_primary_snapshot(&mut e, &actions);
+    }
+}
+
+#[test]
+fn generic_invalid_parameter_text_is_not_a_missing_order_cancel_or_a_resend() {
+    for message in ["invalid symbol", "order not exist: invalid symbol"] {
+        let mut e = engine();
+        e.store_mut().set_orders(vec![open_order("old")]);
+        e.handle(
+            START,
+            Event::Command(Command::CancelOrders {
+                command: COMMAND,
+                ids: vec!["old".into()],
+            }),
+        );
+        let cancel = cancel_packet(&collect(&mut e, START));
+        let actions = respond(
+            &mut e,
+            &cancel,
+            START + 1.,
+            200,
+            &json!({"code":109400,"msg":message}).to_string(),
+        );
+        assert_eq!(failures(&actions)[0].kind, Some(ErrorKind::InvalidInput));
+        assert_eq!(failures(&actions)[0].outcome, Some(Outcome::Rejected));
+        assert!(writes(&actions).is_empty());
+        assert!(order_reads(&actions).is_empty());
+        assert_eq!(
+            e.store().order("old").unwrap().status,
+            safe_cex_engine::model::OrderStatus::Open
+        );
+    }
+}

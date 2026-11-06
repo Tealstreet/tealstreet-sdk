@@ -407,10 +407,12 @@ impl Venue for Paradex {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.account.handles_timer(timer) {
-            self.account.on_timer(cx, timer);
-        } else {
-            self.public_timer(cx, timer);
+        if !self.trading.on_timer(cx, &mut self.account, timer) {
+            if self.account.handles_timer(timer) {
+                self.account.on_timer(cx, timer);
+            } else {
+                self.public_timer(cx, timer);
+            }
         }
         self.failures(cx);
     }

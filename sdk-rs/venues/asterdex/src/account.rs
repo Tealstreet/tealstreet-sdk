@@ -1587,6 +1587,8 @@ impl AsterDex {
                 time_in_force: o.f.clone(),
                 client_order_id: o.c.clone(),
                 position_side: o.ps.clone(),
+                price_rate: None,
+                activate_price: None,
             },
             flags,
         );

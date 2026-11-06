@@ -201,6 +201,11 @@ pub struct AccountState {
     derivative_trade_order: VecDeque<(String, u64, i64)>,
     derivative_fill_watermarks: HashMap<(String, u64), f64>,
     terminal_algo_ids: HashSet<String>,
+    /// Open trailing stops' native callback rate and activation price, from the last
+    /// open-algo snapshot: what an amend's put-back restores exactly.
+    pub(crate) trailing: HashMap<String, crate::trading::NativeTrailing>,
+    /// The same from the regular open-orders snapshot: COIN-M lists trailing stops there.
+    pub(crate) regular_trailing: HashMap<String, crate::trading::NativeTrailing>,
     /// Orders whose native type executes at a limit price once triggered.
     pub(crate) limit_stops: HashSet<String>,
     /// The native hedge side of open rows; `reduceOnly` alone does not prove it.
@@ -1241,11 +1246,29 @@ impl BinanceFutures {
                 let mut position_sides = Vec::new();
                 let client_keyed = self.options.portfolio_margin || self.is_spot();
                 let spot = self.is_spot();
+                let mut trailing = HashMap::new();
                 let (parsed, undecodable) = each_decodable::<OpenOrder>(body, |o| {
                     let id = match (&o.client_order_id, client_keyed) {
                         (Some(client), true) => client.to_string(),
                         _ => o.order_id.to_string(),
                     };
+                    if &*o.kind == "TRAILING_STOP_MARKET"
+                        && let Some(rate) =
+                            o.price_rate.as_deref().and_then(|r| r.parse::<f64>().ok())
+                        && rate > 0.0
+                    {
+                        trailing.insert(
+                            id.clone(),
+                            crate::trading::NativeTrailing {
+                                rate,
+                                activate_price: o
+                                    .activate_price
+                                    .as_deref()
+                                    .filter(|p| p.parse::<f64>().is_ok_and(|p| p > 0.0))
+                                    .map(str::to_owned),
+                            },
+                        );
+                    }
                     let Some(kind) = order_type(&o.kind) else {
                         let message = format!("Binance open order {id} has an unsupported type");
                         rejected.push((id, o.symbol.to_string(), message));
@@ -1310,6 +1333,9 @@ impl BinanceFutures {
                     });
                 });
                 rejected.extend(undecodable);
+                if parsed.is_ok() {
+                    self.account.regular_trailing = trailing;
+                }
                 let read = cx.order_read_mark();
                 if self.is_inverse() {
                     for order in &mut orders {
@@ -1341,8 +1367,26 @@ impl BinanceFutures {
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
                 let mut position_sides = Vec::new();
+                let mut trailing = HashMap::new();
                 let (parsed, undecodable) = each_decodable::<PmConditionalOrder>(body, |o| {
                     let id = o.new_client_strategy_id.as_ref();
+                    if &*o.strategy_type == "TRAILING_STOP_MARKET"
+                        && let Some(rate) =
+                            o.price_rate.as_deref().and_then(|r| r.parse::<f64>().ok())
+                        && rate > 0.0
+                    {
+                        trailing.insert(
+                            id.to_owned(),
+                            crate::trading::NativeTrailing {
+                                rate,
+                                activate_price: o
+                                    .activate_price
+                                    .as_deref()
+                                    .filter(|p| p.parse::<f64>().is_ok_and(|p| p > 0.0))
+                                    .map(str::to_owned),
+                            },
+                        );
+                    }
                     let Some(kind) = order_type(&o.strategy_type) else {
                         let message =
                             format!("Binance conditional order {id} has an unsupported type");
@@ -1405,6 +1449,9 @@ impl BinanceFutures {
                     });
                 });
                 rejected.extend(undecodable);
+                if parsed.is_ok() {
+                    self.account.trailing = trailing;
+                }
                 let read = cx.order_read_mark();
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
@@ -1427,7 +1474,27 @@ impl BinanceFutures {
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
                 let mut position_sides = Vec::new();
+                let mut trailing = HashMap::new();
                 let (parsed, undecodable) = each_decodable::<OpenAlgoOrder>(body, |o| {
+                    if &*o.order_type == "TRAILING_STOP_MARKET"
+                        && let Some(rate) = o
+                            .callback_rate
+                            .as_deref()
+                            .and_then(|r| r.parse::<f64>().ok())
+                        && rate > 0.0
+                    {
+                        trailing.insert(
+                            o.algo_id.to_string(),
+                            crate::trading::NativeTrailing {
+                                rate,
+                                activate_price: o
+                                    .activate_price
+                                    .as_deref()
+                                    .filter(|p| p.parse::<f64>().is_ok_and(|p| p > 0.0))
+                                    .map(str::to_owned),
+                            },
+                        );
+                    }
                     let Some(kind) = order_type(&o.order_type) else {
                         let id = o.algo_id.to_string();
                         let message = format!("Binance open order {id} has an unsupported type");
@@ -1468,6 +1535,9 @@ impl BinanceFutures {
                     });
                 });
                 rejected.extend(undecodable);
+                if parsed.is_ok() {
+                    self.account.trailing = trailing;
+                }
                 let read = cx.order_read_mark();
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation

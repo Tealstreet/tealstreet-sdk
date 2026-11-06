@@ -192,6 +192,9 @@ pub struct Hyperliquid {
     connection: Connection,
     books: HashMap<String, Ladder>,
     candles: HashMap<(String, Interval), usize>,
+    /// Newest trade time per watched symbol whose `last` is now its trade price;
+    /// until its first trade, and for every other symbol, `last` is the mid.
+    trade_last: HashMap<String, f64>,
     assets: HashMap<String, u32>,
     isolated_only: HashSet<String>,
     coins: HashMap<String, String>,
@@ -230,6 +233,7 @@ impl Hyperliquid {
             connection: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
+            trade_last: HashMap::new(),
             assets: HashMap::new(),
             isolated_only: HashSet::new(),
             coins: HashMap::new(),
@@ -681,12 +685,17 @@ impl Hyperliquid {
                             && mid.is_finite()
                             && mid > 0.0
                         {
+                            let mid_is_last = !self.trade_last.contains_key(symbol);
                             cx.store.update_ticker(symbol, |t| {
-                                t.last = mid;
+                                if mid_is_last {
+                                    t.last = mid;
+                                }
                                 t.mid_price = Some(mid);
                             });
                             // A repeated mid is still an observation of last.
-                            cx.store.observe_ticker_fields(symbol, 1 << 2);
+                            if mid_is_last {
+                                cx.store.observe_ticker_fields(symbol, 1 << 2);
+                            }
                         }
                     }
                 }
@@ -702,8 +711,9 @@ impl Hyperliquid {
                         if let Some(symbol) = self.symbol(coin) {
                             let usable =
                                 |v: Option<f64>| v.is_some_and(|v| v.is_finite() && v > 0.0);
+                            let mid_is_last = !self.trade_last.contains_key(symbol);
                             // The references this context carries, changed or not (bits: last, mark).
-                            let observed = (u16::from(usable(context.mid_px)) << 2)
+                            let observed = (u16::from(mid_is_last && usable(context.mid_px)) << 2)
                                 | (u16::from(usable(context.mark_px)) << 3);
                             cx.store.update_ticker(symbol, |t| {
                                 if let Some(mark) =
@@ -714,12 +724,37 @@ impl Hyperliquid {
                                 if let Some(mid) =
                                     context.mid_px.filter(|v| v.is_finite() && *v > 0.0)
                                 {
-                                    t.last = mid;
+                                    if mid_is_last {
+                                        t.last = mid;
+                                    }
                                     t.mid_price = Some(mid);
                                 }
                             });
                             cx.store.observe_ticker_fields(symbol, observed);
                         }
+                    }
+                }
+            }
+            "trades" => {
+                if let Ok(rows) = serde_json::from_str::<Vec<TradeRow>>(raw) {
+                    for row in rows {
+                        let Some(symbol) = self.symbol(&row.coin).map(str::to_owned) else {
+                            continue;
+                        };
+                        // A print after the last book or chart closed must not pin `last`.
+                        if !self.watches(&symbol)
+                            || !row.px.is_finite()
+                            || row.px <= 0.0
+                            || self
+                                .trade_last
+                                .get(&symbol)
+                                .is_some_and(|at| row.time < *at)
+                        {
+                            continue;
+                        }
+                        self.trade_last.insert(symbol.clone(), row.time);
+                        cx.store.update_ticker(&symbol, |t| t.last = row.px);
+                        cx.store.observe_ticker_fields(&symbol, 1 << 2);
                     }
                 }
             }
@@ -857,6 +892,25 @@ impl Hyperliquid {
             }
         }
     }
+    /// A symbol with a live book or candle subscriber streams `trades`, its `last`.
+    fn watches(&self, symbol: &str) -> bool {
+        self.books.contains_key(symbol) || self.candles.keys().any(|(s, _)| s == symbol)
+    }
+    pub(crate) fn watched_symbols(&self) -> std::collections::BTreeSet<&str> {
+        let candles = self.candles.keys().map(|(symbol, _)| symbol.as_str());
+        self.books
+            .keys()
+            .map(String::as_str)
+            .chain(candles)
+            .collect()
+    }
+    /// An unwatched symbol's `last` returns to the mid on the next mids frame.
+    fn forget_unwatched_trades(&mut self) {
+        let (books, candles) = (&self.books, &self.candles);
+        self.trade_last.retain(|symbol, _| {
+            books.contains_key(symbol) || candles.keys().any(|(s, _)| s == symbol)
+        });
+    }
     fn book_sub(&mut self, cx: &mut Cx<'_, Pending>, symbol: String, add: bool) {
         let count = self.books.entry(symbol.clone()).or_default();
         if add {
@@ -876,6 +930,7 @@ impl Hyperliquid {
                 return;
             }
             self.books.remove(&symbol);
+            self.forget_unwatched_trades();
         }
         if add
             && self
@@ -2089,6 +2144,7 @@ impl Venue for Hyperliquid {
                     }
                 }
                 self.candles.remove(&(symbol.clone(), interval));
+                self.forget_unwatched_trades();
                 if self.coin(cx, &symbol).is_some() {
                     self.propose_socket_interests(cx);
                 }

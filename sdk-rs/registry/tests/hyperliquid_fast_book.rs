@@ -81,15 +81,34 @@ fn registry_options_default_off_and_explicit_opt_in_reaches_native_socket() {
                 venue == "hyperliquid" && fast == Some(true),
                 "{venue} {fast:?}: {topics:?}"
             );
+            // The watched coin's trades stream rides beside its depth topics, exactly once.
+            let coin = if venue == "hyperliquidspot" {
+                "PURR/USDC"
+            } else {
+                "BTC"
+            };
+            let trades = format!(
+                r#"{{"method":"subscribe","subscription":{{"type":"trades","coin":"{coin}"}}}}"#
+            );
             assert_eq!(
-                topics.len(),
+                topics
+                    .iter()
+                    .filter(|t| t.contains("\"type\":\"trades\""))
+                    .count(),
+                1,
+                "{venue} {fast:?}: {topics:?}"
+            );
+            assert!(topics.contains(&trades), "{venue} {fast:?}: {topics:?}");
+            assert_eq!(
+                topics.len() - 1,
                 if venue == "hyperliquidspot" {
                     5
                 } else if fast == Some(true) {
                     3
                 } else {
                     2
-                }
+                },
+                "{venue} {fast:?}: depth topics besides trades"
             );
         }
     }
