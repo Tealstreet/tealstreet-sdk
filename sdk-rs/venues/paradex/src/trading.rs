@@ -247,6 +247,7 @@ pub struct Trading {
 }
 const CANCEL_PROOF_MS: f64 = 5_000.;
 const CANCEL_PROOF_POLLS: u8 = 3;
+const CANCEL_PROOF_WINDOW_MARGIN_MS: u64 = 60_000;
 struct CancelProof {
     guard: Box<StopGuard>,
     deadline: f64,
@@ -1068,11 +1069,16 @@ impl Trading {
         }
         proof.polls += 1;
         let raw = &proof.guard.raw;
+        let start_at = raw
+            .created_at
+            .parse::<u64>()
+            .unwrap_or(0)
+            .saturating_sub(CANCEL_PROOF_WINDOW_MARGIN_MS);
         let mut path = format!(
             "/orders-history?market={}&status=CLOSED&page_size=100&start_at={}&end_at={}",
             encode(&raw.market),
-            encode(&raw.created_at),
-            num::format(cx.now.floor())
+            start_at,
+            num::format((cx.now + CANCEL_PROOF_WINDOW_MARGIN_MS as f64).floor())
         );
         if !raw.client_id.is_empty() {
             path.push_str(&format!("&client_id={}", encode(&raw.client_id)));

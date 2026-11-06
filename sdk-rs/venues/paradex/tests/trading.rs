@@ -2386,7 +2386,7 @@ fn observe_proof_stop(h: &mut Harness, client_id: Option<&str>) {
 }
 
 #[test]
-fn cancel_proof_history_window_uses_target_creation_and_each_reads_own_time() {
+fn cancel_proof_history_window_adds_margins_to_target_creation_and_each_reads_own_time() {
     for client_id in [None, Some("ts_original")] {
         let mut h = with_untriggered_stop();
         observe_proof_stop(&mut h, client_id);
@@ -2399,8 +2399,8 @@ fn cancel_proof_history_window_uses_target_creation_and_each_reads_own_time() {
             let read = take_method(&mut h, Method::Get, "/orders-history?");
             assert!(
                 read.url.contains(&format!(
-                    "&start_at=1700000000000&end_at={:.0}",
-                    h.now.floor()
+                    "&start_at=1699999940000&end_at={:.0}",
+                    h.now.floor() + 60_000.
                 )),
                 "{}",
                 read.url
@@ -2460,7 +2460,7 @@ fn a_clientless_bracket_leg_can_prove_its_cancel_in_the_bounded_history_window()
     let read = take_method(&mut h, Method::Get, "/orders-history?");
     assert!(
         read.url
-            .contains("&start_at=1700000000000&end_at=1700000000200"),
+            .contains("&start_at=1699999940000&end_at=1700000060200"),
         "{}",
         read.url
     );
@@ -2471,6 +2471,71 @@ fn a_clientless_bracket_leg_can_prove_its_cancel_in_the_bounded_history_window()
         &format!(r#"{{"results":[{}]}}"#, canceled_stop_row()),
     );
     assert_eq!(order_posts(&h), 1);
+}
+
+fn prove_cancel_through_an_exclusive_history_window(filter_updated: bool) {
+    let mut h = with_untriggered_stop();
+    h.now += 200.;
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let read = take_method(&mut h, Method::Get, "/orders-history?");
+    let bound = |name: &str| -> f64 {
+        read.url
+            .split_once('?')
+            .unwrap()
+            .1
+            .split('&')
+            .find_map(|pair| {
+                let (key, value) = pair.split_once('=')?;
+                (key == name).then(|| value.parse().unwrap())
+            })
+            .unwrap()
+    };
+    let mut row: serde_json::Value = serde_json::from_str(canceled_stop_row()).unwrap();
+    if filter_updated {
+        row["last_updated_at"] = 1_700_000_005_000_u64.into();
+        assert!(row["last_updated_at"].as_f64().unwrap() > h.now);
+    }
+    let timestamp = row[if filter_updated {
+        "last_updated_at"
+    } else {
+        "created_at"
+    }]
+    .as_f64()
+    .unwrap();
+    let body = if bound("start_at") < timestamp && timestamp < bound("end_at") {
+        serde_json::json!({"results": [row]}).to_string()
+    } else {
+        r#"{"results":[]}"#.into()
+    };
+    h.respond(read, 200, &body);
+    assert_eq!(
+        order_posts(&h),
+        1,
+        "the exact target must remain inside exclusive history bounds"
+    );
+    let place = take_method(&mut h, Method::Post, "/orders");
+    let payload: Payload = serde_json::from_str(place.body.as_deref().unwrap()).unwrap();
+    h.respond(
+        place,
+        201,
+        &format!(
+            r#"{{"id":"replacement","client_id":"{}"}}"#,
+            payload.client_id.unwrap()
+        ),
+    );
+    assert!(h.result(13).is_ok());
+}
+
+#[test]
+fn cancel_proof_window_includes_the_exact_target_creation_boundary() {
+    prove_cancel_through_an_exclusive_history_window(false);
+}
+
+#[test]
+fn cancel_proof_window_includes_a_venue_update_ahead_of_the_device_clock() {
+    prove_cancel_through_an_exclusive_history_window(true);
 }
 
 #[test]
