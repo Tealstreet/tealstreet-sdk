@@ -34,6 +34,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
         Log::info(&format!("route bases: {bases}"));
         Log::info(&format!("listening on {}", config.port));
+        let public_topics_log =
+            tokio::spawn(safe_cex_exchange_server::public_topics::log_periodically(
+                app.registry.public_topics.clone(),
+                app.closing.subscribe(),
+            ));
         let draining = app.clone();
         axum::serve(
             listener,
@@ -51,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             drain(&draining).await;
         })
         .await?;
+        public_topics_log.abort();
         Ok(())
     })
 }

@@ -127,6 +127,10 @@ fn routes(app: Arc<App>, proof: Arc<Proof>) -> Router {
                 .with_state(proof)
                 .layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
         )
+        .route(
+            "/admin/public-topics",
+            post(public_topics).layer(axum::extract::DefaultBodyLimit::max(1024)),
+        )
         .route("/admin/router-lease/status", post(router_lease_status))
         .route(
             "/admin/router-lease/summary",
@@ -441,6 +445,29 @@ async fn router_heartbeat(
         }
         Err(_) => StatusCode::BAD_REQUEST.into_response(),
     }
+}
+
+async fn public_topics(
+    State(app): State<Arc<App>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if !admin_peer(&headers, peer) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !body.is_empty()
+        && !serde_json::from_slice::<HashMap<String, serde::de::IgnoredAny>>(&body)
+            .is_ok_and(|fields| fields.is_empty())
+    {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let summary = app.registry.public_topics.snapshot();
+    let mut response = axum::Json(summary).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 async fn router_lease_summary(
