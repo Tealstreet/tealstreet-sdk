@@ -3587,7 +3587,13 @@ export class RustEngineExchange extends BaseExchange {
 
   /** The engine re-sends the venue's subscribe for this live stream; a venue that cannot logs why. */
   repairOHLCV = (opts: Pick<OHLCVOptions, 'symbol' | 'interval'>) => {
-    if (!this.publicDemandReady || !this.candleListeners.has(`${opts.symbol}:${opts.interval}`)) return;
+    const unsent = !this.publicDemandReady
+      ? 'public data is not ready'
+      : !this.candleListeners.has(`${opts.symbol}:${opts.interval}`) && 'no candle listener';
+    if (unsent) {
+      this.log(`${this.name} candles ${opts.symbol} ${opts.interval} repair not sent: ${unsent}`, LogSeverity.Warning);
+      return;
+    }
     // A shared-feed account holds no public topics; its source's socket carries the stream.
     if (this.sharedPublicFeed) {
       this.sharedPublicFeed.send({ op: 'repair', symbol: opts.symbol, interval: opts.interval });

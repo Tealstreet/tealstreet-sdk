@@ -36320,19 +36320,6 @@
     },
     {
       "venue": "kucoin",
-      "tapeSha256": "2bab19c1b1e616e2ab5005d12d0261ec7f5cb23afc45c0ede8a01d0f0f733c43",
-      "tape": "sdk-rs/harness/fixtures/kucoin-public.jsonl.gz",
-      "diagnostics": [
-        {
-          "divergence": "Raw book seed/depth differs at this boundary; final tape-derived book corrections do not erase interim differences.",
-          "keys": [
-            "checkpoint 0 books.ETHUSDT"
-          ]
-        }
-      ]
-    },
-    {
-      "venue": "kucoin",
       "tapeSha256": "7271b023a3dfbb91dc2a5d8e0223d6fca801e664ac3654bb060d62f37919628b",
       "tape": "sdk-rs/harness/tapes/kucoin-private.jsonl",
       "diagnostics": [

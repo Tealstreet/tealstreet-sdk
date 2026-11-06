@@ -183,6 +183,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // watched coins. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
 // #3187 run 42251340763 measured binance 2,212,299 B: PM algo migration and cancel proof.
 // CI size plus 10 KiB, rounded up; all Binance aliases use this single family cap.
+// #3178 run 42239151280, job 127965614325: Hyperliquid 2,154,756 B at 81206ca3c02.
+// CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
@@ -200,8 +202,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   cryptocom: 1_727_488,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_164_736,
-  hyperliquidspot: 2_164_736,
+  hyperliquid: 2_165_760,
+  hyperliquidspot: 2_165_760,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
