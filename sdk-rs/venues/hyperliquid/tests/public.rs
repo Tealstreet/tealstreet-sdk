@@ -62,14 +62,12 @@ fn start() -> (Engine<Hyperliquid>, SocketId) {
 fn message(e: &mut Engine<Hyperliquid>, socket: SocketId, text: &str) {
     e.handle(2000.0, Event::WsMessage { socket, text });
 }
+// fastAssetCtxs carries every HIP-3 dex's mids and marks, so a per-dex allMids is a duplicate
+// against the 1,000-subscription per-IP cap.
 #[test]
-fn dex_mids_subscription_matches_ts_account_session_requirement() {
-    for (public_data_only, identity, expected) in [
-        (true, false, false),
-        (true, true, false),
-        (false, false, false),
-        (false, true, true),
-    ] {
+fn dex_mids_ride_fast_asset_contexts_not_a_per_dex_all_mids() {
+    for (public_data_only, identity) in [(true, false), (true, true), (false, false), (false, true)]
+    {
         let mut e = safe_cex_engine::test_support::seeded_engine(Hyperliquid::new(Options {
             public_data_only,
             application_id: identity.then(|| "0x0000000000000000000000000000000000000001".into()),
@@ -94,16 +92,21 @@ fn dex_mids_subscription_matches_ts_account_session_requirement() {
             })
             .unwrap();
         e.handle(1000.0, Event::WsOpened { socket });
-        let dex_mids = prepared_now(&mut e).into_iter().any(|action| match action {
-            Action::WsSend { text, .. } => {
-                let message: serde_json::Value = serde_json::from_str(&text).unwrap();
-                message["subscription"]["type"] == "allMids"
-                    && message["subscription"]["dex"] == "xyz"
-            }
-            _ => false,
-        });
+        let types: Vec<_> = prepared_now(&mut e)
+            .into_iter()
+            .filter_map(|action| match action {
+                Action::WsSend { text, .. } => {
+                    let message: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    let subscription = &message["subscription"];
+                    (subscription["user"].is_null())
+                        .then(|| format!("{} {}", subscription["type"], subscription["dex"]))
+                }
+                _ => None,
+            })
+            .collect();
         assert_eq!(
-            dex_mids, expected,
+            types,
+            [r#""allMids" null"#, r#""fastAssetCtxs" null"#],
             "public={public_data_only}, identity={identity}"
         );
     }
@@ -216,13 +219,14 @@ fn silence_watchdog_closes_without_a_close_event() {
     let (mut e, _) = start();
     let timer = prepared_now(&mut e)
         .into_iter()
-        .find_map(|a| {
+        .filter_map(|a| {
             if let Action::SetTimer { timer, .. } = a {
                 Some(timer)
             } else {
                 None
             }
         })
+        .next_back()
         .unwrap();
     e.handle(50000.0, Event::TimerFired { timer });
     assert!(
@@ -377,4 +381,208 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         assert_eq!(ids, ["BTC"], "szDecimals {sz}");
         assert!(prepared_now(&mut e).into_iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message == "Skipped malformed public discovery row")));
     }
+}
+
+/// Every timer currently armed after `actions`, by deadline.
+fn armed(actions: Vec<Action>, timers: &mut Vec<(safe_cex_engine::TimerId, f64)>) {
+    for action in actions {
+        match action {
+            Action::SetTimer { timer, at_ms } => timers.push((timer, at_ms)),
+            Action::ClearTimer { timer } => timers.retain(|(t, _)| *t != timer),
+            _ => {}
+        }
+    }
+}
+
+/// Fires due timers through `until`, answering each ping with a pong; true once the socket closed.
+fn run_answering_pings(
+    e: &mut Engine<Hyperliquid>,
+    socket: SocketId,
+    timers: &mut Vec<(safe_cex_engine::TimerId, f64)>,
+    until: f64,
+) -> bool {
+    while let Some(&(timer, at)) = timers
+        .iter()
+        .filter(|(_, at)| *at <= until)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+    {
+        timers.retain(|(t, _)| *t != timer);
+        e.handle(at, Event::TimerFired { timer });
+        let actions = safe_cex_engine::test_support::prepared_actions(e, at);
+        if actions.iter().any(|a| matches!(a, Action::WsClose { .. })) {
+            return true;
+        }
+        armed(actions, timers);
+        e.handle(
+            at,
+            Event::WsMessage {
+                socket,
+                text: r#"{"channel":"pong"}"#,
+            },
+        );
+        armed(
+            safe_cex_engine::test_support::prepared_actions(e, at),
+            timers,
+        );
+    }
+    false
+}
+
+// 5b15cb / ebb012: an open socket answering every ping while its public streams carry nothing
+// was never recycled, because any text frame counted as traffic.
+#[test]
+fn a_socket_answering_pings_but_carrying_no_public_data_is_recycled() {
+    let (mut e, s) = start();
+    let mut timers = Vec::new();
+    armed(prepared_now(&mut e), &mut timers);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"allMids","data":{"mids":{"BTC":"98000"}}}"#,
+    );
+    armed(prepared_now(&mut e), &mut timers);
+    assert!(
+        !run_answering_pings(&mut e, s, &mut timers, 31_000.),
+        "inside the window"
+    );
+    assert!(
+        run_answering_pings(&mut e, s, &mut timers, 33_000.),
+        "30 s of pongs alone"
+    );
+}
+
+#[test]
+fn public_data_keeps_a_pinged_socket() {
+    let (mut e, s) = start();
+    let mut timers = Vec::new();
+    armed(prepared_now(&mut e), &mut timers);
+    for second in (10..=120).step_by(10) {
+        let at = f64::from(second) * 1_000.;
+        assert!(!run_answering_pings(&mut e, s, &mut timers, at), "at {at}");
+        e.handle(
+            at,
+            Event::WsMessage {
+                socket: s,
+                text: r#"{"channel":"allMids","data":{"mids":{"BTC":"98000"}}}"#,
+            },
+        );
+        armed(
+            safe_cex_engine::test_support::prepared_actions(&mut e, at),
+            &mut timers,
+        );
+    }
+}
+
+fn notices(actions: &[Action]) -> Vec<String> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Event(notice)) => {
+                Some(notice.message.to_string())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn sent(actions: &[Action]) -> Vec<String> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::WsSend { text, .. } => Some(text.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+// The per-IP cap names nothing; it answers the oldest subscription still unacknowledged.
+#[test]
+fn a_capped_subscription_is_named_and_not_resubscribed_silently() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    e.handle(
+        1000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ETH-PERP".into(),
+        }),
+    );
+    prepared_now(&mut e).into_iter().for_each(drop);
+    for ack in [
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"allMids"}}}"#,
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"fastAssetCtxs"}}}"#,
+        r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"l2Book","coin":"ETH"}}}"#,
+    ] {
+        message(&mut e, s, ack);
+    }
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Cannot subscribe to more than 1000 channels."}"#,
+    );
+    let actions = prepared_now(&mut e);
+    assert_eq!(
+        notices(&actions),
+        ["Hyperliquid refused bbo ETH: Cannot subscribe to more than 1000 channels."]
+    );
+    assert_eq!(
+        sent(&actions),
+        [r#"{"method":"unsubscribe","subscription":{"type":"bbo","coin":"ETH"}}"#],
+        "dropped from the desired set, not retried in place"
+    );
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Already unsubscribed: {\"type\":\"bbo\",\"coin\":\"ETH\"}"}"#,
+    );
+    assert!(
+        notices(&prepared_now(&mut e)).is_empty(),
+        "the venue's own echo is not news"
+    );
+}
+
+#[test]
+fn a_refusal_naming_its_subscription_drops_that_one_and_a_fresh_subscribe_retries_it() {
+    let (mut e, s) = start();
+    prepared_now(&mut e).into_iter().for_each(drop);
+    e.handle(
+        1000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTC-PERP".into(),
+        }),
+    );
+    prepared_now(&mut e).into_iter().for_each(drop);
+    message(
+        &mut e,
+        s,
+        r#"{"channel":"error","data":"Invalid subscription {\"method\":\"subscribe\",\"subscription\":{\"type\":\"l2Book\",\"coin\":\"BTC\"}}"}"#,
+    );
+    let actions = prepared_now(&mut e);
+    assert_eq!(notices(&actions).len(), 1);
+    assert!(
+        notices(&actions)[0].starts_with("Hyperliquid refused l2Book BTC: Invalid subscription")
+    );
+    assert_eq!(
+        sent(&actions),
+        [r#"{"method":"unsubscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#]
+    );
+    e.handle(
+        3000.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "BTC-PERP".into(),
+        }),
+    );
+    prepared_now(&mut e).into_iter().for_each(drop);
+    e.handle(
+        4000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTC-PERP".into(),
+        }),
+    );
+    let again = sent(&prepared_now(&mut e));
+    assert!(
+        again.contains(
+            &r#"{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}"#.to_owned()
+        ),
+        "the user asked again: {again:?}"
+    );
 }

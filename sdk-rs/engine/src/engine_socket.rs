@@ -825,7 +825,9 @@ impl<V: Venue> Engine<V> {
                 };
                 let other = matches!(
                     control,
-                    Control::Other | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
+                    Control::Other
+                        | Control::Unwatched
+                        | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
                 );
                 #[cfg(feature = "socket-native-timing")]
                 let other = other || matches!(control, Control::Traffic);

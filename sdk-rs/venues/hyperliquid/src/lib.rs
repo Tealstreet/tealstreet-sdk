@@ -138,6 +138,11 @@ struct Connection {
     private_bootstrap: socket_codec::PrivateBootstrap,
     // Transport liveness and epoch retirement cannot forgive a missing private bootstrap.
     private_bootstrap_misses: u8,
+    /// Canonical subscriptions the venue acknowledged on the current socket.
+    acked: HashSet<String>,
+    /// Interest keys the venue refused; left out until the socket or the topic is renewed.
+    refused: HashSet<String>,
+    refusal_notices: u8,
 }
 #[derive(Default)]
 struct Ladder {
@@ -788,6 +793,12 @@ impl Hyperliquid {
             if count.subscribers > 1 {
                 return;
             }
+            self.forget_refusals(
+                cx.store,
+                &SubscriptionTopic::OrderBook {
+                    symbol: symbol.clone(),
+                },
+            );
         } else {
             count.subscribers = count.subscribers.saturating_sub(1);
             if count.subscribers > 0 {
@@ -1377,6 +1388,15 @@ impl Venue for Hyperliquid {
     ) -> Vec<(FeedId, String)> {
         self.topic_interests(store, topic)
     }
+    fn socket_control(
+        &self,
+        _: &safe_cex_engine::Store,
+        _: FeedId,
+        _: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        socket_codec::managed_control(text)
+    }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self
             .connection
@@ -1386,7 +1406,7 @@ impl Venue for Hyperliquid {
         {
             return;
         }
-        if !self.observe_private_snapshot(cx, text) {
+        if !self.observe_private_snapshot(cx, text) || self.subscription_reply(cx, text) {
             return;
         }
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
@@ -1838,8 +1858,17 @@ impl Venue for Hyperliquid {
                 }
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
-                if *count == 1 && self.coin(cx, &symbol).is_some() {
-                    self.propose_socket_interests(cx);
+                if *count == 1 {
+                    self.forget_refusals(
+                        cx.store,
+                        &SubscriptionTopic::Candles {
+                            symbol: symbol.clone(),
+                            interval,
+                        },
+                    );
+                    if self.coin(cx, &symbol).is_some() {
+                        self.propose_socket_interests(cx);
+                    }
                 }
             }
             Command::UnsubscribeCandles { symbol, interval } => {
