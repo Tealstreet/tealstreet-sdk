@@ -11,6 +11,7 @@ pub mod interruption;
 pub mod methods;
 pub mod out;
 pub mod pacing;
+pub mod public_topics;
 pub mod router_lease;
 pub mod session;
 pub mod state;
