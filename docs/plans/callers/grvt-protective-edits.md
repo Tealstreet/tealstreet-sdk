@@ -49,3 +49,7 @@ position. It now uses an unfilled stop, its position and a genuine fresh Mark
 receipt; its original unprotected-message assertion is unchanged. Its response
 lacks exact restoration fields, retaining the unavailable-provenance branch.
 A separate control refuses filled or changed targets at the shared send boundary.
+
+HTTP 429 on a protective replacement or put-back is Unknown, even with a native
+refusal or code-1000 body. It cannot authorize a put-back, session refresh or
+Unprotected claim; the user is directed to check Open Orders.

@@ -40,6 +40,13 @@ impl Request {
     pub(crate) fn is_protective(&self) -> bool {
         self.plan.protection.is_some()
     }
+    pub(crate) fn failed_outcome(&self, response: &Response<'_>) -> Outcome {
+        if response.status == 429 && self.is_protective() && !self.is_read() {
+            Outcome::Unknown
+        } else {
+            crate::wire::write_outcome(response)
+        }
+    }
     pub(crate) fn is_restore(&self) -> bool {
         self.plan
             .protection
@@ -1527,7 +1534,7 @@ impl Grvt {
         response: Response<'_>,
     ) {
         if let Err(error) = crate::wire::check(&response) {
-            let outcome = crate::wire::write_outcome(&response);
+            let outcome = request.failed_outcome(&response);
             self.trade_failed(cx, request, &error, outcome);
             return;
         }

@@ -1047,7 +1047,7 @@ impl Venue for Grvt {
             if code == "1000"
                 && !pending.auth_resent
                 && !restoring
-                && (!protective || wire::venue_rejected(&response))
+                && (!protective || (response.status != 429 && wire::venue_rejected(&response)))
                 && !matches!(pending.job, Job::Account(account::Request::Login))
                 && !matches!(pending.job, Job::Markets { .. } | Job::Candles(_))
                 && !matches!(&pending.job,Job::History(request) if request.is_public())
@@ -1063,7 +1063,8 @@ impl Venue for Grvt {
                 }
                 self.account_refresh(cx, pending);
             } else if let Job::Trade(request) = pending.job {
-                self.trade_failed(cx, request, &error, wire::write_outcome(&response));
+                let outcome = request.failed_outcome(&response);
+                self.trade_failed(cx, request, &error, outcome);
             } else if let Job::History(request) = pending.job {
                 self.history_failed(cx, *request, &error);
             } else {

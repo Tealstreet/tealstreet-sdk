@@ -2812,3 +2812,56 @@ fn protective_unknown_response_with_session_code_does_not_refresh_or_resend() {
         .unwrap();
     assert_eq!(serde_json::to_value(error).unwrap()["outcome"], "unknown");
 }
+
+#[test]
+fn protective_429_on_replacement_or_put_back_stays_unknown_without_retry_or_protection_claim() {
+    for put_back in [false, true] {
+        for body in [
+            "",
+            r#"{"c":1001,"m":"refused"}"#,
+            r#"{"c":1000,"m":"expired"}"#,
+        ] {
+            let (mut e, public, source) = protective_engine(
+                OrderType::StopLoss,
+                OrderSide::Sell,
+                StopTriggerType::MarkPrice,
+            );
+            e.store_mut().update_order("42", |o| o.close = Some(true));
+            let source = source.replace("\"cp\":false", "\"cp\":true");
+            protective_quote(&mut e, public, NOW + 1., r#""mp":"100""#);
+            let get = protective_start(&mut e, 80.);
+            let cancel = http(reply(&mut e, &get, 200, &source), "cancel_order");
+            let verify = http(reply(&mut e, &cancel, 200, r#"{"r":{"a":true}}"#), "/order");
+            let replacement = http(
+                reply(
+                    &mut e,
+                    &verify,
+                    200,
+                    &source.replace("\"OPEN\"", "\"CANCELLED\""),
+                ),
+                "create_order",
+            );
+            let pending = if put_back {
+                http(
+                    reply(&mut e, &replacement, 400, r#"{"c":1001,"m":"refused"}"#),
+                    "create_order",
+                )
+            } else {
+                replacement
+            };
+            let actions = reply(&mut e, &pending, 429, body);
+            assert!(!actions.iter().any(|a|matches!(a,Action::Http(r) if r.url.ends_with("create_order") || r.url.ends_with("cancel_order") || r.url.ends_with("auth/api_key/login"))),"{actions:?}");
+            let error = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            assert!(error.protection.is_none());
+            assert!(error.message.contains("unknown") && error.message.contains("Open Orders"));
+            assert!(!error.message.contains("both refused"));
+        }
+    }
+}
