@@ -6,7 +6,7 @@ import { WASM_BUDGETS, WASM_VENUE_OVERRIDES, wasmBudgetError } from './wasm-budg
 
 test('combined shipping build and standalone builds retain distinct fixed ceilings', () => {
   assert.equal(WASM_BUDGETS.venue, 1_343_488);
-  assert.equal(WASM_BUDGETS.combined, 16 * 1024 * 1024);
+  assert.equal(WASM_BUDGETS.combined, 17 * 1024 * 1024);
   for (const profile of Object.keys(WASM_BUDGETS)) {
     assert.equal(wasmBudgetError(WASM_BUDGETS[profile], profile), undefined);
     assert.match(wasmBudgetError(WASM_BUDGETS[profile] + 1, profile), /exceeds/);
@@ -18,11 +18,12 @@ test('combined shipping build and standalone builds retain distinct fixed ceilin
 
 
 
-test('the approved combined ceiling accepts 16 MiB exactly and rejects the next byte', () => {
+test('the approved combined ceiling accepts 17 MiB exactly and rejects the next byte', () => {
   for (const venue of [undefined, ...Object.keys(WASM_VENUE_OVERRIDES)]) {
-    assert.equal(wasmBudgetError(16_777_215, 'combined', venue), undefined);
-    assert.equal(wasmBudgetError(16_777_216, 'combined', venue), undefined);
-    assert.equal(wasmBudgetError(16_777_217, 'combined', venue), 'combined wasm 16777217 exceeds 16777216 bytes');
+    assert.equal(wasmBudgetError(16_778_652, 'combined', venue), undefined, '#3140 measured size');
+    assert.equal(wasmBudgetError(17_825_791, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(17_825_792, 'combined', venue), undefined);
+    assert.equal(wasmBudgetError(17_825_793, 'combined', venue), 'combined wasm 17825793 exceeds 17825792 bytes');
   }
 });
 

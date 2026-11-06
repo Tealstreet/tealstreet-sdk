@@ -6,8 +6,8 @@ import { parseArgs } from 'node:util';
 
 // Single-venue family bundles: 1.28125 MiB (RUST_WASM_FAMILIES.md), raised from
 // 1.25 MiB for FetchAccount decoding in every identity venue. The combined ceiling caps
-// total package size; Sam raised the combined ceiling to 16 MiB on 2026-10-27.
-export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_216 });
+// total package size; Sam raised the combined ceiling to 17 MiB on 2026-11-06 after #3140 measured 16,778,652 B.
+export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_792 });
 // #2219 Base64Url/EvmHex signing on the #2208 tip: CI Bitget 1,482,166 rounded up to KiB (overseer ceiling 1448 KiB);
 // #2224 serial call pacing: CI 1,482,920, +1 KiB under the 2 KiB shared-code rule.
 // AsterDEX: managed sockets (#2212) measured 1,384,485 in CI, within the standing 5% venue
