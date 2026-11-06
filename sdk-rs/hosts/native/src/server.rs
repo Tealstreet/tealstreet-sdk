@@ -985,7 +985,13 @@ impl<V: Venue, T: Transport> Account<V, T> {
                     error,
                     read_refusal,
                 } => {
-                    self.note_start_failure(&error);
+                    let engine = &self.host.engine;
+                    let unloaded = first_unloaded(
+                        engine.store().loaded(),
+                        engine.public_feed_policy() != safe_cex_engine::PublicFeedPolicy::Disabled,
+                        engine.account_startup(),
+                    );
+                    self.note_start_failure(&error, unloaded, read_refusal);
                     let mut text = encode_notice(ServerNotice::StartupFailed { detail: &error });
                     if text.len() > self.config.max_frame_bytes {
                         // Late peers replay this notice, so keep a deliverable failure.
@@ -1132,7 +1138,12 @@ impl<V: Venue, T: Transport> Account<V, T> {
 
     /// A Hosted account's start failure, one line per account per MIRROR_EVERY, also
     /// handed to the host's error sink (`report`).
-    fn note_start_failure(&mut self, error: &VenueError) {
+    fn note_start_failure(
+        &mut self,
+        error: &VenueError,
+        unloaded: Option<&'static str>,
+        refused: bool,
+    ) {
         let Some(label) = self.config.log_label.as_deref() else {
             return;
         };
@@ -1156,6 +1167,8 @@ impl<V: Venue, T: Transport> Account<V, T> {
             error_kind: error.kind.map(|kind| kind.as_str()),
             venue_code: error.venue_code.as_deref(),
             venue: None,
+            startup_unloaded: unloaded,
+            startup_refused: Some(refused),
         });
     }
 
@@ -1734,6 +1747,25 @@ enum ServerNotice<'a> {
     },
 }
 
+/// The first startup section not yet loaded, in the engine's own order and
+/// requirements (`watch_startup`): what had not loaded when a start failed.
+fn first_unloaded(
+    loaded: safe_cex_engine::model::Loaded,
+    tickers: bool,
+    account: bool,
+) -> Option<&'static str> {
+    [
+        ("markets", loaded.markets, true),
+        ("tickers", loaded.tickers, tickers),
+        ("balance", loaded.balance, account),
+        ("orders", loaded.orders, account),
+        ("positions", loaded.positions, account),
+    ]
+    .into_iter()
+    .find(|(_, done, required)| *required && !done)
+    .map(|(name, ..)| name)
+}
+
 struct NoticeFields<'a>(&'a [(&'static str, Value)]);
 
 impl NoticeFields<'_> {
@@ -2028,6 +2060,43 @@ fn valid_symbol(symbol: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{Events, HostEvent};
+
+    #[test]
+    fn a_start_failure_names_the_first_section_not_yet_loaded() {
+        use safe_cex_engine::model::Loaded;
+        let loaded = |markets, tickers, balance, orders, positions| Loaded {
+            markets,
+            tickers,
+            balance,
+            orders,
+            positions,
+        };
+        assert_eq!(
+            first_unloaded(Loaded::default(), true, true),
+            Some("markets")
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, false, false, false, false), true, true),
+            Some("tickers")
+        );
+        // A disabled public feed never waits for tickers; a public-only engine never for the account.
+        assert_eq!(
+            first_unloaded(loaded(true, false, false, true, false), false, true),
+            Some("balance")
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, true, true, true, false), true, true),
+            Some("positions")
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, true, false, false, false), true, false),
+            None
+        );
+        assert_eq!(
+            first_unloaded(loaded(true, true, true, true, true), true, true),
+            None
+        );
+    }
 
     #[test]
     fn every_subscription_repair_outcome_reaches_the_journal() {

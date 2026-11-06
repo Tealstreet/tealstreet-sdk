@@ -5156,6 +5156,12 @@ impl<V: Venue> Engine<V> {
         self.account_startup = account;
     }
 
+    /// Whether startup expects the account sections (`set_account_startup`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn account_startup(&self) -> bool {
+        self.account_startup
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn private_startup_pending(&self) -> bool {
         self.started
