@@ -1304,6 +1304,23 @@ impl BitunixFutures {
             None
         };
         let full = n.full_position || o.amount == 0.0;
+        // A LIMIT-executed TP/SL rests its limit at the old trigger: moving the trigger alone
+        // would leave a stop that fires and then rests unfilled.
+        if let Some(leg) = leg
+            && price.is_some_and(|price| price != o.price)
+            && (if leg == "tp" {
+                &n.tp_execution
+            } else {
+                &n.sl_execution
+            })
+            .eq_ignore_ascii_case("LIMIT")
+        {
+            return Err(format!(
+                "Your {} {} was not changed: its LIMIT execution would keep the old limit price; cancel it and place a new one",
+                o.symbol,
+                if leg == "tp" { "take profit" } else { "stop" }
+            ));
+        }
         if (attached || full) && amount.is_some() {
             return Err(
                 "Bitunix full-position or attached TP/SL quantity cannot be amended".into(),
