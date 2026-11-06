@@ -10476,3 +10476,28 @@ back only one exact original order after proven cancellation. Ambiguous replies
 remain Unknown without a put-back; direct attached-leg edits refuse before any
 cancel. Ordinary amendments retain their master wire/error contract. See the
 [contract and regression controls](callers/bitrue-protective-refusals.md).
+
+### Paradex guarded cancel requires terminal proof before replacement
+
+A guarded trigger edit no longer treats `400 ORDER_ID_NOT_FOUND` or `204` as
+permission to create a replacement. The former proves no cancellation reason or
+fill quantity; the latter only queues cancellation under the documented
+[cancel contract](https://docs.paradex.trade/api/prod/orders/cancel).
+The edit now uses the authenticated [order-history endpoint](https://docs.paradex.trade/api/prod/orders/get-orders),
+filtered by market, CLOSED status and original client ID when present. At most
+three reads, one second apart, share one five-second deadline. Only one matching
+exchange ID with CLOSED / USER_CANCELED, the same original identity and parameters,
+and remaining quantity equal to the entire original size authorizes replacement.
+An empty, missing, duplicate, malformed, partially filled or conflicting target
+never proves cancellation; a cursor is not absence evidence. Exhaustion, read
+failure or deadline equality ends actionable Unknown, without create or put-back.
+A later proof or timer cannot revive the ended edit. Current fill/change/cancel
+observations and crossed or stale prices also withhold replacement.
+
+This is a live fix in Paradex's existing authenticated request lane; it does not
+introduce managed Plans or claim a new final-Claim veto. The existing pre-sign
+cancel guard remains. Ordinary placements, native limit amends and plain cancels
+retain their wire and outcomes, including plain-cancel not-found idempotency.
+Their full signed-request digest is pinned against master. Existing exact put-back
+controls now supply terminal cancellation proof before exercising replacement
+refusal; their original payload and protection-result assertions remain.

@@ -1017,3 +1017,28 @@ fn an_amend_below_the_value_minimum_is_refused_before_the_cancel() {
         h.done
     );
 }
+
+#[test]
+fn an_already_gone_amend_reports_plain_words_without_a_replacement() {
+    for variant in [Variant::UsdM, Variant::PortfolioMargin] {
+        let mut h = ready(variant);
+        amend(&mut h, variant, 91, None);
+        let cancel = h.take(&format!("{}/order", root(variant)));
+        h.reply(
+            cancel.id,
+            400,
+            "",
+            r#"{"code":-2011,"msg":"Unknown order sent."}"#,
+        );
+        assert!(h.only_reconcile_reads());
+        assert_eq!(
+            h.result(91).unwrap().as_ref().unwrap_err(),
+            "Binance order was already filled or cancelled; check Open Orders"
+        );
+        assert_eq!(h.failures[0].1.venue_code.as_deref(), Some("-2011"));
+        assert_eq!(
+            h.engine.store().order(id(variant)).unwrap().status,
+            OrderStatus::Open
+        );
+    }
+}

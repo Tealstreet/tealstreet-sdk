@@ -1071,7 +1071,7 @@ impl BinanceFutures {
                     ids: canceled,
                     proof,
                 },
-                Err((UNKNOWN_ORDER, message)),
+                Err((UNKNOWN_ORDER, _)),
             ) if !unproven => {
                 if matches!(proof, Some(CancelProof::Strategy(_))) {
                     unproven = true;
@@ -1087,7 +1087,7 @@ impl BinanceFutures {
                 {
                     Some((
                         UNKNOWN_ORDER,
-                        format!("Cancellation was not confirmed: {message}"),
+                        "Binance order was already filled or cancelled; check Open Orders".into(),
                     ))
                 } else {
                     if let Some(proof) = &proof {
