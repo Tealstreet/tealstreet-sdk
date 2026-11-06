@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 /// Host observation of committed upstream interests, never desired or queued rows.
+#[cfg(not(target_arch = "wasm32"))]
 pub enum InterestObservation<'a> {
     Attached,
     Released {
@@ -32,9 +33,11 @@ pub enum InterestObservation<'a> {
     Dropped,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct InterestObserver(Arc<dyn Fn(InterestObservation<'_>) + Send + Sync>);
 
+#[cfg(not(target_arch = "wasm32"))]
 impl InterestObserver {
     pub fn new(observe: impl Fn(InterestObservation<'_>) + Send + Sync + 'static) -> Self {
         Self(Arc::new(observe))
@@ -44,6 +47,7 @@ impl InterestObserver {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl std::fmt::Debug for InterestObserver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("InterestObserver")
@@ -528,8 +532,10 @@ pub(crate) struct Lifecycle {
     socket_lookups: std::cell::Cell<usize>,
     pending_frames: usize,
     external_queue_bytes: usize,
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) observer: Option<InterestObserver>,
 }
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for Lifecycle {
     fn drop(&mut self) {
         if let Some(observer) = &self.observer {
@@ -610,6 +616,7 @@ impl Lifecycle {
         f.phase = Phase::Quarantined;
         f.authenticated = false;
         f.interests.clear_queue(&mut self.pending_frames);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(observer) = &self.observer {
             observer.observe(InterestObservation::Cleared { feed });
         }
@@ -676,6 +683,7 @@ impl Lifecycle {
         f.phase = Phase::Connecting;
         f.authenticated = false;
         f.pong_seen = false;
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(observer) = &self.observer {
             observer.observe(InterestObservation::Cleared { feed });
         }
@@ -881,6 +889,7 @@ impl Lifecycle {
         f.phase = Phase::Quarantined;
         f.authenticated = false;
         f.interests.clear_queue(&mut self.pending_frames);
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(observer) = &self.observer {
             observer.observe(InterestObservation::Cleared { feed });
         }
@@ -907,6 +916,7 @@ impl Lifecycle {
             f.phase = Phase::Quarantined;
             f.authenticated = false;
             f.interests.clear_queue(&mut self.pending_frames);
+            #[cfg(not(target_arch = "wasm32"))]
             if let Some(observer) = &self.observer {
                 observer.observe(InterestObservation::Cleared { feed: *feed });
             }
@@ -1228,6 +1238,7 @@ impl Lifecycle {
         for key in queued.batch.covered_keys {
             if queued.subscribe {
                 let row = f.interests.desired.get(&key)?.clone();
+                #[cfg(not(target_arch = "wasm32"))]
                 if let Some(observer) = &self.observer {
                     observer.observe(InterestObservation::Released {
                         feed: epoch.feed,
@@ -1236,14 +1247,18 @@ impl Lifecycle {
                     });
                 }
                 f.interests.released.insert(key, row);
-            } else if let Some(row) = f.interests.released.remove(&key)
-                && let Some(observer) = &self.observer
-            {
-                observer.observe(InterestObservation::Released {
-                    feed: epoch.feed,
-                    subscribed: false,
-                    interest: &row,
-                });
+            } else {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(observer) = &self.observer
+                    && let Some(row) = f.interests.released.get(&key)
+                {
+                    observer.observe(InterestObservation::Released {
+                        feed: epoch.feed,
+                        subscribed: false,
+                        interest: row,
+                    });
+                }
+                f.interests.released.remove(&key);
             }
         }
         Some(queued.batch.text)

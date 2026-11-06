@@ -14,6 +14,8 @@ The response is `{ "venues": { "<venue>": { "book": B, "candles": C,
 "other": N, "total": T, "peakTotal": P, "peakAt": ms } }, "checkedAt": ms }`.
 
 Only public-only engines are observed; private account engines are excluded.
+The observer API, state and callbacks compile only on native targets; wasm
+retains its original engine layout and code.
 Counts aggregate all live public-only engines for a venue, including multiple
 engines if present. Managed topics count at final subscription frame handoff,
 not when desired or queued; legacy topics count at native transport handoff.

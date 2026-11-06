@@ -48,6 +48,17 @@ pub(super) fn topics(venue: &str, text: &str) -> Vec<(String, bool)> {
             if let Some(channel) = v["params"]["channel"].as_str() {
                 push(json!(channel), added);
             }
+            if venue == "bitunix"
+                && let Some(args) = v["args"].as_array()
+            {
+                for arg in args {
+                    if let (Some(symbol), Some(channel)) =
+                        (arg["symbol"].as_str(), arg["ch"].as_str())
+                    {
+                        push(json!([symbol, channel]), added);
+                    }
+                }
+            }
         }
         "grvt" => {
             if let (Some(stream), Some(selectors)) = (
@@ -233,4 +244,113 @@ fn kucoin_batch_selectors_are_individual_topics() {
         r#"{"type":"unsubscribe","topic":"/contractMarket/snapshot:ETHUSDTM"}"#,
     );
     assert_eq!(batch[1].0, single[0].0);
+}
+#[cfg(test)]
+#[test]
+fn review_bitunix_public_batch_topics_are_counted() {
+    let sub = r#"{"op":"subscribe","args":[{"symbol":"BTCUSDT","ch":"ticker"},{"symbol":"ETHUSDT","ch":"ticker"}]}"#;
+    let unsub = r#"{"op":"unsubscribe","args":[{"symbol":"BTCUSDT","ch":"ticker"},{"symbol":"ETHUSDT","ch":"ticker"}]}"#;
+    let add = topics("bitunix", sub);
+    let remove = topics("bitunix", unsub);
+    assert_eq!(add.len(), 2);
+    assert_eq!(remove.len(), 2);
+    assert_ne!(add[0].0, add[1].0);
+    for ((a, subscribed), (b, unsubscribed)) in add.iter().zip(&remove) {
+        assert_eq!(a, b);
+        assert!(*subscribed && !*unsubscribed);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn bitunix_real_public_encoder_preserves_symbol_and_channel_identity() {
+    use safe_cex_engine::{Action, Engine, Event, Response, Venue};
+    struct PublicBatches;
+    impl safe_cex_venues::Visit for PublicBatches {
+        type Output = Vec<String>;
+        fn visit<V: Venue + 'static>(self, mut engine: Engine<V>) -> Self::Output {
+            let pairs = r#"{"code":0,"data":[{"symbol":"BTCUSDT","base":"BTC","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"},{"symbol":"ETHUSDT","base":"ETH","quote":"USDT","symbolStatus":"OPEN","basePrecision":3,"quotePrecision":1,"maxLimitOrderVolume":"100"}]}"#;
+            let tickers = r#"{"code":0,"data":[{"symbol":"BTCUSDT","last":"96000","open":"95000","markPrice":"96001","baseVol":"1000","quoteVol":"96000000"},{"symbol":"ETHUSDT","last":"3000","open":"2900","markPrice":"3001","baseVol":"1000","quoteVol":"3000000"}]}"#;
+            let mut batches = Vec::new();
+            engine.start(0.);
+            for _ in 0..16 {
+                let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.);
+                if actions.is_empty() {
+                    break;
+                }
+                for action in actions {
+                    match action {
+                        Action::Http(request) => {
+                            let body = if request.url.ends_with("/trading_pairs") {
+                                pairs
+                            } else if request.url.ends_with("/tickers") {
+                                tickers
+                            } else {
+                                panic!("unexpected public discovery request");
+                            };
+                            engine.handle(
+                                0.,
+                                Event::HttpResponse {
+                                    request: request.id,
+                                    response: Response {
+                                        status: 200,
+                                        headers: "",
+                                        body,
+                                    },
+                                },
+                            );
+                        }
+                        Action::WsConnect { socket, .. } => {
+                            engine.handle(0., Event::WsOpened { socket })
+                        }
+                        Action::WsSend { text, .. } => {
+                            if serde_json::from_str::<Value>(&text)
+                                .is_ok_and(|v| v["op"] == "subscribe" && v["args"].is_array())
+                            {
+                                batches.push(text);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            batches
+        }
+    }
+    let batches = safe_cex_venues::build(
+        "bitunix",
+        serde_json::from_value(json!({"publicDataOnly":true})).unwrap(),
+        Some(safe_cex_engine::test_support::seeded_entropy(1)),
+        PublicBatches,
+    )
+    .unwrap();
+    assert_eq!(
+        batches.len(),
+        2,
+        "ticker and price each emit a two-symbol batch"
+    );
+    let mut identities = std::collections::HashSet::new();
+    for frame in batches {
+        let added = topics("bitunix", &frame);
+        assert_eq!(added.len(), 2);
+        for (key, subscribed) in &added {
+            assert!(*subscribed);
+            assert!(identities.insert(key.clone()));
+        }
+        let mut unsubscribe: Value = serde_json::from_str(&frame).unwrap();
+        unsubscribe["op"] = json!("unsubscribe");
+        let removed = topics("bitunix", &unsubscribe.to_string());
+        assert_eq!(
+            removed,
+            added
+                .into_iter()
+                .map(|(key, _)| (key, false))
+                .collect::<Vec<_>>()
+        );
+    }
+    assert_eq!(
+        identities.len(),
+        4,
+        "both symbol and channel are part of the identity"
+    );
 }

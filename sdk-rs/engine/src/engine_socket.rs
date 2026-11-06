@@ -445,6 +445,7 @@ impl crate::engine::CoreRef<'_> {
 
 impl<V: Venue> Engine<V> {
     /// Install before start; observes final managed subscription handoff and retirement.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn set_interest_observer(&mut self, observer: crate::socket_lifecycle::InterestObserver) {
         assert!(
             !self.has_started(),
