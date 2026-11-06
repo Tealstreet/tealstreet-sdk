@@ -364,3 +364,33 @@ fn a_stop_that_partly_filled_during_its_cancel_is_not_replaced() {
     assert_eq!(error.protection, Some(Protection::Unprotected));
     assert_eq!(order_posts(&h), 0);
 }
+
+/// A size edit's put-back carries the original's size from the Inspect read,
+/// never the edited size.
+#[test]
+fn a_size_edit_put_back_restores_the_original_volume() {
+    let mut h = guarded_stop();
+    h.command(Command::AmendOrder {
+        command: 7,
+        id: "456".into(),
+        price: Some(1790.0),
+        amount: Some(0.002),
+    });
+    let inspect = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(inspect, &detail("INIT", 0.0));
+    let cancel = h.take(Method::Post, "/fapi/v2/cancel");
+    h.reply(cancel, r#"{"code":"0","data":{"orderId":456}}"#);
+    let verify = h.take(Method::Get, "/fapi/v2/order?");
+    h.reply(verify, &detail("CANCELED", 0.0));
+    let create = h.take(Method::Post, "/fapi/v2/order");
+    let edited = body(&create);
+    h.reply(create, REFUSED);
+    let restore = h.take(Method::Post, "/fapi/v2/order");
+    let original = body(&restore);
+    assert_eq!(edited["volume"], "0.002", "the edit");
+    assert_eq!(
+        original["volume"], "0.001",
+        "the original's size, not the edit's"
+    );
+    assert_eq!(original["triggerPrice"], 1800.0);
+}

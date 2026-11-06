@@ -95,6 +95,12 @@ impl StopGuard {
         Ok(())
     }
 }
+/// The amended order as its Inspect read showed it.
+struct Original {
+    amount: f64,
+    filled: f64,
+    trigger: f64,
+}
 /// An amended stop's final check and, while nothing has filled, the exact
 /// original to put back once.
 struct StopProtect {
@@ -765,31 +771,58 @@ impl Bitrue {
         &self,
         cx: &Cx<'_, Pending>,
         amend: &Amend,
-        opts: &PlaceOrderOpts,
+        edited: &PlaceOrderOpts,
         reference: StopTriggerType,
-        filled: f64,
+        original: Original,
     ) -> Result<Box<StopProtect>, String> {
         let order = &amend.order;
         let guard = StopGuard {
             order: order.clone(),
-            trigger: opts.price.ok_or("Bitrue amendment has no trigger")?,
+            trigger: edited.price.ok_or("Bitrue amendment has no trigger")?,
             reference,
             // A stop sells below (buys above) the market; a take profit the reverse.
             below: (order.kind == OrderType::StopLoss) == (order.side == OrderSide::Sell),
-            closes: Some(if order.side == OrderSide::Sell {
-                PositionSide::Long
-            } else {
-                PositionSide::Short
+            // Only a closing stop needs a position; an opening conditional does not.
+            closes: (order.reduce_only || order.close == Some(true)).then(|| {
+                if order.side == OrderSide::Sell {
+                    PositionSide::Long
+                } else {
+                    PositionSide::Short
+                }
             }),
         };
         guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
-        // Only an untouched original is put back exactly.
-        let restore = if filled == 0.0 {
-            let original = PlaceOrderOpts {
-                price: Some(order.price),
-                ..opts.clone()
+        // Only an untouched original is put back, exactly as the Inspect read
+        // showed it: never the edit's size or trigger.
+        let restore = if original.filled == 0.0 {
+            let precision = cx
+                .store
+                .market(&order.symbol)
+                .map_or(0.0, |m| m.precision.amount);
+            let reference = Some(reference);
+            let put_back = PlaceOrderOpts {
+                symbol: order.symbol.clone(),
+                kind: order.kind,
+                side: order.side,
+                amount: safe_cex_engine::num::adjust(original.amount, precision),
+                price: Some(original.trigger),
+                trigger_price: None,
+                stop_loss: None,
+                take_profit: None,
+                reduce_only: Some(order.reduce_only),
+                time_in_force: order.time_in_force,
+                trigger_type: None,
+                tp_trigger_type: reference.filter(|_| order.kind == OrderType::TakeProfit),
+                sl_trigger_type: reference.filter(|_| order.kind == OrderType::StopLoss),
+                client_order_id: None,
+                close: order.close,
+                stp_mode: None,
+                max_slippage_pct: None,
+                bybit_bbo: None,
+                bybit_slippage_tolerance_ticks: None,
+                implied_volatility: None,
             };
-            Some(self.placement(cx, &original)?)
+            Some(self.placement(cx, &put_back)?)
         } else {
             None
         };
@@ -2483,7 +2516,12 @@ impl Bitrue {
                 }
                 let rows = self.placement(cx, &opts)?;
                 if let Some(reference) = source {
-                    work.stop = Some(self.stop_protect(cx, amend, &opts, reference, filled)?);
+                    let original = Original {
+                        amount,
+                        filled,
+                        trigger: detail.trigger_price.map_or(amend.order.price, |n| n.0),
+                    };
+                    work.stop = Some(self.stop_protect(cx, amend, &opts, reference, original)?);
                 }
                 let mut target = amend.target.clone();
                 target.amount = amount;
