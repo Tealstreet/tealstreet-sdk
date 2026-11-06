@@ -14,6 +14,7 @@ use safe_cex_engine::request_context::{
     RetryPolicy, WriteResult,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, CredentialSlot, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -1578,7 +1579,7 @@ impl BitgetFutures {
                     .filter(|position| position.symbol == order.symbol)
                     .map(|position| format!("{:?}:{}", position.side, position.contracts))
                     .collect::<Vec<_>>()
-                    .join(", ");
+                    .join_with(", ");
                 cx.notice(Level::Warn, code::COMMAND_UNSUPPORTED, format!(
                     "Sized {} stop became a full-position stop: no open {:?} position to size requested {} against, positions seen [{}]",
                     order.symbol, protected_position(order.side), order.amount,
@@ -1612,10 +1613,18 @@ impl BitgetFutures {
             if total <= 0.0 {
                 continue;
             }
-            let max = if m.limits.amount.max > 0.0 && m.limits.amount.max.is_finite() {
-                floor_lot(m.limits.amount.max, m.precision.amount)
-            } else {
+            let cap = self
+                .order_caps
+                .get(&o.symbol)
+                .map_or(m.limits.amount.max, |caps| {
+                    caps.for_order(m.limits.amount.max, o.kind == OrderType::Market)
+                });
+            let max = if cap > 0.0 && cap.is_finite() {
+                floor_lot(cap, m.precision.amount)
+            } else if cap == f64::INFINITY {
                 total
+            } else {
+                return Err("Bitget market has no valid maximum order quantity".into());
             };
             if max <= 0.0 {
                 return Err("Bitget maximum size is smaller than one lot".into());
@@ -2640,8 +2649,8 @@ impl BitgetFutures {
                     .unwrap_or_default();
                 error = Some(format!(
                     "Bitget batch cancel did not acknowledge every order; these may still be open: {} (acknowledged [{}]{plan})",
-                    rest.join(", "),
-                    listed.join(", ")
+                    rest.join_with(", "),
+                    listed.join_with(", ")
                 ));
             }
         }
@@ -3701,7 +3710,7 @@ fn failure_text(failures: &[(Option<i64>, String)]) -> String {
         .iter()
         .map(|(_, message)| message.as_str())
         .collect::<Vec<_>>()
-        .join("; ")
+        .join_with("; ")
 }
 
 /// Each failed row's message and integer code, when Bitget sends one.

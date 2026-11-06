@@ -14,6 +14,7 @@ use safe_cex_engine::request_context::{
     PreflightPurpose, ReconciliationData, RetryPolicy, WriteResult,
 };
 use safe_cex_engine::signing::Identity as SigningIdentity;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, Cx, ErrorKind, Method, Outcome, Response, VenueError, num};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -2385,7 +2386,7 @@ impl BitunixFutures {
         let message = if messages.is_empty() {
             "Bitunix batch response has incomplete order acknowledgements".to_owned()
         } else {
-            messages.join("; ")
+            messages.join_with("; ")
         };
         if let Some(live) = self.trading.live.get_mut(&request.command) {
             live.job.ids.extend(ids.iter().cloned());
@@ -2533,7 +2534,7 @@ impl BitunixFutures {
         } else if message.is_empty() {
             "Malformed Bitunix cancellation acknowledgement".to_owned()
         } else {
-            message.join("; ")
+            message.join_with("; ")
         };
         match cx.http_write_batch(
             &request.context,

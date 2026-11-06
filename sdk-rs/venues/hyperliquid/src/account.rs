@@ -851,6 +851,22 @@ impl Hyperliquid {
             self.refresh_orders_scope(cx, &dex);
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn recheck_account_startup(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        if self.options.public_data_only || !self.account.started || cx.frame_fed() {
+            return false;
+        }
+        if self.user().is_none() {
+            self.send_role(cx);
+        } else {
+            if !self.spot && !self.account.mode_resolved {
+                self.send_mode(cx);
+            }
+            self.refresh_account(cx);
+            self.refresh_spot_holdings(cx);
+        }
+        true
+    }
     fn refresh_state(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
         if !self.account.inflight.insert(format!("state:{dex}")) {
             return;

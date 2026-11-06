@@ -48,7 +48,15 @@ const CLOSE_FRAMES_DEADLINE: Duration = Duration::from_secs(2);
 /// socket 1001 so its page reconnects to the next process.
 pub async fn drain(app: &App) {
     if !app.registry.drain(DRAIN_DEADLINE).await {
-        Log::warn("drain passed its deadline; orders may rest");
+        let summary = "drain passed its deadline; orders may rest";
+        Log::error(
+            summary,
+            &crate::telemetry::Report {
+                kind: "drain.deadline_passed",
+                summary,
+                ..Default::default()
+            },
+        );
     }
     let _ = app.closing.send(true);
     let until = tokio::time::Instant::now() + CLOSE_FRAMES_DEADLINE;
@@ -62,7 +70,15 @@ pub async fn drain(app: &App) {
 pub async fn drain_now(app: &App) -> bool {
     let settled = app.registry.break_glass(DRAIN_DEADLINE).await;
     if !settled {
-        Log::warn("break-glass drain passed its deadline; orders may rest");
+        let summary = "break-glass drain passed its deadline; orders may rest";
+        Log::error(
+            summary,
+            &crate::telemetry::Report {
+                kind: "drain.break_glass_deadline_passed",
+                summary,
+                ..Default::default()
+            },
+        );
     }
     settled
 }
@@ -464,7 +480,7 @@ async fn router_lease_status(
         Ok(request) => request,
         Err(status) => return status.into_response(),
     };
-    let Some(user) = app.registry.router_leases.get(&request.user_id) else {
+    let Some(user) = app.registry.router_leases.lookup(&request.user_id) else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let mut status = serde_json::to_value(user.status()).unwrap();
@@ -1215,7 +1231,8 @@ mod tests {
         assert_eq!(value["accepted"], 1);
         assert_eq!(value["enforcing"], false);
         assert!(value.get("graceUntil").unwrap().is_null());
-        assert_eq!(value.as_object().unwrap().len(), 5);
+        assert_eq!(value.as_object().unwrap().len(), 6);
+        assert_eq!(value["untracked"], 0);
         assert_eq!(value["bootId"], registry.router_leases.boot_id());
         assert!(value["checkedAt"].as_u64().unwrap() >= now);
         assert!(!String::from_utf8_lossy(&bytes).contains("private-user-sentinel"));

@@ -19,6 +19,7 @@ use safe_cex_engine::log::code;
 use safe_cex_engine::model::{Balance, Candle, Interval, Market, Ticker};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::text::JoinWith;
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{
     Command, CommandId, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, Store,
@@ -269,7 +270,7 @@ fn encoded_path(path: &str) -> String {
             format!("{}={}", encode(k), encode(v))
         })
         .collect::<Vec<_>>()
-        .join("&");
+        .join_with("&");
     format!("{base}?{query}")
 }
 /// KuCoin candle minutes and native type name.
@@ -659,7 +660,7 @@ impl Kucoin {
                     self.subscription(
                         cx,
                         channel,
-                        &format!("/contractMarket/snapshot:{}", chunk.join(",")),
+                        &format!("/contractMarket/snapshot:{}", chunk.join_with(",")),
                         true,
                     );
                 }

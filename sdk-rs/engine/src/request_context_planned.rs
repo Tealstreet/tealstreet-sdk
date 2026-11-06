@@ -2232,6 +2232,34 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
+    /// Words for a live Mutation Plan's failure when its terminal brings no
+    /// presented text of its own, as when the engine seals an unproven reply
+    /// the venue never sees. Only the message: outcome and protection stay
+    /// projected. The latest call replaces any earlier words.
+    pub fn present_plan_failure(
+        &mut self,
+        plan: &Plan,
+        message: impl Into<String>,
+    ) -> Result<(), Error> {
+        let body = self
+            .io
+            .core
+            .request_contexts
+            .validate_plan(plan, self.now)?;
+        if body.policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        self.io
+            .core
+            .request_contexts
+            .owner_entry_mut(plan.owner())
+            .ok_or(Error::Revoked)?
+            .writes
+            .as_mut()
+            .ok_or(Error::State)?
+            .present_failure(message.into())
+    }
+
     /// Retire the current unissued call of an independent complete Plan that
     /// the venue decides not to send. No journal fact; its reservations return.
     /// Admitted only where the call could have been issued; every check

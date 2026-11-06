@@ -197,9 +197,7 @@ impl Grvt {
         } else if request.failed {
             let _ = cx.fail_plan(&request.plan, "Invalid GRVT candles");
         } else {
-            request
-                .rows
-                .sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+            safe_cex_engine::model::sort_candles_by_time(&mut request.rows);
             match serde_json::to_string(&request.rows) {
                 Ok(result) => {
                     let _ = cx.done_read_plan_after_data(

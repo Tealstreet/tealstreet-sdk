@@ -436,6 +436,14 @@ const STARTUP_READ_WAIT_MS = 30_000;
 const WORKER_CAPABILITY_RETRY_MS = 30_000;
 const WORKER_BRIDGE_WAIT_MS = 30_000;
 const WORKER_BRIDGE_POLL_MS = 25;
+/** A page candle read stays well under the chart's 60 s hung-history verdict, end to end. */
+const PAGE_CANDLE_MARKETS_WAIT_MS = 10_000;
+/** A source still without markets this long after construction is stuck, not slow: rebuild it. */
+const PAGE_CANDLE_MARKETS_STUCK_MS = 60_000;
+const PAGE_CANDLE_COMMAND_TIMEOUT_MS = 20_000;
+/** Rebuilding a broken page candle source backs off from 2 s, doubling to a minute. */
+const PAGE_CANDLE_REBUILD_MIN_MS = 2_000;
+const PAGE_CANDLE_REBUILD_MAX_MS = 60_000;
 const LOADED_SECTIONS = [
   [LOADED_FLAG.MARKETS, 'markets'],
   [LOADED_FLAG.TICKERS, 'tickers'],
@@ -553,6 +561,8 @@ export class RustEngineExchange extends BaseExchange {
   private sharedValidatedMarkets?: Store['markets'];
   private sharedPublicReady = false;
   private nativeLoaded = 0;
+  /** A mirror's credential-free source for chart history; its reads are bounded. */
+  private pageCandleSource = false;
   private readonly commandTimeoutMs: number;
   private readonly bridgeConstruction: EngineBridgeConstruction;
   private publicDemandReady = false;
@@ -2070,6 +2080,7 @@ export class RustEngineExchange extends BaseExchange {
     // Refreshed on every symbol selection, and a read can refuse routinely (portfolio margin).
     try {
       await this.untilNativeData(LOADED_FLAG.MARKETS, 'markets');
+      if (this.isDisposed || !Object.hasOwn(this.store.marketsBySymbol, symbol)) return;
       if (capabilities.maxLeverage === 'query') {
         await this.fetchSymbolMaxLeverage(symbol);
         return;
@@ -2441,7 +2452,7 @@ export class RustEngineExchange extends BaseExchange {
   /** `report: false` is for background reads whose caller owns the failure's visibility. */
   private command = async <T>(
     command: { op: string; [field: string]: unknown },
-    { report = true, timing }: { report?: boolean; timing?: WriteTiming } = {},
+    { report = true, timing, timeoutMs }: { report?: boolean; timing?: WriteTiming; timeoutMs?: number } = {},
   ): Promise<T> => {
     // Unreported: the account has nothing to read, which is not an error the user caused.
     if (this.options.publicDataOnly === true && PRIVATE_HISTORY_OPS.has(command.op))
@@ -2460,7 +2471,13 @@ export class RustEngineExchange extends BaseExchange {
             : Boolean(value && typeof value === 'object' && Object.values(value).some(invalid));
         if (invalid(command)) throw new Error('Coinbase command numbers must be finite');
       }
-      return (await (timing ? this.host.command(command, { onStage: timing.mark }) : this.host.command(command))) as T;
+      const options = {
+        ...(timing ? { onStage: timing.mark } : {}),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      };
+      return (await (Object.keys(options).length
+        ? this.host.command(command, options)
+        : this.host.command(command))) as T;
     } catch (error) {
       // The web's placement failure names the order; a second raw report would only repeat it.
       const callerReports = command.op === 'placeOrders' && this.options.callerReportsPlacementFailures;
@@ -3018,7 +3035,8 @@ export class RustEngineExchange extends BaseExchange {
         )
           finish();
       };
-      const timeout = setTimeout(() => finish(new Error(`Timed out waiting for native ${label}`)), 30_000);
+      const waitMs = this.pageCandleSource ? PAGE_CANDLE_MARKETS_WAIT_MS : 30_000;
+      const timeout = setTimeout(() => finish(new Error(`Timed out waiting for native ${label}`)), waitMs);
       this.startupWaiters.add(wake);
       wake();
     });
@@ -3197,36 +3215,77 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private candleSource?: RustEngineExchange;
+  private readonly constructedAt = Date.now();
+  private candleSourceRebuilds = 0;
+  private candleSourceRebuildAt = 0;
+
+  /**
+   * A source that failed to start or died cannot serve a later read; one whose markets are only
+   * slow (a big catalogue, a tunnel round trip, an instruments 429) keeps loading for the next read.
+   */
+  private get candleSourceBroken(): boolean {
+    return Boolean(
+      this.isDisposed ||
+        this.engineFailure ||
+        this.startupFailure ||
+        (!(this.nativeLoaded & LOADED_FLAG.MARKETS) && Date.now() - this.constructedAt >= PAGE_CANDLE_MARKETS_STUCK_MS),
+    );
+  }
 
   private fetchPageCandles = async (opts: OHLCVOptions) => {
     if (this.isDisposed) throw new Error('Exchange disposed before candle read');
-    // Frame-fed engines execute only writes; candles always own a credential-free public source.
-    this.candleSource ??= new RustEngineExchange(
-      this.name,
-      {
-        ...withoutDelegatedSigning(this.engineOptions),
-        workerMirror: false,
-        publicDataOnly: true,
-        privateOnly: false,
-        publicFeed: undefined,
-        externalPublicData: undefined,
-      },
-      new DefaultStore(),
-    );
-    return this.candleSource.fetchOHLCV(opts);
+    if (!this.candleSource) {
+      // A persistently failing venue is rebuilt on a backoff, never spun; meanwhile the
+      // chart sees a visible failure and retries.
+      if (Date.now() < this.candleSourceRebuildAt) throw new Error(`${this.name} candle source is recovering`);
+      // Frame-fed engines execute only writes; candles always own a credential-free public source.
+      const source = new RustEngineExchange(
+        this.name,
+        {
+          ...withoutDelegatedSigning(this.engineOptions),
+          workerMirror: false,
+          publicDataOnly: true,
+          privateOnly: false,
+          publicFeed: undefined,
+          externalPublicData: undefined,
+        },
+        new DefaultStore(),
+      );
+      source.pageCandleSource = true;
+      this.candleSource = source;
+    }
+    const source = this.candleSource;
+    try {
+      const candles = await source.fetchOHLCV(opts);
+      this.candleSourceRebuilds = 0;
+      return candles;
+    } catch (error) {
+      if (this.candleSource === source && source.candleSourceBroken) {
+        this.candleSource = undefined;
+        source.dispose();
+        this.candleSourceRebuildAt =
+          Date.now() +
+          Math.min(PAGE_CANDLE_REBUILD_MIN_MS * 2 ** this.candleSourceRebuilds, PAGE_CANDLE_REBUILD_MAX_MS);
+        this.candleSourceRebuilds += 1;
+      }
+      throw error;
+    }
   };
 
   fetchOHLCV = async (opts: OHLCVOptions) => {
     // Before its market list an engine refuses the symbol or sends an unmapped id.
     if (!(this.nativeLoaded & LOADED_FLAG.MARKETS)) await this.untilNativeData(LOADED_FLAG.MARKETS, 'markets');
-    return this.command<Candle[]>({
-      op: 'fetchCandles',
-      symbol: opts.symbol,
-      interval: opts.interval,
-      limit: opts.limit,
-      from: opts.from,
-      to: opts.to,
-    });
+    return this.command<Candle[]>(
+      {
+        op: 'fetchCandles',
+        symbol: opts.symbol,
+        interval: opts.interval,
+        limit: opts.limit,
+        from: opts.from,
+        to: opts.to,
+      },
+      this.pageCandleSource ? { timeoutMs: PAGE_CANDLE_COMMAND_TIMEOUT_MS } : {},
+    );
   };
 
   fetchHistoricalFills = async (opts: ExecutionsOptions) => {

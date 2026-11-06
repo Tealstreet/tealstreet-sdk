@@ -310,7 +310,7 @@ impl Blofin {
                 mut rows,
                 failed: false,
             } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
             other @ (Pending::Markets { .. } | Pending::Tickers { .. }) => self.public_failed(
@@ -511,6 +511,14 @@ impl Blofin {
 impl Venue for Blofin {
     fn managed_sockets() -> bool {
         true
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.stop_release_veto(store, pending, release)
     }
     fn socket_capabilities() -> safe_cex_engine::socket_lifecycle::SocketCapabilities {
         safe_cex_engine::socket_lifecycle::SocketCapabilities { handoff: false }

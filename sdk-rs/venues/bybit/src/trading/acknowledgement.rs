@@ -3,6 +3,7 @@
 //! matched to the request by echo, never by position alone. A shape this module
 //! rejects is a malformed acknowledgement: the engine records it as unproven.
 use safe_cex_engine::classify::decode_int;
+use safe_cex_engine::text::JoinWith;
 use serde_json::value::RawValue;
 
 /// Rows a batch acknowledgement may carry; larger answers are malformed.
@@ -422,7 +423,7 @@ fn child_diagnostic(
     }
     format!(
         "children=[{}]; omitted={}",
-        children.join(";"),
+        children.join_with(";"),
         total.saturating_sub(DIAGNOSTIC_CHILDREN)
     )
 }
@@ -627,7 +628,7 @@ pub(crate) fn cancel_diagnostic(
         order_ids.len(),
         results.as_ref().map_or(0, Vec::len),
         statuses.as_ref().map_or(0, Vec::len),
-        failure_codes.join(","),
+        failure_codes.join_with(","),
         echoed_targets.iter().filter(|count| **count > 1).count(),
         native_ids - target_matches,
     );
@@ -793,7 +794,7 @@ pub(crate) fn margin_reasons(result: Option<&RawValue>) -> Option<String> {
         .into_iter()
         .filter_map(non_empty)
         .collect();
-    (!text.is_empty()).then(|| text.join(", "))
+    (!text.is_empty()).then(|| text.join_with(", "))
 }
 
 /// `/v5/account/set-margin-mode`: `true` is proven success (no reasons). A

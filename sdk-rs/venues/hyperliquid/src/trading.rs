@@ -3,6 +3,7 @@ mod custody;
 mod schedule;
 pub(crate) use custody::PACING;
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 
 use crate::{
     Builder, Hyperliquid, Pending,
@@ -1263,7 +1264,7 @@ impl Hyperliquid {
             None
         } else {
             Some(
-                VenueError::new(errors.join(", "))
+                VenueError::new(errors.join_with(", "))
                     .kind(ErrorKind::Rejected)
                     .outcome(if accepted {
                         Outcome::Unknown
@@ -1276,7 +1277,7 @@ impl Hyperliquid {
             cx,
             &request,
             &statuses,
-            &errors.join(", "),
+            &errors.join_with(", "),
             idempotent_cancel,
         ) {
             self.finish_trade(cx, Err(error.venue_error()));

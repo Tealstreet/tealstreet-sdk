@@ -421,7 +421,7 @@ fn startup_refusal_notice_keeps_its_actual_venue_code_and_existing_guards() {
         let failures: Vec<_> = actions
             .iter()
             .filter_map(|action| match action {
-                Action::Notice(Notice::StartupFailed { error }) => Some(error),
+                Action::Notice(Notice::StartupFailed { error, .. }) => Some(error),
                 _ => None,
             })
             .collect();
@@ -431,6 +431,14 @@ fn startup_refusal_notice_keeps_its_actual_venue_code_and_existing_guards() {
         } else {
             assert_eq!(notices.len(), 1, "one-shot refusal");
             assert_eq!(failures, vec![&error]);
+            #[cfg(not(target_arch = "wasm32"))]
+            assert!(actions.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::StartupFailed {
+                    read_refusal: true,
+                    ..
+                })
+            )));
             assert!(
                 notices[0].fields.contains(&("venueCode", "40018".into())),
                 "{:?}",

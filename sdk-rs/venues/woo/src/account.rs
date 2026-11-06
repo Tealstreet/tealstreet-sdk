@@ -12,6 +12,7 @@ use safe_cex_engine::model::{
     Balance, MarginType, Order, OrderExtra, OrderSide, OrderStatus, OrderType, Position,
     PositionMode, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Fill, Method, OrderSnapshotToken, Response, SocketId,
     TimerId, VenueError, num,
@@ -103,7 +104,7 @@ impl Skipped {
             format!(
                 "WOO {kind}: skipped {} unmappable row(s) [{}]",
                 rows.count(),
-                rows.ids().join(", ")
+                rows.ids().join_with(", ")
             )
         })
     }

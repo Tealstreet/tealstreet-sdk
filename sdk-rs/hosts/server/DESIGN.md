@@ -70,9 +70,9 @@ Images do not contain credentials and the workflows do not deploy hosts.
 | `TEALSTREET_ACCESS_AUD` | unset | Hexadecimal Access application AUD for `/proof/*`; either missing/invalid value disables Access-authenticated proof, heartbeat and interruption-header handling and logs once at startup |
 | `TEALSTREET_IDLE_RELEASE_TTL_MS` | `20000` | Idle-release lease in milliseconds; operator drains never expire |
 | `CONNECT_REGION` | unset | Region label. Routing uses it for `proxyRegion` defaults; it also appears in `/health` and logs |
-| `TEALSTREET_RELEASE` | unset | Image revision shown in `/health`; whitespace and placeholder values (`undefined`, `null`, `unknown`) are omitted |
-| `TEALSTREET_BOX` | unset | Bun wrapper only: stable Sentry `server_name` and `box` tag (for example `exchange-01`); no hostname fallback |
-| `EXCHANGE_SERVER_SENTRY_DSN` | unset | Bun wrapper only: Sentry is off when unset |
+| `TEALSTREET_RELEASE` | unset | Image revision shown in `/health` and as the Sentry `release`; whitespace and placeholder values (`undefined`, `null`, `unknown`) are omitted |
+| `TEALSTREET_BOX` | unset | Stable Sentry `server_name` and `box` tag (for example `exchange-01`); no hostname fallback |
+| `EXCHANGE_SERVER_SENTRY_DSN` | unset | Native error capture (`src/telemetry.rs`); Sentry is off when unset |
 | `REDIS_URL` | unset | Optional. Not used in v1; it is accepted so that today's compose files keep working |
 | `TEALSTREET_ENGINE_THREADS` | number of CPUs | Account actor threads (see Runtime) |
 | `TEALSTREET_DIAGNOSTIC_BUILD` | `0` | `1` enables `diagnostic:server-health` frames for verbose clients |
@@ -82,13 +82,45 @@ Images do not contain credentials and the workflows do not deploy hosts.
 belong to the Bun gateway and have no meaning here. One process serves all
 connections.
 
-The native binary currently emits JSON logs, not Sentry events. The Bun gateway
-and exchange workers initialize Sentry through `packages/service-telemetry`.
-They use the existing runtime `TEALSTREET_RELEASE` image revision, never the
-literal `undefined`. Image OCI revision labels are external metadata, not
-process environment variables. Box identity comes only from `TEALSTREET_BOX`;
-missing or invalid labels are omitted. Their Sentry events omit `region` because
-`CONNECT_REGION` can be a legacy routing default rather than the box location.
+The native binary writes JSON logs and, when `EXCHANGE_SERVER_SENTRY_DSN` is
+set, sends Sentry events (`src/telemetry.rs`). Its identity rules match
+`packages/service-telemetry`, which the Bun gateway and exchange workers use.
+The release is the runtime `TEALSTREET_RELEASE` image revision, omitted when
+unset, and never the literal `undefined`. Image OCI revision labels are
+external metadata, not process environment variables. Box identity comes only
+from `TEALSTREET_BOX`; missing or invalid labels are omitted. Events omit
+`region` because `CONNECT_REGION` can be a legacy routing default rather than
+the box location. The SDK infers no host, release or environment.
+
+What it captures:
+- panics, through a panic hook that captures without flushing (a caught panic
+  on an engine thread never waits on Sentry), sending the code location and
+  never the payload;
+- `Log::error` conditions: drain and break-glass deadlines, router-lease
+  fencing, a failing signer, and algo shutdown deadlines;
+- the native host's account start failures and venue, relay and HTTP-tunnel
+  transport failures, through `safe_cex_native::report`. Each account's
+  transport is built `with_venue`, so its failures carry `venue` beside `kind`
+  and `target` (host and route, never a URL). The shared HTTP-tunnel socket
+  pool serves many venues and reports none.
+
+Warnings are not sent.
+
+Every event is rebuilt from an allowlist:
+- a fixed summary per condition, never error text or a venue payload;
+- a scrubbed fingerprint and exception type;
+- stack frames' function, module, file, line and column only;
+- tags `service`, `box`, `kind`, `error_kind`, `venue_code`, `venue` and
+  `target`;
+- extras `user_tag` (a hash, never the user ID) and
+  `suppressed_since_last_event`.
+
+Account names, URLs with their query, auth headers, key-shaped strings and
+payloads do not leave. Events are throttled to one per fingerprint per 60 s
+and 30 per minute overall, tracking at most 500 fingerprints. They are sent
+from Sentry's transport thread through a bounded queue that drops when full.
+The only flush is the guard's at shutdown, bounded to 2 s, so telemetry never
+blocks or fails a trading path.
 
 ## HTTP routes
 
@@ -271,7 +303,7 @@ display/Sentry label and is not an ownership identifier. The router
 must return public 404 for `/lease/*`, as for `/proof/*` and `/admin/*`.
 
 `POST /lease/router-heartbeat` returns
-`{accepted, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
+`{accepted, untracked, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
 `enforcing` is true only with enforcement on and no active explicit enable grace.
 The ACK stays conservative for the whole submitted batch, including users whose
 first heartbeat has already ended the missing-heartbeat exception. Users share
@@ -293,26 +325,44 @@ and never replaces the persisted maximum-issued `notAfter` and skew wait.
 A batch contains 1–256 distinct users, user IDs at most 512 bytes,
 and a body at most 256 KiB. Epoch and sequence are positive JS-safe integers.
 Old or duplicate tuples never extend a grant; invalid assertions return 400.
+A valid batch skips only assertions that cannot fit the inventory, returning
+`untracked` beside `accepted` in the ACK; later existing users still renew.
+An all-overflow batch returns 200 with `accepted:0` and a nonzero `untracked`.
+The router's singleton renewal requires `accepted:1`, so overflow proves no grant.
 A separate bounded peer limiter allows a 1024-request burst and 512 requests/s,
 without consuming the proof endpoint's smaller allowance. There are at most
 4096 tracked users; epoch high-water marks are retained until process exit and
-capacity exhaustion fails closed. No raw user IDs are logged.
+capacity exhaustion refuses new private starts when enforced. Read-only socket
+fence checks never register users: an unknown user follows explicit missing-user
+grace below capacity, and is fenced whenever enforced at full capacity.
+No raw user IDs are logged.
 
 `POST /admin/router-lease/status {userId}` uses the existing on-box admin guard
 and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,
 `sequence`, `notAfter`, `generation`, `routerBoxId`, and `missingHeartbeatGraceMs`. It grants
-no placement, renewal or write authority. Expiry uses both wall-clock
+no placement, renewal or write authority. Lookup does not register a user;
+untracked users return 503 without changing inventory. Expiry uses both wall-clock
 `notAfter` and a monotonic deadline so a clock rollback cannot extend ownership.
 
 `POST /admin/router-lease/summary` accepts an empty body or `{}` under the
 same on-box admin guard. It returns only
-`{routerBoxId, enforced, enableGraceUntil, trackedUsers, fencedUsers,
-wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+`{routerBoxId, enforced, enableGraceUntil, capacity, remaining, trackedUsers,
+fencedUsers, wouldFenceUsers, liveWouldFenceUsers, liveUsersWithoutLease, checkedAt}`;
+no user or account IDs.
+`capacity` stays 4096; `remaining` is capacity minus the same snapshot's
+`trackedUsers`. Inventory holds distinct users for the process lifetime, not
+just active users: accepted epoch/sequence high-water marks are never evicted.
+One count-only journal warning is emitted at each 80% and 95% crossing (3277 and
+3892 users); plan a drain/roll before exhaustion. Safe eviction would require a
+future authenticated router retirement watermark; expiry alone is insufficient.
 `wouldFenceUsers` counts the exact per-user `wouldFence` predicate, including
 wall-clock and monotonic expiry, independently of shadow/enforcement mode.
 `fencedUsers` counts the per-user actual `fenced` flag. Hosted users with private
 accounts (including parked accounts) or authenticated sockets are deduplicated;
-those with no lease record count as `liveUsersWithoutLease`. Pending authenticated
+those with no lease record count as `liveUsersWithoutLease`, and those whose record
+has `wouldFence` count as `liveWouldFenceUsers`. `wouldFenceUsers` still counts every
+tracked record, so `wouldFenceUsers - liveWouldFenceUsers` is departed users: a user
+who moved home to the other box keeps an expired record here. Pending authenticated
 upgrade reservations count as sockets. Anonymous public data and drain latches
 alone do not count as hosted activity. Reading the summary never creates lease
 records for absent users. `enableGraceUntil` is the active explicit enable-grace
@@ -320,7 +370,8 @@ deadline only while enforcement is on, otherwise null. It uses the same
 absolute/monotonic expiry predicate as the heartbeat ACK and never grants grace
 on restart. Without an explicit active deadline, ungranted tracked users count
 as fenced immediately in enforcement mode. Operators gate enabling on both boxes reporting
-`wouldFenceUsers == 0 && liveUsersWithoutLease == 0`. This is a current-state
+`liveUsersWithoutLease == 0 && liveWouldFenceUsers == 0`; departed records alone do not
+block it. This is a current-state
 snapshot, not an admission latch or takeover proof.
 
 ### Rollout and recovery
@@ -515,6 +566,39 @@ How FrameServer notices map onto `msg`:
 | `startupFailed` | `start-status` `{ok:false, detail}`, plus `error` |
 | `accountAuth` | `engine-event` with code `accountAuth`. The server always opts in |
 
+### Recovering a refused native startup
+
+FrameServer retains `StartupFailed` for late joins. Only a failure originating
+in `Cx::startup_read_refused` while required private startup was incomplete
+can retire: that same source engine must load markets, balance, positions and
+orders with no signing refusal. Public-only engines, frame-fed mirrors, partial
+state, terminal engines and non-read failures (including a missing signing key)
+cannot clear it. A new failure on an already-loaded account is retained.
+This proves bootstrap completion, not that an agent key can place an order.
+
+Connected peers receive the recovery store frame. NX re-derives essential
+readiness and clears health/terminal failure in
+`exchangeAccountController.ts:2574-2624`; no new wire notice is needed. That NX
+branch currently checks loaded flags alone, so unsigned frames can also clear
+its UI latch for a non-read signing failure. This pre-existing NX limitation is
+separate; native late-join replay retains that failure.
+
+An auth-kind startup refusal may receive at most three native read-only
+rechecks, after 5, 10 and 20 minutes respectively, each with 0–30 seconds of
+host entropy jitter. A longer venue `retryAfterMs` floor is preserved; a new
+refusal does not reset the attempt budget. Clock rollback cannot accelerate
+the monotonic schedule. Successful completion retires the remaining rechecks.
+
+The venue must opt in via `Venue::rechecks_startup_reads` and implement
+`Venue::recheck_startup_reads`; non-adopters return before any engine turn.
+Hyperliquid is the first adopter:
+it retries only identity/mode and account State/Spot/Orders reads through the
+existing single-flight and admission paths. These hooks are absent from wasm.
+The host never restarts the venue, recreates the actor, replays a command or
+fires arbitrary venue timers. Existing algo/job state stays on that actor.
+After exhaustion, the failure remains visible and an explicit account retry
+can start over; the page's public-only refusal latch is a separate policy.
+
 The client's output to its own consumer stays as today: `op:'store'`
 snapshots, `listenOrderBook` (from `FrameApplier.books`), `listenOHLCV` (from
 `.candles`) and `fill` (from `.fills`). Nothing downstream of
@@ -666,9 +750,10 @@ default exactly where the TS server reads it.
     src/frames.rs     FrameServer Outgoing to msg frame/notice mapping, base64
     src/signer.rs     4yjlw0 (wires safe-cex-remote-signer)
 
-Dependencies: `axum` (with `ws`), `tokio`, `jsonwebtoken`, `base64`, `serde_json`
-and `safe-cex-native`. Sentry capture currently belongs to the Bun wrapper,
-not this native crate.
+Dependencies: `axum` (with `ws`), `tokio`, `jsonwebtoken`, `base64`, `serde_json`,
+`safe-cex-native` and `sentry`. `sentry` runs without default features: only
+its panic event builder and the reqwest transport, over the rustls/ring stack the
+server already links. There is no native-tls, no host contexts and no sessions.
 
 ## Algos (claude-tbz5hr chaser, 55ao7t TWAP, zs5e83 exec)
 

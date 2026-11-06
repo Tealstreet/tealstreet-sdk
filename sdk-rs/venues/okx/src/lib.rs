@@ -1608,7 +1608,7 @@ impl Venue for Okx {
                     self.history_candles(cx, root, read);
                     return;
                 }
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = match serde_json::to_string(&rows) {
                     Ok(data) => cx.done_context(&root, data),
                     Err(error) => cx.fail_context(&root, error.to_string()),

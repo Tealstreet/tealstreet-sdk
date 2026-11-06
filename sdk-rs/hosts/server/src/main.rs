@@ -8,6 +8,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Before anything can panic or fail; held until exit so pending events flush.
+    let _sentry = safe_cex_exchange_server::telemetry::init_from_env();
     let config = Config::from_env()?;
     // A malformed proxy or tunnel override refuses here, not on the first account.
     let bases = safe_cex_native::resolve::route_bases()?;

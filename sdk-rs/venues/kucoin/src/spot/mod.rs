@@ -17,6 +17,7 @@ use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, 
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor, Tick};
 use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, Fill, Method, PublicFeedPolicy, Query, Response, SocketChannel,
     SocketId, SubscriptionTopic, TimerId, Venue, VenueError,
@@ -1531,7 +1532,7 @@ impl Venue for KucoinSpot {
                     let _ =
                         cx.fail_context(&context, VenueError::new("invalid KuCoin Spot candles"));
                 } else {
-                    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                    safe_cex_engine::model::sort_candles_by_time(&mut rows);
                     let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
                 }
             }
@@ -1947,7 +1948,7 @@ impl KucoinSpot {
                     owner: Box::new(HistoryRows::new(
                         ReadCompletion::from_context(cx, command, root.clone())
                             .expect("fresh KuCoin Spot read root"),
-                        |rows| Ok(format!("[{}]", rows.join(","))),
+                        |rows| Ok(format!("[{}]", rows.join_with(","))),
                     )),
                 };
                 self.send_read(cx, root, &path, pending);

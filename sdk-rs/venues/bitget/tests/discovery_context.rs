@@ -84,7 +84,7 @@ impl Cycle {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 Action::WsConnect { .. } => self.markets_published += 1,
-                Action::Notice(Notice::StartupFailed { error }) => {
+                Action::Notice(Notice::StartupFailed { error, .. }) => {
                     panic!("unexpected Bitget startup failure: {error}")
                 }
                 _ => {}

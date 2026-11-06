@@ -52,6 +52,9 @@ const allowsLighterToken = (
   );
 };
 
+// GRVT's login answers with a `gravity=` session; its own `Cookie: rm=true` carries none.
+const SESSION_COOKIE = /(?:^|;)\s*gravity=/i;
+
 export interface PublicProxyCheck {
   exchange: ExchangeName;
   method: string;
@@ -86,7 +89,7 @@ export const refuseSignedPublicProxy = ({
   const credentialHeader = Object.entries(headers ?? {}).some(
     ([name, value]) =>
       Boolean(value) &&
-      credentialHeaders.has(name.toLowerCase()) &&
+      (credentialHeaders.has(name.toLowerCase()) || (name.toLowerCase() === 'cookie' && SESSION_COOKIE.test(value))) &&
       !(
         payloadSigned &&
         name.toLowerCase() === 'authorization' &&

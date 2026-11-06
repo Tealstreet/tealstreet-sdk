@@ -126,6 +126,7 @@ pub struct NetworkTransport {
     http: reqwest::Client,
     routing: Option<Arc<RoutingState>>,
     io_guard: Option<IoGuard>,
+    venue: Option<Arc<str>>,
 }
 
 pub(crate) type IoGuard = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -144,7 +145,14 @@ impl NetworkTransport {
                 .expect("an HTTP client with the default configuration"),
             routing: None,
             io_guard: None,
+            venue: None,
         }
+    }
+
+    /// Attributes this transport's failure reports to `venue`.
+    pub fn with_venue(mut self, venue: &str) -> Self {
+        self.venue = Some(venue.into());
+        self
     }
 
     /// A host-owned, generation-bound authority checked at each final IO handoff.
@@ -333,15 +341,30 @@ impl OpenFailures {
 
 static FAILURES: std::sync::Mutex<Option<OpenFailures>> = std::sync::Mutex::new(None);
 
-fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) {
-    if let Some(line) = note(
+/// Whether a line was due (and written).
+fn log_failure(note: impl FnOnce(&mut OpenFailures) -> Option<String>) -> bool {
+    let line = note(
         FAILURES
             .lock()
             .unwrap()
             .get_or_insert_with(OpenFailures::default),
-    ) {
+    );
+    if let Some(line) = &line {
         eprintln!("{line}");
     }
+    line.is_some()
+}
+
+/// A transport failure the journal just logged, for the host's error sink.
+fn report_failure(kind: crate::report::ErrorKind, target: &str, venue: Option<&str>) {
+    crate::report::report(&crate::report::ErrorReport {
+        kind,
+        label: None,
+        target: Some(target),
+        error_kind: None,
+        venue_code: None,
+        venue,
+    });
 }
 
 /// A URL's host alone: a relay URL's query names its upstream and may carry a token.
@@ -352,13 +375,28 @@ pub(crate) fn host_of(url: &str) -> String {
         .unwrap_or_else(|| "unparsable url".to_owned())
 }
 
-pub(crate) fn log_open_failure(url: &str, error: &str) {
-    log_failure(|failures| failures.note(url, error, std::time::Instant::now()));
+pub(crate) fn log_open_failure(url: &str, error: &str, venue: Option<&str>) {
+    if log_failure(|failures| failures.note(url, error, std::time::Instant::now())) {
+        report_failure(
+            crate::report::ErrorKind::SocketOpenFailed,
+            &host_of(url),
+            venue,
+        );
+    }
 }
 
 /// A venue request that failed in transport (a timeout, a refused connection), by route.
-pub(crate) fn log_request_failure(route: &str, error: &str, elapsed: Duration) {
-    log_failure(|failures| failures.note_request(route, error, elapsed, std::time::Instant::now()));
+pub(crate) fn log_request_failure(
+    route: &str,
+    error: &str,
+    elapsed: Duration,
+    venue: Option<&str>,
+) {
+    if log_failure(|failures| {
+        failures.note_request(route, error, elapsed, std::time::Instant::now())
+    }) {
+        report_failure(crate::report::ErrorKind::RequestFailed, route, venue);
+    }
 }
 
 const MAX_DECOMPRESSED_BYTES: usize = 16 * 1024 * 1024;
@@ -438,6 +476,7 @@ impl Transport for NetworkTransport {
         let (outgoing, mut pending) = mpsc::unbounded_channel::<String>();
         let routing = self.routing.clone();
         let guard = self.io_guard.clone();
+        let venue = self.venue.clone();
         let headers = headers
             .into_iter()
             .map(|(name, value)| (name.to_owned(), value))
@@ -491,8 +530,8 @@ impl Transport for NetworkTransport {
                         },
                         result = &mut opening => match result {
                             Ok(Ok(ws)) => break ws,
-                            Ok(Err(error)) => { log_open_failure(&target, &error); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
-                            Err(_) => { log_open_failure(&target, "timed out after 15s"); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                            Ok(Err(error)) => { log_open_failure(&target, &error, venue.as_deref()); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                            Err(_) => { log_open_failure(&target, "timed out after 15s", venue.as_deref()); let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
                         },
                     }
                 };
@@ -556,7 +595,7 @@ impl Transport for NetworkTransport {
                         },
                     }
                 };
-                log_failure(|failures| {
+                let _ = log_failure(|failures| {
                     failures.note_close(
                         &target,
                         code,
@@ -862,5 +901,83 @@ mod security_tests {
             assert!(decode_message(&compressed).is_err());
         }
         assert_eq!(decode_message(b"valid text").unwrap(), "valid text");
+    }
+
+    type Reported = (&'static str, String, Option<String>);
+    static REPORTED: std::sync::Mutex<Vec<Reported>> = std::sync::Mutex::new(Vec::new());
+
+    fn record(report: &crate::report::ErrorReport<'_>) {
+        REPORTED.lock().unwrap().push((
+            report.kind.as_str(),
+            report.target.unwrap_or_default().to_owned(),
+            report.venue.map(str::to_owned),
+        ));
+    }
+
+    /// The sink is process-wide, so one test owns it: direct logging, then a
+    /// real refused request through a venue-attributed transport. Its route
+    /// (`localhost`) is one no other test in this binary logs inside the window.
+    #[tokio::test]
+    async fn a_logged_failure_reaches_the_error_sink_once_per_window_with_its_venue() {
+        assert!(crate::report::set_error_sink(record));
+        let url = "wss://sink-test.example/tunnel?ts-relay=wss%3A%2F%2Fvenue&token=t";
+        log_open_failure(url, "refused", Some("bybitdemo"));
+        log_open_failure(url, "refused", Some("bybitdemo"));
+        log_request_failure(
+            "sink-test.example via HTTP tunnel",
+            "reset",
+            Duration::ZERO,
+            None,
+        );
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = closed.local_addr().unwrap();
+        drop(closed);
+        let (events, mut received) = mpsc::unbounded_channel();
+        NetworkTransport::new().with_venue("okx").request(
+            HttpRequest {
+                id: safe_cex_engine::RequestId(1),
+                method: safe_cex_engine::Method::Get,
+                route: None,
+                timeout_ms: Some(5_000),
+                url: format!("http://localhost:{}/v5/order?sign=s", address.port()),
+                headers: vec![],
+                signer_headers: vec![],
+                body: None,
+            },
+            events,
+        );
+        assert!(matches!(
+            received.recv().await,
+            Some(HostEvent::HttpFailed(..))
+        ));
+        let reported: Vec<_> = REPORTED
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, target, _)| {
+                target.starts_with("sink-test.example") || target.starts_with("localhost")
+            })
+            .cloned()
+            .collect();
+        assert_eq!(
+            reported,
+            [
+                (
+                    "transport.socket_open_failed",
+                    "sink-test.example".to_owned(),
+                    Some("bybitdemo".to_owned())
+                ),
+                (
+                    "transport.request_failed",
+                    "sink-test.example via HTTP tunnel".to_owned(),
+                    None
+                ),
+                (
+                    "transport.request_failed",
+                    "localhost direct".to_owned(),
+                    Some("okx".to_owned())
+                ),
+            ]
+        );
     }
 }

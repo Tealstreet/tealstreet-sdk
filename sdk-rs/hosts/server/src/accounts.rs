@@ -731,10 +731,7 @@ impl Registry {
     }
 
     pub fn user_lease_fenced(&self, user: &str) -> bool {
-        self.router_leases.get(user).map_or_else(
-            || self.router_leases.enforced(),
-            |lease| lease.status().fenced,
-        )
+        self.router_leases.fenced(user)
     }
 
     pub fn park_expired_router_leases(self: &Arc<Self>) {
@@ -743,10 +740,17 @@ impl Registry {
             if !account.running.claim_lease_park() {
                 continue;
             }
-            Log::warn(&format!(
-                "router lease fenced user_tag={}",
-                user_tag(&account.user)
-            ));
+            let tag = user_tag(&account.user);
+            Log::error(
+                &format!("router lease fenced user_tag={tag}"),
+                &crate::telemetry::Report {
+                    kind: "router_lease.fenced",
+                    summary: "router lease fenced; the account's algos stop on this box",
+                    user_tag: Some(tag.clone()),
+                    venue: Some(&account.venue),
+                    ..Default::default()
+                },
+            );
             account.handle.begin_disposal(DisposalCause::Stopped);
             let stopped = self.keep_notice(&account, "router-lease");
             if !account.algos.as_ref().is_some_and(|sender| {
@@ -1034,7 +1038,7 @@ impl Registry {
         };
         let (spawned, receive) = tokio::sync::oneshot::channel();
         let placed = self.threads.place(move |placement| {
-            let mut transport = NetworkTransport::with_routing(plan, tokens);
+            let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
             if let Some(lease) = lease {
                 transport = transport.with_io_guard(Arc::new(move || lease.allowed()));
             }
@@ -1243,7 +1247,16 @@ impl Registry {
     /// A signer that keeps answering with failures stops the account. The page
     /// re-inits on its next pong; algos do not restart, so whoever holds it is told.
     fn signer_failed(&self, account: &Arc<Account>) {
-        Log::warn(&format!("signer for {} failing; disposing", account.venue));
+        Log::error(
+            &format!("signer for {} failing; disposing", account.venue),
+            &crate::telemetry::Report {
+                kind: "signer.failing",
+                summary: "signer keeps failing; account disposed",
+                user_tag: Some(user_tag(&account.user)),
+                venue: Some(&account.venue),
+                ..Default::default()
+            },
+        );
         let name = account.name.clone();
         let live: Vec<Outbox> = account
             .holders
@@ -2459,8 +2472,15 @@ pub(crate) mod tests {
                 assert_eq!(counts.live_users_without_lease, 1);
                 assert_eq!(counts.tracked_users, 1);
                 assert_eq!(counts.would_fence_users, 1);
+                assert_eq!(counts.live_would_fence_users, 1);
                 drop(socket);
                 drop(duplicate);
+                let counts = registry.router_lease_counts();
+                assert_eq!(counts.would_fence_users, 1);
+                assert_eq!(
+                    counts.live_would_fence_users, 0,
+                    "a user whose socket closed keeps its record but is not live"
+                );
                 assert_eq!(
                     registry.router_lease_counts().live_users_without_lease,
                     1,

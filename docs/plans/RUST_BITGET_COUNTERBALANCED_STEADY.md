@@ -51,14 +51,25 @@ it does not decide the per-PR non-regression result. EPYC 7763's approximately
 
 ## Pinned cumulative anchor and job cost
 
-A0 is 518d3953c09daf63c1345ea465bbc55bd313f53a, the actual landing used by
-the counterbalanced study. Only an explicit auditor GO with evidence may move
+A0 is 38b69912e461e27198f5252c98cef73b7521b169, a post-#3091 master landing
+with the current public Bitget amount limits. Only an explicit auditor GO with evidence may move
 this source pin. There is no PR, CLI, workflow-input, report, or automatic
 advance path. The coordinator derives anchor authority from the issued tip
 comparison authority and the checked-in fixed pin; uploaded evidence cannot
 issue either authority.
 
-The old A0 source is checked out for its TS preflight and BUILD. Its own checked-in build.sh,
+The previous anchor was 518d3953c09daf63c1345ea465bbc55bd313f53a. Its TS output
+predated the conservative market cap, so its anchor preflight refused certification.
+The approved reset first measured Rust-only drift on one EPYC 7763 runner in
+[run 42125492893](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/42125492893):
+64 samples per arm, A/B/B/A then B/A/A/B, common tape and Node runtime.
+The old median was 449.9615 ms; the new median was 458.1105 ms, ratio 1.0181104383
+(+1.811%), below 1.023110. This is the **drift accepted at reset** baseline;
+correctness was known-changed, and that diagnostic does not certify CPU.
+The calibration freeze, tolerance, R0, and both normal authenticated witnesses
+remain unchanged. Fresh normal paired CI must qualify the new pin.
+
+The pinned A0 source is checked out for its TS preflight and BUILD. Its own checked-in build.sh,
 tool pins, family profile, size checker and ci-wasm archive producer build and
 seal its package. No current runtime source is copied into that checkout. The
 external driver retains source seals, raw/web/node artifacts, metadata bytes
@@ -160,6 +171,24 @@ If the outputs differ, `steady-assessment.json` records `NOT-CERTIFIED`,
 neither PASS nor an unchanged-bytes exception. This CPU job remains non-required;
 required replay correctness, family sizes and coverage retain their own gates.
 A failed TS replay is a collection error, not an oracle-change disposition.
+
+The CPU planner has a separate Bitget-only reader for this failed producer.
+It requires the original same-run physical job and checkout, exactly the failed
+oracle step with its literal refusal, a successful sealed upload, and a matching
+receipt whose raw TS outputs actually differ outside metrics. Cancelled jobs,
+other failed steps, malformed evidence and metrics-only differences fail closed.
+An anchor refusal also revalidates the completed tip's original raw records.
+Successful artifact authentication remains unchanged for every other path.
+
+The planner still authenticates and revalidates Bitget's complete strict first
+measurement, including correctness and memory. With a valid oracle refusal it
+records `not-certified`, binds the refusal artifact, and schedules no second
+measurement. The certifier recomputes that plan and writes a refusal, never a
+Bitget certificate: `certified=false`, the Bitget replay gate remains
+NOT-CERTIFIED, and the other 31 suites can certify independently. A corruption
+or memory failure is not converted into an oracle refusal. The post-#3091 anchor
+reset removes the persistent historical mismatch; this remains defence in depth
+for a later legitimate published-output change.
 
 This guard prevents baseline Rust from being judged against changed candidate TS
 output. It does not establish arm-matched correctness: a future change must pair

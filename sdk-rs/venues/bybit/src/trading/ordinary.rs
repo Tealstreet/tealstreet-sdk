@@ -22,6 +22,7 @@ use safe_cex_engine::request_context::{
     RetryEvidence, RetryPolicy, WriteResult,
 };
 use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, TimerId, VenueError,
 };
@@ -1198,7 +1199,7 @@ impl BybitLinear {
                     .map(String::as_str)
                     .collect();
                 if let Some(first) = left.first().and_then(|order| cx.store.order(order)) {
-                    let (count, symbol, list) = (left.len(), &first.symbol, left.join(", "));
+                    let (count, symbol, list) = (left.len(), &first.symbol, left.join_with(", "));
                     let message = if confirmed {
                         format!("Bybit cancel-all left {count} live order(s) on {symbol}: {list}")
                     } else {
@@ -1258,6 +1259,33 @@ impl BybitLinear {
         cx.command_error(request.command, error.message.clone());
         run.error.get_or_insert(error);
         self.continue_ordinary(cx, request.command, entry);
+    }
+
+    pub(crate) fn partial_stop_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Then::Ordinary(request) = &pending.then else {
+            return Ok(());
+        };
+        let Some(entry) = self.trading.ordinary.get(&request.command) else {
+            return Ok(());
+        };
+        let Stage::Plan(run) = &entry.stage else {
+            return Ok(());
+        };
+        let Some(active) = &run.active else {
+            return Ok(());
+        };
+        if active.context != request.context {
+            return Ok(());
+        }
+        if let Call::CancelPartialStop { guard, .. } = &active.leg.planned.call {
+            guard.validate(store, release.time.raw_ms)?;
+        }
+        Ok(())
     }
 
     /// Record the classified failure before anything else. `weaken` marks a
@@ -1643,7 +1671,7 @@ impl BybitLinear {
                     &BYBIT,
                     links.len(),
                     &items,
-                    format!("Failed to place batch orders: {}", reasons.join("; ")),
+                    format!("Failed to place batch orders: {}", reasons.join_with("; ")),
                     None,
                 ) else {
                     return Decision::Lost;
@@ -1755,7 +1783,7 @@ impl BybitLinear {
                     | WriteResult::Failed(error) => Decision::Failed(error),
                 }
             }
-            Call::CancelPartialStop { id, batch } => {
+            Call::CancelPartialStop { id, batch, .. } => {
                 let row = if *batch {
                     ack::cancelled_one(result, ext, id)
                 } else {

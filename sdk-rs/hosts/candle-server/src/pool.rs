@@ -87,7 +87,7 @@ impl Shared {
                 self.settle(command, Err(error.message));
             }
             Notice::Event(event) => self.on_event(event),
-            Notice::StartupFailed { error } => {
+            Notice::StartupFailed { error, .. } => {
                 self.error_seq.set(self.error_seq.get() + 1);
                 eprintln!("[candle-server] exchange startup failed: {}", error.message);
                 *self.last_error.borrow_mut() = Some(error.message);

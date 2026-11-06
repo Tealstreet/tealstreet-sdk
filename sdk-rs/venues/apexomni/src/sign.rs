@@ -20,6 +20,7 @@ use safe_cex_engine::signing::{
     Algorithm, Context, Encoding as PartEncoding, ExtraKey, Identity, KeyUse, Need, Operation,
     PayloadPart, SignError, SignReceipt, SignRequest, SignResult,
 };
+use safe_cex_engine::text::JoinWith;
 pub use safe_cex_engine::url::encode;
 use safe_cex_engine::{Action, DispatchContext, Method, SignStep, num};
 
@@ -102,7 +103,7 @@ pub fn query(params: &[(String, String)]) -> String {
         .into_iter()
         .map(|(key, value)| format!("{}={}", encode(key), encode(value)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 
 pub fn form(params: &[(String, String)]) -> String {

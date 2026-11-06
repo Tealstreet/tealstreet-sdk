@@ -324,6 +324,9 @@ pub enum Notice {
     /// account the venue refuses); hosts fail `start` with it.
     StartupFailed {
         error: VenueError,
+        /// Only a refused bootstrap read can recover from later account reads.
+        #[cfg(not(target_arch = "wasm32"))]
+        read_refusal: bool,
     },
     /// Completes a command with a structured failure; hosts report it like a
     /// `CommandDone` error, plus the detail.
@@ -2313,8 +2316,8 @@ struct CoreIo<'a> {
 }
 
 /// The venue-independent view of `Cx<P>`; see `CoreIo`.
-struct CoreCx<'a> {
-    now: f64,
+pub(crate) struct CoreCx<'a> {
+    pub(crate) now: f64,
     #[cfg(feature = "metadata-freshness")]
     store: &'a mut Store,
     io: CoreIo<'a>,
@@ -2332,7 +2335,7 @@ impl<P> Io<P> {
 
 impl<P> Cx<'_, P> {
     #[inline]
-    fn core(&mut self) -> CoreCx<'_> {
+    pub(crate) fn core(&mut self) -> CoreCx<'_> {
         CoreCx {
             now: self.now,
             #[cfg(feature = "metadata-freshness")]
@@ -2472,14 +2475,7 @@ impl<P> Io<P> {
 
     /// Splits the poll registry from the timer state it writes to.
     fn polls(&mut self) -> (&mut Polls, TimerSink<'_>) {
-        (
-            &mut self.core.polls,
-            TimerSink {
-                next_id: &mut self.core.next_id,
-                timers: &mut self.core.timers,
-                actions: &mut self.core.actions,
-            },
-        )
+        poll_timers(&mut self.core)
     }
 }
 
@@ -2676,10 +2672,7 @@ impl<P> Cx<'_, P> {
 
     /// `SocketId(0)` stands for a connect the engine suppressed.
     fn inert_socket(&self, socket: SocketId) -> bool {
-        socket.0 == 0
-            && (self.io.core.public_feed_policy != PublicFeedPolicy::Direct
-                || self.io.core.signing_latch.roles != 0
-                || self.io.core.frame_fed)
+        self.core_ref().inert_socket(socket)
     }
 
     pub fn connect(&mut self, spec: impl Into<SocketSpec>) -> SocketId {
@@ -2776,21 +2769,7 @@ impl<P> Cx<'_, P> {
     /// use this after revoking the epoch, before native invalidation; public
     /// close can then enter retirement without recursively invoking itself.
     fn close_socket_transport(&mut self, socket: SocketId) {
-        if self.inert_socket(socket) {
-            return;
-        }
-        self.io.opaque_entry_activity();
-        for timer in self.io.core.signing.close_socket(socket) {
-            if timer.0 != 0 {
-                self.io.core.actions.push(Action::ClearTimer { timer });
-            }
-        }
-        // The host drops engine-initiated closes without reporting them back.
-        // They are deliberate, so they never make the next connect a reconnect.
-        if self.io.core.sockets.closed(socket, false) {
-            self.io.core.health.count(log_code::WS_CLOSED);
-        }
-        self.io.core.actions.push(Action::WsClose { socket });
+        self.core().close_socket_transport(socket)
     }
 
     /// Issue a request; `pending` comes back with its response.
@@ -2974,12 +2953,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
-        self.io
-            .core
-            .entropy
-            .as_ref()
-            .ok_or("Engine entropy providers are required")?
-            .identity(bytes)
+        self.core_ref().fill_entropy(bytes)
     }
     pub fn fill_signing_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
         self.io
@@ -2994,22 +2968,7 @@ impl<P> Cx<'_, P> {
     /// clients do not retry in lockstep. Apply rate-limit minimums afterwards.
     /// Non-finite and non-positive delays pass through unchanged.
     pub fn jittered(&mut self, delay_ms: f64) -> f64 {
-        if !(delay_ms.is_finite() && delay_ms > 0.0) {
-            return delay_ms;
-        }
-        let mut bytes = [0; 8];
-        if self.fill_entropy(&mut bytes).is_err() {
-            return delay_ms;
-        }
-        crate::backoff::jitter(delay_ms, u64::from_le_bytes(bytes))
-    }
-
-    pub(crate) fn note_socket_backoff(&mut self, timer: TimerId) {
-        let core = &mut self.io.core;
-        let timers = &core.timers;
-        core.socket_backoffs
-            .retain(|waiting| timers.contains_key(waiting));
-        core.socket_backoffs.push(timer);
+        self.core().jittered(delay_ms)
     }
 
     /// The host rearms a timer id in place, so a due backoff fires as usual.
@@ -3024,13 +2983,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
-        let timer = TimerId(self.io.next());
-        self.io.core.timers.insert(timer, ());
-        self.io.core.actions.push(Action::SetTimer {
-            timer,
-            at_ms: self.now + delay_ms,
-        });
-        timer
+        self.core().set_timer(delay_ms)
     }
 
     /// Register one periodic-poll wakeup. The configured positive interval
@@ -3060,10 +3013,7 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn clear_timer(&mut self, timer: TimerId) {
-        let (polls, mut sink) = self.io.polls();
-        if !polls.clear(timer, &mut sink) {
-            sink.clear(timer);
-        }
+        self.core().clear_timer(timer)
     }
 
     pub fn book_changed(&mut self, symbol: &str) {
@@ -3199,7 +3149,7 @@ impl<P> Cx<'_, P> {
             return false;
         }
         self.notice_error(Level::Error, log_code::for_startup_error(error), error);
-        self.startup_failed(error.clone());
+        self.push_startup_failure(error.clone(), true);
         let now = self.now;
         let (polls, mut sink) = self.io.polls();
         polls.hold_off_refused(now, &mut sink);
@@ -3207,12 +3157,22 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn startup_failed(&mut self, error: impl Into<VenueError>) {
-        let error = error.into().with_ip_whitelist_hint();
+        self.push_startup_failure(error.into(), false);
+    }
+
+    fn push_startup_failure(&mut self, error: VenueError, read_refusal: bool) {
+        let error = error.with_ip_whitelist_hint();
         count_auth_failure(&mut self.io.core, Some(&error));
+        #[cfg(target_arch = "wasm32")]
+        let _ = read_refusal;
         self.io
             .core
             .actions
-            .push(Action::Notice(Notice::StartupFailed { error }));
+            .push(Action::Notice(Notice::StartupFailed {
+                error,
+                #[cfg(not(target_arch = "wasm32"))]
+                read_refusal,
+            }));
     }
 
     /// Legacy numeric finalization. Managed commands use `fail_context`.
@@ -4129,6 +4089,18 @@ pub trait Venue {
         HttpRelease::Mutable(|_, _, _| Ok(crate::request_context::Admission::Unscheduled))
     }
 
+    /// Pure veto at a single request's final claim; reads current Store only.
+    /// No I/O, interior mutation or scheduling; Err must name a NotSent cause.
+    /// A refusal follows normal claim cleanup before any physical release.
+    fn http_release_veto(
+        &self,
+        _store: &Store,
+        _pending: &Self::Pending,
+        _release: &crate::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        Ok(())
+    }
+
     /// Explicit pure group admission; the default refuses group support.
     /// Implementations must not mutate state, schedule work or use interior
     /// mutability here. This first contract accepts only Unscheduled.
@@ -4519,6 +4491,19 @@ pub trait Venue {
     /// Optional public stage facts for the nonterminal startup watchdog.
     fn startup_diagnostics(&self, _store: &Store) -> Vec<(&'static str, Value)> {
         Vec::new()
+    }
+    /// Native recovery may retry bootstrap reads, never commands or timers.
+    /// Opt in only with a read-only implementation; false stops host rechecks.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn rechecks_startup_reads() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn recheck_startup_reads(&mut self, _cx: &mut Cx<'_, Self::Pending>) -> bool {
+        false
     }
     fn on_poll_scale(&mut self, _cx: &mut Cx<'_, Self::Pending>, _scale: f64) {}
     /// Revalue account-derived state after host-owned public prices change.
@@ -5072,43 +5057,15 @@ impl<V: Venue> Engine<V> {
         if !self.source_read_covers {
             return;
         }
-        let standing: Vec<(String, u64)> = self
-            .io
-            .core
-            .order_locks
-            .uncertain_epochs()
-            .map(|(symbol, epoch)| (symbol.to_owned(), epoch))
-            .collect();
-        self.orders_held
-            .retain(|named| standing.iter().any(|(symbol, _)| symbol == named));
-        if standing
-            .iter()
-            .all(|(symbol, _)| self.orders_held.contains(symbol))
-        {
-            return;
-        }
-        let marks = &self.fence_marks;
-        let Some(oldest) = standing
-            .iter()
-            .filter_map(|(_, epoch)| marks.iter().find(|(token, _)| token >= epoch))
-            .map(|(_, at)| *at)
-            .min_by(f64::total_cmp)
-        else {
+        let Some((named, lift_after_ms)) = orders_held_notice(
+            &self.io.core.order_locks,
+            &mut self.orders_held,
+            &self.fence_marks,
+            self.source_clock_offset.is_some(),
+            now,
+        ) else {
             return;
         };
-        let grace = if self.source_clock_offset.is_some() {
-            crate::frame_fed::FENCE_GRACE_MS
-        } else {
-            crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
-        };
-        let mut symbols: Vec<String> = standing.into_iter().map(|(symbol, _)| symbol).collect();
-        symbols.sort();
-        let named = if symbols.iter().any(String::is_empty) {
-            String::new()
-        } else {
-            symbols.join(",")
-        };
-        self.orders_held = symbols;
         Cx {
             now,
             store: &mut self.store,
@@ -5120,7 +5077,7 @@ impl<V: Venue> Engine<V> {
             "Holding an uncertain write until the data source reads its orders",
             vec![
                 ("symbols", Value::Str(named)),
-                ("liftAfterMs", Value::Num((oldest + grace - now).max(0.))),
+                ("liftAfterMs", Value::Num(lift_after_ms)),
             ],
         );
     }
@@ -5129,6 +5086,47 @@ impl<V: Venue> Engine<V> {
     /// for an account that can sign, matching the SDK's readiness rule.
     pub fn set_account_startup(&mut self, account: bool) {
         self.account_startup = account;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn private_startup_pending(&self) -> bool {
+        self.started
+            && self.account_startup
+            && !self.frame_fed()
+            && !self.private_startup_complete()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn private_startup_complete(&self) -> bool {
+        let loaded = self.store.loaded();
+        self.started
+            && self.account_startup
+            && !self.frame_fed()
+            && !self.failed()
+            && !self.io.core.signing.refused()
+            && loaded.markets
+            && loaded.balance
+            && loaded.orders
+            && loaded.positions
+    }
+
+    /// Trusted native-host ingress; no command receipt or mutation authority.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn recheck_startup_reads(&mut self, now: f64) -> bool {
+        self.assert_live();
+        if !V::rechecks_startup_reads() || !now.is_finite() || !self.private_startup_pending() {
+            return false;
+        }
+        self.begin_event_scope();
+        self.store.set_clock(now);
+        self.io.core.dispatch_now = now;
+        let supported = self.venue.recheck_startup_reads(&mut Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        });
+        self.finish_event_scope(now);
+        supported
     }
 
     pub fn public_feed_policy(&self) -> PublicFeedPolicy {
@@ -5204,30 +5202,7 @@ impl<V: Venue> Engine<V> {
     }
 
     fn apply_shared_tickers(&mut self, now: f64) {
-        let mut missing = Vec::new();
-        for ticker in self.shared_tickers.values() {
-            if self.store.ticker(&ticker.symbol).is_none()
-                && let Some(market) = self.store.market(&ticker.symbol)
-            {
-                missing.push(crate::model::Ticker {
-                    id: market.id.clone(),
-                    symbol: market.symbol.clone(),
-                    ..Default::default()
-                });
-            }
-        }
-        if !missing.is_empty() {
-            let mut tickers = self.store.tickers().to_vec();
-            tickers.extend(missing);
-            self.store.set_tickers(tickers);
-        }
-        // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
-        for ticker in self.shared_tickers.values() {
-            if self.store.market(&ticker.symbol).is_some() {
-                self.store
-                    .update_ticker(&ticker.symbol, |target| ticker.apply(target));
-            }
-        }
+        copy_shared_tickers(&mut self.store, &self.shared_tickers);
         // A venue may have revalued its account using REST prices before restoration.
         let mut cx = Cx {
             now,
@@ -7640,6 +7615,92 @@ impl<V: Venue> Engine<V> {
     }
 }
 
+impl CoreRef<'_> {
+    fn inert_socket(&self, socket: SocketId) -> bool {
+        socket.0 == 0
+            && (self.io.core.public_feed_policy != PublicFeedPolicy::Direct
+                || self.io.core.signing_latch.roles != 0
+                || self.io.core.frame_fed)
+    }
+}
+
+impl CoreCx<'_> {
+    pub(crate) fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.core_ref().fill_entropy(bytes)
+    }
+    pub(crate) fn jittered(&mut self, delay_ms: f64) -> f64 {
+        if !(delay_ms.is_finite() && delay_ms > 0.0) {
+            return delay_ms;
+        }
+        let mut bytes = [0; 8];
+        if self.fill_entropy(&mut bytes).is_err() {
+            return delay_ms;
+        }
+        crate::backoff::jitter(delay_ms, u64::from_le_bytes(bytes))
+    }
+    pub(crate) fn note_socket_backoff(&mut self, timer: TimerId) {
+        let core = &mut self.io.core;
+        let timers = &core.timers;
+        core.socket_backoffs
+            .retain(|waiting| timers.contains_key(waiting));
+        core.socket_backoffs.push(timer);
+    }
+    pub(crate) fn set_timer(&mut self, delay_ms: f64) -> TimerId {
+        let timer = TimerId(self.io.next());
+        self.io.core.timers.insert(timer, ());
+        self.io.core.actions.push(Action::SetTimer {
+            timer,
+            at_ms: self.now + delay_ms,
+        });
+        timer
+    }
+    pub(crate) fn clear_timer(&mut self, timer: TimerId) {
+        let (polls, mut sink) = poll_timers(self.io.core);
+        if !polls.clear(timer, &mut sink) {
+            sink.clear(timer);
+        }
+    }
+    pub(crate) fn close_socket_transport(&mut self, socket: SocketId) {
+        if self.core_ref().inert_socket(socket) {
+            return;
+        }
+        self.io.opaque_entry_activity();
+        for timer in self.io.core.signing.close_socket(socket) {
+            if timer.0 != 0 {
+                self.io.core.actions.push(Action::ClearTimer { timer });
+            }
+        }
+        // The host drops engine-initiated closes without reporting them back.
+        // They are deliberate, so they never make the next connect a reconnect.
+        if self.io.core.sockets.closed(socket, false) {
+            self.io.core.health.count(log_code::WS_CLOSED);
+        }
+        self.io.core.actions.push(Action::WsClose { socket });
+    }
+}
+
+fn poll_timers(core: &mut IoCore) -> (&mut Polls, TimerSink<'_>) {
+    (
+        &mut core.polls,
+        TimerSink {
+            next_id: &mut core.next_id,
+            timers: &mut core.timers,
+            actions: &mut core.actions,
+        },
+    )
+}
+
+impl CoreRef<'_> {
+    fn fill_entropy(&self, bytes: &mut [u8]) -> Result<(), String> {
+        self.io
+            .core
+            .entropy
+            .as_ref()
+            .ok_or("Engine entropy providers are required")?
+            .identity(bytes)
+    }
+}
+
 /// The longest a repeating retried-read failure goes without an Error. Below the
 /// app's 120 s auth-badge expiry, so a key that stays rejected keeps its badge.
 pub const RETRIED_FAILURE_ERROR_EVERY_MS: f64 = 90_000.0;
@@ -7708,9 +7769,83 @@ impl SigningLatch {
         if startup {
             actions.push(Action::Notice(Notice::StartupFailed {
                 error: error.venue_error(),
+                #[cfg(not(target_arch = "wasm32"))]
+                read_refusal: false,
             }));
         }
     }
+}
+
+/// Shared provider quotes into the Store: a placeholder row for each missing
+/// ticker, then every quote. Venue-independent, so one copy serves every family.
+#[inline(never)]
+fn copy_shared_tickers(
+    store: &mut Store,
+    shared: &HashMap<String, crate::public_feed::PublicTicker>,
+) {
+    let mut missing = Vec::new();
+    for ticker in shared.values() {
+        if store.ticker(&ticker.symbol).is_none()
+            && let Some(market) = store.market(&ticker.symbol)
+        {
+            missing.push(crate::model::Ticker {
+                id: market.id.clone(),
+                symbol: market.symbol.clone(),
+                ..Default::default()
+            });
+        }
+    }
+    if !missing.is_empty() {
+        let mut tickers = store.tickers().to_vec();
+        tickers.extend(missing);
+        store.set_tickers(tickers);
+    }
+    // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
+    for ticker in shared.values() {
+        if store.market(&ticker.symbol).is_some() {
+            store.update_ticker(&ticker.symbol, |target| ticker.apply(target));
+        }
+    }
+}
+
+/// The `orders.held` notice's symbols and `liftAfterMs`, or None when every
+/// standing fence is already named or none has a mark. Records what it names.
+#[cfg(feature = "order-locks")]
+#[inline(never)]
+fn orders_held_notice(
+    locks: &crate::order_locks::OrderLocks,
+    held: &mut Vec<String>,
+    marks: &[(u64, f64)],
+    synced: bool,
+    now: f64,
+) -> Option<(String, f64)> {
+    let standing: Vec<(String, u64)> = locks
+        .uncertain_epochs()
+        .map(|(symbol, epoch)| (symbol.to_owned(), epoch))
+        .collect();
+    held.retain(|named| standing.iter().any(|(symbol, _)| symbol == named));
+    if standing.iter().all(|(symbol, _)| held.contains(symbol)) {
+        return None;
+    }
+    let oldest = standing
+        .iter()
+        .filter_map(|(_, epoch)| marks.iter().find(|(token, _)| token >= epoch))
+        .map(|(_, at)| *at)
+        .min_by(f64::total_cmp)?;
+    let grace = if synced {
+        crate::frame_fed::FENCE_GRACE_MS
+    } else {
+        crate::frame_fed::UNSYNCED_FENCE_GRACE_MS
+    };
+    let mut symbols: Vec<String> = standing.into_iter().map(|(symbol, _)| symbol).collect();
+    symbols.sort();
+    let named = if symbols.iter().any(String::is_empty) {
+        String::new()
+    } else {
+        symbols.join(",")
+    };
+    *held = symbols;
+    Some((named, (oldest + grace - now).max(0.)))
 }
 
 /// Live sockets that declared a role, for reconnect and private-traffic counts.
@@ -11371,6 +11506,10 @@ mod http_plan_boundary_tests;
 #[cfg(feature = "http-plans")]
 #[path = "http_plan_expiry.rs"]
 mod http_plan_expiry;
+
+#[cfg(test)]
+#[path = "cold_path_tests.rs"]
+mod cold_path_tests;
 
 #[cfg(all(test, feature = "order-locks"))]
 #[path = "read_cover_lift_tests.rs"]
