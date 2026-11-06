@@ -62,6 +62,19 @@ fn response(e: &mut TestEngine, request: &HttpRequest, now: f64, body: &str) {
         },
     );
 }
+fn response_status(e: &mut TestEngine, request: &HttpRequest, now: f64, status: u16) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status,
+                headers: "",
+                body: "",
+            },
+        },
+    );
+}
 fn ws(e: &mut TestEngine, socket: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket, text });
 }
@@ -2698,4 +2711,37 @@ fn a_put_back_is_one_attempt_on_the_wire() {
     let error = failure_of(&out);
     assert!(error.message.contains("both refused"), "{}", error.message);
     assert_eq!(error.protection, Some(Protection::Unprotected));
+}
+
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
+#[test]
+fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
+    for status in [408, 503] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop(&mut e, socket, 0.0);
+        let replacement = to_stop_replacement(&mut e);
+        response(&mut e, &replacement, NOW + 200.0, REFUSED);
+        let restore = requests(&mut e).remove(0);
+        response_status(&mut e, &restore, NOW + 201.0, status);
+        let out = actions(&mut e);
+        let error = failure_of(&out);
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("too many requests"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}"
+        );
+        assert_eq!(error.protection, None, "{status}");
+        assert!(
+            placements(&without_reconcile_read(http(out))).is_empty(),
+            "{status}: never resent"
+        );
+    }
 }
