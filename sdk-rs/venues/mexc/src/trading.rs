@@ -2019,20 +2019,20 @@ fn write_failure(
                     && matches!(row.id.as_ref(), "" | "0")
                     && matches!(row.order_id.as_ref(), "" | "0") =>
             {
-                write_code_failure(error, row.error_code, &row.error_msg)
+                write_code_failure(error, row.error_code, &row.error_msg, true)
             }
             _ => error,
         };
     }
-    if envelope.success != Some(false) {
+    if protective && envelope.success != Some(false) {
         return error.outcome(Outcome::Unknown);
     }
-    write_code_failure(error, envelope.code, &envelope.message)
+    write_code_failure(error, envelope.code, &envelope.message, protective)
 }
 
-fn write_code_failure(error: VenueError, code: f64, message: &str) -> VenueError {
+fn write_code_failure(error: VenueError, code: f64, message: &str, protective: bool) -> VenueError {
     let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
-    if !code.is_finite() || code.fract() != 0. {
+    if protective && (!code.is_finite() || code.fract() != 0.) {
         return error.outcome(Outcome::Unknown);
     }
     let mut error = error.venue_code(code.to_string());
@@ -2045,7 +2045,8 @@ fn write_code_failure(error: VenueError, code: f64, message: &str) -> VenueError
         406 | 701..=704 => rejected(error, ErrorKind::AuthPermission),
         510 => rejected(error, ErrorKind::RateLimited),
         // MEXC documents 3001 as a trigger-order price-type refusal.
-        600 | 1001..=1004 | 2001..=2009 | 2011 | 2013..=2015 | 3001 => {
+        3001 if protective => rejected(error, ErrorKind::Rejected),
+        600 | 1001..=1004 | 2001..=2009 | 2011 | 2013..=2015 => {
             rejected(error, ErrorKind::Rejected)
         }
         500 | 501 | 9999 => error.outcome(Outcome::Unknown),

@@ -3485,3 +3485,41 @@ fn ordinary_single_row_refusals_keep_the_unclassified_contract() {
         );
     }
 }
+
+#[test]
+fn ordinary_failure_envelopes_keep_the_base_classification() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for (body, code, outcome) in [
+        (r#"{"code":2006}"#, "2006", Some(Outcome::Rejected)),
+        (
+            r#"{"success":true,"code":2006}"#,
+            "2006",
+            Some(Outcome::Rejected),
+        ),
+        (
+            r#"{"success":false,"code":2006.5}"#,
+            "2006.5",
+            Some(Outcome::Rejected),
+        ),
+        (r#"{"success":false,"code":3001}"#, "3001", None),
+    ] {
+        let mut e = ready();
+        e.handle(
+            200.,
+            Event::Command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![order()],
+            }),
+        );
+        let request = requests(&mut e).remove(0);
+        reply(&mut e, &request, 300., body);
+        let [error] = failures(&mut e).try_into().unwrap();
+        assert_eq!(error.outcome, outcome, "{body}: {error:?}");
+        assert_eq!(
+            error.kind,
+            outcome.map(|_| ErrorKind::Rejected),
+            "{body}: {error:?}"
+        );
+        assert_eq!(error.venue_code.as_deref(), Some(code), "{body}: {error:?}");
+    }
+}
