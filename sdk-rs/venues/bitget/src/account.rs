@@ -140,6 +140,16 @@ struct WsPosition {
 // Fix pre-send age at the first physical release, not at response delivery.
 const POSITION_RECEIPT_GRACE_MS: f64 = 5_000.0;
 
+/// A position row's size split: `locked` is held by resting close orders.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Closable {
+    /// The mapped position's contracts, to match the row against the store.
+    pub contracts: f64,
+    pub total: f64,
+    pub available: f64,
+    pub locked: f64,
+}
+
 #[derive(Default)]
 pub struct Account {
     pub(crate) supervisor: Supervisor,
@@ -209,6 +219,8 @@ pub struct Account {
     census_follow_up: Option<TimerId>,
     cancel_checks: Vec<CancelCheck>,
     cancel_check_serial: u64,
+    /// Each position's last reported unlocked split; it only words a close refusal.
+    pub(crate) closable: HashMap<(String, PositionSide), Closable>,
     degraded: bool,
     /// When positions, balance and orders were last read over REST while live;
     /// `None` after each (re)login, so the first live poll covers the gap.
@@ -830,9 +842,14 @@ impl BitgetFutures {
             Request::Positions { rows, skipped, .. } => {
                 match serde_json::from_str::<PositionRow>(item)
                     .map_err(|_| "malformed record".to_owned())
-                    .and_then(|row| self.map_position(cx, &row))
-                {
-                    Ok(p) => rows.push(p),
+                    .and_then(|row| {
+                        let position = self.map_position(cx, &row)?;
+                        Ok((closable(&row, &position), position))
+                    }) {
+                    Ok((split, p)) => {
+                        self.note_closable(&p, split);
+                        rows.push(p)
+                    }
                     Err(error) => {
                         let key = self.position_key(item);
                         let message = format!(
@@ -2322,7 +2339,11 @@ impl BitgetFutures {
                             {
                                 continue;
                             }
-                            self.map_position(cx, &row)
+                            let mapped = self.map_position(cx, &row);
+                            if let Ok(position) = &mapped {
+                                self.note_closable(position, closable(&row, position));
+                            }
+                            mapped
                         }
                         Err(_) => {
                             if self.foreign_stream_row(item.get(), true) {
@@ -3026,6 +3047,14 @@ impl BitgetFutures {
         (!symbol.is_empty()).then_some((symbol, side))
     }
 
+    fn note_closable(&mut self, position: &Position, split: Option<Closable>) {
+        let key = (position.symbol.clone(), position.side);
+        match split {
+            Some(split) => self.account.closable.insert(key, split),
+            None => self.account.closable.remove(&key),
+        };
+    }
+
     fn map_position(
         &self,
         cx: &Cx<'_, Pending>,
@@ -3379,6 +3408,18 @@ fn positions_agree(a: &Position, b: &Position) -> bool {
 pub(crate) fn clean(v: f64) -> f64 {
     (v * 1e12).round() / 1e12
 }
+/// The row's unlocked split, when it reports one; `locked` defaults to the rest.
+fn closable(raw: &PositionRow<'_>, position: &Position) -> Option<Closable> {
+    let total = first(&[raw.total, raw.size, raw.pos, raw.open_total_pos])?;
+    let available = raw.available.0?;
+    Some(Closable {
+        contracts: position.contracts,
+        total,
+        available,
+        locked: raw.locked.0.unwrap_or_else(|| round8(total - available)),
+    })
+}
+
 pub(crate) fn first(values: &[Number]) -> Option<f64> {
     values.iter().find_map(|v| v.0)
 }

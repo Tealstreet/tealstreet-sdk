@@ -1608,6 +1608,61 @@ impl BitgetFutures {
         }
     }
 
+    /// Bitget's refusal of a close beyond the position's unlocked size, worded
+    /// with the split its last position row reported while that row is current.
+    fn closable_refusal(
+        &self,
+        cx: &Cx<'_, Pending>,
+        call: &Planned,
+        message: &str,
+    ) -> Option<String> {
+        if call.path != paths::BATCH_PLACE
+            || !message
+                .to_ascii_lowercase()
+                .contains("not enough position is available")
+        {
+            return None;
+        }
+        let symbol = call.payload.symbol.as_deref()?;
+        let close = call
+            .payload
+            .order_list
+            .as_deref()?
+            .iter()
+            .find(|o| o.reduce_only == Some("YES") || o.trade_side == Some("close"))?;
+        // A hedged close names its position's side; a one-way close sells a long.
+        let long = if close.trade_side == Some("close") {
+            close.side == Some("buy")
+        } else {
+            close.side == Some("sell")
+        };
+        let (side, label) = if long {
+            (PositionSide::Long, "long")
+        } else {
+            (PositionSide::Short, "short")
+        };
+        let split =
+            self.account
+                .closable
+                .get(&(symbol.to_owned(), side))
+                .filter(|split| {
+                    cx.store.positions().iter().any(|p| {
+                        p.symbol == symbol && p.side == side && p.contracts == split.contracts
+                    })
+                });
+        Some(match split {
+            Some(split) => format!(
+                "only {} of the {} {symbol} {label} is free to close; {} is held by open close orders, cancel them first ({message})",
+                num::format(split.available),
+                num::format(split.total),
+                num::format(split.locked)
+            ),
+            None => format!(
+                "the {symbol} {label} is held by open close orders, cancel them first ({message})"
+            ),
+        })
+    }
+
     fn classic(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<Payload, String> {
         Ok(Payload {
             symbol: Some(symbol.into()),
@@ -2550,7 +2605,8 @@ impl BitgetFutures {
             Ok(reply) => Some(format!(
                 "Bitget {}: {} (HTTP {status})",
                 reply.code.get(),
-                reply.msg
+                self.closable_refusal(cx, &request.call, &reply.msg)
+                    .unwrap_or_else(|| reply.msg.to_string())
             )),
             Err(error) => Some(error.clone()),
         };
@@ -2735,10 +2791,15 @@ impl BitgetFutures {
                     }
                 }
                 answer = Answer::Accepted(ids.clone());
-                if let Some(failures) = data
+                if let Some(mut failures) = data
                     .map(|d| failure_messages(&d.failure_list))
                     .filter(|f| !f.is_empty())
                 {
+                    for (_, message) in &mut failures {
+                        if let Some(clear) = self.closable_refusal(cx, &request.call, message) {
+                            *message = clear;
+                        }
+                    }
                     error = Some(format!(
                         "Bitget batch failure after ids {ids:?}: {}",
                         failure_text(&failures)
