@@ -57,7 +57,8 @@ send. Its venue-assigned ID changes; these plan/position-stop placement APIs hav
 no caller-ID parameter to reuse. Success reports typed Restored. Refused or
 withheld put-back reports typed Unprotected with a visible “re-place” message;
 there is no loop and no immediate market fallback. Partial, attached and grouped
-orders never borrow standalone restore authority. An unknown placement or
+orders never borrow standalone restore authority. HTTP 429 on replacement or put-back is Unknown regardless of its body, with
+no protection claim or restore/resend. An unknown placement or
 put-back outcome never restores/resends and reports status unknown, asking the
 user to check Open Orders and their position before acting.
 

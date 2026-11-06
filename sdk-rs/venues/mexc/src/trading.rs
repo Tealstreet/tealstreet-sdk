@@ -1966,6 +1966,9 @@ impl MexcFutures {
                 {
                     error.outcome = Some(Outcome::Unknown);
                 }
+                if response.status == 429 && (protective_place.is_some() || guarded_regular_place) {
+                    error.outcome = Some(Outcome::Unknown);
+                }
                 if native_edit && error.outcome == Some(Outcome::Rejected) {
                     error.outcome = Some(Outcome::NotSent);
                 }

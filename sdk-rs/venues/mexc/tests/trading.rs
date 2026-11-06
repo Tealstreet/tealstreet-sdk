@@ -2919,3 +2919,58 @@ fn protective_final_guard_uses_the_rounded_trigger_that_will_be_sent() {
         OrderStatus::Open
     );
 }
+
+#[test]
+fn protective_429_on_replacement_or_put_back_is_unknown_without_protection_claim() {
+    for put_back in [false, true] {
+        for body in [
+            "",
+            r#"{"success":false,"code":510,"message":"rate limited"}"#,
+            r#"{"success":false,"code":2006,"message":"refused"}"#,
+        ] {
+            let (mut e, _, _) = guarded_fixture();
+            let replacement = guarded_replacement(&mut e, 300.);
+            let pending = if put_back {
+                reply(
+                    &mut e,
+                    &replacement,
+                    340.,
+                    r#"{"success":false,"code":2006,"message":"replacement refused"}"#,
+                );
+                requests(&mut e).remove(0)
+            } else {
+                replacement
+            };
+            e.handle(
+                350.,
+                Event::HttpResponse {
+                    request: pending.id,
+                    response: Response {
+                        status: 429,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            let actions = drained(&mut e);
+            assert!(
+                !actions.iter().any(|a| matches!(a, Action::Http(_))),
+                "{actions:?}"
+            );
+            let error = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            assert!(error.protection.is_none());
+            assert!(
+                error.message.contains("status is unknown")
+                    && error.message.contains("Open Orders")
+            );
+            assert!(!error.message.contains("both refused"));
+        }
+    }
+}
