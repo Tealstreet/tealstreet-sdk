@@ -15,7 +15,7 @@ use std::collections::{HashMap, VecDeque};
 use support::setup::Options;
 
 const NOW: f64 = 1_000.;
-const LIMIT: f64 = 60_000.;
+const LIMIT: f64 = 20_000.;
 const A: &str = "BTCUSDT";
 const B: &str = "ETHUSDT";
 const INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":3},{"symbol":"ETHUSDT","baseAsset":"ETH","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":2,"quantityPrecision":3}]}"#;
@@ -1140,7 +1140,7 @@ fn physical_depth_timeout(held: bool) {
             Action::Notice(safe_cex_engine::Notice::Event(event))
                 if event.code == safe_cex_engine::log::code::REQUEST_FAILED
                     && event.message
-                        == "WEEX: HTTP request timed out (class=discovery budget=60000ms elapsed=60000ms)" =>
+                        == "WEEX: HTTP request timed out (class=discovery budget=20000ms elapsed=20000ms)" =>
             {
                 diagnostics += 1
             }
