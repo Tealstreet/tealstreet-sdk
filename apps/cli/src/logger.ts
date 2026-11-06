@@ -1,11 +1,10 @@
-// Must load before the console is captured below (it wraps it on ASCII consoles).
-import { G } from './console-glyphs';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as readline from 'readline';
 import { stableHash } from '@tealstreet/utils/src/stableHash';
 
+import { G, terminalText } from './console-glyphs';
 import { classifyLog, isOperational } from './log-classify';
 import { setStatus } from './status-line';
 import { BRAND } from './brand';
@@ -343,7 +342,8 @@ export function interceptConsole(): void {
     if (isDuplicateMessage(message)) return;
     if (shouldRateLimit()) return;
 
-    writeAbovePrompt(() => (stdoutReservedForJson ? originalConsoleError : originalConsoleLog)(...args));
+    const terminalArgs = args.map((arg) => (typeof arg === 'string' ? terminalText(arg) : arg));
+    writeAbovePrompt(() => (stdoutReservedForJson ? originalConsoleError : originalConsoleLog)(...terminalArgs));
   };
   console.log = handleInfoLog;
   console.info = handleInfoLog;
@@ -371,7 +371,7 @@ export function interceptConsole(): void {
     if (shouldRateLimit()) return;
 
     // Format with red X like watch mode
-    writeAbovePrompt(() => originalConsoleError(`\x1b[31m${G.error}\x1b[0m`, cleanMessage));
+    writeAbovePrompt(() => originalConsoleError(`\x1b[31m${G.error}\x1b[0m`, terminalText(cleanMessage)));
     setStatus(cleanMessage, classifyLog(cleanMessage, 'error'));
   };
 
@@ -390,7 +390,7 @@ export function interceptConsole(): void {
     // Apply rate limiting
     if (shouldRateLimit()) return;
 
-    writeAbovePrompt(() => originalConsoleWarn(`\x1b[33m${G.warn}\x1b[0m`, cleanMessage));
+    writeAbovePrompt(() => originalConsoleWarn(`\x1b[33m${G.warn}\x1b[0m`, terminalText(cleanMessage)));
     setStatus(cleanMessage, classifyLog(cleanMessage, 'warn'));
   };
 

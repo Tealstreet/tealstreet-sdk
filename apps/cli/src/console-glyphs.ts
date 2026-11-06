@@ -2,9 +2,13 @@
  * Every non-ASCII glyph the CLI prints, in one table.
  *
  * The legacy Windows console (cmd/conhost) renders glyphs outside its code page
- * and font as '?' and shifts the font on fallback, so there the CLI prints ASCII
+ * and font as '?' and shifts the font on fallback, so a terminal there gets ASCII
  * markers instead. Windows Terminal on a UTF-8 code page, and every other
  * platform, keeps Unicode. `TEALSTREET_ASCII=1` forces ASCII, `=0` forces Unicode.
+ *
+ * ASCII is a human-terminal rendering only: it needs stdout to be a TTY, and it
+ * is applied by terminal renderers and terminal sinks, never to JSON, pipes or
+ * capture/listener payloads, which always carry the canonical Unicode text.
  */
 
 export type GlyphMode = 'unicode' | 'ascii';
@@ -14,11 +18,14 @@ const UTF8_CODE_PAGE = 65001;
 export interface ConsoleEnvironment {
   platform: NodeJS.Platform;
   env: NodeJS.ProcessEnv;
+  /** Whether stdout is a terminal; redirected output stays canonical. */
+  isTTY: boolean;
   /** The console output code page, or undefined when it cannot be read. */
   codePage: () => number | undefined;
 }
 
-export function glyphMode({ platform, env, codePage }: ConsoleEnvironment): GlyphMode {
+export function glyphMode({ platform, env, isTTY, codePage }: ConsoleEnvironment): GlyphMode {
+  if (!isTTY) return 'unicode';
   if (env.TEALSTREET_ASCII === '1') return 'ascii';
   if (env.TEALSTREET_ASCII === '0') return 'unicode';
   if (platform !== 'win32') return 'unicode';
@@ -42,7 +49,8 @@ function windowsConsoleCodePage(): number | undefined {
   }
 }
 
-const UNICODE = {
+/** The canonical glyphs: what shared content and machine output always carry. */
+export const U = {
   error: '✗',
   warn: '⚠',
   ok: '✓',
@@ -74,7 +82,7 @@ const UNICODE = {
   bottomRight: '┘',
 } as const;
 
-export type Glyphs = { readonly [K in keyof typeof UNICODE]: string };
+export type Glyphs = { readonly [K in keyof typeof U]: string };
 
 const ASCII: Glyphs = {
   error: '[x]',
@@ -108,10 +116,13 @@ const ASCII: Glyphs = {
   bottomRight: '+',
 };
 
-export const glyphsFor = (mode: GlyphMode): Glyphs => (mode === 'ascii' ? ASCII : UNICODE);
+export const glyphsFor = (mode: GlyphMode): Glyphs => (mode === 'ascii' ? ASCII : U);
 
-/** The catch-all for text that bypasses `G` (shared-package tables, dependencies):
- * one cell per glyph so columns stay aligned. */
+/**
+ * Canonical text bound for an ASCII terminal (shared-package tables, adapter
+ * output): each glyph keeps its JS string length so `padEnd` columns stay
+ * aligned. Anything unmapped, such as user data, passes through unchanged.
+ */
 export const TRANSLITERATION: Readonly<Record<string, string>> = {
   '─': '-',
   '━': '-',
@@ -159,54 +170,40 @@ export const TRANSLITERATION: Readonly<Record<string, string>> = {
   '◄': '<',
   '≥': '>=',
   '≤': '<=',
-  '✓': 'v',
-  '✔': 'v',
+  '✓': '+',
+  '✔': '+',
   '✗': 'x',
   '✘': 'x',
   '⚠': '!',
   ℹ: 'i',
+  '⛔': '!',
+  '❌': 'x',
+  '✅': '+',
+  '⭕': 'o',
+  '⏸': '|',
+  '⏸️': '||',
+  '⚠️': '!!',
   '\uFE0F': '',
+  '🟢': 'on',
+  '🌐': '@@',
+  Σ: 'S',
 };
-const NON_ASCII = /[^\x00-\x7F]/gu;
+// A glyph with its emoji variation selector maps as one unit (⏸️ is two code units).
+const NON_ASCII = /[^\x00-\x7F]\uFE0F?/gu;
 
 export function asciiText(text: string): string {
-  return text.replace(NON_ASCII, (glyph) => TRANSLITERATION[glyph] ?? '?');
+  return text.replace(NON_ASCII, (glyph) => TRANSLITERATION[glyph] ?? TRANSLITERATION[glyph[0]] ?? glyph);
 }
 
 export const GLYPH_MODE: GlyphMode = glyphMode({
   platform: process.platform,
   env: process.env,
+  isTTY: Boolean(process.stdout.isTTY),
   codePage: windowsConsoleCodePage,
 });
 
-/** The glyphs for this process's console. */
+/** The glyphs for terminal renderers (status bar, footer, spinner, terminal log lines). */
 export const G: Glyphs = glyphsFor(GLYPH_MODE);
 
-type Write = typeof process.stdout.write;
-const asciiWrite = (write: Write): Write =>
-  function (this: NodeJS.WriteStream, chunk: unknown, ...rest: unknown[]) {
-    return (write as (...args: unknown[]) => boolean).call(
-      this,
-      typeof chunk === 'string' ? asciiText(chunk) : chunk,
-      ...rest,
-    );
-  } as Write;
-
-/**
- * Transliterate everything bound for an ASCII console. Runs when this module
- * loads, so logger.ts (which imports it first) captures the wrapped console.
- * Bun's console bypasses `process.stdout.write`, so both are wrapped.
- */
-export function installAsciiConsole(
-  target: Pick<Console, 'log' | 'info' | 'warn' | 'error' | 'debug' | 'trace'> = console,
-  streams: Pick<NodeJS.WriteStream, 'write'>[] = [process.stdout, process.stderr],
-): void {
-  for (const method of ['log', 'info', 'warn', 'error', 'debug', 'trace'] as const) {
-    const original = target[method];
-    target[method] = (...args: unknown[]) =>
-      original(...args.map((arg) => (typeof arg === 'string' ? asciiText(arg) : arg)));
-  }
-  for (const stream of streams) stream.write = asciiWrite(stream.write);
-}
-
-if (GLYPH_MODE === 'ascii') installAsciiConsole();
+/** Canonical text at a human-terminal sink; identity unless the terminal is ASCII. */
+export const terminalText = (text: string): string => (GLYPH_MODE === 'ascii' ? asciiText(text) : text);

@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 // Shim WebSocket for tealstreet.io proxy connections (must be first import)
 import './ws-shim';
-// Must load before any module captures console (it wraps it on ASCII consoles).
 import { G } from './console-glyphs';
 import './rust-engine';
 import '@tealstreet/safe-cex/src/transport/registerTealstreetTransport';

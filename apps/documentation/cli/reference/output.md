@@ -24,7 +24,10 @@ draw. Every other terminal keeps Unicode.
 | `— … → ≥`   | `- . > >=`         |
 
 `TEALSTREET_ASCII=1` forces ASCII on any platform; `TEALSTREET_ASCII=0` keeps
-Unicode. The code page is read once at startup.
+Unicode. The code page is read once at startup. ASCII only applies to what a
+person reads in the terminal: `--json` documents, redirected or piped output,
+and output sent to web clients over the listener always keep the original
+Unicode text.
 
 ## Output kinds
 

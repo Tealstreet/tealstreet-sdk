@@ -50,7 +50,8 @@ Three things to know:
   non-UTF-8 code page, the CLI prints `[x] [!] [ok] [i]` instead of
   `✗ ⚠ ✓ ℹ`, and plain `- | +` for table borders, because the legacy console
   font shows those glyphs as `?`. Set `TEALSTREET_ASCII=1` to force ASCII
-  anywhere, or `TEALSTREET_ASCII=0` to keep Unicode.
+  in any terminal, or `TEALSTREET_ASCII=0` to keep Unicode. `--json` and
+  piped output are never changed.
 - **`tealstreet update` works either way.** An npm install upgrades through
   `npm update -g`. A directly-downloaded `.exe` is replaced by renaming the
   running binary aside and moving the new one into place — Windows will not

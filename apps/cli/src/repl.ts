@@ -77,7 +77,7 @@ import {
 } from '../../../packages/safe-cex/src/types';
 import type { Exchange } from '../../../packages/safe-cex/src/exchanges/base';
 import { loadConfig, saveConfig, getAccount } from './config';
-import { G } from './console-glyphs';
+import { G, U } from './console-glyphs';
 // TWAP support for taskAction handling
 import { commandRegistry } from '../../../packages/cli-core/src/commands/CommandRegistry';
 import { ensureCommandsRegistered } from '../../../packages/cli-core/src/commands/CommandExecutor';
@@ -955,7 +955,7 @@ function setupExchangeListeners(exchange: ExchangeLike, accountName?: string): v
     if (isMonitorMode) {
       addWatchMessage('fill', fillMsg);
     } else {
-      adapter.printSuccess(`${G.ok} Fill: ${fillMsg}`);
+      adapter.printSuccess(`${U.ok} Fill: ${fillMsg}`);
     }
   });
 

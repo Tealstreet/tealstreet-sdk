@@ -1,14 +1,14 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
-import { TRANSLITERATION, asciiText, glyphMode, glyphsFor, installAsciiConsole } from './console-glyphs';
+import { TRANSLITERATION, U, asciiText, glyphMode, glyphsFor } from './console-glyphs';
 
 const UTF8 = 65001;
 const OEM_US = 437;
 
 describe('glyphMode', () => {
-  const mode = (platform: NodeJS.Platform, env: NodeJS.ProcessEnv, codePage?: number) =>
-    glyphMode({ platform, env, codePage: () => codePage });
+  const mode = (platform: NodeJS.Platform, env: NodeJS.ProcessEnv, codePage?: number, isTTY = true) =>
+    glyphMode({ platform, env, isTTY, codePage: () => codePage });
 
   it.each<[NodeJS.Platform, NodeJS.ProcessEnv, number | undefined, 'unicode' | 'ascii']>([
     ['darwin', {}, undefined, 'unicode'],
@@ -32,13 +32,19 @@ describe('glyphMode', () => {
     expect(mode(platform, env, codePage)).toBe(expected);
   });
 
+  it('keeps redirected output canonical even where a terminal would be ASCII', () => {
+    expect(mode('win32', {}, OEM_US, false)).toBe('unicode');
+    expect(mode('darwin', { TEALSTREET_ASCII: '1' }, undefined, false)).toBe('unicode');
+  });
+
   it('reads the code page only for Windows Terminal on Windows', () => {
     const codePage = vi.fn(() => UTF8);
-    glyphMode({ platform: 'darwin', env: { WT_SESSION: 'x' }, codePage });
-    glyphMode({ platform: 'win32', env: {}, codePage });
-    glyphMode({ platform: 'win32', env: { TEALSTREET_ASCII: '0', WT_SESSION: 'x' }, codePage });
+    glyphMode({ platform: 'darwin', env: { WT_SESSION: 'x' }, isTTY: true, codePage });
+    glyphMode({ platform: 'win32', env: {}, isTTY: true, codePage });
+    glyphMode({ platform: 'win32', env: { TEALSTREET_ASCII: '0', WT_SESSION: 'x' }, isTTY: true, codePage });
+    glyphMode({ platform: 'win32', env: { WT_SESSION: 'x' }, isTTY: false, codePage });
     expect(codePage).not.toHaveBeenCalled();
-    glyphMode({ platform: 'win32', env: { WT_SESSION: 'x' }, codePage });
+    glyphMode({ platform: 'win32', env: { WT_SESSION: 'x' }, isTTY: true, codePage });
     expect(codePage).toHaveBeenCalledTimes(1);
   });
 });
@@ -54,6 +60,7 @@ describe('glyph tables', () => {
 
   it('Unicode keeps the glyphs the CLI has always printed', () => {
     const unicode = glyphsFor('unicode');
+    expect(unicode).toBe(U);
     expect([unicode.error, unicode.warn, unicode.ok, unicode.info]).toEqual(['✗', '⚠', '✓', 'ℹ']);
     expect(`${unicode.paused}  Paused`).toBe('⏸️  Paused');
     expect(`${unicode.warnEmoji}  x`).toBe('⚠️  x');
@@ -68,34 +75,18 @@ describe('asciiText', () => {
     ascii.forEach((line, i) => expect(line.length).toBe(table[i].length));
   });
 
-  it('transliterates prose punctuation and leaves ASCII alone', () => {
+  it('keeps padEnd widths of canonical status cells', () => {
+    for (const cell of [`${U.running} Running`, `${U.paused}  Paused`, `${U.inactive} Inactive`, `${U.ok} Fill`]) {
+      expect(asciiText(cell).length, cell).toBe(cell.length);
+      expect(asciiText(cell)).toMatch(/^[\x20-\x7E]+$/);
+    }
+  });
+
+  it('transliterates prose punctuation and leaves ASCII and user data alone', () => {
     expect(asciiText('stopped — retry… a → b, n ≥ 8')).toBe('stopped - retry. a > b, n >= 8');
     expect(asciiText('plain \x1b[31mred\x1b[0m text')).toBe('plain \x1b[31mred\x1b[0m text');
-    expect(asciiText('⚠️ x')).toBe('! x');
-    expect(asciiText('🚀')).toBe('?');
-  });
-});
-
-describe('installAsciiConsole', () => {
-  it('transliterates string arguments and string writes only', () => {
-    const calls: unknown[][] = [];
-    const record = (...args: unknown[]) => void calls.push(args);
-    const target = { log: record, info: record, warn: record, error: record, debug: record, trace: record };
-    const written: unknown[] = [];
-    const stream = {
-      write: function (chunk: unknown) {
-        written.push(chunk);
-        return true;
-      } as NodeJS.WriteStream['write'],
-    };
-    installAsciiConsole(target, [stream]);
-    const bytes = Buffer.from('✓');
-    target.log('✓ done', 3, { a: '✓' });
-    target.error('✗ failed');
-    stream.write('─ rule');
-    stream.write(bytes);
-    expect(calls).toEqual([['v done', 3, { a: '✓' }], ['x failed']]);
-    expect(written).toEqual(['- rule', bytes]);
+    expect(asciiText('⚠️ x')).toBe('!! x');
+    expect(asciiText('東京 café 🚀')).toBe('東京 café 🚀');
   });
 });
 
