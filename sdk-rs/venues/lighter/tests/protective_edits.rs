@@ -114,6 +114,12 @@ fn cancel_ack_requires_exact_unfilled_terminal_target_before_replacement() {
         let c = cancel(&mut e, NOW);
         let p = proof(&mut e, &mut t, &c);
         assert!(p.url.contains("client_order_indexes=123"));
+        assert!(
+            p.headers
+                .iter()
+                .any(|(key, value)| key.eq_ignore_ascii_case("authorization") && !value.is_empty())
+        );
+        assert!(!p.url.contains("auth="));
         let mut row = original();
         row["status"] = json!("canceled");
         match change {

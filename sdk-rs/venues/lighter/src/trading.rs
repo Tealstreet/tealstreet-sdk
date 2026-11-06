@@ -773,7 +773,7 @@ impl Lighter {
                 .identity
                 .clone()
                 .ok_or_else(|| "Lighter signer unavailable".to_owned())
-                .and_then(|identity| self.auth_recipe(identity, sign::AuthPlacement::Query))
+                .and_then(|identity| self.auth_recipe(identity, sign::AuthPlacement::Header))
             {
                 Ok(recipe) => recipe,
                 Err(error) => {
@@ -2277,7 +2277,7 @@ impl Lighter {
         if self.trading.active.as_ref().unwrap().protection.is_some() {
             let recipe = self.auth_recipe(
                 self.account.identity.clone().unwrap(),
-                sign::AuthPlacement::Query,
+                sign::AuthPlacement::Header,
             );
             match recipe {
                 Ok(recipe) => {
