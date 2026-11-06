@@ -5,6 +5,7 @@ pub mod setup;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
+use safe_cex_engine::text::JoinWith;
 use sha2::{Digest, Sha256, Sha512};
 use zeroize::Zeroizing;
 
@@ -29,7 +30,7 @@ pub fn form(params: &[(&str, String)]) -> String {
         .into_iter()
         .map(|(k, v)| format!("{}={}", encode(k), encode(v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 pub struct Signer {
     secret: Zeroizing<Vec<u8>>,

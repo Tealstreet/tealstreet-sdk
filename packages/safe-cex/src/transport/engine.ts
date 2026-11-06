@@ -43,6 +43,7 @@ import { HyperliquidStartupFacts } from './hyperliquidStartupFacts';
 import { payloadSignedViaPublicProxy, refuseSignedPublicProxy } from './publicProxyGuard';
 import { getTransport } from './registry';
 import { proxyFleetForwards } from './tealstreet/proxyFleetAllowlist';
+import { PUBLIC_PROXY_READ_HOSTS, readsViaPublicProxy } from './tealstreet/publicCorsAllowlist';
 import {
   isTealstreetProxyAuthFailureBody,
   proxyAuthorizationHeader,
@@ -151,6 +152,8 @@ const secondaryReadHeaders: Partial<Record<ExchangeName, string>> = {
 /** Headers that carry a venue credential: never sent toward the public proxy. */
 const CREDENTIAL_HEADERS: ReadonlySet<string> = new Set([
   'authorization',
+  'x-ts-grvt-session',
+  'x-grvt-account-id',
   ...Object.values(secondaryReadHeaders).map((name) => name!.toLowerCase()),
 ]);
 
@@ -390,6 +393,10 @@ const isPublicBinanceRead = (exchange: ExchangeName, request: Request, credentia
   (credentialIntent === 'public' && ['binance', 'binancepm', 'binanceinverse'].includes(exchange)) ||
   (credentialIntent === undefined && publicBinanceRequest(exchange, request));
 
+/** The account's tunnel setting under the venue's default: BingX tunnels unless switched off. */
+const tunnelFlagOn = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
+  exchange === 'bingx' ? options.tealstreetTunnel !== false : Boolean(options.tealstreetTunnel);
+
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
   exchange === 'paradex'
@@ -397,8 +404,8 @@ const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =
     : ['hyperliquid', 'hyperliquidspot', 'kucoin', 'kucoinspot'].includes(exchange)
       ? !options.publicDataOnly
       : exchange === 'bingx'
-        ? !options.publicDataOnly && options.tealstreetTunnel !== false
-        : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && Boolean(options.tealstreetTunnel);
+        ? !options.publicDataOnly && tunnelFlagOn(exchange, options)
+        : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && tunnelFlagOn(exchange, options);
 
 // A browser engine on public data only keeps the account's tunnel flag but not the
 // tunnel; the flag must not suppress the proxy, or a venue whose public REST refuses
@@ -1338,6 +1345,19 @@ export const createEngineTransport = (
         infoFacts,
       )
     : undefined;
+  // A keyless public-data engine (a mirror's chart source) on an opted-in venue holds no
+  // credential, so its reads to allowlisted hosts leave through the public CORS proxy, off the
+  // trading fleet's IPs, unless the account is plain direct; the signed-packet guard still
+  // refuses anything credentialed.
+  const keylessPublicReads =
+    publicCorsHttp !== undefined &&
+    PUBLIC_PROXY_READ_HOSTS[exchange] !== undefined &&
+    options.publicDataOnly === true &&
+    !options.key &&
+    !options.secret &&
+    !options.passphrase &&
+    (options.tealstreetProxy === true || tunnelFlagOn(exchange, options)) &&
+    !DIRECT_PUBLIC_READS.has(exchange);
   const readOptions =
     SECONDARY_READ_KEYS_ENABLED && credentials?.hasSecondary
       ? { ...options, overrideProxyUrl: options.secondaryProxyUrl || provider.publicCorsProxy() }
@@ -1415,7 +1435,9 @@ export const createEngineTransport = (
                 ? readHttp
                 : intent === 'public' && DIRECT_PUBLIC_READS.has(exchange)
                   ? directHttp
-                  : intent === 'public' &&
+                  : intent === 'public' && keylessPublicReads && readsViaPublicProxy(exchange, packet.url)
+                    ? publicCorsHttp
+                    : intent === 'public' &&
                       readHttp &&
                       !['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange)
                     ? readHttp
@@ -1440,7 +1462,9 @@ export const createEngineTransport = (
         (!['binance', 'binancepm', 'binanceinverse', 'asterdex'].includes(exchange) ||
           hasHeader(request.headers, secondaryReadHeaders[exchange]!))
         ? readHttp.request(nativeRequest)
-        : http.request(nativeRequest);
+        : keylessPublicReads && readsViaPublicProxy(exchange, request.url)
+          ? publicCorsHttp!.request(nativeRequest)
+          : http.request(nativeRequest);
     },
     dispose: () => {
       http.dispose();

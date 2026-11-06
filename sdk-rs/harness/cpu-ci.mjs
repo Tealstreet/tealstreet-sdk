@@ -8,11 +8,11 @@ import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { expectedGateCases, gateCaseKey } from './ci-gate-suites.mjs';
-import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateArtifactMetadata, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
+import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateArtifactMetadata, authenticateBitgetOracleRefusalArtifact, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
 import { readArtifactZip } from './cpu-artifacts.mjs';
 import { captureCache, verifyCache } from './cpu-cache.mjs';
 import { assessGateReport } from './known-failure-policy.mjs';
-import { assessEligibility, decideRemeasurement } from './cpu-remeasure.mjs';
+import { assessEligibility, decideRemeasurement, validatePublicEvidence } from './cpu-remeasure.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
 import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint, environmentIdentity, environmentMismatch } from './cpu-runtime.mjs';
@@ -20,7 +20,8 @@ import { loadGateLedger } from './verify-gates.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { selectBitgetPair } from './bitget-paired-ci.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
-import { pairedSteadyAssessment, readBitgetSteadyCertificate } from './bitget-paired-steady.mjs';
+import { pairedSteadyAssessment, readBitgetSteadyCertificate, assessBitgetPairedSteady, bitgetAnchorAuthority } from './bitget-paired-steady.mjs';
+import { readBitgetOracleRefusal, isBitgetOracleRefusal } from './bitget-oracle-refusal.mjs';
 
 import { collectFamilyIdentity, familyComparisonAuthority, readFamilyIdentity, readFamilyIdentityDirectory, familyCpuAssessment, familyCpuMiss } from './cpu-family-identity.mjs';
 
@@ -37,7 +38,15 @@ const artifactRef = ({ meta }) => ({ artifactId: meta.id, name: meta.name, diges
 const fullCase = (report) => Object.fromEntries(['venue', 'tape', 'tapeSha256', 'books', 'private', 'correctnessRuns', 'runs'].map((key) => [key, report[key]]));
 const manifest = () => json(new URL('./known-gate-failures.json', import.meta.url));
 
-export function classifyInitialCase(evidence, declarations, paired, family) {
+export function classifyInitialCase(evidence, declarations, paired, family, refusal) {
+  if (refusal !== undefined) {
+    insist(isBitgetOracleRefusal(refusal) && evidence.report?.venue === 'bitget' && evidence.report.private === false &&
+      evidence.execution?.measuredCheckoutSha === refusal.authority.candidate, 'unissued or mismatched Bitget oracle refusal');
+    const errors = validatePublicEvidence(evidence);
+    insist(!errors.length, errors.join('\n'));
+    classifyInitialCase(evidence, declarations, paired, family);
+    return { decision: 'not-certified' };
+  }
   const assessment = pairedSteadyAssessment(assessGateReport(evidence.report, declarations), evidence.report, paired, evidence.execution?.measuredCheckoutSha);
   if (!assessment.errors.length) return { decision: 'first', assessment };
   if (family && familyCpuMiss(evidence, assessment)) {
@@ -178,7 +187,7 @@ const producerIdentity = job => Object.fromEntries(['id', 'run_id', 'run_attempt
 const workflowIdentity = run => Object.fromEntries(['id', 'run_number', 'run_attempt', 'workflow_id',
   'path', 'head_sha', 'head_branch', 'event'].map(key => [key, run[key]]));
 
-async function terminalProducer(context, jobName, stepName) {
+async function terminalProducer(context, jobName, stepName, bitgetRefusal = false) {
   let inventory = await evidenceInventory(context), originalJob, originalRun, physical;
   for (;;) {
     const { run, jobs } = inventory, selected = jobs.filter(job => job.name === jobName);
@@ -202,7 +211,8 @@ async function terminalProducer(context, jobName, stepName) {
       inventory = await evidenceInventory(context, true);
       continue;
     }
-    insist(job.conclusion === 'success', 'measurement not successful original physical attempt1');
+    insist(job.conclusion === 'success' || (bitgetRefusal && jobName === 'Rust / Bitget counterbalanced steady CPU' &&
+      job.conclusion === 'failure'), 'measurement not successful original physical attempt1');
     const identity = producerIdentity(job), workflow = workflowIdentity(run);
     originalJob ??= identity; originalRun ??= workflow;
     insist(same(identity, originalJob) && same(workflow, originalRun), 'producer physical identity changed during step metadata refresh');
@@ -249,11 +259,33 @@ export async function authenticatedBundle(context, runId, name, jobName, stepNam
 
 async function loadBitgetPaired(context) {
   context.bitgetPaired ??= (async () => {
-    const bundle = await authenticatedBundle(context, context.runId, 'bitget-paired-steady',
-      'Rust / Bitget counterbalanced steady CPU', 'Retain counterbalanced Bitget steady evidence', context.checkoutSha);
+    const bundle = await authenticatedBitgetPairedBundle(context);
     const directory = resolve(context.env.RUNNER_TEMP, 'authenticated-bitget-paired');
     artifactEntriesToDirectory(bundle.entries, directory);
     const authority = await selectBitgetPair({ reader: context.reader, runId: context.runId, root: context.root });
+    if (bundle.job.conclusion === 'failure') {
+      const result = jsonMember(bundle.entries, 'steady-assessment.json');
+      insist(['tip', 'anchor'].includes(result.oracle?.witness), 'unknown refusal witness');
+      const selected = result.oracle.witness === 'anchor' ? bitgetAnchorAuthority(authority) : authority;
+      const sourceTrees = {};
+      for (const source of new Set([selected.baseline, selected.candidate])) {
+        const commit = await context.reader.getCommit(source);
+        insist(commit.sha === source, 'oracle API source differs');
+        sourceTrees[source] = commit.tree?.sha;
+      }
+      const refusal = readBitgetOracleRefusal({ entries: bundle.entries, authority, sourceTrees,
+        tapeSha256: sha256(readFileSync(resolve(context.root, 'sdk-rs/harness/fixtures/bitget-public.jsonl.gz'))) });
+      if (refusal.witness === 'anchor') {
+        const evidence = readBitgetPairedEvidence(resolve(directory, 'tip', 'records'));
+        for (const cohort of evidence.cohorts) {
+          restorePairedRawOutputs(context.root, cohort.evidence);
+          revalidateRecordedEvidence(cohort.evidence, { root: context.root });
+        }
+        const tip = assessBitgetPairedSteady({ authority, evidence, manifest: manifest() });
+        insist(tip.valid, tip.errors.join('\n'));
+      }
+      return { refusal, bundle };
+    }
     const certificate = await readBitgetSteadyCertificate({ authority, manifest: manifest(),
       readEvidence: async (name, selected) => {
         const evidence = readBitgetPairedEvidence(resolve(directory, name, 'records'));
@@ -275,6 +307,19 @@ async function loadBitgetPaired(context) {
   return context.bitgetPaired;
 }
 
+export async function authenticatedBitgetPairedBundle(context) {
+  const jobName = 'Rust / Bitget counterbalanced steady CPU', stepName = 'Retain counterbalanced Bitget steady evidence';
+  const { run, job } = await terminalProducer(context, jobName, stepName, true);
+  if (job.conclusion === 'success') return authenticatedBundle(context, context.runId, 'bitget-paired-steady',
+    jobName, stepName, context.checkoutSha);
+  const bundle = await artifact(context, context.runId, 'bitget-paired-steady');
+  const logBytes = await context.reader.getLog(job.id);
+  const receipt = authenticateBitgetOracleRefusalArtifact({ artifact: bundle.meta, artifactBytes: bundle.bytes,
+    run, job, logBytes, expectedCheckoutSha: context.checkoutSha });
+  context.bindings?.push({ artifact: bundle.meta, job });
+  return { ...bundle, receipt, job, logBytes };
+}
+
 export function restorePairedRawOutputs(root, evidence) {
   const out = resolve(root, 'sdk-rs/harness/out'), entries = new Map();
   for (const [index, slot] of evidence.raw.entries()) {
@@ -288,7 +333,7 @@ export function restorePairedRawOutputs(root, evidence) {
 }
 
 export function pairedCertificateForRuntime(paired, state, entries) {
-  if (!paired || state.mode !== 'family') return undefined;
+  if (!paired || state.mode !== 'family' || isBitgetOracleRefusal(paired.refusal)) return undefined;
   const recorded = jsonMember(entries, 'manifest.json');
   for (const [name, digest] of Object.entries(paired.certificate.moduleHashes)) {
     const path = `sdk-rs/hosts/wasm/pkg/node/${name}`;
@@ -548,7 +593,12 @@ export function validatePlannedCases(plan) {
     insist(Number.isSafeInteger(row.firstArtifactId) && /^sha256:[a-f0-9]{64}$/.test(row.firstArtifactDigest ?? '') &&
       Array.isArray(row.cases) && same(row.cases.map(value => gateCaseKey(value.case)).sort(), publicCases(row.suite).map(gateCaseKey).sort()), 'missing/duplicate/substituted complete public roster');
     insist(new Set(row.cases.map(value => value.key)).size === row.cases.length, 'duplicate case key');
-    for (const value of row.cases) insist(['first', 'second'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
+    const refused = row.cases.some(value => value.decision === 'not-certified');
+    insist(refused ? row.suite === 'bitget' && row.cases.every(value => value.decision === 'not-certified') &&
+      row.oracleRefusal?.name === 'bitget-paired-steady' && Number.isSafeInteger(row.oracleRefusal.artifactId) && row.oracleRefusal.artifactId > 0 &&
+      /^sha256:[a-f0-9]{64}$/.test(row.oracleRefusal.digest ?? '') && Number.isSafeInteger(row.oracleRefusal.bytes) && row.oracleRefusal.bytes > 0
+      : row.oracleRefusal === undefined, 'invalid Bitget-only refusal plan authority');
+    for (const value of row.cases) insist(['first', 'second', 'not-certified'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
       value.case.private === false && value.case.runs === PUBLIC_REPLAY_PAIRS && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
   }
   return plan;
@@ -600,6 +650,7 @@ async function gatherSuite(context, suite) {
   const { readSourceTree } = await import('./cpu-collection.mjs');
   insist(readSourceTree(context.root).inputsSha256 === state.inputsSha256 && state.sourceHead === context.checkoutSha, 'first measured inputs differ from current source');
   const row = { suite, firstArtifactId: strict.meta.id, firstArtifactDigest: strict.meta.digest, cases: [] };
+  if (pairedBundle?.refusal) row.oracleRefusal = artifactRef(pairedBundle.bundle);
   for (const item of publicCases(suite)) {
     const matches = bundle.claims.filter(value => gateCaseKey(value.case) === gateCaseKey(item));
     insist(matches.length === 1, 'missing/duplicate exact first claim');
@@ -608,7 +659,8 @@ async function gatherSuite(context, suite) {
     validateRetainedCache({ entries: strict.entries, evidence: first, state });
     await authenticateCase(context, first, strict.job, suite);
     revalidateRecordedEvidence(first, { root: context.root });
-    row.cases.push({ key: first.key, case: claim.case, decision: classifyInitialCase(first, manifest(), paired, family).decision });
+    row.cases.push({ key: first.key, case: claim.case,
+      decision: classifyInitialCase(first, manifest(), paired, family, pairedBundle?.refusal).decision });
   }
   return row;
 }
@@ -647,6 +699,15 @@ async function certifySuite(context, suite, destination) {
   const hasSecond = requireSecondState(row.cases, allJobs.filter(job => job.name === `Rust / CPU remeasurement (${suite})`));
   context.secondDispositions ??= new Map();
   context.secondDispositions.set(suite, row.cases);
+  if (row.oracleRefusal) {
+    insist(isBitgetOracleRefusal(pairedBundle?.refusal), 'missing authenticated Bitget refusal');
+    write(resolve(destination, 'refusal.json'), { schema: 1, suite, runId: context.runId,
+      checkoutSha: context.checkoutSha, disposition: 'NOT-CERTIFIED', certified: false,
+      reason: pairedBundle.refusal.reason, pairedArtifact: row.oracleRefusal });
+    const error = new Error(pairedBundle.refusal.reason);
+    error.oracleRefusal = pairedBundle.refusal;
+    throw error;
+  }
   const strict = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
     `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
   const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
@@ -733,7 +794,7 @@ export async function certifySuites(suites, certifyOne) {
 async function certifyAll(context, destination) {
   const { results: outcome, certificates } = await certifySuites(CPU_REMEASURE_SUITES, async (suite) => {
     try { return await certifySuite(context, suite, resolve(destination, suite)); }
-    catch (error) { context.secondDispositions?.delete(suite); throw error; }
+    catch (error) { if (!isBitgetOracleRefusal(error.oracleRefusal)) context.secondDispositions?.delete(suite); throw error; }
   });
   await evidenceEndCheck(context);
   const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, ...outcome };

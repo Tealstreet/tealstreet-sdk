@@ -731,10 +731,7 @@ impl Registry {
     }
 
     pub fn user_lease_fenced(&self, user: &str) -> bool {
-        self.router_leases.get(user).map_or_else(
-            || self.router_leases.enforced(),
-            |lease| lease.status().fenced,
-        )
+        self.router_leases.fenced(user)
     }
 
     pub fn park_expired_router_leases(self: &Arc<Self>) {
@@ -1041,7 +1038,7 @@ impl Registry {
         };
         let (spawned, receive) = tokio::sync::oneshot::channel();
         let placed = self.threads.place(move |placement| {
-            let mut transport = NetworkTransport::with_routing(plan, tokens);
+            let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
             if let Some(lease) = lease {
                 transport = transport.with_io_guard(Arc::new(move || lease.allowed()));
             }
@@ -2475,8 +2472,15 @@ pub(crate) mod tests {
                 assert_eq!(counts.live_users_without_lease, 1);
                 assert_eq!(counts.tracked_users, 1);
                 assert_eq!(counts.would_fence_users, 1);
+                assert_eq!(counts.live_would_fence_users, 1);
                 drop(socket);
                 drop(duplicate);
+                let counts = registry.router_lease_counts();
+                assert_eq!(counts.would_fence_users, 1);
+                assert_eq!(
+                    counts.live_would_fence_users, 0,
+                    "a user whose socket closed keeps its record but is not live"
+                );
                 assert_eq!(
                     registry.router_lease_counts().live_users_without_lease,
                     1,

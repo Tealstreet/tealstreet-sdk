@@ -163,6 +163,7 @@ fn ready(profile: Profile) -> Harness {
     for ticker in &mut tickers {
         ticker.mark = 100.0;
         ticker.last = 100.0;
+        ticker.index = 100.0;
     }
     h.engine.store_mut().set_tickers(tickers);
     h.requests.clear();
@@ -338,10 +339,10 @@ fn partial_same_kind_keeps_supported_trigger_and_uses_destination_defaults_other
                 } else {
                     assert_eq!(
                         request.tp_trigger_by.as_deref(),
-                        Some(if trigger == "MarkPrice" {
-                            "MarkPrice"
-                        } else {
-                            "LastPrice"
+                        Some(match trigger {
+                            "MarkPrice" => "MarkPrice",
+                            "IndexPrice" => "IndexPrice",
+                            _ => "LastPrice",
                         })
                     );
                     assert!(request.sl_trigger_by.is_none());
@@ -1871,6 +1872,203 @@ fn partial_stop_fresh_reference_boundary_is_inclusive_for_every_profile() {
             } else {
                 assert_guard_refused(&h, "fresh mark");
             }
+        }
+    }
+}
+
+#[test]
+fn tp_amend_native_rows_keep_real_reference_or_use_last_when_unknown() {
+    use safe_cex_engine::model::StopTriggerType;
+    for profile in PROFILES {
+        for (native, expected, typed) in [
+            ("MarkPrice", "MarkPrice", Some(StopTriggerType::MarkPrice)),
+            ("LastPrice", "LastPrice", Some(StopTriggerType::LastPrice)),
+            (
+                "IndexPrice",
+                "IndexPrice",
+                Some(StopTriggerType::IndexPrice),
+            ),
+            ("UNKNOWN", "LastPrice", None),
+            ("NEW_NATIVE_TRIGGER", "LastPrice", None),
+            ("", "LastPrice", None),
+        ] {
+            for path in ["attached", "full", "missing-mark"] {
+                let mut h = ready(profile);
+                h.message("/v5/private", &serde_json::json!({"topic":"position","data":[{
+                    "category":profile.category(),"symbol":profile.symbol(),"side":"Buy","size":"0","avgPrice":"0","markPrice":"100","leverage":"10","positionIdx":0
+                }]}).to_string());
+                let mut row = serde_json::json!({
+                    "category":profile.category(),"symbol":profile.symbol(),"orderId":"tp-native",
+                    "side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"TakeProfit",
+                    "tpslMode":if path=="full" {"Full"} else {"Partial"},
+                    "qty":if path=="full" {"0"} else {"7"},"cumExecQty":"0","price":"110","leavesQty":"7",
+                    "triggerPrice":"110","triggerBy":native,"reduceOnly":true,"closeOnTrigger":true,"positionIdx":0
+                });
+                if path == "attached" {
+                    row["orderId"] = "parent".into();
+                    row["side"] = "Buy".into();
+                    row["orderType"] = "Limit".into();
+                    row["orderStatus"] = "New".into();
+                    row["stopOrderType"] = "UNKNOWN".into();
+                    row["tpslMode"] = "".into();
+                    row["triggerPrice"] = "0".into();
+                    row["triggerBy"] = "MarkPrice".into();
+                    row["takeProfit"] = "110".into();
+                    row["tpTriggerBy"] = native.into();
+                }
+                h.message(
+                    "/v5/private",
+                    &serde_json::json!({"topic":"order","data":[row]}).to_string(),
+                );
+                let id = if path == "attached" {
+                    "parent__take_profit"
+                } else {
+                    "tp-native"
+                };
+                let order = h.engine.store().order(id).unwrap_or_else(|| {
+                    panic!(
+                        "native TP row missing {profile:?}/{path}/{native}: {:?}",
+                        h.logs
+                    )
+                });
+                assert_eq!(order.trigger_type, typed, "{profile:?}/{path}/{native}");
+                if !native.is_empty() && typed.is_none() {
+                    assert!(
+                        h.logs
+                            .iter()
+                            .any(|log| log.contains("unrecognized trigger reference")),
+                        "unknown must be observable"
+                    );
+                    assert!(!h.logs.iter().any(|log| log.contains("NEW_NATIVE_TRIGGER")));
+                }
+                if path == "missing-mark" {
+                    h.engine.store_mut().set_tickers(Vec::new());
+                }
+                h.command(Command::AmendOrder {
+                    command: 93,
+                    id: id.into(),
+                    price: Some(115.0),
+                    amount: None,
+                });
+                assert!(!h.has_request(profile.cancel_path()));
+                let request = h.take(if path == "attached" {
+                    "/v5/order/amend"
+                } else {
+                    "/v5/position/trading-stop"
+                });
+                let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+                assert_eq!(payload["category"], profile.category());
+                assert_eq!(payload["takeProfit"], "115");
+                assert_eq!(
+                    payload["tpTriggerBy"], expected,
+                    "{profile:?}/{path}/{native}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn tp_add_uses_a_known_requested_reference_for_linear_and_inverse() {
+    for profile in PROFILES {
+        for (typed, expected) in [
+            ("mark_price", "MarkPrice"),
+            ("last_price", "LastPrice"),
+            ("index_price", "IndexPrice"),
+        ] {
+            let mut h = ready(profile);
+            h.message("/v5/private", &serde_json::json!({"topic":"position","data":[{
+                "category":profile.category(),"symbol":profile.symbol(),"side":"Buy","size":"20","avgPrice":"100","markPrice":"100","leverage":"10","unrealisedPnl":"0","positionIdx":0
+            }]}).to_string());
+            h.command(Command::PlaceOrders {command:94, orders:vec![serde_json::from_value(serde_json::json!({"symbol":profile.symbol(),"type":"take_profit_market","side":"sell","amount":0,"price":115,"tpTriggerType":typed})).unwrap()]});
+            assert!(
+                h.has_request("/v5/position/trading-stop"),
+                "{profile:?}/{typed}: result={:?}, requests={:?}",
+                h.result(94),
+                h.requests.iter().map(|r| &r.url).collect::<Vec<_>>()
+            );
+            let request = h.take("/v5/position/trading-stop");
+            let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            assert_eq!(payload["tpTriggerBy"], expected, "{profile:?}");
+        }
+    }
+}
+
+#[test]
+fn attached_sl_amend_preserves_own_native_reference_or_existing_mark_default() {
+    use safe_cex_engine::model::StopTriggerType;
+    for profile in PROFILES {
+        for (native, expected, typed) in [
+            (
+                Some("MarkPrice"),
+                "MarkPrice",
+                Some(StopTriggerType::MarkPrice),
+            ),
+            (
+                Some("LastPrice"),
+                "LastPrice",
+                Some(StopTriggerType::LastPrice),
+            ),
+            (
+                Some("IndexPrice"),
+                "IndexPrice",
+                Some(StopTriggerType::IndexPrice),
+            ),
+            (Some("UNKNOWN"), "MarkPrice", None),
+            (Some("NEW_NATIVE_TRIGGER"), "MarkPrice", None),
+            (Some(""), "MarkPrice", None),
+            (None, "MarkPrice", None),
+        ] {
+            let mut h = ready(profile);
+            h.message(
+                "/v5/private",
+                &serde_json::json!({"topic":"position","data":[{
+                    "category":profile.category(),"symbol":profile.symbol(),"side":"Buy","size":"0",
+                    "avgPrice":"0","markPrice":"100","leverage":"10","positionIdx":0
+                }]})
+                .to_string(),
+            );
+            let mut row = serde_json::json!({
+                "category":profile.category(),"symbol":profile.symbol(),"orderId":"sl-parent",
+                "side":"Buy","orderType":"Limit","orderStatus":"New","stopOrderType":"Stop",
+                "qty":"7","cumExecQty":"0","price":"110","leavesQty":"7",
+                "triggerPrice":"110","triggerBy":"LastPrice","stopLoss":"90","positionIdx":0
+            });
+            if let Some(native) = native {
+                row["slTriggerBy"] = native.into();
+            }
+            h.message(
+                "/v5/private",
+                &serde_json::json!({"topic":"order","data":[row]}).to_string(),
+            );
+            assert_eq!(
+                h.engine.store().order("sl-parent").unwrap().trigger_type,
+                Some(StopTriggerType::LastPrice)
+            );
+            assert_eq!(
+                h.engine
+                    .store()
+                    .order("sl-parent__stop_loss")
+                    .unwrap()
+                    .trigger_type,
+                typed,
+                "{profile:?}/{native:?}"
+            );
+            h.command(Command::AmendOrder {
+                command: 95,
+                id: "sl-parent__stop_loss".into(),
+                price: Some(85.0),
+                amount: None,
+            });
+            let request = h.take("/v5/order/amend");
+            let payload: serde_json::Value = serde_json::from_str(body(&request)).unwrap();
+            assert_eq!(payload["category"], profile.category());
+            assert_eq!(payload["orderId"], "sl-parent");
+            assert_eq!(payload["stopLoss"], "85");
+            assert_eq!(payload["slTriggerBy"], expected, "{profile:?}/{native:?}");
+            assert!(payload.get("tpTriggerBy").is_none());
+            assert!(!h.has_request(profile.cancel_path()));
+            assert!(!h.has_request("/v5/position/trading-stop"));
         }
     }
 }

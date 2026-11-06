@@ -14,6 +14,7 @@ use safe_cex_engine::model::{
     Order, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus, OrderType,
     PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Command, CommandId, Cx, Outcome, SocketId, VenueError, num};
 use std::collections::{HashMap, VecDeque};
 
@@ -258,8 +259,13 @@ fn sl_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
 }
 
 fn tp_trigger_by(opts: &PlaceOrderOpts) -> &'static str {
-    match opts.tp_trigger_type {
+    take_profit_reference(opts.tp_trigger_type)
+}
+
+fn take_profit_reference(trigger: Option<StopTriggerType>) -> &'static str {
+    match trigger {
         Some(StopTriggerType::MarkPrice) => "MarkPrice",
+        Some(StopTriggerType::IndexPrice) => "IndexPrice",
         _ => "LastPrice",
     }
 }
@@ -670,7 +676,7 @@ impl BybitLinear {
                     chunk.iter().map(|lot| lot.item.clone().finish()).collect();
                 let body = Body::new()
                     .str("category", category.as_str())
-                    .raw("request", &format!("[{}]", items.join(",")))
+                    .raw("request", &format!("[{}]", items.join_with(",")))
                     .finish();
                 let fallback = chunk
                     .iter()
@@ -1124,11 +1130,7 @@ impl BybitLinear {
                 "takeProfit",
                 "tpTriggerBy",
                 "tpSize",
-                if trigger == Some(StopTriggerType::MarkPrice) {
-                    "MarkPrice"
-                } else {
-                    "LastPrice"
-                },
+                take_profit_reference(trigger),
             )
         };
         let body = Body::new()
@@ -1307,7 +1309,11 @@ impl BybitLinear {
         if self.variant != crate::Variant::Inverse {
             body = body.str("tpslMode", "Partial");
         }
-        body = body.opt_str(level, price.map(number).as_deref());
+        body = body.opt_str(level, price.map(number).as_deref()).opt_str(
+            "tpTriggerBy",
+            (order.kind == OrderType::TakeProfit)
+                .then(|| take_profit_reference(order.trigger_type)),
+        );
         if self.variant != crate::Variant::Inverse {
             body = body.str(size, &number(amount.unwrap_or(order.amount)));
         }
@@ -1362,7 +1368,26 @@ impl BybitLinear {
             } else {
                 "takeProfit"
             };
-            return amend(base().str("orderId", parent).str(field, &number(price)));
+            return amend(
+                base()
+                    .str("orderId", parent)
+                    .str(field, &number(price))
+                    .opt_str(
+                        "tpTriggerBy",
+                        (order.kind == OrderType::TakeProfit && !self.variant.is_spot())
+                            .then(|| take_profit_reference(order.trigger_type)),
+                    )
+                    .opt_str(
+                        "slTriggerBy",
+                        (order.kind == OrderType::StopLoss && !self.variant.is_spot()).then_some(
+                            match order.trigger_type {
+                                Some(StopTriggerType::LastPrice) => "LastPrice",
+                                Some(StopTriggerType::IndexPrice) => "IndexPrice",
+                                _ => "MarkPrice",
+                            },
+                        ),
+                    ),
+            );
         }
         if order.kind == OrderType::TrailingStopLoss {
             let target = price.ok_or("A trailing stop moves by price")?;
@@ -1401,11 +1426,15 @@ impl BybitLinear {
             } else {
                 ("takeProfit", "tpTriggerBy")
             };
-            let by_value = match order.trigger_type {
-                Some(StopTriggerType::MarkPrice) => Some("MarkPrice"),
-                Some(StopTriggerType::LastPrice) => Some("LastPrice"),
-                Some(StopTriggerType::IndexPrice) => Some("IndexPrice"),
-                None => None,
+            let by_value = if order.kind == OrderType::TakeProfit {
+                Some(take_profit_reference(order.trigger_type))
+            } else {
+                match order.trigger_type {
+                    Some(StopTriggerType::MarkPrice) => Some("MarkPrice"),
+                    Some(StopTriggerType::LastPrice) => Some("LastPrice"),
+                    Some(StopTriggerType::IndexPrice) => Some("IndexPrice"),
+                    None => None,
+                }
             };
             let body = Body::new()
                 .str("category", self.category_for(&order.symbol).as_str())
@@ -1537,7 +1566,7 @@ impl BybitLinear {
                     .collect();
                 let body = Body::new()
                     .str("category", category.as_str())
-                    .raw("request", &format!("[{}]", items.join(",")))
+                    .raw("request", &format!("[{}]", items.join_with(",")))
                     .finish();
                 job.steps.push_back(Step {
                     delay_ms: if index > 0 {

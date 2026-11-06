@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { CPU_COHORT_STEPS, sourceInputFingerprint, cohortKey, parseCohortJson, createGithubReader,
-  authenticateArtifactExecution, authenticateMeasurementWindow, formatMeasurementMarker, requireGithubResponseSize } from './cpu-cohort.mjs';
+  authenticateArtifactExecution, authenticateBitgetOracleRefusalArtifact, authenticateMeasurementWindow, formatMeasurementMarker, requireGithubResponseSize } from './cpu-cohort.mjs';
 const anchor = { workflowId: 386369161, runNumber: 1, runId: 1000 };
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const git = (value) => createHash('sha1').update(value).digest('hex');
@@ -473,4 +473,38 @@ test('buffered public markers use payload execution order within physical delive
     checkout + begin + end.replace('07:54:28.7101159Z', '07:55:01.000Z'),
     checkout + begin.replace(execution.startedAt, execution.completedAt) + end,
   ]) assert.throws(() => authenticateMeasurementWindow({ ...input, logBytes: Buffer.from(raw) }));
+});
+
+function oracleRefusalUpload() {
+  const x = fixture(), record = x.claims[0], source = record.observations[0];
+  const meta = { ...record.artifact, name: 'bitget-paired-steady' };
+  const producer = { ...source.job, name: 'Rust / Bitget counterbalanced steady CPU', conclusion: 'failure',
+    steps: [source.job.steps[0],
+      { name: 'Public counterbalanced Bitget steady CPU', status: 'completed', conclusion: 'failure', started_at: at(5), completed_at: at(15) },
+      { name: 'Retain counterbalanced Bitget steady evidence', status: 'completed', conclusion: 'success', started_at: at(20), completed_at: at(25) }] };
+  const refusal = 'NOT-CERTIFIED: Bitget TS oracle output changed between baseline and candidate; arm-matched correctness is not available';
+  return { artifact: meta, artifactBytes: record.artifactBytes, run: x.runs[0], job: producer,
+    logBytes: Buffer.concat([log(source.checkout.sha, meta), Buffer.from(`${at(10)} ${refusal}\n`)]),
+    expectedCheckoutSha: source.checkout.sha };
+}
+
+test('only the exact Bitget failed oracle step can authenticate a non-certifying refusal upload', () => {
+  const x = oracleRefusalUpload(), receipt = authenticateBitgetOracleRefusalArtifact(x);
+  assert.equal(receipt.jobId, x.job.id);
+  assert.equal(receipt.measuredCheckoutSha, x.expectedCheckoutSha);
+  assert.throws(() => authenticateArtifactExecution({ ...x, jobName: x.job.name,
+    stepName: 'Retain counterbalanced Bitget steady evidence' }), /not successful/);
+  const changes = [x => { x.job.name = 'Rust / replay measurement (bitget)'; },
+    x => { x.job.conclusion = 'success'; }, x => { x.job.conclusion = 'cancelled'; },
+    x => { x.job.run_attempt = 2; }, x => { x.run.run_attempt = 2; },
+    x => { x.job.steps[1].conclusion = 'success'; },
+    x => { x.job.steps[2].conclusion = 'failure'; },
+    x => { x.job.steps.push({ ...x.job.steps[1], name: 'Post cleanup' }); },
+    x => { x.job.steps.push({ ...x.job.steps[1], conclusion: 'success' }); },
+    x => { x.artifactBytes = Buffer.from('substituted'); },
+    x => { x.expectedCheckoutSha = git('foreign'); },
+    x => { x.logBytes = Buffer.from(x.logBytes.toString().replace('NOT-CERTIFIED:', 'OTHER:')); },
+    x => { x.logBytes = Buffer.from(x.logBytes.toString().replace(at(10), at(18))); },
+    x => { x.artifact.name = 'cpu-plan'; }];
+  for (const change of changes) { const bad = oracleRefusalUpload(); change(bad); assert.throws(() => authenticateBitgetOracleRefusalArtifact(bad)); }
 });

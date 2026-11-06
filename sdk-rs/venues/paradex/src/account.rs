@@ -634,6 +634,15 @@ impl Account {
         }
     }
     fn dispatch(&mut self, cx: &mut Cx<'_, Pending>, mut request: Queued) {
+        // The last moment before an amend's destructive cancel leaves: after any
+        // JWT refresh it waited on, against the Store as it is now.
+        if let Pending::Trade(trade) = &request.pending
+            && let Some(guard) = trade.stop_guard()
+            && let Err(error) = guard.validate(self, cx.store, cx.now)
+        {
+            self.failed.push((request.pending, error));
+            return;
+        }
         if let Pending::Trade(trade) = &request.pending {
             trade.report_progress(cx);
         }

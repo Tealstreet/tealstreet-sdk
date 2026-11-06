@@ -99,7 +99,10 @@ What it captures:
 - `Log::error` conditions: drain and break-glass deadlines, router-lease
   fencing, a failing signer, and algo shutdown deadlines;
 - the native host's account start failures and venue, relay and HTTP-tunnel
-  transport failures, through `safe_cex_native::report`.
+  transport failures, through `safe_cex_native::report`. Each account's
+  transport is built `with_venue`, so its failures carry `venue` beside `kind`
+  and `target` (host and route, never a URL). The shared HTTP-tunnel socket
+  pool serves many venues and reports none.
 
 Warnings are not sent.
 
@@ -300,7 +303,7 @@ display/Sentry label and is not an ownership identifier. The router
 must return public 404 for `/lease/*`, as for `/proof/*` and `/admin/*`.
 
 `POST /lease/router-heartbeat` returns
-`{accepted, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
+`{accepted, untracked, checkedAt, enforcing, graceUntil, bootId}` with Unix milliseconds.
 `enforcing` is true only with enforcement on and no active explicit enable grace.
 The ACK stays conservative for the whole submitted batch, including users whose
 first heartbeat has already ended the missing-heartbeat exception. Users share
@@ -322,26 +325,44 @@ and never replaces the persisted maximum-issued `notAfter` and skew wait.
 A batch contains 1–256 distinct users, user IDs at most 512 bytes,
 and a body at most 256 KiB. Epoch and sequence are positive JS-safe integers.
 Old or duplicate tuples never extend a grant; invalid assertions return 400.
+A valid batch skips only assertions that cannot fit the inventory, returning
+`untracked` beside `accepted` in the ACK; later existing users still renew.
+An all-overflow batch returns 200 with `accepted:0` and a nonzero `untracked`.
+The router's singleton renewal requires `accepted:1`, so overflow proves no grant.
 A separate bounded peer limiter allows a 1024-request burst and 512 requests/s,
 without consuming the proof endpoint's smaller allowance. There are at most
 4096 tracked users; epoch high-water marks are retained until process exit and
-capacity exhaustion fails closed. No raw user IDs are logged.
+capacity exhaustion refuses new private starts when enforced. Read-only socket
+fence checks never register users: an unknown user follows explicit missing-user
+grace below capacity, and is fenced whenever enforced at full capacity.
+No raw user IDs are logged.
 
 `POST /admin/router-lease/status {userId}` uses the existing on-box admin guard
 and returns `userTag`, `enforced`, `wouldFence`, `fenced`, `ownerEpoch`,
 `sequence`, `notAfter`, `generation`, `routerBoxId`, and `missingHeartbeatGraceMs`. It grants
-no placement, renewal or write authority. Expiry uses both wall-clock
+no placement, renewal or write authority. Lookup does not register a user;
+untracked users return 503 without changing inventory. Expiry uses both wall-clock
 `notAfter` and a monotonic deadline so a clock rollback cannot extend ownership.
 
 `POST /admin/router-lease/summary` accepts an empty body or `{}` under the
 same on-box admin guard. It returns only
-`{routerBoxId, enforced, enableGraceUntil, trackedUsers, fencedUsers,
-wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+`{routerBoxId, enforced, enableGraceUntil, capacity, remaining, trackedUsers,
+fencedUsers, wouldFenceUsers, liveWouldFenceUsers, liveUsersWithoutLease, checkedAt}`;
+no user or account IDs.
+`capacity` stays 4096; `remaining` is capacity minus the same snapshot's
+`trackedUsers`. Inventory holds distinct users for the process lifetime, not
+just active users: accepted epoch/sequence high-water marks are never evicted.
+One count-only journal warning is emitted at each 80% and 95% crossing (3277 and
+3892 users); plan a drain/roll before exhaustion. Safe eviction would require a
+future authenticated router retirement watermark; expiry alone is insufficient.
 `wouldFenceUsers` counts the exact per-user `wouldFence` predicate, including
 wall-clock and monotonic expiry, independently of shadow/enforcement mode.
 `fencedUsers` counts the per-user actual `fenced` flag. Hosted users with private
 accounts (including parked accounts) or authenticated sockets are deduplicated;
-those with no lease record count as `liveUsersWithoutLease`. Pending authenticated
+those with no lease record count as `liveUsersWithoutLease`, and those whose record
+has `wouldFence` count as `liveWouldFenceUsers`. `wouldFenceUsers` still counts every
+tracked record, so `wouldFenceUsers - liveWouldFenceUsers` is departed users: a user
+who moved home to the other box keeps an expired record here. Pending authenticated
 upgrade reservations count as sockets. Anonymous public data and drain latches
 alone do not count as hosted activity. Reading the summary never creates lease
 records for absent users. `enableGraceUntil` is the active explicit enable-grace
@@ -349,7 +370,8 @@ deadline only while enforcement is on, otherwise null. It uses the same
 absolute/monotonic expiry predicate as the heartbeat ACK and never grants grace
 on restart. Without an explicit active deadline, ungranted tracked users count
 as fenced immediately in enforcement mode. Operators gate enabling on both boxes reporting
-`wouldFenceUsers == 0 && liveUsersWithoutLease == 0`. This is a current-state
+`liveUsersWithoutLease == 0 && liveWouldFenceUsers == 0`; departed records alone do not
+block it. This is a current-state
 snapshot, not an admission latch or takeover proof.
 
 ### Rollout and recovery

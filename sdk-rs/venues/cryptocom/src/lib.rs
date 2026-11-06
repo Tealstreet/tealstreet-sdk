@@ -119,6 +119,7 @@ pub struct Cryptocom {
     options: Options,
     rest: &'static str,
     sockets: [Connection; 2],
+    login_refusal_reported: bool,
     discovery: safe_cex_engine::startup::Backoff<bool>,
     // Instruments rejected as malformed; owned exposure there holds the snapshot.
     malformed_markets: HashSet<String>,
@@ -267,6 +268,7 @@ impl Cryptocom {
             },
             options,
             sockets: [Connection::new(false), Connection::new(true)],
+            login_refusal_reported: false,
             discovery: Default::default(),
             malformed_markets: HashSet::new(),
             reread_stalls: 0,
@@ -494,7 +496,7 @@ impl Cryptocom {
                 }
                 let mut candles = Vec::new();
                 json::each::<CandleRow>(message.data.get(), |row| candles.push(row.candle()))?;
-                candles.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut candles);
                 // A subscription's first answer carries history: only its newest row is live.
                 if self.candles_live.insert(message.subscription.to_owned()) {
                     let newest = candles.pop();
@@ -667,14 +669,18 @@ impl Venue for Cryptocom {
                     );
                     cx.close(socket);
                     self.on_close(cx, socket, 1008);
-                    cx.startup_read_refused(
-                        &safe_cex_engine::VenueError::new(format!(
-                            "Crypto.com private login rejected: {}",
-                            envelope.message
-                        ))
-                        .kind(safe_cex_engine::ErrorKind::AuthInvalid),
-                    );
+                    // REST readiness cannot recover a rejected private stream login.
+                    if !std::mem::replace(&mut self.login_refusal_reported, true) {
+                        cx.startup_failed(
+                            safe_cex_engine::VenueError::new(format!(
+                                "Crypto.com private login rejected: {}",
+                                envelope.message
+                            ))
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+                        );
+                    }
                 } else if !self.sockets[channel].authenticated {
+                    self.login_refusal_reported = false;
                     self.sockets[channel].authenticated = true;
                     self.sockets[channel].supervisor.authenticated(cx);
                     self.authenticated(cx, &envelope);

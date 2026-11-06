@@ -8,3 +8,9 @@ Structured logging system with Grafana integration, Sentry error reporting, and 
 - **Security**: Redacts sensitive fields (keys, tokens, passwords, secrets)
 - **No barrel file** — import directly from individual files
 - **Dependencies**: `jotai` (state management — `log.ts` uses `getDefaultStore` + `logAtom`), `lodash` (utilities), `@tealstreet/utils` (stableHash); LogSeverity enum is defined locally in `LogSeverity.ts`
+
+`startLoggingToGrafana(userId, username?)` accepts only the already-selected public
+chat handle, never an Auth0 name/email or an account name. Each queued log/notice
+captures it as JSON-escaped `username=` text beside the unchanged user ID; it is
+not a Loki label, Sentry tag or issue title. The owning cleanup clears identity
+context on logout, while stale cleanup cannot clear a newer user's context.

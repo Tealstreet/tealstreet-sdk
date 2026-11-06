@@ -1126,7 +1126,7 @@ impl Venue for Kraken {
                     );
                     return;
                 }
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
                 if let Some(root) = &root {
                     if let Some(context) = &context {

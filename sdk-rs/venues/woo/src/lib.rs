@@ -762,7 +762,7 @@ impl Venue for Woo {
                 mut rows,
                 bad,
             } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 {
                     let result: Result<String, String> = if bad {
                         Err("Invalid WOO candle page".into())

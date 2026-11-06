@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { createEngineTransport } from './engine';
 import { tealstreetTransport } from './tealstreet/tealstreetTransport';
+import { getPublicCorsProxy } from './tealstreet/transportResolution';
 
 vi.mock('../accessToken', () => ({
   getProxyToken: vi.fn(async () => 'proxy-fixture'),
@@ -54,10 +55,17 @@ describe('public-data-only REST for a venue that needs CORS', () => {
     expect(getExchangeMetadata('bingx').requiresCors).toBe(true);
   });
 
-  for (const [name, key] of [
-    ['keyless', undefined],
-    ['refused key', 'refused-key'],
-  ] as const) {
+  it('a keyless bingx engine reads contracts through the public CORS proxy, off the trading fleet', async () => {
+    const { raw, dispatched } = rawTransport();
+    const route = createEngineTransport('bingx', publicBingx(), raw);
+    await route.request({ method: 'GET', url: CONTRACTS, headers: {} });
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0].url).toBe(`${getPublicCorsProxy()}/${CONTRACTS}`);
+    expect(Object.values(dispatched[0].headers)).not.toContain('Bearer proxy-fixture');
+    route.dispose!();
+  });
+
+  for (const [name, key] of [['refused key', 'refused-key']] as const) {
     it(`a ${name} bingx engine reads contracts through the proxy, never browser-direct`, async () => {
       const { raw, dispatched } = rawTransport();
       const route = createEngineTransport('bingx', publicBingx(key), raw);

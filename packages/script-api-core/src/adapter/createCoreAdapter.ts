@@ -394,7 +394,9 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           }
           rounded.amount = amount;
         }
-        await updateOrder({ ...patch, update: rounded, order } as UpdateOrderOpts);
+        const options = { ...patch, update: rounded, order } as UpdateOrderOpts;
+        if (host.submitOrderAmend) await host.submitOrderAmend(account, options);
+        else await updateOrder(options);
         observe('updateOrder', account, summary, true);
       } catch (error) {
         observe('updateOrder', account, summary, false, { error: messageOf(error) });

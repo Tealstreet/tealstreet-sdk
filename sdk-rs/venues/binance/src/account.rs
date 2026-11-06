@@ -16,6 +16,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::socket_lifecycle::RetireReason;
 use safe_cex_engine::store::MarketSetting;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError, json, num};
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -2171,7 +2172,7 @@ impl BinanceFutures {
             cx.notice(Level::Debug, code::BALANCE_SUMMARY,
                 format!(
                     "Balance aggregation: {}; Total: ${:.2}, Free: ${:.2}, Used: ${:.2}, UPnL: ${:.2}",
-                    details.join(", "),
+                    details.join_with(", "),
                     balance.total,
                     balance.free,
                     balance.used,

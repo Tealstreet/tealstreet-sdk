@@ -193,17 +193,23 @@ fn an_unproven_verify_prepares_no_replacement() {
         cancel,
         &format!(r#"{{"code":"0","data":{{"orderId":{ORDER}}}}}"#),
     );
-    let verify = h.take(Method::Get, "/fapi/v2/order?");
-    h.reply(verify, &detail("PARTIALLY_FILLED", 0.004, ""));
+    // A cancel still live is re-read to its bound, then unproven.
+    h.verify_until_unproven(&detail("PARTIALLY_FILLED", 0.004, ""));
     assert!(
         !h.requests
             .iter()
             .any(|r| r.method == Method::Post && r.url.ends_with("/fapi/v2/order")),
         "no replacement without final cancellation proof"
     );
-    // The accepted cancel is a known effect: the journal's partial contract.
+    // Only here is the original's standing unknown: the Plan reconciles it.
     let error = failure(&h, 7).expect("one terminal");
-    assert_eq!(error.outcome, None);
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert!(
+        error.message.contains("could not be confirmed")
+            && error.message.contains("Check Open Orders"),
+        "{}",
+        error.message
+    );
     assert_eq!(
         error.partial.as_ref().map(|p| p.order_ids.clone()),
         Some(vec![ORDER.to_owned()])
@@ -574,14 +580,23 @@ fn a_stop_whose_replacement_is_refused_says_the_position_is_unprotected() {
     let verify = h.take(Method::Get, "/fapi/v2/order?");
     h.reply(verify, &detail("CANCELED"));
     let create = h.take(Method::Post, "/fapi/v2/order");
+    // -2019 is not among Bitrue's documented refusals: its outcome is unknown,
+    // so nothing is put back and the stop may or may not stand.
     h.reply(create, r#"{"code":"-2019","msg":"insufficient margin"}"#);
     let error = failure(&h, 7).expect("a failure");
     assert!(
         error
             .message
-            .contains("Your E-BTC-USDT long position has no stop"),
+            .contains("Your E-BTC-USDT long position may have no stop"),
         "{}",
         error.message
+    );
+    assert_eq!(error.protection, None);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.ends_with("/fapi/v2/order")),
+        "no put-back over an unknown refusal"
     );
 }
 #[test]

@@ -5,6 +5,7 @@ use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::execution::{Arithmetic, CumulativePrice, Cursor, Report};
 use safe_cex_engine::fence::StaleGuard;
 use safe_cex_engine::log::code;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::url;
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, model::*};
 use serde::{Deserialize, Serialize};
@@ -220,7 +221,7 @@ pub(super) fn form(params: &[(&str, String)]) -> String {
         .iter()
         .map(|(k, v)| format!("{}={}", url::encode(k), url::encode(v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 impl KrakenSpot {
     fn current_token(&self, cx: &Cx<'_, Pending>, kind: &Kind) -> bool {

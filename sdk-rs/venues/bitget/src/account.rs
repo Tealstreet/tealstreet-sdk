@@ -13,6 +13,7 @@ use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Credential, Scope};
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket::{Config, Supervisor};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 use std::collections::{HashMap, HashSet};
@@ -1616,7 +1617,7 @@ impl BitgetFutures {
                 .into_iter()
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>()
-                .join(" ")
+                .join_with(" ")
         });
         let mut error = VenueError::new(format!(
             "Bitget private WS login rejected: {detail} — the API key's IP whitelist allows none of Tealstreet's WebSocket egress IPs"

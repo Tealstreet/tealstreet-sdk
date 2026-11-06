@@ -16,6 +16,7 @@ use safe_cex_engine::request_context::{
 use safe_cex_engine::selected_read::{
     CommandReadError, LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRoot, SelectedRead,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{CommandId, CommandWait, Cx, Method, Query, Response, TimerId, VenueError};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::borrow::Cow;
@@ -650,7 +651,7 @@ impl Orderly {
                 params.push(format!("size={PAGE_SIZE}"));
             }
             path.push('?');
-            path.push_str(&params.join("&"));
+            path.push_str(&params.join_with("&"));
         }
         let origin = self.rest();
         let url = format!("{origin}{path}");

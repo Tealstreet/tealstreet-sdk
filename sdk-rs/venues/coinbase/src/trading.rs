@@ -2,6 +2,7 @@ use crate::{Coinbase, Pending, account::Editable};
 use safe_cex_engine::Level;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, Response, VenueError, num,
 };
@@ -802,7 +803,7 @@ impl Coinbase {
                     format!(
                         "Coinbase close of {} leaves reduce-only orders {} exceeding the remaining position; Coinbase cannot enforce reduce-only, so cancel them or they may open a new position",
                         close.symbol,
-                        ids.join(", ")
+                        ids.join_with(", ")
                     ),
                 );
             }
@@ -1671,7 +1672,7 @@ impl Coinbase {
                 }
                 if !errors.is_empty() {
                     // Per-order results; other orders in the batch may have been cancelled.
-                    return Err(VenueError::new(errors.join(", ")));
+                    return Err(VenueError::new(errors.join_with(", ")));
                 }
                 Ok(None)
             }
@@ -1711,7 +1712,7 @@ impl Coinbase {
                     let message = if reasons.is_empty() {
                         "Coinbase edit rejected".to_owned()
                     } else {
-                        reasons.join(", ")
+                        reasons.join_with(", ")
                     };
                     return Err(if refused {
                         rejected(message)
