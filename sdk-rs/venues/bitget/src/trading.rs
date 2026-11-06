@@ -81,6 +81,15 @@ pub(crate) const CODES: CodeTable = CodeTable {
         refused(45110, ErrorKind::InvalidInput),
         refused(45113, ErrorKind::InvalidInput),
         refused(45122, ErrorKind::InvalidInput),
+        // "Not enough position is available": a reduce-only size above the
+        // position, refused at any price until the position changes. No capture
+        // has carried 40757 yet, so the text names it under any code or none.
+        refused(40757, ErrorKind::InvalidInput),
+        Row {
+            key: Key::Phrase("Not enough position is available"),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
+            only: None,
+        },
         Row {
             key: Key::Int(40010),
             verdict: Verdict::Unknown(None),
@@ -3931,6 +3940,27 @@ mod code_table_tests {
                 assert_eq!(row.key, Key::Int(40009), "{row:?}");
             }
             assert!(!matches!(row.verdict, Verdict::Satisfied(_)), "{row:?}");
+        }
+    }
+
+    /// The position refusal's code is fixed from the venue's text when the rows are
+    /// read, so a message reworded after that (the close-locked wording) still classifies.
+    #[test]
+    fn a_code_less_position_refusal_keeps_its_kind_after_rewording() {
+        let rows: Vec<Failure> = serde_json::from_str(
+            r#"[{"errorMsg":"Not enough position is available"},{"errorMsg":"Not enough position is available","errorCode":"40999"}]"#,
+        )
+        .unwrap();
+        for (code, _) in failure_messages(&rows) {
+            let reworded = "only 0.4 of the 1 BTCUSDT long is free to close; 0.6 is held by open close orders, cancel them first (Not enough position is available)";
+            let native = Native {
+                code: code.map_or(NativeCode::None, NativeCode::Int),
+                message: reworded,
+            };
+            assert_eq!(
+                CODES.verdict(&native, Intent::Place),
+                Verdict::Refused(ErrorKind::InvalidInput)
+            );
         }
     }
 }
