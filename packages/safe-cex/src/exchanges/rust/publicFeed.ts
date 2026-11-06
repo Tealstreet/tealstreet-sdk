@@ -29,7 +29,9 @@ type Request =
   | { op: 'tickerSymbols'; symbols: string[] }
   | { op: 'snapshot' | 'dispose' | 'ping' }
   | { op: 'book'; symbol: string; subscribe: boolean }
-  | { op: 'candle'; symbol: string; interval: OHLCVOptions['interval']; subscribe: boolean };
+  | { op: 'candle'; symbol: string; interval: OHLCVOptions['interval']; subscribe: boolean }
+  // A chart's forced reset on an account: the source's socket is the one carrying the stream.
+  | { op: 'repair'; symbol: string; interval: OHLCVOptions['interval'] };
 type FeedMarket = Pick<
   Market,
   'id' | 'symbol' | 'contractSize' | 'isSpot' | 'isPerpetual' | 'isInverse' | 'isExpiring'
@@ -210,7 +212,11 @@ export class RustPublicFeedProvider {
         this.updateTickerDemand();
       } else if (ready && data.op === 'ping') send({ op: 'pong' });
       else if (ready && data.op === 'snapshot') seed();
-      else if (ready && (data.op === 'book' || data.op === 'candle')) {
+      else if (ready && data.op === 'repair') {
+        // Only a stream this account holds; the source's engine decides resubscribe or reconnect.
+        if (subscriptions.has(`candle:${data.symbol}:${data.interval}`))
+          this.source.repairOHLCV({ symbol: data.symbol, interval: data.interval });
+      } else if (ready && (data.op === 'book' || data.op === 'candle')) {
         if (typeof data.symbol !== 'string' || !this.source.store.marketsBySymbol[data.symbol]) {
           send({ op: 'error', message: 'Shared public feed symbol unavailable' });
           return;

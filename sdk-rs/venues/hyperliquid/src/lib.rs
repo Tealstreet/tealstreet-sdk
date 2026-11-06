@@ -1482,6 +1482,13 @@ impl Venue for Hyperliquid {
     ) -> Vec<(FeedId, String)> {
         self.topic_interests(store, topic)
     }
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        self.retry_refused(cx, topic)
+    }
     fn socket_control(
         &self,
         _: &safe_cex_engine::Store,
