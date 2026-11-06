@@ -183,6 +183,9 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // ddi2il standing rule: CI + 10 KiB rounded up; all Bybit variants share this family cap.
 // #3145 run 42218930349 job 127896386942 measured hyperliquid 2,153,944 B: trades as last for
 // watched coins. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
+// #3150 final runtime, same-run comparison 42258955401: PR merge d820d0d012d vs
+// exact master first-parent 0115ba8df07. Source head d04b192d1b1; URL/RPC tables removed.
+// Only over-cap families receive measured CI bytes + 10 KiB, rounded up to a KiB; HL siblings equal.
 // #3187 run 42251340763 measured binance 2,212,299 B: PM algo migration and cancel proof.
 // CI size plus 10 KiB, rounded up; all Binance aliases use this single family cap.
 // #3178 run 42239151280, job 127965614325: Hyperliquid 2,154,756 B at 81206ca3c02.
@@ -192,19 +195,19 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3207 run 42279265759, job 128106963965 measured Bitget 2,390,477 B.
 // CI size plus 10 KiB rounded up to KiB; BitgetUSDC shares the family cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 2_013_184,
+  apexomni: 2_024_448,
   asterdex: 2_161_664,
-  backpack: 1_937_408,
+  backpack: 1_948_672,
   binance: 2_223_104,
-  bingx: 2_074_624,
+  bingx: 2_085_888,
   bitget: 2_401_280,
   bitgetusdc: 2_401_280,
-  bitrue: 1_840_128,
+  bitrue: 1_851_392,
   bitunix: 1_863_680,
-  blofin: 1_989_632,
+  blofin: 2_001_920,
   breakoutprop: 1_565_696,
   bybit: 2_270_208,
-  coinbase: 1_826_816,
+  coinbase: 1_838_080,
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
@@ -218,13 +221,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   'lighter-robinhood': 2_093_056,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   mexc: 1_858_560,
-  okx: 1_984_512,
+  okx: 1_986_560,
   orderly: 1_732_608,
   paradex: 2_266_112,
   phemex: 2_079_744,
   polymarket: 1_611_776,
   txflow: 1_852_416,
-  weex: 1_936_384,
+  weex: 1_948_672,
   woo: 2_416_640,
 });
 export const wasmBudgetBytes = (profile, venue) =>

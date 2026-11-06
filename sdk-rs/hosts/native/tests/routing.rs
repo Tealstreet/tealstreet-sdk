@@ -839,7 +839,7 @@ async fn proxy_token_acquisition_is_inside_the_request_deadline() {
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(21)).await;
     assert!(
-        matches!(events.recv().await, Some(HostEvent::HttpFailed(RequestId(20), error)) if error == "transport request timed out")
+        matches!(events.recv().await, Some(HostEvent::HttpFailed(RequestId(20), error)) if error == "HTTP request timed out (class=orderWrite budget=20000ms elapsed=21000ms)")
     );
     assert!(
         tokio::time::timeout(Duration::from_millis(1), listener.accept())

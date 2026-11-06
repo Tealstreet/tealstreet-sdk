@@ -139,12 +139,12 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });
 
-test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
+test('#3150 final CI 42258955401 cap refresh: refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
   for (const [venue, measured, minimumCap] of [
     ['coinbase', 1_816_299, 1_826_816],
-    ['txflow', 1_827_125, 1_838_080],
+    ['txflow', 1_839_762, 1_850_368],
     ['weex', 1_925_507, 1_936_384],
-    ['woo', 2_388_474, 2_399_232],
+    ['woo', 2_402_361, 2_413_568],
   ]) {
     assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     const cap = WASM_VENUE_OVERRIDES[venue];
@@ -213,10 +213,10 @@ test('#3018 protective-amend caps (run 41854021043 at 824ff543b6d) retain the ru
   }
 });
 
-test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain headroom and siblings match', () => {
+test('#3150 final CI 42258955401 cap refresh: refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain headroom and siblings match', () => {
   for (const [venue, measured, minimumCap] of [
-    ['bitunix', 1_838_517, 1_849_344],
-    ['cryptocom', 1_716_657, 1_727_488],
+    ['bitunix', 1_850_459, 1_861_632],
+    ['cryptocom', 1_727_568, 1_738_752],
     ['kucoinspot', 2_253_260, 2_264_064],
   ]) {
     assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
@@ -229,9 +229,9 @@ test('refresh-ask caps after #3039 (PR run 41845929983 at 9bf12da7671) retain he
   assert.equal(WASM_VENUE_OVERRIDES.lighter, WASM_VENUE_OVERRIDES['lighter-robinhood']);
 });
 
-test('Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom and siblings match', () => {
+test('#3150 final CI 42258955401 cap refresh: Phemex read-cover caps (PR run 41868980693 at d8899b7a3e0) retain headroom and siblings match', () => {
   for (const [venue, measured, minimumCap] of [
-    ['phemex', 2_054_401, 2_065_408],
+    ['phemex', 2_066_964, 2_077_696],
   ]) {
     assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     const cap = WASM_VENUE_OVERRIDES[venue];
@@ -401,12 +401,12 @@ test('#3149 activeAssetData scoping (run 42197163575) retains Hyperliquid headro
   }
 });
 
-test('#3145 trades as last (run 42218930349 job 127896386942) retains Hyperliquid headroom and siblings match', () => {
-  const measured = 2_153_944;
-  const measuredCap = 2_164_736;
-  assert.equal(measuredCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+test('#3150 final CI 42258955401 cap refresh: #3145 trades as last (run 42218930349 job 127896386942) retains Hyperliquid headroom and siblings match', () => {
+  const measured = 2_166_092;
+  const minimumCap = 2_177_024;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   const cap = WASM_VENUE_OVERRIDES.hyperliquid;
-  assert.ok(cap >= measuredCap);
+  assert.ok(cap >= minimumCap);
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
@@ -415,9 +415,9 @@ test('#3145 trades as last (run 42218930349 job 127896386942) retains Hyperliqui
   }
 });
 
-test('#3122 protective stop edits (run 42126229513) retain Paradex and BloFin headroom', () => {
+test('#3150 final CI 42258955401 cap refresh: #3122 protective stop edits (run 42126229513) retain Paradex and BloFin headroom', () => {
   for (const [venue, measured, minimumCap] of [
-    ['paradex', 2_239_351, 2_249_728],
+    ['paradex', 2_252_369, 2_263_040],
     ['blofin', 1_979_025, 1_989_632],
   ]) {
     assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
@@ -459,9 +459,10 @@ test('#3169 MEXC managed protective edits (run 42228563954) retain measured head
 });
 
 test('#3128 ApeX guarded amends (run 42146728975) retain ApeX headroom', () => {
-  for (const [venue, measured, cap] of [['apexomni', 2_002_359, 2_013_184]]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  for (const [venue, measured, minimumCap] of [['apexomni', 2_002_359, 2_013_184]]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -469,9 +470,10 @@ test('#3128 ApeX guarded amends (run 42146728975) retain ApeX headroom', () => {
 });
 
 test('#3130 Backpack guarded trigger amends (run 42154583609) retain Backpack headroom', () => {
-  for (const [venue, measured, cap] of [['backpack', 1_926_668, 1_937_408]]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  for (const [venue, measured, minimumCap] of [['backpack', 1_926_668, 1_937_408]]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -479,9 +481,10 @@ test('#3130 Backpack guarded trigger amends (run 42154583609) retain Backpack he
 });
 
 test('#3138 Bitrue guarded stop edits (run 42166643605) retain Bitrue headroom', () => {
-  for (const [venue, measured, cap] of [['bitrue', 1_829_700, 1_840_128]]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  for (const [venue, measured, minimumCap] of [['bitrue', 1_829_700, 1_840_128]]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -500,8 +503,10 @@ test('BreakoutProp native protective edits retain measured headroom and the exac
 
 test('#3199 chaser refusals (run 42280800704) retain OKX headroom and all siblings share the cap', () => {
   const measured = 1_973_874;
-  const cap = 1_984_512;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const minimumCap = 1_984_512;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.okx;
+  assert.ok(cap >= minimumCap);
   for (const venue of ['okx', 'okxeu', 'okxdemo', 'okxeudemo']) {
     const family = venueFamily(venue);
     assert.equal(family, 'okx');
@@ -514,8 +519,10 @@ test('#3199 chaser refusals (run 42280800704) retain OKX headroom and all siblin
 
 test('#3152 BingX protective edits (run 42200843544) retain measured headroom and the exact boundary', () => {
   const measured = 2_063_923;
-  const cap = 2_074_624;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const minimumCap = 2_074_624;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.ok(cap >= minimumCap);
   assert.equal(venueFamily('bingx'), 'bingx');
   assert.equal(WASM_VENUE_OVERRIDES.bingx, cap);
   assert.equal(wasmBudgetError(measured, 'venue', 'bingx'), undefined);
@@ -566,6 +573,23 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
     assert.match(wasmBudgetError(cap + 1, 'venue', sibling), /exceeds/);
   }
   assert.equal(wasmBudgetError(16_830_742, 'combined'), undefined);
+});
+
+test('#3150 merged-tree caps retain the approved exact boundaries', () => {
+  for (const [venue, cap] of [
+    ['apexomni', 2_024_448],
+    ['backpack', 1_948_672],
+    ['bingx', 2_085_888],
+    ['bitrue', 1_851_392],
+    ['blofin', 2_001_920],
+    ['coinbase', 1_838_080],
+    ['okx', 1_986_560],
+    ['weex', 1_948_672],
+  ]) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
 
 test('#3207 telemetry (run 42279265759) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {

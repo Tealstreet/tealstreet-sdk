@@ -211,15 +211,16 @@ impl Kraken {
         if self.ticker_in_flight {
             return;
         }
-        let context =
-            match cx.http_context(Scope::Background, public_context::policy(Operation::Read)) {
-                Ok(context) => context,
-                Err(reason) => {
-                    self.discovery.failed(cx, true);
-                    cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
-                    return;
-                }
-            };
+        let context = match cx
+            .http_live_context(Scope::Background, public_context::policy(Operation::Read))
+        {
+            Ok(context) => context,
+            Err(reason) => {
+                self.discovery.failed(cx, true);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
+                return;
+            }
+        };
         self.ticker_in_flight = true;
         self.live_tickers.begin();
         match cx.request_managed(
@@ -413,7 +414,7 @@ impl Kraken {
         let policy = public_context::policy(Operation::Read);
         let issued = match root {
             Some(root) => cx.http_leg_context(root, policy),
-            None => cx.http_context(Scope::Background, policy),
+            None => cx.http_live_context(Scope::Background, policy),
         };
         let leg = match issued {
             Ok(leg) => leg,

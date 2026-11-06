@@ -34,6 +34,7 @@ export interface HttpPacket {
   request?: number;
   method: string;
   route?: 'direct' | 'publicCors' | 'primary' | 'secondary';
+  requestClass?: 'discovery' | 'orderRead' | 'orderWrite' | 'history' | 'read';
   /** Remaining original lifecycle timeout, never renewed by binding. */
   timeoutMs?: number;
   url: string;

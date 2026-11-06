@@ -8,6 +8,10 @@ use crate::request_context::{
     SessionPlacement,
 };
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "http_read_budget_tests.rs"]
+mod read_budget_tests;
+
 #[cfg(test)]
 #[path = "http_unsigned_headers_tests.rs"]
 mod unsigned_headers_tests;
@@ -845,6 +849,18 @@ impl<P> Cx<'_, P> {
         pending: P,
         #[cfg(feature = "http-plans")] admission: Option<&request_context_registry::OwnedAdmission>,
     ) -> Result<RequestId, (P, Error)> {
+        let request_class = if context.operation() == Operation::Read
+            && bearer.is_some()
+            && context.request_class() == crate::request_budget::RequestClass::Discovery
+        {
+            crate::request_budget::RequestClass::Read
+        } else {
+            context.request_class()
+        };
+        let class_deadline = context.background_deadline(request_class);
+        if self.now >= class_deadline {
+            return Err((pending, Error::TimedOut));
+        }
         #[cfg(feature = "sign-meta")]
         let mut explicit = None;
         let (step, public_headers, selected_claim) = match recipe {
@@ -1011,6 +1027,7 @@ impl<P> Cx<'_, P> {
                 context.deadline(),
             )
         };
+        let deadline = deadline.min(class_deadline);
         let http = HttpRequest {
             id: request,
             method,
@@ -1091,7 +1108,7 @@ impl<P> Cx<'_, P> {
             bearer.floor = floor;
             bearer
         });
-        let lifecycle = Lifecycle::with_deadline(
+        let mut lifecycle = Lifecycle::with_deadline(
             context,
             Attempt {
                 request,
@@ -1101,7 +1118,10 @@ impl<P> Cx<'_, P> {
             deadline,
         )
         .expect("validated physical HTTP window");
+        lifecycle.set_request_class(request_class);
         let preparation = lifecycle.preparation();
+        #[cfg(target_arch = "wasm32")]
+        let request_class = lifecycle.request_class() as u8;
         #[cfg(feature = "release-domains")]
         self.io.core.domain_accept(
             request,
@@ -1152,6 +1172,8 @@ impl<P> Cx<'_, P> {
             .core
             .actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class,
                 preparation,
                 intent,
                 request: http,
@@ -1532,6 +1554,92 @@ impl crate::engine::CoreIo<'_> {
 }
 
 impl<V: Venue> Engine<V> {
+    /// Read priority and account evidence are available after the venue callback
+    /// has attached its Pending value and AccountReadScope. Narrow before any
+    /// preparation leaves the engine; retries keep the same original ceiling.
+    pub(super) fn apply_account_read_budgets(&mut self, now: f64, from: usize) {
+        let mut index = from;
+        while index < self.io.core.actions.len() {
+            let token = match &self.io.core.actions[index] {
+                Action::ManagedHttp(action) => match action.as_ref() {
+                    HttpAction::Prepare { preparation, .. } => Some(*preparation),
+                    _ => None,
+                },
+                _ => None,
+            };
+            index += 1;
+            let Some(token) = token else { continue };
+            let request = token.attempt().request;
+            let account = self.io.pending.get(&request).is_some_and(|pending| {
+                pending.auth.is_some()
+                    || matches!(
+                        self.venue.http_read_class(&pending.value),
+                        HttpReadClass::Critical | HttpReadClass::Reconciliation
+                    )
+            });
+            let Some(managed) = self.io.core.managed_http.get_mut(&request) else {
+                continue;
+            };
+            if managed.lifecycle.preparation() != token
+                || managed.lifecycle.context().operation() != Operation::Read
+            {
+                continue;
+            }
+            if account {
+                managed.lifecycle.narrow_account_read();
+            }
+            #[cfg(target_arch = "wasm32")]
+            let class = managed.lifecycle.request_class();
+            let deadline = managed.lifecycle.deadline();
+            let timer = managed.timer;
+            let timeout = (deadline - now).ceil().max(1.) as u32;
+            managed.original.timeout_ms =
+                Some(managed.original.timeout_ms.unwrap_or(u32::MAX).min(timeout));
+            for action in self.io.core.actions.iter_mut() {
+                match action {
+                    Action::SetTimer { timer: id, at_ms } if *id == timer => *at_ms = deadline,
+                    Action::ManagedHttp(action) => {
+                        if let HttpAction::Prepare {
+                            preparation,
+                            request: http,
+                            #[cfg(target_arch = "wasm32")]
+                            request_class,
+                            ..
+                        } = action.as_mut()
+                            && *preparation == token
+                        {
+                            http.timeout_ms =
+                                Some(http.timeout_ms.unwrap_or(u32::MAX).min(timeout));
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                *request_class = class as u8;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if now >= deadline {
+                self.io.core.actions.remove(index - 1);
+                self.expire_http_timer(now, &Event::TimerFired { timer });
+                index = from;
+            }
+        }
+    }
+
+    /// Closed diagnostic label for this exact live preparation; no send authority.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn http_request_class(
+        &self,
+        token: Preparation,
+    ) -> Option<crate::request_budget::RequestClass> {
+        self.http_preparation_pending(token).then(|| {
+            self.io.core.managed_http[&token.attempt().request]
+                .lifecycle
+                .request_class()
+        })
+    }
+
     pub fn http_read_class(&self, request: crate::RequestId) -> super::HttpReadClass {
         self.io
             .pending
@@ -1874,6 +1982,17 @@ impl<V: Venue> Engine<V> {
             return;
         }
         let delivery = managed.delivery();
+        #[cfg(not(target_arch = "wasm32"))]
+        if reason == Error::TimedOut
+            && !error.message.starts_with("Signing ")
+            && !error.message.contains(" budget=")
+        {
+            error.message = format!(
+                "{} ({})",
+                error.message,
+                managed.lifecycle.timeout_diagnostic(now)
+            );
+        }
         error.outcome = Some(crate::Outcome::NotSent);
         if error.kind.is_none() {
             error.kind = Some(reason.kind());
@@ -2447,24 +2566,35 @@ impl<V: Venue> Engine<V> {
         }
         let first_action = self.io.core.actions.len();
         let managed = &self.io.core.managed_http[&request];
+        #[cfg(not(target_arch = "wasm32"))]
+        let timeout_message = format!(
+            "HTTP request timed out ({})",
+            managed.lifecycle.timeout_diagnostic(now)
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        let timeout_text = timeout_message.as_str();
+        #[cfg(target_arch = "wasm32")]
+        let timeout_text = "HTTP request timed out";
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.core.http_failure_kind, ErrorKind::Timeout);
             self.handle_event_with_read_timeout(
                 now,
                 Event::HttpFailed {
                     request,
-                    error: "HTTP request timed out",
+                    error: timeout_text,
                 },
                 true,
             );
             self.io.core.http_failure_kind = kind;
             self.io.discard_managed(request);
         } else {
+            #[cfg(target_arch = "wasm32")]
+            let timeout_message = timeout_text;
             self.http_preparation_failed(
                 now,
                 managed.lifecycle.preparation(),
                 Error::TimedOut,
-                VenueError::new("HTTP request timed out"),
+                VenueError::new(timeout_message),
             );
         }
         // Only notices from this original timeout callback receive its opaque request ID.
@@ -3035,6 +3165,8 @@ impl crate::engine::IoCore {
         http.timeout_ms = Some((managed.lifecycle.deadline() - now).ceil().max(1.) as u32);
         self.actions
             .push(Action::ManagedHttp(Box::new(HttpAction::Prepare {
+                #[cfg(target_arch = "wasm32")]
+                request_class: managed.lifecycle.request_class() as u8,
                 preparation: managed.lifecycle.preparation(),
                 intent: managed.intent,
                 request: http,

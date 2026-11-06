@@ -176,7 +176,13 @@ impl Backpack {
         if let Some(old) = self.seed.requests[kind as usize].take() {
             let _ = cx.finish_http_context(&old);
         }
-        let context = match cx.http_context(
+        let issue = if !matches!(kind, SeedRead::Markets) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -495,7 +501,7 @@ impl Backpack {
             _ => vec![],
         };
         state.sync = Sync::Waiting(buffer);
-        let context = match cx.http_context(
+        let context = match cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,

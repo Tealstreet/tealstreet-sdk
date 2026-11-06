@@ -350,14 +350,14 @@ impl Polymarket {
                 .collect::<Vec<_>>(),
         )
         .expect("token list");
-        let context = match cx.http_context(Scope::Background, public_read::policy(Operation::Read))
-        {
-            Ok(context) => context,
-            Err(_) => {
-                self.midpoints_failed(cx, offset, false);
-                return;
-            }
-        };
+        let context =
+            match cx.http_live_context(Scope::Background, public_read::policy(Operation::Read)) {
+                Ok(context) => context,
+                Err(_) => {
+                    self.midpoints_failed(cx, offset, false);
+                    return;
+                }
+            };
         self.midpoint_inflight.insert(offset, context.clone());
         if cx
             .request_managed_with_headers(

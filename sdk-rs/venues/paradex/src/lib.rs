@@ -90,6 +90,18 @@ impl Paradex {
 }
 
 impl Venue for Paradex {
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::Account(
+                account::Request::Margins { .. }
+                | account::Request::Positions { .. }
+                | account::Request::Balance { .. }
+                | account::Request::Orders { .. },
+            ) => safe_cex_engine::HttpReadClass::Reconciliation,
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
+
     type Pending = Pending;
     fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
         use safe_cex_engine::startup::Sections as S;

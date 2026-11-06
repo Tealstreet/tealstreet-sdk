@@ -190,7 +190,7 @@ impl KrakenSpot {
     }
     fn tickers(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.tickers_in_flight {
-            let context = match cx.http_context(
+            let context = match cx.http_live_context(
                 Scope::Background,
                 crate::public_context::policy(Operation::Read),
             ) {

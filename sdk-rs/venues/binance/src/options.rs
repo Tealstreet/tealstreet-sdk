@@ -376,7 +376,13 @@ impl BinanceFutures {
         } else {
             None
         };
-        let Ok(context) = cx.http_context(
+        let issue = if matches!(kind, Kind::Tickers | Kind::Marks) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let Ok(context) = issue(
+            cx,
             Scope::Background,
             reads::policy(selected.as_ref().map(|(c, _)| c.clone())),
         ) else {

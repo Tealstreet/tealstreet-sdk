@@ -315,7 +315,13 @@ impl Orderly {
         }
     }
     fn seed(&mut self, cx: &mut Cx<'_, Pending>, kind: Seed) {
-        let context = match cx.http_context(
+        let issue = if matches!(kind, Seed::Tickers) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
