@@ -2493,23 +2493,32 @@ impl Okx {
                 }
             }
             "move_order_stop" => {
-                let spread = num::parse(o.callback_spread);
-                let position = cx.store.positions().iter().find(|p| {
-                    p.symbol == m.symbol && (o.side == "sell") == (p.side == PositionSide::Long)
-                });
-                let movement = position.map_or(num::parse(o.move_trigger_px), |p| {
-                    -(p.entry_price - spread).abs()
-                });
-                let price = num::adjust(
-                    num::parse(o.last) + if o.side == "buy" { -movement } else { movement },
-                    m.precision.price,
-                );
-                legs.push((
-                    OrderType::TrailingStopLoss,
-                    "_tsl",
-                    if price == 0.0 { spread } else { price },
-                    None,
-                ));
+                // moveTriggerPx is OKX's live trigger level, where the line is drawn and
+                // dragged. Unpublished, the stop sits a callback behind the current last:
+                // the row's own `last` is its placement-time fill price, not today's.
+                let trigger = num::parse(o.move_trigger_px);
+                let last = cx.store.ticker(&m.symbol).map_or(0.0, |t| t.last);
+                let price = if trigger > 0.0 {
+                    trigger
+                } else if last > 0.0 {
+                    let spread = num::parse(o.callback_spread);
+                    let distance = if spread > 0.0 {
+                        spread
+                    } else {
+                        last * num::parse(o.callback_ratio)
+                    };
+                    num::adjust(
+                        if o.side == "buy" {
+                            last + distance
+                        } else {
+                            last - distance
+                        },
+                        m.precision.price,
+                    )
+                } else {
+                    0.0
+                };
+                legs.push((OrderType::TrailingStopLoss, "_tsl", price, None));
             }
             _ => legs.push((
                 if matches!(o.ord_type, "market" | "optimal_limit_ioc") {
