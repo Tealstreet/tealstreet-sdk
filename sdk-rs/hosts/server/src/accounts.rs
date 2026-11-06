@@ -2472,8 +2472,15 @@ pub(crate) mod tests {
                 assert_eq!(counts.live_users_without_lease, 1);
                 assert_eq!(counts.tracked_users, 1);
                 assert_eq!(counts.would_fence_users, 1);
+                assert_eq!(counts.live_would_fence_users, 1);
                 drop(socket);
                 drop(duplicate);
+                let counts = registry.router_lease_counts();
+                assert_eq!(counts.would_fence_users, 1);
+                assert_eq!(
+                    counts.live_would_fence_users, 0,
+                    "a user whose socket closed keeps its record but is not live"
+                );
                 assert_eq!(
                     registry.router_lease_counts().live_users_without_lease,
                     1,
