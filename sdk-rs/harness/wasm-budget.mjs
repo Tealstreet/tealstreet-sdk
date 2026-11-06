@@ -176,56 +176,41 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // FetchLeverage read and subscription.count. CI size plus 10 KiB, rounded up; siblings equal.
 // #3158 run 42215250423, job 127884302751 measured lighter 2,068,697 B.
 // CI size plus 10 KiB, rounded up to the KiB; lighter-robinhood equal.
-// #3150 composed CI run 42248363341 at 77c6790a3e: each over-cap family below
-// receives CI bytes + 10 KiB rounded up. Combined cap stays 17,825,792 B.
-// binance: 2_210_311 -> 2_221_056 B (job 127998282130).
-// bitget: 2_360_942 -> 2_371_584 B (job 127998282225).
-// bitunix: 1_854_212 -> 1_864_704 B (job 127998282234).
-// cryptocom: 1_730_919 -> 1_741_824 B (job 127998282281).
-// hyperliquid: 2_160_655 -> 2_171_904 B (job 127998282163).
-// kucoinspot: 2_266_682 -> 2_277_376 B (job 127998282284).
-// lighter: 2_083_568 -> 2_094_080 B (job 127998282415).
-// phemex: 2_070_651 -> 2_081_792 B (job 127998282544).
-// polymarket: 1_602_562 -> 1_613_824 B (job 127998282821).
-// txflow: 1_843_387 -> 1_854_464 B (job 127998282384).
-// weex: 1_936_418 -> 1_947_648 B (job 127998282436).
-// woo: 2_404_283 -> 2_414_592 B (job 127998282442).
-// asterdex: 2_152_208 -> 2_162_688 B (job 127998282471).
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
-  asterdex: 2_162_688,
+  asterdex: 2_150_400,
   backpack: 1_937_408,
-  binance: 2_221_056,
+  binance: 2_206_720,
   bingx: 2_074_624,
-  bitget: 2_371_584,
-  bitgetusdc: 2_371_584,
+  bitget: 2_359_296,
+  bitgetusdc: 2_359_296,
   bitrue: 1_840_128,
-  bitunix: 1_864_704,
+  bitunix: 1_849_344,
   blofin: 1_989_632,
   breakoutprop: 1_565_696,
   bybit: 2_225_152,
   coinbase: 1_826_816,
-  cryptocom: 1_741_824,
+  cryptocom: 1_727_488,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_171_904,
-  hyperliquidspot: 2_171_904,
+  hyperliquid: 2_153_472,
+  hyperliquidspot: 2_153_472,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_692_672,
-  kucoinspot: 2_277_376,
-  lighter: 2_094_080,
-  'lighter-robinhood': 2_094_080,
+  kucoinspot: 2_264_064,
+  lighter: 2_079_744,
+  'lighter-robinhood': 2_079_744,
   // #3131, CI run 42150228180: MEXC measured 1,777,946 B + 10 KiB, rounded up.
   mexc: 1_788_928,
   okx: 1_973_248,
   orderly: 1_732_608,
   paradex: 2_249_728,
-  phemex: 2_081_792,
-  polymarket: 1_613_824,
-  txflow: 1_854_464,
-  weex: 1_947_648,
-  woo: 2_414_592,
+  phemex: 2_065_408,
+  polymarket: 1_600_512,
+  txflow: 1_838_080,
+  weex: 1_936_384,
+  woo: 2_399_232,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
