@@ -2825,14 +2825,54 @@ impl BitgetFutures {
                         explicit_rejection,
                     );
                 } else {
-                    for (code, message) in &diagnostic.failures {
-                        self.close_rejection_event(
-                            cx,
-                            &closes,
-                            code.as_deref(),
-                            message.as_deref(),
-                            false,
-                        );
+                    let rows = request
+                        .call
+                        .payload
+                        .order_list
+                        .as_deref()
+                        .unwrap_or(std::slice::from_ref(&request.call.payload));
+                    for failure in &diagnostic.failures {
+                        let matching: Vec<_> =
+                            rows.iter()
+                                .filter(|row| {
+                                    failure.client.as_deref().is_some_and(|client| {
+                                        row.client_oid.as_deref() == Some(client)
+                                    })
+                                })
+                                .collect();
+                        let row = if matching.len() == 1 {
+                            Some(matching[0])
+                        } else if failure.client.is_none() && rows.len() == 1 {
+                            Some(&rows[0])
+                        } else {
+                            None
+                        };
+                        if let Some(row) = row {
+                            if let Some(close) = &row.close_diagnostic {
+                                self.close_rejection_event(
+                                    cx,
+                                    std::slice::from_ref(close),
+                                    failure.code.as_deref(),
+                                    failure.message.as_deref(),
+                                    false,
+                                );
+                            } else if rows.len() == 1 {
+                                self.close_rejection_event(
+                                    cx,
+                                    &closes,
+                                    failure.code.as_deref(),
+                                    failure.message.as_deref(),
+                                    false,
+                                );
+                            }
+                            // A matched opening row has no closing metadata.
+                        } else {
+                            self.unattributed_close_failure(
+                                cx,
+                                failure.code.as_deref(),
+                                failure.message.as_deref(),
+                            );
+                        }
                     }
                 }
             }

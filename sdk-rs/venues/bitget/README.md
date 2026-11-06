@@ -71,8 +71,12 @@ code spelling and string leading zeros are retained; missing values are empty
 strings with their `nativeCodePresent`/`nativeMsgPresent` flags false, never an
 inferred 40757. A booking observation without a native error uses those absent
 flags. Existing engine string limits still apply (512 UTF-8 bytes per field).
-A failed batch has one diagnostic per native failure and affected symbol/side
-group, summing its split requests without asserting which uncorrelated row failed.
+A batch failure is matched by its original client identity (or an unambiguous
+single-row request). A proven opening-row failure emits no close diagnostic.
+Missing, foreign or conflicting identities in a multi-row batch emit one event
+with `requestAttribution=ambiguous` and the raw code/message, without guessing a
+symbol, side, size or reservation count. Exact matches and booking observations
+carry `requestAttribution=exact`.
 
 Booking correlation retains at most 512 closing requests for five minutes and
 consumes each on its first matching native observation. Older REST reads cannot

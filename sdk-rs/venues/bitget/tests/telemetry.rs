@@ -293,3 +293,66 @@ fn a_native_stop_amend_refusal_retains_the_raw_close_diagnostic() {
     assert_eq!(field(rows[0], "requestedSize"), &Value::from(0.5));
     assert_eq!(field(rows[0], "side"), &Value::from("long"));
 }
+
+#[test]
+fn hedge_batch_failure_is_attributed_only_to_its_own_close_or_marked_ambiguous() {
+    for identity in [Some("short-close"), None, Some("foreign-client")] {
+        let mut h = Harness::classic();
+        h.engine.store_mut().set_hedged(true);
+        h.command(Command::PlaceOrders {
+            command: 73,
+            orders: vec![
+                serde_json::from_value(json!({"symbol":"BTCUSDT","type":"limit","side":"sell","amount":0.6,"price":110,"reduceOnly":true,"clientOrderId":"long-close"})).unwrap(),
+                serde_json::from_value(json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.2,"price":90,"reduceOnly":true,"clientOrderId":"short-close"})).unwrap(),
+            ],
+        });
+        let r = h.take("/batch-place-order");
+        let mut failure =
+            json!({"errorCode":"040757","errorMsg":"Not enough position is available"});
+        if let Some(id) = identity {
+            failure["clientOid"] = json!(id);
+        }
+        h.reply(r.id, 200, &json!({"code":"00000","data":{"successList":[{"orderId":"long-id","clientOid":"long-close"}],"failureList":[failure]}}).to_string());
+        let rows = events(&h, "bitget.close.diagnostic");
+        assert_eq!(rows.len(), 1, "one event per native failure");
+        assert_eq!(field(rows[0], "nativeCode"), &Value::from("040757"));
+        if identity == Some("short-close") {
+            assert_eq!(field(rows[0], "requestAttribution"), &Value::from("exact"));
+            assert_eq!(field(rows[0], "side"), &Value::from("short"));
+            assert_eq!(field(rows[0], "requestedSize"), &Value::from(0.2));
+        } else {
+            assert_eq!(
+                field(rows[0], "requestAttribution"),
+                &Value::from("ambiguous")
+            );
+            for name in [
+                "symbol",
+                "side",
+                "requestedSize",
+                "positionTotal",
+                "reduceOnlyOrderCount",
+                "planOrderSize",
+            ] {
+                assert!(
+                    !rows[0].fields.iter().any(|(key, _)| *key == name),
+                    "no guessed {name}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn an_identified_opening_failure_does_not_borrow_another_rows_close_metadata() {
+    let mut h = Harness::classic();
+    h.command(Command::PlaceOrders {
+        command: 74,
+        orders: vec![
+            serde_json::from_value(json!({"symbol":"BTCUSDT","type":"limit","side":"sell","amount":0.6,"price":110,"reduceOnly":true,"clientOrderId":"close-row"})).unwrap(),
+            serde_json::from_value(json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.2,"price":90,"reduceOnly":false,"clientOrderId":"opening-row"})).unwrap(),
+        ],
+    });
+    let r = h.take("/batch-place-order");
+    h.reply(r.id, 200, r#"{"code":"00000","data":{"successList":[{"orderId":"close-id","clientOid":"close-row"}],"failureList":[{"clientOid":"opening-row","errorCode":"40757","errorMsg":"Not enough position is available"}]}}"#);
+    assert!(events(&h, "bitget.close.diagnostic").is_empty());
+}

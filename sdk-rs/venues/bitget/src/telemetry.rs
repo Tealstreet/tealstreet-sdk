@@ -140,31 +140,45 @@ impl BitgetFutures {
         message: Option<&str>,
         rejected: bool,
     ) {
-        // One event per rejected symbol/side group, even for a split native batch.
-        let mut groups: Vec<CloseRequest> = vec![];
-        for request in requests {
-            if let Some(group) = groups
-                .iter_mut()
-                .find(|g| g.symbol == request.symbol && g.side == request.side)
-            {
-                group.requested += request.requested;
-                group.submitted += request.submitted;
-            } else {
-                groups.push(request.clone());
-            }
-        }
-        for request in groups {
-            self.close_event(
-                cx,
-                &request,
-                Diagnostic {
-                    reason: if rejected { "rejected" } else { "unconfirmed" },
-                    booked: None,
-                    code,
-                    message,
-                },
-            );
-        }
+        let [request] = requests else {
+            return self.unattributed_close_failure(cx, code, message);
+        };
+        self.close_event(
+            cx,
+            request,
+            Diagnostic {
+                reason: if rejected { "rejected" } else { "unconfirmed" },
+                booked: None,
+                code,
+                message,
+            },
+        );
+    }
+
+    pub(crate) fn unattributed_close_failure(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        code: Option<&str>,
+        message: Option<&str>,
+    ) {
+        // An ambiguous batch row must not borrow another request's position or size.
+        cx.event(
+            Level::Warn,
+            "bitget.close.diagnostic",
+            "Bitget close order diagnostic",
+            vec![
+                ("reason", "unconfirmed".into()),
+                ("requestAttribution", "ambiguous".into()),
+                (
+                    "accountMode",
+                    if self.account.uta { "uta" } else { "classic" }.into(),
+                ),
+                ("nativeCode", code.unwrap_or("").into()),
+                ("nativeMsg", message.unwrap_or("").into()),
+                ("nativeCodePresent", code.is_some().into()),
+                ("nativeMsgPresent", message.is_some().into()),
+            ],
+        );
     }
 
     pub(crate) fn observe_close_bookings(
@@ -289,6 +303,7 @@ impl BitgetFutures {
         }
         let mut fields: Vec<(&'static str, Value)> = vec![
             ("reason", reason.into()),
+            ("requestAttribution", "exact".into()),
             (
                 "accountMode",
                 if self.account.uta { "uta" } else { "classic" }.into(),
@@ -345,7 +360,12 @@ impl BitgetFutures {
 pub(crate) struct NativeReply {
     pub code: Option<String>,
     pub message: Option<String>,
-    pub failures: Vec<(Option<String>, Option<String>)>,
+    pub failures: Vec<NativeFailure>,
+}
+pub(crate) struct NativeFailure {
+    pub code: Option<String>,
+    pub message: Option<String>,
+    pub client: Option<String>,
 }
 impl NativeReply {
     pub fn parse(body: &str) -> Self {
@@ -363,6 +383,8 @@ impl NativeReply {
             #[serde(borrow)]
             error_code: Option<&'a serde_json::value::RawValue>,
             error_msg: Option<String>,
+            #[serde(borrow)]
+            client_oid: Option<&'a serde_json::value::RawValue>,
         }
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -387,7 +409,11 @@ impl NativeReply {
             .map(|d| {
                 d.failure_list
                     .into_iter()
-                    .map(|f| (native_code(f.error_code), f.error_msg))
+                    .map(|f| NativeFailure {
+                        code: native_code(f.error_code),
+                        message: f.error_msg,
+                        client: native_code(f.client_oid).filter(|s| !s.is_empty()),
+                    })
                     .collect()
             })
             .unwrap_or_default();
