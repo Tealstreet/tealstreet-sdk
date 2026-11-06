@@ -567,6 +567,25 @@ describe('createCoreAdapter', () => {
     expect('amount' in sent.update).toBe(false);
   });
 
+  it('hands a rounded amend to the host lifetime boundary without a raw write', async () => {
+    const raw = vi.fn(async () => undefined);
+    const submitOrderAmend = vi.fn(async () => undefined);
+    const { host } = fakeHost({
+      getExchange: () => ({ name: 'binance', updateOrder: raw }) as never,
+      getStore: () => ({ orders: [order()], markets: [market()] }) as never,
+      submitOrderAmend,
+    });
+    await createCoreAdapter(host).updateOrder('o1', { update: { price: 60_000.27 } } as never, 'main');
+    expect(submitOrderAmend).toHaveBeenCalledExactlyOnceWith(
+      'main',
+      expect.objectContaining({
+        order: expect.objectContaining({ id: 'o1' }),
+        update: { price: 60_000.5 },
+      }),
+    );
+    expect(raw).not.toHaveBeenCalled();
+  });
+
   it('closes each matching position and reports partial ids when a later leg throws', async () => {
     const placeOrder = vi.fn().mockResolvedValueOnce(['id-1']).mockRejectedValueOnce(new Error('venue said no'));
     const positions = [position({ side: 'long' }), position({ side: 'short', contracts: 1 })];

@@ -60,7 +60,7 @@ async fn summary_route_is_on_box_count_only_and_never_creates_lease_records() {
             !text.contains("private-live-sentinel") && !text.contains("private-tracked-sentinel")
         );
         let summary: Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(summary.as_object().unwrap().len(), 10);
+        assert_eq!(summary.as_object().unwrap().len(), 11);
         assert_eq!(summary["capacity"], 4096);
         assert_eq!(summary["remaining"], 4095);
         assert_eq!(summary["routerBoxId"], "01");
@@ -70,6 +70,10 @@ async fn summary_route_is_on_box_count_only_and_never_creates_lease_records() {
         assert_eq!(summary["fencedUsers"], 0);
         assert_eq!(summary["wouldFenceUsers"], 1);
         assert_eq!(summary["liveUsersWithoutLease"], 1);
+        assert_eq!(
+            summary["liveWouldFenceUsers"], 0,
+            "a tracked user with no live socket or account is departed, not at risk"
+        );
         assert!(summary["checkedAt"].as_u64().unwrap() > 0);
     }
     for (name, value) in [

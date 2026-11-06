@@ -347,7 +347,8 @@ untracked users return 503 without changing inventory. Expiry uses both wall-clo
 `POST /admin/router-lease/summary` accepts an empty body or `{}` under the
 same on-box admin guard. It returns only
 `{routerBoxId, enforced, enableGraceUntil, capacity, remaining, trackedUsers,
-fencedUsers, wouldFenceUsers, liveUsersWithoutLease, checkedAt}`; no user or account IDs.
+fencedUsers, wouldFenceUsers, liveWouldFenceUsers, liveUsersWithoutLease, checkedAt}`;
+no user or account IDs.
 `capacity` stays 4096; `remaining` is capacity minus the same snapshot's
 `trackedUsers`. Inventory holds distinct users for the process lifetime, not
 just active users: accepted epoch/sequence high-water marks are never evicted.
@@ -358,7 +359,10 @@ future authenticated router retirement watermark; expiry alone is insufficient.
 wall-clock and monotonic expiry, independently of shadow/enforcement mode.
 `fencedUsers` counts the per-user actual `fenced` flag. Hosted users with private
 accounts (including parked accounts) or authenticated sockets are deduplicated;
-those with no lease record count as `liveUsersWithoutLease`. Pending authenticated
+those with no lease record count as `liveUsersWithoutLease`, and those whose record
+has `wouldFence` count as `liveWouldFenceUsers`. `wouldFenceUsers` still counts every
+tracked record, so `wouldFenceUsers - liveWouldFenceUsers` is departed users: a user
+who moved home to the other box keeps an expired record here. Pending authenticated
 upgrade reservations count as sockets. Anonymous public data and drain latches
 alone do not count as hosted activity. Reading the summary never creates lease
 records for absent users. `enableGraceUntil` is the active explicit enable-grace
@@ -366,7 +370,8 @@ deadline only while enforcement is on, otherwise null. It uses the same
 absolute/monotonic expiry predicate as the heartbeat ACK and never grants grace
 on restart. Without an explicit active deadline, ungranted tracked users count
 as fenced immediately in enforcement mode. Operators gate enabling on both boxes reporting
-`wouldFenceUsers == 0 && liveUsersWithoutLease == 0`. This is a current-state
+`liveUsersWithoutLease == 0 && liveWouldFenceUsers == 0`; departed records alone do not
+block it. This is a current-state
 snapshot, not an admission latch or takeover proof.
 
 ### Rollout and recovery
