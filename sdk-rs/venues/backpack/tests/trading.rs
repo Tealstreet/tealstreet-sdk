@@ -1575,12 +1575,19 @@ fn a_stop_that_filled_during_its_cancel_is_not_put_back() {
 /// user is told to check Open Orders, never to re-place a second stop.
 #[test]
 fn an_unknown_put_back_says_check_open_orders_never_re_place() {
-    for case in ["429", "lost"] {
+    for case in ["429", "408", "500", "lost"] {
         let mut e = resting_stop();
         let read = refused_then_read(&mut e);
         reply(&mut e, &read, 200, "[]");
         let restore = posts(&actions(&mut e)).pop().expect("the put-back");
         match case {
+            "408" => reply(&mut e, &restore, 408, ""),
+            "500" => reply(
+                &mut e,
+                &restore,
+                500,
+                r#"{"code":"INTERNAL_ERROR","message":"oops"}"#,
+            ),
             "429" => reply(
                 &mut e,
                 &restore,

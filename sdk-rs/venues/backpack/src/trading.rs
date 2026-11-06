@@ -1817,15 +1817,22 @@ impl Backpack {
             let _ = cx.fail_plan(&managed.plan, error);
             return;
         }
+        let protect = job.protect.as_ref().expect("a guarded amend");
         let restore = Step::Place {
-            order: job
-                .protect
-                .as_ref()
-                .expect("a guarded amend")
-                .restore
-                .clone(),
+            order: protect.restore.clone(),
             optional: false,
         };
+        // A 408 or 5xx on the put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        let words = format!(
+            "Your {} {}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders",
+            protect.guard.order.symbol,
+            what(protect.guard.order.kind)
+        );
+        if let Err(reason) = cx.present_plan_failure(&managed.plan, words) {
+            let error = VenueError::new(reason.venue_error().message);
+            return self.guarded_failed(cx, request, error, true);
+        }
         if let Err(reason) = cx.continue_serial_plan(
             &managed.plan,
             &managed.slot,
