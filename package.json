@@ -16,6 +16,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
     "check:licenses": "node scripts/check-licenses.mjs",
     "rust:build-wasm": "bash sdk-rs/harness/build.sh",
+    "rust:metadata": "node sdk-rs/safe-cex-types/scripts/generate-exchange-metadata.cjs",
+    "rust:metadata:check": "node sdk-rs/safe-cex-types/scripts/generate-exchange-metadata.cjs --check",
     "rust:record": "node --import tsx sdk-rs/harness/record.mjs",
     "rust:private-tape-coinbase": "node sdk-rs/harness/private-tape-coinbase.mjs",
     "rust:private-tape-orderly": "node sdk-rs/harness/private-tape-orderly.mjs",
