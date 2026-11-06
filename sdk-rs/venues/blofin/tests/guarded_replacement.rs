@@ -26,13 +26,17 @@ fn writes(h: &Harness) -> Vec<String> {
 
 /// A buy limit entry 4/10 filled, carrying TP 65000 and SL 55000.
 fn partly_filled(h: &mut Harness) {
+    partly_filled_with(h, r#""tpTriggerPrice":"65000","slTriggerPrice":"55000""#);
+}
+/// The same entry with `legs` as its row's TP/SL fields.
+fn partly_filled_with(h: &mut Harness, legs: &str) {
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
     h.reply(
         "balances",
         r#"{"code":"0","data":[{"balance":"1000","available":"1000","frozen":"0"}]}"#,
     );
-    h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"12","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","filledSize":"4","price":"60000","state":"partially_filled","tpTriggerPrice":"65000","slTriggerPrice":"55000"}]}"#);
+    h.reply("orders-pending",&format!(r#"{{"code":"0","data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"12","orderType":"limit","side":"buy","marginMode":"cross","positionSide":"net","size":"10","filledSize":"4","price":"60000","state":"partially_filled",{legs}}}]}}"#));
     for path in [
         "orders-pending",
         "orders-tpsl-pending",
@@ -177,6 +181,88 @@ fn a_rate_limited_replacement_is_unknown_and_never_put_back() {
 }
 
 #[test]
+fn a_put_back_keeps_each_legs_trigger_reference() {
+    for (legs, tp, sl) in [
+        (
+            r#""tpTriggerPrice":"65000","tpTriggerPriceType":"mark","slTriggerPrice":"55000","slTriggerPriceType":"index""#,
+            "mark",
+            "index",
+        ),
+        (
+            r#""attachAlgoOrders":[{"tpTriggerPrice":"65000","tpTriggerPriceType":"index","slTriggerPrice":"55000","slTriggerPriceType":"mark"}]"#,
+            "index",
+            "mark",
+        ),
+        // An untyped row is BloFin's default, sent explicitly.
+        (
+            r#""tpTriggerPrice":"65000","slTriggerPrice":"55000""#,
+            "last",
+            "last",
+        ),
+    ] {
+        for leg in ["12__stop_loss", "12__take_profit"] {
+            let mut h = Harness::new();
+            partly_filled_with(&mut h, legs);
+            h.handle(
+                1.0,
+                Event::Command(Command::AmendOrder {
+                    command: 7,
+                    id: leg.into(),
+                    price: Some(if leg.ends_with("loss") {
+                        56000.0
+                    } else {
+                        66000.0
+                    }),
+                    amount: None,
+                }),
+            );
+            let replacement = to_replacement(&mut h);
+            h.respond(replacement, REFUSED);
+            let restore = body(&h.take("batch-orders"));
+            for p in [&restore[0], &restore[0]["attachAlgoOrders"][0]] {
+                assert_eq!(p["tpTriggerPrice"], "65000", "{leg}: {restore}");
+                assert_eq!(p["slTriggerPrice"], "55000", "{leg}: {restore}");
+                assert_eq!(p["tpTriggerPriceType"], tp, "{leg}: {restore}");
+                assert_eq!(p["slTriggerPriceType"], sl, "{leg}: {restore}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_bracket_leg_size_edit_is_refused_before_any_write() {
+    for leg in ["12__stop_loss", "12__take_profit"] {
+        let mut h = Harness::new();
+        partly_filled(&mut h);
+        h.handle(
+            1.0,
+            Event::Command(Command::AmendOrder {
+                command: 7,
+                id: leg.into(),
+                price: Some(56000.0),
+                amount: Some(3.0),
+            }),
+        );
+        h.collect();
+        let error = failure(&h).expect("refused");
+        assert_eq!(
+            error.message, "BloFin attached stop size follows its entry",
+            "{leg}"
+        );
+        assert_eq!(error.outcome, Some(Outcome::NotSent), "{leg}");
+        assert_eq!(error.protection, None, "{leg}");
+        assert!(
+            !h.pending
+                .iter()
+                .any(|r| r.method != safe_cex_engine::Method::Get),
+            "{leg}: no write: {:?}",
+            h.pending.iter().map(|r| &r.url).collect::<Vec<_>>()
+        );
+        assert!(h.e.store().order(leg).is_some(), "{leg}: untouched");
+    }
+}
+
+#[test]
 fn an_unknown_replacement_is_never_doubled() {
     let mut h = Harness::new();
     partly_filled(&mut h);
@@ -289,4 +375,30 @@ fn a_later_cancel_of_the_original_follows_it_to_the_put_back_entry() {
         "{:?}",
         cancel.body
     );
+}
+
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
+#[test]
+fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
+    for status in [408, 503] {
+        let mut h = Harness::new();
+        partly_filled(&mut h);
+        edit_stop(&mut h, 56000.0);
+        let replacement = to_replacement(&mut h);
+        h.respond(replacement, REFUSED);
+        let restore = h.take("batch-orders");
+        h.respond_status(restore, status, "");
+        let error = failure(&h).expect("the engine seals the Plan");
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("trigger refused"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{status}");
+        assert_eq!(error.protection, None, "{status}");
+        assert!(writes(&h).is_empty(), "{status}: never resent");
+    }
 }

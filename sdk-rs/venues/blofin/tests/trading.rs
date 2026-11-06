@@ -711,7 +711,8 @@ fn isolated_hedge_leverage_sends_short_after_long_is_accepted() {
 }
 
 #[test]
-fn editing_inline_virtual_protection_preserves_parent_remainder_despite_child_amount() {
+/// A size on this edit is refused (guarded_replacement.rs); a price edit keeps the remainder.
+fn editing_inline_virtual_protection_preserves_parent_remainder() {
     let mut h = Harness::new();
     h.modes();
     h.reply("account/positions", r#"{"code":"0","data":[]}"#);
@@ -734,7 +735,7 @@ fn editing_inline_virtual_protection_preserves_parent_remainder_despite_child_am
             command: 7,
             id: "12__take_profit".into(),
             price: Some(66000.0),
-            amount: Some(20.0),
+            amount: None,
         }),
     );
     h.collect();

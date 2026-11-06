@@ -62,6 +62,19 @@ fn response(e: &mut TestEngine, request: &HttpRequest, now: f64, body: &str) {
         },
     );
 }
+fn response_status(e: &mut TestEngine, request: &HttpRequest, now: f64, status: u16) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status,
+                headers: "",
+                body: "",
+            },
+        },
+    );
+}
 fn ws(e: &mut TestEngine, socket: SocketId, now: f64, text: &str) {
     e.handle(now, Event::WsMessage { socket, text });
 }
@@ -76,12 +89,20 @@ fn ready_with_provider(hmac_only: bool) -> (TestEngine, SocketId) {
     ready_with_provider_mode(hmac_only, false)
 }
 fn ready_with_provider_mode(hmac_only: bool, remote: bool) -> (TestEngine, SocketId) {
+    ready_with_signer(hmac_only, |provider| {
+        if remote {
+            Arc::new(DelegatedHmac(provider))
+        } else {
+            provider
+        }
+    })
+}
+fn ready_with_signer(
+    hmac_only: bool,
+    wrap: impl FnOnce(Arc<dyn Signer>) -> Arc<dyn Signer>,
+) -> (TestEngine, SocketId) {
     let (provider, identities) = write_provider(hmac_only);
-    let provider: Arc<dyn Signer> = if remote {
-        Arc::new(DelegatedHmac(provider))
-    } else {
-        provider
-    };
+    let provider = wrap(provider);
     let inner = safe_cex_engine::test_support::seeded_engine(ApexOmni::new(Options {
         identity: identities.primary.clone(),
         ..Options::default()
@@ -2271,12 +2292,15 @@ fn unlisted_coded_placement_fence_clears_on_the_next_read() {
 
 /// A resting reduce-only sell stop at 55000 on the index, guarding a long.
 fn resting_stop(e: &mut TestEngine, socket: SocketId, filled: f64) {
+    resting_stop_of(e, socket, filled, "STOP_MARKET");
+}
+fn resting_stop_of(e: &mut TestEngine, socket: SocketId, filled: f64, kind: &str) {
     ws(
         e,
         socket,
         NOW + 5.0,
         &format!(
-            r#"{{"topic":"ws_zk_accounts_v3","type":"snapshot","contents":{{"orders":[{{"id":"stop","symbol":"BTC-USDT","side":"SELL","type":"STOP_MARKET","status":"UNTRIGGERED","size":"10","price":"54725","triggerPrice":"55000","triggerPriceType":"INDEX","reduceOnly":true,"cumSuccessFillSize":"{filled}","updatedAt":{}}}]}}}}"#,
+            r#"{{"topic":"ws_zk_accounts_v3","type":"snapshot","contents":{{"orders":[{{"id":"stop","symbol":"BTC-USDT","side":"SELL","type":"{kind}","status":"UNTRIGGERED","size":"10","price":"54725","triggerPrice":"55000","triggerPriceType":"INDEX","reduceOnly":true,"cumSuccessFillSize":"{filled}","updatedAt":{}}}]}}}}"#,
             NOW + 5.0
         ),
     );
@@ -2725,4 +2749,103 @@ fn a_put_back_is_one_attempt_on_the_wire() {
     let error = failure_of(&out);
     assert!(error.message.contains("both refused"), "{}", error.message);
     assert_eq!(error.protection, Some(Protection::Unprotected));
+}
+
+/// A put-back the engine seals on a 408 or 5xx says its outcome is unknown,
+/// never the replacement's refusal and never to re-place a second stop.
+#[test]
+fn a_put_back_sealed_on_a_5xx_says_its_outcome_is_unknown() {
+    for status in [408, 503] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop(&mut e, socket, 0.0);
+        let replacement = to_stop_replacement(&mut e);
+        response(&mut e, &replacement, NOW + 200.0, REFUSED);
+        let restore = requests(&mut e).remove(0);
+        response_status(&mut e, &restore, NOW + 201.0, status);
+        let out = actions(&mut e);
+        let error = failure_of(&out);
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("too many requests"),
+            "{status}: {}",
+            error.message
+        );
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}"
+        );
+        assert_eq!(error.protection, None, "{status}");
+        assert!(
+            placements(&without_reconcile_read(http(out))).is_empty(),
+            "{status}: never resent"
+        );
+    }
+}
+
+/// A put-back refused before it is sent (it cannot be signed) never reached
+/// ApeX: the stop was removed and must be re-placed, not "both refused".
+#[test]
+fn a_put_back_refused_before_sending_says_the_stop_was_removed() {
+    use safe_cex_engine::error::Protection;
+    // The provider signs one order placement (the replacement), then refuses.
+    let placements_signed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = placements_signed.clone();
+    let (mut e, socket) = ready_with_signer(false, |provider| {
+        Arc::new(RefusesLaterPlacements(provider, counter))
+    });
+    resting_stop(&mut e, socket, 0.0);
+    let replacement = to_stop_replacement(&mut e);
+    response(&mut e, &replacement, NOW + 200.0, REFUSED);
+    let out = actions(&mut e);
+    let error = failure_of(&out);
+    assert!(
+        error.message.contains("was removed")
+            && error.message.contains("please re-place it")
+            && !error.message.contains("both refused"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.protection, Some(Protection::Unprotected));
+    assert!(placements(&http(out)).is_empty(), "nothing was sent");
+}
+
+/// Signs through `0` until it has signed one order placement; refuses later ones.
+struct RefusesLaterPlacements(Arc<dyn Signer>, Arc<std::sync::atomic::AtomicUsize>);
+impl Signer for RefusesLaterPlacements {
+    fn sign(&self, request: SignRequest) -> SignFuture {
+        self.0.sign(request)
+    }
+    fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
+        if work.context.method == "POST" && work.context.path.ends_with("/v3/order") {
+            let signed = self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if signed >= 1 {
+                return Some(Err(SignError::Refused));
+            }
+        }
+        self.0.sign_ready(work)
+    }
+    fn can_sign(&self, key: &KeyRef, algorithm: Algorithm) -> Capability {
+        self.0.can_sign(key, algorithm)
+    }
+}
+
+/// An edit or put-back keeps the original's native type: a STOP_MARKET stays
+/// one (a STOP_LIMIT may not fill through a gap); a STOP_LIMIT stays a limit.
+#[test]
+fn a_stop_edit_and_its_put_back_keep_the_native_order_type() {
+    for kind in ["STOP_MARKET", "STOP_LIMIT"] {
+        let (mut e, socket) = ready_with_socket();
+        resting_stop_of(&mut e, socket, 0.0, kind);
+        let cancel = amend_to(&mut e, "stop", 56000.0).remove(0);
+        response(&mut e, &cancel, NOW + 15.0, REAL_CANCEL);
+        prove_cancel_of(&mut e, "stop", "CANCELED");
+        let replacement = requests(&mut e).remove(0);
+        assert_eq!(form(&replacement)["type"], kind, "the edit");
+        response(&mut e, &replacement, NOW + 200.0, REFUSED);
+        let restore = requests(&mut e).remove(0);
+        assert_eq!(form(&restore)["type"], kind, "the put-back");
+        assert_eq!(form(&restore)["triggerPrice"], "55000");
+    }
 }

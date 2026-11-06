@@ -60,6 +60,51 @@ describe('utils.ts', () => {
     mockConsoleError.mockRestore();
   });
 
+  describe('public display handle context', () => {
+    const uploadedLines = () =>
+      mockFetch.mock.calls.flatMap(([, init]) =>
+        JSON.parse(init.body).streams.flatMap((stream: any) => stream.values.map((value: any) => value[1])),
+      );
+
+    it('escapes the handle in each log line, preserving the Auth0 ID and closed label set', async () => {
+      utils.startLoggingToGrafana('auth0|one', 'Trader"\\\nWARN forged');
+      utils.logWarn('A notice');
+      utils.dumpLogQueue();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(uploadedLines()[0]).toBe(
+        'auth0|one username="Trader\\"\\\\\\nWARN forged" [test-session-key-123]: A notice',
+      );
+      const labels = JSON.parse(mockFetch.mock.calls[0][1].body).streams[0].stream;
+      expect(labels.userId).toBe('auth0|one');
+      expect(Object.keys(labels).sort()).toEqual(['app', 'env', 'sessionKey', 'userId', 'version']);
+    });
+
+    it('captures the handle when queued and clears it on logout without stale cleanup clearing a new user', async () => {
+      const stopOld = utils.startLoggingToGrafana('auth0|one', 'Old');
+      utils.logInfo('Before rename');
+      const stopNew = utils.startLoggingToGrafana('disrupt:auth0|two', 'New');
+      stopOld();
+      utils.logInfo('After switch');
+      stopNew();
+      utils.logInfo('After logout');
+      utils.dumpLogQueue();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(uploadedLines()).toEqual([
+        'auth0|one username="Old" [test-session-key-123]: Before rename',
+        'disrupt:auth0|two username="New" [test-session-key-123]: After switch',
+        ' [test-session-key-123]: After logout',
+      ]);
+    });
+
+    it('keeps the existing line format when no handle is available', async () => {
+      utils.startLoggingToGrafana('auth0|one');
+      utils.logInfo('No profile yet');
+      utils.dumpLogQueue();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(uploadedLines()[0]).toBe('auth0|one [test-session-key-123]: No profile yet');
+    });
+  });
+
   describe('getSessionKey', () => {
     it('should return a session key', () => {
       const sessionKey = utils.getSessionKey();

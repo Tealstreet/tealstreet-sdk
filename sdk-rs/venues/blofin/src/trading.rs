@@ -748,15 +748,21 @@ impl Blofin {
                             source.sl_order_price
                         }));
                 }
+                // The original row's references, sent explicitly; BloFin's default is last.
+                let reference = |kind: &str| match kind {
+                    "" => Some("last".to_owned()),
+                    "last" | "mark" | "index" => Some(kind.to_owned()),
+                    _ => None,
+                };
                 if payload.protection.tp_trigger_price.is_some()
-                    && matches!(source.tp_type.as_str(), "last" | "mark" | "index")
+                    && let Some(kind) = reference(&source.tp_type)
                 {
-                    payload.protection.tp_trigger_price_type = Some(source.tp_type.clone());
+                    payload.protection.tp_trigger_price_type = Some(kind);
                 }
                 if payload.protection.sl_trigger_price.is_some()
-                    && matches!(source.sl_type.as_str(), "last" | "mark" | "index")
+                    && let Some(kind) = reference(&source.sl_type)
                 {
-                    payload.protection.sl_trigger_price_type = Some(source.sl_type.clone());
+                    payload.protection.sl_trigger_price_type = Some(kind);
                 }
             }
             if !conditional && !protective && (!payload.attach_algo_orders.is_empty()) {
@@ -1765,6 +1771,17 @@ impl Blofin {
                     id, price, amount, ..
                 } => {
                     let order = cx.store.order(&id).ok_or("Unknown order to amend")?;
+                    // A leg attached to its entry carries the entry's size; a resize would be dropped.
+                    let attached =
+                        matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                            && self
+                                .account
+                                .sources
+                                .get(&id)
+                                .is_some_and(|s| s.tpsl_id.is_empty() && !s.order_id.is_empty());
+                    if attached && amount.is_some() {
+                        return Err("BloFin attached stop size follows its entry".into());
+                    }
                     if let Some(steps) = self.native_amend(cx, order, price, amount)? {
                         job.steps.extend(steps);
                         return Ok(job);
@@ -2023,6 +2040,27 @@ impl Blofin {
                 not_sent("BloFin requires API credentials"),
             );
         };
+        // A 408 or 5xx on a put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        if active.job.restoring && matches!(step.effect, Effect::Place { .. }) {
+            let what = active
+                .job
+                .replacing_stop
+                .as_ref()
+                .map(|(_, symbol, ..)| format!("{symbol} stop"))
+                .or_else(|| {
+                    active
+                        .job
+                        .replacing_order
+                        .as_ref()
+                        .map(|(_, symbol)| format!("{symbol} order"))
+                })
+                .unwrap_or_else(|| "order".into());
+            let words = format!(
+                "Your {what}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+            );
+            let _ = cx.present_plan_failure(&plan, words);
+        }
         match &step.effect {
             Effect::Place { .. } => {
                 cx.store.invalidate_order_snapshots();

@@ -2018,6 +2018,18 @@ impl PhemexPerpetuals {
                 cx.store.set_order_status(&order.id, OrderStatus::Canceling);
             }
         }
+        // A 408 or 5xx on a put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        if let Call::Place { .. } = &step.call
+            && let Some(job) = self.trading.jobs.get(&command)
+            && job.restoring
+            && let Some((symbol, ..)) = &job.replacing
+        {
+            let words = format!(
+                "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+            );
+            let _ = cx.present_plan_failure(&plan, words);
+        }
         self.account_write(cx);
         let revision = self.account.order_revision();
         if let Some(job) = self.trading.jobs.get_mut(&command) {

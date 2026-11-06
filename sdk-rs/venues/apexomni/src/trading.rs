@@ -190,10 +190,14 @@ struct StopProtect {
     restore: PlaceOrderOpts,
     /// False once anything filled: only an untouched original is put back.
     restorable: bool,
+    /// The original was a STOP_MARKET or TAKE_PROFIT_MARKET.
+    market_trigger: bool,
 }
 
 struct Amendment {
     id: String,
+    /// The amended order was a STOP_MARKET or TAKE_PROFIT_MARKET.
+    market_trigger: bool,
     replaced: Replaced,
     order: PlaceOrderOpts,
     total_amount: f64,
@@ -531,6 +535,7 @@ fn stop_protect(
         guard,
         restore: replacement(cx, id, None, None).map_err(not_sent)?,
         restorable: parent.filled == 0.0,
+        market_trigger: false,
     })))
 }
 
@@ -540,6 +545,7 @@ impl ApexOmni {
         cx: &Cx<'_, Pending>,
         order: &PlaceOrderOpts,
         issued: &mut HashSet<String>,
+        market_trigger: bool,
     ) -> Result<Vec<Step>, String> {
         if !self.account.initialized {
             return Err("ApeX Omni account signing state is unavailable".into());
@@ -625,6 +631,8 @@ impl ApexOmni {
                     match order.kind {
                         OrderType::Limit => "LIMIT",
                         OrderType::Market => "MARKET",
+                        OrderType::StopLoss if market_trigger => "STOP_MARKET",
+                        OrderType::TakeProfit if market_trigger => "TAKE_PROFIT_MARKET",
                         OrderType::StopLoss => "STOP_LIMIT",
                         OrderType::TakeProfit => "TAKE_PROFIT_LIMIT",
                         _ => unreachable!(),
@@ -1030,7 +1038,7 @@ impl ApexOmni {
                         .collect();
                     for order in orders {
                         prepared.extend(
-                            self.prepare_order(cx, &order, &mut issued)
+                            self.prepare_order(cx, &order, &mut issued, false)
                                 .map_err(not_sent)?,
                         );
                     }
@@ -1045,8 +1053,10 @@ impl ApexOmni {
                         .iter()
                         .filter_map(|o| o.client_order_id.clone())
                         .collect();
+                    // A standalone STOP_MARKET or TAKE_PROFIT_MARKET stays one.
+                    let market_trigger = self.account.market_trigger(parent_id(&id));
                     let replacement = self
-                        .prepare_order(cx, &order, &mut issued)
+                        .prepare_order(cx, &order, &mut issued, market_trigger)
                         .map_err(not_sent)?;
                     let parent = cx
                         .store
@@ -1054,7 +1064,10 @@ impl ApexOmni {
                         .expect("replacement validated parent");
                     let amended = cx.store.order(&id).expect("replacement validated target");
                     let replaced = (amended.symbol.clone(), amended.side, amended.kind);
-                    let stop = stop_protect(cx, &id, &order)?;
+                    let mut stop = stop_protect(cx, &id, &order)?;
+                    if let Some(stop) = stop.as_mut() {
+                        stop.market_trigger = market_trigger;
+                    }
                     job.replaces = Some(replaced.clone());
                     prepared.push_back(Step::Write(
                         sign::Request::form(
@@ -1068,6 +1081,7 @@ impl ApexOmni {
                     prepared.extend(replacement);
                     self.trading.amendment = Some(Amendment {
                         id: parent.id.clone(),
+                        market_trigger,
                         replaced,
                         order,
                         total_amount: parent.amount,
@@ -1259,6 +1273,18 @@ impl ApexOmni {
                 .map(|receipt| receipt.identity.clone())
                 .collect(),
         };
+        // A 408 or 5xx on a put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        if job.restoring
+            && matches!(accepted, Accepted::Place)
+            && let Some((symbol, _, kind)) = &job.replaces
+        {
+            let words = format!(
+                "Your {symbol} {}'s replacement was refused and its put-back's outcome is unknown. Check Open Orders",
+                what(*kind)
+            );
+            let _ = cx.present_plan_failure(&plan, words);
+        }
         cx.command_progress(job.command, receipts);
         let delivery = Request {
             command: job.command,
@@ -1348,9 +1374,15 @@ impl ApexOmni {
         {
             let what = what(*kind);
             error.presents = true;
+            // A put-back refused before it was sent never reached ApeX.
+            let unsent = job.restoring && error.outcome == Some(Outcome::NotSent);
             error.message = match (unknown, job.restoring) {
                 (false, false) => format!(
                     "Your {symbol} {what} was removed: its replacement was refused, please re-place it ({})",
+                    error.message
+                ),
+                (false, true) if unsent => format!(
+                    "Your {symbol} {what} was removed: its replacement was refused and the put-back could not be sent, please re-place it ({})",
                     error.message
                 ),
                 (false, true) => format!(
@@ -1515,7 +1547,7 @@ impl ApexOmni {
                         .iter()
                         .filter_map(|o| o.client_order_id.clone())
                         .collect();
-                    self.prepare_order(cx, &amendment.order, &mut issued)
+                    self.prepare_order(cx, &amendment.order, &mut issued, amendment.market_trigger)
                 })
             } else {
                 Ok(self
@@ -1707,11 +1739,11 @@ impl ApexOmni {
         let Some(job) = self.trading.active.as_ref() else {
             return false;
         };
-        let Some(restore) = job
+        let Some((restore, market_trigger)) = job
             .protect
             .as_ref()
             .filter(|protect| protect.restorable)
-            .map(|protect| protect.restore.clone())
+            .map(|protect| (protect.restore.clone(), protect.market_trigger))
         else {
             return false;
         };
@@ -1729,7 +1761,7 @@ impl ApexOmni {
             .iter()
             .filter_map(|o| o.client_order_id.clone())
             .collect();
-        let Ok(steps) = self.prepare_order(cx, &restore, &mut issued) else {
+        let Ok(steps) = self.prepare_order(cx, &restore, &mut issued, market_trigger) else {
             return false;
         };
         // One attempt: no native resend can send the put-back twice. A refused

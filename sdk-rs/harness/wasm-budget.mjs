@@ -154,22 +154,27 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // CI size plus 10 KiB, rounded up to the KiB.
 // #3128 run 42146728975 measured apexomni 2,002,359 B: amends stream as serial Plans (cancel proof
 // and put-back). CI size plus 10 KiB, rounded up to the KiB.
+// #3130 run 42154583609 measured backpack 1,926,668 B: trigger amends stream as serial Plans
+// (proof read and put-back). CI size plus 10 KiB, rounded up to the KiB.
+// #3138 run 42166643605 measured bitrue 1,829,700 B: guarded stop edits, cancel-proof polling and
+// put-back. CI size plus 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_150_400,
-  backpack: 1_887_232,
+  backpack: 1_937_408,
   binance: 2_206_720,
   bingx: 2_036_736,
   bitget: 2_345_984,
   bitgetusdc: 2_345_984,
-  bitrue: 1_821_696,
+  bitrue: 1_840_128,
   bitunix: 1_849_344,
   blofin: 1_989_632,
   breakoutprop: 1_512_448,
   bybit: 2_225_152,
   coinbase: 1_826_816,
   cryptocom: 1_727_488,
-  grvt: 1_780_736,
+  // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
+  grvt: 1_817_600,
   hyperliquid: 2_117_632,
   hyperliquidspot: 2_117_632,
   kraken: 2_136_064,
@@ -178,7 +183,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   kucoinspot: 2_264_064,
   lighter: 2_001_920,
   'lighter-robinhood': 2_001_920,
-  mexc: 1_755_136,
+  // #3131, CI run 42150228180: MEXC measured 1,777,946 B + 10 KiB, rounded up.
+  mexc: 1_788_928,
   okx: 1_947_648,
   orderly: 1_732_608,
   paradex: 2_249_728,
