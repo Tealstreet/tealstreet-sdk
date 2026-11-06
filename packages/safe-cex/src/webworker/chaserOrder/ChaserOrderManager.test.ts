@@ -1136,9 +1136,7 @@ describe('ChaserOrderManager', () => {
       manager.add(instance);
       await vi.advanceTimersByTimeAsync(1000);
 
-      (store as any).positions = [
-        { id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 },
-      ];
+      (store as any).positions = [{ id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 1 }];
       store.updateIds.positions += 1;
       await emit('update', store);
       await vi.advanceTimersByTimeAsync(0);
@@ -1221,9 +1219,7 @@ describe('ChaserOrderManager', () => {
       manager.add(instance);
       await vi.advanceTimersByTimeAsync(1000);
       // A separate market buy grew the long; this chase filled nothing.
-      (store as any).positions = [
-        { id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0.5 },
-      ];
+      (store as any).positions = [{ id: 'BTCUSDT-long', symbol: 'BTCUSDT', side: PositionSide.Long, contracts: 0.5 }];
 
       manager.remove(instance.id);
       await vi.advanceTimersByTimeAsync(0);
@@ -1308,7 +1304,9 @@ describe('ChaserOrderManager lost placement', () => {
     expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
     expect(instance.isStopped).toBe(true);
     expect(exchange.emitter.emit).toHaveBeenCalledWith('error', expect.stringContaining('check open orders'));
-    const completions = (exchange.emitter.emit as any).mock.calls.filter(([event]: [string]) => event === 'chaser:complete');
+    const completions = (exchange.emitter.emit as any).mock.calls.filter(
+      ([event]: [string]) => event === 'chaser:complete',
+    );
     expect(completions).toHaveLength(1);
     expect(completions[0][1]).toMatchObject({ stopReason: 'Could not confirm order placement' });
   });
@@ -1355,4 +1353,46 @@ describe('ChaserOrderManager lost placement', () => {
     expect(exchange.findOrderByClientOrderId).not.toHaveBeenCalled();
     expect(exchange.placeOrder).toHaveBeenCalledTimes(2);
   });
+
+  const venueError = (message: string, kind: string, outcome: string) =>
+    Object.assign(new Error(message), { kind, outcome });
+
+  it('a reduce-only refused for position ends the chase on its first placement, saying so once', async () => {
+    const { exchange } = withLostResponse();
+    exchange.placeOrder = vi
+      .fn()
+      .mockRejectedValue(venueError('Not enough position is available', 'invalidInput', 'rejected'));
+
+    const instance = startChase(exchange);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(exchange.placeOrder).toHaveBeenCalledTimes(1);
+    expect(instance.isStopped).toBe(true);
+    const errors = (exchange.emitter.emit as any).mock.calls.filter(([event]: [string]) => event === 'error');
+    expect(errors).toEqual([
+      ['error', 'Chaser for BTCUSDT stopped: the venue refused the order: Not enough position is available'],
+    ]);
+    const completions = (exchange.emitter.emit as any).mock.calls.filter(
+      ([event]: [string]) => event === 'chaser:complete',
+    );
+    expect(completions).toHaveLength(1);
+    expect(completions[0][1]).toMatchObject({ stopReason: 'The venue refused the order' });
+  });
+
+  it.each(['rateLimited', 'timeout', 'network', 'rejected'])(
+    'a %s placement failure that sent nothing still retries',
+    async (kind) => {
+      const { exchange } = withLostResponse();
+      exchange.placeOrder = vi
+        .fn()
+        .mockRejectedValueOnce(venueError('try again', kind, 'notSent'))
+        .mockResolvedValueOnce(['order-1']);
+
+      const instance = startChase(exchange);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(exchange.placeOrder).toHaveBeenCalledTimes(2);
+      expect(instance.currentOrderIds).toEqual(['order-1']);
+    },
+  );
 });

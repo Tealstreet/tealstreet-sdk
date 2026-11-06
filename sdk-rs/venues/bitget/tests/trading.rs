@@ -1394,6 +1394,11 @@ fn write_failures_are_classified_without_changing_their_text() {
                 Some(Outcome::Rejected),
             ),
         ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available","errorCode":"40757"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
         // Per-row outcome change: a row coded with an unproven code (40010,
         // 40725, 45001) is now Unknown, where a code-less row was Rejected.
         (

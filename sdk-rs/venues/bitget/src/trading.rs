@@ -81,6 +81,9 @@ pub(crate) const CODES: CodeTable = CodeTable {
         refused(45110, ErrorKind::InvalidInput),
         refused(45113, ErrorKind::InvalidInput),
         refused(45122, ErrorKind::InvalidInput),
+        // "Not enough position is available": a reduce-only size above the
+        // position, refused at any price until the position changes.
+        refused(40757, ErrorKind::InvalidInput),
         Row {
             key: Key::Int(40010),
             verdict: Verdict::Unknown(None),
