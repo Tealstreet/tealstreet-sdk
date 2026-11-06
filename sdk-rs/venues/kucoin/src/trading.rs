@@ -60,6 +60,8 @@ struct Replacement {
 #[derive(Clone)]
 struct StopProtect {
     guard: StopGuard,
+    /// The original venue trigger, unchanged by the amendment.
+    original_trigger: f64,
     /// The original placed again, unchanged, once its replacement is refused.
     restore: Step,
     /// False when the original cannot be proven again (its entry has fills):
@@ -83,7 +85,7 @@ struct StopGuard {
 impl StopGuard {
     /// A refusal is typed NotSent and leaves the order untouched.
     fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
-        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        use safe_cex_engine::protective_amend::refused;
         let unchanged = || format!("Your {} order was not changed", self.order.symbol);
         let same = |planned: &Order| store.order(&planned.id) == Some(planned);
         if !same(&self.order) || self.parent.as_ref().is_some_and(|parent| !same(parent)) {
@@ -103,6 +105,19 @@ impl StopGuard {
                 unchanged()
             ))));
         }
+        self.validate_trigger(store, now, self.trigger)
+            .map_err(|mut error| {
+                error.message = format!("{}: {}", unchanged(), error.message);
+                error
+            })
+    }
+    fn validate_trigger(
+        &self,
+        store: &safe_cex_engine::Store,
+        now: f64,
+        trigger: f64,
+    ) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
         let label = match self.reference {
             StopTriggerType::MarkPrice => "mark",
             StopTriggerType::IndexPrice => "index",
@@ -110,16 +125,14 @@ impl StopGuard {
         };
         let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
             return Err(refused(Some(format!(
-                "{}: the {label} price reference is stale",
-                unchanged()
+                "the {label} price reference is stale"
             ))));
         };
         if let Some(below) = self.below
-            && ((below && self.trigger >= price) || (!below && self.trigger <= price))
+            && ((below && trigger >= price) || (!below && trigger <= price))
         {
             return Err(refused(Some(format!(
-                "{}: the new trigger has already crossed the {label} price",
-                unchanged()
+                "the trigger has already crossed the {label} price"
             ))));
         }
         Ok(())
@@ -694,6 +707,7 @@ impl Kucoin {
         restore.call = Call::Place;
         Ok(Some(Box::new(StopProtect {
             guard,
+            original_trigger: num::adjust(order.price, market.precision.price),
             restore,
             restorable: parent.filled == 0.0,
         })))

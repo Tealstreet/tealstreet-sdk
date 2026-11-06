@@ -149,10 +149,7 @@ impl State {
         if !observed.is_some_and(|(price, seen)| {
             positive(price) && seen <= now && now - seen <= 5_000.0 && current == Some(price)
         }) {
-            return Err(not_sent(format!(
-                "Your {} order was not changed: trigger-source receipt is stale or missing",
-                guard.order.symbol
-            )));
+            return Err(not_sent("trigger-source receipt is stale or missing"));
         }
         Ok(())
     }
@@ -185,15 +182,35 @@ pub(super) fn handles(store: &safe_cex_engine::Store, command: &Command) -> bool
 fn unknown(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
+fn protection_order(run: &Run) -> &Order {
+    run.stop
+        .as_ref()
+        .map_or(&run.original, |stop| &stop.guard.order)
+}
+fn protection_name(order: &Order) -> (&'static str, &'static str) {
+    let side = if order.side == OrderSide::Buy {
+        "short"
+    } else {
+        "long"
+    };
+    let kind = if order.kind == OrderType::TakeProfit {
+        "take profit"
+    } else {
+        "stop"
+    };
+    (side, kind)
+}
 fn gone(run: &Run, message: impl Into<String>, restored: bool) -> VenueError {
-    let symbol = &run.original.symbol;
+    let order = protection_order(run);
+    let symbol = &order.symbol;
+    let (side, kind) = protection_name(order);
     let words = if restored {
         format!(
-            "Your {symbol} stop is unchanged: its replacement was refused, so the original was put back as a new order"
+            "Your {symbol} {side} position's {kind} is unchanged: its replacement was refused, so the original was put back as a new order"
         )
     } else {
         format!(
-            "Your {symbol} stop was removed; please re-place it: {}",
+            "Your {symbol} {side} position has no {kind}: its {kind} was removed; please re-place it: {}",
             message.into()
         )
     };
@@ -207,22 +224,23 @@ fn gone(run: &Run, message: impl Into<String>, restored: bool) -> VenueError {
     error
 }
 fn words(run: &Run, at: At) -> String {
-    let symbol = &run.original.symbol;
+    let order = protection_order(run);
+    let symbol = &order.symbol;
+    let (side, kind) = protection_name(order);
     match at {
         At::Cancel => format!(
-            "Your {symbol} stop edit outcome is unknown; check Open Orders before editing again"
+            "Your {symbol} {side} position's {kind} edit outcome is unknown; check Open Orders before editing again"
         ),
         At::Proof => format!(
-            "Your {symbol} stop cancel was sent but could not be confirmed; its outcome is unknown and no replacement was sent. Check Open Orders"
+            "Your {symbol} {side} position's {kind} cancel was sent but could not be confirmed; its outcome is unknown and no replacement was sent. Check Open Orders"
         ),
-        At::Place => format!(
-            "Your {symbol} stop was removed and its replacement outcome is unknown. Check Open Orders before re-placing protection"
-        ),
+        At::Place => safe_cex_engine::error::stop_gone_text(symbol, order.side, order.kind, true),
         At::Restore => format!(
-            "Your {symbol} original stop put-back outcome is unknown. Check Open Orders before re-placing protection"
+            "Your {symbol} {side} position's {kind} put-back outcome is unknown. Check Open Orders before re-placing protection"
         ),
     }
 }
+
 fn call(at: At) -> SerialCall {
     match at {
         At::Proof => READ,
@@ -606,6 +624,13 @@ impl Kucoin {
                         self.trading
                             .protective
                             .reference(store, guard, release.time.raw_ms)
+                            .map_err(|mut error| {
+                                error.message = format!(
+                                    "Your {} order was not changed: {}",
+                                    guard.order.symbol, error.message
+                                );
+                                error
+                            })
                     })
                 })
                 .map_err(|mut error| {
@@ -627,16 +652,31 @@ impl Kucoin {
             )
             .outcome(Outcome::NotSent));
         }
-        if let Some(side) = stop.guard.closes
-            && !store
-                .positions()
-                .iter()
-                .any(|p| p.symbol == run.original.symbol && p.side == side && p.contracts > 0.0)
-        {
-            return Err(
-                gone(run, "no position remains on its protected side", false)
-                    .outcome(Outcome::NotSent),
-            );
+        for guard in &run.guards {
+            if let Some(side) = guard.closes
+                && !store
+                    .positions()
+                    .iter()
+                    .any(|p| p.symbol == guard.order.symbol && p.side == side && p.contracts > 0.0)
+            {
+                return Err(
+                    gone(run, "no position remains on its protected side", false)
+                        .outcome(Outcome::NotSent),
+                );
+            }
+            let trigger = if pending.at == At::Restore {
+                stop.original_trigger
+            } else {
+                guard.trigger
+            };
+            guard
+                .validate_trigger(store, release.time.raw_ms, trigger)
+                .and_then(|_| {
+                    self.trading
+                        .protective
+                        .reference(store, guard, release.time.raw_ms)
+                })
+                .map_err(|error| gone(run, error.message, false).outcome(Outcome::NotSent))?;
         }
         Ok(())
     }
@@ -669,7 +709,10 @@ impl Kucoin {
             self.protective_proof_error(cx, &pending, run, error.message);
             return;
         }
-        let error = if run.cancelled && error.outcome == Some(Outcome::NotSent) {
+        let error = if run.cancelled
+            && error.outcome == Some(Outcome::NotSent)
+            && error.protection.is_none()
+        {
             gone(&run, error.message, false)
         } else {
             error

@@ -50,8 +50,13 @@ replacement refusal permits one exact original standalone put-back, at the origi
 native lots and native type, with a fresh client identity. Attached/group/parented
 shapes never get a guessed put-back; a definitive refusal reports Unprotected and
 asks the user to re-place protection. A successful original put-back reports
-Restored. Its Claim still checks terminal proof, newer fills and the protected
-position. A put-back itself has one attempt, including signature refusals.
+Restored. Every replacement Claim rechecks its new trigger against the exact native
+field receipt; every put-back Claim checks the original venue trigger instead.
+Both reject crossed or stale sources (equality is crossed, 5,000 ms is live),
+including held Prepare/Bind and re-signs. Neither repeats the pre-cancel order
+presence test after terminal proof removed that order. They still check newer
+fills, a reappearing group and the protected position. A put-back itself has one
+attempt, including signature refusals.
 
 Documented signature refusal may re-sign cancel or replacement once, using the
 engine's opaque grant; fallback cancellation is limited to a definite 404 family
@@ -90,3 +95,9 @@ Sources:
 - [Classic Futures order endpoints](https://www.kucoin.com/docs-new/rest/futures-trading/orders/add-order)
 - [Classic Futures error codes](https://www.kucoin.com/docs-new/error-code/futures)
 - [Official pinned request schema](https://github.com/Kucoin/kucoin-universal-sdk/blob/c2f39bdb8b7d5f31cfb3fd532f9baf2f09fd8f12/spec/rest/api/openapi-futures-order.json)
+
+The review follow-up pins SL and TP wording on both position sides for all failure
+stages, plus exact held replacement/put-back Claims and crossing during proof
+polling. Positive put-back fixtures now provide a safe native quote for the
+original trigger; their type/price/size assertions are unchanged. Final-Claim
+vetoes retain one kind/side-aware Unprotected message, without wrapping it twice.
