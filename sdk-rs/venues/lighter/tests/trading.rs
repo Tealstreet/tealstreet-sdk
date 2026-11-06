@@ -830,12 +830,12 @@ fn signed_perp_market_indexes_above_legacy_sentinel_are_supported() {
 
 #[test]
 fn closing_limit_edit_preserves_native_limit_type() {
-    for (side, old_price, new_price, _previously_conditional) in [
-        (OrderSide::Sell, 110.0, 95.0, true),
-        (OrderSide::Buy, 90.0, 105.0, true),
-        (OrderSide::Sell, 95.0, 110.0, false),
-        (OrderSide::Buy, 105.0, 90.0, false),
-        (OrderSide::Buy, 90.0, 100.0, true),
+    for (side, old_price, new_price) in [
+        (OrderSide::Sell, 110.0, 95.0),
+        (OrderSide::Buy, 90.0, 105.0),
+        (OrderSide::Sell, 95.0, 110.0),
+        (OrderSide::Buy, 105.0, 90.0),
+        (OrderSide::Buy, 90.0, 100.0),
     ] {
         let (mut e, socket) = ready_unattributed();
         e.store_mut().update_order("42", |o| {
