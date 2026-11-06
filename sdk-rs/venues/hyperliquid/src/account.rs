@@ -1101,15 +1101,10 @@ impl Hyperliquid {
                 (self.account.mode == Mode::Portfolio).then_some(true),
             );
         }
+        // Only clearinghouseState is per dex: Hyperliquid ignores `dex` on fills, orders and
+        // events, refusing each copy as "Already subscribed".
         for dex in &self.dex_names {
-            for kind in [
-                "clearinghouseState",
-                "userFills",
-                "orderUpdates",
-                "userEvents",
-            ] {
-                send(kind, Some(dex), None, None);
-            }
+            send("clearinghouseState", Some(dex), None, None);
         }
         // One activeAssetData per market filled the 1,000-per-IP cap with ~5 keyed
         // accounts; held symbols take settings from clearinghouseState instead.

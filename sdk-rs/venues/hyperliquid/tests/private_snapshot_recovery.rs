@@ -7,6 +7,8 @@ use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 const MIDS: &str = r#"{"channel":"allMids","data":{"mids":{"BTC":"123"}}}"#;
 const STATE: &str = r#"{"channel":"clearinghouseState","data":{"dex":"","clearinghouseState":{"assetPositions":[],"marginSummary":{"accountValue":"1000","totalMarginUsed":"0"},"time":1000}}}"#;
 const PONG: &str = r#"{"channel":"pong"}"#;
+/// A delivered frame that proves nothing: pongs no longer reach the venue.
+const ACK: &str = r#"{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"allMids"}}}"#;
 
 struct Harness {
     engine: Engine<Hyperliquid>,
@@ -420,9 +422,43 @@ fn invalid_watch_clock_preserves_the_deadline_for_the_next_finite_turn() {
         assert!(h.closed.is_empty());
         assert!(h.timers.iter().all(|(_, at)| at.is_finite()));
         h.now = 2000.;
-        h.message(socket, PONG);
+        h.message(socket, ACK);
         assert_eq!(h.timers.iter().filter(|(_, at)| *at == 31_000.).count(), 1);
         h.advance(31_000.);
         assert_eq!(h.closed, [socket]);
     }
+}
+
+// On a keyed account's single socket, account frames arrive while the public streams are dead;
+// only public market data keeps it, so the engine's data watch (and a repair) can act.
+#[test]
+fn account_frames_and_pongs_never_keep_a_keyed_socket_whose_public_streams_died() {
+    let mut h = Harness::private();
+    let socket = h.socket();
+    h.message(socket, STATE);
+    h.message(socket, MIDS);
+    let mids_at = h.now;
+    while h.closed.is_empty() && h.now < mids_at + 60_000. {
+        let at = h
+            .timers
+            .iter()
+            .map(|(_, at)| *at)
+            .fold(h.now + 5_000., f64::min);
+        while let Some((timer, due)) = h.timers.iter().copied().find(|(_, due)| *due <= at) {
+            h.timers.retain(|(id, _)| *id != timer);
+            h.now = h.now.max(due);
+            h.event(Event::TimerFired { timer });
+        }
+        h.now = at;
+        if h.closed.is_empty() {
+            h.message(socket, PONG);
+            h.message(socket, STATE);
+        }
+    }
+    assert_eq!(h.closed, [socket]);
+    let silent_for = h.closed_at[0].1 - mids_at;
+    assert!(
+        (30_000. ..35_000.).contains(&silent_for),
+        "closed after {silent_for} ms"
+    );
 }

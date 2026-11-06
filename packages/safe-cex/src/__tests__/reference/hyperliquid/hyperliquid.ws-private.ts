@@ -169,60 +169,15 @@ export class HyperliquidPrivateWebSocket extends BaseWebSocket<HyperliquidExchan
       }),
     );
 
-    // Subscribe to HIP-3 DEX topics
-    // For HIP-3 (builder-deployed assets), we need dex parameter on each channel
-    // See: https://hyperliquid.gitbook.io/hyperliquid-docs
+    // HIP-3 DEX topics: only clearinghouseState is per dex. fastAssetCtxs
+    // carries every dex's mids and marks, and the venue ignores `dex` on
+    // userFills, orderUpdates and userEvents ("Already subscribed").
     for (const dexName of this.parent.hip3DexNames) {
-      // allMids with dex is the reliable HIP-3 last-price stream.
-      this.sendWithDiagnostics(
-        JSON.stringify({
-          method: 'subscribe',
-          subscription: {
-            type: 'allMids',
-            dex: dexName,
-          },
-        }),
-      );
-      // clearinghouseState with dex for faster real-time position updates
-      // This is the authoritative position snapshot for the DEX.
       this.sendWithDiagnostics(
         JSON.stringify({
           method: 'subscribe',
           subscription: {
             type: 'clearinghouseState',
-            user,
-            dex: dexName,
-          },
-        }),
-      );
-      // userFills with dex for instant HIP-3 fill notifications
-      this.sendWithDiagnostics(
-        JSON.stringify({
-          method: 'subscribe',
-          subscription: {
-            type: 'userFills',
-            user,
-            dex: dexName,
-          },
-        }),
-      );
-      // orderUpdates with dex for incremental order status changes
-      this.sendWithDiagnostics(
-        JSON.stringify({
-          method: 'subscribe',
-          subscription: {
-            type: 'orderUpdates',
-            user,
-            dex: dexName,
-          },
-        }),
-      );
-      // userEvents with dex for comprehensive order lifecycle events
-      this.sendWithDiagnostics(
-        JSON.stringify({
-          method: 'subscribe',
-          subscription: {
-            type: 'userEvents',
             user,
             dex: dexName,
           },
