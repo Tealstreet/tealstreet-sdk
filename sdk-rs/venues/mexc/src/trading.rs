@@ -2003,6 +2003,9 @@ fn write_failure(
         if !refused {
             return error.outcome(Outcome::Unknown);
         }
+        if !protective {
+            return error;
+        }
         let row = envelope.data.and_then(|data| {
             match serde_json::from_str::<ResultRows<'_>>(data.get()).ok()? {
                 ResultRows::One(row) => Some(row),

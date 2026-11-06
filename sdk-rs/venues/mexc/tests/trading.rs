@@ -3440,3 +3440,48 @@ fn protective_stop_limit_quantity_only_recreate_keeps_both_native_prices() {
     assert_eq!(body["vol"], 70.);
     assert_eq!(body["orderType"], 1.);
 }
+
+#[test]
+fn ordinary_single_row_refusals_keep_the_unclassified_contract() {
+    for code in [2006, 500, 8888] {
+        let mut e = ready();
+        e.handle(
+            200.,
+            Event::Command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![order()],
+            }),
+        );
+        let request = requests(&mut e).remove(0);
+        reply(
+            &mut e,
+            &request,
+            300.,
+            &format!(
+                r#"{{"success":true,"code":0,"data":{{"orderId":"0","errorCode":{code},"errorMsg":"ordinary row refusal"}}}}"#,
+            ),
+        );
+        let actions = drained(&mut e);
+        assert!(
+            !actions.iter().any(|a| matches!(a, Action::Http(_))),
+            "{actions:?}"
+        );
+        let errors: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(errors.len(), 1, "code={code}: {actions:?}");
+        let error = errors[0];
+        assert_eq!(error.outcome, None, "code={code}: {error:?}");
+        assert_eq!(error.kind, None, "code={code}: {error:?}");
+        assert_eq!(error.venue_code, None, "code={code}: {error:?}");
+        assert_eq!(error.venue_message, None, "code={code}: {error:?}");
+        assert_eq!(
+            error.message,
+            format!("MEXC refused the order [{code}]: ordinary row refusal")
+        );
+    }
+}
