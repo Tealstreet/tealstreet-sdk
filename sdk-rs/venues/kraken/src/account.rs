@@ -1792,13 +1792,28 @@ mod startup_cause_tests {
             Kraken::startup_reads(p)
         }
         fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-            cx.request(
+            use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
+            let context = cx
+                .http_context(
+                    Scope::Background,
+                    Policy {
+                        operation: Operation::Read,
+                        credential: None,
+                        timeout_ms: 120_000,
+                        pacing: None,
+                        retry: RetryPolicy::Never,
+                    },
+                )
+                .unwrap();
+            cx.request_managed(
+                context,
+                None,
                 Method::Get,
                 "https://startup.test/orders".into(),
-                vec![],
                 None,
-                Pending::Account(Request::new(Scope::Orders, 0, 0)),
-            );
+                Pending::Account(Request::new(super::Scope::Orders, 0, 0)),
+            )
+            .unwrap_or_else(|(_, reason)| panic!("startup parent queue refused: {reason:?}"));
         }
         fn on_response(&mut self, cx: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {
             self.0.account_refresh(cx);
@@ -1825,16 +1840,18 @@ mod startup_cause_tests {
         }
         let mut engine = safe_cex_engine::test_support::seeded_engine(RefreshOnly(native));
         engine.set_account_startup(true);
-        engine.start(0.);
-        let requests: Vec<_> = engine
-            .drain_actions()
-            .filter_map(|a| match a {
-                Action::Http(r) => Some(r),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(requests.len(), 1);
         let now = (u64::MAX / 1000) as f64 + 1_000_000.;
+        let started = now - 1_000.;
+        engine.start(started);
+        let requests: Vec<_> =
+            safe_cex_engine::test_support::prepared_actions(&mut engine, started)
+                .into_iter()
+                .filter_map(|a| match a {
+                    Action::Http(r) => Some(r),
+                    _ => None,
+                })
+                .collect();
+        assert_eq!(requests.len(), 1);
         engine.handle(
             now,
             Event::HttpResponse {
