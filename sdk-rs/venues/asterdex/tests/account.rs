@@ -2127,3 +2127,22 @@ fn an_unlisted_code_on_the_replacement_is_unknown_and_never_put_back() {
     );
     assert_unknown_stop(&h);
 }
+
+#[test]
+fn the_replacement_keeps_the_originals_price_protection() {
+    for protect in [true, false] {
+        let mut h = guarded_row(&format!(
+            r#"{{"orderId":991,"symbol":"BTCUSDT","type":"STOP_MARKET","side":"BUY","price":"0","stopPrice":"110","origQty":"2","executedQty":"0","reduceOnly":true,"closePosition":false,"workingType":"MARK_PRICE","priceProtect":{protect},"clientOrderId":"original-stop","positionSide":"BOTH","status":"NEW"}}"#
+        ));
+        amend_guarded_stop(&mut h, 105.0);
+        let cancel = h.take("/order");
+        h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
+        let replacement = h.take("/order");
+        let expected = if protect {
+            "priceProtect=TRUE"
+        } else {
+            "priceProtect=FALSE"
+        };
+        assert!(replacement.url.contains(expected), "{}", replacement.url);
+    }
+}

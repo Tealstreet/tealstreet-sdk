@@ -1462,7 +1462,7 @@ impl AsterDex {
             ..empty_order()
         };
         // Format and validate before canceling the live order.
-        let place = self.plan_place_inner(cx, &[replacement], Some(id), position_side)?;
+        let mut place = self.plan_place_inner(cx, &[replacement], Some(id), position_side)?;
         if let Some(error) = place.error {
             return Err(error.message);
         }
@@ -1500,6 +1500,17 @@ impl AsterDex {
                 reference: native.reference,
             };
             guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
+            // The replacement keeps the original's price protection, as its put-back does.
+            if let Some(step) = place.steps.front_mut() {
+                step.query = std::mem::replace(&mut step.query, Query::new()).str(
+                    "priceProtect",
+                    if native.price_protect {
+                        "TRUE"
+                    } else {
+                        "FALSE"
+                    },
+                );
+            }
             job.guard = Some(guard);
             job.restore = Some(Planned {
                 method: Method::Post,
