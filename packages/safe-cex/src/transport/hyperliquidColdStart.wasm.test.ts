@@ -76,6 +76,7 @@ it.each([0, 8000])(
     const stores: DefaultStore[] = [];
     const events: EngineEvent[] = [];
     const loadedAt = [0, 0, 0, 0];
+    const connectCounts = [0, 0, 0, 0];
     const sends: Array<{
       account: number;
       type: string;
@@ -190,6 +191,7 @@ it.each([0, 8000])(
           return { status: 200, headers: '', body: new TextEncoder().encode(JSON.stringify(body)) };
         },
         connect(_url, handlers) {
+          connectCounts[account] += 1;
           let closed = false;
           const deliver = (value: unknown) => {
             if (!closed) handlers.onMessage(JSON.stringify(value));
@@ -301,6 +303,7 @@ it.each([0, 8000])(
       if (allScopesRead && ancillaryComplete && stores.every((store) => Object.values(store.loaded).every(Boolean)))
         break;
     }
+    expect(connectCounts).toEqual([1, 1, 1, 1]);
     const nextRead = sends[amendIndex];
     expect(nextRead?.type).toBe('orderStatus');
     expect(nextRead?.readClass).toBe('critical');
@@ -346,7 +349,7 @@ it.each([0, 8000])(
     ))
       expect(row.readClass).toBe('normal');
     expect(Math.max(...loadedAt)).toBeLessThan(roleLatencyMs + 10_000);
-    expect(Date.now() - startedAt).toBeLessThan(64_000);
+    expect(Date.now() - startedAt).toBeLessThan(60_000);
     expect(Math.max(...loadedAt)).toBeLessThan(60_000);
     expect(stores.map((store) => store.balance.total)).toEqual([1000, 1001, 1002, 1003]);
     expect(sends.filter((row) => row.type === 'metaAndAssetCtxs' || row.type === 'perpDexs')).toHaveLength(12);
