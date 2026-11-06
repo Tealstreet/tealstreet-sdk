@@ -521,7 +521,12 @@ impl Lighter {
                     sl_trigger_type: None,
                     client_order_id: None,
                     close: old.close,
-                    max_slippage_pct: None,
+                    max_slippage_pct: self
+                        .protection
+                        .originals
+                        .get(&old.id)
+                        .filter(|original| original.observed == old)
+                        .and_then(protection::Original::market_slippage_pct),
                     stp_mode: None,
                     bybit_bbo: None,
                     bybit_slippage_tolerance_ticks: None,

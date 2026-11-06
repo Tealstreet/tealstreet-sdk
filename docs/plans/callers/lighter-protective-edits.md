@@ -75,6 +75,14 @@ user limit. It cannot change side, type, reduce-only, TIF or expiry. Price-only 
 retain the original venue amount. A stale/missing mark or any source/position
 change vetoes the final managed Claim. Frame-fed edits still refuse stale.
 
+Market-stop edits recover their effective slippage percentage from the accepted
+original native execution bound and trigger. Both guarded replacements and tx17
+apply that percentage to the new trigger using the existing placement rounding.
+This preserves the venue-rounded band; the original unrounded caller percentage
+is not retained. Wrong-side or greater-than-50% bounds are not recoverable under
+the placement policy, so they use the account setting as before. Ordinary
+placement is unchanged; stop-limits continue to preserve their explicit limit.
+
 Stop-limit edits refuse before any write if the kept sell limit exceeds the new
 trigger or the kept buy limit is below it; equality is allowed. The user must
 re-place with their intended limit. The PR 1 guarded path already refused all
