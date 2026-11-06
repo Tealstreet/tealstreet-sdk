@@ -42,6 +42,14 @@ fn write(actions: Vec<Action>) -> HttpRequest {
         })
         .unwrap()
 }
+fn queued(actions: Vec<Action>) {
+    assert_eq!(
+        actions.len(),
+        1,
+        "only the original caller expiry is armed while queued"
+    );
+    assert!(matches!(actions[0], Action::SetTimer { at_ms, .. } if at_ms == NOW + 120_000.));
+}
 fn reply(
     e: &mut Engine<Hyperliquid>,
     request: &HttpRequest,
@@ -224,8 +232,8 @@ fn unlisted_native_refusal_and_lost_response_are_unknown_without_retry() {
 fn queued_deadline_is_rechecked_before_signing_and_next_owner_progresses() {
     let mut e = engine();
     let first = write(command(&mut e, 7, "", NOW));
-    assert!(command(&mut e, 8, ",\"time\":1800000005000", NOW).is_empty());
-    assert!(command(&mut e, 9, "", NOW).is_empty());
+    queued(command(&mut e, 8, ",\"time\":1800000005000", NOW));
+    queued(command(&mut e, 9, "", NOW));
     let actions = reply(&mut e, &first, 200, OK, NOW + 1.0);
     let actions = support::advance_packet_timers(&mut e, actions, NOW + 334.0);
     failed(&actions, 8, Outcome::NotSent);
@@ -264,7 +272,7 @@ fn refused_malformed_and_lost_replies_release_the_next_owner_once() {
     for scenario in [0, 1, 2] {
         let mut e = engine();
         let r = write(command(&mut e, 7, "", NOW));
-        assert!(command(&mut e, 8, "", NOW).is_empty());
+        queued(command(&mut e, 8, "", NOW));
         let actions = if scenario == 2 {
             e.handle(
                 NOW + 1.0,

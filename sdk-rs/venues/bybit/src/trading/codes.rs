@@ -199,11 +199,34 @@ pub(crate) const MARGIN_MODE_ALREADY_SET: CodeTable = CodeTable {
     ..BYBIT
 };
 
+const fn protective_rows() -> [Row; BYBIT.rows.len()] {
+    let mut rows = [row(Key::Int(0), Verdict::Unknown(None)); BYBIT.rows.len()];
+    let mut index = 0;
+    while index < rows.len() {
+        rows[index] = BYBIT.rows[index];
+        if let Verdict::Refused(ErrorKind::RateLimited) = rows[index].verdict {
+            rows[index].verdict = Verdict::Unknown(Some(ErrorKind::RateLimited));
+        }
+        if let Verdict::Satisfied(SatisfiedIntent::Setting) = rows[index].verdict {
+            rows[index].verdict = Verdict::Unknown(None);
+        }
+        index += 1;
+    }
+    rows
+}
+
+pub(crate) const PROTECTIVE: CodeTable = CodeTable {
+    rows: &protective_rows(),
+    unlisted: Verdict::Unknown(None),
+    ..BYBIT
+};
+
 #[cfg(test)]
 #[test]
 fn the_bybit_table_satisfies_the_engine_invariants() {
     safe_cex_engine::classify::assert_table(&BYBIT);
     safe_cex_engine::classify::assert_table(&MARGIN_MODE_ALREADY_SET);
+    safe_cex_engine::classify::assert_table(&PROTECTIVE);
 }
 
 #[cfg(test)]
