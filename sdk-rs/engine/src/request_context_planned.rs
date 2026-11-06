@@ -473,12 +473,21 @@ impl<P> Cx<'_, P> {
                 ),
                 policy,
             };
-            self.admit_plan_root(preflight, prepared, physical, None)
+            self.core()
+                .admit_plan_root(preflight, prepared, physical, None)
         }
         #[cfg(not(feature = "serial-plans"))]
-        self.admit_plan_root(preflight, declaration, physical)
+        self.core()
+            .admit_plan_root(preflight, declaration, physical)
     }
 
+    #[inline]
+    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
+        self.core_ref().plan_slots(plan)
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
     /// A serial Plan shares the whole declared admission transaction, with its
     /// own unbounded root and streamed journal.
     fn admit_plan_root(
@@ -828,13 +837,6 @@ impl<P> Cx<'_, P> {
         Ok((handle, execution))
     }
 
-    #[inline]
-    pub fn plan_slots(&self, plan: &Plan) -> Result<Vec<Slot>, Error> {
-        self.core_ref().plan_slots(plan)
-    }
-}
-
-impl crate::engine::CoreCx<'_> {
     // Only some feature combinations call this.
     #[cfg_attr(feature = "http-plans", allow(dead_code))]
     #[inline]

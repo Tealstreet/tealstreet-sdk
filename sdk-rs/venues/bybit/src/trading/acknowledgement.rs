@@ -161,6 +161,22 @@ fn object(raw: &RawValue) -> Result<Fields<'_>, Malformed> {
     serde_json::from_str(raw.get()).map_err(|_| Malformed)
 }
 
+/// Trading-stop returns an empty result, without per-order echoes or statuses.
+pub(crate) fn position_setting(
+    result: Option<&RawValue>,
+    ext: Option<&RawValue>,
+) -> Result<(), Malformed> {
+    if !object(result.ok_or(Malformed)?)?.0.is_empty() {
+        return Err(Malformed);
+    }
+    if let Some(ext) = ext
+        && !object(ext)?.0.is_empty()
+    {
+        return Err(Malformed);
+    }
+    Ok(())
+}
+
 /// A bounded array of raw elements.
 fn elements(raw: &RawValue) -> Result<Vec<&RawValue>, Malformed> {
     if !is_array(raw) {

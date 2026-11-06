@@ -30,10 +30,28 @@ are ignored. Shared ticker input updates native state without replacing local
 market metadata or account settings. Shared quote changes invoke native account
 revaluation so UPNL and available margin follow provider prices.
 
+## Rust queued write intent
+
+Native writes capture the original caller wait before entering the venue queue;
+an amend caps it at five seconds in that same capture. Read owner/deadline
+bindings, read timers and both final Claim guards copy this one bound.
+Unsent queued or builder/prerequisite-waiting jobs expire through bounded owner
+custody, and the first physical Claim checks the same exclusive deadline even
+when the timer has not fired. Queue, preparation, signing and pacing never renew
+it. An already released write keeps its response window and serial continuation;
+an amend whose cancel landed must still place its replacement after that bound.
+
+Queued independent cancels and protective placements may pass older placements
+only when their markets and order/client identities are disjoint from every
+older job. Same-market work and account-wide schedule controls remain barriers.
+The active owner is never preempted; nonce custody and 334 ms release pacing are
+unchanged. Expiry is a typed Timeout/NotSent for an entirely unsent command.
+
 ## Rust amendments
 
 An amend resolves account identity and fresh partial-fill sizing within the
-exclusive five-second deadline from command receipt before cancelling. Read
+exclusive deadline, at most five seconds and capped by the caller's original
+remaining wait, before cancelling. Read
 receipts and the final cancel claim enforce it independently of timer order.
 The deadline never abandons a replacement after a cancel already left. Identity
 and sizing reads/timers retain the genuine amend preflight owner and original
