@@ -664,3 +664,41 @@ fn an_unknown_guarded_cancel_never_sends_a_replacement_or_claims_lost_protection
         assert!(!h.requests.iter().any(|r| r.method == Method::Post));
     }
 }
+
+#[test]
+fn a_client_only_or_conflicting_put_back_ack_cannot_claim_protection_restored() {
+    for (full, reply) in [
+        (false, r#"{"code":"00000","data":{"clientOid":"foreign"}}"#),
+        (
+            true,
+            r#"{"code":"00000","data":{"orderId":"restored","clientOid":"foreign"}}"#,
+        ),
+    ] {
+        let mut h = uta();
+        if full {
+            full_stop(&mut h);
+        } else {
+            trailing(&mut h);
+        }
+        h.command(edit(
+            if full { "full" } else { "trail" },
+            Some(if full { 85.0 } else { 96.0 }),
+            None,
+        ));
+        h.respond(
+            "/cancel-strategy-order",
+            200,
+            r#"{"code":"00000","data":null}"#,
+        );
+        h.respond(
+            "/place-strategy-order",
+            200,
+            r#"{"code":"40017","msg":"replace refused","data":null}"#,
+        );
+        h.respond("/place-strategy-order", 200, reply);
+        let error = h.failures.last().unwrap();
+        assert_eq!(error.outcome, Some(Outcome::Unknown));
+        assert_eq!(error.protection, None);
+        assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+    }
+}

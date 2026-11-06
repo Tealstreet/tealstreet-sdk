@@ -2977,6 +2977,28 @@ impl BitgetFutures {
                 ));
             }
         }
+        if error.is_none() && job.error.is_some() && request.call.is_place() {
+            let proven = parsed
+                .as_ref()
+                .ok()
+                .and_then(|reply| reply.data.as_ref())
+                .is_some_and(|data| {
+                    let client = data.client_oid.text();
+                    !data.order_id.text().is_empty()
+                        && (client.is_empty()
+                            || request
+                                .call
+                                .payload
+                                .client_oid
+                                .as_ref()
+                                .is_none_or(|expected| expected == client.as_ref()))
+                });
+            if !proven {
+                unproven = true;
+                answer = Answer::Unproven;
+                error = Some("Bitget put-back identity is unproven; check Open Orders".into());
+            }
+        }
         if error.is_none() {
             let data = parsed.as_ref().ok().and_then(|r| r.data.as_ref());
             if let Effect::Place { expected } = request.call.effect {
