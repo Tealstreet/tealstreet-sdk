@@ -1663,6 +1663,51 @@ fn a_refused_put_back_is_typed_unprotected_and_never_retried() {
     assert!(writes(&h).is_empty(), "{:?}", writes(&h));
 }
 
+const RATE_LIMITED: &str = r#"{"code":"429000","msg":"Too Many Requests"}"#;
+
+/// A 429 may have placed the order, so it is unknown: never "refused" or Unprotected.
+fn assert_unknown_stop(h: &Harness) {
+    let error = failure(h);
+    assert!(
+        error
+            .message
+            .contains("outcome is unknown. Check Open Orders"),
+        "{}",
+        error.message
+    );
+    assert!(!error.message.contains("both refused"), "{}", error.message);
+    assert_eq!(error.outcome, Some(Outcome::Unknown));
+    assert_eq!(error.protection, None);
+    assert!(writes(h).is_empty(), "{:?}", writes(h));
+}
+
+#[test]
+fn a_rate_limited_put_back_is_unknown_not_unprotected() {
+    for (status, body) in [(429, RATE_LIMITED), (200, RATE_LIMITED)] {
+        let mut h = Harness::new();
+        resting_stop(&mut h);
+        amend_stop(&mut h, "old", 120.0);
+        let replacement = to_replacement(&mut h, "old", 0.0);
+        h.response(&replacement, 200, REFUSED);
+        h.pace();
+        let restore = h.take("/api/v1/");
+        h.response(&restore, status, body);
+        h.pace();
+        assert_unknown_stop(&h);
+    }
+}
+
+#[test]
+fn a_rate_limited_replacement_is_unknown_and_never_put_back() {
+    let mut h = Harness::new();
+    resting_stop(&mut h);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    h.response(&replacement, 429, RATE_LIMITED);
+    h.pace();
+    assert_unknown_stop(&h);
+}
+
 #[test]
 fn a_stop_that_filled_during_its_cancel_is_not_put_back() {
     let mut h = Harness::new();
