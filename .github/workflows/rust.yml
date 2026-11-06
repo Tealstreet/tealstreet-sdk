@@ -104,7 +104,11 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           WASM_SIZE_COMPARE_PR: ${{ inputs.wasm_size_compare_pr }}
         run: |
-          if [ '${{ github.event_name }}' = workflow_dispatch ] && { [ '${{ inputs.cpu_budget_diagnostic }}' = true ] || [ -n "$WASM_SIZE_COMPARE_PR" ]; }; then
+          if [ '${{ github.event_name }}' = workflow_dispatch ] && [ -n "$WASM_SIZE_COMPARE_PR" ]; then
+            echo 'relevant=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ '${{ github.event_name }}' = workflow_dispatch ] && [ '${{ inputs.cpu_budget_diagnostic }}' = true ]; then
             echo 'relevant=false' >> "$GITHUB_OUTPUT"
           else
             node sdk-rs/harness/ci-scope.mjs
