@@ -2651,3 +2651,73 @@ fn another_fresh_ticker_field_never_refreshes_a_stale_or_missing_trigger_referen
         );
     }
 }
+
+#[test]
+fn missing_order_edits_never_replace_or_put_back_without_cancel_proof() {
+    for (code, message) in [
+        (109400, "order not exist"),
+        (109421, "order does not exist"),
+    ] {
+        for shape in 0..4 {
+            let mut h = if shape < 2 {
+                Harness::new(Some((order(), "LIMIT")))
+            } else {
+                guarded_stop(shape == 3)
+            };
+            let original = h.engine.store().order(&order().id).unwrap().clone();
+            h.command(Command::AmendOrder {
+                command: 1,
+                id: original.id.clone(),
+                price: (shape != 0).then_some(if shape < 2 { 96. } else { 91. }),
+                amount: (shape == 0).then_some(2.),
+            });
+            assert_eq!(h.requests.len(), 1, "shape {shape}: {:?}", h.done);
+            h.reply(&serde_json::json!({"code":code,"msg":message}).to_string());
+            assert!(
+                h.requests.is_empty(),
+                "no follow-up writes for shape {shape}"
+            );
+            let error = &h.failures[0];
+            assert_eq!(
+                error.message,
+                "BingX order was already filled or cancelled; check Open Orders"
+            );
+            assert_ne!(error.kind, Some(safe_cex_engine::ErrorKind::InvalidInput));
+            assert_eq!(error.protection, None);
+            assert_eq!(h.engine.store().order(&original.id), Some(&original));
+        }
+    }
+}
+
+#[test]
+fn missing_order_text_on_placement_keeps_the_generic_parameter_classification() {
+    let mut h = Harness::new(None);
+    h.place(vec![opts()]);
+    h.reply(r#"{"code":109400,"msg":"order not exist"}"#);
+    assert_eq!(
+        h.failures[0].kind,
+        Some(safe_cex_engine::ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
+    assert!(h.requests.is_empty());
+}
+
+#[test]
+fn a_rate_limited_or_server_failure_keeps_unknown_words_even_with_missing_order_text() {
+    for status in [429, 500] {
+        let mut h = guarded_stop(true);
+        edit_stop(&mut h);
+        h.reply_status(status, r#"{"code":109400,"msg":"order not exist"}"#);
+        assert!(h.requests.is_empty());
+        assert!(
+            h.failures[0].message.contains("outcome is unknown"),
+            "{:?}",
+            h.failures
+        );
+        assert!(!h.failures[0].message.contains("already filled"));
+        assert_eq!(h.failures[0].protection, None);
+    }
+}

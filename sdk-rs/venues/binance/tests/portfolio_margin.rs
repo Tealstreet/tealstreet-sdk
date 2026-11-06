@@ -468,3 +468,115 @@ fn pm_rejected_numeric_row_cannot_change_retained_stop_metadata() {
     );
     pm_amend_stays_refused(&mut h);
 }
+
+const PM_TRAILING: &str = r#"[{"newClientStrategyId":"trail","strategyId":777,"strategyStatus":"NEW","strategyType":"TRAILING_STOP_MARKET","origQty":"0.010","price":"0","reduceOnly":true,"side":"SELL","positionSide":"BOTH","stopPrice":"98","symbol":"BTCUSDT","activatePrice":"103","priceRate":"1.5","bookTime":1,"updateTime":1,"timeInForce":"GTC","workingType":"CONTRACT_PRICE","priceProtect":false}]"#;
+
+fn trailing(price: f64) -> PlaceOrderOpts {
+    let mut order = limit(0.01, price);
+    order.kind = OrderType::TrailingStopLoss;
+    order.side = OrderSide::Sell;
+    order.reduce_only = Some(true);
+    order
+}
+
+#[test]
+fn a_pm_trailing_stop_is_reduce_only_inside_the_5_percent_callback_range() {
+    let mut h = ready();
+    h.requests.clear();
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 31,
+        orders: vec![trailing(93.0)],
+    }));
+    assert!(
+        h.requests.iter().all(|r| r.method == Method::Get),
+        "{:?}",
+        h.paths()
+    );
+    let refused = h.result(31).unwrap().as_ref().unwrap_err();
+    assert!(refused.contains("0.1%-5% callback range"), "{refused}");
+
+    h.event(Event::Command(Command::PlaceOrders {
+        command: 32,
+        orders: vec![trailing(98.0)],
+    }));
+    let sent = h.take("/papi/v1/um/conditional/order");
+    assert_eq!(
+        param(&sent.url, "strategyType").as_deref(),
+        Some("TRAILING_STOP_MARKET")
+    );
+    assert_eq!(param(&sent.url, "callbackRate").as_deref(), Some("2"));
+    assert_eq!(param(&sent.url, "reduceOnly").as_deref(), Some("true"));
+}
+
+#[test]
+fn a_refused_pm_trailing_replacement_puts_back_the_native_rate_and_activation_price() {
+    let mut h = Harness::started(Options {
+        key: Some("api-key".into()),
+        secret: Some("secret".into()),
+        portfolio_margin: true,
+        ..Options::default()
+    });
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond(
+        "/papi/v1/um/leverageBracket",
+        200,
+        r#"[{"symbol":"BTCUSDT","brackets":[{"bracket":1,"initialLeverage":125}]}]"#,
+    );
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    h.respond("/papi/v1/listenKey", 200, r#"{"listenKey":"pmkey"}"#);
+    h.respond(
+        "/papi/v1/um/positionSide/dual",
+        200,
+        r#"{"dualSidePosition":false}"#,
+    );
+    h.respond("/papi/v1/um/positionRisk", 200, POSITION_RISK);
+    h.respond("/papi/v1/balance", 200, BALANCE);
+    h.respond("/papi/v1/um/openOrders", 200, "[]");
+    h.respond("/papi/v1/um/conditional/openOrders", 200, PM_TRAILING);
+    for path in ["/public/ws", "/market/ws", "/pm/ws"] {
+        let socket = h.socket(path).unwrap();
+        h.event(Event::WsOpened { socket });
+    }
+    h.answer_open_position_read();
+    h.requests.clear();
+    h.event(Event::Command(Command::AmendOrder {
+        command: 33,
+        id: "trail".into(),
+        price: Some(97.0),
+        amount: None,
+    }));
+    let cancel = h.take("/papi/v1/um/conditional/order");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"symbol":"BTCUSDT","strategyId":777,"newClientStrategyId":"trail","strategyStatus":"CANCELED"}"#,
+    );
+    let replacement = h.take("/papi/v1/um/conditional/order");
+    assert_eq!(
+        param(&replacement.url, "callbackRate").as_deref(),
+        Some("3")
+    );
+    assert_eq!(
+        param(&replacement.url, "reduceOnly").as_deref(),
+        Some("true")
+    );
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let put_back = h.take("/papi/v1/um/conditional/order");
+    assert_eq!(put_back.method, Method::Post);
+    assert_eq!(param(&put_back.url, "callbackRate").as_deref(), Some("1.5"));
+    assert_eq!(
+        param(&put_back.url, "activationPrice").as_deref(),
+        Some("103")
+    );
+    assert_eq!(param(&put_back.url, "activatePrice"), None);
+    assert_eq!(param(&put_back.url, "reduceOnly").as_deref(), Some("true"));
+}
