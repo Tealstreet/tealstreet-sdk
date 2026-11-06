@@ -112,6 +112,10 @@ trait AnyEngine {
     fn sign_meta(&self, _: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
         None
     }
+    #[cfg(feature = "hyperliquid")]
+    fn http_read_class(&self, _: RequestId) -> safe_cex_engine::HttpReadClass {
+        safe_cex_engine::HttpReadClass::Normal
+    }
     fn http_preparation_pending(&self, _: safe_cex_engine::request_context::Preparation) -> bool {
         false
     }
@@ -265,6 +269,10 @@ impl<V: Venue> AnyEngine for Engine<V> {
     #[cfg(feature = "sign-meta")]
     fn sign_meta(&self, task: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
         Engine::sign_meta(self, task)
+    }
+    #[cfg(feature = "hyperliquid")]
+    fn http_read_class(&self, request: RequestId) -> safe_cex_engine::HttpReadClass {
+        Engine::http_read_class(self, request)
     }
     fn http_preparation_pending(
         &self,
@@ -2392,7 +2400,7 @@ mod tests {
                     || any(&ORDERLY, venue)
                 {
                     LeverageQuery::OnRead
-                } else if any(&["mexc", "woo", "kraken"], venue) {
+                } else if any(&["mexc", "woo", "kraken", "hyperliquid"], venue) {
                     LeverageQuery::OnMetadata
                 } else {
                     LeverageQuery::Settings

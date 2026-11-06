@@ -369,6 +369,7 @@ struct Parked {
 }
 
 pub struct Registry {
+    pub public_topics: Arc<crate::public_topics::PublicTopics>,
     pub user_drains: crate::user_drain::Users,
     pub router_leases: Arc<crate::router_lease::Users>,
     pub interruptions: Arc<crate::interruption::Notices>,
@@ -403,10 +404,11 @@ pub struct Registry {
 /// A chart's forced reset repairs its upstream stream at most this often per account and topic.
 pub const REPAIR_EVERY: Duration = Duration::from_secs(30);
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Presence {
     socket_at: std::time::Instant,
     told_at: Option<std::time::Instant>,
+    chat_handle: Option<crate::auth::ChatHandle>,
 }
 
 /// How long after its session is disposed for no browser a user may stay away unlogged.
@@ -421,6 +423,14 @@ pub fn user_tag(user: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn user_log_label(user: &str, chat_handle: Option<&crate::auth::ChatHandle>) -> String {
+    let tag = user_tag(user);
+    match chat_handle {
+        Some(handle) => format!("{tag} chat={}", handle.as_str()),
+        None => tag,
+    }
 }
 
 /// The operator's drain of this box before a restart.
@@ -697,6 +707,7 @@ fn usable_builder(builder: &crate::envelope::HyperliquidBuilder) -> bool {
 impl Registry {
     pub fn new(threads: EngineThreads, account_flush: Duration, resume_grace: Duration) -> Self {
         Self {
+            public_topics: Arc::default(),
             user_drains: crate::user_drain::Users::default(),
             router_leases: Arc::new(crate::router_lease::Users::new(Default::default())),
             interruptions: Default::default(),
@@ -989,7 +1000,7 @@ impl Registry {
         proxy_token.set(token);
         let tokens = proxy_token.provider();
         let mut config = self.engine_config.clone();
-        config.log_label = Some(format!("{} {} {venue}", user_tag(user), init.account_name));
+        config.log_label = Some(self.account_log_label(user, &init.account_name, &venue));
         // A private account always signs through the browser (asserted above).
         config.signing_mode = Some(if public_only {
             "public"
@@ -1036,6 +1047,9 @@ impl Registry {
             account: init.account_name.clone(),
             venue: venue.clone(),
         };
+        if public_only {
+            config.interest_observer = Some(self.public_topics.observer(&venue));
+        }
         let (spawned, receive) = tokio::sync::oneshot::channel();
         let placed = self.threads.place(move |placement| {
             let mut transport = NetworkTransport::with_routing(plan, tokens).with_venue(&venue);
@@ -1119,16 +1133,32 @@ impl Registry {
         }
     }
 
-    /// A socket of `user` opened: they are back.
-    pub fn user_connected(&self, user: &str) {
+    pub(crate) fn account_log_label(&self, user: &str, name: &str, venue: &str) -> String {
+        let presence = self.presence.lock().unwrap();
+        let handle = presence
+            .get(user)
+            .and_then(|seen| seen.chat_handle.as_ref());
+        format!("{} {name} {venue}", user_log_label(user, handle))
+    }
+
+    /// A socket of `user` opened: retain only its validated public handle for logs.
+    pub fn user_connected(&self, user: &str, chat_handle: Option<&crate::auth::ChatHandle>) {
+        Log::info(&format!(
+            "hosted user connected: {}",
+            user_log_label(user, chat_handle)
+        ));
         let now = std::time::Instant::now();
         let mut presence = self.presence.lock().unwrap();
         presence
             .entry(user.to_owned())
-            .and_modify(|seen| seen.socket_at = now)
+            .and_modify(|seen| {
+                seen.socket_at = now;
+                seen.chat_handle = chat_handle.cloned();
+            })
             .or_insert(Presence {
                 socket_at: now,
                 told_at: None,
+                chat_handle: chat_handle.cloned(),
             });
     }
 
@@ -1144,6 +1174,7 @@ impl Registry {
         let seen = presence.entry(user.to_owned()).or_insert(Presence {
             socket_at: disposed_at,
             told_at: None,
+            chat_handle: None,
         });
         if seen.socket_at > disposed_at
             || seen
@@ -1155,7 +1186,7 @@ impl Registry {
         seen.told_at = Some(now);
         Some(format!(
             "hosted user did not return: {} after {} min",
-            user_tag(user),
+            user_log_label(user, seen.chat_handle.as_ref()),
             now.duration_since(disposed_at).as_secs() / 60
         ))
     }
@@ -2569,6 +2600,46 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn public_chat_handle_labels_keep_the_tag_and_do_not_cross_users() {
+        let registry = Registry::new(
+            EngineThreads::start(1).unwrap(),
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+        );
+        let user = "auth0|opaque-user";
+        let handle = crate::auth::ChatHandle::parse("Trader-063249").unwrap();
+        registry.user_connected(user, Some(&handle));
+        assert_eq!(
+            registry.account_log_label(user, "existing-account", "bingx"),
+            format!(
+                "{} chat=Trader-063249 existing-account bingx",
+                user_tag(user)
+            )
+        );
+        assert_eq!(
+            registry.account_log_label("other-user", "existing-account", "bingx"),
+            format!("{} existing-account bingx", user_tag("other-user"))
+        );
+        let disposed = std::time::Instant::now();
+        let line = registry
+            .did_not_return(user, disposed, disposed + RETURN_WAIT)
+            .unwrap();
+        assert_eq!(
+            line,
+            format!(
+                "hosted user did not return: {} chat=Trader-063249 after 5 min",
+                user_tag(user)
+            )
+        );
+        assert!(!line.contains(user) && !line.contains("existing-account"));
+        registry.user_connected(user, None);
+        assert_eq!(
+            registry.account_log_label(user, "existing-account", "bingx"),
+            format!("{} existing-account bingx", user_tag(user))
+        );
+    }
+
+    #[test]
     fn a_user_who_does_not_return_is_logged_by_tag_once_an_hour() {
         let registry = Registry::new(
             EngineThreads::start(1).unwrap(),
@@ -2600,7 +2671,7 @@ pub(crate) mod tests {
         let back = "auth0|returning";
         let gone = std::time::Instant::now();
         std::thread::sleep(Duration::from_millis(2));
-        registry.user_connected(back);
+        registry.user_connected(back, None);
         assert_eq!(
             registry.did_not_return(back, gone, gone + Duration::from_secs(300)),
             None

@@ -338,3 +338,50 @@ for (const [code, label] of ['discovery', 'orderRead', 'orderWrite', 'history', 
     r.host.dispose();
   });
 }
+
+
+for (const [nativeClass, expected] of [[undefined, 'normal'], [0, 'normal'], [1, 'critical'], [2, 'bulk'], [3, 'reconciliation'], [99, 'normal']]) {
+  test(`managed preparation carries the closed native read class ${nativeClass}`, async () => {
+    const seen = [];
+    const r = rig((prepared) => {
+      seen.push(prepared.readClass);
+      assert.deepEqual(prepared.headers, {});
+      assert.equal(prepared.body, '{}');
+      return {bind(bound) {
+        seen.push(bound.readClass);
+        return {ready: () => true, dispatch: () => Promise.resolve({status: 200, body: new Uint8Array()})};
+      }};
+    });
+    if (nativeClass !== undefined) r.host.engine.httpReadClass = (request) => {
+      assert.equal(request, 7);
+      return nativeClass;
+    };
+    r.host.execute(prepare);
+    await tick();
+    assert.deepEqual(seen, [expected, expected]);
+    assert.equal(r.events.filter(([kind]) => kind === 'claim').length, 1);
+    r.host.dispose();
+  });
+}
+
+// Pin both complete ABIs together: admission priority never selects a deadline.
+for (const [priorityCode, readClass] of ['normal', 'critical', 'bulk', 'reconciliation'].entries()) {
+  for (const [budgetCode, requestClass] of ['discovery', 'orderRead', 'orderWrite', 'history', 'read'].entries()) {
+    test(`admission ${priorityCode}=${readClass} and deadline ${budgetCode}=${requestClass} retain independent codes`, async () => {
+      let seen, bound;
+      const r = rig(request => {
+        seen = request;
+        return { bind(packet) { bound = packet; return { ready: () => true, dispatch: () => new Promise(() => {}) }; } };
+      });
+      r.host.engine.httpReadClass = id => { assert.equal(id, 7); return priorityCode; };
+      r.host.execute({ ...prepare, requestClass: budgetCode }); await tick();
+      assert.equal(seen.readClass, readClass);
+      assert.equal(bound.readClass, readClass);
+      assert.equal(seen.requestClass, requestClass);
+      assert.equal(seen.timeoutMs, packet.timeoutMs);
+      assert.equal(bound.body, packet.body);
+      assert.equal(bound.requestClass, undefined);
+      r.host.dispose();
+    });
+  }
+}

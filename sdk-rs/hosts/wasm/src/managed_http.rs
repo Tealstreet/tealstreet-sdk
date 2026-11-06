@@ -161,6 +161,13 @@ impl WasmEngine {
         }))
     }
 
+    #[cfg(feature = "hyperliquid")]
+    #[wasm_bindgen(js_name = httpReadClass)]
+    pub fn http_read_class(&self, request: f64) -> Result<u8, js_sys::Error> {
+        let request = host_resource_id(request)?;
+        Ok(self.inner.http_read_class(RequestId(request)) as u8)
+    }
+
     #[wasm_bindgen(js_name = httpPreparationPending)]
     pub fn http_preparation_pending(&self, preparation: &str) -> bool {
         Preparation::from_wire(preparation)

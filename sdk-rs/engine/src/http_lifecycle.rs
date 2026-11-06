@@ -1533,6 +1533,15 @@ impl<V: Venue> Engine<V> {
         })
     }
 
+    pub fn http_read_class(&self, request: crate::RequestId) -> super::HttpReadClass {
+        self.io
+            .pending
+            .get(&request)
+            .map_or(super::HttpReadClass::Normal, |pending| {
+                self.venue.http_read_class(&pending.value)
+            })
+    }
+
     /// Hosts check this before inserting an asynchronous prepared resource.
     /// A duplicate/late completion must not overwrite its replacement.
     pub fn http_preparation_pending(&self, token: Preparation) -> bool {

@@ -1935,3 +1935,234 @@ fn a_stop_family_fallback_cancel_is_vetoed_like_the_first() {
         assert!(writes(&h).is_empty(), "{case}: {:?}", writes(&h));
     }
 }
+
+fn resting_stop_limit(h: &mut Harness, kind: OrderType, close: bool) {
+    resting_stop(h);
+    h.engine.store_mut().update_order("old", |o| {
+        o.kind = kind;
+        o.close = Some(close);
+        o.reduce_only = true;
+        o.extra.as_mut().unwrap().conditional_order_price = Some(130.0);
+    });
+    h.engine.store_mut().set_positions(vec![short_position()]);
+}
+
+#[test]
+fn stop_limit_replacement_preserves_price_type_and_native_lots() {
+    for (kind, trigger) in [(OrderType::StopLoss, 120.0), (OrderType::TakeProfit, 90.0)] {
+        let mut h = Harness::new();
+        resting_stop_limit(&mut h, kind, false);
+        amend_stop(&mut h, "old", trigger);
+        let request = to_replacement(&mut h, "old", 0.0);
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["type"], "limit");
+        assert_eq!(body["price"], "130");
+        assert_eq!(body["stopPrice"], trigger.to_string());
+        assert_eq!(body["size"], "6");
+        assert_ne!(
+            body["closeOrder"], true,
+            "omitted closeOrder defaults to false"
+        );
+        assert_eq!(body["stopPriceType"], "MP");
+        assert_eq!(body["timeInForce"], "GTC");
+    }
+}
+
+#[test]
+fn stop_limit_put_back_preserves_original_type_price_trigger_and_size() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut h = Harness::new();
+        resting_stop_limit(&mut h, kind, false);
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(if kind == OrderType::StopLoss {
+                120.0
+            } else {
+                90.0
+            }),
+            amount: Some(8.0),
+        });
+        let replacement = to_replacement(&mut h, "old", 0.0);
+        h.response(&replacement, 200, REFUSED);
+        h.pace();
+        let restore = h.take("/api/v1/orders");
+        let body: serde_json::Value =
+            serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["type"], "limit");
+        assert_eq!(body["price"], "130");
+        assert_eq!(body["stopPrice"], "100");
+        assert_eq!(
+            body["size"], "6",
+            "put-back uses original lots, not the edit"
+        );
+        assert_ne!(
+            body["closeOrder"], true,
+            "omitted closeOrder defaults to false"
+        );
+        h.response(
+            &restore,
+            200,
+            r#"{"code":"200000","data":{"orderId":"restored"}}"#,
+        );
+        h.pace();
+        assert_eq!(failure(&h).protection, Some(Protection::Restored));
+        assert!(writes(&h).is_empty());
+    }
+}
+
+#[test]
+fn stop_close_flag_is_preserved_even_when_the_native_row_has_a_size() {
+    let mut h = Harness::new();
+    resting_stop_limit(&mut h, OrderType::StopLoss, true);
+    amend_stop(&mut h, "old", 120.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["closeOrder"], true);
+    assert!(
+        body.get("size").is_none(),
+        "closeOrder owns the full-position quantity"
+    );
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let restore = h.take("/api/v1/orders");
+    let body: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["closeOrder"], true);
+    assert!(body.get("size").is_none());
+}
+
+#[test]
+fn stop_limit_with_unusable_limit_price_is_refused_before_cancel() {
+    for price in [0.0, f64::NAN, 0.01] {
+        let mut h = Harness::new();
+        resting_stop_limit(&mut h, OrderType::StopLoss, false);
+        h.engine.store_mut().update_order("old", |o| {
+            o.extra.as_mut().unwrap().conditional_order_price = Some(price);
+        });
+        amend_stop(&mut h, "old", 120.0);
+        if h.has("getMarginMode") {
+            h.metadata(false, "CROSS");
+        }
+        assert!(writes(&h).is_empty(), "invalid native limit: {price}");
+        assert_eq!(failure(&h).outcome, Some(Outcome::NotSent));
+        assert!(h.engine.store().order("old").is_some());
+    }
+}
+
+#[test]
+fn new_app_protection_with_redundant_trigger_remains_stop_market() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut h = Harness::new();
+        let mut opts = order();
+        opts.kind = kind;
+        opts.client_order_id = None;
+        opts.price = Some(110.0);
+        opts.trigger_price = Some(110.0);
+        place(&mut h, vec![opts]);
+        h.metadata(false, "CROSS");
+        let request = h.take("/api/v1/orders");
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["type"], "market");
+        assert_eq!(body["stopPrice"], "110");
+        assert!(body.get("price").is_none());
+        assert!(body.get("timeInForce").is_none());
+    }
+}
+
+#[test]
+fn new_redundant_trigger_stop_cannot_bypass_post_only_refusal() {
+    let mut h = Harness::new();
+    let mut opts = order();
+    opts.kind = OrderType::StopLoss;
+    opts.client_order_id = None;
+    opts.trigger_price = opts.price;
+    opts.time_in_force = Some(TimeInForce::PostOnly);
+    place(&mut h, vec![opts]);
+    assert!(
+        h.actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 1, .. }))),
+        "new PostOnly stop must refuse synchronously"
+    );
+    assert!(writes(&h).is_empty());
+    assert_eq!(failure(&h).outcome, Some(Outcome::NotSent));
+}
+
+#[test]
+fn new_sized_close_market_or_stop_keeps_the_explicit_native_size() {
+    for kind in [
+        OrderType::Market,
+        OrderType::StopLoss,
+        OrderType::TakeProfit,
+    ] {
+        let mut h = Harness::new();
+        let mut opts = order();
+        opts.kind = kind;
+        opts.client_order_id = None;
+        opts.close = Some(true);
+        opts.amount = 10.0;
+        place(&mut h, vec![opts]);
+        h.metadata(false, "CROSS");
+        let request = h.take("/api/v1/orders");
+        let body: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(body["size"], "10");
+        assert_ne!(body["closeOrder"], true);
+        assert_eq!(body["type"], "market");
+    }
+}
+
+#[test]
+fn native_stop_limit_equal_to_its_trigger_stays_limit_on_replacement_and_put_back() {
+    let mut h = Harness::new();
+    resting_stop_limit(&mut h, OrderType::StopLoss, false);
+    h.engine.store_mut().update_order("old", |o| {
+        o.price = 130.0;
+    });
+    h.fresh_ticker(110.0);
+    amend_stop(&mut h, "old", 130.0);
+    let replacement = to_replacement(&mut h, "old", 0.0);
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["price"], "130");
+    assert_eq!(body["stopPrice"], "130");
+    h.response(&replacement, 200, REFUSED);
+    h.pace();
+    let restore = h.take("/api/v1/orders");
+    let body: serde_json::Value = serde_json::from_str(restore.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["price"], "130");
+    assert_eq!(body["stopPrice"], "130");
+}
+
+#[test]
+fn an_ordinary_limit_amend_keeps_the_original_close_order_wire_shape() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    h.reply(
+        "/api/v1/orders/old",
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    h.confirm_cancel("old", 10.0, 4.0);
+    let replacement = h.take("/api/v1/orders");
+    let body: serde_json::Value =
+        serde_json::from_str(replacement.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["type"], "limit");
+    assert_eq!(body["size"], "6");
+    assert!(
+        body.get("closeOrder").is_none(),
+        "native default false needs no new field"
+    );
+}

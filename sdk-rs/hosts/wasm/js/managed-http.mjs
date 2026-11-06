@@ -21,6 +21,8 @@ function preparationReason(error, fallback) {
 
 // Numeric ABI follows the engine's repr(u8) RequestClass. Strings and formatting
 // stay in the host; labels grant no release, credential or retry authority.
+// #3106 admission ABI: keep these codes independent of deadline classes.
+const readClasses = Object.freeze(['normal', 'critical', 'bulk', 'reconciliation']);
 const requestClasses = Object.freeze(['discovery', 'orderRead', 'orderWrite', 'history', 'read']);
 
 // Host-owned route resources. Engine tokens remain strings through every hop.
@@ -109,7 +111,7 @@ export class ManagedHttp {
     try {
       if (typeof action.permit !== 'string') throw new Error('Invalid HTTP permit');
       resource.diagnostic = requestFailureFields(action.packet);
-      resource.bound = resource.prepared.bind({ ...action.packet, headers: Object.fromEntries(action.packet.headers), signal: resource.controller.signal });
+      resource.bound = resource.prepared.bind({ ...action.packet, readClass: resource.readClass, headers: Object.fromEntries(action.packet.headers), signal: resource.controller.signal });
       if (!resource.bound || typeof resource.bound.ready !== 'function' || typeof resource.bound.dispatch !== 'function') throw new Error('Invalid bound HTTP resource');
       resource.phase = 'bound';
     } catch (error) { this.fail(token, resource, preparationReason(error, 'invalid')); return; }
@@ -122,17 +124,21 @@ export class ManagedHttp {
     const token = action.preparation;
     if (this.resources.has(token) || host.disposed
       || !host.invoke(host.engine.httpPreparationPending, token)) return;
-    const resource = { controller: new AbortController(), phase: 'preparing',
+    const resource = { readClass: 'normal', controller: new AbortController(), phase: 'preparing',
       diagnostic: requestFailureFields(action.packet), request: action.packet.request,
       startedAt: host.transport.now(), budgetMs: action.packet.timeoutMs,
       requestClass: action.packet.method.toUpperCase() === 'GET' ? 'read' : 'orderWrite' };
     this.resources.set(token, resource);
     if (typeof host.transport.prepareHttp !== 'function') { this.fail(token, resource, 'unsupported'); return; }
     try {
+      const nativeReadClass = typeof host.engine.httpReadClass === 'function'
+        ? host.invoke(host.engine.httpReadClass, action.packet.request) : 0;
+      const readClass = Number.isInteger(nativeReadClass) ? readClasses[nativeReadClass] ?? 'normal' : 'normal';
+      resource.readClass = readClass;
       const classCode = action.requestClass;
       const requestClass = Number.isInteger(classCode) ? requestClasses[classCode] : undefined;
       if (requestClass) resource.requestClass = requestClass;
-      const prepared = await host.transport.prepareHttp({ ...action.packet, headers: Object.fromEntries(action.packet.headers), intent: action.intent, ...(requestClass ? { requestClass } : {}), signal: resource.controller.signal });
+      const prepared = await host.transport.prepareHttp({ ...action.packet, readClass, headers: Object.fromEntries(action.packet.headers), intent: action.intent, ...(requestClass ? { requestClass } : {}), signal: resource.controller.signal });
       if (!this.live(token, resource) || !host.invoke(host.engine.httpPreparationPending, token)) {
         prepared?.cancel?.();
         if (this.live(token, resource)) this.cancel(token);

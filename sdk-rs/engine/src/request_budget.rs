@@ -165,6 +165,14 @@ mod tests {
         }
     }
     #[test]
+    fn admission_class_abi_keeps_all_master_codes() {
+        assert_eq!(crate::HttpReadClass::Normal as u8, 0);
+        assert_eq!(crate::HttpReadClass::Critical as u8, 1);
+        assert_eq!(crate::HttpReadClass::Bulk as u8, 2);
+        #[cfg(feature = "address-nonce")]
+        assert_eq!(crate::HttpReadClass::Reconciliation as u8, 3);
+    }
+    #[test]
     fn diagnostic_metadata_preserves_the_issued_operation() {
         use crate::request_context::Operation;
         for class in [

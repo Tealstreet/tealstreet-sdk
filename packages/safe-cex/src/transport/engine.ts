@@ -900,7 +900,7 @@ const httpTransport = (
       const budgetGeneration =
         !cached && infoBudget && request.method === 'POST' && original.pathname === '/info'
           ? await untilAborted(
-              infoRead!.wait(() => infoBudget.wait(original.origin, request.body, started + deadlineMs, signal)),
+              infoRead!.wait(() => infoBudget.wait(original.origin, request.body, started + deadlineMs, signal, request.readClass)),
               signal,
             )
           : undefined;
@@ -927,6 +927,7 @@ const httpTransport = (
           if (
             packet.request !== request.request ||
             packet.method !== request.method ||
+            packet.readClass !== request.readClass ||
             new URL(packet.url).origin !== original.origin ||
             packet.route !== request.route ||
             packet.signal !== request.signal ||

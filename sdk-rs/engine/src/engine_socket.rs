@@ -168,6 +168,11 @@ impl<P> Cx<'_, P> {
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
         self.io.core.socket_driver.state.authenticated(feed)
     }
+    /// Whether `key`'s subscribe frame was sent on the feed's current socket (and not
+    /// since unsubscribed): what was released, not what was encoded.
+    pub fn socket_released(&self, feed: FeedId, key: &str) -> bool {
+        self.io.core.socket_driver.state.released(feed, key)
+    }
     /// Native one-shot frames ordered after current interests, retained with
     /// their epoch until final drain. They are never persistent interests.
     pub fn send_after_socket_interests(
@@ -444,6 +449,21 @@ impl crate::engine::CoreRef<'_> {
 }
 
 impl<V: Venue> Engine<V> {
+    /// Install before start; observes final managed subscription handoff and retirement.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_interest_observer(&mut self, observer: crate::socket_lifecycle::InterestObserver) {
+        assert!(
+            !self.has_started(),
+            "interest observer must precede engine start"
+        );
+        assert!(
+            self.io.core.socket_driver.state.observer.is_none(),
+            "interest observer already installed"
+        );
+        observer.observe(crate::socket_lifecycle::InterestObservation::Attached);
+        self.io.core.socket_driver.state.observer = Some(observer);
+    }
+
     pub(super) fn has_socket_work(&self) -> bool {
         if !V::managed_sockets() {
             return false;
@@ -825,7 +845,9 @@ impl<V: Venue> Engine<V> {
                 };
                 let other = matches!(
                     control,
-                    Control::Other | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
+                    Control::Other
+                        | Control::Unwatched
+                        | Control::Auth(crate::socket_lifecycle::AuthEvidence::Progress)
                 );
                 #[cfg(feature = "socket-native-timing")]
                 let other = other || matches!(control, Control::Traffic);

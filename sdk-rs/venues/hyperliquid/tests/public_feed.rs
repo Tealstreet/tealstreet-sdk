@@ -5,6 +5,7 @@ use safe_cex_engine::test_support::prepared_now;
 use safe_cex_engine::{Action, Command, Event, PublicFeedPolicy, SocketChannel, SocketId};
 use support::*;
 
+// activeAssetData is private too, but only for a selection or open order.
 fn assert_private_only(messages: &[String]) {
     let subscriptions: Vec<serde_json::Value> = messages
         .iter()
@@ -16,7 +17,6 @@ fn assert_private_only(messages: &[String]) {
         "orderUpdates",
         "userFills",
         "userEvents",
-        "activeAssetData",
     ] {
         assert!(
             subscriptions

@@ -38,7 +38,9 @@ function rig(options = {}) {
     connect(_, callbacks) { socketCallbacks = callbacks; return { close() { events.push(["socketDispose"]); } }; },
     request() { assert.fail('legacy request forbidden'); },
     async prepareHttp(request) {
-      return { bind() {
+      return { bind(bound) {
+        assert.equal(request.readClass, 'normal');
+        assert.equal(bound.readClass, request.readClass);
         if (options.bindFailure === request.request) throw new Error('private bind detail');
         return {
           ...(options.admission ? { admitDispatch: options.admission } : {}),

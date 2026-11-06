@@ -378,6 +378,7 @@ fn tx_input(
         .ok_or("Lighter expiry overflow")?;
     bounded(expired_at, MAX_ORDER_VALUE, "transaction expiry")?;
     let tx_type = match tx {
+        Transaction::Modify(_) => panic!("tx17 is outside the frozen legacy corpus"),
         Transaction::Create { .. } => 14,
         Transaction::Cancel { .. } => 15,
         Transaction::Leverage { .. } => 20,
@@ -396,6 +397,7 @@ fn tx_input(
         ],
     );
     let fields = match tx {
+        Transaction::Modify(_) => panic!("tx17 is outside the frozen legacy corpus"),
         Transaction::Create { order, builder } => {
             let order = OrderInfo::new(order, now_ms)?;
             order.append(&mut data);
