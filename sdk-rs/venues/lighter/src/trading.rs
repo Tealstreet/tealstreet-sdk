@@ -572,6 +572,21 @@ impl Lighter {
                         );
                         return;
                     }
+                    if matches!(original.native.order_type, 3 | 5)
+                        && if original.native.is_buy {
+                            original.native.price < orders[0].native.trigger_price
+                        } else {
+                            original.native.price > orders[0].native.trigger_price
+                        }
+                    {
+                        refuse(
+                            cx,
+                            not_sent(
+                                "Lighter stop not changed: kept limit cannot execute at the new trigger; re-place with the intended limit",
+                            ),
+                        );
+                        return;
+                    }
                     if let Err(error) =
                         self.protective_reference(cx.store, &orders[0].order, cx.now)
                     {
@@ -599,7 +614,11 @@ impl Lighter {
                         market_index: edit.original.native.market_id,
                         index: edit.original.index,
                         base_amount: orders[0].native.amount,
-                        price: edit.original.native.price,
+                        price: if matches!(edit.original.native.order_type, 2 | 4) {
+                            orders[0].native.price
+                        } else {
+                            edit.original.native.price
+                        },
                         trigger_price: orders[0].native.trigger_price,
                     })]);
                 } else {

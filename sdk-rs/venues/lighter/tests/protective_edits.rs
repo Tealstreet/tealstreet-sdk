@@ -610,15 +610,19 @@ fn native_boot() -> (Engine<Lighter>, Feeds, Timers) {
 #[test]
 fn untriggered_same_type_standalone_stop_modifies_in_place_without_cancel() {
     for robinhood in [false, true] {
-        for (kind, ask, old_trigger, new_trigger) in [
-            (2, true, 80., 85.),
-            (2, false, 120., 115.),
-            (4, true, 120., 115.),
-            (4, false, 80., 85.),
-            (3, true, 80., 85.),
-            (3, false, 120., 115.),
-            (5, true, 120., 115.),
-            (5, false, 80., 85.),
+        for (kind, ask, old_trigger, old_price, new_trigger, expected_price) in [
+            (2, true, 80., 79.2, 70., 6930),
+            (2, false, 120., 121.2, 130., 13130),
+            (4, true, 120., 118.8, 110., 10890),
+            (4, false, 80., 80.8, 90., 9090),
+            (3, true, 80., 79., 85., 7900),
+            (3, false, 120., 121., 115., 12100),
+            (5, true, 120., 119., 125., 11900),
+            (5, false, 80., 81., 75., 8100),
+            (3, true, 80., 79., 79., 7900),
+            (3, false, 120., 121., 121., 12100),
+            (5, true, 120., 119., 119., 11900),
+            (5, false, 80., 81., 81., 8100),
         ] {
             let (mut e, feeds, mut t) = ready_feeds(
                 Options {
@@ -633,6 +637,7 @@ fn untriggered_same_type_standalone_stop_modifies_in_place_without_cancel() {
             row["is_ask"] = json!(ask);
             row["trigger_status"] = json!("mark-price");
             row["trigger_price"] = json!(old_trigger.to_string());
+            row["price"] = json!(old_price.to_string());
             e.store_mut().update_positions(|p| {
                 p.side = if ask {
                     safe_cex_engine::model::PositionSide::Long
@@ -665,7 +670,7 @@ fn untriggered_same_type_standalone_stop_modifies_in_place_without_cancel() {
             assert!(wire.get("Type").is_none());
             assert_eq!(wire["Index"], 42);
             assert_eq!(wire["BaseAmount"], 1000);
-            assert_eq!(wire["Price"], 7900);
+            assert_eq!(wire["Price"], expected_price, "kind={kind}, ask={ask}");
             assert_eq!(wire["TriggerPrice"], (new_trigger * 100.) as u64);
             ack(&mut e, &r, NOW);
             let out = advance(&mut e, &mut t, NOW + 1000.);
@@ -688,6 +693,63 @@ fn new_type(r: &HttpRequest) -> u64 {
         .parse()
         .unwrap()
 }
+#[test]
+fn stop_limits_with_non_executable_kept_limits_refuse_before_any_write() {
+    for (kind, ask, old_trigger, limit, new_trigger) in [
+        (3, true, 80., 79., 70.),
+        (3, false, 120., 121., 130.),
+        (5, true, 120., 119., 110.),
+        (5, false, 80., 81., 90.),
+    ] {
+        for status in ["mark-price", "untriggered", "pending", "na"] {
+            let (mut e, feeds, _) = boot();
+            let mut row = original();
+            row["type"] = json!(kind);
+            row["is_ask"] = json!(ask);
+            row["trigger_status"] = json!(status);
+            row["trigger_price"] = json!(old_trigger.to_string());
+            row["price"] = json!(limit.to_string());
+            e.store_mut().update_positions(|p| {
+                p.side = if ask {
+                    safe_cex_engine::model::PositionSide::Long
+                } else {
+                    safe_cex_engine::model::PositionSide::Short
+                }
+            });
+            message(
+                &mut e,
+                feeds.private,
+                NOW,
+                &json!({"channel":"account_all_orders","orders":[row]}).to_string(),
+            );
+            drain_at(&mut e, &mut vec![], NOW);
+            let old = e.store().order("42").unwrap().clone();
+            e.handle(
+                NOW,
+                Event::Command(Command::AmendOrder {
+                    command: 8,
+                    id: "42".into(),
+                    price: Some(new_trigger),
+                    amount: None,
+                }),
+            );
+            let out = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+            assert!(
+                !out.iter().any(|a| matches!(a, Action::Http(_))),
+                "{kind}/{ask}/{status}: {out:?}"
+            );
+            assert_eq!(e.store().order("42"), Some(&old));
+            assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed { error, .. })
+                if error.outcome == Some(Outcome::NotSent)
+                    && if status == "mark-price" {
+                        error.message.contains("limit") && error.message.contains("trigger") && error.message.contains("re-place")
+                    } else {
+                        error.message.contains("stop-limit edit is unsupported")
+                    })), "{kind}/{ask}/{status}: {out:?}");
+        }
+    }
+}
+
 #[test]
 fn native_modify_refusals_and_unknowns_never_cancel_restore_or_resend() {
     for (status, body, unknown) in [

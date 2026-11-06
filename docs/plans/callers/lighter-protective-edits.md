@@ -69,10 +69,16 @@ use MARK. No live or demo orders are required by these controls.
 
 A complete native row waiting on MARK (`trigger_status=mark-price`), with zero
 fills and explicit standalone links/flags, permits tx17 for native types 2/3/4/5.
-The transaction changes only amount/trigger, retains the original execution
-price, and cannot change side, type, reduce-only, TIF or expiry. Price-only edits
+The transaction changes amount/trigger and recomputes market-stop execution
+prices from the new trigger's slippage band. Stop-limits retain their original
+user limit. It cannot change side, type, reduce-only, TIF or expiry. Price-only edits
 retain the original venue amount. A stale/missing mark or any source/position
 change vetoes the final managed Claim. Frame-fed edits still refuse stale.
+
+Stop-limit edits refuse before any write if the kept sell limit exceeds the new
+trigger or the kept buy limit is below it; equality is allowed. The user must
+re-place with their intended limit. The PR 1 guarded path already refused all
+stop-limit edits before cancel; legacy trigger-status controls pin that refusal.
 
 The native [OpenAPI order enum](https://github.com/elliottech/lighter-python/blob/38a34672e7cb43c67d807ece25f125fda2dfdecf/openapi.json)
 separates `mark-price` from `ready`, `na`, `parent-order` and `twap`; only the
