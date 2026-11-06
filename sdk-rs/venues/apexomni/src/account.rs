@@ -212,6 +212,9 @@ pub struct Account {
     snapshot_floor: u64,
     terminal: HashMap<String, (u64, OrderStatus)>,
     cancelling: HashMap<String, f64>,
+    /// Resting STOP_MARKET and TAKE_PROFIT_MARKET orders: an edit or put-back
+    /// keeps the market type, which fills through a gap where a limit may not.
+    market_triggers: HashSet<String>,
     seen: HashSet<String>,
     seen_queue: VecDeque<String>,
     progress: HashMap<String, Progress>,
@@ -229,6 +232,17 @@ impl Account {
     }
     /// An accepted cancel fences older reads and hides the order briefly; only
     /// a venue terminal event tombstones it, so an order the venue kept reappears.
+    pub(crate) fn note_trigger_type(&mut self, raw: &wire::OrderRow<'_>) {
+        let resting = matches!(raw.status.as_ref(), "PENDING" | "OPEN" | "UNTRIGGERED");
+        if resting && matches!(raw.kind.as_ref(), "STOP_MARKET" | "TAKE_PROFIT_MARKET") {
+            self.market_triggers.insert(raw.id.clone());
+        } else {
+            self.market_triggers.remove(&raw.id);
+        }
+    }
+    pub(crate) fn market_trigger(&self, id: &str) -> bool {
+        self.market_triggers.contains(id)
+    }
     pub(crate) fn note_cancel(&mut self, id: &str, now: f64) {
         self.record_order(id, None);
         self.cancelling.retain(|_, at| now - *at < CANCEL_GRACE_MS);
@@ -919,6 +933,7 @@ impl ApexOmni {
                             cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED, "ApeX owned order has unavailable market metadata; preserving previous orders");
                             return Err("unknown owned order market".into());
                         }
+                        self.account.note_trigger_type(&raw);
                         map_order(cx.store, &raw, cx.now)
                     })
                 {
@@ -1750,6 +1765,7 @@ impl ApexOmni {
         raw: &wire::OrderRow<'_>,
         snapshot: bool,
     ) {
+        self.account.note_trigger_type(raw);
         let rows = match map_order(cx.store, raw, cx.now) {
             Ok(rows) => rows,
             Err(error) => {
