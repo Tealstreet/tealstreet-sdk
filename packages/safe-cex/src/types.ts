@@ -545,7 +545,11 @@ export type Market = {
   readonly makerFee?: number;
 };
 
+/** Source engine receipt times for last, mark and index; null is unobserved. */
+export type TickerObservedAt = [number | null, number | null, number | null];
+
 export type Ticker = {
+  readonly observedAt?: TickerObservedAt;
   readonly id: string;
   readonly symbol: string;
   readonly bid: number;

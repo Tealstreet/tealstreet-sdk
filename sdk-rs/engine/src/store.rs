@@ -64,6 +64,7 @@ pub struct Store {
     /// Host time each row's last, mark and index price was last observed: changed,
     /// or explicitly reported unchanged by its venue. -inf before any data.
     ticker_seen_at: Vec<[f64; 3]>,
+    pub(crate) export_ticker_observations: bool,
     /// The engine's current host time, set at each entry, so rows can be dated.
     clock: f64,
     dirty_tickers: Vec<u32>,
@@ -412,15 +413,61 @@ impl Store {
         }
     }
 
-    // Bits 2, 3 and 4 of `TICKER_FIELDS` are last, mark and index.
-    fn mark_references_seen(&mut self, index: u32, mask: u16) {
+    // High mask bits track observation changes independently of value deltas.
+    fn set_reference_times(&mut self, index: u32, times: [f64; 3]) {
         if let Some(seen) = self.ticker_seen_at.get_mut(index as usize) {
-            for (slot, bit) in [2, 3, 4].into_iter().enumerate() {
-                if mask & (1 << bit) != 0 {
-                    seen[slot] = self.clock;
+            let mut mask = 0;
+            for slot in 0..3 {
+                if seen[slot].to_bits() != times[slot].to_bits() {
+                    seen[slot] = times[slot];
+                    mask |= 1 << (12 + slot);
                 }
             }
+            if mask != 0 && self.export_ticker_observations {
+                let dirty = &mut self.ticker_masks[index as usize];
+                if *dirty == 0 {
+                    self.dirty_tickers.push(index);
+                }
+                *dirty |= mask;
+            }
         }
+    }
+
+    // Bits 2, 3 and 4 of `TICKER_FIELDS` are last, mark and index.
+    fn mark_references_seen(&mut self, index: u32, mask: u16) {
+        if let Some(mut times) = self.ticker_seen_at.get(index as usize).copied() {
+            for (slot, bit) in [2, 3, 4].into_iter().enumerate() {
+                if mask & (1 << bit) != 0 {
+                    times[slot] = self.clock;
+                }
+            }
+            self.set_reference_times(index, times);
+        }
+    }
+
+    pub(crate) fn apply_shared_ticker(&mut self, ticker: &crate::public_feed::PublicTicker) {
+        let before = self
+            .ticker_index(&ticker.symbol)
+            .and_then(|index| self.ticker_seen_at.get(index as usize))
+            .copied();
+        self.update_ticker(&ticker.symbol, |target| ticker.apply(target));
+        if let (Some(source), Some(index)) = (ticker.observed_at, self.ticker_index(&ticker.symbol))
+        {
+            let mut times = before.unwrap_or([f64::NEG_INFINITY; 3]);
+            for (slot, value) in [ticker.last, ticker.mark, ticker.index]
+                .into_iter()
+                .enumerate()
+            {
+                if value.is_some() {
+                    times[slot] = source[slot].unwrap_or(f64::NEG_INFINITY);
+                }
+            }
+            self.set_reference_times(index, times);
+        }
+    }
+
+    pub(crate) fn import_reference_times(&mut self, index: u32, times: [f64; 3]) {
+        self.set_reference_times(index, times);
     }
 
     pub(crate) fn ticker_revision(&self) -> u64 {
@@ -1242,7 +1289,11 @@ impl Store {
         }
         if changes.tickers_replaced {
             self.write_tickers(w);
-        } else if !pending.ticker_deltas.is_empty() {
+        } else if pending
+            .ticker_deltas
+            .iter()
+            .any(|(_, mask)| mask & 0xfff != 0)
+        {
             let revision = u16::from(
                 pending
                     .ticker_deltas
@@ -1251,11 +1302,38 @@ impl Store {
             );
             w.begin_revision(section::TICKER_DELTAS, revision);
             for &(index, mask) in &pending.ticker_deltas {
+                let mask = mask & 0xfff;
+                if mask == 0 {
+                    continue;
+                }
                 let values = ticker_values(&self.tickers[index as usize]);
                 w.f64s([index as f64, mask as f64]);
                 for (bit, value) in values.iter().enumerate() {
                     if mask & (1 << bit) != 0 {
                         w.f64(*value);
+                    }
+                }
+            }
+            w.end();
+        }
+        if self.export_ticker_observations
+            && (changes.tickers_replaced
+                || pending
+                    .ticker_deltas
+                    .iter()
+                    .any(|(_, mask)| mask & 0x7000 != 0))
+        {
+            w.begin(section::TICKER_OBSERVATIONS);
+            if changes.tickers_replaced {
+                for (index, times) in self.ticker_seen_at.iter().enumerate() {
+                    w.f64(index as f64);
+                    w.f64s(times.iter().copied());
+                }
+            } else {
+                for &(index, mask) in &pending.ticker_deltas {
+                    if mask & 0x7000 != 0 {
+                        w.f64(index as f64);
+                        w.f64s(self.ticker_seen_at[index as usize]);
                     }
                 }
             }

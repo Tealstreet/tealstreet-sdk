@@ -250,6 +250,38 @@ pub fn apply(
             section::MARKETS => {}
             section::TICKERS => tickers(store, &mut *state, frame, section)?,
             section::TICKER_DELTAS => ticker_deltas(store, state, frame, section)?,
+            section::TICKER_OBSERVATIONS => {
+                if section.revision != 0 || !section.payload.len().is_multiple_of(32) {
+                    return Err(IngestError("invalid ticker observation section"));
+                }
+                // Validate the whole observation batch before changing any reference.
+                for apply in [false, true] {
+                    let mut cursor = Cursor::new(section.payload);
+                    while cursor.at < section.payload.len() {
+                        let row = cursor.f64()?;
+                        let times = [cursor.f64()?, cursor.f64()?, cursor.f64()?];
+                        if row.fract() != 0.
+                            || !(0.0..state.source_tickers.len() as f64).contains(&row)
+                            || times
+                                .iter()
+                                .any(|v| !(v.is_finite() && *v >= 0. || *v == f64::NEG_INFINITY))
+                        {
+                            return Err(IngestError("invalid ticker observation"));
+                        }
+                        if store
+                            .tickers()
+                            .get(row as usize)
+                            .map(|ticker| &ticker.symbol)
+                            != state.source_tickers.get(row as usize)
+                        {
+                            return Err(IngestError("ticker observation identity mismatch"));
+                        }
+                        if apply {
+                            store.import_reference_times(row as u32, times);
+                        }
+                    }
+                }
+            }
             section::ORDERS => {
                 orders(store, state, frame, section)?;
                 applied.orders = true;

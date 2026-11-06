@@ -55,7 +55,8 @@ pub fn fresh_reference(
         StopTriggerType::IndexPrice => ticker.index,
     };
     let seen = store.reference_seen_at(symbol, reference)?;
-    (price.is_finite() && price > 0.0 && now - seen <= FRESH_TICKER_MS).then_some(price)
+    (price.is_finite() && price > 0.0 && seen <= now && now - seen <= FRESH_TICKER_MS)
+        .then_some(price)
 }
 
 /// Why an amend of order `id` to `price` must not be sent, if it must not.

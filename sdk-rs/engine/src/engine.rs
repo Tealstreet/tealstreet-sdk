@@ -4938,6 +4938,8 @@ impl<V: Venue> Engine<V> {
             return Err("public feed policy must be configured before startup");
         }
         self.io.core.public_feed_policy = policy;
+        self.store.export_ticker_observations =
+            policy == PublicFeedPolicy::Shared || !self.account_startup;
         Ok(())
     }
 
@@ -5154,6 +5156,8 @@ impl<V: Venue> Engine<V> {
     /// for an account that can sign, matching the SDK's readiness rule.
     pub fn set_account_startup(&mut self, account: bool) {
         self.account_startup = account;
+        self.store.export_ticker_observations =
+            !account || self.public_feed_policy() == PublicFeedPolicy::Shared;
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -7860,27 +7864,13 @@ fn copy_shared_tickers(
     store: &mut Store,
     shared: &HashMap<String, crate::public_feed::PublicTicker>,
 ) {
-    let mut missing = Vec::new();
     for ticker in shared.values() {
-        if store.ticker(&ticker.symbol).is_none()
-            && let Some(market) = store.market(&ticker.symbol)
-        {
-            missing.push(crate::model::Ticker {
-                id: market.id.clone(),
-                symbol: market.symbol.clone(),
-                ..Default::default()
-            });
-        }
-    }
-    if !missing.is_empty() {
-        let mut tickers = store.tickers().to_vec();
-        tickers.extend(missing);
-        store.set_tickers(tickers);
+        store.ensure_ticker(&ticker.symbol);
     }
     // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
     for ticker in shared.values() {
         if store.market(&ticker.symbol).is_some() {
-            store.update_ticker(&ticker.symbol, |target| ticker.apply(target));
+            store.apply_shared_ticker(ticker);
         }
     }
 }

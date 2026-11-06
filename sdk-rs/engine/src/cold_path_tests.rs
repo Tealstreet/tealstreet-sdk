@@ -153,3 +153,241 @@ fn orders_held_forgets_lifted_names_floors_the_delay_and_asks_for_the_account() 
     let (named, _) = orders_held_notice(&locks, &mut held, &marks, true, 1_000.).unwrap();
     assert_eq!(named, "");
 }
+
+#[test]
+fn shared_reference_observations_keep_source_time_even_when_values_do_not_change() {
+    use crate::model::StopTriggerType::{IndexPrice, LastPrice, MarkPrice};
+    let mut store = Store::default();
+    store.set_clock(1_000.);
+    store.set_markets(vec![market("BTC")]);
+    store.set_tickers(vec![Ticker {
+        symbol: "BTC".into(),
+        mark: 100.,
+        last: 99.,
+        index: 98.,
+        ..Default::default()
+    }]);
+    let shared = |text| [("BTC".into(), quote(text))].into_iter().collect();
+    store.set_clock(9_000.);
+    copy_shared_tickers(
+        &mut store,
+        &shared(r#"{"symbol":"BTC","mark":100,"observedAt":[null,8500,null]}"#),
+    );
+    assert_eq!(store.reference_seen_at("BTC", MarkPrice), Some(8_500.));
+    assert_eq!(store.reference_seen_at("BTC", LastPrice), Some(1_000.));
+    assert_eq!(store.reference_seen_at("BTC", IndexPrice), Some(1_000.));
+    store.set_clock(20_000.);
+    copy_shared_tickers(
+        &mut store,
+        &shared(r#"{"symbol":"BTC","mark":100,"observedAt":[null,8500,null]}"#),
+    );
+    assert_eq!(
+        store.reference_seen_at("BTC", MarkPrice),
+        Some(8_500.),
+        "replay and local restoration never date cached data as now"
+    );
+    assert!(crate::protective_amend::fresh_reference(&store, "BTC", MarkPrice, 20_000.).is_none());
+    copy_shared_tickers(
+        &mut store,
+        &shared(r#"{"symbol":"BTC","mark":101,"observedAt":[null,null,null]}"#),
+    );
+    assert!(
+        crate::protective_amend::fresh_reference(&store, "BTC", MarkPrice, 20_000.).is_none(),
+        "explicitly unobserved values are not fresh"
+    );
+    copy_shared_tickers(&mut store, &shared(r#"{"symbol":"BTC","mark":102}"#));
+    assert_eq!(
+        store.reference_seen_at("BTC", MarkPrice),
+        Some(20_000.),
+        "old producer retains changed-value behavior"
+    );
+}
+
+#[test]
+fn unchanged_source_observation_is_exported_without_redating_other_fields() {
+    use crate::wire::{FrameWriter, sections};
+    let mut store = Store::default();
+    store.export_ticker_observations = true;
+    store.set_clock(1_000.);
+    store.set_tickers(vec![Ticker {
+        symbol: "BTC".into(),
+        mark: 100.,
+        ..Default::default()
+    }]);
+    store.take_pending();
+    store.set_clock(8_500.);
+    store.observe_ticker_fields("BTC", 1 << 3);
+    let pending = store.take_pending();
+    let mut writer = FrameWriter::new(vec![], 9_000.);
+    store.write(&pending, &mut writer);
+    let bytes = writer.finish();
+    let (_, payload) = sections(&bytes)
+        .find(|(kind, _)| *kind == 24)
+        .expect("source observations must reach shared consumers even without a value delta");
+    let numbers: Vec<_> = payload
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|v| f64::from_le_bytes(*v))
+        .collect();
+    assert_eq!(numbers, [0., 1_000., 8_500., 1_000.]);
+}
+
+#[test]
+fn direct_account_ticker_frame_is_byte_identical_to_the_legacy_wire() {
+    use crate::wire::FrameWriter;
+    let mut store = Store::default();
+    store.set_clock(1_000.);
+    store.set_tickers(vec![Ticker {
+        symbol: "BTC".into(),
+        mark: 99.,
+        ..Default::default()
+    }]);
+    store.take_pending();
+    store.set_clock(2_000.);
+    store.update_ticker("BTC", |ticker| ticker.mark = 100.);
+    let pending = store.take_pending();
+    let mut writer = FrameWriter::new(vec![], 2_100.);
+    store.write(&pending, &mut writer);
+    // Format 1, one revision-0 TICKER_DELTAS section, [row=0, mask=8, mark=100].
+    let expected = [
+        b"SCXF".as_slice(),
+        &1u16.to_le_bytes(),
+        &1u16.to_le_bytes(),
+        &2100f64.to_le_bytes(),
+        &4u16.to_le_bytes(),
+        &0u16.to_le_bytes(),
+        &24u32.to_le_bytes(),
+        &0f64.to_le_bytes(),
+        &8f64.to_le_bytes(),
+        &100f64.to_le_bytes(),
+    ]
+    .concat();
+    assert_eq!(writer.finish(), expected);
+    store.set_clock(3_000.);
+    store.observe_ticker_fields("BTC", 1 << 3);
+    let mut writer = FrameWriter::new(vec![], 3_100.);
+    let pending = store.take_pending();
+    store.write(&pending, &mut writer);
+    assert_eq!(
+        writer.finish(),
+        [
+            b"SCXF".as_slice(),
+            &1u16.to_le_bytes(),
+            &0u16.to_le_bytes(),
+            &3100f64.to_le_bytes()
+        ]
+        .concat()
+    );
+}
+
+#[test]
+fn source_observations_survive_frame_fed_snapshots_and_time_only_deltas() {
+    use crate::{ingest, model::StopTriggerType::MarkPrice, wire::FrameWriter};
+    let mut source = Store::default();
+    source.export_ticker_observations = true;
+    source.set_clock(1_000.);
+    source.set_markets(vec![market("BTC")]);
+    source.set_tickers(vec![Ticker {
+        id: "native-BTC".into(),
+        symbol: "BTC".into(),
+        mark: 100.,
+        ..Default::default()
+    }]);
+    let mut target = Store::default();
+    target.set_clock(20_000.);
+    let mut state = ingest::IngestState::default();
+    let mut writer = FrameWriter::new(vec![], 19_000.);
+    source.write(&source.everything(), &mut writer);
+    let bytes = writer.finish();
+    ingest::apply(
+        &mut target,
+        &mut state,
+        &ingest::parse(&bytes).unwrap(),
+        true,
+    )
+    .unwrap();
+    assert_eq!(target.reference_seen_at("BTC", MarkPrice), Some(1_000.));
+    source.take_pending();
+    source.set_clock(8_500.);
+    source.observe_ticker_fields("BTC", 1 << 3);
+    let pending = source.take_pending();
+    let mut writer = FrameWriter::new(vec![], 19_500.);
+    source.write(&pending, &mut writer);
+    let bytes = writer.finish();
+    ingest::apply(
+        &mut target,
+        &mut state,
+        &ingest::parse(&bytes).unwrap(),
+        false,
+    )
+    .unwrap();
+    assert_eq!(target.reference_seen_at("BTC", MarkPrice), Some(8_500.));
+    assert!(crate::protective_amend::fresh_reference(&target, "BTC", MarkPrice, 20_000.).is_none());
+}
+
+#[test]
+fn partial_shared_updates_cannot_freshen_cached_omitted_references() {
+    let mut cached = quote(r#"{"symbol":"BTC","last":99,"mark":100,"index":98}"#);
+    cached.merge(quote(
+        r#"{"symbol":"BTC","bid":97,"observedAt":[9000,9000,9000]}"#,
+    ));
+    assert_eq!(cached.observed_at, Some([None; 3]));
+    cached.merge(quote(
+        r#"{"symbol":"BTC","mark":100,"observedAt":[null,8500,null]}"#,
+    ));
+    assert_eq!(cached.observed_at, Some([None, Some(8500.), None]));
+    cached.merge(quote(
+        r#"{"symbol":"BTC","last":99,"observedAt":[9000,null,null]}"#,
+    ));
+    assert_eq!(cached.observed_at, Some([Some(9000.), Some(8500.), None]));
+    let mut store = Store::default();
+    store.set_clock(20_000.);
+    store.set_markets(vec![market("BTC")]);
+    copy_shared_tickers(&mut store, &[("BTC".into(), cached)].into_iter().collect());
+    assert_eq!(
+        store.reference_seen_at("BTC", crate::model::StopTriggerType::MarkPrice),
+        Some(8500.)
+    );
+    assert!(
+        crate::protective_amend::fresh_reference(
+            &store,
+            "BTC",
+            crate::model::StopTriggerType::MarkPrice,
+            8000.
+        )
+        .is_none(),
+        "a future source clock cannot grant freshness"
+    );
+}
+
+#[test]
+fn malformed_observation_batch_does_not_freshen_any_reference() {
+    use crate::{ingest, model::StopTriggerType::MarkPrice, wire::FrameWriter};
+    let mut target = Store::default();
+    target.set_clock(1000.);
+    target.set_tickers(vec![Ticker {
+        symbol: "BTC".into(),
+        mark: 100.,
+        ..Default::default()
+    }]);
+    let mut state = ingest::IngestState::default();
+    state.source_tickers = vec!["BTC".into()];
+    for invalid in [f64::NAN, f64::INFINITY, -1.] {
+        let mut writer = FrameWriter::new(vec![], 20_000.);
+        writer.begin(24);
+        writer.f64s([0., 19_000., 19_000., 19_000., 0., 19_000., invalid, 19_000.]);
+        writer.end();
+        let bytes = writer.finish();
+        assert!(
+            ingest::apply(
+                &mut target,
+                &mut state,
+                &ingest::parse(&bytes).unwrap(),
+                false
+            )
+            .is_err()
+        );
+        assert_eq!(target.reference_seen_at("BTC", MarkPrice), Some(1000.));
+    }
+}

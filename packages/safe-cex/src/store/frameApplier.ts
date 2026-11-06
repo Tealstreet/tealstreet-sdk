@@ -317,6 +317,27 @@ export class FrameApplier {
 
     attempt(() => {
       if (marketsFailed) return;
+      const observations = frame.tickerObservations?.();
+      if (!observations) return;
+      const rows = update.tickers ?? this.store.tickers;
+      const times: NonNullable<StoreUpdate['tickerObservations']> = [];
+      for (let i = 0; i < observations.length; i += 4) {
+        const row = observations[i];
+        if (!rows[row]) throw new Error('Invalid ticker observation row');
+        times.push([
+          row,
+          [
+            finite(observations[i + 1]) ?? null,
+            finite(observations[i + 2]) ?? null,
+            finite(observations[i + 3]) ?? null,
+          ],
+        ]);
+      }
+      update.tickerObservations = times;
+    }, LOADED_FLAG.TICKERS);
+
+    attempt(() => {
+      if (marketsFailed) return;
       const orders = frame.orders();
       if (orders) {
         const rows: Order[] = [];
@@ -360,8 +381,7 @@ export class FrameApplier {
               ? {
                   remainingNative: native,
                   remainingNotional:
-                    native *
-                    (inverseContractSized || nativePlacementAmounts ? contractSizes[orders.market[i]] : 1),
+                    native * (inverseContractSized || nativePlacementAmounts ? contractSizes[orders.market[i]] : 1),
                 }
               : inverseNativeAmounts
                 ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
@@ -488,10 +508,7 @@ export class FrameApplier {
             unrealizedPnl: displayNumber(positions.unrealizedPnl[i]),
             contracts: positions.contracts[i],
             ...(market &&
-              (nativePlacementAmounts ||
-                contractCountAmounts ||
-                market?.isInverse ||
-                inverseNativeAmounts) && {
+              (nativePlacementAmounts || contractCountAmounts || market?.isInverse || inverseNativeAmounts) && {
                 extra: {
                   ...(nativePlacementAmounts && {
                     contractsNative: divide(positions.contracts[i], contractSizes[positions.market[i]]),
@@ -506,9 +523,7 @@ export class FrameApplier {
                     : (market?.isInverse || inverseNativeAmounts) && {
                         contractsNative: divide(
                           positions.notional[i],
-                          inverseContractSized || nativePlacementAmounts
-                            ? contractSizes[positions.market[i]]
-                            : 1,
+                          inverseContractSized || nativePlacementAmounts ? contractSizes[positions.market[i]] : 1,
                         ),
                         ...(!nativePlacementAmounts && {
                           unrealizedPnlNative: displayNumber(positions.unrealizedPnl[i]),
