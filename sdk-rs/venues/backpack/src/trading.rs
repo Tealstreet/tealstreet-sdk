@@ -1574,6 +1574,16 @@ impl Backpack {
                         native_failure(cx, &managed.context, table, response.body, &e)
                     };
                     if let Err(error) = fact {
+                        // A trigger amend's write that cannot be journaled is unknown.
+                        if request.step.places()
+                            && self
+                                .trading
+                                .jobs
+                                .get(&request.command)
+                                .is_some_and(|job| job.protect.is_some())
+                        {
+                            return self.guarded_failed(cx, request, error.venue_error(), true);
+                        }
                         let _ = cx.fail_plan(&managed.plan, error.venue_error());
                         return;
                     }
@@ -1828,6 +1838,8 @@ impl Backpack {
         let job = self.trading.jobs.get_mut(&request.command).unwrap();
         job.steps = VecDeque::from([restore]);
         job.restoring = true;
+        // The put-back is judged by its own answer, not the replacement's.
+        job.refused = None;
         self.run_trade(cx, request.command);
     }
 

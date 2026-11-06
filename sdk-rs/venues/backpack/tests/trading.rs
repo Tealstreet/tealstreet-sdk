@@ -1570,3 +1570,42 @@ fn a_stop_that_filled_during_its_cancel_is_not_put_back() {
     );
     assert!(posts(&out).is_empty());
 }
+
+/// A put-back answered with anything but a definite refusal may stand: the
+/// user is told to check Open Orders, never to re-place a second stop.
+#[test]
+fn an_unknown_put_back_says_check_open_orders_never_re_place() {
+    for case in ["429", "lost"] {
+        let mut e = resting_stop();
+        let read = refused_then_read(&mut e);
+        reply(&mut e, &read, 200, "[]");
+        let restore = posts(&actions(&mut e)).pop().expect("the put-back");
+        match case {
+            "429" => reply(
+                &mut e,
+                &restore,
+                429,
+                r#"{"code":"TOO_MANY_REQUESTS","message":"slow"}"#,
+            ),
+            _ => e.handle(
+                1000.0,
+                Event::HttpFailed {
+                    request: restore.id,
+                    error: "lost put-back response",
+                },
+            ),
+        }
+        let out = actions(&mut e);
+        let error = failure(&out);
+        assert!(
+            error.message.contains("put-back's outcome is unknown")
+                && error.message.contains("Check Open Orders")
+                && !error.message.contains("re-place")
+                && !error.message.contains("INVALID_ORDER"),
+            "{case}: {}",
+            error.message
+        );
+        assert_eq!(error.protection, None, "{case}");
+        assert!(posts(&out).is_empty(), "{case}: never resent");
+    }
+}
