@@ -172,6 +172,24 @@ neither PASS nor an unchanged-bytes exception. This CPU job remains non-required
 required replay correctness, family sizes and coverage retain their own gates.
 A failed TS replay is a collection error, not an oracle-change disposition.
 
+The CPU planner has a separate Bitget-only reader for this failed producer.
+It requires the original same-run physical job and checkout, exactly the failed
+oracle step with its literal refusal, a successful sealed upload, and a matching
+receipt whose raw TS outputs actually differ outside metrics. Cancelled jobs,
+other failed steps, malformed evidence and metrics-only differences fail closed.
+An anchor refusal also revalidates the completed tip's original raw records.
+Successful artifact authentication remains unchanged for every other path.
+
+The planner still authenticates and revalidates Bitget's complete strict first
+measurement, including correctness and memory. With a valid oracle refusal it
+records `not-certified`, binds the refusal artifact, and schedules no second
+measurement. The certifier recomputes that plan and writes a refusal, never a
+Bitget certificate: `certified=false`, the Bitget replay gate remains
+NOT-CERTIFIED, and the other 31 suites can certify independently. A corruption
+or memory failure is not converted into an oracle refusal. The post-#3091 anchor
+reset removes the persistent historical mismatch; this remains defence in depth
+for a later legitimate published-output change.
+
 This guard prevents baseline Rust from being judged against changed candidate TS
 output. It does not establish arm-matched correctness: a future change must pair
 each Rust revision with its corresponding TS oracle before CPU comparisons of

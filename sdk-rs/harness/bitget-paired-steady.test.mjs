@@ -8,6 +8,8 @@ import { BITGET_COHORT_ORDER, BITGET_PAIRED_FREEZE_SHA256, BITGET_PAIRED_TOLERAN
 import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './performance-policy.mjs';
 import { assessEligibility, decideRemeasurement } from './cpu-remeasure.mjs';
 import { classifyInitialCase, pairedCertificateForRuntime } from './cpu-ci.mjs';
+import { readBitgetOracleRefusal } from './bitget-oracle-refusal.mjs';
+import { BitgetOracleChanged } from './bitget-paired-oracle.mjs';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 const A = 'a'.repeat(40), B = 'b'.repeat(40), tree = 'c'.repeat(40), head = 'd'.repeat(40);
@@ -403,4 +405,83 @@ test('an unchanged TS oracle still certifies, while baseline Rust corruption sti
   const result = assessBitgetPairedSteady(data);
   assert.equal(result.valid, false);
   assert.equal(result.certificate, null);
+});
+
+function refusalFixture(witness = 'tip') {
+  const data = fixture(), authority = data.authority;
+  const selected = witness === 'anchor' ? bitgetAnchorAuthority(authority) : authority;
+  const value = JSON.parse(data.evidence.cohorts[0].evidence.raw[0].bytes);
+  value.checkpoints = [];
+  const baseline = JSON.stringify({ ...value, markets: [{ symbol: 'BTCUSDT', max: 1200 }] });
+  const candidate = JSON.stringify({ ...value, markets: [{ symbol: 'BTCUSDT', max: 220 }] });
+  const sourceTrees = { [selected.baseline]: 'f'.repeat(40), [selected.candidate]: tree };
+  const receipt = { runId: authority.runId, jobId: authority.jobId, runnerId: authority.runnerId, witness,
+    sources: { baseline: { source: selected.baseline, tree: sourceTrees[selected.baseline], outputSha256: sha(baseline) },
+      candidate: { source: selected.candidate, tree, outputSha256: sha(candidate) } },
+    tape: 'sdk-rs/harness/fixtures/bitget-public.jsonl.gz', tapeSha256: sha('tape'),
+    books: 'BTCUSDT,ETHUSDT', nodeSha256: sha('node') };
+  const result = { valid: false, disposition: 'NOT-CERTIFIED', certified: false, certificate: null,
+    errors: [new BitgetOracleChanged().message], oracle: receipt };
+  const entries = new Map(Object.entries({ 'steady-assessment.json': result,
+    [`${witness}/oracle-receipt.json`]: receipt,
+    [`${witness}/oracle-baseline.json`]: baseline, [`${witness}/oracle-candidate.json`]: candidate })
+    .map(([name, value]) => [name, Buffer.from(typeof value === 'string' ? value : JSON.stringify(value))]));
+  return { data, entries, authority, sourceTrees, tapeSha256: sha('tape') };
+}
+
+test('issued tip and anchor oracle refusals stay non-certified and cannot supply steady authority', () => {
+  for (const witness of ['tip', 'anchor']) {
+    const x = refusalFixture(witness), refusal = readBitgetOracleRefusal(x);
+    assert.equal(refusal.disposition, 'NOT-CERTIFIED');
+    assert.equal(refusal.certified, false);
+    assert.equal(refusal.certificate, null);
+    assert.equal(refusal.witness, witness);
+    assert.equal(pairedCertificateForRuntime({ refusal }, { mode: 'family' }, new Map()), undefined);
+  }
+});
+
+test('refusal content binds actual oracle difference, exact receipt, source tree, run and raw bytes', () => {
+  for (const mutate of [x => { x.authority = { ...x.authority }; },
+    x => { x.sourceTrees[x.authority.candidate] = '9'.repeat(40); },
+    x => { x.entries.set('tip/oracle-candidate.json', x.entries.get('tip/oracle-baseline.json')); },
+    x => { x.entries.set('tip/oracle-receipt.json', Buffer.from('{}')); },
+    x => { x.entries.set('tip/records/plan.json', Buffer.from('{}')); },
+    x => { const v = JSON.parse(x.entries.get('steady-assessment.json')); v.certified = true; x.entries.set('steady-assessment.json', Buffer.from(JSON.stringify(v))); },
+    x => { const v = JSON.parse(x.entries.get('steady-assessment.json')); v.oracle.runId = '99'; x.entries.set('steady-assessment.json', Buffer.from(JSON.stringify(v))); },
+    x => { x.entries.set('tip/oracle-candidate.json', Buffer.from('{"impl":"ts","impl":"rust"}')); }]) {
+    const x = refusalFixture(); mutate(x); assert.throws(() => readBitgetOracleRefusal(x));
+  }
+});
+
+test('a sealed metrics-only oracle difference is not a legitimate refusal', () => {
+  const x = refusalFixture(), raw = JSON.parse(x.entries.get('tip/oracle-baseline.json'));
+  raw.metrics.cpuMs += 1;
+  const bytes = Buffer.from(JSON.stringify(raw));
+  x.entries.set('tip/oracle-candidate.json', bytes);
+  const result = JSON.parse(x.entries.get('steady-assessment.json'));
+  result.oracle.sources.candidate.outputSha256 = sha(bytes);
+  x.entries.set('steady-assessment.json', Buffer.from(JSON.stringify(result)));
+  x.entries.set('tip/oracle-receipt.json', Buffer.from(JSON.stringify(result.oracle)));
+  assert.throws(() => readBitgetOracleRefusal(x), /no actual published oracle difference/);
+});
+
+test('a valid refusal plans no second but never hides corruption or memory failure', () => {
+  const x = refusalFixture(), refusal = readBitgetOracleRefusal(x);
+  const evidence = structuredClone(x.data.evidence.cohorts[0].evidence);
+  evidence.execution = { measuredCheckoutSha: x.authority.candidate };
+  assert.equal(classifyInitialCase(evidence, manifest, undefined, undefined, refusal).decision, 'not-certified');
+  assert.equal(classifyInitialCase(evidence, manifest).decision, 'first', 'ordinary success stays unchanged');
+  assert.throws(() => classifyInitialCase(evidence, manifest, undefined, undefined, { ...refusal }));
+  const corrupted = structuredClone(evidence); corrupted.raw[0].bytes += ' ';
+  assert.throws(() => classifyInitialCase(corrupted, manifest, undefined, undefined, refusal));
+  const memory = structuredClone(evidence);
+  for (const slot of memory.raw.filter(slot => slot.impl === 'rust')) {
+    const output = JSON.parse(slot.bytes); output.metrics.heapUsedBytes = 250;
+    output.metrics.heapRetainedBytes = output.metrics.retainedBytes = 150;
+    slot.bytes = JSON.stringify(output); slot.sha256 = sha(slot.bytes);
+    if (slot.mode === 'performance') memory.report.samples.rust[slot.run] = output.metrics;
+  }
+  memory.report.failures = performanceFailures(memory.report.samples.ts, memory.report.samples.rust);
+  memory.report.status = 'FAIL'; memory.reportBytes = JSON.stringify(memory.report);
+  assert.throws(() => classifyInitialCase(memory, manifest, undefined, undefined, refusal));
 });
