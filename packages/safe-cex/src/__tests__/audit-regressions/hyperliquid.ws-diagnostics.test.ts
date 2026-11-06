@@ -134,8 +134,8 @@ describe('Hyperliquid WebSocket diagnostics', () => {
     (websocket as any).send = send;
 
     // activeAssetData follows open orders; spot and HIP-3 symbols never subscribe.
-    parent.store.orders = parent.store.markets.map((market) => ({ symbol: market.symbol })) as never;
-    parent.store.marketsBySymbol = Object.fromEntries(parent.store.markets.map((m) => [m.symbol, m])) as never;
+    parent.store.orders = parent.store.markets.map((market: { symbol: string }) => ({ symbol: market.symbol })) as never;
+    parent.store.marketsBySymbol = Object.fromEntries(parent.store.markets.map((m: { symbol: string }) => [m.symbol, m])) as never;
     Object.defineProperty(websocket, 'isConnected', { get: () => true });
     (websocket as any).subscribeOrderAssetData();
 
