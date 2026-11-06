@@ -13,6 +13,9 @@ now also streams `trades{coin}`, and its `last` is the newest trade's price.
   overwrite a trade-sourced `last`.
 - Live-balance uPnL (`current_upnl`) values at `mid_price`, falling back to
   `last`, so uPnL and free balance are what they were when `last` was the mid.
+- Spot market and stop-market limits (`base_price`, standalone spot and spot
+  pairs in the perp account) base at `mid_price`, then `last`, so a print off
+  the mid on a thin pair cannot move the ±5% IOC limit. Perps keep mark first.
 
 Callers:
 

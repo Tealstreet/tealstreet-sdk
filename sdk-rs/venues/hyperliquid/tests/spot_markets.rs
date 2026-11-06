@@ -311,6 +311,38 @@ fn spot_orders_use_spot_prices_never_reduce_only_and_ignore_leverage() {
 }
 
 #[test]
+fn a_merged_spot_market_order_prices_at_the_mid_not_a_trade_print() {
+    let mut r = run(true, Some(SPOT_META), false);
+    r.e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "HYPE/USDH".into(),
+        }),
+    );
+    message(
+        &mut r.e,
+        r.socket,
+        2100.0,
+        r#"{"channel":"trades","data":[{"coin":"@4","side":"B","px":"40","sz":"1","time":2100,"hash":"0x0","tid":1}]}"#,
+    );
+    assert_eq!(r.e.store().ticker("HYPE/USDH").unwrap().last, 40.0);
+    prepared_now(&mut r.e).into_iter().for_each(drop);
+    let opts: PlaceOrderOpts =
+        serde_json::from_str(r#"{"symbol":"HYPE/USDH","type":"market","side":"buy","amount":1}"#)
+            .unwrap();
+    r.e.handle(
+        3000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 5,
+            orders: vec![opts],
+        }),
+    );
+    let write = exchange_write(&mut r.e);
+    let body: Value = serde_json::from_str(write.body.as_deref().unwrap()).unwrap();
+    assert_eq!(body["action"]["orders"][0]["p"], "31.5", "mid 30 + 5%");
+}
+
+#[test]
 fn a_spot_disabled_account_reads_and_subscribes_exactly_as_before() {
     let r = run(false, None, false);
     assert!(!r.reads.iter().any(|k| k.contains("spot")));

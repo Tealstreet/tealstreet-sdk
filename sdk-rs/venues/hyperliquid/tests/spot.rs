@@ -1921,3 +1921,39 @@ fn a_watched_spot_pair_takes_last_from_trades_and_mid_price_from_mids() {
     let ticker = e.store().ticker("PURR/USDC").unwrap();
     assert_eq!((ticker.last, ticker.mid_price), (0.215, Some(0.22)));
 }
+
+#[test]
+fn a_trade_print_does_not_move_a_spot_market_order_price() {
+    let (mut e, s) = ready(true);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PURR/USDC".into(),
+        }),
+    );
+    support::message(
+        &mut e,
+        s,
+        2100.0,
+        r#"{"channel":"trades","data":[{"coin":"PURR/USDC","side":"B","px":"0.3","sz":"10","time":2100,"hash":"0x0","tid":1}]}"#,
+    );
+    assert_eq!(e.store().ticker("PURR/USDC").unwrap().last, 0.3);
+    e.drain_plain().for_each(drop);
+    let mut o = order("PURR/USDC");
+    o.kind = OrderType::Market;
+    o.amount = 10.0;
+    o.price = None;
+    e.handle(
+        3000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![o],
+        }),
+    );
+    let r = take_http(&mut e);
+    let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        p["action"]["orders"][0]["p"], "0.21973",
+        "mid 0.209265 + 5%"
+    );
+}
