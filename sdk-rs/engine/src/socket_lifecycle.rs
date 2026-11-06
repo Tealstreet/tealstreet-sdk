@@ -712,6 +712,12 @@ impl Lifecycle {
             .get(feed.0)
             .is_some_and(|f| !f.stopped && f.interests.desired.contains_key(key))
     }
+    /// Whether `key`'s subscribe frame went out on the feed's current socket.
+    pub(crate) fn released(&self, feed: FeedId, key: &str) -> bool {
+        self.feeds
+            .get(feed.0)
+            .is_some_and(|f| f.interests.released.contains_key(key))
+    }
     /// Whether a live feed wants any key matching `matches`.
     pub(crate) fn desires_any(&self, feed: FeedId, matches: impl Fn(&str) -> bool) -> bool {
         self.feeds.get(feed.0).is_some_and(|f| {

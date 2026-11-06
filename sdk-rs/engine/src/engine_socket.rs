@@ -168,6 +168,11 @@ impl<P> Cx<'_, P> {
     pub fn socket_authenticated(&self, feed: FeedId) -> bool {
         self.io.core.socket_driver.state.authenticated(feed)
     }
+    /// Whether `key`'s subscribe frame was sent on the feed's current socket (and not
+    /// since unsubscribed): what was released, not what was encoded.
+    pub fn socket_released(&self, feed: FeedId, key: &str) -> bool {
+        self.io.core.socket_driver.state.released(feed, key)
+    }
     /// Native one-shot frames ordered after current interests, retained with
     /// their epoch until final drain. They are never persistent interests.
     pub fn send_after_socket_interests(
