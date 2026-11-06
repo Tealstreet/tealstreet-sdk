@@ -1253,11 +1253,18 @@ impl PhemexPerpetuals {
                     PositionSide::Short
                 }
             });
+        // The source the replacement is sent with, defaulted as placement does,
+        // so the veto checks the price the venue will trigger on.
+        let reference = match child.kind {
+            OrderType::TakeProfit => opts.tp_trigger_type.unwrap_or(StopTriggerType::LastPrice),
+            OrderType::StopLoss => opts.sl_trigger_type.unwrap_or(StopTriggerType::MarkPrice),
+            _ => parent.trigger_type.unwrap_or(StopTriggerType::LastPrice),
+        };
         let guard = StopGuard {
             order: child.clone(),
             parent: leg.then(|| parent.clone()),
             trigger,
-            reference: child.trigger_type.unwrap_or(StopTriggerType::LastPrice),
+            reference,
             below,
             closes,
         };

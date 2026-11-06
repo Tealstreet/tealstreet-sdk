@@ -3893,6 +3893,58 @@ fn a_stale_crossed_filled_or_flat_stop_at_the_final_claim_cancels_nothing() {
     }
 }
 
+/// A leg whose row carries no trigger source is replaced on the source the
+/// entry was placed with (here the mark default), so the veto checks the mark.
+#[test]
+fn a_leg_crossed_on_the_mark_but_not_the_last_cancels_nothing() {
+    let mut e = engine();
+    let mut entry = opts("");
+    entry.stop_loss = Some(68000.);
+    let sent = writes(&command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 2,
+            orders: vec![entry],
+        },
+    ));
+    assert_eq!(p(&sent[0], "slTrigger").as_deref(), Some("ByMarkPrice"));
+    assert!(done(&respond(&mut e, &sent[0], ack(&sent[0], "entry"))).is_ok());
+    e.store_mut().update_order("entry", |o| {
+        o.filled = 0.004;
+        o.stop_loss = Some(68000.);
+    });
+    let mut sl = order("entry__stop_loss");
+    sl.parent_id = Some("entry".into());
+    sl.kind = OrderType::StopLoss;
+    sl.side = OrderSide::Sell;
+    sl.trigger_type = None;
+    sl.price = 68000.;
+    e.store_mut().upsert_order(sl);
+    protected_long(&mut e);
+    e.handle(
+        1000.,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "entry__stop_loss".into(),
+            price: Some(67900.),
+            amount: None,
+        }),
+    );
+    // The mark falls through the new stop before the cancel's final claim;
+    // the last price does not.
+    e.store_mut().update_ticker("BTCUSDT", |t| t.mark = 67850.);
+    let a: Vec<Action> = e.drain_actions().collect();
+    assert!(writes(&a).is_empty(), "no cancel: {a:?}");
+    let error = failure(&a);
+    assert!(
+        error.message.contains("already crossed the mark price"),
+        "{}",
+        error.message
+    );
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::NotSent));
+    assert_eq!(error.protection, None);
+}
+
 /// A buy limit entry carrying a 68000 stop loss; its leg is edited to 67900.
 fn bracketed_entry(e: &mut Engine<PhemexPerpetuals>, filled: f64) {
     let mut parent = order("old");
