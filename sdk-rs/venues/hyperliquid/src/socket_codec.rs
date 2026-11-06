@@ -186,6 +186,14 @@ struct DepthOrder<'a> {
     fast: bool,
 }
 
+/// One encoded subscribe or unsubscribe frame awaiting the venue's answer.
+pub(super) struct Unanswered {
+    subscribe: bool,
+    key: std::sync::Arc<str>,
+    /// The engine's released ledger showed this frame went out.
+    sent: bool,
+}
+
 impl Hyperliquid {
     /// Track early native snapshots too: delivery can beat the release continuation.
     fn prepare_private_snapshots(&mut self, cx: &mut Cx<'_, Pending>, epoch: Epoch) {
@@ -438,6 +446,15 @@ impl Hyperliquid {
         }
     }
 
+    /// A new proposal supersedes the engine's queued but unsent frames: keep only frames
+    /// its released ledger shows went out (a subscribe released, an unsubscribe gone).
+    pub(super) fn forget_unsent(&self, cx: &Cx<'_, Pending>, feed: FeedId) {
+        self.connection.unanswered.borrow_mut().retain_mut(|frame| {
+            frame.sent |= cx.socket_released(feed, &frame.key) == frame.subscribe;
+            frame.sent
+        });
+    }
+
     /// Acknowledgements and refusals answer this engine's subscribe frames, in order.
     pub(super) fn subscription_reply(&mut self, cx: &mut Cx<'_, Pending>, text: &str) -> bool {
         let Ok(frame) = serde_json::from_str::<Envelope>(text) else {
@@ -449,7 +466,12 @@ impl Hyperliquid {
                 true
             }
             "error" => {
-                let answered = self.connection.unanswered.borrow_mut().pop_front();
+                let answered = self
+                    .connection
+                    .unanswered
+                    .borrow_mut()
+                    .pop_front()
+                    .map(|frame| (frame.subscribe, frame.key));
                 if let Ok(message) = serde_json::from_str::<Cow<'_, str>>(frame.data.get()) {
                     self.subscription_refused(cx, &message, answered);
                 }
@@ -599,6 +621,7 @@ impl Hyperliquid {
             .map(|interest| interest.key.as_ref())
             .collect();
         let epoch = cx.socket_epoch(feed);
+        self.forget_unsent(cx, feed);
         if let Err(error) = cx.set_socket_interests_then(
             feed,
             desired,
@@ -634,6 +657,11 @@ impl Hyperliquid {
         event: LifecycleEvent,
     ) -> Result<(), SocketError> {
         match event {
+            // Frames encoded before this socket opened were never sent on it; Ready
+            // replays every desired interest through the encoder afterwards.
+            LifecycleEvent::Opened(epoch) if self.connection.feed == Some(epoch.feed()) => {
+                self.connection.unanswered.borrow_mut().clear();
+            }
             LifecycleEvent::Ready { epoch, .. } => {
                 if self.connection.feed != Some(epoch.feed()) {
                     return Err(SocketError::Stale);
@@ -737,7 +765,11 @@ impl Hyperliquid {
             self.connection
                 .unanswered
                 .borrow_mut()
-                .push_back((subscribe, interest.key.clone()));
+                .push_back(Unanswered {
+                    subscribe,
+                    key: interest.key.clone(),
+                    sent: false,
+                });
         }
         Ok(())
     }
