@@ -475,8 +475,17 @@ fn listed_failures(list: &[ListResult]) -> Vec<(Option<i64>, String)> {
 struct Failure {
     #[serde(default)]
     error_msg: String,
+    /// Which order of the batch this row refuses; anything unreadable names none.
+    #[serde(default)]
+    client_oid: Option<FailureClient>,
     #[serde(default)]
     error_code: Number,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum FailureClient {
+    Text(String),
+    Other(serde::de::IgnoredAny),
 }
 #[derive(Deserialize)]
 struct Reply<'a> {
@@ -1609,12 +1618,15 @@ impl BitgetFutures {
     }
 
     /// Bitget's refusal of a close beyond the position's unlocked size, worded
-    /// with the split its last position row reported while that row is current.
+    /// with the split its last admitted position row reported. `client` names the
+    /// refused order; without it only a batch whose closes share one side is
+    /// attributed, else the text names no side or size.
     fn closable_refusal(
         &self,
         cx: &Cx<'_, Pending>,
         call: &Planned,
         message: &str,
+        client: Option<&str>,
     ) -> Option<String> {
         if call.path != paths::BATCH_PLACE
             || !message
@@ -1624,32 +1636,51 @@ impl BitgetFutures {
             return None;
         }
         let symbol = call.payload.symbol.as_deref()?;
-        let close = call
-            .payload
-            .order_list
-            .as_deref()?
-            .iter()
-            .find(|o| o.reduce_only == Some("YES") || o.trade_side == Some("close"))?;
+        let rows = call.payload.order_list.as_deref()?;
         // A hedged close names its position's side; a one-way close sells a long.
-        let long = if close.trade_side == Some("close") {
-            close.side == Some("buy")
-        } else {
-            close.side == Some("sell")
+        let closes_long = |o: &Payload| {
+            (o.reduce_only == Some("YES") || o.trade_side == Some("close")).then(|| {
+                if o.trade_side == Some("close") {
+                    o.side == Some("buy")
+                } else {
+                    o.side == Some("sell")
+                }
+            })
+        };
+        let named = client.and_then(|client| {
+            rows.iter()
+                .find(|o| o.client_oid.as_deref() == Some(client))
+        });
+        let long = match named {
+            Some(row) => closes_long(row),
+            None => {
+                let mut sides = rows.iter().filter_map(closes_long);
+                let first = sides.next();
+                first.filter(|long| sides.all(|other| other == *long))
+            }
+        };
+        let Some(long) = long else {
+            return Some(format!(
+                "part of the {symbol} position is held by open close orders, cancel them first ({message})"
+            ));
         };
         let (side, label) = if long {
             (PositionSide::Long, "long")
         } else {
             (PositionSide::Short, "short")
         };
-        let split =
-            self.account
-                .closable
-                .get(&(symbol.to_owned(), side))
-                .filter(|split| {
-                    cx.store.positions().iter().any(|p| {
-                        p.symbol == symbol && p.side == side && p.contracts == split.contracts
-                    })
-                });
+        let split = self
+            .account
+            .closable
+            .get(&(symbol.to_owned(), side))
+            .filter(|split| {
+                cx.store.positions().iter().any(|p| {
+                    p.symbol == symbol
+                        && p.side == side
+                        && p.contracts == split.contracts
+                        && p.last_update == split.last_update
+                })
+            });
         Some(match split {
             Some(split) => format!(
                 "only {} of the {} {symbol} {label} is free to close; {} is held by open close orders, cancel them first ({message})",
@@ -2604,7 +2635,7 @@ impl BitgetFutures {
             Ok(reply) if status == 200 && reply.code.0 == Some(0.0) => None,
             Ok(reply) => {
                 let text = self
-                    .closable_refusal(cx, &request.call, &reply.msg)
+                    .closable_refusal(cx, &request.call, &reply.msg, None)
                     .unwrap_or_else(|| reply.msg.to_string());
                 Some(format!(
                     "Bitget {}: {text} (HTTP {status})",
@@ -2798,8 +2829,15 @@ impl BitgetFutures {
                     .map(|d| failure_messages(&d.failure_list))
                     .filter(|f| !f.is_empty())
                 {
-                    for (_, message) in &mut failures {
-                        if let Some(clear) = self.closable_refusal(cx, &request.call, message) {
+                    let rows = data.map_or(&[][..], |d| d.failure_list.as_slice());
+                    for (row, (_, message)) in rows.iter().zip(&mut failures) {
+                        let client = match &row.client_oid {
+                            Some(FailureClient::Text(client)) => Some(client.as_str()),
+                            _ => None,
+                        };
+                        if let Some(clear) =
+                            self.closable_refusal(cx, &request.call, message, client)
+                        {
                             *message = clear;
                         }
                     }

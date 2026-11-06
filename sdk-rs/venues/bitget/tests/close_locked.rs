@@ -1,6 +1,7 @@
 //! A Classic reduce-only close against a position partly held by resting close
-//! orders: Bitget shrinks a market close to the unlocked size, and refuses one
-//! when nothing is unlocked (live report, v2 batch-place-order, one-way).
+//! orders. Observed live (v2 batch-place-order, one-way): Bitget shrank a market
+//! close to the unlocked size and refused later ones with nothing unlocked. The
+//! shrink fixture pins that observation, not a documented protocol rule.
 mod support;
 use safe_cex_engine::{Command, Outcome};
 use serde_json::{Value, json};
@@ -191,4 +192,106 @@ fn other_refusals_keep_the_venue_text_byte_for_byte() {
         h.failures.last().unwrap().message,
         "Bitget 40762: order size too big (HTTP 200)"
     );
+}
+
+// Review probes (#3203).
+#[test]
+fn a_late_rest_row_never_replaces_a_newer_stream_split() {
+    let mut h = held();
+    while h.requests.iter().any(|r| r.url.contains("/all-position")) {
+        h.respond("/all-position", 200, HELD);
+    }
+    h.command(Command::Venue {
+        command: 90,
+        action: safe_cex_engine::VenueAction::ReadPositions,
+    });
+    let old = h.take("/all-position");
+    h.now += 1.0;
+    let fresh = HELD
+        .replace(r#""available":"0.197""#, r#""available":"0""#)
+        .replace(r#""locked":"0.552""#, r#""locked":"0.749""#)
+        .replace(r#""uTime":"100""#, r#""uTime":"200""#);
+    let data: Value = serde_json::from_str(&fresh).unwrap();
+    h.private_message(
+        &json!({"arg":{"channel":"positions"},"action":"update","data":data["data"]}).to_string(),
+    );
+    h.reply(old.id, 200, HELD);
+    assert_eq!(h.engine.store().positions()[0].last_update, Some(200.0));
+    let (_, id) = close(&mut h, 91, 0.138);
+    h.reply(
+        id,
+        200,
+        &json!({"code":"40757","msg":REFUSAL,"data":null}).to_string(),
+    );
+    let message = &h.failures.last().unwrap().message;
+    assert!(
+        message.contains("only 0 of the 0.749 BTCUSDT long"),
+        "{message}"
+    );
+}
+
+fn hedged() -> Harness {
+    let mut h = Harness::private_started();
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    let rows = json!({"code":"00000","data":[
+        {"symbol":"BTCUSDT","holdSide":"long","total":"0.749","available":"0.197","locked":"0.552","openPriceAvg":"90","markPrice":"100","leverage":"20","marginMode":"crossed","posMode":"hedge_mode","uTime":"100"},
+        {"symbol":"BTCUSDT","holdSide":"short","total":"0.5","available":"0","locked":"0.5","openPriceAvg":"90","markPrice":"100","leverage":"20","marginMode":"crossed","posMode":"hedge_mode","uTime":"100"}
+    ]});
+    h.respond("/all-position", 200, &rows.to_string());
+    h.respond("/account/accounts", 200, ACCOUNT);
+    h.orders(OPEN_ORDER);
+    h.login();
+    assert!(h.engine.store().hedged());
+    h
+}
+
+fn both_closes(h: &mut Harness, command: u32) -> safe_cex_engine::RequestId {
+    h.command(Command::PlaceOrders {
+        command,
+        orders: vec![
+            serde_json::from_value(json!({"symbol":"BTCUSDT","type":"market","side":"sell","amount":0.1,"reduceOnly":true,"clientOrderId":"long-close"})).unwrap(),
+            serde_json::from_value(json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":0.1,"reduceOnly":true,"clientOrderId":"short-close"})).unwrap(),
+        ],
+    });
+    h.take("/batch-place-order").id
+}
+
+#[test]
+fn each_failure_names_its_own_close_in_a_mixed_hedge_batch() {
+    let mut h = hedged();
+    let id = both_closes(&mut h, 92);
+    h.reply(id, 200, &json!({"code":"00000","data":{"successList":[{"orderId":"long-ok","clientOid":"long-close"}],"failureList":[{"clientOid":"short-close","errorCode":"40757","errorMsg":REFUSAL}]}}).to_string());
+    let message = &h.failures.last().unwrap().message;
+    assert!(
+        message.contains("only 0 of the 0.5 BTCUSDT short"),
+        "{message}"
+    );
+    assert!(!message.contains("BTCUSDT long"), "{message}");
+}
+
+#[test]
+fn an_unattributable_refusal_names_no_side_or_size() {
+    // No clientOid on the row, and a whole-batch refusal: either close may be the one.
+    for reply in [
+        json!({"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":REFUSAL}]}}),
+        json!({"code":"00000","data":{"successList":[],"failureList":[{"clientOid":"unknown","errorMsg":REFUSAL}]}}),
+        json!({"code":"40757","msg":REFUSAL,"data":null}),
+    ] {
+        let mut h = hedged();
+        let id = both_closes(&mut h, 93);
+        h.reply(id, 200, &reply.to_string());
+        let message = &h.failures.last().unwrap().message;
+        assert!(
+            message.contains("part of the BTCUSDT position is held by open close orders, cancel them first (Not enough position is available)"),
+            "{reply}: {message}"
+        );
+        assert!(
+            !message.contains("long") && !message.contains("short") && !message.contains("0.5"),
+            "{message}"
+        );
+    }
 }

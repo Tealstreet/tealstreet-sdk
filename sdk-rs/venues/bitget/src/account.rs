@@ -143,8 +143,9 @@ const POSITION_RECEIPT_GRACE_MS: f64 = 5_000.0;
 /// A position row's size split: `locked` is held by resting close orders.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Closable {
-    /// The mapped position's contracts, to match the row against the store.
+    /// The mapped position's contracts and update time, to match the store's admitted row.
     pub contracts: f64,
+    pub last_update: Option<f64>,
     pub total: f64,
     pub available: f64,
     pub locked: f64,
@@ -3049,6 +3050,14 @@ impl BitgetFutures {
 
     fn note_closable(&mut self, position: &Position, split: Option<Closable>) {
         let key = (position.symbol.clone(), position.side);
+        // A row older than the kept one (a late REST read) never replaces it.
+        let newer = |kept: &Closable| match (kept.last_update, position.last_update) {
+            (Some(kept), Some(row)) => row >= kept,
+            _ => true,
+        };
+        if !self.account.closable.get(&key).is_none_or(newer) {
+            return;
+        }
         match split {
             Some(split) => self.account.closable.insert(key, split),
             None => self.account.closable.remove(&key),
@@ -3414,6 +3423,7 @@ fn closable(raw: &PositionRow<'_>, position: &Position) -> Option<Closable> {
     let available = raw.available.0?;
     Some(Closable {
         contracts: position.contracts,
+        last_update: position.last_update,
         total,
         available,
         locked: raw.locked.0.unwrap_or_else(|| round8(total - available)),
