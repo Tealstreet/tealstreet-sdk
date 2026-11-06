@@ -1,5 +1,5 @@
-//! Process-wide logging and counters. Logs carry account names and venues only:
-//! never a URI, token, init payload or signature.
+//! Process-wide logging and counters. User labels carry a hash and optional
+//! validated public chat handle; never a raw user id, URI, token, init or signature.
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 

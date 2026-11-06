@@ -482,6 +482,15 @@ explicit user action; no speculative restore or automatic cross-box replay runs.
 - **Token check:** `proxyToken` is an RS256 JWT, verified with today's `PROXY_PUBLIC_KEY`. That key is copied verbatim into `src/auth.rs`.
 - **Claims:** it needs a nonempty string `userId` claim and an unexpired `exp`.
   - Once verified, the `userId` binds both the socket and any resume.
+  - Optional `chatHandle` is the authenticated user's `chat_users.username`,
+    supplied by NX when minting the signed proxy JWT. Only 1–32 ASCII letters,
+    digits, `_` and `-` are retained; absent, non-string or invalid values fall
+    back to the tag alone without refusing the token. No email/name fallback.
+  - Session-start and existing engine account labels append `chat=<handle>` to
+    the existing 12-hex user tag. The handle grants no access and never replaces
+    `userId`, `user_tag`, account keys, routing or resume ownership. Browser init
+    fields and query parameters cannot set it. Existing account labels retain
+    their build-time value; the session-start line maps each fresh token's handle.
   - At `exp + 30s` the socket closes with 1008. That 30s is the same reconnect grace as `PROXY_TOKEN_RECONNECT_GRACE_MS`.
 - **Use of the token:** it is also the per-socket proxy token behind the account's `ProxyTokenProvider` (see Routing). It is never logged.
 - **Unauthenticated sockets:** they may only `init` the public pseudo-account `__pub_bybit`.
