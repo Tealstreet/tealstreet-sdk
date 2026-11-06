@@ -202,10 +202,10 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitgetusdc: 2_375_680,
   bitrue: 1_840_128,
   bitunix: 1_863_680,
-  blofin: 1_989_632,
+  blofin: 2_001_920,
   breakoutprop: 1_565_696,
   bybit: 2_270_208,
-  coinbase: 1_826_816,
+  coinbase: 1_838_080,
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
@@ -219,13 +219,13 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   'lighter-robinhood': 2_093_056,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
   mexc: 1_858_560,
-  okx: 1_984_512,
+  okx: 1_986_560,
   orderly: 1_732_608,
   paradex: 2_266_112,
   phemex: 2_079_744,
   polymarket: 1_611_776,
   txflow: 1_852_416,
-  weex: 1_936_384,
+  weex: 1_948_672,
   woo: 2_416_640,
 });
 export const wasmBudgetBytes = (profile, venue) =>

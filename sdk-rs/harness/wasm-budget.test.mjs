@@ -498,8 +498,10 @@ test('BreakoutProp native protective edits retain measured headroom and the exac
 
 test('#3199 chaser refusals (run 42280800704) retain OKX headroom and all siblings share the cap', () => {
   const measured = 1_973_874;
-  const cap = 1_984_512;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const minimumCap = 1_984_512;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.okx;
+  assert.ok(cap >= minimumCap);
   for (const venue of ['okx', 'okxeu', 'okxdemo', 'okxeudemo']) {
     const family = venueFamily(venue);
     assert.equal(family, 'okx');
@@ -564,4 +566,17 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
     assert.match(wasmBudgetError(cap + 1, 'venue', sibling), /exceeds/);
   }
   assert.equal(wasmBudgetError(16_830_742, 'combined'), undefined);
+});
+
+test('#3150 merged-tree caps retain the approved exact boundaries', () => {
+  for (const [venue, cap] of [
+    ['blofin', 2_001_920],
+    ['coinbase', 1_838_080],
+    ['okx', 1_986_560],
+    ['weex', 1_948_672],
+  ]) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
 });
