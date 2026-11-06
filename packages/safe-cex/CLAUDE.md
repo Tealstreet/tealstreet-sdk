@@ -1218,6 +1218,21 @@ hosts consume these hints before network I/O. Public CORS routes come from the
 provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.
 
+Managed HTTP carries the engine's closed `requestClass` into HOW outside signed
+packet bytes. TS ignores non-write hints on non-GET methods; explicit remaining
+engine deadlines still govern managed posted reads. Catalogue discovery alone
+gets 60 s (90 s during startup): markets, instruments, contracts and symbol/asset/
+product catalogues, including closed catalogue RPC kinds. Live public depth,
+order books, tickers/market summaries, trades, candle polls and funding/mark-price
+reads get 20 s on every family; unknown public read kinds also stay short. Engine
+history queries (fills/order history/income) get 30 s, while candles and public
+trades use 20 s. Semantic classification happens once at the shared managed-HTTP
+boundary and uses the original Context issuance time, so neither re-prepare nor
+retry renews the deadline. Explicit nonstandard venue bounds and shorter Plan/
+caller caps remain authoritative. Both engine and transport diagnostics name
+class, budget and elapsed milliseconds; readiness stays inside the original
+bound, with no write replay.
+
 Managed engine HTTP uses `Transport.prepareHttp` to finish route/proxy-token
 and tunnel readiness before signing. `credentialIntent` (`public`, `primary`,
 `secondary`) selects the route independently of HTTP method or credential headers;

@@ -36,6 +36,7 @@ pub mod public_feed;
 pub mod read_scheduler;
 #[cfg(feature = "repair-mutations")]
 pub mod repair;
+pub mod request_budget;
 pub mod request_context;
 pub mod resource_ids;
 pub mod selected_read;

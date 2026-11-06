@@ -519,7 +519,7 @@ impl Lighter {
         if self.ticker_in_flight || self.startup.waiting(&false) {
             return;
         }
-        let Ok(context) = cx.http_context(
+        let Ok(context) = cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -575,7 +575,7 @@ impl Lighter {
         if state.in_flight || cx.now < state.rest_retry_at {
             return;
         }
-        let Ok(context) = cx.http_context(
+        let Ok(context) = cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -638,7 +638,7 @@ impl Lighter {
             };
             context
         } else {
-            match cx.http_context(Scope::Background, policy) {
+            match cx.http_live_context(Scope::Background, policy) {
                 Ok(context) => context,
                 Err(_) => {
                     if let Some(state) = self
@@ -1019,6 +1019,13 @@ impl Lighter {
     }
 }
 impl Venue for Lighter {
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::Account { .. } => safe_cex_engine::HttpReadClass::Reconciliation,
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
+
     /// A repair re-sends the topic's book or candle channel; a book resubscribe
     /// answers with a full snapshot, which replaces the book.
     fn subscription_interest(

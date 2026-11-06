@@ -113,7 +113,6 @@ pub enum HttpReadClass {
     Normal = 0,
     Critical = 1,
     Bulk = 2,
-    #[cfg(feature = "address-nonce")]
     Reconciliation = 3,
 }
 
@@ -6183,7 +6182,10 @@ impl<V: Venue> Engine<V> {
                 }
                 .write_intent();
                 cx.io.core.request_contexts.dispatch = Some((command, intent));
+                cx.io.core.request_contexts.dispatch_class =
+                    crate::request_budget::RequestClass::venue_action(&action);
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.core.request_contexts.dispatch_class = Default::default();
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
@@ -6351,7 +6353,10 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.request_contexts.dispatch = command
                     .completion_id()
                     .map(|id| (id, command.write_intent()));
+                cx.io.core.request_contexts.dispatch_class =
+                    crate::request_budget::RequestClass::command(&command);
                 self.venue.on_command(&mut cx, command);
+                cx.io.core.request_contexts.dispatch_class = Default::default();
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
@@ -7296,6 +7301,7 @@ impl<V: Venue> Engine<V> {
     ) {
         self.assert_live();
         self.flush_http_owner_retirements();
+        self.apply_account_read_budgets(self.io.core.dispatch_now, emitted);
         for action in self.io.core.actions.split_off(emitted).into_iter().rev() {
             queued.push_front(action);
         }
@@ -7304,6 +7310,7 @@ impl<V: Venue> Engine<V> {
     #[inline(always)]
     fn dispatch_actions(&mut self, now: f64) {
         self.assert_live();
+        self.apply_account_read_budgets(now, 0);
         if self.io.core.actions.is_empty()
             && self.io.core.signing_admission.is_empty()
             && self.io.core.signing.is_empty()

@@ -204,7 +204,12 @@ impl BitunixFutures {
         self.public_seed(cx, DiscoveryRead::Tickers);
     }
     fn public_seed(&mut self, cx: &mut Cx<'_, Pending>, read: DiscoveryRead) {
-        let context = match cx.http_context(Scope::Background, Self::read_policy()) {
+        let issue = if matches!(read, DiscoveryRead::Tickers) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, Self::read_policy()) {
             Ok(context) => context,
             Err(error) => {
                 self.public_failed(cx, read, error.venue_error(), 0.0);

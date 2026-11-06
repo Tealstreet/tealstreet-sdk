@@ -1733,3 +1733,16 @@ fn post_only_crossing_has_a_plain_message_and_retains_rejection_classification()
                 if event.code == "order.rejected")));
     }
 }
+
+#[test]
+fn unsigned_account_snapshot_has_a_twenty_second_reconciliation_budget() {
+    let (mut e, socket) = ready_unopened();
+    e.handle(NOW, Event::WsOpened { socket });
+    let held = requests(&mut e);
+    let account = held.iter().find(|r| r.url.contains("/account?")).unwrap();
+    assert_eq!(account.timeout_ms, Some(20_000));
+    assert_eq!(
+        e.http_read_class(account.id),
+        safe_cex_engine::HttpReadClass::Reconciliation
+    );
+}

@@ -1835,7 +1835,9 @@ fn a_hung_listen_key_create_is_bounded_and_backs_off() {
     h.advance(1.0);
     assert_eq!(
         h.errors,
-        ["Binance user data stream unavailable: network error: HTTP request timed out"]
+        [
+            "Binance user data stream unavailable: network error: HTTP request timed out (class=orderWrite budget=20000ms elapsed=20000ms)"
+        ]
     );
     h.take("/fapi/v1/listenKey");
     h.advance(5_000.0);

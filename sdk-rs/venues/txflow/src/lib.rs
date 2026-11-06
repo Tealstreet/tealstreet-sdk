@@ -211,6 +211,8 @@ impl TxFlow {
             cx.route_request(id, safe_cex_engine::RequestRoute::PublicCors);
         }
     }
+    // perpMeta is catalogue discovery. This path still uses plain cx.request;
+    // if moved to managed HTTP it keeps the undeclared catalogue default.
     fn metadata(&self, cx: &mut Cx<'_, Pending>) {
         self.info(
             cx,
@@ -227,7 +229,7 @@ impl TxFlow {
         if let Some(old) = self.ticker_contexts.remove(&asset) {
             let _ = cx.finish_http_context(&old);
         }
-        let context = match cx.http_context_with_egress(
+        let context = match cx.http_live_context_with_egress(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -655,6 +657,15 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::Account(account::Request::Setting { .. }) => {
+                safe_cex_engine::HttpReadClass::Reconciliation
+            }
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
+
     fn managed_sockets() -> bool {
         true
     }

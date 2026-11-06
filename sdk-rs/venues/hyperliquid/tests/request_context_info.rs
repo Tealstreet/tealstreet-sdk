@@ -46,8 +46,14 @@ fn release<V: Venue>(engine: &mut Engine<V>, testnet: bool) -> Vec<Action> {
                 } => {
                     assert_eq!(intent, RoutingIntent::Public);
                     let loaded = engine.store().loaded();
-                    let bound = if loaded.markets && loaded.tickers {
+                    let bound = if matches!(
+                        engine.http_read_class(request.id),
+                        safe_cex_engine::HttpReadClass::Critical
+                            | safe_cex_engine::HttpReadClass::Reconciliation
+                    ) {
                         READ_TIMEOUT_MS
+                    } else if loaded.markets && loaded.tickers {
+                        60_000
                     } else {
                         DISCOVERY_DEADLINE_MS
                     };

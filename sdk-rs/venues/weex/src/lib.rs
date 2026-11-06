@@ -328,7 +328,13 @@ impl WeexFutures {
             seed_generation: self.seed_generation,
         };
         if pending.task.is_seed() {
-            let context = match cx.http_context_with_egress(
+            let issue = if matches!(&pending.task, Task::Daily(_) | Task::BookTickers(_)) {
+                Cx::http_live_context_with_egress
+            } else {
+                Cx::http_context_with_egress
+            };
+            let context = match issue(
+                cx,
                 Scope::Background,
                 Policy {
                     operation: Operation::Read,
