@@ -2223,7 +2223,7 @@ impl BitgetFutures {
                         .execution_prices
                         .get(&order.id)
                         .copied()
-                        .ok_or("Bitget execution price is unavailable; refresh before editing")?,
+                        .ok_or("Bitget execution price is unavailable; stop not changed; check Open Orders and re-place it")?,
                 ));
             }
             p.size = Some(if amount.is_some_and(|a| a > 0.0) {

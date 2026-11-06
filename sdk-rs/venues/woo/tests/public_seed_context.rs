@@ -622,7 +622,17 @@ fn nonfinite_delivery(failure: bool) {
                         "Startup incomplete: still waiting for tickers"
                     }
                 );
-                assert!(event.fields.is_empty());
+                assert_eq!(
+                    event.fields,
+                    if seed == Seed::Markets {
+                        vec![
+                            ("startupMarketsState", "started".into()),
+                            ("startupTickersState", "neverStarted".into()),
+                        ]
+                    } else {
+                        vec![("startupTickersState", "started".into())]
+                    }
+                );
             }
 
             assert_eq!(

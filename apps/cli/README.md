@@ -208,6 +208,10 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
   noisy prefixes there, not in `logger.ts`.
 - **Everything else prints _above_ the prompt** via `writeAbovePrompt`
   (readline-aware), so async output never corrupts what the user is typing.
+- **Glyphs go through `src/console-glyphs.ts`.** On a legacy Windows console
+  TTY, terminal renderers print ASCII markers (`[x] [!] [ok] [i]`) and terminal
+  sinks transliterate tables; JSON, pipes and capture/listener output stay
+  Unicode. `TEALSTREET_ASCII=1`/`0` overrides. A test rejects raw glyphs.
   `console.warn` / `console.error` (and any line `log-classify.ts` rates
   `critical`) are additionally mirrored on the **top status bar**
   (`src/status-line.ts`). ("critical" is a severity classification, not a
@@ -215,6 +219,10 @@ sync (see the doc-sync table at the top of `CLAUDE.md`). The essentials:
 - **`print()` / `originalConsoleLog()` bypass all of the above** — use them for
   primary command output, prompts, progress, and anything the user explicitly
   asked for.
+- **Clock skew.** Bybit timestamp refusals use per-account Rust clock correction
+  and one bounded re-signed retry. The CLI prints one warning per session with
+  the measured fast/slow offset and Windows time-sync steps.
+
 - **Verbose transport diagnostics share `cli.log`.** When the CLI runs with
   `DEBUG=1` or `DEBUG=true`, tunneled HoW/tradetunnel REST requests emit
   sanitized `[TradeTunnel]` request/response summaries through the existing

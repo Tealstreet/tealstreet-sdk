@@ -2300,6 +2300,11 @@ export class RustEngineExchange extends BaseExchange {
       this.refreshSourceOrders(named.includes('') ? undefined : named);
     }
     this.emitter.emit('engine-event', event);
+    // Only an explicit clock-advice listener replaces the generic info log.
+    if (event.code === 'bybit.clock.corrected' && event.level === 'info' && this.emitter.hasListeners('clock-advice')) {
+      this.emitter.emit('clock-advice', event);
+      return;
+    }
     if (event.level === 'error')
       this.emitAndLogError(
         event.code === 'ws.public_unavailable'

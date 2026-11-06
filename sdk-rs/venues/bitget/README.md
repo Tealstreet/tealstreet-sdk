@@ -47,3 +47,11 @@ into the engine query shapes and reject incomplete financial results.
 
 Inverse sizing and UTA bills/trailing remain outside the verified scope.
 Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
+
+Classic TPSL rows explicitly marked `orderType=market` with an absent or blank
+`executePrice` retain market execution in REST, WebSocket and version-2 source
+frames. Native TPSL amendments send `executePrice="0"`, the documented market
+form, while preserving the order identity, quantity and trigger reference.
+Unknown or malformed execution evidence stays refused; it never borrows a live
+price. Version-1 frames still lack this evidence and require re-placing the stop.
+See [Classic modify TPSL](https://www.bitget.com/docs/catalog/classic-contract-plan/classic-contract-plan).
