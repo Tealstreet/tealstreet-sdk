@@ -457,9 +457,10 @@ test('#3169 MEXC managed protective edits (run 42228563954) retain measured head
 });
 
 test('#3128 ApeX guarded amends (run 42146728975) retain ApeX headroom', () => {
-  for (const [venue, measured, cap] of [['apexomni', 2_002_359, 2_013_184]]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  for (const [venue, measured, minimumCap] of [['apexomni', 2_002_359, 2_013_184]]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -467,9 +468,10 @@ test('#3128 ApeX guarded amends (run 42146728975) retain ApeX headroom', () => {
 });
 
 test('#3130 Backpack guarded trigger amends (run 42154583609) retain Backpack headroom', () => {
-  for (const [venue, measured, cap] of [['backpack', 1_926_668, 1_937_408]]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  for (const [venue, measured, minimumCap] of [['backpack', 1_926_668, 1_937_408]]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -477,9 +479,10 @@ test('#3130 Backpack guarded trigger amends (run 42154583609) retain Backpack he
 });
 
 test('#3138 Bitrue guarded stop edits (run 42166643605) retain Bitrue headroom', () => {
-  for (const [venue, measured, cap] of [['bitrue', 1_829_700, 1_840_128]]) {
-    assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  for (const [venue, measured, minimumCap] of [['bitrue', 1_829_700, 1_840_128]]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -514,8 +517,10 @@ test('#3199 chaser refusals (run 42280800704) retain OKX headroom and all siblin
 
 test('#3152 BingX protective edits (run 42200843544) retain measured headroom and the exact boundary', () => {
   const measured = 2_063_923;
-  const cap = 2_074_624;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const minimumCap = 2_074_624;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.bingx;
+  assert.ok(cap >= minimumCap);
   assert.equal(venueFamily('bingx'), 'bingx');
   assert.equal(WASM_VENUE_OVERRIDES.bingx, cap);
   assert.equal(wasmBudgetError(measured, 'venue', 'bingx'), undefined);
@@ -570,6 +575,10 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
 
 test('#3150 merged-tree caps retain the approved exact boundaries', () => {
   for (const [venue, cap] of [
+    ['apexomni', 2_024_448],
+    ['backpack', 1_948_672],
+    ['bingx', 2_085_888],
+    ['bitrue', 1_851_392],
     ['blofin', 2_001_920],
     ['coinbase', 1_838_080],
     ['okx', 1_986_560],

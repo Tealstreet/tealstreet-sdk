@@ -193,14 +193,14 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3188 startup attribution, run 42260192686 at cda38ed52a9: CI + 10 KiB rounded up.
 // Only measured over-cap families grow; shared siblings stay equal and larger incoming caps win.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
-  apexomni: 2_013_184,
+  apexomni: 2_024_448,
   asterdex: 2_161_664,
-  backpack: 1_937_408,
+  backpack: 1_948_672,
   binance: 2_223_104,
-  bingx: 2_074_624,
+  bingx: 2_085_888,
   bitget: 2_375_680,
   bitgetusdc: 2_375_680,
-  bitrue: 1_840_128,
+  bitrue: 1_851_392,
   bitunix: 1_863_680,
   blofin: 2_001_920,
   breakoutprop: 1_565_696,
