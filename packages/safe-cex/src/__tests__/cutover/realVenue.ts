@@ -91,11 +91,22 @@ export const realVenue = (name: ExchangeName) => {
     records = buildBinanceOptionsTape({ isPublic: true }) as RecordRow[];
     source = 'private-tape-binanceoptions.mjs public records';
   } else if (name === 'coinbase') {
-    // Main Coinbase keyless mode is legacy INTX. The captured public tape is
-    // spot-only, so use the documented INTX instruments input, with no keys.
-    // This proves compatibility, not availability of the retired live route.
-    records = coinbasePrivateTape({ profile: 'intx' }).records as RecordRow[];
-    source = 'private-tape-coinbase.mjs legacy INTX public records';
+    // Keyless Coinbase reads CFM futures beside spot (INTX left Advanced Trade on
+    // 2026-10-01). The captured public tape is spot; the documented CFM product
+    // read supplies the FUTURE catalogue at its keyless market path.
+    const captured = gunzipSync(readFileSync(new URL('../../../../../sdk-rs/harness/fixtures/coinbase-public.jsonl.gz', import.meta.url)))
+      .toString()
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line)) as RecordRow[];
+    const future = (coinbasePrivateTape({ profile: 'cfm' }).records as RecordRow[]).find(
+      (record) => record.type === 'http' && record.url!.endsWith('/products?product_type=FUTURE'),
+    )!;
+    records = [
+      { ...future, url: 'https://api.coinbase.com/api/v3/brokerage/market/products?limit=1000&product_type=FUTURE' },
+      ...captured,
+    ];
+    source = 'coinbase-public.jsonl.gz with the private-tape-coinbase.mjs CFM FUTURE catalogue';
   } else {
     const file = new URL(`../../../../../sdk-rs/harness/fixtures/${fixture}-public.jsonl.gz`, import.meta.url);
     records = gunzipSync(readFileSync(file))
@@ -113,12 +124,6 @@ export const realVenue = (name: ExchangeName) => {
       record.type === 'http'
         ? record.url!.includes('/mix/market/')
         : record.type === 'ws' && record.url!.endsWith('/ws/public'),
-    );
-  if (name === 'coinbase')
-    records = records.filter((record) =>
-      record.type === 'http'
-        ? record.url!.includes('api.international.coinbase.com')
-        : record.type === 'ws' && record.url === 'wss://advanced-trade-ws.coinbase.com',
     );
 
   const venue = venueOf(name === 'binancepm' ? 'binance' : name);

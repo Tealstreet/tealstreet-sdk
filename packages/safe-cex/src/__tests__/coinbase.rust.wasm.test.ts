@@ -59,11 +59,6 @@ const transport = (profile: 'spot' | 'cfm' = 'spot') => {
         const { order_ids } = JSON.parse(request.body!);
         return response({ results: order_ids.map((order_id: string) => ({ order_id, success: true })) });
       }
-      if (parsed.hostname === 'api.international.coinbase.com') return response([{
-        symbol: 'BTC-PERP', type: 'PERP', trading_state: 'TRADING', base_asset_name: 'BTC', quote_asset_name: 'USDC',
-        base_increment: '0.001', quote_increment: '0.01', min_quantity: '0.001', qty_24hr: '20', notional_24hr: '2200',
-        quote: { best_bid_price: '109', best_ask_price: '111', trade_price: '110', mark_price: '110', index_price: '110' },
-      }]);
       if (path.endsWith('/cfm/balance_summary')) return profile === 'cfm'
         ? response({ balance_summary: { total_usd_balance: { value: '1000' }, available_margin: { value: '800' }, unrealized_pnl: { value: '0.2' } } })
         : response({ message: 'No CFM account' }, 403);
@@ -369,16 +364,15 @@ describe('retained Coinbase Rust family oracle', () => {
   }, 20000);
 
   it.each(names)('%s honors explicit public-only despite downloaded credentials', async (name) => {
-    const tape = transport();
+    // Keyless coinbase reads CFM futures beside spot: INTX left Advanced Trade on 2026-10-01.
+    const tape = transport(name === 'coinbase' ? 'cfm' : 'spot');
     setWasmEngineLoader(loadNodeEngine);
     setRustEngineTransport(() => tape.native);
     exchange = await createExchange(name, { key: downloaded, secret: '', publicDataOnly: true, tealstreetTunnel: false }) as RustEngineExchange;
     expect(exchange.isPublicDataOnly).toBe(true);
     await exchange.start();
     expect(tape.requests.length).toBeGreaterThan(0);
-    expect(tape.requests.every((r) => name === 'coinbasespot'
-      ? new URL(r.url).pathname.startsWith('/api/v3/brokerage/market/')
-      : new URL(r.url).hostname === 'api.international.coinbase.com')).toBe(true);
+    expect(tape.requests.every((r) => new URL(r.url).pathname.startsWith('/api/v3/brokerage/market/'))).toBe(true);
     expect(tape.requests.every((r) => r.headers.Authorization === undefined)).toBe(true);
     expect(tape.subscriptions.every((s) => !s.url.includes('-ws-user.') && s.message.jwt === undefined)).toBe(true);
     await expect(exchange.getAccount()).rejects.toThrow(/private portfolio ID is unavailable/);

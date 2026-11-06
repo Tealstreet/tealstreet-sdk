@@ -724,7 +724,7 @@ fn initial_socket_uses_primary_route_and_missing_snapshot_recovers() {
 }
 
 #[test]
-fn keyless_perpetuals_fail_startup_without_requesting_intx() {
+fn keyless_futures_read_the_public_cfm_and_spot_catalogues_not_intx() {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
@@ -733,23 +733,59 @@ fn keyless_perpetuals_fail_startup_without_requesting_intx() {
         .unwrap(),
     );
     e.start(1000.);
-    let actions: Vec<_> = e.drain_actions().collect();
-    assert!(
-        !actions.iter().any(|a| matches!(a, Action::Http(_))),
-        "{actions:?}"
-    );
-    let error = actions
+    let mut urls = vec![];
+    let mut timers = vec![];
+    let mut now = 1000.;
+    for _ in 0..8 {
+        let mut http = vec![];
+        for action in e.drain_actions().collect::<Vec<_>>() {
+            match action {
+                Action::Http(r) => http.push(r),
+                Action::SetTimer { timer, at_ms } => timers.push((at_ms, timer)),
+                _ => {}
+            }
+        }
+        let Some(r) = http.pop() else {
+            // The REST queue paces its next read behind a timer.
+            timers.sort_by(|a: &(f64, _), b| a.0.total_cmp(&b.0));
+            if timers.is_empty() || urls.len() == 2 {
+                break;
+            }
+            let (at, timer) = timers.remove(0);
+            now = at.max(now);
+            e.handle(now, Event::TimerFired { timer });
+            continue;
+        };
+        assert!(
+            r.url.starts_with(
+                "https://api.coinbase.com/api/v3/brokerage/market/products?limit=1000"
+            ),
+            "{}",
+            r.url
+        );
+        assert!(r.headers.is_empty(), "keyless: {:?}", r.headers);
+        let body = if r.url.contains("product_type=FUTURE") {
+            r#"{"products":[{"product_type":"FUTURE","product_id":"BIP-20DEC30-CDE","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"1","price_increment":"0.01","base_min_size":"1","base_max_size":"5000","price":"75635","volume_24h":"906250","price_percentage_change_24h":"-5.9","future_product_details":{"contract_expiry_type":"EXPIRING","contract_root_unit":"BTC","contract_size":"0.01"}}],"pagination":{"has_next":false}}"#
+        } else {
+            support::PRODUCTS
+        };
+        urls.push(r.url.clone());
+        reply(&mut e, &r, 200, body);
+    }
+    assert_eq!(urls.len(), 2, "one FUTURE and one spot catalogue: {urls:?}");
+    assert!(e.store().loaded().markets);
+    let mut symbols: Vec<_> = e
+        .store()
+        .markets()
         .iter()
-        .find_map(|a| match a {
-            Action::Notice(Notice::StartupFailed { error, .. }) => Some(error),
-            _ => None,
-        })
-        .expect("keyless perpetuals end startup");
-    assert_eq!(
-        error.message,
-        "Coinbase INTX perpetuals moved to the Deribit gateway on 2026-10-01 and are not yet supported"
+        .map(|m| m.symbol.clone())
+        .collect();
+    symbols.sort();
+    assert_eq!(symbols, ["BIP-20DEC30-CDE", "BTC-USD"]);
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::StartupFailed { .. })))
     );
-    assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::Unsupported));
 }
 #[test]
 fn spot_only_public_profile_has_keyless_real_spot_products() {

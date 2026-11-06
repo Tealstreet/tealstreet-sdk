@@ -237,12 +237,13 @@ impl Coinbase {
         }
     }
     pub(crate) fn public_start(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.options.spot_only {
-            self.private_ready(ProductKind::Spot, cx);
+        // INTX's public catalogue is gone; keyless futures are CFM's, beside spot.
+        let kind = if self.options.spot_only {
+            ProductKind::Spot
         } else {
-            // Keyless perpetuals are INTX's public catalogue.
-            intx_unsupported(cx);
-        }
+            ProductKind::Cfm
+        };
+        self.private_ready(kind, cx);
     }
     pub(crate) fn private_ready(&mut self, kind: ProductKind, cx: &mut Cx<'_, Pending>) {
         self.public.kind = Some(kind);
@@ -303,7 +304,7 @@ impl Coinbase {
         };
         let kind = *kind;
         let generation = *generation;
-        let public = self.credentials.is_none() && self.options.spot_only;
+        let public = self.credentials.is_none();
         let mut path = if public {
             "/api/v3/brokerage/market/products?limit=1000"
         } else {
