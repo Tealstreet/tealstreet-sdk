@@ -1086,7 +1086,9 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: Option<crate::classify::Intent>,
     ) -> Result<Context, Error> {
-        let leg = self.make_plan_leg_context(plan, slot, intent, false, true)?;
+        let leg = self
+            .core()
+            .make_plan_leg_context(plan, slot, intent, false, true)?;
         self.note_session_resume(plan, &leg);
         Ok(leg)
     }
@@ -1097,7 +1099,8 @@ impl<P> Cx<'_, P> {
     }
 
     pub fn plan_leg_context(&mut self, plan: &Plan, slot: &Slot) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, None, false, false)
+        self.core()
+            .make_plan_leg_context(plan, slot, None, false, false)
     }
 
     /// Narrow a write leg using the common engine intent rules before its first
@@ -1108,7 +1111,8 @@ impl<P> Cx<'_, P> {
         slot: &Slot,
         intent: crate::classify::Intent,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(plan, slot, Some(intent), false, false)
+        self.core()
+            .make_plan_leg_context(plan, slot, Some(intent), false, false)
     }
 
     /// The Plan form of `http_write_protection_cancel_leg`: an amend's cancel
@@ -1119,7 +1123,7 @@ impl<P> Cx<'_, P> {
         plan: &Plan,
         slot: &Slot,
     ) -> Result<Context, Error> {
-        self.make_plan_leg_context(
+        self.core().make_plan_leg_context(
             plan,
             slot,
             Some(crate::classify::Intent::Cancel),
@@ -1128,6 +1132,13 @@ impl<P> Cx<'_, P> {
         )
     }
 
+    #[inline]
+    fn plan_issue_custody(&self, plan: &Plan, body: &Body) -> bool {
+        self.core_ref().plan_issue_custody(plan, body)
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
     /// Handoff, initial or ready custody over this Plan's next issue.
     fn plan_issue_custody(&self, plan: &Plan, body: &Body) -> bool {
         self.io
@@ -1148,7 +1159,9 @@ impl<P> Cx<'_, P> {
                     .as_ref()
                     .is_some_and(|ready| ready.same_plan(plan)))
     }
+}
 
+impl crate::engine::CoreCx<'_> {
     /// A parked Slot's resume stands in for Plan custody; nothing else may
     /// issue a parked Slot.
     fn make_plan_leg_context(
@@ -1183,7 +1196,7 @@ impl<P> Cx<'_, P> {
                 .available()
                 .any(|candidate| body.schedule.ordinal(&candidate) == Ok(index))
             || !entry.eligible_at.is_some_and(|at| at <= self.now)
-            || !(resumed || self.plan_issue_custody(plan, body))
+            || !(resumed || self.core_ref().plan_issue_custody(plan, body))
         {
             return Err(Error::Revoked);
         }
@@ -1296,7 +1309,9 @@ impl<P> Cx<'_, P> {
             .insert(context.leg(), context.clone());
         Ok(context)
     }
+}
 
+impl<P> Cx<'_, P> {
     #[inline]
     pub fn validate_plan_delivery(&self, plan: &Plan, context: &Context) -> Result<(), Error> {
         self.core_ref().validate_plan_delivery(plan, context)

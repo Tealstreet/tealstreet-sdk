@@ -128,6 +128,16 @@ impl ContextRegistry {
 }
 
 impl<P> Cx<'_, P> {
+    #[inline]
+    pub(in crate::engine) fn validate_preflight_ready_owner(
+        &self,
+        owner: Owner,
+    ) -> Result<(), Error> {
+        self.core_ref().validate_preflight_ready_owner(owner)
+    }
+}
+
+impl crate::engine::CoreRef<'_> {
     pub(in crate::engine) fn validate_preflight_ready_owner(
         &self,
         owner: Owner,
@@ -152,7 +162,9 @@ impl<P> Cx<'_, P> {
             Ok(())
         }
     }
+}
 
+impl<P> Cx<'_, P> {
     #[inline]
     pub(in crate::engine) fn validate_preflight_activation(
         &self,
