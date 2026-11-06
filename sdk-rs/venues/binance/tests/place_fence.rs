@@ -35,10 +35,7 @@ fn order_path(variant: Variant) -> &'static str {
 fn order_reads(variant: Variant) -> &'static [&'static str] {
     match variant {
         Variant::UsdM => &["/fapi/v1/openOrders", "/fapi/v1/openAlgoOrders"],
-        Variant::PortfolioMargin => &[
-            "/papi/v1/um/openOrders",
-            "/papi/v1/um/conditional/openOrders",
-        ],
+        Variant::PortfolioMargin => &["/papi/v1/um/openOrders", "/papi/v1/um/algo/openAlgoOrders"],
         Variant::Spot => &["/api/v3/openOrders"],
         Variant::CoinM => &["/dapi/v1/openOrders"],
         Variant::Options => &["/eapi/v1/openOrders"],

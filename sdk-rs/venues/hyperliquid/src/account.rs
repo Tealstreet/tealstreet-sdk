@@ -3412,6 +3412,20 @@ fn every_dex_clean(names: &[String], clean: &HashMap<String, u64>) -> Option<u64
     })
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Role => S::ACCOUNT,
+            Self::Mode => S::ACCOUNT,
+            Self::State { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { .. } => S::ORDERS,
+            Self::Spot { .. } => S::BALANCE,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod every_dex_clean_tests {
     use super::*;

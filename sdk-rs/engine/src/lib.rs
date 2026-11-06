@@ -59,6 +59,7 @@ mod socket_driver;
 #[cfg(feature = "managed-sockets")]
 pub mod socket_lifecycle;
 pub mod startup;
+mod startup_causes;
 pub mod store;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;

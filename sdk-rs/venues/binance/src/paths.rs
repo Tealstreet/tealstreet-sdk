@@ -97,12 +97,12 @@ pub const PORTFOLIO_MARGIN: Paths = Paths {
     symbol_config: None,
     balance: "/papi/v1/balance",
     open_orders: "/papi/v1/um/openOrders",
-    open_conditional_orders: "/papi/v1/um/conditional/openOrders",
+    open_conditional_orders: "/papi/v1/um/algo/openAlgoOrders",
     order: "/papi/v1/um/order",
     batch_orders: None,
-    conditional_order: "/papi/v1/um/conditional/order",
+    conditional_order: "/papi/v1/um/algo/order",
     cancel_all: "/papi/v1/um/allOpenOrders",
-    cancel_all_conditional: "/papi/v1/um/conditional/allOpenOrders",
+    cancel_all_conditional: "/papi/v1/um/algo/allOpenOrders",
     leverage: "/papi/v1/um/leverage",
     margin_type: None,
     user_trades: "/papi/v1/um/userTrades",
@@ -231,3 +231,6 @@ pub const OPTIONS: Paths = Paths {
     all_orders: "/eapi/v1/historyOrders",
     income: "",
 };
+
+/// Targeted Portfolio Margin Algo Service cancellation readback.
+pub const PM_ALGO_QUERY: &str = "/papi/v1/um/algo/algoOrder";
