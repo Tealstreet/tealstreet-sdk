@@ -160,6 +160,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // (proof read and put-back). CI size plus 10 KiB, rounded up to the KiB.
 // #3138 run 42166643605 measured bitrue 1,829,700 B: guarded stop edits, cancel-proof polling and
 // put-back. CI size plus 10 KiB, rounded up to the KiB.
+// #3140 run 42172778210 measured breakoutprop 1,554,817 B on composed checkout 451287ba0229.
+// CI size plus 10 KiB, rounded up to the KiB.
 // #3121 run 42122802638, job 127583372751 at cce3b8d1f5f measured okx 1,962,129 B.
 // CI size plus 10 KiB rounded up to the KiB; all OKX variants share the okx family cap.
 // #3148 run 42196761441 measured bitget 2,348,153 B; CI size plus 10 KiB rounded up
@@ -177,7 +179,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   bitrue: 1_840_128,
   bitunix: 1_849_344,
   blofin: 1_989_632,
-  breakoutprop: 1_512_448,
+  breakoutprop: 1_565_696,
   bybit: 2_225_152,
   coinbase: 1_826_816,
   cryptocom: 1_727_488,

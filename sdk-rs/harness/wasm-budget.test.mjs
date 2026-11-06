@@ -141,7 +141,6 @@ test('read-cover batch caps (cut 41796230942 at 3b9f6b0fe2b) retain headroom and
 
 test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and siblings match', () => {
   for (const [venue, measured, cap] of [
-    ['breakoutprop', 1_501_277, 1_512_448],
     ['coinbase', 1_816_299, 1_826_816],
     ['txflow', 1_827_125, 1_838_080],
     ['weex', 1_925_507, 1_936_384],
@@ -358,6 +357,16 @@ test('#3138 Bitrue guarded stop edits (run 42166643605) retain Bitrue headroom',
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
+});
+
+test('BreakoutProp native protective edits retain measured headroom and the exact boundary', () => {
+  const measured = 1_554_817;
+  const cap = 1_565_696;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.breakoutprop, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'breakoutprop'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'breakoutprop'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'breakoutprop'), /exceeds/);
 });
 
 test('#3121 protective amendments (run 42122802638) retain OKX headroom and all siblings share the cap', () => {
