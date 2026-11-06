@@ -110,6 +110,7 @@ pub enum Pending {
     },
     ManagedCandles(Box<ManagedCandleRead>),
     ManagedInfo(Box<ManagedInfoRead>),
+    Leverage(Box<LeverageRead>),
     SocketRefresh {
         mode_ready: bool,
     },
@@ -120,6 +121,10 @@ pub struct ManagedCandleRead {
     context: Context,
     candles: Vec<Candle>,
     valid: bool,
+}
+pub struct LeverageRead {
+    context: Context,
+    symbol: String,
 }
 pub struct ManagedInfoRead {
     context: Context,
@@ -140,8 +145,17 @@ struct Connection {
     private_bootstrap: socket_codec::PrivateBootstrap,
     // Transport liveness and epoch retirement cannot forgive a missing private bootstrap.
     private_bootstrap_misses: u8,
+    /// Subscribe (true) and unsubscribe frames encoded for the current socket and not
+    /// yet answered, oldest first, and whether the engine's ledger shows each was sent.
+    /// The venue answers every sent frame, in order, with an ack or an error.
+    unanswered: std::cell::RefCell<VecDeque<socket_codec::Unanswered>>,
+    /// Interest keys the venue refused; left out until the socket or the topic is renewed.
+    refused: HashSet<String>,
+    refusal_notices: u8,
     // Successful proposal admission persists across epochs and catalogue growth.
     admitted_interests: HashSet<std::sync::Arc<str>>,
+    /// The last subscription count reported, and when.
+    reported_subscriptions: Option<(usize, f64)>,
     capacity_excess: usize,
 }
 #[derive(Default)]
@@ -502,13 +516,13 @@ impl Hyperliquid {
     fn next_dex(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some((dex, offset)) = self.dex_queue.pop_front() {
             self.meta(cx, dex, offset);
-        } else if self.connection.feed.is_none() {
+        } else if !self.perps_published {
             self.perps_published = true;
             if let Some(catalog) = self.spot_catalog.take() {
                 self.commit_spot_catalog(cx, catalog);
             }
             self.account_start(cx);
-            self.start_socket(cx);
+            self.propose_socket_interests(cx);
         }
     }
     fn start_socket(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -524,6 +538,13 @@ impl Hyperliquid {
     fn advance_scope(&mut self, cx: &mut Cx<'_, Pending>, dex: &str) {
         if !self.advanced_scopes.insert(dex.into()) {
             return;
+        }
+        // Streams start with the first catalogue (5b15cb sat 2 min with none while HIP-3
+        // dexes loaded); each later scope adds its topics to the open socket.
+        if self.connection.feed.is_none() {
+            self.start_socket(cx);
+        } else {
+            self.propose_socket_interests(cx);
         }
         if !self.spot && dex.is_empty() {
             self.info(
@@ -608,7 +629,9 @@ impl Hyperliquid {
         }
         if let Some(feed) = self.connection.feed {
             let desired = self.bounded_socket_interests(cx);
+            self.report_subscriptions(cx, &desired);
             let admitted = desired.iter().map(|i| i.key.clone()).collect();
+            self.forget_unsent(cx, feed);
             if let Err(error) = cx.set_socket_interests(feed, desired) {
                 Self::socket_refused(cx, error);
             } else {
@@ -883,6 +906,12 @@ impl Hyperliquid {
             if count.subscribers > 1 {
                 return;
             }
+            self.forget_refusals(
+                cx.store,
+                &SubscriptionTopic::OrderBook {
+                    symbol: symbol.clone(),
+                },
+            );
         } else {
             count.subscribers = count.subscribers.saturating_sub(1);
             if count.subscribers > 0 {
@@ -1272,6 +1301,8 @@ impl Venue for Hyperliquid {
                 fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
                 client_order_lookup: true,
                 schedule_cancel: true,
+                // Settings stream only for the selection; selecting a symbol reads its rails.
+                leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
                 fresh_positions: true,
                 symbol_cancel_misses_unseen: true,
                 order_read_covers: true,
@@ -1506,6 +1537,15 @@ impl Venue for Hyperliquid {
     ) -> Vec<(FeedId, String)> {
         self.topic_interests(store, topic)
     }
+    fn socket_control(
+        &self,
+        _: &safe_cex_engine::Store,
+        _: FeedId,
+        _: bool,
+        text: &str,
+    ) -> safe_cex_engine::socket_lifecycle::Control {
+        socket_codec::managed_control(text)
+    }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self
             .connection
@@ -1515,7 +1555,7 @@ impl Venue for Hyperliquid {
         {
             return;
         }
-        if !self.observe_private_snapshot(cx, text) {
+        if !self.observe_private_snapshot(cx, text) || self.subscription_reply(cx, text) {
             return;
         }
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
@@ -1523,12 +1563,22 @@ impl Venue for Hyperliquid {
         }
         self.account_frame(cx, text);
         self.live_balance(cx);
+        if !socket_codec::public_market_frame(text) {
+            self.refresh_asset_scope(cx);
+        }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         if self.discard_retired_amend_read(cx, &pending) {
             return;
         }
         if let Pending::ManagedCandles(read) = &pending
+            && cx
+                .validate_read_http_delivery(&read.context, &read.context)
+                .is_err()
+        {
+            return;
+        }
+        if let Pending::Leverage(read) = &pending
             && cx
                 .validate_read_http_delivery(&read.context, &read.context)
                 .is_err()
@@ -1651,8 +1701,12 @@ impl Venue for Hyperliquid {
                 if builder {
                     self.builder_result(cx);
                 }
+                self.refresh_asset_scope(cx);
             }
-            Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
+            Pending::Trade(request) => {
+                self.trade_response(cx, request, Ok(response));
+                self.refresh_asset_scope(cx);
+            }
             Pending::History(request) => self.history_response(cx, *request, response),
             Pending::Meta {
                 dex,
@@ -1745,11 +1799,12 @@ impl Venue for Hyperliquid {
                     let _ = cx.fail_context(&read.context, "Malformed Hyperliquid candles");
                 }
             }
+            Pending::Leverage(read) => self.leverage_read(cx, *read, response.body),
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::SocketRefresh { .. } => {}
+            Pending::SocketRefresh { .. } | Pending::Leverage(_) => {}
             Pending::SpotMeta {
                 meta,
                 markets,
@@ -1871,6 +1926,9 @@ impl Venue for Hyperliquid {
             Pending::ManagedCandles(read) => {
                 let _ = cx.fail_context(&read.context, error);
             }
+            Pending::Leverage(read) => {
+                let _ = cx.fail_context(&read.context, error);
+            }
             Pending::SpotMeta { .. } if !self.spot => {
                 self.spot_markets_failed(cx, error);
             }
@@ -1909,6 +1967,9 @@ impl Venue for Hyperliquid {
             Pending::ManagedCandles(read) => {
                 let _ = cx.fail_context(&read.context, error);
             }
+            Pending::Leverage(read) => {
+                let _ = cx.fail_context(&read.context, error);
+            }
             pending => self.on_sign_failed(cx, pending, &error.message),
         }
     }
@@ -1917,6 +1978,9 @@ impl Venue for Hyperliquid {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::History(read) => self.history_failed(cx, *read, error),
             Pending::ManagedCandles(read) => {
+                let _ = cx.fail_context(&read.context, error);
+            }
+            Pending::Leverage(read) => {
                 let _ = cx.fail_context(&read.context, error);
             }
             pending => {
@@ -1968,6 +2032,13 @@ impl Venue for Hyperliquid {
                 let count = self.candles.entry((symbol.clone(), interval)).or_default();
                 *count += 1;
                 if *count == 1 {
+                    self.forget_refusals(
+                        cx.store,
+                        &SubscriptionTopic::Candles {
+                            symbol: symbol.clone(),
+                            interval,
+                        },
+                    );
                     if self
                         .desired_socket_interests(cx.store, cx.public_feed_policy())
                         .len()
@@ -2045,6 +2116,7 @@ impl Venue for Hyperliquid {
                 }
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
+            Command::FetchLeverage { symbol, .. } if !self.spot => self.fetch_leverage(cx, symbol),
             trade => self.trade_command(cx, trade),
         }
     }

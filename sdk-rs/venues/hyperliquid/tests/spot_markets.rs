@@ -352,10 +352,11 @@ fn a_spot_disabled_account_reads_and_subscribes_exactly_as_before() {
     // Same reads and subscriptions as the shared harness, which panics on any spot read.
     let (_, _, baseline) =
         support::ready_with_policy("disabled", safe_cex_engine::PublicFeedPolicy::Direct);
+    // activeAssetData follows open orders, and only this harness rests one.
     let strip = |sends: &[String]| {
         sends
             .iter()
-            .filter(|s| !s.contains("\"dex\""))
+            .filter(|s| !s.contains("\"dex\"") && !s.contains("\"activeAssetData\""))
             .cloned()
             .collect::<Vec<_>>()
     };

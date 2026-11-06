@@ -20,6 +20,7 @@ use tokio::task::JoinHandle;
 pub struct Identity {
     /// `None` for an unauthenticated public-data socket.
     pub user: Option<String>,
+    pub chat_handle: Option<crate::auth::ChatHandle>,
     pub token: Option<(String, u64)>,
     pub resume_from: Option<String>,
     pub resumable: bool,
@@ -175,6 +176,9 @@ impl Session {
         identity: Identity,
         out: Out,
     ) -> Self {
+        if let Some(user) = identity.user.as_deref() {
+            registry.user_connected(user, identity.chat_handle.as_ref());
+        }
         let socket = registry.next_id();
         let (loaded, loaded_rx) = tokio::sync::mpsc::unbounded_channel();
         let (dropped, dropped_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1828,6 +1832,47 @@ mod tests {
             .unwrap();
     }
 
+    #[test]
+    fn session_start_carries_only_the_authenticated_public_chat_handle() {
+        let registry = crate::accounts::tests::registry();
+        let (out, _sent, _) = Out::channel(256);
+        let user = "auth0|opaque-user";
+        let identity = Identity {
+            user: Some(user.into()),
+            chat_handle: crate::auth::ChatHandle::parse("Trader-063249"),
+            token: Some(("test-token".into(), u64::MAX)),
+            resume_from: None,
+            resumable: true,
+        };
+        let session = Session::new(
+            registry.clone(),
+            Arc::new(Metrics::default()),
+            identity,
+            out,
+        );
+        assert_eq!(session.user(), user);
+        assert_eq!(
+            registry.account_log_label(user, "acct", "bingx"),
+            format!(
+                "{} chat=Trader-063249 acct bingx",
+                crate::accounts::user_tag(user)
+            )
+        );
+        let (out, _sent, _) = Out::channel(256);
+        let public = Identity {
+            user: None,
+            chat_handle: crate::auth::ChatHandle::parse("Forged_handle"),
+            token: None,
+            resume_from: None,
+            resumable: false,
+        };
+        let public = Session::new(registry.clone(), Arc::new(Metrics::default()), public, out);
+        assert_eq!(
+            registry.account_log_label(public.user(), "acct", "bingx"),
+            format!("{} acct bingx", crate::accounts::user_tag(public.user()))
+        );
+    }
+
     fn user_session(
         registry: Arc<Registry>,
         user: &str,
@@ -1835,6 +1880,7 @@ mod tests {
         let (out, sent, _) = Out::channel(256);
         let identity = Identity {
             user: Some(user.into()),
+            chat_handle: None,
             token: Some(("t".into(), u64::MAX)),
             resume_from: None,
             resumable: true,
@@ -2110,6 +2156,7 @@ mod tests {
         let (out, _sent, _) = Out::channel(64);
         let identity = Identity {
             user: Some("u".into()),
+            chat_handle: None,
             token: Some(("t".into(), u64::MAX)),
             resume_from: None,
             resumable: false,
@@ -2321,6 +2368,7 @@ mod tests {
                 let (out, mut sent, _) = Out::channel(64);
                 let identity = Identity {
                     user: Some("u".into()),
+                    chat_handle: None,
                     token: Some(("t".into(), u64::MAX)),
                     resume_from: Some("r1".into()),
                     resumable: true,
@@ -2407,6 +2455,7 @@ mod tests {
                 let (out, mut sent, _) = Out::channel(64);
                 let identity = Identity {
                     user: Some("u".into()),
+            chat_handle: None,
                     token: Some(("t".into(), u64::MAX)),
                     resume_from: Some("r1".into()),
                     resumable: true,
@@ -2461,6 +2510,7 @@ mod tests {
         let (out, mut sent, _) = Out::channel(64);
         let identity = Identity {
             user: Some("u".into()),
+            chat_handle: None,
             token: Some(("t".into(), u64::MAX)),
             resume_from: None,
             resumable: true,
@@ -2519,6 +2569,7 @@ mod tests {
         let (out, sent, _) = Out::channel(64);
         let identity = Identity {
             user: Some("u".into()),
+            chat_handle: None,
             token: Some(("t".into(), u64::MAX)),
             resume_from: Some("r1".into()),
             resumable: true,
@@ -2740,6 +2791,7 @@ mod tests {
                 let (out, mut sent, _) = Out::channel(64);
                 let identity = Identity {
                     user: Some("u".into()),
+                    chat_handle: None,
                     token: Some(("t".into(), u64::MAX)),
                     resume_from: Some("r1".into()),
                     resumable: true,
@@ -2797,6 +2849,7 @@ mod tests {
                 registry.park("r1".into(), "u", vec![(account.clone(), 7)]);
                 let resume = |from: &str| Identity {
                     user: Some("u".into()),
+                    chat_handle: None,
                     token: Some(("t".into(), u64::MAX)),
                     resume_from: Some(from.into()),
                     resumable: true,
@@ -2856,6 +2909,7 @@ mod tests {
                     let (out, mut sent, _) = Out::channel(64);
                     let identity = Identity {
                         user: Some("u".into()),
+                        chat_handle: None,
                         token: Some(("t".into(), u64::MAX)),
                         resume_from: from.map(str::to_owned),
                         resumable: from.is_some(),
@@ -2912,6 +2966,7 @@ mod tests {
                 let (out, mut sent, _) = Out::channel(64);
                 let identity = Identity {
                     user: Some("u".into()),
+            chat_handle: None,
                     token: Some(("t".into(), u64::MAX)),
                     resume_from: Some("r1".into()),
                     resumable: true,
@@ -2982,6 +3037,7 @@ mod tests {
                 let (out, mut sent, _) = Out::channel(256);
                 let identity = Identity {
                     user: Some("u".into()),
+                    chat_handle: None,
                     token: Some(("t".into(), u64::MAX)),
                     resume_from: Some(owner),
                     resumable: true,
@@ -3055,6 +3111,7 @@ mod tests {
                 let (out, mut sent, _) = Out::channel(64);
                 let identity = Identity {
                     user: Some("u".into()),
+            chat_handle: None,
                     token: Some(("t".into(), u64::MAX)),
                     resume_from: None,
                     resumable: false,
@@ -3171,6 +3228,7 @@ mod tests {
         let (out, mut sent, _) = Out::channel(64);
         let identity = Identity {
             user: Some("u".into()),
+            chat_handle: None,
             token: Some(("t".into(), u64::MAX)),
             resume_from: None,
             resumable: false,
