@@ -1403,6 +1403,44 @@ fn write_failures_are_classified_without_changing_their_text() {
                 Some(Outcome::Rejected),
             ),
         ),
+        // The reduce-only position refusal, by its code, its text, or both;
+        // the text wins over an absent or different code, in any case.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available","errorCode":"40757"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"position","errorCode":"40757"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"not enough position is available.","errorCode":"40999"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            400,
+            r#"{"code":"40757","msg":"position"}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            400,
+            r#"{"code":"40999","msg":"Not enough position is available"}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        // The text never upgrades an unproven code to a refusal.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available","errorCode":"40010"}]}}"#,
+            (None, Some(Outcome::Unknown)),
+        ),
         // Per-row outcome change: a row coded with an unproven code (40010,
         // 40725, 45001) is now Unknown, where a code-less row was Rejected.
         (
@@ -1430,7 +1468,8 @@ fn write_failures_are_classified_without_changing_their_text() {
         );
         assert_eq!(h.done.last().unwrap().1, Err(error.legacy_text()));
         if status == 400 {
-            assert_eq!(error.venue_code.as_deref(), Some("40762"));
+            let own: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(error.venue_code.as_deref(), own["code"].as_str(), "{body}");
         }
     }
     // Transport loss on a write is Unknown.
