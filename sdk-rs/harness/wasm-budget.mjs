@@ -145,6 +145,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // #3073 run 41931095253 measured bitget and bitgetusdc 2,334,811 B.
 // ddi2il ruling: CI size plus 10 KiB rounded up to the KiB; siblings equal.
 // #3094 run 42062090938 measured bybit 2,214,254 B; CI size plus 10 KiB rounded up to the KiB.
+// #3106 run 42097859473, job 127493304972: hyperliquid 2,108,435 B at 8d94727188a.
+// CI size plus 10 KiB rounded up to the KiB; hyperliquidspot shares the family cap.
 // #2314 Lighter managed sockets: job 127434185656 measured lighter 2,034,142 B;
 // CI size plus 10 KiB rounded up to the KiB, lighter-robinhood equal to lighter.
 // #3118 run 42112075305 measured asterdex 2,139,837 B; CI size plus 10 KiB, rounded up to the KiB.
