@@ -371,6 +371,11 @@ pub struct OpenAlgoOrder<'a> {
     pub close_position: bool,
     #[serde(borrow, default)]
     pub working_type: Option<Str<'a>>,
+    /// TRAILING_STOP_MARKET only: the callback rate in percent, and its activation price.
+    #[serde(borrow, default)]
+    pub callback_rate: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub activate_price: Option<Str<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -659,6 +664,11 @@ pub struct PmConditionalOrder<'a> {
     pub reduce_only: bool,
     #[serde(borrow, default)]
     pub working_type: Option<Str<'a>>,
+    /// TRAILING_STOP_MARKET only: the callback rate in percent, and its activation price.
+    #[serde(borrow, default)]
+    pub price_rate: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub activate_price: Option<Str<'a>>,
 }
 
 #[derive(Deserialize)]

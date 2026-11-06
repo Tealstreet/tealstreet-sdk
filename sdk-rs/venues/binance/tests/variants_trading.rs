@@ -805,3 +805,29 @@ fn a_signature_code_on_an_unproven_status_is_never_resent() {
     let (_, error) = h.failures.last().expect("the write fails");
     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
 }
+
+/// COIN-M refuses a trailing level past its 10% callback ceiling, or one that rounds to
+/// 0%, instead of clamping it.
+#[test]
+fn coin_m_trailing_outside_the_callback_range_is_refused_not_clamped() {
+    for (price, rate) in [(85.0, None), (99.96, None), (98.0, Some("2"))] {
+        let mut h = ready(Variant::CoinM);
+        let mut trailing = order(Variant::CoinM, r#""reduceOnly":true"#);
+        trailing.kind = safe_cex_engine::model::OrderType::TrailingStopLoss;
+        trailing.side = safe_cex_engine::model::OrderSide::Sell;
+        trailing.price = Some(price);
+        place(&mut h, vec![trailing]);
+        let sent = h.requests.iter().find(|r| r.url.contains("/dapi/v1/order"));
+        match rate {
+            Some(rate) => {
+                let sent = sent.expect("an in-range trailing stop is placed");
+                assert_eq!(param(&sent.url, "callbackRate").as_deref(), Some(rate));
+            }
+            None => {
+                assert!(sent.is_none(), "{price}: {:?}", h.paths());
+                let refused = h.result(77).unwrap().as_ref().unwrap_err();
+                assert!(refused.contains("0.1%-10% callback range"), "{refused}");
+            }
+        }
+    }
+}
