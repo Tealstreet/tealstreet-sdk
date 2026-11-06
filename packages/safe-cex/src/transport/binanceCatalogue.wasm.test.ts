@@ -3,7 +3,7 @@ import type { HttpResponse, Transport } from '@tealstreet/safe-cex-wasm/host';
 
 import { setImmediate } from 'node:timers';
 
-import { IDBDatabase, IDBFactory } from 'fake-indexeddb';
+import { forceCloseDatabase, IDBDatabase, IDBFactory } from 'fake-indexeddb';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { EngineHost } from '@tealstreet/safe-cex-wasm/host';
@@ -12,6 +12,9 @@ import { prepareRecordedHttp } from '../__tests__/support/managedHttp';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { FrameApplier } from '../store/frameApplier';
 import { DefaultStore } from '../store/store.base';
+
+// fake-indexeddb declares a constructor parameter, but its runtime takes a database instance.
+const closeDatabase = forceCloseDatabase as unknown as (database: IDBDatabase) => void;
 
 const hosts: EngineHost[] = [];
 const transports: Transport[] = [];
@@ -61,6 +64,13 @@ async function sixEngines(answer: (attempt: number) => Promise<HttpResponse>, un
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   vi.setSystemTime(1_000_000);
   const factory = new IDBFactory();
+  const databases = new Set<IDBDatabase>();
+  const open = factory.open.bind(factory);
+  vi.spyOn(factory, 'open').mockImplementation((...args) => {
+    const request = open(...args);
+    request.addEventListener('success', () => databases.add(request.result));
+    return request;
+  });
   if (unavailable)
     vi.spyOn(factory, 'open').mockImplementation(() => {
       throw new DOMException('blocked', 'SecurityError');
@@ -81,6 +91,7 @@ async function sixEngines(answer: (attempt: number) => Promise<HttpResponse>, un
   const started = Date.now();
   const stores: DefaultStore[] = [];
   const sends: Array<{ account: number; at: number }> = [];
+  const preparations: Array<{ account: number; at: number }> = [];
   for (let account = 0; account < 6; account++) {
     // Separate module instances model account-worker realms sharing only IDB.
     vi.resetModules();
@@ -117,6 +128,12 @@ async function sixEngines(answer: (attempt: number) => Promise<HttpResponse>, un
       },
     };
     const transport = createEngineTransport('binance', { key: '', secret: '' }, raw);
+    const prepare = transport.prepareHttp!.bind(transport);
+    transport.prepareHttp = (packet) => {
+      if (new URL(packet.url).pathname === '/fapi/v1/exchangeInfo')
+        preparations.push({ account, at: Date.now() - started });
+      return prepare(packet);
+    };
     transports.push(transport);
     const host = new EngineHost(
       new WasmEngine('binance', JSON.stringify({ publicDataOnly: true })),
@@ -141,7 +158,7 @@ async function sixEngines(answer: (attempt: number) => Promise<HttpResponse>, un
       expect(store.loaded.markets).toBe(true);
       expect(store.markets.map((market) => market.symbol)).toContain('BTCUSDT');
     });
-  return { advance, sends, loaded, stores };
+  return { advance, sends, preparations, loaded, stores, databases };
 }
 
 it('publishes one physical anonymous catalogue independently into six native Stores', async () => {
@@ -214,4 +231,31 @@ it('storage failure during a shared lease cannot stampede after the original dea
   await r.advance(21_000);
   expect(r.sends).toHaveLength(1);
   expect(r.stores.every((store) => !store.loaded.markets)).toBe(true);
+});
+
+it('the first native retry after a closed-database pause physically dispatches before the startup watchdog', async () => {
+  let release!: (value: HttpResponse) => void;
+  const pending = new Promise<HttpResponse>((resolve) => {
+    release = resolve;
+  });
+  const r = await sixEngines(async (attempt) => (attempt === 1 ? pending : response()));
+  await r.advance(500);
+  expect(r.sends).toHaveLength(1);
+  expect(r.databases.size).toBe(6);
+  r.databases.forEach((db) => closeDatabase(db));
+  release(response(503));
+  await r.advance(29_000);
+  expect(r.sends).toHaveLength(1);
+  expect(r.stores.every((store) => !store.loaded.markets)).toBe(true);
+  for (let elapsed = 29_500; elapsed < 58_500 && r.sends.length === 1; elapsed += 100) await r.advance(100);
+  expect(r.sends).toHaveLength(2);
+  expect(r.sends[1].at).toBeGreaterThanOrEqual(30_500);
+  expect(r.sends[1].at).toBeLessThan(60_000);
+  const firstRetry = r.preparations.find((attempt) => attempt.at >= 30_500)!;
+  expect(firstRetry).toBeDefined();
+  expect(r.sends[1].account).toBe(firstRetry.account);
+  expect(r.sends[1].at - firstRetry.at).toBeLessThanOrEqual(100);
+  await r.advance(58_500 - r.sends[1].at);
+  for (let i = 2; i < r.sends.length; i++) expect(r.sends[i].at - r.sends[i - 1].at).toBeGreaterThanOrEqual(5000);
+  r.loaded();
 });
