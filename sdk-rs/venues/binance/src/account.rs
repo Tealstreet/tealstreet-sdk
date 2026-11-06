@@ -3753,6 +3753,19 @@ fn each_decodable<'de, T: serde::Deserialize<'de>>(
     (parsed, undecodable)
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Account { .. } => S::BALANCE,
+            Self::PositionRisk { .. } => S::POSITIONS,
+            Self::OpenOrders { .. } => S::ORDERS,
+            Self::OpenAlgoOrders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::venue_error;

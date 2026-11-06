@@ -2,11 +2,14 @@ import type { HttpPacket, HttpResponse, Transport } from '@tealstreet/safe-cex-w
 
 import { setImmediate } from 'node:timers';
 
-import { IDBDatabase, IDBFactory } from 'fake-indexeddb';
+import { forceCloseDatabase, IDBDatabase, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { binanceCataloguePolicy } from './binanceCatalogue';
 import { SharedCatalogue } from './sharedCatalogue';
+
+// fake-indexeddb declares a constructor parameter, but its runtime takes a database instance.
+const closeDatabase = forceCloseDatabase as unknown as (database: IDBDatabase) => void;
 
 const ROUTE = { network: 'mainnet' as const, route: 'direct' };
 const URL = 'https://fapi.binance.com/fapi/v1/exchangeInfo';
@@ -213,6 +216,158 @@ it('storage lost after observing a peer lease refuses rather than bypassing it',
   vi.restoreAllMocks();
   await leader!.complete(response());
 });
+
+it('a formerly working engine recovers after an abnormal database close despite native retry waves', async () => {
+  vi.stubGlobal('indexedDB', factory);
+  vi.resetModules();
+  let database: IDBDatabase | undefined;
+  const open = factory.open.bind(factory);
+  vi.spyOn(factory, 'open').mockImplementation((...args) => {
+    const request = open(...args);
+    request.addEventListener('success', () => {
+      database = request.result;
+    });
+    return request;
+  });
+  const { createEngineTransport } = await import('./engine');
+  const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+  const send = vi.fn(async () => response());
+  const raw: Transport = {
+    now: Date.now,
+    setTimeout,
+    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    prepareHttp: prepareRecordedHttp,
+    request: send,
+    connect: () => ({ send() {}, close() {} }),
+  };
+  const transport = createEngineTransport(
+    'binance',
+    {
+      key: '',
+      secret: '',
+      publicDataOnly: true,
+      tealstreetProxy: false,
+      tealstreetTunnel: false,
+    },
+    raw,
+  );
+  let id = 0;
+  const attempt = async () => {
+    const packet = { ...request(), request: ++id, route: 'direct' as const, timeoutMs: 20_000 };
+    return (await transport.prepareHttp!(packet)).bind(packet).dispatch();
+  };
+  try {
+    await attempt();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(database).toBeDefined();
+    closeDatabase(database!);
+    await flush();
+    await expect(attempt()).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+    for (const ms of [1000, 2000, 4000, 8000]) {
+      await advance(ms);
+      await expect(attempt()).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+      expect(send).toHaveBeenCalledTimes(1);
+    }
+    await advance(16_000);
+    await expect(attempt()).resolves.toMatchObject({ status: 200 });
+    expect(send).toHaveBeenCalledTimes(2);
+  } finally {
+    transport.dispose?.();
+    await flush();
+  }
+});
+
+it('reopens after a real second-instance versionchange without using the old cache', async () => {
+  const a = client();
+  await (await prepare(a))!.complete(response());
+  const second = client();
+  expect((await prepare(second))?.cached).toBeDefined();
+  await new Promise<void>((resolve, reject) => {
+    const deletion = factory.deleteDatabase(binanceCataloguePolicy.database);
+    deletion.onsuccess = () => resolve();
+    deletion.onerror = () => reject(deletion.error);
+  });
+  const read = await prepare(a);
+  expect(read).toBeDefined();
+  expect(read!.cached).toBeUndefined();
+  await read!.complete(response());
+  expect((await prepare(second))?.cached?.body).toEqual(bytes);
+});
+
+it('reopening after a storage pause still honors an exact-route peer cooldown', async () => {
+  const a = client();
+  await (await prepare(a))!.complete(response());
+  await advance(5001);
+  vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
+    throw new DOMException('closed connection', 'InvalidStateError');
+  });
+  await expect(prepare(a)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+  const peer = await prepare(client());
+  await peer!.complete(response(429, 'retry-after: 60'));
+  for (const ms of [1000, 2000, 4000, 8000]) {
+    await advance(ms);
+    await expect(prepare(a)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+  }
+  await advance(16_000);
+  const waiting = Promise.allSettled([prepare(a, undefined, Date.now() + 1000)]);
+  await advance(1000);
+  expect((await waiting)[0]).toMatchObject({ status: 'rejected', reason: { code: 'HTTP_PREPARATION_TIMED_OUT' } });
+  await advance(28_000);
+  const replacement = await prepare(a);
+  expect(replacement!.cached).toBeUndefined();
+  replacement!.cancel();
+});
+
+it.each(['abort', 'dispose'])(
+  'a participant %s cannot renew the storage pause or retire a surviving engine',
+  async (mode) => {
+    vi.stubGlobal('indexedDB', factory);
+    vi.resetModules();
+    const { createEngineTransport } = await import('./engine');
+    const { prepareRecordedHttp } = await import('../__tests__/support/managedHttp');
+    const send = vi.fn(async () => response());
+    const raw = (): Transport => ({
+      now: Date.now,
+      setTimeout,
+      clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+      prepareHttp: prepareRecordedHttp,
+      request: send,
+      connect: () => ({ send() {}, close() {} }),
+    });
+    const a = createEngineTransport('binance', { key: '', secret: '' }, raw());
+    const b = createEngineTransport('binance', { key: '', secret: '' }, raw());
+    let id = 0;
+    const attempt = async (transport: typeof a, signal?: AbortSignal) => {
+      const packet = { ...request(), request: ++id, route: 'direct' as const, timeoutMs: 20_000, signal };
+      return (await transport.prepareHttp!(packet)).bind(packet).dispatch();
+    };
+    try {
+      await attempt(a);
+      vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
+        throw new DOMException('closed connection', 'InvalidStateError');
+      });
+      await expect(attempt(b)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+      const stop = new AbortController();
+      stop.abort(new Error('participant cancelled'));
+      if (mode === 'dispose') a.dispose?.();
+      for (const ms of [1000, 2000, 4000, 8000]) {
+        await advance(ms);
+        await expect(attempt(a, mode === 'abort' ? stop.signal : undefined)).rejects.toThrow(
+          mode === 'abort' ? 'participant cancelled' : 'Engine transport disposed',
+        );
+        await expect(attempt(b)).rejects.toMatchObject({ code: 'HTTP_PREPARATION_NETWORK' });
+        expect(send).toHaveBeenCalledTimes(1);
+      }
+      await advance(16_000);
+      await expect(attempt(b)).resolves.toMatchObject({ status: 200 });
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      a.dispose?.();
+      b.dispose?.();
+      await flush();
+    }
+  },
+);
 
 it('caches spot and inverse catalogues with the native contractStatus alias', () => {
   const row = JSON.parse(new TextDecoder().decode(bytes)).symbols[0];

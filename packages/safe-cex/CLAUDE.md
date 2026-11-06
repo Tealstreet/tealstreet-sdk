@@ -224,6 +224,11 @@ are reported through `console.error` with venue, event and original cause.
 Reporting emits no error/log event, so failures in those listeners cannot recurse.
 The inherited once/off/context and subscription-snapshot behavior stays intact.
 
+Rust `startup.incomplete` carries bounded per-section cause fields from the native
+engine. `BaseExchange.emitAndLogError` derives Sentry tags from those event fields
+for local and hosted accounts; it never guesses causes from browser read state.
+See `docs/plans/callers/startup-incomplete-causes.md` for the field contract.
+
 Managed HTTP failures also emit the JS host's Debug `http.request_failed` event,
 with the actual SDK venue plus method, redacted path template, phase and closed
 failure kind. Queries, origins and request material are never diagnostic fields;
@@ -1844,6 +1849,9 @@ Unavailable storage from startup preserves independent native discovery/backoff.
 After a successful coordination transaction, storage loss refuses preparation
 instead of bypassing an unknown lease. Waiter cancellation never deletes a peer's
 lease/cooldown; each engine still parses and publishes its own catalogue.
+The 30 s storage recovery pause starts only on an actual failed storage attempt.
+Retries refused during that pause cannot extend it; after expiry the coordinator
+reopens storage and rechecks the existing route-scoped lease before sending.
 Future-dated strict ownership stays blocking. A dispatched timeout publishes a
 cooldown before abort cleanup without delaying the caller; expired ownership
 retains its minimum failure window until that publication can settle. The original
@@ -1861,3 +1869,7 @@ sync publishes them without a new polling loop. The wasm binary is unchanged.
 `updateSymbolMetadata` rechecks exact symbol membership after native market readiness
 before querying leverage. A foreign symbol or an engine retired during readiness
 starts no metadata command. UI callers also validate their account market binding.
+
+Bybit native receive-window corrections emit bybit.clock.corrected with numeric
+offsetMs only. Hosts without an explicit clock-advice listener keep the normal
+info log; CLI listeners replace it with one clock-sync warning per session.

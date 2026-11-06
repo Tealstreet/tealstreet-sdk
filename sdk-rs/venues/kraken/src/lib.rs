@@ -563,6 +563,16 @@ impl Venue for Kraken {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::FillsAccount,
@@ -1191,16 +1201,18 @@ impl Venue for Kraken {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        if matches!(pending, Pending::Candles { .. }) {
-            self.candles_failed(cx, pending, error);
-        } else {
-            match pending {
-                Pending::PublicTrades(r, child) => {
-                    self.public_trades_preparation_failed(cx, *r, Some(child), error)
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if matches!(pending, Pending::Candles { .. }) {
+                self.candles_failed(cx, pending, error);
+            } else {
+                match pending {
+                    Pending::PublicTrades(r, child) => {
+                        self.public_trades_preparation_failed(cx, *r, Some(child), error)
+                    }
+                    pending => self.on_sign_error(cx, pending, error),
                 }
-                pending => self.on_sign_error(cx, pending, error),
             }
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

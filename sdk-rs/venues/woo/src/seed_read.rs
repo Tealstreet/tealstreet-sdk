@@ -464,3 +464,13 @@ impl Woo {
         }
     }
 }
+
+impl Read {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self.payload.kind() {
+            Kind::Markets => S::MARKETS,
+            Kind::Tickers | Kind::Funding => S::TICKERS,
+        }
+    }
+}

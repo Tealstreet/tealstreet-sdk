@@ -609,6 +609,28 @@ impl Venue for BitunixFutures {
         self.account_auth(pending, response, store)
     }
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Private(request)
+                if request.after.is_none()
+                    && matches!(
+                        request.custody,
+                        None | Some(account::ReadCustody::Background(_))
+                    ) =>
+            {
+                match request.axis {
+                    account::Axis::Balance => S::BALANCE,
+                    account::Axis::Positions => S::POSITIONS,
+                    account::Axis::Orders | account::Axis::Tpsl => S::ORDERS,
+                }
+            }
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             closed_positions: true,
@@ -1106,11 +1128,11 @@ impl Venue for BitunixFutures {
     /// A provider refusal never released the request: a write is NotSent,
     /// and a read keeps its native failure path.
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_error(cx, request, error),
             Pending::History(read) => self.history_sign_failed(cx, read, &error.message),
             pending => self.public_typed_failed(cx, pending, error),
-        }
+        });
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
         pending.release(cx);
@@ -1326,5 +1348,56 @@ impl Venue for BitunixFutures {
                 .filter(|(_, b)| b.initialized)
                 .map(|(s, b)| (s.as_str(), &b.levels)),
         )
+    }
+}
+
+#[cfg(test)]
+mod startup_cause_tests {
+    use super::*;
+
+    fn pending(axis: account::Axis, after: Option<u32>) -> Pending {
+        Pending::Private(account::Read {
+            custody: None,
+            axis,
+            after,
+            generation: 0,
+            balance_write_revision: 0,
+            position_write_revision: 0,
+            order_token: None,
+            serial: 0,
+            positions: vec![],
+            position_rejected: Default::default(),
+            position_admitted: vec![],
+            identities: vec![],
+            orders: vec![],
+            order_rejected: Default::default(),
+            order_accepted: Default::default(),
+            order_newer: Default::default(),
+            native: vec![],
+            invalid: false,
+            baselines: vec![],
+            reconcile: false,
+            epoch: 0,
+        })
+    }
+
+    #[test]
+    fn command_prerequisites_do_not_supply_startup_causes() {
+        use safe_cex_engine::startup::Sections as S;
+        for (axis, expected) in [
+            (account::Axis::Balance, S::BALANCE),
+            (account::Axis::Positions, S::POSITIONS),
+            (account::Axis::Orders, S::ORDERS),
+            (account::Axis::Tpsl, S::ORDERS),
+        ] {
+            assert_eq!(
+                BitunixFutures::startup_reads(&pending(axis, None)),
+                expected
+            );
+            assert_eq!(
+                BitunixFutures::startup_reads(&pending(axis, Some(1))),
+                S::NONE
+            );
+        }
     }
 }
