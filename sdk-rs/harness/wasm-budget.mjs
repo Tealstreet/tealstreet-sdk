@@ -191,14 +191,16 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // Only measured over-cap families grow; shared siblings stay equal and larger incoming caps win.
 // #3207 run 42279265759, job 128106963965 measured Bitget 2,390,477 B.
 // CI size plus 10 KiB rounded up to KiB; BitgetUSDC shares the family cap.
+// #3202 on #3207 (merge 62c3b59c872), run 42305638406, job 128195021443 measured Bitget
+// 2,409,448 B. CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_013_184,
   asterdex: 2_161_664,
   backpack: 1_937_408,
   binance: 2_223_104,
   bingx: 2_074_624,
-  bitget: 2_401_280,
-  bitgetusdc: 2_401_280,
+  bitget: 2_419_712,
+  bitgetusdc: 2_419_712,
   bitrue: 1_840_128,
   bitunix: 1_863_680,
   blofin: 1_989_632,
