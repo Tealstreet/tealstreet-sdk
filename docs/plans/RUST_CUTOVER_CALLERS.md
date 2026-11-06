@@ -9832,6 +9832,44 @@ pass `None` and are unchanged. Serial is deliberately stricter than Background:
 a non-member serial Read naming a positive-gap domain pacing is Invalid, while a
 Background Read naming it is admitted and kept out of the FIFO.
 
+### Binance Portfolio Margin: retired conditional API replaced by Algo Service
+
+PM UM conditional and trailing commands use `/papi/v1/um/algo/order`,
+`algo/allOpenOrders`, `algo/openAlgoOrders` and the targeted `algo/algoOrder`
+query. The April 14, 2026 [USD-M changelog](https://developers.binance.com/en/docs/derivatives/change-log)
+retired the old `/conditional/*` routes on April 28. PM `ALGO_UPDATE` is read
+from `ao`, keyed by `caid` plus native `aid`; USD-M's `o` routing is unchanged.
+A triggered child never fabricates a parent fill, and an execution contradicting
+a cancellation read fences its replacement.
+
+A DELETE `{complete:true}` only acknowledges the request. Before any replacement,
+a separate Primary Read must return the exact captured algo ID, client ID and
+symbol, `CANCELED`, an explicitly empty `actualOrderId`, `triggerTime:0` and
+finite zero `actualPrice`. Execution requires a trigger producing a child order;
+all three never-triggered fields together prove zero execution ([query contract](https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/rest-api/trade#query-current-um-open-algo-order-user_data)).
+A pending, partial, foreign, malformed, failed or timed-out read is Unknown,
+with no recreate or put-back. The Read has no resend permission, shares the
+original command bound, and must have its full 20-second window inside that
+bound. A frame-fed command also performs this targeted proof Read; it remains
+free of background account discovery or polling.
+
+The small shared `inherit_http_uncertainty` API carries that failed read's
+uncertainty into the Mutation root's terminal projection, beside the existing
+Plan equivalent. It accepts only a live issued Mutation command root, is
+monotonic and failure-only, and grants no send, retry or success authority.
+
+PM algo trailing requests use `callbackRate` and `activatePrice`. The dated
+October 23, 2026 changelog advertises max 20, while the current
+[PM trade contract](https://developers.binance.com/en/docs/catalog/advanced-trading-derivatives-trading-portfolio-margin/api/rest-api/trade)
+and official connector 22.0.1 still say max 10. Pending a consistent contract,
+PM conservatively accepts 0.1–10%, validating before cancel; an original outside
+that range cannot be edited because its exact put-back is not assured. USD-M's
+20% and COIN-M's 10% bounds are unchanged. Ordinary PM limit/market requests are
+pinned byte-for-byte against their pre-migration signed-wire fixture.
+
+The SDK's retained TS BinancePMExchange is a test reference. This runtime change
+does not patch the independently frozen NX preview TS adapter.
+
 ### Binance COIN-M: per-coin currencies and coinMargined, as in TypeScript
 
 The COIN-M balance now carries a per-coin `currencies` row next to `coins`, in
