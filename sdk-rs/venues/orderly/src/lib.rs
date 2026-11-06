@@ -709,6 +709,9 @@ fn interval_valid(i: Interval) -> bool {
 }
 
 impl Venue for Orderly {
+    fn http_plans() -> bool {
+        false
+    }
     fn cancel_needs_stored_order(&self) -> bool {
         true
     }

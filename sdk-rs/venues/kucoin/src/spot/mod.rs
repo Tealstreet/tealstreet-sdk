@@ -1060,6 +1060,9 @@ fn candle(text: &str) -> Result<Candle, String> {
 }
 
 impl Venue for KucoinSpot {
+    fn http_plans() -> bool {
+        false
+    }
     type Pending = Pending;
     fn repair_subscription(
         &mut self,

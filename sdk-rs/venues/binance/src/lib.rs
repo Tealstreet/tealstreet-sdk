@@ -1349,6 +1349,9 @@ fn buffered(event: &DepthEvent<'_>) -> BufferedDepth {
 }
 
 impl Venue for BinanceFutures {
+    fn http_plans() -> bool {
+        false
+    }
     fn managed_sockets() -> bool {
         true
     }

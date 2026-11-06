@@ -90,6 +90,9 @@ impl Paradex {
 }
 
 impl Venue for Paradex {
+    fn http_plans() -> bool {
+        false
+    }
     type Pending = Pending;
     /// A host-answered provider binds its Stark public key before start; a
     /// trusted local provider keeps the key it sealed at setup.

@@ -398,6 +398,9 @@ impl KrakenSpot {
     }
 }
 impl Venue for KrakenSpot {
+    fn http_plans() -> bool {
+        false
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }

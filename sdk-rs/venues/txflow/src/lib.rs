@@ -655,6 +655,9 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn http_plans() -> bool {
+        false
+    }
     fn managed_sockets() -> bool {
         true
     }

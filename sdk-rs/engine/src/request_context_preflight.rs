@@ -297,6 +297,10 @@ impl<P> Cx<'_, P> {
             &crate::request_context::Session,
         >,
     ) -> Result<Preflight, Error> {
+        // Every Plan, Session root and owner retirement hangs off a Preflight.
+        if !self.io.core.http_plans_declared {
+            return Err(Error::Invalid);
+        }
         if self.io.core.http_delivery.is_some() {
             return Err(Error::Revoked);
         }

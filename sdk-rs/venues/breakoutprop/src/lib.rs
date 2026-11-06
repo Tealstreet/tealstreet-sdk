@@ -923,6 +923,9 @@ impl BreakoutProp {
 }
 
 impl Venue for BreakoutProp {
+    fn http_plans() -> bool {
+        false
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }
