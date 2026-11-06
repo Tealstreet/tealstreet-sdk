@@ -782,13 +782,12 @@ impl Bitrue {
             reference,
             // A stop sells below (buys above) the market; a take profit the reverse.
             below: (order.kind == OrderType::StopLoss) == (order.side == OrderSide::Sell),
-            // Only a closing stop needs a position; an opening conditional does not.
-            closes: (order.reduce_only || order.close == Some(true)).then(|| {
-                if order.side == OrderSide::Sell {
-                    PositionSide::Long
-                } else {
-                    PositionSide::Short
-                }
+            // Bitrue places every protective order as closing (CLOSE), so the
+            // position on its closing side must still be held at the claim.
+            closes: Some(if order.side == OrderSide::Sell {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
             }),
         };
         guard.validate(cx.store, cx.now).map_err(|e| e.message)?;
