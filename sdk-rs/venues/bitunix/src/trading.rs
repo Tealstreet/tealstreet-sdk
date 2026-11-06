@@ -2637,8 +2637,9 @@ impl BitunixFutures {
                 .store
                 .market(&row.symbol)
                 .ok_or("Bitunix market missing")?;
+            // The parent filled before its cancel: its TP/SL went live with the old triggers.
             if status == "FILLED" {
-                return Ok(None);
+                return Err(filled_before_edit(&row.symbol, leg.is_some()));
             }
             if row.qty.0 <= 0.0
                 || row.trade_qty.0 < 0.0
@@ -2656,7 +2657,7 @@ impl BitunixFutures {
                 return Err("Bitunix canceled quantity is not reconciled".into());
             }
             if remaining == 0.0 {
-                return Ok(None);
+                return Err(filled_before_edit(&row.symbol, leg.is_some()));
             }
             let mut p = (**payload).clone();
             p.qty = Some(num::format(remaining));
@@ -2690,7 +2691,12 @@ impl BitunixFutures {
                 }
                 self.advance(cx, command);
             }
-            Err(message) => self.end(cx, command, VenueError::new(message)),
+            Err(message) => {
+                // A filled parent says why the edit was not applied, not the first leg's refusal.
+                let mut error = VenueError::new(message.clone());
+                error.presents = message.contains(FILLED_BEFORE_EDIT);
+                self.end(cx, command, error)
+            }
         }
     }
 }
@@ -2725,6 +2731,17 @@ fn affected_ids(cx: &Cx<'_, Pending>, n: &NativeOrder) -> Vec<String> {
         .filter(|o| o.id == n.raw_id || o.id.starts_with(&format!("{}__", n.raw_id)))
         .map(|o| o.id.clone())
         .collect()
+}
+const FILLED_BEFORE_EDIT: &str = "order filled before its";
+/// An amend fallback whose canceled parent had filled: the edit was never applied.
+fn filled_before_edit(symbol: &str, leg: bool) -> String {
+    if leg {
+        format!(
+            "Your {symbol} {FILLED_BEFORE_EDIT} TP/SL edit; its TP/SL keep the old triggers. Check them in Open Orders"
+        )
+    } else {
+        format!("Your {symbol} {FILLED_BEFORE_EDIT} edit; the edit was not applied")
+    }
 }
 fn append_protection(
     p: &mut Payload,
