@@ -1213,6 +1213,14 @@ hosts consume these hints before network I/O. Public CORS routes come from the
 provider (and serialized native plan), never venue URLs. Missing native CORS
 policy fails explicitly; normal requests retain account routing and deadlines.
 
+Managed HTTP carries the engine's closed `requestClass` into HOW outside signed
+packet bytes. Standard engine budgets are 60 s for credential-free background
+catalogue snapshots (90 s during startup), 30 s for history Query/Candles contexts (client-ID order lookups stay short) and
+20 s for live account/order reads, writes and other reads. Explicit venue bounds,
+Plan/Preflight call windows and caller roots remain authoritative. Both the
+engine and transport timeout messages name class, budget and elapsed milliseconds;
+readiness is capped within that same original deadline, with no write replay.
+
 Managed engine HTTP uses `Transport.prepareHttp` to finish route/proxy-token
 and tunnel readiness before signing. `credentialIntent` (`public`, `primary`,
 `secondary`) selects the route independently of HTTP method or credential headers;

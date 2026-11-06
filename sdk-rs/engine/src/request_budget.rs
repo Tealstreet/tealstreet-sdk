@@ -1,0 +1,172 @@
+//! Closed HTTP wait budgets. TypeScript's requestBudget.ts is the parity reference.
+//! These labels grant no retry, credential or execution authority.
+use crate::{Command, Method};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RequestClass {
+    Discovery,
+    OrderRead,
+    OrderWrite,
+    History,
+    Read,
+}
+
+pub const MAX_REQUEST_BUDGET_MS: u32 = 2_147_483_647;
+
+impl RequestClass {
+    pub(crate) fn for_operation(self, operation: crate::request_context::Operation) -> Self {
+        if operation == crate::request_context::Operation::Mutation {
+            Self::OrderWrite
+        } else if self == Self::OrderWrite {
+            Self::OrderRead
+        } else {
+            self
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Discovery => "discovery",
+            Self::OrderRead => "orderRead",
+            Self::OrderWrite => "orderWrite",
+            Self::History => "history",
+            Self::Read => "read",
+        }
+    }
+    pub fn budget_ms(self) -> u32 {
+        match self {
+            Self::Discovery => 60_000,
+            Self::History => 30_000,
+            _ => 20_000,
+        }
+    }
+    pub fn timeout_ms(self, timeout: Option<u32>) -> u32 {
+        match timeout {
+            Some(ms) if ms > 0 => ms.min(MAX_REQUEST_BUDGET_MS),
+            _ => self.budget_ms(),
+        }
+    }
+    pub fn diagnostic(self, budget_ms: u32, elapsed_ms: u128) -> String {
+        format!(
+            "class={} budget={budget_ms}ms elapsed={elapsed_ms}ms",
+            self.as_str()
+        )
+    }
+    pub(crate) fn venue_action(action: &crate::VenueAction) -> Self {
+        match action {
+            crate::VenueAction::RefreshMarkets => Self::Discovery,
+            crate::VenueAction::FetchClosedPositions { .. } => Self::History,
+            _ => Self::OrderRead,
+        }
+    }
+    pub(crate) fn command(command: &Command) -> Self {
+        match command {
+            Command::Query {
+                query: crate::Query::OrderByClientId { .. },
+                ..
+            } => Self::OrderRead,
+            Command::Venue { action, .. } => Self::venue_action(action),
+            Command::Query { .. } | Command::FetchCandles { .. } => Self::History,
+            _ if command.write_intent() != crate::classify::Intent::Read => Self::OrderWrite,
+            _ => Self::OrderRead,
+        }
+    }
+    /// Legacy GET classification. Managed posted reads carry their semantic label.
+    pub fn legacy(method: Method, url: &str) -> Self {
+        if method != Method::Get {
+            return Self::OrderWrite;
+        }
+        // URL components only: queries, fragments and hostnames cannot select a class.
+        let Some((scheme, rest)) = url.split_once("://") else {
+            return Self::Read;
+        };
+        if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+            return Self::Read;
+        }
+        let Some(at) = rest.find(['/', '?', '#']) else {
+            return Self::Read;
+        };
+        if at == 0 || !rest[at..].starts_with('/') {
+            return Self::Read;
+        }
+        let path = rest[at..]
+            .split(['?', '#'])
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let has = |names: &[&str]| path.split('/').any(|part| names.contains(&part));
+        if has(&[
+            "history",
+            "historical",
+            "candles",
+            "kline",
+            "klines",
+            "fills",
+            "trades",
+            "income",
+            "allorders",
+        ]) {
+            Self::History
+        } else if has(&["order", "orders", "openorders", "orderstatus"]) {
+            Self::OrderRead
+        } else if has(&[
+            "instruments",
+            "instruments-info",
+            "contracts",
+            "exchangeinfo",
+            "markets",
+            "symbols",
+            "products",
+        ]) {
+            Self::Discovery
+        } else {
+            Self::Read
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Case {
+        method: String,
+        url: String,
+        request_class: String,
+        timeout_ms: Option<u32>,
+        budget_ms: u32,
+    }
+    #[test]
+    fn ts_reference_class_budgets_and_explicit_bounds_match() {
+        let cases: Vec<Case> = serde_json::from_str(include_str!(
+            "../../../packages/http-over-websocket/src/requestBudget.fixtures.json"
+        ))
+        .unwrap();
+        for case in cases {
+            let method = match case.method.as_str() {
+                "GET" => Method::Get,
+                "POST" => Method::Post,
+                "DELETE" => Method::Delete,
+                _ => panic!("unsupported fixture method"),
+            };
+            let class = RequestClass::legacy(method, &case.url);
+            assert_eq!(class.as_str(), case.request_class, "{}", case.url);
+            assert_eq!(class.timeout_ms(case.timeout_ms), case.budget_ms);
+        }
+        for class in [
+            RequestClass::Discovery,
+            RequestClass::OrderRead,
+            RequestClass::OrderWrite,
+            RequestClass::History,
+            RequestClass::Read,
+        ] {
+            assert!((1..=MAX_REQUEST_BUDGET_MS).contains(&class.budget_ms()));
+            assert_eq!(class.timeout_ms(Some(0)), class.budget_ms());
+            assert_eq!(class.timeout_ms(Some(u32::MAX)), MAX_REQUEST_BUDGET_MS);
+        }
+        assert_eq!(
+            RequestClass::History.diagnostic(30_000, 30_012),
+            "class=history budget=30000ms elapsed=30012ms"
+        );
+    }
+}

@@ -154,6 +154,14 @@ impl WasmEngine {
         }))
     }
 
+    #[wasm_bindgen(js_name = httpRequestClass)]
+    pub fn http_request_class(&self, preparation: &str) -> Option<String> {
+        let token = Preparation::from_wire(preparation).ok()?;
+        self.inner
+            .http_request_class(token)
+            .map(|class| class.as_str().to_owned())
+    }
+
     #[wasm_bindgen(js_name = httpPreparationPending)]
     pub fn http_preparation_pending(&self, preparation: &str) -> bool {
         Preparation::from_wire(preparation)

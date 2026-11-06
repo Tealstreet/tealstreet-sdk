@@ -49,6 +49,27 @@ deadline; it never resets the clock after readiness. Credentialed reads, caller
 commands, writes, explicit venue timeouts and reads after discovery keep their
 existing bounds.
 
+## HTTP request classes
+
+The TS HOW package's `requestBudget.ts` defines the parity reference: catalogue
+reads have 60 s, history pages 30 s, and order reads, writes and other reads 20 s.
+Engine policies on the standard 20 s bound select the class at issuance:
+credential-free background snapshots are discovery, caller history Query/Candles reads
+are history (client-ID order lookups stay short), and live account/order reads and mutations keep 20 s. The existing
+90 s startup discovery bound above remains intact. Explicit nonstandard venue
+bounds, Plan/Preflight call windows and caller-wait roots remain authoritative.
+A child or retry never extends its original root deadline.
+
+The engine exposes `http_request_class` only for an exact pending preparation.
+Native and WASM hosts copy that closed label into transport diagnostics; the
+label grants no send or retry authority and never changes signed wire bytes.
+Timeouts name class, budget and elapsed milliseconds, including engine expiry
+when it wins the race with the host timer. HOW readiness remains capped at 30 s
+inside the same original deadline. Legacy GET paths use exact catalogue/history/
+order components; unknown paths use the 20 s read default and non-GET requests
+conservatively use the short write default. Explicit transport deadlines win.
+No server, retry, outcome-unknown or socket-silence policy changes are needed.
+
 ## Host entropy
 
 Core construction is explicit: `Engine::new(venue, Some(entropy))` returns a

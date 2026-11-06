@@ -112,7 +112,8 @@ export class ManagedHttp {
     this.resources.set(token, resource);
     if (typeof host.transport.prepareHttp !== 'function') { this.fail(token, resource, 'unsupported'); return; }
     try {
-      const prepared = await host.transport.prepareHttp({ ...action.packet, headers: Object.fromEntries(action.packet.headers), intent: action.intent, signal: resource.controller.signal });
+      const requestClass = typeof host.engine.httpRequestClass === 'function' ? host.invoke(host.engine.httpRequestClass, token) : undefined;
+      const prepared = await host.transport.prepareHttp({ ...action.packet, headers: Object.fromEntries(action.packet.headers), intent: action.intent, ...(requestClass ? { requestClass } : {}), signal: resource.controller.signal });
       if (!this.live(token, resource) || !host.invoke(host.engine.httpPreparationPending, token)) {
         prepared?.cancel?.();
         if (this.live(token, resource)) this.cancel(token);

@@ -319,3 +319,19 @@ test('late provider answers and broken diagnostic observers cannot alter cleanup
   assert.equal(r.events.some(([name]) => name === 'claim'), false);
   r.host.dispose();
 });
+
+test('copies the closed engine class into preparation without changing the signed packet', async () => {
+  let seen, bound;
+  const r = rig(async request => {
+    seen = request;
+    return { bind(packet) { bound = packet; return { ready: () => true, dispatch: () => new Promise(() => {}) }; } };
+  });
+  r.host.engine.httpRequestClass = value => { assert.equal(value, token); return 'history'; };
+  r.host.execute(prepare); await tick();
+  assert.equal(seen.requestClass, 'history');
+  assert.equal(seen.timeoutMs, 1000);
+  assert.equal(bound.url, packet.url);
+  assert.equal(bound.body, packet.body);
+  assert.equal(bound.requestClass, undefined);
+  r.host.dispose();
+});

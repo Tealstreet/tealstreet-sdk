@@ -112,6 +112,12 @@ trait AnyEngine {
     fn sign_meta(&self, _: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
         None
     }
+    fn http_request_class(
+        &self,
+        _: safe_cex_engine::request_context::Preparation,
+    ) -> Option<safe_cex_engine::request_budget::RequestClass> {
+        None
+    }
     fn http_preparation_pending(&self, _: safe_cex_engine::request_context::Preparation) -> bool {
         false
     }
@@ -265,6 +271,12 @@ impl<V: Venue> AnyEngine for Engine<V> {
     #[cfg(feature = "sign-meta")]
     fn sign_meta(&self, task: RequestId) -> Option<safe_cex_engine::sign_meta::SignMeta> {
         Engine::sign_meta(self, task)
+    }
+    fn http_request_class(
+        &self,
+        token: safe_cex_engine::request_context::Preparation,
+    ) -> Option<safe_cex_engine::request_budget::RequestClass> {
+        Engine::http_request_class(self, token)
     }
     fn http_preparation_pending(
         &self,

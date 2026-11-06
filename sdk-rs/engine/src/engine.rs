@@ -5975,7 +5975,12 @@ impl<V: Venue> Engine<V> {
                 }
                 .write_intent();
                 cx.io.core.request_contexts.dispatch = Some((command, intent));
+                cx.io.core.request_contexts.dispatch_class = Some((
+                    command,
+                    crate::request_budget::RequestClass::venue_action(&action),
+                ));
                 self.venue.on_venue_action(&mut cx, command, action);
+                cx.io.core.request_contexts.dispatch_class = None;
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }
@@ -6143,7 +6148,11 @@ impl<V: Venue> Engine<V> {
                 cx.io.core.request_contexts.dispatch = command
                     .completion_id()
                     .map(|id| (id, command.write_intent()));
+                cx.io.core.request_contexts.dispatch_class = command
+                    .completion_id()
+                    .map(|id| (id, crate::request_budget::RequestClass::command(&command)));
                 self.venue.on_command(&mut cx, command);
+                cx.io.core.request_contexts.dispatch_class = None;
                 cx.io.core.request_contexts.dispatch = None;
                 cx.io.end_command_entry();
             }

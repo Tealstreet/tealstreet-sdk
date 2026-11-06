@@ -1515,6 +1515,19 @@ impl crate::engine::CoreIo<'_> {
 }
 
 impl<V: Venue> Engine<V> {
+    /// Closed diagnostic label for this exact live preparation; no send authority.
+    pub fn http_request_class(
+        &self,
+        token: Preparation,
+    ) -> Option<crate::request_budget::RequestClass> {
+        self.http_preparation_pending(token).then(|| {
+            self.io.core.managed_http[&token.attempt().request]
+                .lifecycle
+                .context()
+                .request_class()
+        })
+    }
+
     /// Hosts check this before inserting an asynchronous prepared resource.
     /// A duplicate/late completion must not overwrite its replacement.
     pub fn http_preparation_pending(&self, token: Preparation) -> bool {
@@ -1848,6 +1861,16 @@ impl<V: Venue> Engine<V> {
             return;
         }
         let delivery = managed.delivery();
+        if reason == Error::TimedOut
+            && !error.message.starts_with("Signing ")
+            && !error.message.contains(" budget=")
+        {
+            error.message = format!(
+                "{} ({})",
+                error.message,
+                managed.lifecycle.timeout_diagnostic(now)
+            );
+        }
         error.outcome = Some(crate::Outcome::NotSent);
         if error.kind.is_none() {
             error.kind = Some(reason.kind());
@@ -2423,13 +2446,17 @@ impl<V: Venue> Engine<V> {
         }
         let first_action = self.io.core.actions.len();
         let managed = &self.io.core.managed_http[&request];
+        let timeout_message = format!(
+            "HTTP request timed out ({})",
+            managed.lifecycle.timeout_diagnostic(now)
+        );
         if managed.lifecycle.release().is_some() {
             let kind = std::mem::replace(&mut self.io.core.http_failure_kind, ErrorKind::Timeout);
             self.handle_event_with_read_timeout(
                 now,
                 Event::HttpFailed {
                     request,
-                    error: "HTTP request timed out",
+                    error: &timeout_message,
                 },
                 true,
             );
@@ -2440,7 +2467,7 @@ impl<V: Venue> Engine<V> {
                 now,
                 managed.lifecycle.preparation(),
                 Error::TimedOut,
-                VenueError::new("HTTP request timed out"),
+                VenueError::new(timeout_message),
             );
         }
         // Only notices from this original timeout callback receive its opaque request ID.

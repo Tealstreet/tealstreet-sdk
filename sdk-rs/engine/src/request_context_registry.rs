@@ -57,6 +57,7 @@ mod execution;
 mod background_delivery_tests;
 
 struct CommandOwner {
+    request_class: crate::request_budget::RequestClass,
     generation: u64,
     /// Exact logical completion authority survives expired-handle cleanup.
     phase: CommandPhase,
@@ -98,6 +99,29 @@ enum CommandPhase {
     Planned(planned::State),
     #[cfg(feature = "http-plans")]
     Retiring(HttpOwnerRetirement),
+}
+
+impl ContextRegistry {
+    fn request_class(&self, scope: Scope, policy: &Policy) -> crate::request_budget::RequestClass {
+        use crate::request_budget::RequestClass;
+        if policy.operation == Operation::Mutation {
+            return RequestClass::OrderWrite;
+        }
+        match scope {
+            Scope::Command(id) => self
+                .commands
+                .get(&id)
+                .map(|owner| owner.request_class)
+                .or_else(|| {
+                    self.dispatch_class
+                        .filter(|(command, _)| *command == id)
+                        .map(|(_, class)| class)
+                })
+                .unwrap_or(RequestClass::Read),
+            Scope::Background if policy.credential.is_none() => RequestClass::Discovery,
+            _ => RequestClass::OrderRead,
+        }
+    }
 }
 
 impl CommandOwner {
@@ -229,6 +253,7 @@ pub(super) struct ContextRegistry {
     bearer_legs: Vec<(u64, u64)>,
     /// The command being dispatched to the venue and its intent.
     pub(super) dispatch: Option<(CommandId, crate::classify::Intent)>,
+    pub(super) dispatch_class: Option<(CommandId, crate::request_budget::RequestClass)>,
     executions: execution::Executions,
     #[cfg(feature = "http-plans")]
     retirements: VecDeque<HttpOwnerRetirement>,
@@ -593,6 +618,15 @@ impl ContextRegistry {
         egress: Option<Egress>,
         until: Option<f64>,
     ) -> Result<Context, Error> {
+        let scope = match owner {
+            Owner::Command { id, .. } => Scope::Command(id),
+            Owner::Background { .. } => Scope::Background,
+            _ => Scope::Execution,
+        };
+        let class = parent.map_or_else(
+            || self.request_class(scope, &policy),
+            Context::request_class,
+        );
         let deadline = until.unwrap_or(now + f64::from(policy.timeout_ms));
         let deadline = parent.map_or(deadline, |parent| parent.deadline().min(deadline));
         if let Owner::Command { id, .. } = owner
@@ -623,7 +657,8 @@ impl ContextRegistry {
             policy.pacing,
         )?
         .with_retry(policy.retry)?
-        .with_egress(egress)?;
+        .with_egress(egress)?
+        .with_request_class(class);
         if self.contexts.len() + self.reserved_context_count() >= CAPACITY
             || matches!(owner, Owner::Command { id, .. }
                 if !self.commands.contains_key(&id) && self.commands.len() >= CAPACITY)
@@ -652,6 +687,7 @@ impl ContextRegistry {
                     owner.credentialed |= context.credential().is_some();
                 })
                 .or_insert(CommandOwner {
+                    request_class: context.request_class(),
                     generation,
                     phase: CommandPhase::Context {
                         root: context.clone(),
@@ -749,7 +785,8 @@ impl ContextRegistry {
                 policy.pacing,
             )?
             .with_retry(policy.retry)?
-            .with_egress(parent.egress())?;
+            .with_egress(parent.egress())?
+            .with_request_class(parent.request_class());
             child.bind_issuer(&self.issuer);
             legs.push(leg);
             children.push(child);
@@ -2299,6 +2336,19 @@ impl crate::engine::CoreCx<'_> {
                 .core
                 .domain_pacing(policy.operation, policy.pacing)?,
             ..policy
+        };
+        let class = parent.map_or_else(
+            || self.io.core.request_contexts.request_class(scope, &policy),
+            Context::request_class,
+        );
+        let class = class.for_operation(policy.operation);
+        let policy = if policy.timeout_ms == READ_TIMEOUT_MS {
+            Policy {
+                timeout_ms: class.budget_ms(),
+                ..policy
+            }
+        } else {
+            policy
         };
         let identity = self.io.reserve_ids(1).ok_or(Error::Capacity)?.start;
         let context = self

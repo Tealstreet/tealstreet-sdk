@@ -75,6 +75,11 @@ impl ContextRegistry {
         self.commands.insert(
             command,
             CommandOwner {
+                request_class: self
+                    .dispatch_class
+                    .filter(|(id, _)| *id == command)
+                    .map(|(_, class)| class)
+                    .unwrap_or(crate::request_budget::RequestClass::Read),
                 generation,
                 phase: CommandPhase::Preflight(State::new(policy)),
                 last_deadline: now,

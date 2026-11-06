@@ -133,6 +133,16 @@ yarn test           # Vitest
   sleep. Each actual open resets clock/token readiness. Bind/ready reject stale
   resources with `HTTP_PREPARATION_STALE` before claim, so the engine re-prepares
   and re-signs within the original deadline; no post-send failure is replayed.
+- `requestBudget.ts` is the TS/Rust HTTP budget reference: discovery/catalogue
+  60 s, history pages 30 s, order reads and writes 20 s, other reads 20 s.
+  The engine supplies a closed `requestClass` label for posted reads too. Legacy
+  GETs use exact path components, never query/body values, to select a default;
+  other methods conservatively use the write default. Explicit finite positive
+  `config.timeout` wins (including an explicit 20 s); zero, negative, NaN and
+  infinity use the class default, and timers stay within 2147483647 ms.
+  `TradeTunnelTimeoutError`/readiness failures carry `requestClass`, `budgetMs`,
+  `elapsedMs` and include them in their sanitized message. Missing-token deadline
+  errors retain their authorization classification and include the same facts.
 - Axios `config.timeout` is one deadline for the complete tunnel request, not
   only the post-send response wait. Token retrieval, socket/time sync,
   authentication, simulation, and response handling all consume the same

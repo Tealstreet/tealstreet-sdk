@@ -1039,3 +1039,86 @@ fn a_refusal_outside_a_genuine_entry_is_a_caller_bug() {
     });
     e.start(0.);
 }
+
+#[test]
+fn history_default_is_medium_and_issued_deadlines_never_renew() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        callback: Some(|cx| {
+            use crate::request_budget::RequestClass;
+            let context = cx.admit_http_command(read_policy()).unwrap();
+            assert_eq!(context.request_class(), RequestClass::History);
+            assert_eq!(context.deadline(), cx.now + 30_000.);
+            let retry = context.retry(
+                crate::request_context::RetryEvidence::ReadFailure,
+                cx.now + 5_000.,
+            );
+            assert!(retry.is_err(), "a budget grants no retry authority");
+            let child = cx.http_leg_context(&context, read_policy()).unwrap();
+            assert_eq!(child.deadline(), context.deadline());
+            assert_eq!(child.request_class(), RequestClass::History);
+            let explicit = Policy {
+                timeout_ms: 1_234,
+                ..read_policy()
+            };
+            let child = cx.http_leg_context(&context, explicit).unwrap();
+            assert_eq!(child.deadline(), cx.now + 1_234.);
+        }),
+        ..Default::default()
+    });
+    e.start(0.);
+    e.drain_actions().for_each(drop);
+    e.handle(1., Event::Command(command()));
+    assert_eq!(e.venue.calls, 1);
+}
+
+#[test]
+fn live_order_reads_keep_the_short_default() {
+    let mut e = crate::test_support::seeded_engine(Probe {
+        fill: Some(0),
+        callback: Some(|cx| {
+            let context = cx.admit_http_command(read_policy()).unwrap();
+            assert_eq!(
+                context.request_class(),
+                crate::request_budget::RequestClass::OrderRead
+            );
+            assert_eq!(context.deadline(), cx.now + 20_000.);
+        }),
+        ..Default::default()
+    });
+    e.start(0.);
+    e.drain_actions().for_each(drop);
+    e.handle(1., Event::Command(Command::FetchAccount { command: 7 }));
+}
+
+#[test]
+fn definitive_order_lookup_is_short_even_though_it_is_a_query() {
+    let command = Command::Query {
+        command: 7,
+        query: Query::OrderByClientId {
+            symbol: "BTCUSD".into(),
+            client_order_id: "id".into(),
+        },
+    };
+    assert_eq!(
+        crate::request_budget::RequestClass::command(&command),
+        crate::request_budget::RequestClass::OrderRead
+    );
+}
+
+#[test]
+fn catalogue_refresh_and_closed_position_actions_use_read_budgets() {
+    use crate::request_budget::RequestClass;
+    assert_eq!(
+        RequestClass::venue_action(&VenueAction::RefreshMarkets),
+        RequestClass::Discovery
+    );
+    assert_eq!(
+        RequestClass::venue_action(&VenueAction::FetchClosedPositions {
+            symbol: None,
+            from_ms: None,
+            to_ms: None
+        }),
+        RequestClass::History
+    );
+}

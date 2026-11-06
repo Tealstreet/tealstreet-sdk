@@ -438,6 +438,8 @@ pub struct Context {
     owner: Owner,
     leg: u64,
     operation: Operation,
+    request_class: crate::request_budget::RequestClass,
+    created_at: f64,
     credential: Option<Credential>,
     /// Egress declared at issuance; it may only confirm a credential's intent.
     egress: Option<Egress>,
@@ -490,12 +492,27 @@ impl Context {
             owner,
             leg,
             operation,
+            request_class: if operation == Operation::Mutation {
+                crate::request_budget::RequestClass::OrderWrite
+            } else {
+                crate::request_budget::RequestClass::Read
+            },
             credential,
+            created_at,
             egress: None,
             deadline,
             pacing,
             retry: RetryPolicy::Never,
         })
+    }
+
+    pub fn request_class(&self) -> crate::request_budget::RequestClass {
+        self.request_class
+    }
+
+    pub(crate) fn with_request_class(mut self, class: crate::request_budget::RequestClass) -> Self {
+        self.request_class = class.for_operation(self.operation);
+        self
     }
 
     /// Capture egress before issuer binding: unsigned reads declare it, a
@@ -842,6 +859,7 @@ enum State {
 /// One physical attempt. A retry constructs another lifecycle with the same
 /// context; command evidence is retained separately until command sealing.
 pub struct Lifecycle {
+    created_at: f64,
     context: Context,
     deadline: f64,
     attempt: Attempt,
@@ -869,6 +887,7 @@ pub(crate) mod group_lifecycle;
 impl Lifecycle {
     pub fn new(context: Context, attempt: Attempt) -> Self {
         Self {
+            created_at: context.created_at,
             deadline: context.deadline(),
             context,
             attempt,
@@ -898,8 +917,16 @@ impl Lifecycle {
             return Err(Error::Invalid);
         }
         let mut lifecycle = Self::new(context, attempt);
+        lifecycle.created_at = created_at;
         lifecycle.deadline = deadline;
         Ok(lifecycle)
+    }
+
+    pub(crate) fn timeout_diagnostic(&self, now: f64) -> String {
+        self.context.request_class().diagnostic(
+            (self.deadline - self.created_at).max(0.) as u32,
+            (now - self.created_at).max(0.) as u128,
+        )
     }
 
     /// Immutable physical cap; it never grants more time than the Context.
