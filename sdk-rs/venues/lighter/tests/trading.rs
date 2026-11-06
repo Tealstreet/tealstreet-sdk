@@ -127,7 +127,7 @@ fn native_stop_limit_edit_never_converts_to_a_market_stop() {
             socket,
             NOW + 1.0,
             &json!({
-                "type":"update/account_all_orders", "orders":[{
+                "channel":"account_all_orders", "type":"update/account_all_orders", "orders":[{
                     "order_index":"42", "market_id":1, "status":"open", "type":kind,
                     "is_ask":true, "reduce_only":true, "initial_base_amount":"2",
                     "filled_base_amount":"0", "remaining_base_amount":"2",
@@ -841,8 +841,8 @@ fn signed_perp_market_indexes_above_legacy_sentinel_are_supported() {
 }
 
 #[test]
-fn amend_infers_protection_from_requested_price() {
-    for (side, old_price, new_price, conditional) in [
+fn closing_limit_edit_preserves_native_limit_type() {
+    for (side, old_price, new_price, _previously_conditional) in [
         (OrderSide::Sell, 110.0, 95.0, true),
         (OrderSide::Buy, 90.0, 105.0, true),
         (OrderSide::Sell, 95.0, 110.0, false),
@@ -881,16 +881,12 @@ fn amend_infers_protection_from_requested_price() {
         let tx = wire(&replacement);
         assert_eq!(
             tx["Type"],
-            if conditional { 2 } else { 0 },
+            0,
             "{side:?}: {old_price} -> {new_price}"
         );
         assert_eq!(
             tx["TriggerPrice"],
-            if conditional {
-                (new_price * 100.0) as u64
-            } else {
-                0
-            }
+            0
         );
     }
 }
