@@ -9422,9 +9422,14 @@ signing and queueing. Equality expires before response admission in either event
 order. Typed integrity, provider and local refusals fail with their original
 cause and consume no transport retry. Native response compatibility, including
 40085 on HTTP 408/5xx, still uses actual response bodies. Native three retries
-and strict incomplete failure remain; no prefix success or INCOMPLETE marker is
-introduced. Expiry removes only this owner’s parked work. The unrelated account
-completion remains the one Bitget legacy request site.
+and strict failures remain for those error cases. A successful order-history
+page filling its requested limit without a usable continuation cursor now
+preserves validated rows through the core's `history.incomplete` protocol
+(`laterPageFailed`), so ingestion stores the lower bound without completing
+coverage. Short final pages and valid Classic `endId` / UTA `cursor` chains keep
+their completion behavior, including canceled zero-fill limit orders. Expiry
+removes only this owner’s parked work. The unrelated account completion remains
+the one Bitget legacy request site.
 
 Bitget malformed/non-UTF8 streamed envelopes keep native250/500/750ms response
 retries after exact delivery validation. They are distinct from typed Internal
