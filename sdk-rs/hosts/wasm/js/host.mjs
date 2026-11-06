@@ -362,6 +362,7 @@ export class EngineHost {
     this.hostedSignings = new Map();
     this.entropy = identity;
     this.engine = engine;
+    this.engineVerified = false;
     this.ownsEngine = options.ownsEngine === true;
     this.transport = transport;
     this.handlers = handlers;
@@ -431,10 +432,13 @@ export class EngineHost {
     this.assertHttpHandoffIdle();
     if (this.disposed) return;
     try {
-      if (this.engine.failed?.()) {
+      // Failure is sticky and only engine calls set it: a passed post-call check
+      // covers this call unless an engine call ran outside invoke since.
+      if (!this.engineVerified && this.engine.failed?.()) {
         this.failEngine(new Error('Engine resource identities exhausted'));
         return;
       }
+      this.engineVerified = false;
       let result;
       switch (arguments.length) {
         case 1: result = fn.call(this.engine); break;
@@ -447,6 +451,7 @@ export class EngineHost {
         this.failEngine(new Error('Engine resource identities exhausted'));
         return;
       }
+      this.engineVerified = true;
       return result;
     } catch (error) {
       // Do not inspect Rust state after a trap: its mutable borrow may be held.
@@ -1069,6 +1074,12 @@ export class EngineHost {
     return JSON.parse(this.invokeHosted(this.engine.hostedSigningClock, this.transport.now()));
   }
 
+  // A direct engine entry outside invoke: the next invoke checks failure first.
+  cancelEngineHostedSigning(id) {
+    this.engineVerified = false;
+    this.engine.cancelHostedSigning?.(id);
+  }
+
   invokeHosted(fn, ...args) {
     this.assertHttpHandoffIdle();
     const output = this.invoke(fn, ...args);
@@ -1088,14 +1099,14 @@ export class EngineHost {
     const duration = deadlineMs - this.transport.now();
     if (!Number.isInteger(id) || id <= 0 || id > 0xffff_ffff || this.hostedSignings.has(id)
       || !Number.isFinite(duration) || duration <= 0 || duration > 5000) {
-      this.engine.cancelHostedSigning?.(id);
+      this.cancelEngineHostedSigning(id);
       return Promise.reject(new ExchangeError('Invalid hosted signing request', { kind: 'invalidInput', outcome: 'notSent' }));
     }
     if (!this.signer) {
       try {
         return Promise.resolve(JSON.parse(this.invokeHosted(this.engine.localHostedSigning, id, this.transport.now())));
       } catch (error) {
-        try { this.engine.cancelHostedSigning(id); } catch { /* Preserve the closed native error. */ }
+        try { this.cancelEngineHostedSigning(id); } catch { /* Preserve the closed native error. */ }
         return Promise.reject(error);
       }
     }
@@ -1104,7 +1115,7 @@ export class EngineHost {
       const pending = this.primitiveSigning(work, duration, execute, (result, code) => {
         this.hostedSignings.delete(id);
         if (code || this.disposed) {
-          try { this.engine.cancelHostedSigning(id); } catch { /* Keep a closed signing error. */ }
+          try { this.cancelEngineHostedSigning(id); } catch { /* Keep a closed signing error. */ }
           reject(new ExchangeError(code === 'timedOut' ? 'Hosted signing timed out' : 'Hosted signing failed', {
             kind: code === 'timedOut' ? 'timeout' : code === 'refused' ? 'invalidInput' : 'internal', outcome: 'notSent',
           }));
