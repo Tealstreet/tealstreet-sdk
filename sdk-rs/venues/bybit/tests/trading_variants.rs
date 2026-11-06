@@ -4998,3 +4998,82 @@ fn a_trigger_amend_that_differs_from_the_stored_stop_stays_refused() {
         );
     }
 }
+
+fn pending_trigger_amend(h: &mut Harness, price: f64) -> safe_cex_engine::HttpRequest {
+    h.command(Command::AmendOrder {
+        command: 87,
+        id: "stop".into(),
+        price: Some(price),
+        amount: None,
+    });
+    if h.has_request("/v5/position/list") {
+        resolve_mode(h, "BTCUSDT");
+    }
+    h.take("/v5/order/amend")
+}
+
+/// The no-op needs the whole answer to agree: another order's echo, an item row, or a
+/// server error keeps it the refusal it is.
+#[test]
+fn a_trigger_no_op_needs_a_clean_whole_answer() {
+    for (status, reply) in [
+        (
+            200,
+            r#"{"retCode":10001,"retMsg":"order not modified","result":{"orderId":"foreign"},"retExtInfo":{}}"#,
+        ),
+        (
+            200,
+            r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{"list":[{"code":10001,"msg":"invalid trigger"}]}}"#,
+        ),
+        (
+            500,
+            r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+        ),
+    ] {
+        let mut h = ready(Variant::Demo);
+        h.message("/v5/private", &stop_row("60000", "1"));
+        let request = pending_trigger_amend(&mut h, 60000.0);
+        h.reply(request.id, status, reply);
+        assert!(
+            h.result(87).unwrap().is_err(),
+            "{reply}: {:?}",
+            h.result(87)
+        );
+    }
+}
+
+/// Only a trigger-bearing row stores its trigger: once the same id is an open limit
+/// (it triggered), its execution price is never trigger proof.
+#[test]
+fn a_trigger_no_op_never_reads_an_active_limits_price_as_its_trigger() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("59000", "1"));
+    let request = pending_trigger_amend(&mut h, 60000.0);
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"stop","orderStatus":"New","orderType":"Limit","stopOrderType":"UNKNOWN","triggerPrice":"0","side":"Sell","price":"60000","qty":"1","leavesQty":"1","reduceOnly":true,"closeOnTrigger":false}]}"#);
+    assert_eq!(
+        h.engine.store().order("stop").unwrap().kind,
+        OrderType::Limit
+    );
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    assert!(h.result(87).unwrap().is_err(), "{:?}", h.result(87));
+}
+
+/// The comparison reads the store when the answer lands: a stop moved meanwhile keeps
+/// the refusal.
+#[test]
+fn a_trigger_no_op_compares_the_store_as_it_stands_when_answered() {
+    let mut h = ready(Variant::Demo);
+    h.message("/v5/private", &stop_row("60000", "1"));
+    let request = pending_trigger_amend(&mut h, 60000.0);
+    h.message("/v5/private", &stop_row("59000", "1"));
+    h.reply(
+        request.id,
+        200,
+        r#"{"retCode":10001,"retMsg":"order not modified","result":{},"retExtInfo":{}}"#,
+    );
+    assert!(h.result(87).unwrap().is_err(), "{:?}", h.result(87));
+}

@@ -15,7 +15,7 @@ use crate::{BybitLinear, Category, Pending, Rest, Then};
 use safe_cex_engine::classify::{
     self, BatchItem, CodeTable, Intent, Native, NativeCode, ReadRetry, Released, Verdict, WriteFact,
 };
-use safe_cex_engine::model::{MarginType, OrderStatus};
+use safe_cex_engine::model::{MarginType, OrderStatus, OrderType};
 use safe_cex_engine::request_context::plan::{
     CallBound, CallTerms, RetryWindow, SerialCall, SerialPolicy, Slot, StepBound,
 };
@@ -217,8 +217,15 @@ fn trigger_amend_matches_store(store: &safe_cex_engine::Store, body: &str) -> bo
     let Ok(request) = serde_json::from_str::<TriggerAmend>(body) else {
         return false;
     };
+    // Only a trigger-bearing row stores its trigger as its price; a limit's is where it fills.
     store.order(request.order_id).is_some_and(|order| {
         order.status == OrderStatus::Open
+            && matches!(
+                order.kind,
+                OrderType::StopLoss | OrderType::TakeProfit | OrderType::Conditional
+            )
+            && order.price.is_finite()
+            && order.price > 0.0
             && request.symbol == order.symbol
             && request.trigger_price == super::number(order.price)
             && request
@@ -1563,7 +1570,10 @@ impl BybitLinear {
                 message,
                 result,
                 ext,
-            }) => self.refused_leg(cx, id, active, code, message, result, ext),
+            }) => {
+                let http_ok = (200..300).contains(&response.status);
+                self.refused_leg(cx, id, active, code, message, result, ext, http_ok)
+            }
             Ok(Answer::Success { result, ext }) => {
                 self.accepted_leg(cx, active, response, result, ext)
             }
@@ -1604,6 +1614,7 @@ impl BybitLinear {
         message: String,
         result: Option<&serde_json::value::RawValue>,
         ext: Option<&serde_json::value::RawValue>,
+        http_ok: bool,
     ) -> Decision {
         let context = &active.context;
         let planned = &active.leg.planned;
@@ -1623,12 +1634,18 @@ impl BybitLinear {
                 Decision::Lost
             };
         }
-        // A trigger amend is done only when every value it carries already equals the
-        // stored order's: compared directly, so a genuine refusal is never masked.
+        // A trigger amend is done only when the whole answer is a clean refusal (a 2xx,
+        // no item rows, no other order's ID) and every value it carries already equals
+        // the stored stop's: compared directly, so a genuine refusal is never masked.
         if code == 10001
             && matches!(planned.call, Call::Amend)
             && message == "order not modified"
             && planned.body.contains("\"triggerPrice\"")
+            && http_ok
+            && !ack::carries_rows(result, ext)
+            && ack::evidence_ids(result)
+                .iter()
+                .all(|echo| fields(&planned.body).order_id.as_ref() == Some(echo))
             && trigger_amend_matches_store(cx.store, &planned.body)
         {
             let target = fields(&planned.body).order_id.unwrap_or_default();
