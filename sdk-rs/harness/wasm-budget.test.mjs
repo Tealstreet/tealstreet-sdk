@@ -265,9 +265,9 @@ test('#3118 Aster protection guard (run 42112075305) retains measured headroom',
   assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
 
-test('#3114 cold-path sharing (run 42104530272) retains Hyperliquid headroom and siblings match', () => {
-  const measured = 2_106_596;
-  const cap = 2_117_632;
+test('#3143 public data watch (run 42181736999) retains Hyperliquid headroom and siblings match', () => {
+  const measured = 2_126_281;
+  const cap = 2_137_088;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['hyperliquid', 'hyperliquidspot']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
