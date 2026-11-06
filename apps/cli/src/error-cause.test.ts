@@ -18,24 +18,59 @@ describe('terminalErrorText', () => {
     ['a code without a message', { retCode: 110001, retMsg: '' }, 'bybitdemo error error code 110001'],
     ['an unrecognised body', { result: null, time: 1 }, 'bybitdemo error {"result":null,"time":1}'],
     ['an empty object', {}, 'bybitdemo error (empty object)'],
-    ['an undefined body', undefined, 'bybitdemo error (no details: undefined)'],
+    // A primitive after a label is not described (it was never printed); see the colon rule below.
+    ['an undefined body', undefined, 'bybitdemo error'],
   ])('names the cause of %s', (_, body, expected) => {
     expect(terminalErrorText(['bybitdemo error', body])).toBe(expected);
   });
 
-  it('keeps the messages it already printed', () => {
+  it('keeps every argument that already printed something byte-identical', () => {
     expect(terminalErrorText(['Engine frame apply failed', new Error('bad section')])).toBe(
       'Engine frame apply failed bad section',
     );
+    expect(terminalErrorText(['x', new Error('  padded message ')])).toBe('x   padded message ');
     expect(terminalErrorText([{ retMsg: 'API key is invalid.' }])).toBe('API key is invalid.');
     expect(terminalErrorText([{ message: 'boom', code: 'E1' }])).toBe('boom');
+    expect(terminalErrorText([{ message: 404 }, { msg: null }])).toBe('404 null');
     expect(terminalErrorText(['Exchange error:', 'socket closed'])).toBe('socket closed');
   });
 
-  it('prints nothing only for blank or redundant strings', () => {
+  it('adds a trailing primitive only to a bare or colon-ended prefix', () => {
+    expect(terminalErrorText(['Retrying in', 3, 'seconds'])).toBe('Retrying in seconds');
+    expect(terminalErrorText(['Order failed', undefined])).toBe('Order failed');
+    expect(terminalErrorText(['Order failed', null, false, ['a']])).toBe('Order failed');
+    expect(terminalErrorText(['Order failed:', undefined])).toBe('Order failed: (no details: undefined)');
+    expect(terminalErrorText([404])).toBe('404');
+  });
+
+  it('never prints credentials from a serialized body', () => {
+    const text = terminalErrorText([
+      'bybitdemo error',
+      {
+        url: '/v5/order/create',
+        headers: { 'X-BAPI-API-KEY': 'live-key', 'X-BAPI-SIGN': 'deadbeef', 'X-BAPI-TIMESTAMP': '1' },
+        config: {
+          secret: 's3cret',
+          passphrase: 'p',
+          token: 't',
+          cookie: 'c',
+          privateKey: 'k',
+          seed: 'w',
+          mnemonic: 'm',
+        },
+      },
+    ]);
+    for (const leaked of ['live-key', 'deadbeef', 's3cret', '"p"', '"t"', '"c"', '"k"', '"w"', '"m"']) {
+      expect(text).not.toContain(leaked);
+    }
+    expect(text).toContain('"X-BAPI-API-KEY":"[redacted]"');
+    expect(text).toContain('"X-BAPI-TIMESTAMP":"1"');
+  });
+
+  it('prints nothing for blank or redundant strings', () => {
     expect(terminalErrorText([])).toBeNull();
-    expect(terminalErrorText([''])).toBeNull();
-    expect(terminalErrorText(['exchange error'])).toBeNull();
+    expect(terminalErrorText([''])).toBe('');
+    expect(terminalErrorText(['exchange error'])).toBe('');
     expect(terminalErrorText(['exchange error', {}])).toBe('(empty object)');
   });
 });
