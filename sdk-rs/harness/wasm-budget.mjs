@@ -162,6 +162,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 16_777_2
 // put-back. CI size plus 10 KiB, rounded up to the KiB.
 // #3121 run 42122802638, job 127583372751 at cce3b8d1f5f measured okx 1,962,129 B.
 // CI size plus 10 KiB rounded up to the KiB; all OKX variants share the okx family cap.
+// #3148 run 42196761441 measured bitget 2,348,153 B; CI size plus 10 KiB rounded up
+// to the KiB, bitgetusdc equal to bitget.
 // #3143 run 42181736999 measured hyperliquid 2,126,281 B: the public data watch, error-channel
 // refusals and Control::Unwatched. CI size plus 10 KiB, rounded up to the KiB; siblings equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
@@ -170,8 +172,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   backpack: 1_937_408,
   binance: 2_206_720,
   bingx: 2_036_736,
-  bitget: 2_345_984,
-  bitgetusdc: 2_345_984,
+  bitget: 2_359_296,
+  bitgetusdc: 2_359_296,
   bitrue: 1_840_128,
   bitunix: 1_849_344,
   blofin: 1_989_632,

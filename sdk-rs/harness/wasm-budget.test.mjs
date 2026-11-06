@@ -156,9 +156,9 @@ test('refresh-ask caps (PR run 41804469904 at 466b16cd11e) retain headroom and s
   assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
 });
 
-test('#3073 cancel confirmation (run 41931095253) retains headroom and siblings match', () => {
-  const measured = 2_334_811;
-  const cap = 2_345_984;
+test('#3148 protective edit live fixes (run 42196761441) retain headroom and siblings match', () => {
+  const measured = 2_348_153;
+  const cap = 2_359_296;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
