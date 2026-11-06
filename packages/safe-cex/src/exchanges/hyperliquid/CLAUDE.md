@@ -60,10 +60,14 @@ with the same final veto. When their original grouping is unproven, definitive
 replacement refusal reports typed `Protection::Unprotected` and “stop removed,
 please re-place”, with no invented restore. Exact recovery rechecks position,
 newer protection, late fills and the original fresh trigger at its final claim.
-Its terminal carries `Protection::Restored` after an accepted restore, or
-`Protection::Unprotected` after a failed/unknown restore; obsolete recovery is
-refused visibly. Replacement preserves native execution type/price and the fresh
-remaining size. Complete native stream fields take precedence over stale cached
+Its terminal carries `Protection::Restored` after an accepted put-back, or
+`Protection::Unprotected` only after a definitive put-back refusal. Unknown or
+rate-limited put-back carries no protection claim and says its outcome is unknown,
+with a request to check Open Orders. Replacement 429 uses the same uncertain
+wording and never restores/resends. The serial root refusal remains intact.
+Put-back preserves economic parameters but mints a fresh cloid: HL documents its
+format, not reuse after cancellation. Obsolete recovery is refused visibly.
+Replacement preserves native execution type/price and the fresh remaining size. Complete native stream fields take precedence over stale cached
 placement fields. ACKs reconcile accepted parameters into an existing row while
 retaining newer stream fills, remaining quantity, status and observation time.
 

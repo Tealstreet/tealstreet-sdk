@@ -314,16 +314,22 @@ impl Hyperliquid {
         let grouping = p
             .grouping
             .ok_or("Original placement semantics are unavailable")?;
+        // HL documents cloid format, without guaranteeing reuse after cancellation.
+        // Put-back preserves economic parameters but is a new order/identity.
+        let mut wire = p.original.clone();
+        wire.c = mint_cloid(cx)?;
+        let mut order = p.before.clone();
+        order.id.clear();
+        order.status = OrderStatus::Creating;
+        order.last_update = cx.now;
+        order.client_order_id = Some(wire.c.clone());
         Ok((
             Action::Order {
-                orders: vec![p.original.clone()],
+                orders: vec![wire],
                 grouping,
                 builder: None,
             },
-            Effect::Place(vec![Placement {
-                at: cx.now,
-                order: p.before.clone(),
-            }]),
+            Effect::Place(vec![Placement { at: cx.now, order }]),
         ))
     }
 }
@@ -364,6 +370,19 @@ impl Hyperliquid {
             return Some(error);
         };
         if p.restoring {
+            if !matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
+                || error.kind == Some(ErrorKind::RateLimited)
+            {
+                error.message = format!(
+                    "Hyperliquid {} put-back's outcome is unknown. Check Open Orders: {}",
+                    p.before.symbol, error.message
+                );
+                error.outcome = Some(Outcome::Unknown);
+                error.protection = None;
+                job.replacing_stop = None;
+                job.stop_note = Some(error.message.clone());
+                return Some(error);
+            }
             if error.outcome == Some(Outcome::NotSent) && restore_obsolete(cx.store, p) {
                 job.stop_note = Some("Original protection was not restored because the position closed or newer protection superseded it".into());
                 job.replacing_stop = None;
@@ -380,9 +399,10 @@ impl Hyperliquid {
             error.protection = Some(Protection::Unprotected);
             return Some(error);
         }
-        let definitive = error.outcome == Some(Outcome::NotSent)
-            || (error.outcome == Some(Outcome::Rejected)
-                && custody::known_protective_refusal(&error.message));
+        let definitive = error.kind != Some(ErrorKind::RateLimited)
+            && (error.outcome == Some(Outcome::NotSent)
+                || (error.outcome == Some(Outcome::Rejected)
+                    && custody::known_protective_refusal(&error.message)));
         if !job.effective || !definitive || job.amend_filled {
             return Some(error);
         }

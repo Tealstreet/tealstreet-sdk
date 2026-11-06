@@ -18,8 +18,13 @@ sources permit a one-shot original-parameter restore. Partial/attached edits sta
 available; where grouping cannot be proven, no restore is invented. Their
 failure carries Protection::Unprotected with “stop removed, please re-place”.
 Unknown replacement outcomes must reconcile and must never automatically restore
-or resend. Render Restored only after accepted recovery, or Unprotected after
-failed/unknown recovery. A closed position, late source fill or newer protection
+or resend. Render Restored only after accepted recovery, and Unprotected only
+after definitive recovery refusal. Unknown and rate-limited put-back must carry
+no protection flag and explicitly ask the caller to check Open Orders; the same
+uncertain warning applies to replacement 429. Preserve the serial root refusal.
+The put-back mints a fresh cloid while preserving original economic parameters;
+HL's exchange endpoint documents cloid format without promising reuse after
+cancellation (https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint#place-an-order). A closed position, late source fill or newer protection
 retires an unsent restore. Its final claim also checks the original fresh trigger.
 
 Complete native stream fields outrank cached placement data. ACKs reconcile

@@ -1442,16 +1442,15 @@ impl Hyperliquid {
             };
             if let Err(mut error) = result {
                 error = error.partial_ids(&job.ids);
+                let unknown = error.outcome != Some(Outcome::Rejected)
+                    || error.kind == Some(ErrorKind::RateLimited);
                 if job.effective
                     && error.protection.is_none()
                     && job.ids.is_empty()
                     && let Some((symbol, side, kind)) = &job.replacing_stop
                 {
                     job.stop_note = Some(safe_cex_engine::error::stop_gone_text(
-                        symbol,
-                        *side,
-                        *kind,
-                        error.outcome == Some(Outcome::Unknown),
+                        symbol, *side, *kind, unknown,
                     ));
                 }
                 if job.effective
@@ -1459,10 +1458,7 @@ impl Hyperliquid {
                     && !job.amend_filled
                     && let Some(symbol) = &job.replacing_order
                 {
-                    job.stop_note = Some(safe_cex_engine::error::order_gone_text(
-                        symbol,
-                        error.outcome == Some(Outcome::Unknown),
-                    ));
+                    job.stop_note = Some(safe_cex_engine::error::order_gone_text(symbol, unknown));
                 }
                 if (job.effective || !job.ids.is_empty())
                     && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
