@@ -702,7 +702,10 @@ impl BybitLinear {
         if run.partial.is_some()
             && matches!(
                 leg.planned.call,
-                Call::PartialProof(_) | Call::PartialStop { .. } | Call::RestorePartialStop { .. }
+                Call::CancelPartialStop { .. }
+                    | Call::PartialProof(_)
+                    | Call::PartialStop { .. }
+                    | Call::RestorePartialStop { .. }
             )
         {
             let _ = cx.present_plan_failure(
@@ -993,7 +996,18 @@ impl BybitLinear {
                             self.local_order_lifecycle(),
                         );
                     }
-                    if axis == partial::Axis::History && !run.partial.as_ref().unwrap().restorable()
+                    if axis == partial::Axis::Live {
+                        let flow = run.partial.as_mut().unwrap();
+                        if let Some(history) = flow.history_proof() {
+                            run.queue.front_mut().unwrap().planned = history;
+                        } else {
+                            flow.skip_history();
+                            run.queue.pop_front();
+                        }
+                    }
+                    if matches!(axis, partial::Axis::Live | partial::Axis::History)
+                        && !run.partial.as_ref().unwrap().restorable()
+                        && run.partial.as_ref().unwrap().history_done()
                     {
                         for leg in &mut run.queue {
                             if let Call::PartialStop { restore, .. } = &mut leg.planned.call {
@@ -1117,6 +1131,11 @@ impl BybitLinear {
                 }
             }
             Decision::Failed(mut error) => {
+                if matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
+                    && error.outcome != Some(Outcome::Unknown)
+                {
+                    error.presents = true;
+                }
                 if matches!(active.leg.planned.call, Call::PartialStop { .. })
                     && error.outcome != Some(Outcome::Unknown)
                 {
@@ -1384,6 +1403,14 @@ impl BybitLinear {
             .active
             .as_ref()
             .is_some_and(|active| active.context == request.context);
+        if matches
+            && error.outcome == Some(Outcome::NotSent)
+            && run.active.as_ref().is_some_and(|active| {
+                matches!(active.leg.planned.call, Call::CancelPartialStop { .. })
+            })
+        {
+            let _ = cx.present_plan_failure(&run.plan, error.message.clone());
+        }
         if matches
             && run
                 .active
