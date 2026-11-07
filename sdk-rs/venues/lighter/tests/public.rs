@@ -773,7 +773,7 @@ fn candle_receipts_refresh_only_the_matching_interval_subscription() {
         .unwrap()
     };
     let mut candles = 0;
-    for row in section[8..].chunks_exact(24) {
+    for row in section[8..].as_chunks::<24>().0 {
         let topic = text(u32::from_le_bytes(row[4..8].try_into().unwrap()) as usize);
         if topic.contains("candle/0/") {
             candles += 1;
