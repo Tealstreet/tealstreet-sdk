@@ -355,7 +355,6 @@ describe('exchangeMetadata', () => {
         'bitrue',
         'bitunix',
         'blofin',
-        'breakoutprop',
         'bybit',
         'bybitdemo',
         'hyrotrader',

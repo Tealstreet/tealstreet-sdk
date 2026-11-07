@@ -2,7 +2,6 @@
 // excuse a diagnostic, never a missing, duplicate or substituted replay case.
 // Books are literal CLI arguments: private tapes deliberately use ''.
 const primaryBooks = Object.freeze({
-  breakoutprop: 'BTCUSD,ETHUSD',
   apexomni: 'BTCUSDT,ETHUSDT',
   asterdex: 'BTCUSDT,ETHUSDT',
   woo: 'BTCUSDT,ETHUSDT',
