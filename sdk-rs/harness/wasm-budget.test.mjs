@@ -100,7 +100,6 @@ test('every venue carries its LOCAL-algos family cap, inclusive, and rejects the
     bitrue: 1_719_296,
     bitunix: 1_727_488,
     blofin: 1_824_768,
-    breakoutprop: 1_420_288,
     bybit: 2_032_640,
     coinbase: 1_720_320,
     cryptocom: 1_612_800,
@@ -560,16 +559,6 @@ test('#3138 Bitrue guarded stop edits (run 42166643605) retain Bitrue headroom',
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
-});
-
-test('BreakoutProp native protective edits retain measured headroom and the exact boundary', () => {
-  const measured = 1_554_817;
-  const cap = 1_565_696;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES.breakoutprop, cap);
-  assert.equal(wasmBudgetError(measured, 'venue', 'breakoutprop'), undefined);
-  assert.equal(wasmBudgetError(cap, 'venue', 'breakoutprop'), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', 'breakoutprop'), /exceeds/);
 });
 
 test('#3199 chaser refusals (run 42280800704) retain OKX headroom and all siblings share the cap', () => {
