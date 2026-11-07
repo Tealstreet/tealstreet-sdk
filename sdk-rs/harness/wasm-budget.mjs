@@ -199,6 +199,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB rounded up to KiB; BitgetUSDC shares the family cap.
 // #3202 on #3207 (merge 62c3b59c872), run 42305638406, job 128195021443 measured Bitget
 // 2,409,448 B. CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
+// #3220 KuCoin hosted signing: run 42324881707, job 128258225940 measured 1,827,119 B.
+// CI size plus 10 KiB rounded up to KiB; KuCoin Spot retains its existing cap.
 // #3210 run 42320236420, job 128244910061 measured Bitget 2,422,853 B at 191de16bd7d.
 // CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
@@ -230,7 +232,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   hyperliquidspot: 2_195_456,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
-  kucoin: 1_802_240,
+  kucoin: 1_838_080,
   kucoinspot: 2_357_248,
   lighter: 2_093_056,
   'lighter-robinhood': 2_093_056,
