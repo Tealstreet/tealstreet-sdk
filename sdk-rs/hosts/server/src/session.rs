@@ -511,6 +511,16 @@ impl Session {
             self.socket,
             self.resume_id_prefix()
         ));
+        // Refuse before routing can erase the classification or a rebuild can
+        // dispose a live account with the same saved name.
+        if !safe_cex_venues::supported(&init.exchange_name) {
+            self.drop_early(&init.account_name, "unsupported venue");
+            self.send(envelope::init_unsupported(
+                &init.account_name,
+                &init.exchange_name,
+            ));
+            return Ok(());
+        }
         self.forget_disposed();
         if let Some(joined) = self.joined.get(&init.account_name)
             && joined.account.fingerprint == init.fingerprint()
