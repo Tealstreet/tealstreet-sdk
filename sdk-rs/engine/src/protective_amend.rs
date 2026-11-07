@@ -193,6 +193,20 @@ mod tests {
     }
 
     #[test]
+    fn a_future_local_receipt_remains_fresh_for_every_reference() {
+        let now = 999.0;
+        let store = fixture(OrderType::StopLoss, OrderSide::Sell, None);
+        for (reference, price) in [
+            (StopTriggerType::MarkPrice, 100.0),
+            (StopTriggerType::LastPrice, 101.0),
+            (StopTriggerType::IndexPrice, 99.0),
+        ] {
+            assert_eq!(store.reference_seen_at("X", reference), Some(now + 1.0));
+            assert_eq!(fresh_reference(&store, "X", reference, now), Some(price));
+        }
+    }
+
+    #[test]
     fn a_stale_ticker_refuses_nothing() {
         let store = fixture(
             OrderType::StopLoss,
