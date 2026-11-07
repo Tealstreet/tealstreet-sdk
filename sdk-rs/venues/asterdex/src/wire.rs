@@ -144,7 +144,109 @@ impl<'de> Deserialize<'de> for FastAggregate<'de> {
 
 #[cfg(test)]
 mod aggregate_tests {
-    use super::FastAggregate;
+    use super::{FastAggregate, MarkEvent, TickerEvent};
+
+    #[test]
+    fn optional_market_numbers_borrow_unescaped_frame_storage() {
+        let (mark, allocations) = allocation_count::measure(|| {
+            serde_json::from_str::<MarkEvent<'_>>(
+                r#"{"s":"BTCUSDT","p":"100.1","i":"100.2","r":"0.0001","T":2}"#,
+            )
+            .unwrap()
+        });
+        assert_eq!(allocations, 0);
+        assert!(matches!(mark.s, std::borrow::Cow::Borrowed(_)));
+        for value in [mark.p, mark.i, mark.r] {
+            assert!(matches!(value, Some(std::borrow::Cow::Borrowed(_))));
+        }
+        let ticker: TickerEvent<'_> =
+            serde_json::from_str(r#"{"s":"BTCUSDT","c":"100.1","P":"2","v":"3","q":"4"}"#).unwrap();
+        for value in [ticker.c, ticker.percentage, ticker.v, ticker.q] {
+            assert!(matches!(value, Some(std::borrow::Cow::Borrowed(_))));
+        }
+    }
+
+    #[test]
+    fn borrowed_market_numbers_keep_escape_null_and_error_semantics() {
+        let mark: MarkEvent<'_> =
+            serde_json::from_str(r#"{"s":"BTC\u0055SDT","p":"1\u0030.1","i":null,"r":""}"#)
+                .unwrap();
+        assert_eq!(mark.s, "BTCUSDT");
+        assert!(matches!(mark.s, std::borrow::Cow::Owned(_)));
+        assert_eq!(mark.p.as_deref(), Some("10.1"));
+        assert!(matches!(mark.p, Some(std::borrow::Cow::Owned(_))));
+        assert!(mark.i.is_none());
+        assert_eq!(mark.r.as_deref(), Some(""));
+        for text in [
+            r#"{"s":"BTCUSDT"}"#,
+            r#"{"s":"BTCUSDT","p":null,"i":null,"r":null}"#,
+        ] {
+            let mark: MarkEvent<'_> = serde_json::from_str(text).unwrap();
+            assert!(mark.p.is_none() && mark.i.is_none() && mark.r.is_none());
+        }
+        for text in [
+            r#"{"s":"BTCUSDT","p":10}"#,
+            r#"{"s":"BTCUSDT","p":true}"#,
+            r#"{"s":"BTCUSDT","p":{}}"#,
+            r#"{"s":"BTCUSDT","p":"1","p":"2"}"#,
+        ] {
+            assert!(serde_json::from_str::<MarkEvent<'_>>(text).is_err());
+        }
+        let ticker: TickerEvent<'_> =
+            serde_json::from_str(r#"{"s":"BTCUSDT","c":"1\u0030.1","P":null,"v":"","q":"4"}"#)
+                .unwrap();
+        assert_eq!(ticker.c.as_deref(), Some("10.1"));
+        assert!(matches!(ticker.c, Some(std::borrow::Cow::Owned(_))));
+        assert!(ticker.percentage.is_none());
+        assert_eq!(ticker.v.as_deref(), Some(""));
+    }
+
+    mod allocation_count {
+        use std::alloc::{GlobalAlloc, Layout, System};
+        use std::cell::Cell;
+
+        thread_local! { static CALLS: Cell<Option<usize>> = const { Cell::new(None) }; }
+        struct Counter;
+        fn allocated() {
+            let _ = CALLS.try_with(|calls| {
+                if let Some(count) = calls.get() {
+                    calls.set(Some(count + 1));
+                }
+            });
+        }
+        unsafe impl GlobalAlloc for Counter {
+            unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                allocated();
+                unsafe { System.alloc(layout) }
+            }
+            unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+                allocated();
+                unsafe { System.alloc_zeroed(layout) }
+            }
+            unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+                allocated();
+                unsafe { System.realloc(pointer, layout, size) }
+            }
+            unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+                unsafe { System.dealloc(pointer, layout) }
+            }
+        }
+        #[global_allocator]
+        static ALLOCATOR: Counter = Counter;
+
+        pub fn measure<T>(f: impl FnOnce() -> T) -> (T, usize) {
+            struct Reset;
+            impl Drop for Reset {
+                fn drop(&mut self) {
+                    CALLS.with(|calls| calls.set(None));
+                }
+            }
+            CALLS.with(|calls| calls.set(Some(0)));
+            let _reset = Reset;
+            let result = f();
+            (result, CALLS.with(|calls| calls.get().unwrap()))
+        }
+    }
 
     #[test]
     fn stream_first_aggregates_decode_without_a_raw_body_scan() {
@@ -180,29 +282,37 @@ mod aggregate_tests {
 #[derive(Deserialize)]
 pub struct TickerEvent<'a> {
     #[serde(borrow)]
-    pub s: Str<'a>,
-    #[serde(borrow, default)]
+    pub s: Cow<'a, str>,
+    #[serde(borrow, default, deserialize_with = "optional_text")]
     pub c: Option<Str<'a>>,
-    #[serde(rename = "P", borrow, default)]
+    #[serde(rename = "P", borrow, default, deserialize_with = "optional_text")]
     pub percentage: Option<Str<'a>>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "optional_text")]
     pub v: Option<Str<'a>>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "optional_text")]
     pub q: Option<Str<'a>>,
 }
 
 #[derive(Deserialize)]
 pub struct MarkEvent<'a> {
     #[serde(borrow)]
-    pub s: Str<'a>,
-    #[serde(borrow, default)]
+    pub s: Cow<'a, str>,
+    #[serde(borrow, default, deserialize_with = "optional_text")]
     pub p: Option<Str<'a>>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "optional_text")]
     pub i: Option<Str<'a>>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "optional_text")]
     pub r: Option<Str<'a>>,
     #[serde(rename = "T", default)]
     pub funding_time: Option<f64>,
+}
+
+// Serde's borrowing special case recognizes direct Cow fields, not aliases or
+// Option<Cow>. Escape decoding still owns its resulting string.
+fn optional_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Str<'de>>, D::Error> {
+    #[derive(Deserialize)]
+    struct Text<'a>(#[serde(borrow)] Cow<'a, str>);
+    Option::<Text<'de>>::deserialize(d).map(|value| value.map(|text| text.0))
 }
 
 #[derive(Deserialize)]
