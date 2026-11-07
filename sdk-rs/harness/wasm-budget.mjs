@@ -196,35 +196,37 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB rounded up to KiB; BitgetUSDC shares the family cap.
 // #3202 on #3207 (merge 62c3b59c872), run 42305638406, job 128195021443 measured Bitget
 // 2,409,448 B. CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
+// #3193 at ad4f1d6d5d9: shared ticker observation provenance.
+// The seven measured over-cap families use CI + 10 KiB, rounded up to the KiB.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
   backpack: 1_948_672,
-  binance: 2_223_104,
+  binance: 2_236_416,
   bingx: 2_085_888,
   bitget: 2_419_712,
   bitgetusdc: 2_419_712,
   bitrue: 1_851_392,
   bitunix: 1_863_680,
   blofin: 2_001_920,
-  breakoutprop: 1_565_696,
+  breakoutprop: 1_580_032,
   bybit: 2_270_208,
   coinbase: 1_838_080,
   cryptocom: 1_740_800,
-  // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
-  grvt: 1_817_600,
+  // #3193 at ad4f1d6d5d9: GRVT measured 1,819,801 B + 10 KiB, rounded up.
+  grvt: 1_830_912,
   hyperliquid: 2_180_096,
   hyperliquidspot: 2_180_096,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
-  kucoin: 1_692_672,
-  kucoinspot: 2_277_376,
+  kucoin: 1_708_032,
+  kucoinspot: 2_288_640,
   lighter: 2_093_056,
   'lighter-robinhood': 2_093_056,
-  // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
-  mexc: 1_858_560,
+  // #3193 at ad4f1d6d5d9: MEXC measured 1,862,399 B + 10 KiB, rounded up.
+  mexc: 1_872_896,
   okx: 1_986_560,
-  orderly: 1_732_608,
+  orderly: 1_744_896,
   paradex: 2_266_112,
   phemex: 2_079_744,
   polymarket: 1_611_776,
