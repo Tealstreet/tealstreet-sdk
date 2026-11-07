@@ -1,4 +1,5 @@
 //! Original runtime boundaries; all authority comes from real engine admission.
+use safe_cex_engine::ControlFrame;
 mod support;
 
 use safe_cex_engine::book::Book;
@@ -868,7 +869,10 @@ impl Venue for RetirementPressure {
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if Some(socket) == self.foreign_socket {
-            cx.send(socket, "fixture:foreign-positive");
+            cx.send(
+                socket,
+                ControlFrame::subscription("fixture:foreign-positive"),
+            );
         } else {
             self.inner.on_message(cx, socket, text);
         }
@@ -1140,7 +1144,7 @@ fn physical_depth_timeout(held: bool) {
             Action::Notice(safe_cex_engine::Notice::Event(event))
                 if event.code == safe_cex_engine::log::code::REQUEST_FAILED
                     && event.message
-                        == "WEEX: HTTP request timed out (class=read budget=20000ms elapsed=20000ms)" =>
+                        == "WEEX: Request timed out (class=read budget=20000ms elapsed=20000ms)" =>
             {
                 diagnostics += 1
             }

@@ -1,5 +1,6 @@
 //! Phemex public wire projection; the engine owns epochs, interests and timers.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthMode, AuthRecovery, ControlPolicy, FeedPolicy, Invalidation, TrafficPolicy,
@@ -168,7 +169,7 @@ impl PhemexPerpetuals {
                 }
                 cx.send(
                     epoch.socket(),
-                    self.public_frame("server.ping", "[]".into())?,
+                    ControlFrame::heartbeat(self.public_frame("server.ping", "[]".into())?),
                 );
             }
             LifecycleEvent::Reconnect(feed) => {

@@ -1,4 +1,5 @@
 //! Orderly perpetuals, shared by its four broker frontends.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod funding;
 mod history;
@@ -384,11 +385,13 @@ impl Orderly {
         }
         cx.send(
             self.public.socket.unwrap(),
-            serde_json::to_string(&Sub {
-                event: if add { "subscribe" } else { "unsubscribe" },
-                topic,
-            })
-            .unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Sub {
+                    event: if add { "subscribe" } else { "unsubscribe" },
+                    topic,
+                })
+                .unwrap(),
+            ),
         );
     }
     fn snapshot(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -417,15 +420,17 @@ impl Orderly {
         }
         cx.send(
             self.public.socket.unwrap(),
-            serde_json::to_string(&Request {
-                id: &id,
-                event: "request",
-                params: Params {
-                    r#type: "orderbook",
-                    symbol: &self.native[symbol],
-                },
-            })
-            .unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Request {
+                    id: &id,
+                    event: "request",
+                    params: Params {
+                        r#type: "orderbook",
+                        symbol: &self.native[symbol],
+                    },
+                })
+                .unwrap(),
+            ),
         );
         state.snapshot = Some((id, cx.set_timer(10000.0)));
     }
@@ -567,7 +572,10 @@ impl Orderly {
         let env: Envelope<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
         match env.event.as_ref() {
             "ping" => {
-                cx.send(self.public.socket.unwrap(), "{\"event\":\"pong\"}");
+                cx.send(
+                    self.public.socket.unwrap(),
+                    ControlFrame::heartbeat("{\"event\":\"pong\"}"),
+                );
                 return Ok(());
             }
             "pong" => {
@@ -760,7 +768,7 @@ impl Venue for Orderly {
         self.public.open = true;
         self.public.ping_at = cx.now;
         self.public.supervisor.opened(cx);
-        cx.send(socket, "{\"event\":\"ping\"}");
+        cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
         for topic in ["tickers", "bbos", "markprices"] {
             self.subscribe(cx, topic, true);
         }
@@ -1246,7 +1254,7 @@ impl Venue for Orderly {
             SocketTick::Ping => {
                 if let Some(socket) = self.public.socket {
                     self.public.ping_at = cx.now;
-                    cx.send(socket, "{\"event\":\"ping\"}");
+                    cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
                 }
                 return;
             }

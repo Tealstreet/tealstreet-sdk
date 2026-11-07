@@ -388,7 +388,7 @@ fn assert_unknown_setting_failure(h: &Harness, result: &[Action], provider_posts
                 assert_eq!(
                     error.message,
                     // A 5xx write is the engine's unproven seal; no body is decoded.
-                    "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                    "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
                 );
                 Some("failure")
             }

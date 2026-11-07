@@ -1,4 +1,5 @@
 //! Polymarket CLOB V2 outcome tokens on the sans-I/O engine.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod history;
 mod public_read;
@@ -466,13 +467,15 @@ impl Polymarket {
             }
             cx.send(
                 socket,
-                serde_json::to_string(&Subscription {
-                    assets_ids: ids,
-                    kind: operation.is_none().then_some("market"),
-                    operation,
-                    custom_feature_enabled: true,
-                })
-                .expect("subscription"),
+                ControlFrame::subscription(
+                    serde_json::to_string(&Subscription {
+                        assets_ids: ids,
+                        kind: operation.is_none().then_some("market"),
+                        operation,
+                        custom_feature_enabled: true,
+                    })
+                    .expect("subscription"),
+                ),
             );
         }
     }
@@ -811,11 +814,11 @@ impl Venue for Polymarket {
             self.subscription(cx, ids, None);
         } else {
             if let Some(subscription) = self.private_subscription() {
-                cx.send(socket, subscription);
+                cx.send(socket, ControlFrame::subscription(subscription));
             }
             self.account_reconcile(cx);
         }
-        cx.send(socket, "PING");
+        cx.send(socket, ControlFrame::heartbeat("PING"));
         self.connections[i].awaiting_pong = true;
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
@@ -1353,7 +1356,7 @@ impl Venue for Polymarket {
                 }
                 SocketTick::Ping => {
                     if let Some(socket) = self.connections[i].socket {
-                        cx.send(socket, "PING");
+                        cx.send(socket, ControlFrame::heartbeat("PING"));
                         self.connections[i].awaiting_pong = true;
                     }
                 }

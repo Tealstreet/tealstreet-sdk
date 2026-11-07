@@ -1,4 +1,5 @@
 //! Bitrue stablecoin perpetuals, driven entirely by host events.
+use safe_cex_engine::ControlFrame;
 mod account;
 mod codes;
 mod history;
@@ -698,7 +699,7 @@ impl Bitrue {
                 },
             })
             .unwrap();
-            cx.send(socket, text);
+            cx.send(socket, ControlFrame::subscription(text));
         }
     }
     fn subscribe_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -749,17 +750,19 @@ impl Bitrue {
         let id = format!("engine-{}", read.timer.0);
         cx.send(
             socket,
-            serde_json::to_string(&Subscription {
-                event: "req",
-                params: Params {
-                    channel,
-                    cb_id: &id,
-                    end_idx,
-                    page_size,
-                    top,
-                },
-            })
-            .unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Subscription {
+                    event: "req",
+                    params: Params {
+                        channel,
+                        cb_id: &id,
+                        end_idx,
+                        page_size,
+                        top,
+                    },
+                })
+                .unwrap(),
+            ),
         );
     }
     fn public_read(&mut self, cx: &mut Cx<'_, Pending>, channel: String, read: SocketRead) {
@@ -1013,9 +1016,12 @@ impl Venue for Bitrue {
         };
         self.public.supervisor.received(cx.now);
         if message.ping.is_some() || message.event == "ping" {
-            cx.send(socket, "pong");
+            cx.send(socket, ControlFrame::heartbeat("pong"));
             if let Some(ping) = message.ping {
-                cx.send(socket, format!(r#"{{"pong":{}}}"#, ping.get()));
+                cx.send(
+                    socket,
+                    ControlFrame::heartbeat(format!(r#"{{"pong":{}}}"#, ping.get())),
+                );
             }
             return;
         }

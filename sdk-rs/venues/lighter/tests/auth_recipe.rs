@@ -1,3 +1,4 @@
+use safe_cex_engine::ControlFrame;
 #[path = "support/reference_signer.rs"]
 mod reference_signer;
 use reference_signer::Signer;
@@ -126,7 +127,11 @@ impl Venue for Issue {
                         channel: "account_all_orders/42".into(),
                     },
                 );
-                cx.send_signed(sockets[send_on], String::new(), Box::new(recipe));
+                cx.send_signed(
+                    sockets[send_on],
+                    ControlFrame::authentication(String::new()),
+                    Box::new(recipe),
+                );
             }
         }
     }

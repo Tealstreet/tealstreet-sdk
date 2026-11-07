@@ -1,4 +1,5 @@
 use crate::{Paradex, Pending, wire::*};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -352,13 +353,15 @@ impl Paradex {
         }
         cx.send(
             socket,
-            serde_json::to_string(&Rpc {
-                id,
-                jsonrpc: "2.0",
-                method,
-                params: Params { channel: &channel },
-            })
-            .unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Rpc {
+                    id,
+                    jsonrpc: "2.0",
+                    method,
+                    params: Params { channel: &channel },
+                })
+                .unwrap(),
+            ),
         );
         if method == "subscribe" {
             self.public.subscriptions.insert(

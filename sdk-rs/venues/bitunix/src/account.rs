@@ -2,6 +2,7 @@
 use crate::sign::{self, Params};
 use crate::wire::*;
 use crate::{BitunixFutures, Feed, Pending, REST};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, row_skipped};
 use safe_cex_engine::credential_selection::{CredentialRole, PrimaryReason};
@@ -836,7 +837,7 @@ impl BitunixFutures {
         if let Ok((_, identity)) = self.slots.select(CredentialRole::SessionAuth) {
             cx.send_signed(
                 socket,
-                String::new(),
+                ControlFrame::authentication(String::new()),
                 Box::new(sign::dispatch::WsLogin::new(identity.clone())),
             );
         }

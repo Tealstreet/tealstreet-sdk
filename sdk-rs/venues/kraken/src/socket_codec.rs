@@ -1,5 +1,6 @@
 //! Shared engine lifecycle admission; Kraken retains native protocol evidence.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::ErrorKind;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
@@ -195,7 +196,10 @@ impl Kraken {
             }
             LifecycleEvent::Ping(epoch) => {
                 self.private_feed(epoch.feed())?;
-                cx.send(epoch.socket(), r#"{"event":"ping"}"#);
+                cx.send(
+                    epoch.socket(),
+                    ControlFrame::heartbeat(r#"{"event":"ping"}"#),
+                );
             }
             LifecycleEvent::AuthFailure { evidence, .. } => {
                 if let safe_cex_engine::socket_lifecycle::AuthEvidence::Rejected(mut error) =

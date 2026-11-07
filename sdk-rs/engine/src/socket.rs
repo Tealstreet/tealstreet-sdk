@@ -1,4 +1,6 @@
 //! Replayable socket liveness and retry policy; wire protocols remain venue-owned.
+#[cfg(test)]
+use crate::ControlFrame;
 use crate::backoff::Backoff;
 use crate::engine::CoreCx;
 use crate::{Cx, TimerId};
@@ -661,7 +663,7 @@ mod tests {
                 Tick::Reconnect => self.connect(cx),
                 Tick::Ping => {
                     if let Some(socket) = self.socket {
-                        cx.send(socket, "native-ping");
+                        cx.send(socket, ControlFrame::heartbeat("native-ping"));
                     }
                 }
                 _ => {}

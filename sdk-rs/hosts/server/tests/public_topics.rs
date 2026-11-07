@@ -1,3 +1,4 @@
+use safe_cex_engine::ControlFrame;
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::socket::Config;
@@ -84,13 +85,13 @@ impl<const MANAGED: bool> Venue for TopicsVenue<MANAGED> {
     fn on_open(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId) {
         if !MANAGED {
             for topic in &self.topics {
-                cx.send(socket, topic);
+                cx.send(socket, ControlFrame::subscription(topic));
             }
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, text: &str) {
         if !MANAGED {
-            cx.send(socket, text);
+            cx.send(socket, ControlFrame::subscription(text));
             return;
         }
         if text == "stop" {

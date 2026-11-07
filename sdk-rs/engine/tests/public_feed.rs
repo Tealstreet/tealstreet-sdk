@@ -1,3 +1,4 @@
+use safe_cex_engine::ControlFrame;
 mod support;
 use safe_cex_engine::book::Book;
 use safe_cex_engine::command::{HostInput, decode_host_input};
@@ -21,7 +22,7 @@ impl Feeds {
         let socket = cx.connect(
             safe_cex_engine::SocketSpec::new("wss://same.test/feed").channel(SocketChannel::Public),
         );
-        cx.send(socket, "public");
+        cx.send(socket, ControlFrame::subscription("public"));
         cx.close(socket);
         cx.connect(
             safe_cex_engine::SocketSpec::new("wss://binary.test/feed")

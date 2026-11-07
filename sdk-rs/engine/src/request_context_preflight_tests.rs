@@ -1,4 +1,5 @@
 use super::*;
+use crate::ControlFrame;
 use crate::book::Book;
 use crate::request_context::{
     HttpOwnerRetirement, Preflight, PreflightPolicy, PreflightPurpose, RetryPolicy,
@@ -406,7 +407,7 @@ fn hook_panic_fences_queued_actions_claims_callbacks_and_native_queries_forever(
             None,
             (),
         );
-        cx.send(SocketId(99), "queued");
+        cx.send(SocketId(99), ControlFrame::subscription("queued"));
         cx.notice(crate::log::Level::Info, "test.queued", "queued");
         cx.done_preflight(&owner, "cached".into()).unwrap();
     });

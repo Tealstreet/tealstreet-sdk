@@ -1357,7 +1357,7 @@ fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
                     assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
                     assert_eq!(
                         error.message,
-                        "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                        "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
                     );
                 } else {
                     assert!(message.contains(told), "{v3} {status} {body}: {message}");

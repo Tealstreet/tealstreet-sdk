@@ -1,5 +1,6 @@
 //! Private challenge state, atomic reconciliation and execution-only fills.
 use crate::{Kraken, Pending, wire};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowRepeat, RowReports, SnapshotBuilder};
@@ -805,10 +806,12 @@ impl Kraken {
         self.account.payload_complete = false;
         cx.send(
             socket,
-            serde_json::to_string(
-                &serde_json::json!({"event":"challenge","api_key":self.options.key}),
-            )
-            .unwrap(),
+            ControlFrame::authentication(
+                serde_json::to_string(
+                    &serde_json::json!({"event":"challenge","api_key":self.options.key}),
+                )
+                .unwrap(),
+            ),
         );
         true
     }
@@ -885,10 +888,13 @@ impl Kraken {
             let signature = signer.challenge(&msg.message);
             self.account.signed_challenge = Some(signature.clone());
             for feed in FEEDS {
-                cx.send(socket, serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string());
+                cx.send(socket, ControlFrame::subscription(serde_json::json!({"event":"subscribe","feed":feed,"api_key":self.options.key,"original_challenge":msg.message,"signed_challenge":signature}).to_string()));
             }
             // Kraken has no ping frame; this feed is its keepalive, every 10 s.
-            cx.send(socket, r#"{"event":"subscribe","feed":"heartbeat"}"#);
+            cx.send(
+                socket,
+                ControlFrame::subscription(r#"{"event":"subscribe","feed":"heartbeat"}"#),
+            );
             return true;
         }
         if refuses_private_feed(&msg) {

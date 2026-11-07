@@ -86,7 +86,7 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
         assert_eq!(
             error.message,
             if unproven {
-                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                "Response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             } else {
                 "Sign signature error"
             }

@@ -3,6 +3,7 @@
 use crate::sign::{Credentials, Params};
 use crate::wire::*;
 use crate::{Backpack, Connection, Pending, REST};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::SnapshotBuilder;
 use safe_cex_engine::credential_selection::{SlotPolicy, Slots};
@@ -900,16 +901,18 @@ impl Backpack {
         let signature = c.ws_auth(cx.protocol_now());
         cx.send(
             socket,
-            serde_json::to_string(&Subscribe {
-                method: "SUBSCRIBE",
-                params: ["account.orderUpdate", "account.positionUpdate"],
-                signature,
-            })
-            .unwrap(),
+            ControlFrame::subscription(
+                serde_json::to_string(&Subscribe {
+                    method: "SUBSCRIBE",
+                    params: ["account.orderUpdate", "account.positionUpdate"],
+                    signature,
+                })
+                .unwrap(),
+            ),
         );
         self.account.socket.open = true;
         self.account.socket.ping_at = cx.now;
-        cx.send(socket, "{\"method\":\"PING\"}");
+        cx.send(socket, ControlFrame::heartbeat("{\"method\":\"PING\"}"));
         if cx.store.loaded().orders {
             self.orders_read(cx, Next::None);
             self.positions_read(cx, Next::None);

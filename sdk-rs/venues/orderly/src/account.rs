@@ -1,4 +1,5 @@
 use crate::{Connection, Orderly, Pending, Seed, sign, symbol, wire::*};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::coverage::{RowAdmission, SnapshotBuilder};
 use safe_cex_engine::execution::{Arithmetic, Cursor};
@@ -1447,7 +1448,7 @@ impl Orderly {
         let url = self.private_url();
         cx.send_signed(
             socket,
-            String::new(),
+            ControlFrame::authentication(String::new()),
             Box::new(sign::WsAuth::new(primary, &url)),
         );
     }
@@ -1861,21 +1862,23 @@ impl Orderly {
                     }
                     cx.send(
                         socket,
-                        serde_json::to_string(&Sub {
-                            topic,
-                            event: "subscribe",
-                        })
-                        .unwrap(),
+                        ControlFrame::subscription(
+                            serde_json::to_string(&Sub {
+                                topic,
+                                event: "subscribe",
+                            })
+                            .unwrap(),
+                        ),
                     );
                 }
                 self.account.socket.ping_at = cx.now;
-                cx.send(socket, "{\"event\":\"ping\"}");
+                cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
                 self.account_poll(cx, true);
             }
             return Ok(());
         }
         if env.event == "ping" {
-            cx.send(socket, "{\"event\":\"pong\"}");
+            cx.send(socket, ControlFrame::heartbeat("{\"event\":\"pong\"}"));
             return Ok(());
         }
         if env.event == "pong" {
@@ -1993,7 +1996,7 @@ impl Orderly {
             SocketTick::Ping => {
                 if let Some(socket) = self.account.socket.socket {
                     self.account.socket.ping_at = cx.now;
-                    cx.send(socket, "{\"event\":\"ping\"}");
+                    cx.send(socket, ControlFrame::heartbeat("{\"event\":\"ping\"}"));
                 }
             }
             SocketTick::TimedOut(_) => {

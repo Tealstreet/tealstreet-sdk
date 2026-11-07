@@ -1,5 +1,6 @@
 //! Atomic private snapshots, protected from newer stream and command updates.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
@@ -731,14 +732,14 @@ impl Blofin {
         };
         cx.send_signed(
             socket,
-            String::new(),
+            ControlFrame::authentication(String::new()),
             Box::new(crate::dispatch_signing::WsLogin::new(
                 primary,
                 self.private_url(),
             )),
         );
 
-        cx.send(socket, "ping");
+        cx.send(socket, ControlFrame::heartbeat("ping"));
     }
     pub(super) fn private_ready(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.authenticated = true;
@@ -1999,7 +2000,7 @@ impl Blofin {
             return;
         }
         if text == "ping" {
-            cx.send(socket, "pong");
+            cx.send(socket, ControlFrame::heartbeat("pong"));
             return;
         }
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {

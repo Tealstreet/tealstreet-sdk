@@ -1,4 +1,5 @@
 //! KuCoin Spot HF: base-unit quantities and native order alteration.
+use safe_cex_engine::ControlFrame;
 mod trading;
 mod wire;
 use crate::wire::{Bullet, Number};
@@ -437,18 +438,20 @@ impl KucoinSpot {
             }
             cx.send(
                 socket,
-                serde_json::to_string(&Subscription {
-                    id: self.next_id,
-                    kind: if subscribe {
-                        "subscribe"
-                    } else {
-                        "unsubscribe"
-                    },
-                    topic,
-                    private_channel: channel == 1,
-                    response: true,
-                })
-                .unwrap(),
+                ControlFrame::subscription(
+                    serde_json::to_string(&Subscription {
+                        id: self.next_id,
+                        kind: if subscribe {
+                            "subscribe"
+                        } else {
+                            "unsubscribe"
+                        },
+                        topic,
+                        private_channel: channel == 1,
+                        response: true,
+                    })
+                    .unwrap(),
+                ),
             );
         }
     }
@@ -508,7 +511,7 @@ impl KucoinSpot {
         if let Some(socket) = c.socket {
             cx.send(
                 socket,
-                format!(r#"{{"id":{},"type":"ping"}}"#, cx.now as u64),
+                ControlFrame::heartbeat(format!(r#"{{"id":{},"type":"ping"}}"#, cx.now as u64)),
             );
             c.pong = Some(cx.set_timer(c.ping_timeout.max(1000.0)));
         }

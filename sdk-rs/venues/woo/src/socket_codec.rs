@@ -1,5 +1,6 @@
 //! WOO wire codecs and invalidation; Engine owns socket lifecycle and replay.
 use super::*;
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::VenueError;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
@@ -275,7 +276,10 @@ impl Woo {
                 } else {
                     self.public.open = true;
                     self.public.ping_at = cx.now;
-                    cx.send(epoch.socket(), r#"{"event":"ping"}"#);
+                    cx.send(
+                        epoch.socket(),
+                        ControlFrame::heartbeat(r#"{"event":"ping"}"#),
+                    );
                 }
             }
             LifecycleEvent::Ready { epoch, .. } if !self.private_feed(epoch.feed())? => {
@@ -324,7 +328,10 @@ impl Woo {
                 } else {
                     self.public.ping_at = cx.now;
                 }
-                cx.send(epoch.socket(), r#"{"event":"ping"}"#);
+                cx.send(
+                    epoch.socket(),
+                    ControlFrame::heartbeat(r#"{"event":"ping"}"#),
+                );
             }
             LifecycleEvent::Reconnect(feed) => {
                 self.managed_connect(cx, self.private_feed(feed)?)?

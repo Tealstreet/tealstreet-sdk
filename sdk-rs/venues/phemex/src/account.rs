@@ -3,6 +3,7 @@ pub use crate::account_wire::Context;
 use crate::account_wire::{AccountRow, OrderRow, PositionRow, integer, order_side};
 use crate::read_owners::Background;
 use crate::{Pending, PhemexPerpetuals};
+use safe_cex_engine::ControlFrame;
 use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
@@ -1242,7 +1243,11 @@ impl PhemexPerpetuals {
                         epoch.socket(),
                         999,
                     );
-                    cx.send_signed(epoch.socket(), recipe.unsigned(), Box::new(recipe));
+                    cx.send_signed(
+                        epoch.socket(),
+                        ControlFrame::authentication(recipe.unsigned()),
+                        Box::new(recipe),
+                    );
                     self.account.next_id.set(1200);
                     cx.send_after_socket_interests(
                         epoch.feed(),
@@ -1257,9 +1262,10 @@ impl PhemexPerpetuals {
                     vec![Interest::from_wire_args("aop_p.subscribe")],
                 )?;
             }
-            LifecycleEvent::Ping(epoch) => {
-                cx.send(epoch.socket(), self.account_frame("server.ping")?)
-            }
+            LifecycleEvent::Ping(epoch) => cx.send(
+                epoch.socket(),
+                ControlFrame::heartbeat(self.account_frame("server.ping")?),
+            ),
             LifecycleEvent::Reconnect(_) => self.connect_account_socket(cx)?,
             LifecycleEvent::Retired { .. } => {
                 self.account.open = false;

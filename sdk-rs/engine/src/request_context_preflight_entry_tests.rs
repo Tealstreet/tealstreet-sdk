@@ -1,4 +1,5 @@
 use super::*;
+use crate::ControlFrame;
 use crate::request_context::{CommandEntryError, Preflight, PreflightPolicy, PreflightPurpose};
 use crate::{Action, Command, Event, Notice, Response, SocketId, TimerId, Venue};
 
@@ -143,7 +144,7 @@ fn preflight_has_no_initial_authority_in_start_timer_feed_or_socket_callbacks() 
 fn preflight_cannot_borrow_entry_after_an_opaque_side_effect() {
     let actions = run(
         |cx| {
-            cx.send(SocketId(9), "native activity");
+            cx.send(SocketId(9), ControlFrame::subscription("native activity"));
             let ids = cx.io.core.next_id;
             assert!(matches!(
                 initial(cx, policy()),

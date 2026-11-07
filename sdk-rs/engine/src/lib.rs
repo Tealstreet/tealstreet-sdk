@@ -4,6 +4,7 @@ pub mod book;
 pub mod capabilities;
 pub mod classify;
 pub mod command;
+mod control_frame;
 pub mod coverage;
 pub mod credential_selection;
 pub mod credentials;
@@ -72,6 +73,7 @@ pub use capabilities::{
     AccountLookup, CancelAll, Capabilities, ClosedPositionFormat, FillHistoryTime, LeverageQuery,
     MaxLeverage, PositionHistory, QuantityUnits,
 };
+pub use control_frame::ControlFrame;
 pub use credentials::{READ_CREDENTIALS_INVALID, ReadCredentials};
 pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CommandWait, CredentialSlot, Cx,

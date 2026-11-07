@@ -1,4 +1,5 @@
 use super::*;
+use crate::ControlFrame;
 use crate::signing::{
     Algorithm, Context, KeyRef, Operation, PayloadPart, SignError, SignRequest, SignResult,
 };
@@ -476,9 +477,13 @@ fn full_pending_queue_rejects_dependent_ws_message_instead_of_dropping_it() {
         io: &mut engine.io,
     };
     for _ in 0..256 {
-        cx.send_signed(SocketId(42), "auth".into(), Box::new(Step));
+        cx.send_signed(
+            SocketId(42),
+            ControlFrame::authentication("auth"),
+            Box::new(Step),
+        );
     }
-    cx.send(SocketId(42), "dependent");
+    cx.send(SocketId(42), ControlFrame::subscription("dependent"));
     assert_eq!(engine.io.core.signing_admission.len(), 1);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|a| matches!(
@@ -588,7 +593,11 @@ fn explicit_close_revokes_auth_without_waiting_for_host_callback() {
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    cx.send_signed(socket, "unsigned".into(), Box::new(Step));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("unsigned"),
+        Box::new(Step),
+    );
     engine.prepare_dispatch(1000.);
     let (attempt, _) = staged(&mut engine);
     let mut cx = Cx {
@@ -619,8 +628,8 @@ fn dependent_ws_message_waits_for_authentication_dispatch() {
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    cx.send_signed(socket, "auth".into(), Box::new(Step));
-    cx.send(socket, "dependent");
+    cx.send_signed(socket, ControlFrame::authentication("auth"), Box::new(Step));
+    cx.send(socket, ControlFrame::subscription("dependent"));
     engine.prepare_dispatch(1000.);
     let (attempt, _) = staged(&mut engine);
     engine.handle(
@@ -651,7 +660,11 @@ fn socket_close_revokes_pending_auth_completion() {
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    cx.send_signed(socket, "unsigned".into(), Box::new(Step));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("unsigned"),
+        Box::new(Step),
+    );
     engine.prepare_dispatch(1000.);
     let (attempt, _) = staged(&mut engine);
     engine.handle(1001., Event::WsClosed { socket, code: 1006 });
@@ -2267,7 +2280,11 @@ fn a_socket_login_missing_its_key_latches_and_blocks_its_role() {
         io: &mut engine.io,
     };
     let socket = cx.connect(private());
-    cx.send_signed(socket, "auth".into(), Box::new(MissingKeyStep));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("auth"),
+        Box::new(MissingKeyStep),
+    );
     engine.prepare_dispatch(1000.);
     let actions: Vec<_> = engine.drain_actions().collect();
     assert!(actions.iter().any(|action| {
@@ -2349,7 +2366,11 @@ fn c4s_a_credential_only_socket_login_latches_through_signing_ref() {
         io: &mut engine.io,
     };
     let socket = cx.connect(private());
-    cx.send_signed(socket, "auth".into(), Box::new(IdentityStep(identity)));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("auth"),
+        Box::new(IdentityStep(identity)),
+    );
     engine.prepare_dispatch(1000.);
     let actions: Vec<_> = engine.drain_actions().collect();
     let config_invalid = actions
@@ -2441,7 +2462,11 @@ fn a_socket_login_with_an_invalid_shape_never_latches() {
         io: &mut engine.io,
     };
     let socket = cx.connect(private());
-    cx.send_signed(socket, "auth".into(), Box::new(InvalidStep));
+    cx.send_signed(
+        socket,
+        ControlFrame::authentication("auth"),
+        Box::new(InvalidStep),
+    );
     engine.prepare_dispatch(1000.);
     assert!(!engine.drain_actions().any(|action| {
         matches!(action, Action::Notice(Notice::Event(LogEvent { code, .. }))
@@ -2482,7 +2507,7 @@ fn a_latch_never_refuses_an_unsigned_frame_held_behind_a_login() {
     cx.sign_http(request, Box::new(MissingKeyStep));
     cx.route_request(request, RequestRoute::Primary);
     let socket = cx.connect(private());
-    cx.send_signed(socket, "auth".into(), Box::new(Step));
+    cx.send_signed(socket, ControlFrame::authentication("auth"), Box::new(Step));
     engine.prepare_dispatch(1000.);
     assert!(latched(
         engine.drain_actions().collect::<Vec<_>>().into_iter()
@@ -2492,7 +2517,7 @@ fn a_latch_never_refuses_an_unsigned_frame_held_behind_a_login() {
         store: &mut engine.store,
         io: &mut engine.io,
     };
-    cx.send(socket, "subscribe");
+    cx.send(socket, ControlFrame::subscription("subscribe"));
     engine.prepare_dispatch(1002.);
     assert!(
         !engine

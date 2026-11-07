@@ -1,6 +1,7 @@
 //! A socket that answers pings but carries no data on a feed that streams
 //! continuously is reconnected; quiet topics alone never count.
 use super::*;
+use crate::ControlFrame;
 use crate::socket::{Config, Timeout};
 use crate::socket_lifecycle::{
     AuthMode, AuthRecovery, DataSilence, Invalidation, RetireReason, TrafficPolicy,
@@ -69,7 +70,10 @@ impl Venue for Feed {
                 cx.connect_socket(feed, "wss://silence.test")?;
             }
             LifecycleEvent::Retired { reason, .. } => self.retired.push(reason),
-            LifecycleEvent::Ping(epoch) => cx.send(epoch.socket(), String::from("ping")),
+            LifecycleEvent::Ping(epoch) => cx.send(
+                epoch.socket(),
+                ControlFrame::heartbeat(String::from("ping")),
+            ),
             _ => {}
         }
         Ok(())
