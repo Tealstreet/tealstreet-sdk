@@ -1648,11 +1648,18 @@ impl Orderly {
         else {
             return;
         };
-        // The first failure names the error; any lost leg makes the outcome unknown.
+        // The first uncertainty owns the terminal warning and its diagnostics;
+        // a definitive earlier refusal must not hide a later ambiguous write.
         let lost = uncertain || error.outcome == Some(Outcome::Unknown);
-        let first = job.error.get_or_insert(error);
-        if lost {
-            first.outcome = Some(Outcome::Unknown);
+        if lost
+            && job
+                .error
+                .as_ref()
+                .is_none_or(|first| first.outcome != Some(Outcome::Unknown))
+        {
+            job.error = Some(error.outcome(Outcome::Unknown));
+        } else {
+            job.error.get_or_insert(error);
         }
         // Bulk cancellation's two families are independent writes, not replacements.
         if !job.keep_going {

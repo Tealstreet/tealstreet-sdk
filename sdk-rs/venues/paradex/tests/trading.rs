@@ -2020,6 +2020,47 @@ fn several_failed_placements_share_an_outcome_only_when_they_agree() {
 }
 
 #[test]
+fn aggregation_keeps_unknown_warning_beside_a_definitive_refusal() {
+    for ambiguous_first in [false, true] {
+        for &(status, body) in AMBIGUOUS_WRITES {
+            let mut h = private();
+            let mut second = opts(OrderType::Market);
+            second.client_order_id = Some("second".into());
+            place(&mut h, 73, vec![opts(OrderType::Market), second]);
+            for ambiguous in [ambiguous_first, !ambiguous_first] {
+                let request = take_method(&mut h, Method::Post, "/orders");
+                if ambiguous {
+                    h.respond(request, status, body);
+                } else {
+                    h.respond(
+                        request,
+                        400,
+                        r#"{"error":"INVALID_PRICE","message":"definitive refusal"}"#,
+                    );
+                }
+            }
+            assert_eq!(h.failures.len(), 1);
+            let error = &h.failures[0];
+            assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+            let text = error.legacy_text().to_ascii_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "{error:?}"
+            );
+            assert!(
+                text.contains("definitive refusal"),
+                "the independent known failure stays visible: {text}"
+            );
+            assert!(
+                !h.pending.iter().any(|r| r.method != Method::Get),
+                "no resend or put-back: {:?}",
+                h.pending
+            );
+        }
+    }
+}
+
+#[test]
 fn public_rest_book_refusal_does_not_invalidate_or_refresh_existing_jwt() {
     let mut h = private();
     let before = (

@@ -1337,3 +1337,46 @@ fn failures_after_an_effective_step_are_never_rejected_or_not_sent() {
     assert_eq!(error.outcome, None);
     assert_ne!(error.outcome, Some(Outcome::Unknown));
 }
+
+#[test]
+fn aggregation_keeps_unknown_warning_and_stops_after_a_refusal() {
+    // Unlike Orderly and Paradex, a refusal ends this venue's batch immediately.
+    let mut h = H::new();
+    h.command(Command::PlaceOrders {
+        command: 91,
+        orders: vec![order(), order()],
+    });
+    h.response("/order", 400, r#"{"error":"definitive refusal"}"#);
+    assert_eq!(h.failures.len(), 1);
+    assert_eq!(
+        h.failures[0].outcome,
+        Some(safe_cex_engine::Outcome::Rejected)
+    );
+    assert_eq!(h.writes(), 0, "a later write cannot overwrite this refusal");
+
+    // An accepted prefix also cannot hide the later ambiguous write's warning.
+    for (status, body) in [
+        (429, r#"{"error":"rate limit"}"#),
+        (408, r#"{"error":"refused"}"#),
+        (503, r#"{"error":"refused"}"#),
+    ] {
+        let mut h = H::new();
+        h.command(Command::PlaceOrders {
+            command: 91,
+            orders: vec![order(), order(), order()],
+        });
+        h.response("/order", 200, &ack("accepted"));
+        h.response("/order", status, body);
+        assert_eq!(h.failures.len(), 1);
+        let error = &h.failures[0];
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.partial.as_ref().unwrap().order_ids, ["accepted"]);
+        let text = error.legacy_text().to_ascii_lowercase();
+        assert!(
+            text.contains("unknown") && text.contains("check open orders"),
+            "{error:?}"
+        );
+        assert!(!text.contains("refused"), "{text}");
+        assert_eq!(h.writes(), 0, "no resend or third placement");
+    }
+}

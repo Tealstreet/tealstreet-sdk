@@ -1765,6 +1765,113 @@ const AMBIGUOUS_WRITES: &[(u16, &str)] = &[
     (504, "gateway timeout"),
 ];
 
+#[test]
+fn aggregation_keeps_unknown_warning_for_mixed_family_cancellation() {
+    use safe_cex_engine::{Method, Outcome};
+    let refused = (400, r#"{"success":false,"code":-1103,"message":"refused"}"#);
+    let rate_limited = [(
+        429,
+        r#"{"success":false,"code":-1003,"message":"rate limit"}"#,
+    )];
+    for ambiguous_first in [false, true] {
+        for &(status, body) in rate_limited.iter().chain(AMBIGUOUS_WRITES) {
+            let (mut e, _) = ready();
+            requests(&mut e);
+            e.handle(
+                2000.,
+                Event::Command(Command::CancelSymbolOrders {
+                    command: 91,
+                    symbol: "BTCUSDC".into(),
+                }),
+            );
+            let first = requests(&mut e)
+                .into_iter()
+                .find(|r| r.method == Method::Delete)
+                .unwrap();
+            assert!(first.url.contains("/v1/orders?"));
+            let (first_status, first_body) = if ambiguous_first {
+                (status, body)
+            } else {
+                refused
+            };
+            reply(&mut e, &first, first_status, first_body);
+            let between = actions(&mut e);
+            let writes: Vec<_> = between
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Http(r) if r.method != Method::Get => Some(r),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                writes.len(),
+                1,
+                "only the independent algo cancellation follows: {between:?}"
+            );
+            assert_eq!(writes[0].method, Method::Delete);
+            assert!(writes[0].url.contains("/v1/algo/orders?"));
+            let (last_status, last_body) = if ambiguous_first {
+                refused
+            } else {
+                (status, body)
+            };
+            reply(&mut e, writes[0], last_status, last_body);
+            let out = actions(&mut e);
+            assert!(
+                !out.iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+                "no resend or put-back: {out:?}"
+            );
+            let errors: Vec<_> = out
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(errors.len(), 1);
+            let error = errors[0];
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            let text = error.legacy_text().to_ascii_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "first ambiguous={ambiguous_first}, response={status}: {error:?}"
+            );
+            assert!(!text.contains("refused"), "{text}");
+            if matches!(status, 200 | 400) {
+                assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
+                assert_eq!(error.venue_code.as_deref(), Some("-1003"));
+            }
+        }
+    }
+
+    // Two definitive failures still report the first refusal as before.
+    let (mut e, _) = ready();
+    requests(&mut e);
+    e.handle(
+        2000.,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 91,
+            symbol: "BTCUSDC".into(),
+        }),
+    );
+    for message in ["first refused", "second refused"] {
+        let r = requests(&mut e)
+            .into_iter()
+            .find(|r| r.method == Method::Delete)
+            .unwrap();
+        reply(
+            &mut e,
+            &r,
+            400,
+            &format!(r#"{{"success":false,"code":-1103,"message":"{message}"}}"#),
+        );
+    }
+    let out = actions(&mut e);
+    assert_eq!(outcome(out.clone(), 91), Some(Some(Outcome::Rejected)));
+    assert!(done(out, 91).unwrap_err().contains("first refused"));
+}
+
 fn assert_dispatched_unknown(
     e: &mut Driver,
     request: &safe_cex_engine::HttpRequest,
