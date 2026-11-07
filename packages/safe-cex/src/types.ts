@@ -1334,6 +1334,7 @@ export interface RemoteSignerRequest {
       | 'kraken-challenge'
       | 'apexomni-base64'
       | 'bitunix-double-sha256'
+      | 'kucoin-batch'
       // Hyperliquid: `toSign` is a structured L1 statement the device re-derives
       // the digest from; `hyperliquid-address` binds the agent address.
       | 'hyperliquid-l1'
