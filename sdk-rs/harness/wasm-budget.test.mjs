@@ -430,6 +430,18 @@ test('#3120 protective recovery (run 42241033166, job 127971867963) retains equa
   }
 });
 
+test('#3120 on master 160884d020d (run 42319184274) uses CI plus 10 KiB and keeps HL siblings equal', () => {
+  const measured = 2_184_857;
+  const cap = 2_195_456;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('#3150 final CI 42258955401 cap refresh: #3145 trades as last (run 42218930349 job 127896386942) retains Hyperliquid headroom and siblings match', () => {
   const measured = 2_166_092;
   const minimumCap = 2_177_024;
@@ -656,7 +668,21 @@ test('#3207 telemetry (run 42279265759) uses CI plus 10 KiB and keeps Bitget sib
 
 test('#3202 on #3207 (run 42305638406) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
   const measured = 2_409_448;
-  const cap = 2_419_712;
+  const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(measuredCap, 2_419_712);
+  const cap = WASM_VENUE_OVERRIDES.bitget;
+  assert.ok(cap >= measuredCap);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3210 admitted close split (run 42320236420) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
+  const measured = 2_422_853;
+  const cap = 2_434_048;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
@@ -675,16 +701,4 @@ test('#3191 run 42249705679 retains measured Paradex headroom', () => {
   assert.equal(wasmBudgetError(measured, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'paradex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'paradex'), /exceeds/);
-});
-
-test('#3120 on master 160884d020d (run 42319184274) uses CI plus 10 KiB and keeps HL siblings equal', () => {
-  const measured = 2_184_857;
-  const cap = 2_195_456;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  for (const venue of ['hyperliquid', 'hyperliquidspot']) {
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
-    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
-    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
-  }
 });
