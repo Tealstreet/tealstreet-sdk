@@ -33,6 +33,7 @@ fn public_numeric_overlays_preserve_presence_and_float_bits() {
             };
             let text = format!(r#"{{"channel":"{kind}","data":{payload}}}"#);
             support::message(&mut engine, api, 4000., &text);
+            support::message(&mut engine, api, 5000., &text);
             let ticker = engine.store().ticker("BTC-USDC").unwrap();
             let (actual, original) = if kind == "ticker" {
                 (ticker.last, 65000.0)
@@ -79,4 +80,21 @@ fn reordered_context_envelopes_keep_null_blank_and_escaped_numbers() {
             "{text}"
         );
     }
+}
+
+#[test]
+fn repeated_tickers_reapply_their_fields_after_a_context_update() {
+    let (mut engine, node, api) = support::ready();
+    let ticker = r#"{"channel":"ticker","data":{"instrumentId":1,"lastPrice":"66000","nodeCtx":{"markPx":"66001"}}}"#;
+    support::message(&mut engine, api, 4000., ticker);
+    support::message(
+        &mut engine,
+        node,
+        5000.,
+        r#"{"channel":"activeAssetCtx","data":{"coin":"1","ctx":{"lastPrice":"67000","markPx":"67001"}}}"#,
+    );
+    assert_eq!(engine.store().ticker("BTC-USDC").unwrap().last, 67000.);
+    support::message(&mut engine, api, 6000., ticker);
+    let row = engine.store().ticker("BTC-USDC").unwrap();
+    assert_eq!((row.last, row.mark), (66000., 66001.));
 }
