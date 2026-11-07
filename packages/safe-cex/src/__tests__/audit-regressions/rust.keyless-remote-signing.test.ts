@@ -40,7 +40,7 @@ describe('Rust-only hosted account selection', () => {
         expect(exchange).toBeInstanceOf(RustEngineExchange);
         exchange.dispose();
       } else {
-        expect(() => assertBetaAccount(name, options)).toThrow('unsupported in this build');
+        expect(() => assertBetaAccount(name, options)).toThrow(`${name} isn't available for Hosted accounts yet; reconnect with your own API key to trade it.`);
         await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
       }
     }

@@ -165,6 +165,27 @@ describe('Rust-only beta construction', () => {
     expect(() => assertBetaAccount('lighter-robinhood', options)).not.toThrow();
     await expect(createExchange('lighter-robinhood', options)).resolves.toBeInstanceOf(state.Rust);
   });
+  it('explains how refused Hosted accounts can reconnect before clock or constructor work', async () => {
+    const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
+    for (const name of BETA_VENUES.filter((venue) => deriveRemoteSigningPolicy(venue)?.enabled !== true)) {
+      const message = `${name} isn't available for Hosted accounts yet; reconnect with your own API key to trade it.`;
+      for (const signing of [{ remoteSigner }, { payloadSigner: vi.fn() }]) {
+        await expect(createExchange(name, { key: 'public-key', secret: '', ...signing })).rejects.toMatchObject({
+          message,
+          kind: 'unsupported',
+          outcome: 'notSent',
+        });
+      }
+    }
+    await expect(createExchange('unknown' as ExchangeName, { key: '', secret: '' })).rejects.toMatchObject({
+      message: 'unknown is unsupported in this build',
+      kind: 'unsupported',
+      outcome: 'notSent',
+    });
+    expect(remoteSigner.sign).not.toHaveBeenCalled();
+    expect(virtualClock.start).not.toHaveBeenCalled();
+    expect(state.calls).toEqual([]);
+  });
   it('refuses unsupported delegated modes without fallback', async () => {
     const remoteSigner = { sign: vi.fn(), isAvailable: () => true, onAvailabilityChange: () => () => {} };
     // Hyperliquid's, Lighter's and Paradex's structured remote signing is pinned in

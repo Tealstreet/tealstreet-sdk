@@ -53,7 +53,7 @@ describe('OUT hosted accounts are refused while signing references remain availa
     for (const name of ['coinbase', 'coinbasespot', ...orderlyNames] as ExchangeName[]) {
       const options: ExchangeOptions = { key: 'hosted-key', secret: '', remoteSigner, privateOnly: true };
       await expect(createExchange(name, options)).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
-      expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrow('unsupported in this build');
+      expect(() => new RustEngineExchange(name, options, new DefaultStore())).toThrow(`${name} isn't available for Hosted accounts yet; reconnect with your own API key to trade it.`);
     }
     expect(clock).not.toHaveBeenCalled();
   });

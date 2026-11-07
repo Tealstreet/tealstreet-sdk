@@ -10,8 +10,9 @@ the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX, and
 Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
-policy, with no separate beta override. Robinhood is admitted through the existing Lighter
-family and remote-signing policy; its preview/production visibility flags are unchanged.
+policy, with no separate beta override. Refused Hosted accounts are told to reconnect
+with their own API key; the refusal remains `unsupported` / `notSent` before I/O.
+Robinhood is admitted through the existing Lighter family and remote-signing policy; its preview/production visibility flags are unchanged.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
 
