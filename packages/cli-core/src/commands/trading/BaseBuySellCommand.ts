@@ -1,6 +1,7 @@
+import { deserializeCommandError, serializeCommandError } from '@tealstreet/safe-cex/src/commandOutcome';
 import { TradingBaseCommand } from './TradingBaseCommand';
 import { CommandCategory, type CommandContext, type CommandResult } from '../Command';
-import { prepareCliOrder } from '../../order/prepareCliOrder';
+import { prepareCliOrders } from '../../order/prepareCliOrder';
 import { OrderSide, OrderTimeInForce, OrderType, PlaceOrderOpts, PositionSide } from '@tealstreet/safe-cex/src/types';
 
 /**
@@ -157,12 +158,13 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       if (!args[2]) {
         return this.error('Size argument missing');
       }
-      const orderIds: string[] = [];
+      const orders: PlaceOrderOpts[] = [];
       for (const sym of symbolsAtStart) {
         const stopLoss = this.maybeStopLoss(ctx, sym, args);
         if (stopLoss instanceof Error) return this.error(stopLoss.message);
-        orderIds.push(...(await this.placeMarketOrder(ctx, sym, args[2], reduceOnly, stopLoss)));
+        orders.push(this.buildOrder(ctx, sym, args[2], reduceOnly, undefined, stopLoss));
       }
+      const orderIds = await this.submitOrders(ctx, orders);
       this.printSuccess(ctx, symbolsAtStart.length > 1 ? 'Orders placed' : 'Order placed');
       return this.successWithData({ orderIds });
     }
@@ -178,12 +180,13 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     }
 
     if (trailingSymbols.length > 0) {
-      const orderIds: string[] = [];
+      const orders: PlaceOrderOpts[] = [];
       for (const sym of trailingSymbols) {
         const stopLoss = this.maybeStopLoss(ctx, sym, args);
         if (stopLoss instanceof Error) return this.error(stopLoss.message);
-        orderIds.push(...(await this.placeMarketOrder(ctx, sym, args[1], reduceOnly, stopLoss)));
+        orders.push(this.buildOrder(ctx, sym, args[1], reduceOnly, undefined, stopLoss));
       }
+      const orderIds = await this.submitOrders(ctx, orders);
       this.printSuccess(ctx, trailingSymbols.length > 1 ? 'Orders placed' : 'Order placed');
       return this.successWithData({ orderIds });
     }
@@ -194,7 +197,9 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     }
     const stopLoss = this.maybeStopLoss(ctx, ctx.symbol, args);
     if (stopLoss instanceof Error) return this.error(stopLoss.message);
-    const orderIds = await this.placeMarketOrder(ctx, ctx.symbol, args[1], reduceOnly, stopLoss);
+    const orderIds = await this.submitOrders(ctx, [
+      this.buildOrder(ctx, ctx.symbol, args[1], reduceOnly, undefined, stopLoss),
+    ]);
     this.printSuccess(ctx, 'Order placed');
     return this.successWithData({ orderIds });
   }
@@ -244,7 +249,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       return this.error('Size argument missing');
     }
 
-    const orderIds: string[] = [];
+    const orders: PlaceOrderOpts[] = [];
     for (const sym of possibleSymbols) {
       const ticker = exchange.store?.tickers?.find((t) => t.symbol === sym);
       if (!ticker) {
@@ -259,8 +264,9 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       }
       const stopLoss = this.maybeStopLoss(ctx, sym, args);
       if (stopLoss instanceof Error) return this.error(stopLoss.message);
-      orderIds.push(...(await this.placeLimitOrder(ctx, sym, sizeArg, bestPrice, reduceOnly, stopLoss, postOnly)));
+      orders.push(this.buildOrder(ctx, sym, sizeArg, reduceOnly, bestPrice, stopLoss, postOnly));
     }
+    const orderIds = await this.submitOrders(ctx, orders);
     this.printSuccess(ctx, possibleSymbols.length > 1 ? 'Orders placed' : 'Order placed');
     return this.successWithData({ orderIds });
   }
@@ -305,7 +311,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       possibleSymbols.push(ctx.symbol);
     }
 
-    const orderIds: string[] = [];
+    const orders: PlaceOrderOpts[] = [];
     for (const sym of possibleSymbols) {
       const currentPrice = exchange.store?.tickers?.find((ticker) => ticker.symbol === sym)?.last;
       if (!currentPrice) {
@@ -318,99 +324,82 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       const price = args[atIndex + 1];
       const stopLoss = this.maybeStopLoss(ctx, sym, args);
       if (stopLoss instanceof Error) return this.error(stopLoss.message);
-      orderIds.push(
-        ...(await this.placeLimitOrder(
+      orders.push(
+        this.buildOrder(
           ctx,
           sym,
           args[sizeArgIndex],
-          parseFloat(this.processPrice(price, currentPrice)),
           reduceOnly,
+          parseFloat(this.processPrice(price, currentPrice)),
           stopLoss,
           postOnly,
-        )),
+        ),
       );
     }
 
+    const orderIds = await this.submitOrders(ctx, orders);
     this.printSuccess(ctx, possibleSymbols.length > 1 ? 'Orders placed' : 'Order placed');
     return this.successWithData({ orderIds });
   }
 
-  protected async placeMarketOrder(
+  private buildOrder(
     ctx: CommandContext,
     symbol: string,
     sizeArg: string,
     reduceOnly: boolean,
-    stopLoss?: number,
-  ): Promise<string[]> {
-    const exchange = ctx.exchange!;
-    // Health gate + fatfinger only apply to exposure-increasing orders;
-    // reduce-only closes stay allowed. Gated here (not in execute) so a
-    // malformed command surfaces its parse error, not the degraded
-    // message (TSBUG-106).
-    if (!reduceOnly) {
-      const blocked = this.healthGate(ctx);
-      if (blocked) throw new Error(blocked);
-    }
-    const amount = this.parseSizeForEntry(exchange, symbol, sizeArg, reduceOnly);
-    // Skip fatfinger + budget on reduce-only orders — both gate new
-    // exposure, not closing existing exposure.
-    let budgetNotional = 0;
-    if (!reduceOnly) {
-      this.enforceFatfinger(ctx, symbol, amount);
-      budgetNotional = this.checkBudget(ctx, exchange, symbol, amount);
-    }
-    const order: PlaceOrderOpts = {
-      symbol,
-      side: this.side,
-      type: OrderType.Market,
-      amount,
-      reduceOnly,
-      timeInForce: OrderTimeInForce.GoodTillCancel,
-      ...(stopLoss !== undefined ? { stopLoss } : {}),
-    };
-    // Exchange placeOrder returns Promise<string[]>. Bracket orders
-    // (with stopLoss) typically produce 2-3 IDs (entry + SL + maybe
-    // TP). Bybit's position-level TP/SL endpoint returns []. The
-    // helper surfaces whatever the exchange returned; the runner
-    // decides what to do with an empty array.
-    const ids = (await exchange.placeOrder!(prepareCliOrder(exchange, order))) ?? [];
-    // Charge the budget only AFTER the order placed (a throw above skips this).
-    if (budgetNotional > 0) ctx.preprocessStore?.addBudgetSpent(budgetNotional);
-    return ids;
-  }
-
-  protected async placeLimitOrder(
-    ctx: CommandContext,
-    symbol: string,
-    sizeArg: string,
-    price: number,
-    reduceOnly: boolean,
+    price?: number,
     stopLoss?: number,
     postOnly = false,
-  ): Promise<string[]> {
-    const exchange = ctx.exchange!;
-    if (!reduceOnly) {
-      const blocked = this.healthGate(ctx);
-      if (blocked) throw new Error(blocked);
-    }
-    const amount = this.parseSizeForEntry(exchange, symbol, sizeArg, reduceOnly);
-    let budgetNotional = 0;
-    if (!reduceOnly) {
-      this.enforceFatfinger(ctx, symbol, amount);
-      budgetNotional = this.checkBudget(ctx, exchange, symbol, amount);
-    }
-    const order: PlaceOrderOpts = {
+  ): PlaceOrderOpts {
+    return {
       symbol,
       side: this.side,
-      type: OrderType.Limit,
-      price,
-      amount,
+      type: price === undefined ? OrderType.Market : OrderType.Limit,
+      amount: this.parseSizeForEntry(ctx.exchange!, symbol, sizeArg, reduceOnly, price),
       reduceOnly,
+      ...(price !== undefined ? { price } : {}),
       timeInForce: postOnly ? OrderTimeInForce.PostOnly : OrderTimeInForce.GoodTillCancel,
       ...(stopLoss !== undefined ? { stopLoss } : {}),
     };
-    const ids = (await exchange.placeOrder!(prepareCliOrder(exchange, order))) ?? [];
-    if (budgetNotional > 0) ctx.preprocessStore?.addBudgetSpent(budgetNotional);
+  }
+
+  private async submitOrders(ctx: CommandContext, orders: PlaceOrderOpts[]): Promise<string[]> {
+    const exchange = ctx.exchange!;
+    const prepared = prepareCliOrders(exchange, orders);
+    const notionals = new Map<PlaceOrderOpts, number>();
+    let pendingNotional = 0;
+    for (const order of prepared) {
+      if (order.reduceOnly) continue;
+      const blocked = this.healthGate(ctx);
+      if (blocked) throw new Error(blocked);
+      this.enforceFatfinger(ctx, order.symbol, order.amount);
+      const notional = this.checkBudget(ctx, exchange, order.symbol, order.amount, order.price, pendingNotional);
+      notionals.set(order, notional);
+      pendingNotional += notional;
+    }
+
+    const ids: string[] = [];
+    let accepted = 0;
+    for (const order of prepared) {
+      try {
+        ids.push(...((await exchange.placeOrder!(order)) ?? []));
+      } catch (error) {
+        if (accepted === 0) throw error;
+        const details = serializeCommandError(error);
+        // Keep native Unknown/client-ID attribution and any inner partial batch.
+        // Earlier accepted legs also forbid retrying this whole command.
+        throw deserializeCommandError({
+          ...details,
+          partialOrderIds: [...ids, ...(details.partialOrderIds ?? [])],
+          partialOrderCount:
+            Math.max(accepted, ids.length) +
+            Math.max(details.partialOrderCount ?? 0, details.partialOrderIds?.length ?? 0),
+        });
+      }
+      accepted++;
+      const notional = notionals.get(order) ?? 0;
+      if (notional > 0) ctx.preprocessStore?.addBudgetSpent(notional);
+    }
     return ids;
   }
 
@@ -426,6 +415,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
     symbol: string,
     size: string,
     reduceOnly = false,
+    price?: number,
   ): number {
     // A reduce-only order closes the OPPOSITE side — a buy reduces a
     // short, a sell reduces a long. Pass that PositionSide so a bare `%`
@@ -439,6 +429,7 @@ export abstract class BaseBuySellCommand extends TradingBaseCommand {
       true,
       reduceSide,
       reduceOnly ? 'position' : 'balance',
+      price,
     );
     if (!(amount > 0)) {
       throw new Error(`Size "${size}" rounds to 0 ${symbol} at this market's precision — order not placed.`);

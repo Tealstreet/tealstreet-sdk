@@ -122,6 +122,15 @@ Both **no-op on a non-TTY** (pipes / CI) and suspend/resume cleanly around
 watch-mode alt-screen. Source: `apps/cli/src/scroll-region.ts` (the single
 region owner), `status-line.ts`, `footer.ts`, `footer-segments.ts`.
 
+Order and position sizes (`o`, `ps`, `p`, the prompt, charts, and the footer
+`position` segment) are base-asset amounts, shown to the market's base lot step
+(lot step × contract size); a step of 1 or more shows whole units.
+Order tables, chart annotations (including SL/TP/trailing orders), and the chase
+monitor's current-order row show the remaining base amount after partial fills.
+Inverse contracts have a price-dependent base size, so fractional amounts use
+up to eight significant digits rather than a fixed decimal count. Small nonzero
+positions and remaining order sizes stay visible.
+
 ---
 
 ## Command audit & tracing {#audit-tracing}
@@ -157,7 +166,7 @@ prompt preview                  # render the current format with live data
 | `{account}`  | Account name                        |
 | `{price}`    | Last price for focused symbol       |
 | `{side}`     | Position side (`L` / `S` / `—`)     |
-| `{size}`     | Position size                       |
+| `{size}`     | Base amount + asset (`240 DOGE`)    |
 | `{entry}`    | Entry price                         |
 | `{pnl}`      | Unrealized PnL (currency)           |
 | `{pnl%}`     | Unrealized PnL (percent)            |

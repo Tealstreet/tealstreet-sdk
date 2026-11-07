@@ -31,6 +31,16 @@ parents fail before any write. SDK `cancelAllOrders`
 uses both native account-wide DELETE paths for every broker, including when
 the latest SDK store frame has no orders.
 
+Dispatched writes answered with HTTP 429, 408, or 5xx, or native rate code
+`-1003`, have an unknown outcome even if the body claims refusal. They are
+never resent or followed by a protective put-back. Check Open Orders before
+retrying; native diagnostics remain available separately from that message.
+If the regular and algo bulk cancellations have mixed failures, the terminal
+error retains the first ambiguous failure's warning and diagnostics so an
+earlier definitive refusal cannot hide the unknown outcome.
+The same warning covers lost transport responses and native Unknown codes;
+normalization preserves the original diagnostic even across multiple failures.
+
 The shared SDK engine transport preserves signed request bytes through direct
 requests, REST proxies and the raw HTTP-over-WebSocket adapter. Intermediary
 authorization may add headers but cannot change signed bytes or venue headers.

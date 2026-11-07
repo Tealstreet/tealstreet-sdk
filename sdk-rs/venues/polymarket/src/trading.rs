@@ -1,4 +1,6 @@
 //! CLOB V2 writes: preflight whole batches, serialize exact signed bodies, never retry writes.
+//! Dispatched HTTP 429/408/5xx remain Unknown, including cancel-and-replace legs;
+//! the caller must Check Open Orders, and native diagnostics cannot prove refusal.
 //! Oracle: official clob-client-v2 v1.1.0 src/types/ordersV2.ts and client.ts.
 use crate::account::OrderRow;
 use crate::sign::{self, OrderSigning};
@@ -669,6 +671,7 @@ impl Polymarket {
     ) {
         let command = request.command();
         let placing = matches!(request, Request::Place { .. });
+        let write = !matches!(request, Request::ReplaceRead { .. });
         if !self.trading.jobs.contains_key(&command) {
             return;
         }
@@ -865,7 +868,11 @@ impl Polymarket {
             }
             Err(error) => {
                 let error = if !(200..300).contains(&response.status) {
-                    http_failure(response.status, error)
+                    if write {
+                        write_failure(response.status, error)
+                    } else {
+                        http_failure(response.status, error)
+                    }
                 } else if before_send {
                     not_sent(error)
                 } else if refused {
@@ -893,13 +900,16 @@ impl Polymarket {
         let error = self.note_replacement_lost(request.command(), placing, error);
         self.trading_finish(cx, request.command(), Err(error));
     }
-    /// An amend's replacement failed after its cancel landed: the order no longer rests.
+    /// Normalize uncertainty before describing an amend whose cancel already landed.
     fn note_replacement_lost(
         &self,
         command: CommandId,
         placing: bool,
         mut error: VenueError,
     ) -> VenueError {
+        if error.outcome == Some(Outcome::Unknown) {
+            error = ambiguous_write(error);
+        }
         if placing
             && let Some(job) = self.trading.jobs.get(&command)
             && job.ids.is_empty()
@@ -932,6 +942,25 @@ pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
             .outcome(Outcome::Rejected),
         _ => error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected),
     }
+}
+
+/// A dispatched write may have executed despite a rate limit or server error.
+/// Retain the native diagnostic separately so it cannot claim definitive refusal
+/// or that a canceled order's replacement is absent. Account reads still use
+/// `http_failure` directly.
+fn write_failure(status: u16, message: String) -> VenueError {
+    let error = http_failure(status, message);
+    if matches!(status, 408 | 429 | 500..) {
+        ambiguous_write(error)
+    } else {
+        error
+    }
+}
+
+fn ambiguous_write(mut error: VenueError) -> VenueError {
+    error.venue_message.get_or_insert(error.message);
+    error.message = "Polymarket write outcome is unknown. Check Open Orders".into();
+    error.outcome(Outcome::Unknown)
 }
 
 /// Refused before any request was sent.
