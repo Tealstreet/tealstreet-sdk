@@ -28,6 +28,10 @@ on:
         description: Compare standalone Bybit barrier capability off/on on this exact checkout
         type: boolean
         default: false
+      asterdex_steady_profile:
+        description: Temporary non-certifying x86 AsterDEX steady-window profile
+        type: boolean
+        default: false
   push:
     branches: [master]
     paths:
@@ -104,6 +108,10 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           WASM_SIZE_COMPARE_PR: ${{ inputs.wasm_size_compare_pr }}
         run: |
+          if [ '${{ github.event_name }}' = workflow_dispatch ] && [ '${{ inputs.asterdex_steady_profile }}' = true ]; then
+            echo 'relevant=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ '${{ github.event_name }}' = workflow_dispatch ] && [ -n "$WASM_SIZE_COMPARE_PR" ]; then
             echo 'relevant=false' >> "$GITHUB_OUTPUT"
             exit 0
@@ -261,6 +269,63 @@ jobs:
           path: ${{ runner.temp }}/cpu-budget/
           if-no-files-found: error
           retention-days: 14
+
+  asterdex-steady-profile:
+    name: Rust / temporary AsterDEX x86 profile
+    if: github.event_name == 'workflow_dispatch' && inputs.asterdex_steady_profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: 1
+      WASM_BINDGEN_VERSION: 0.2.129
+      SAFE_CEX_WASM_OPT: required
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+            sdk-rs/target
+          key: ${{ runner.os }}-cargo-gate-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-gate-
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force -j1
+          fi
+      - uses: ./.github/actions/prefetch-cargo
+      - uses: ./.github/actions/install-binaryen
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
+      - run: corepack yarn rust:build-wasm --venue asterdex
+      - name: Paired baseline, then isolated steady-window profiles (never certification)
+        run: node sdk-rs/harness/asterdex-steady-profile.mjs '${{ runner.temp }}/asterdex-steady-profile'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: asterdex-steady-profile
+          path: |
+            ${{ runner.temp }}/asterdex-steady-profile/
+            sdk-rs/harness/out/ci/gate-*.json
+          if-no-files-found: error
+          retention-days: 7
 
   selection:
     needs: scope
