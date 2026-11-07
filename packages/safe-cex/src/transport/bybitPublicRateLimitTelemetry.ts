@@ -2,6 +2,8 @@ import type { HttpPacket, HttpResponse } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName } from '../types';
 
 export interface BybitPublicRateLimitNotice {
+  retCode?: 10006 | 10018 | 429;
+  httpStatus?: 429;
   egress: string;
   target: string;
   limit?: string;
@@ -81,10 +83,18 @@ export const bybitPublicRateLimitNotice = (
   request: PublicRequest,
   body: string,
   headers: unknown,
+  status = 200,
 ): BybitPublicRateLimitNotice | undefined => {
-  if (!isPublicRequest(request) || body.length > maxBodyBytes) return;
+  if (!isPublicRequest(request)) return;
   try {
-    if (JSON.parse(body)?.retCode !== 10006) return;
+    let retCode: BybitPublicRateLimitNotice['retCode'];
+    if (status !== 429) {
+      if (body.length > maxBodyBytes) return;
+      // https://bybit-exchange.github.io/docs/v5/error (10018 is the legacy IP limit).
+      const code = JSON.parse(body)?.retCode;
+      if (code !== 10006 && code !== 10018 && code !== 429) return;
+      retCode = code;
+    }
     const normalized: Record<string, string> = Object.fromEntries(
       Object.entries(headers && typeof headers === 'object' ? headers : {})
         .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
@@ -93,6 +103,8 @@ export const bybitPublicRateLimitNotice = (
     const id = (name: string) => (/^[a-z0-9._-]{1,64}$/i.test(normalized[name] ?? '') ? normalized[name] : 'unknown');
     const numeric = (name: string) => (/^\d{1,20}$/.test(normalized[name] ?? '') ? normalized[name] : undefined);
     return {
+      retCode,
+      httpStatus: status === 429 ? 429 : undefined,
       egress: id('x-tealstreet-egress'),
       target: id('x-tealstreet-egress-target'),
       limit: numeric('x-bapi-limit'),
@@ -124,12 +136,17 @@ export const observeBybitPublicRateLimit = (
         // Duplicate headers are ambiguous; an empty value is rejected by the notice validator.
         headers[name] = name in headers ? '' : line.slice(colon + 1).trim();
       }
-      const notice = bybitPublicRateLimitNotice(request, body, headers);
+      const notice = bybitPublicRateLimitNotice(request, body, headers, response.status);
       if (notice) report(notice);
     } catch {
       /* Telemetry cannot fail a request or its stream. */
     }
   };
+  // Status alone is authoritative; do not consume or wrap a 429 body, or report it twice.
+  if (response.status === 429) {
+    reportBody('');
+    return response;
+  }
   if (response.body instanceof Uint8Array) {
     if (response.body.byteLength <= maxBodyBytes) reportBody(new TextDecoder().decode(response.body));
     return response;
@@ -152,14 +169,15 @@ export const observeBybitPublicRateLimit = (
 };
 
 export const bybitPublicRateLimitReport = (exchange: ExchangeName, notice: BybitPublicRateLimitNotice) => {
-  const message = 'Bybit public REST rate limit (10006)';
+  const message = 'Bybit public REST rate limit';
   return {
     message,
     sentryData: {
       error: { name: 'BybitPublicRateLimit', message },
       tags: {
         exchange,
-        bybit_ret_code: '10006',
+        bybit_ret_code: notice.retCode?.toString(),
+        bybit_http_status: notice.httpStatus?.toString(),
         bybit_egress: notice.egress,
         bybit_egress_target: notice.target,
         bybit_limit: notice.limit,

@@ -26,6 +26,7 @@ const headers = [
   'Authorization: secret-response-header',
 ].join('\n');
 const expected = {
+  retCode: 10006,
   egress: 'proxy-02',
   target: 'tokyo-02',
   limit: '120',
@@ -33,15 +34,15 @@ const expected = {
   resetTimestamp: '1800000000000',
   retryAfter: '10',
 };
-const response = (streamed: boolean): HttpResponse => ({
-  status: 200,
+const response = (streamed: boolean, status = 200, bodyText = text): HttpResponse => ({
+  status,
   headers,
   body: streamed
     ? (async function* () {
-        yield new TextEncoder().encode(text.slice(0, 10));
-        yield new TextEncoder().encode(text.slice(10));
+        yield new TextEncoder().encode(bodyText.slice(0, 10));
+        yield new TextEncoder().encode(bodyText.slice(10));
       })()
-    : new TextEncoder().encode(text),
+    : new TextEncoder().encode(bodyText),
 });
 const raw = (reply: HttpResponse): Transport => ({
   now: () => 0,
@@ -59,13 +60,28 @@ const read = async (reply: HttpResponse) => {
 };
 
 describe('Bybit public diagnostics on host responses', () => {
-  const routes = [undefined, 'direct', 'publicCors'] as const;
+  const routes = [undefined, 'direct', 'publicCors', 'primary'] as const;
+  const replies = [
+    { status: 200, bodyText: text, retCode: 10006 },
+    { status: 200, bodyText: '{"retCode":429}', retCode: 429 },
+    { status: 200, bodyText: '{"retCode":10018}', retCode: 10018 },
+    { status: 429, bodyText: '' },
+    { status: 429, bodyText: '<html>Too many requests</html>' },
+    { status: 429, bodyText: '{"retCode":10001}' },
+    { status: 429, bodyText: text },
+    { status: 200, bodyText: '{"retCode":0}' },
+    { status: 200, bodyText: '{"retCode":10001}' },
+    { status: 503, bodyText: 'unavailable' },
+    { status: 403, bodyText: 'forbidden' },
+  ];
   const cases = routes.flatMap((route) =>
-    [false, true].flatMap((managed) => [false, true].map((streamed) => ({ route, managed, streamed }))),
+    [false, true].flatMap((managed) =>
+      [false, true].flatMap((streamed) => replies.map((reply) => ({ route, managed, streamed, ...reply }))),
+    ),
   );
   it.each(cases)(
-    'reports once on route $route (managed=$managed, streamed=$streamed), preserving headers and body',
-    async ({ route, managed, streamed }) => {
+    'observes $status/$bodyText on route $route (managed=$managed, streamed=$streamed)',
+    async ({ route, managed, streamed, status, bodyText, retCode }) => {
       const report = vi.fn();
       const transport = createEngineTransport(
         'bybit',
@@ -74,7 +90,7 @@ describe('Bybit public diagnostics on host responses', () => {
           secret: '',
           transport: { ...directTransport, publicCorsProxy: () => 'https://public-proxy.test' },
         },
-        raw(response(streamed)),
+        raw(response(streamed, status, bodyText)),
         undefined,
         undefined,
         undefined,
@@ -83,12 +99,28 @@ describe('Bybit public diagnostics on host responses', () => {
       try {
         const request = { ...packet, route };
         const reply = managed
-          ? await (await transport.prepareHttp!({ ...request, intent: 'public' })).bind(request).dispatch()
+          ? await (
+              await transport.prepareHttp!({ ...request, intent: route === 'primary' ? 'primary' : 'public' })
+            )
+              .bind(request)
+              .dispatch()
           : await transport.request(request);
         expect(reply.headers).toBe(headers);
-        expect(await read(reply)).toBe(text);
-        expect(report).toHaveBeenCalledExactlyOnceWith(expected);
-        const serialized = JSON.stringify(bybitPublicRateLimitReport('bybit', report.mock.calls[0][0]));
+        expect(reply.status).toBe(status);
+        expect(await read(reply)).toBe(bodyText);
+        if (status !== 429 && retCode === undefined) {
+          expect(report).not.toHaveBeenCalled();
+          return;
+        }
+        expect(report).toHaveBeenCalledExactlyOnceWith({
+          ...expected,
+          retCode,
+          httpStatus: status === 429 ? 429 : undefined,
+        });
+        const diagnostic = bybitPublicRateLimitReport('bybit', report.mock.calls[0][0]);
+        expect(diagnostic.sentryData.tags.bybit_ret_code).toBe(retCode?.toString());
+        expect(diagnostic.sentryData.tags.bybit_http_status).toBe(status === 429 ? '429' : undefined);
+        const serialized = JSON.stringify(diagnostic);
         for (const secret of ['private vendor text', 'secret-response-header', 'BTCUSDT', 'https:', 'retMsg'])
           expect(serialized).not.toContain(secret);
       } finally {
