@@ -58,10 +58,14 @@ const read = async (reply: HttpResponse) => {
   return body;
 };
 
-describe('Bybit public diagnostics on managed host responses', () => {
-  it.each([undefined, 'direct', 'publicCors'] as const)(
-    'reports once on route %s, preserving streamed headers and body',
-    async (route) => {
+describe('Bybit public diagnostics on host responses', () => {
+  const routes = [undefined, 'direct', 'publicCors'] as const;
+  const cases = routes.flatMap((route) =>
+    [false, true].flatMap((managed) => [false, true].map((streamed) => ({ route, managed, streamed }))),
+  );
+  it.each(cases)(
+    'reports once on route $route (managed=$managed, streamed=$streamed), preserving headers and body',
+    async ({ route, managed, streamed }) => {
       const report = vi.fn();
       const transport = createEngineTransport(
         'bybit',
@@ -70,7 +74,7 @@ describe('Bybit public diagnostics on managed host responses', () => {
           secret: '',
           transport: { ...directTransport, publicCorsProxy: () => 'https://public-proxy.test' },
         },
-        raw(response(true)),
+        raw(response(streamed)),
         undefined,
         undefined,
         undefined,
@@ -78,8 +82,9 @@ describe('Bybit public diagnostics on managed host responses', () => {
       );
       try {
         const request = { ...packet, route };
-        const prepared = await transport.prepareHttp!({ ...request, intent: 'public' });
-        const reply = await prepared.bind(request).dispatch();
+        const reply = managed
+          ? await (await transport.prepareHttp!({ ...request, intent: 'public' })).bind(request).dispatch()
+          : await transport.request(request);
         expect(reply.headers).toBe(headers);
         expect(await read(reply)).toBe(text);
         expect(report).toHaveBeenCalledExactlyOnceWith(expected);
