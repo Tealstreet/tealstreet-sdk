@@ -460,10 +460,11 @@ test('#3170 managed KuCoin protective edits on master (run 42318845632) retain m
     ['kucoinspot', 2_346_832, 2_357_248],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    const currentCap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(currentCap >= cap, `${venue} retains at least the earlier measured headroom`);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+    assert.match(wasmBudgetError(currentCap + 1, 'venue', venue), /exceeds/);
   }
 });
 
@@ -661,4 +662,15 @@ test('#3191 run 42249705679 retains measured Paradex headroom', () => {
   assert.equal(wasmBudgetError(measured, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'paradex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'paradex'), /exceeds/);
+});
+
+test('#3220 KuCoin hosted signing (run 42324881707, job 128258225940) keeps measured headroom', () => {
+  const measured = 1_827_119;
+  const cap = 1_838_080;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.kucoin, cap);
+  assert.equal(WASM_VENUE_OVERRIDES.kucoinspot, 2_357_248);
+  assert.equal(wasmBudgetError(measured, 'venue', 'kucoin'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'kucoin'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'kucoin'), /exceeds/);
 });
