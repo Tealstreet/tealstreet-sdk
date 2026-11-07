@@ -8,7 +8,7 @@ import { ENDPOINTS } from './bitget.types';
 /** These serializers survive the TS venue class for hosted Rust callers. */
 export const prepareBitgetRequest = (config: InternalAxiosRequestConfig, timestamp: number) => {
   const method = config.method?.toUpperCase() ?? 'GET';
-  // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
+  // TODO: Audit whether HOW proxy re-serialization can break this signature.
   let signingUrl = config.url;
   if (config.params) {
     if (config.params.symbol && !config.url?.includes(ENDPOINTS.KLINE)) {

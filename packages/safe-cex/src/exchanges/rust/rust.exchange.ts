@@ -291,7 +291,8 @@ export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngin
 
 const synchronizedEngineTransport = (noteClockJump: (now: number, utc: number) => void): Transport => {
   // Keep scheduling stable across clock corrections and clocks that stop in
-  // suspend. Clock reads only record a correction; EngineHost applies it later.
+  // suspend. Clock reads record a correction and defer resync; EngineHost
+  // applies protocol time outside the physical HTTP handoff.
   const origin = virtualClock.getCurrentTimeMs();
   const started = performance.now();
   let sampledMonotonic = started;
@@ -304,7 +305,16 @@ const synchronizedEngineTransport = (noteClockJump: (now: number, utc: number) =
       const now = origin + (monotonic - started);
       if (Number.isFinite(monotonic) && Number.isFinite(wall)) {
         const divergence = (wall - sampledWall) - (monotonic - sampledMonotonic);
-        if (Math.abs(divergence) > 1_000) noteClockJump(now, virtualClock.getCurrentTimeMs());
+        if (Math.abs(divergence) > 1_000) {
+          noteClockJump(now, virtualClock.getCurrentTimeMs());
+          // A wall step leaves virtualClock's cached server offset stale.
+          // Defer even Node's synchronous sync notification past this read.
+          void Promise.resolve()
+            .then(() => virtualClock.syncClientServerTime({ afterClockStep: true }))
+            .catch(() => {
+              // Best effort; scheduled synchronization can retry.
+            });
+        }
         sampledMonotonic = monotonic;
         sampledWall = wall;
       }
