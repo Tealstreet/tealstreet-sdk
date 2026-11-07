@@ -302,3 +302,5 @@ StoreData.socketHealth uses RetainedJsonInput so own undefined diagnostic fields
 StoreData and WritableStoreData latency are required nullable numbers. Null means
 unmeasured, not zero; absent/non-numeric values still refuse. Native STATUS uses
 an explicit presence flag, with legacy positive samples retained.
+Their canonical fields retain the required-nullable deserialize metadata used by
+the private companions, so the strict metadata inventory remains exact.
