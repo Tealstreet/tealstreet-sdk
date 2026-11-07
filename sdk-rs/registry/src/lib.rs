@@ -221,6 +221,14 @@ fn invalid(message: impl std::fmt::Display) -> VenueError {
     VenueError::new(message.to_string()).kind(ErrorKind::InvalidInput)
 }
 
+/// The refusal for a venue this build does not construct, including retired
+/// names still saved on user accounts (e.g. `bitmex`). Nothing was sent.
+pub fn unsupported_venue(venue: &str) -> VenueError {
+    VenueError::new(format!("unsupported venue: {venue}"))
+        .kind(ErrorKind::Unsupported)
+        .outcome(safe_cex_engine::Outcome::NotSent)
+}
+
 /// Engine settings every venue receives after construction.
 #[derive(Clone, Copy)]
 struct Startup {
@@ -1385,7 +1393,7 @@ pub fn build_with_signer<T: Visit>(
 ) -> Result<T::Output, VenueError> {
     let _ = &signer;
     if !supported(venue) {
-        return Err(invalid(format!("unsupported venue: {venue}")));
+        return Err(unsupported_venue(venue));
     }
     if (options.signing.is_some() || signer.is_some())
         && !construction::bridge(venue, &options).dispatch_signing
@@ -2389,7 +2397,7 @@ pub fn build_with_signer<T: Visit>(
             engine.set_signer(signer)?;
             finish(visitor, policy, startup, engine)
         }
-        other => Err(invalid(format!("unsupported venue: {other}"))),
+        other => Err(unsupported_venue(other)),
     }
 }
 
