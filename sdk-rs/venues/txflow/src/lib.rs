@@ -168,11 +168,10 @@ impl TxFlow {
     pub(crate) fn symbol(&self, asset: u32) -> Option<&str> {
         self.instruments.get(&asset).map(|row| row.name.as_str())
     }
-    fn coin_symbol<'a>(coins: &'a HashMap<String, String>, coin: &str) -> Option<&'a str> {
-        // Borrow only the alias table so live updates can mutate the other fields.
-        coins
+    pub(crate) fn coin_symbol(&self, coin: &str) -> Option<&str> {
+        self.coins
             .get(coin)
-            .or_else(|| coins.get(&coin.to_ascii_lowercase()))
+            .or_else(|| self.coins.get(&coin.to_ascii_lowercase()))
             .map(String::as_str)
     }
     pub(crate) fn info(
@@ -444,18 +443,18 @@ impl TxFlow {
         match frame {
             PublicFrame::Contexts(rows) => {
                 for row in rows.ctxs {
-                    if let Some(symbol) = Self::coin_symbol(&self.coins, &row.coin) {
+                    if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
                         let mask = Self::context_mask(&row.ctx);
-                        Self::context(cx, symbol, row.ctx);
-                        self.live_tickers.record(cx.store, symbol, mask);
+                        Self::context(cx, &symbol, row.ctx);
+                        self.live_tickers.record(cx.store, &symbol, mask);
                     }
                 }
             }
             PublicFrame::Context(row) => {
-                if let Some(symbol) = Self::coin_symbol(&self.coins, &row.coin) {
+                if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned) {
                     let mask = Self::context_mask(&row.ctx);
-                    Self::context(cx, symbol, row.ctx);
-                    self.live_tickers.record(cx.store, symbol, mask);
+                    Self::context(cx, &symbol, row.ctx);
+                    self.live_tickers.record(cx.store, &symbol, mask);
                 }
             }
             PublicFrame::Ticker(row) => {
@@ -478,8 +477,8 @@ impl TxFlow {
                 }
             }
             PublicFrame::Depth(row) => {
-                if let Some(symbol) = Self::coin_symbol(&self.coins, &row.coin)
-                    && let Some(ladder) = self.books.get_mut(symbol)
+                if let Some(symbol) = self.coin_symbol(&row.coin).map(str::to_owned)
+                    && let Some(ladder) = self.books.get_mut(&symbol)
                     && ladder.time.is_none_or(|t| row.time >= t)
                 {
                     if row
@@ -501,12 +500,12 @@ impl TxFlow {
                     }
                     ladder.time = Some(row.time);
                     ladder.published = true;
-                    cx.book_changed(symbol);
+                    cx.book_changed(&symbol);
                 }
             }
             PublicFrame::Candle(data) => {
                 let mut apply = |row: CandleRow<'_>| {
-                    if let Some(symbol) = Self::coin_symbol(&self.coins, &row.s)
+                    if let Some(symbol) = self.coin_symbol(&row.s)
                         && let Some(interval) = Interval::parse(&row.i)
                         && self.candles.contains_key(&(symbol.to_owned(), interval))
                     {

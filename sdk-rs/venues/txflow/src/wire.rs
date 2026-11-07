@@ -1,10 +1,16 @@
 //! TxFlow's public envelopes and streamed market records.
-use safe_cex_engine::de::{
-    number_or_zero, optional_number_or_blank, optional_number_or_zero as optional_number,
-};
+use safe_cex_engine::de::{number_or_zero, optional_number_or_blank};
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision};
 use serde::Deserialize;
 use std::borrow::Cow;
+
+/// Live overlay fields: null or missing leaves the field untouched, blank reads
+/// as 0, malformed rejects the row.
+fn optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    struct Zero(#[serde(deserialize_with = "number_or_zero")] f64);
+    Ok(Option::<Zero>::deserialize(d)?.map(|n| n.0))
+}
 
 #[derive(Deserialize)]
 pub struct Header {
@@ -269,63 +275,6 @@ impl CandleRow<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn optional_overlay_numbers_keep_presence_and_exact_float_bits() {
-        fn previous<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-            #[derive(Deserialize)]
-            struct Zero(#[serde(deserialize_with = "number_or_zero")] f64);
-            Ok(Option::<Zero>::deserialize(d)?.map(|n| n.0))
-        }
-        #[derive(Deserialize)]
-        struct Before(#[serde(deserialize_with = "previous")] Option<f64>);
-        #[derive(Deserialize)]
-        struct After(#[serde(deserialize_with = "optional_number")] Option<f64>);
-        for value in [
-            "null",
-            "0",
-            "-0.0",
-            "1.25",
-            r#""""#,
-            r#"" ""#,
-            r#""-0""#,
-            r#""1.25""#,
-            r#""\u0031.25""#,
-            r#"" 1.25 ""#,
-            r#""1e-12""#,
-            r#""99999999999999999999.125""#,
-            r#""NaN""#,
-            r#""inf""#,
-            r#""malformed""#,
-            "true",
-            "[]",
-            "{}",
-            "1e400",
-        ] {
-            let before = serde_json::from_str::<Before>(value);
-            let after = serde_json::from_str::<After>(value);
-            assert_eq!(before.is_ok(), after.is_ok(), "{value}");
-            if let (Ok(before), Ok(after)) = (before, after) {
-                assert_eq!(
-                    before.0.map(f64::to_bits),
-                    after.0.map(f64::to_bits),
-                    "{value}"
-                );
-            }
-        }
-        assert!(
-            serde_json::from_str::<Context>("{}")
-                .unwrap()
-                .mark_px
-                .is_none()
-        );
-        assert!(
-            serde_json::from_str::<TickerRow>("{}")
-                .unwrap()
-                .last_price
-                .is_none()
-        );
-    }
 
     #[test]
     fn public_decimal_forms_keep_finite_and_null_contracts() {
