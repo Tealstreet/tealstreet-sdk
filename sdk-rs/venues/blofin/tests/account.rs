@@ -80,6 +80,54 @@ fn cumulative_fills_emit_execution_deltas_and_prices_once() {
         safe_cex_engine::model::OrderStatus::Closed
     );
 }
+
+#[test]
+fn new_live_fill_survives_forward_protocol_clock_correction() {
+    for jump in [0., 7_200_000.] {
+        const START: f64 = 1_800_000_000_000.;
+        let mut h = Harness::new_at(START);
+        h.open_private();
+        h.seed();
+        h.e.take_frame(START);
+        assert!(h.e.sync_host_time(START, START));
+        let utc = START + jump;
+        let raw = START + 100.;
+        assert!(h.e.sync_host_time(raw, utc + 100.));
+        let text = startup_execution(
+            "new-after-sync",
+            1,
+            60000,
+            utc,
+            utc + 50.,
+            "partially_filled",
+        );
+        h.handle(
+            raw,
+            Event::WsMessage {
+                socket: h.private,
+                text: &text,
+            },
+        );
+        h.collect();
+        let fills = h.e.take_frame(raw).map(executions).unwrap_or_default();
+        assert_eq!(fills, [(60000., 0.001)], "UTC correction {jump}");
+        // An identical echo cannot replay the fill.
+        h.handle(
+            raw,
+            Event::WsMessage {
+                socket: h.private,
+                text: &text,
+            },
+        );
+        h.collect();
+        assert!(
+            h.e.take_frame(raw)
+                .map(executions)
+                .unwrap_or_default()
+                .is_empty()
+        );
+    }
+}
 #[test]
 fn stale_rest_cannot_reopen_a_filled_order() {
     let mut h = Harness::new();

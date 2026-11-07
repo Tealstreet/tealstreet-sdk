@@ -57,6 +57,15 @@ fences/order-update fallback timestamps and the KuCoin Spot missing book
 timestamp use protocol UTC so comparison against venue timestamps stays in one
 domain. BreakoutProp is untouched.
 
+MEXC protective edits additionally check each price receipt's protocol UTC age
+at preflight and final physical release. A frozen scheduling clock cannot keep a
+pre-suspend price fresh; a UTC rollback behind the receipt also requires a new
+own-source quote. The scheduling-age check remains in place, so UTC changes
+cannot revive expired receipts. BloFin compares venue execution timestamps with
+protocol UTC session/reporting marks and current UTC. Polymarket live candle
+subscriptions and recurring polls likewise construct their windows from protocol
+UTC; only the poll cadence uses scheduling time.
+
 Controls reproduce both directions of a 162-day correction through the default
 SDK clock, a late initial worker sync, missing worker sync, disposal, explicit
 clocks and host API refusal. A real Binance pending read survives host sync at

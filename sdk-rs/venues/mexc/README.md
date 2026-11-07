@@ -41,6 +41,10 @@ Price-only edits omit amount (or use 0 for full-position stops); an explicit
 positive amount requests fixed-size protection. Quantity edits inspect the
 original, guard the destructive send
 with a genuine fresh trigger reference, and require a terminal cancellation read.
+Reference receipts must be at most five seconds old on both scheduling time and
+protocol UTC, including at physical release. Suspend with a stopped scheduling
+clock, or a UTC rollback behind a receipt, requires a new own-source quote;
+neither can renew an old mark/index receipt through sparse ticker traffic.
 Only a standalone stop with exact native provenance permits one put-back after a
 definitive refusal; unknown outcomes never restore or resend. See
 [`mexc-protective-edits.md`](../../../../docs/plans/callers/mexc-protective-edits.md)

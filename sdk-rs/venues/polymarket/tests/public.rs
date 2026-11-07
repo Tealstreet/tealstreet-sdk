@@ -373,6 +373,45 @@ fn price_history_samples_are_bounded_and_subscriptions_dispose() {
 }
 
 #[test]
+fn live_candle_windows_follow_protocol_utc_after_clock_corrections() {
+    let mut h = H::new();
+    h.load();
+    let origin = h.now;
+    assert!(h.e.sync_host_time(origin, origin));
+    assert!(h.e.sync_host_time(origin, origin + 7_200_000.));
+    h.event(Event::Command(Command::SubscribeCandles {
+        symbol: "election-Yes".into(),
+        interval: safe_cex_engine::model::Interval::M1,
+    }));
+    let check_window = |h: &H, utc: f64| {
+        let r = h
+            .http
+            .iter()
+            .find(|r| r.url.contains("prices-history"))
+            .unwrap();
+        assert!(
+            r.url
+                .contains(&format!("&startTs={}", ((utc - 60000.) / 1000.) as u64)),
+            "{}",
+            r.url
+        );
+        assert!(
+            r.url.contains(&format!("&endTs={}", (utc / 1000.) as u64)),
+            "{}",
+            r.url
+        );
+    };
+    check_window(&h, origin + 7_200_000.);
+    h.response("/prices-history", 200, r#"{"history":[]}"#);
+    // A later backwards correction must also reach the recurring poll.
+    h.now += 5000.;
+    assert!(h.e.sync_host_time(h.now, h.now - 7_200_000.));
+    let timer = h.timers.iter().find(|(_, at)| *at == h.now).unwrap().0;
+    h.event(Event::TimerFired { timer });
+    check_window(&h, h.now - 7_200_000.);
+}
+
+#[test]
 fn stale_public_quotes_trades_ticks_and_malformed_snapshots_cannot_replace_newer_state() {
     let mut h = H::new();
     h.load();

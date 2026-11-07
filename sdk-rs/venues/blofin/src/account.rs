@@ -602,7 +602,7 @@ impl Blofin {
         if !self.signed() {
             return;
         }
-        self.account.session_started = cx.now;
+        self.account.session_started = cx.protocol_now();
         if let Err(error) = self.connect_feed(cx, true) {
             Self::socket_notice(cx, error);
         }
@@ -2223,7 +2223,7 @@ impl Blofin {
         };
         let session_order = created > 0.0
             && created >= self.account.session_started
-            && created <= cx.now
+            && created <= cx.protocol_now()
             && (updated == 0.0 || created <= updated);
         let known_prefix = self.account.fills.contains_key(id.as_ref());
         if !session_order
@@ -2324,7 +2324,7 @@ impl Blofin {
             self.seed_execution_prefix(cx, &id, qty, Some(value));
         }
         self.account.orders_seeded = true;
-        self.account.reporting_started = cx.now;
+        self.account.reporting_started = cx.protocol_now();
         for execution in pending {
             if !self.account.fills.contains_key(&execution.fill.order_id) {
                 // The bounded tracker may have evicted a queued order while

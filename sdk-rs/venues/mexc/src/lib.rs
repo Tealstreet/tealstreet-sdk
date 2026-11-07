@@ -367,10 +367,11 @@ impl MexcFutures {
             );
             return;
         }
-        self.references
-            .entry(symbol.clone())
-            .or_default()
-            .observe(cx.now, [raw.last_price, raw.fair_price, raw.index_price]);
+        self.references.entry(symbol.clone()).or_default().observe(
+            cx.now,
+            cx.protocol_now(),
+            [raw.last_price, raw.fair_price, raw.index_price],
+        );
         cx.store.update_ticker(&symbol, |t| {
             // A zero price is an unavailable quote (seen in the public feed),
             // not a reason to discard valid mark/index/volume fields.
@@ -891,6 +892,7 @@ impl Venue for MexcFutures {
                 ) {
                     self.references.entry(symbol.clone()).or_default().observe(
                         cx.now,
+                        cx.protocol_now(),
                         [
                             Some(raw.last_price),
                             Some(raw.fair_price),
@@ -999,6 +1001,7 @@ impl Venue for MexcFutures {
                         let mut receipt = trading::protection::References::default();
                         receipt.observe(
                             cx.now,
+                            cx.protocol_now(),
                             [
                                 Some(raw.last_price),
                                 Some(raw.fair_price),
@@ -1335,7 +1338,12 @@ impl Venue for MexcFutures {
         release: &safe_cex_engine::request_context::HttpRelease,
     ) -> Result<(), VenueError> {
         if let Pending::Protective(request) = pending {
-            self.protective_release(store, request, release.time.raw_ms)
+            self.protective_release(
+                store,
+                request,
+                release.time.raw_ms,
+                release.time.protocol_ms,
+            )
         } else {
             Ok(())
         }
