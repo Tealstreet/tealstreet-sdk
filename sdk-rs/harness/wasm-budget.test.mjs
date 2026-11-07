@@ -548,6 +548,20 @@ test('#3152 BingX protective edits (run 42200843544) retain measured headroom an
   assert.match(wasmBudgetError(cap + 1, 'venue', 'bingx'), /exceeds/);
 });
 
+test('#3190 engine de-monomorphisation (run 42248954523) retains WOO and Paradex headroom', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['woo', 2_399_392, 2_410_496],
+    ['paradex', 2_249_770, 2_260_992],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
 test('#3178 intent cleanup (run 42239151280, job 127965614325) retains HL headroom and equal siblings', () => {
   const measured = 2_154_756;
   const measuredCap = 2_165_760;
