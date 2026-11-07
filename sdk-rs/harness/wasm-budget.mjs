@@ -207,6 +207,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // at CI merge ba85167cc7c. CI size plus 10 KiB, rounded up to the KiB.
 // #3193 at ad4f1d6d5d9: seven CI measurements + 10 KiB, rounded up to KiB.
 // Later master caps win per family; shared-family siblings remain equal.
+// #3111 historical run 42096897919 measured HL siblings at 2,106,939 B; current larger caps retained.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
