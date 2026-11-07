@@ -1667,7 +1667,13 @@ impl BitgetFutures {
     /// Bitget's refusal of a close beyond the position's unlocked size, worded
     /// as the action it needs. `client` names the refused order; without it only
     /// a batch whose closes share one side names that side.
-    fn closable_refusal(call: &Planned, message: &str, client: Option<&str>) -> Option<String> {
+    fn closable_refusal(
+        &self,
+        cx: &Cx<'_, Pending>,
+        call: &Planned,
+        message: &str,
+        client: Option<&str>,
+    ) -> Option<String> {
         if call.path != paths::BATCH_PLACE
             || !message
                 .to_ascii_lowercase()
@@ -1704,9 +1710,26 @@ impl BitgetFutures {
             Some(false) => " short",
             None => "",
         };
-        Some(format!(
-            "part of your {symbol}{side} position is held by open close orders; cancel them first ({message})"
-        ))
+        // Numbers only from the split of the Store's admitted row for that side.
+        let split = long.and_then(|long| {
+            let side = if long {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            };
+            self.admitted_split(cx, symbol, side)
+        });
+        Some(match split {
+            Some(split) => format!(
+                "only {} of your {} {symbol}{side} position is free to close; {} is held by open close orders; cancel them first ({message})",
+                num::format(split.available),
+                num::format(split.total),
+                num::format(split.locked)
+            ),
+            None => format!(
+                "part of your {symbol}{side} position is held by open close orders; cancel them first ({message})"
+            ),
+        })
     }
 
     fn classic(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<Payload, String> {
@@ -2695,7 +2718,8 @@ impl BitgetFutures {
         let mut error = match &parsed {
             Ok(reply) if status == 200 && reply.code.0 == Some(0.0) => None,
             Ok(reply) => {
-                let text = Self::closable_refusal(&request.call, &reply.msg, None)
+                let text = self
+                    .closable_refusal(cx, &request.call, &reply.msg, None)
                     .unwrap_or_else(|| reply.msg.to_string());
                 Some(format!(
                     "Bitget {}: {text} (HTTP {status})",
@@ -2930,7 +2954,8 @@ impl BitgetFutures {
                             Some(FailureClient::Text(client)) => Some(client.as_str()),
                             _ => None,
                         };
-                        if let Some(clear) = Self::closable_refusal(&request.call, message, client)
+                        if let Some(clear) =
+                            self.closable_refusal(cx, &request.call, message, client)
                         {
                             *message = clear;
                         }

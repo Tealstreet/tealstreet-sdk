@@ -41,10 +41,30 @@ test('PM startup and cancel-all serve the algo API while preserving the legacy T
   assert.equal(rows('DELETE', 'conditional/allOpenOrders').length, 0);
 });
 
-test('PM tape migration leaves the Spot and COIN-M tape bytes unchanged', () => {
+test('COIN-M startup serves the empty algo census without changing any legacy tape record', () => {
+  const tape = generate('binanceinverse');
+  const records = tape.trim().split('\n').map(JSON.parse);
+  const algoRows = records.filter((row) => row.type === 'http' &&
+    new URL(row.url).pathname === '/dapi/v1/openAlgoOrders');
+  assert.equal(algoRows.length, 1, 'Rust startup needs the COIN-M algo endpoint');
+  const [algo] = algoRows;
+  assert.equal(algo.impl, 'rust');
+  assert.equal(algo.method, 'GET');
+  assert.equal(algo.url, 'https://dapi.binance.com/dapi/v1/openAlgoOrders?algoType=CONDITIONAL');
+  assert.equal(algo.status, 200);
+  assert.equal(algo.body, '[]');
+  const legacy = records.filter((row) => row !== algo).map((row) => JSON.stringify(row)).join('\n') + '\n';
+  assert.equal(createHash('sha256').update(legacy).digest('hex'),
+    'a0a35640cbdb5fdd8f43a14188cc4113290683b1e625e131f6da0e9b8b38f94b');
+  const manifest = JSON.parse(readFileSync(new URL('./known-gate-failures.json', import.meta.url), 'utf8'));
+  const entry = manifest.failures.find((row) => row.tape === 'sdk-rs/harness/tapes/binanceinverse-private.jsonl');
+  assert.equal(entry.tapeSha256, createHash('sha256').update(tape).digest('hex'));
+});
+
+test('COIN-M migration leaves the Spot and PM tape bytes unchanged', () => {
   for (const [venue, expected] of [
     ['binancespot', '17f14a131f0240857e7a0866432587f8929a9aea084d1f619c65a88bb4309c67'],
-    ['binanceinverse', 'a0a35640cbdb5fdd8f43a14188cc4113290683b1e625e131f6da0e9b8b38f94b'],
+    ['binancepm', 'c37534b929ea81c1959f2eb8f585f6305f34c43a03bb7a3bb5107f7319083bda'],
   ]) assert.equal(createHash('sha256').update(generate(venue)).digest('hex'), expected, venue);
 });
 

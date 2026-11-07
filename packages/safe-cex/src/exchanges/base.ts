@@ -2467,6 +2467,9 @@ export class BaseExchange implements Exchange {
       }
       case 'kraken-challenge':
         return { id: request.id, error: 'kraken-challenge requires the KrakenExchange signWsAuth override' };
+      case 'grvt-order':
+      case 'grvt-address':
+      case 'kucoin-batch':
       case 'hyperliquid-l1':
       case 'hyperliquid-address':
       case 'lighter-tx':

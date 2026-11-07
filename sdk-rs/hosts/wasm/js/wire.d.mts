@@ -21,6 +21,7 @@ export const SECTION: {
   CAPABILITIES: 19;
   UNDERLYING_TOKENS: 20;
   ACCOUNT_READ: 21;
+  TICKER_OBSERVATIONS: 24;
 };
 export const NONE: number;
 export const TICKER_FIELDS: readonly [
@@ -33,6 +34,7 @@ export const MARKET_COLUMNS: readonly [
   'maxLeverage', 'minPrice', 'contractSize', 'takerFee', 'makerFee',
 ];
 export type MarketColumn = (typeof MARKET_COLUMNS)[number];
+export const ORDER_TRIGGER_WORD: { TP_SHIFT: 0; SL_SHIFT: 8; TRIGGER_MASK: 255; NATIVE_ALGO: 65536 };
 export const MARKET_FLAG: { ACTIVE: 1; INVERSE: 2; SPOT: 4; PERPETUAL: 8; EXPIRING: 16; READ_ONLY: 32 };
 export type QuantityUnits = 'base' | 'nativePlacement' | 'inverseNative' | 'contractCount' | 'inverseContractSized';
 export const QUANTITY_UNITS: readonly QuantityUnits[];
@@ -278,6 +280,7 @@ export class Frame {
   /** Owned copies survive source transfer; identities remain lazily decoded. */
   tickers(owned?: boolean): TickerTable | undefined;
   tickerDeltas(): Float64Array | undefined;
+  tickerObservations(): Float64Array | undefined;
   books(): Generator<BookRows>;
   bookDeltas(): Generator<BookDeltaRows>;
   candles(): CandleRows | undefined;

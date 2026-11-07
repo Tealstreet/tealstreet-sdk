@@ -826,7 +826,22 @@ impl Command {
             | Self::SetPositionMode { .. }
             | Self::SetStpMode { .. } => Intent::Setting,
             Self::Venue { .. } => Intent::Place,
-            _ => Intent::Read,
+            Self::FetchOptionChain { .. }
+            | Self::FetchOptionExpiries { .. }
+            | Self::FetchAccountGreeks { .. }
+            | Self::SetTickerSymbols { .. }
+            | Self::SubscribeOrderBook { .. }
+            | Self::UnsubscribeOrderBook { .. }
+            | Self::SubscribeCandles { .. }
+            | Self::UnsubscribeCandles { .. }
+            | Self::RepairSubscription(_)
+            | Self::FetchStpMode { .. }
+            | Self::FetchAccount { .. }
+            | Self::FetchOrderBook { .. }
+            | Self::FetchLeverage { .. }
+            | Self::FetchMaxLeverage { .. }
+            | Self::Query { .. }
+            | Self::FetchCandles { .. } => Intent::Read,
         }
     }
 
@@ -855,6 +870,31 @@ impl Command {
             | Self::Venue { command, .. } => Some(*command),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod command_intent_tests {
+    use super::Command;
+    use crate::classify::Intent;
+
+    #[test]
+    fn fetching_leverage_is_a_read() {
+        let command = Command::FetchLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+        };
+        assert_eq!(command.write_intent(), Intent::Read);
+    }
+
+    #[test]
+    fn changing_margin_type_is_a_setting_write() {
+        let command = Command::SetMarginType {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        };
+        assert_eq!(command.write_intent(), Intent::Setting);
     }
 }
 
@@ -1879,6 +1919,9 @@ struct IoCore {
     /// `V::http_mutation_barriers()`, copied by `Engine::new` for admission in `Cx`.
     #[cfg(feature = "http-mutation-barriers")]
     mutation_barriers_declared: bool,
+    /// `V::http_plans()`, copied by `Engine::new` for Preflight admission in `Cx`.
+    #[cfg(feature = "http-plans")]
+    http_plans_declared: bool,
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     #[cfg(feature = "http-plans")]
@@ -2176,6 +2219,8 @@ impl Default for IoCore {
             managed_sockets_declared: false,
             #[cfg(feature = "http-mutation-barriers")]
             mutation_barriers_declared: false,
+            #[cfg(feature = "http-plans")]
+            http_plans_declared: true,
             request_contexts: Default::default(),
             http_delivery: None,
             #[cfg(feature = "http-plans")]
@@ -4182,6 +4227,17 @@ pub trait Venue {
         false
     }
 
+    /// Whether this venue may open HTTP Preflights (and so Plans). Engine<V> reads
+    /// it statically: a venue declaring false compiles the per-event Plan sweeps
+    /// out and cannot open a Preflight. Plan adopters keep the default.
+    #[inline]
+    fn http_plans() -> bool
+    where
+        Self: Sized,
+    {
+        true
+    }
+
     /// The venue's one FIFO release domain, if any. Its group must be registered
     /// in `http_pacing`; the engine stamps it onto every member Context.
     #[cfg(feature = "release-domains")]
@@ -4780,6 +4836,8 @@ struct CoreSpec<'a> {
     dispatch_nonce: bool,
     #[cfg(feature = "http-mutation-barriers")]
     http_mutation_barriers: bool,
+    #[cfg(feature = "http-plans")]
+    http_plans: bool,
     #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
     #[cfg(feature = "managed-sockets")]
@@ -4829,6 +4887,8 @@ fn new_core(
         nonce_enabled: spec.dispatch_nonce,
         #[cfg(feature = "http-mutation-barriers")]
         mutation_barriers_declared: spec.http_mutation_barriers,
+        #[cfg(feature = "http-plans")]
+        http_plans_declared: spec.http_plans,
         #[cfg(feature = "managed-sockets")]
         managed_sockets_declared: spec.managed_sockets,
         #[cfg(feature = "managed-sockets")]
@@ -4858,6 +4918,8 @@ impl<V: Venue> Engine<V> {
                 dispatch_nonce: V::dispatch_nonce(),
                 #[cfg(feature = "http-mutation-barriers")]
                 http_mutation_barriers: V::http_mutation_barriers(),
+                #[cfg(feature = "http-plans")]
+                http_plans: V::http_plans(),
                 #[cfg(feature = "managed-sockets")]
                 managed_sockets: V::managed_sockets(),
                 #[cfg(feature = "managed-sockets")]
@@ -5057,6 +5119,8 @@ impl<V: Venue> Engine<V> {
             return Err("public feed policy must be configured before startup");
         }
         self.io.core.public_feed_policy = policy;
+        self.store.export_ticker_observations =
+            policy == PublicFeedPolicy::Shared || !self.account_startup;
         Ok(())
     }
 
@@ -5273,6 +5337,14 @@ impl<V: Venue> Engine<V> {
     /// for an account that can sign, matching the SDK's readiness rule.
     pub fn set_account_startup(&mut self, account: bool) {
         self.account_startup = account;
+        self.store.export_ticker_observations =
+            !account || self.public_feed_policy() == PublicFeedPolicy::Shared;
+    }
+
+    /// Whether startup expects the account sections (`set_account_startup`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn account_startup(&self) -> bool {
+        self.account_startup
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -6507,7 +6579,9 @@ impl<V: Venue> Engine<V> {
 
     fn finish_event_scope(&mut self, now: f64) {
         #[cfg(feature = "http-plans")]
-        self.io.core.request_contexts.end_preflight_admission();
+        if V::http_plans() {
+            self.io.core.request_contexts.end_preflight_admission();
+        }
         self.io.core.request_contexts.end_plan_admission();
         self.flush_bearer_fences(now);
         self.flush_http_owner_retirements();
@@ -7128,6 +7202,11 @@ impl<V: Venue> Engine<V> {
     /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
+        // A venue without Preflights has no Plan state: the plan-less tail.
+        if !V::http_plans() {
+            self.flush_bearer_fences(now);
+            return;
+        }
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         self.flush_keyless_session_roots(now);
         if self.io.core.request_contexts.has_plans() {
@@ -7208,6 +7287,9 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "http-plans")]
     fn expire_plan_timer(&mut self, now: f64, event: &Event<'_>) -> bool {
+        if !V::http_plans() {
+            return false;
+        }
         let Event::TimerFired { timer } = event else {
             return false;
         };
@@ -7226,6 +7308,10 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "http-plans")]
     fn flush_http_owner_retirements(&mut self) {
+        if !V::http_plans() {
+            self.assert_live();
+            return;
+        }
         self.io.core.request_contexts.end_plan_admission();
         self.assert_live();
         if self.io.core.request_contexts.has_retirements() {
@@ -8039,27 +8125,19 @@ fn copy_shared_tickers(
     store: &mut Store,
     shared: &HashMap<String, crate::public_feed::PublicTicker>,
 ) {
-    let mut missing = Vec::new();
+    let mut added = false;
     for ticker in shared.values() {
-        if store.ticker(&ticker.symbol).is_none()
-            && let Some(market) = store.market(&ticker.symbol)
-        {
-            missing.push(crate::model::Ticker {
-                id: market.id.clone(),
-                symbol: market.symbol.clone(),
-                ..Default::default()
-            });
+        if store.ticker(&ticker.symbol).is_none() && store.ensure_ticker(&ticker.symbol).is_some() {
+            added = true;
         }
     }
-    if !missing.is_empty() {
-        let mut tickers = store.tickers().to_vec();
-        tickers.extend(missing);
-        store.set_tickers(tickers);
+    if added {
+        store.set_loaded(|loaded| loaded.tickers = true);
     }
     // Venue REST seeds may fill omitted fields, but cannot overwrite provider quotes.
     for ticker in shared.values() {
         if store.market(&ticker.symbol).is_some() {
-            store.update_ticker(&ticker.symbol, |target| ticker.apply(target));
+            store.apply_shared_ticker(ticker);
         }
     }
 }

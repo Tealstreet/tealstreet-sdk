@@ -597,12 +597,28 @@ fn full_position_stop_keeps_close_flag_after_documented_partial_event() {
         h.engine.store().order("full-stop").unwrap().close,
         Some(true)
     );
+    h.reply("/bullet-public", r#"{"code":"200000","data":{"token":"public-token","instanceServers":[{"endpoint":"wss://example.test/public","pingInterval":18000,"pingTimeout":10000}]}}"#);
+    let socket = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url, .. } if url.contains("/public?") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.event(Event::WsOpened { socket });
+    h.event(Event::WsMessage {
+        socket,
+        text: r#"{"type":"welcome"}"#,
+    });
+    h.event(Event::WsMessage { socket, text: r#"{"type":"message","topic":"/contract/instrument:XBTUSDTM","data":{"markPrice":100}}"# });
     h.event(Event::Command(Command::AmendOrder {
         command: 1,
         id: "full-stop".into(),
         price: Some(81.0),
         amount: None,
     }));
+    h.pace();
     h.reply(
         "/orders/full-stop",
         r#"{"code":"200000","data":{"cancelledOrderIds":["full-stop"]}}"#,

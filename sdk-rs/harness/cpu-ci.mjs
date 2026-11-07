@@ -8,19 +8,19 @@ import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { expectedGateCases, gateCaseKey } from './ci-gate-suites.mjs';
-import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateArtifactMetadata, authenticateBitgetOracleRefusalArtifact, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
+import { createGithubReader, cohortKey, parseCohortJson, authenticateArtifactExecution, authenticateBitgetOracleRefusalArtifact, authenticateMeasurementWindow, formatMeasurementMarker } from './cpu-cohort.mjs';
 import { readArtifactZip } from './cpu-artifacts.mjs';
-import { captureCache, verifyCache } from './cpu-cache.mjs';
+import { verifyCache } from './cpu-cache.mjs';
 import { assessGateReport } from './known-failure-policy.mjs';
-import { assessEligibility, decideRemeasurement, validatePublicEvidence } from './cpu-remeasure.mjs';
+import { splitCpuErrors, validatePublicEvidence } from './cpu-remeasure.mjs';
 import { verifyGateSuite } from './verify-gates.mjs';
 import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
-import { restoreRuntime, verifyRuntime, cacheDigest, cacheEntriesDigest, runtimeFingerprint, environmentIdentity, environmentMismatch } from './cpu-runtime.mjs';
+import { cacheEntriesDigest, runtimeFingerprint } from './cpu-runtime.mjs';
 import { loadGateLedger } from './verify-gates.mjs';
 import { readBitgetPairedEvidence } from './bitget-paired-artifacts.mjs';
 import { selectBitgetPair } from './bitget-paired-ci.mjs';
 import { physicalCandidateRows, relistPhysicalJob } from './physical-job.mjs';
-import { pairedSteadyAssessment, readBitgetSteadyCertificate, assessBitgetPairedSteady, bitgetAnchorAuthority } from './bitget-paired-steady.mjs';
+import { pairedSteadyAssessment, readBitgetSteadyCertificate, assessBitgetPairedSteady, bitgetAnchorAuthority, bitgetSteadyWarning } from './bitget-paired-steady.mjs';
 import { readBitgetOracleRefusal, isBitgetOracleRefusal } from './bitget-oracle-refusal.mjs';
 
 import { collectFamilyIdentity, familyComparisonAuthority, readFamilyIdentity, readFamilyIdentityDirectory, familyCpuAssessment, familyCpuMiss } from './cpu-family-identity.mjs';
@@ -54,9 +54,10 @@ export function classifyInitialCase(evidence, declarations, paired, family, refu
     insist(!identityAssessment.errors.length, identityAssessment.errors.join('\n'));
     return { decision: 'first', assessment: identityAssessment, unchanged: true };
   }
-  const eligible = assessEligibility(evidence, paired);
-  insist(eligible.eligible, [...assessment.errors, ...eligible.errors].join('\n'));
-  return { decision: 'second', assessment };
+  // A CPU-only miss (Rust > 1.00x TS after the in-job re-measure) refuses only this suite's CPU gate.
+  const split = splitCpuErrors(evidence, assessment.errors, paired);
+  insist(split.deferred.length && !split.kept.length, assessment.errors.join('\n'));
+  return { decision: 'cpu-refused', assessment };
 }
 
 export function artifactEntriesToDirectory(entries, directory) {
@@ -101,24 +102,21 @@ export async function evidenceInventory(context, refresh = false) {
   return context.inventory;
 }
 
-async function artifact(context, runId, name, metadataOnly = false) {
+async function artifact(context, runId, name) {
   insist(runId === context.runId, 'artifact from another workflow');
   const { run, artifacts } = await evidenceInventory(context), selected = artifacts.filter(item => item.name === name);
   insist(selected.length === 1, `missing/duplicate exact artifact ${name}`);
   const meta = selected[0];
   insist(meta.expired === false && meta.workflow_run?.id === runId && meta.workflow_run.head_sha === run.head_sha &&
     meta.workflow_run.head_branch === run.head_branch && /^sha256:[a-f0-9]{64}$/.test(meta.digest), 'artifact/source metadata differs');
-  if (metadataOnly) return { meta };
-  const runtime = name.startsWith('cpu-runtime-');
-  if (runtime) requireCpuRemeasureSuite(name.slice('cpu-runtime-'.length));
-  const bytes = await context.reader.getArtifactBytes(meta.id, runtime ? 'runtime-artifact' : 'artifact');
+  const bytes = await context.reader.getArtifactBytes(meta.id, 'artifact');
   insist(bytes.length === meta.size_in_bytes && `sha256:${sha256(bytes)}` === meta.digest, 'artifact ZIP bytes differ');
   return { meta, bytes, entries: readArtifactZip(bytes, { maxBytes: 4 * 1024 * 1024 * 1024 }) };
 }
 
 function restoreOriginalOutputs(context, entries) {
   const out = resolve(context.root, 'sdk-rs/harness/out');
-  // This is a fresh verifier/second-run workspace; retained original ZIP bytes
+  // This is a fresh verifier workspace; retained original ZIP bytes
   // remain untouched. Revalidation writes only separate supplemental files.
   rmSync(out, { recursive: true, force: true });
   artifactEntriesToDirectory(entries, out);
@@ -155,19 +153,18 @@ function suiteEntries(entries) {
   });
 }
 
-export function requireMeasuredProducer({ runId, checkoutSha, suite, evidence, producer, role }) {
+export function requireMeasuredProducer({ runId, checkoutSha, suite, evidence, producer }) {
   const execution = evidence?.execution, claim = evidence?.claim;
-  insist(['first', 'second'].includes(role) && producer?.run_id === runId && producer.run_attempt === 1 &&
-    producer.name === `Rust / ${role === 'first' ? 'replay measurement' : 'CPU remeasurement'} (${suite})` &&
+  insist(producer?.run_id === runId && producer.run_attempt === 1 && producer.name === `Rust / replay measurement (${suite})` &&
     execution?.runId === String(runId) && execution.jobId === String(producer.id) &&
     execution.runnerId === String(producer.runner_id) && execution.attempt === 1 &&
     execution.measuredCheckoutSha === checkoutSha && claim?.runId === runId && claim.suite === suite &&
     claim.measuredCheckoutSha === checkoutSha, 'measured execution differs from current authenticated producer');
-  if (role === 'first') insist(claim.firstJobId === producer.id, 'first claim belongs to another physical producer');
+  insist(claim.firstJobId === producer.id, 'first claim belongs to another physical producer');
 }
 
-async function authenticateCase(context, evidence, producer, suite, role = 'first') {
-  requireMeasuredProducer({ runId: context.runId, checkoutSha: context.checkoutSha, suite, evidence, producer, role });
+async function authenticateCase(context, evidence, producer, suite) {
+  requireMeasuredProducer({ runId: context.runId, checkoutSha: context.checkoutSha, suite, evidence, producer });
   const logBytes = await context.reader.getLog(producer.id);
   return authenticateMeasurementWindow({ execution: evidence.execution, key: evidence.key, job: producer, logBytes });
 }
@@ -240,16 +237,16 @@ async function terminalProducer(context, jobName, stepName, bitgetRefusal = fals
   }
 }
 
-export async function authenticatedBundle(context, runId, name, jobName, stepName, expectedCheckoutSha, metadataOnly = false) {
+export async function authenticatedBundle(context, runId, name, jobName, stepName, expectedCheckoutSha) {
   context.bundles ??= new Map();
-  const key = JSON.stringify([runId, name, jobName, stepName, expectedCheckoutSha, metadataOnly]);
+  const key = JSON.stringify([runId, name, jobName, stepName, expectedCheckoutSha]);
   if (context.bundles.has(key)) return context.bundles.get(key);
-  const bundle = await artifact(context, runId, name, metadataOnly);
+  const bundle = await artifact(context, runId, name);
   const { run, job } = await terminalProducer(context, jobName, stepName);
   const currentArtifacts = (await evidenceInventory(context)).artifacts.filter(meta => meta.name === name);
   insist(currentArtifacts.length === 1 && same(currentArtifacts[0], bundle.meta), 'artifact identity changed during step metadata refresh');
   const logBytes = await context.reader.getLog(job.id);
-  const receipt = (metadataOnly ? authenticateArtifactMetadata : authenticateArtifactExecution)({ artifact: bundle.meta, artifactBytes: bundle.bytes,
+  const receipt = authenticateArtifactExecution({ artifact: bundle.meta, artifactBytes: bundle.bytes,
     run, job, logBytes, stepName, jobName, expectedCheckoutSha });
   context.bindings?.push({ artifact: bundle.meta, job });
   const result = { ...bundle, receipt, job, logBytes };
@@ -378,18 +375,13 @@ async function collectMeasurement(context, suite) {
     if (unchanged) console.log(`${suite}: unchanged bytes, not measured`);
   }
   insist(!result.errors.length, result.errors.join('\n'));
-  if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT, `has_eligible=${result.pending.length > 0 && !unchanged}\n`, { flag: 'a' });
   console.log(`${unchanged ? 0 : result.pending.length} CPU cases remain unresolved; this collection is not final certification`);
+  for (const miss of result.cpuMisses) console.log(`${miss.venue} ${miss.tape}: CPU miss beyond remeasurement, judged by the CPU gate`);
   return result;
 }
 
-export function clearSecondOutputs({ root, directory, environment }) {
-  rmSync(resolve(root, 'sdk-rs/harness/out'), { recursive: true, force: true });
-  return restoreRuntime({ root, directory, environment });
-}
-
-export function validateRetainedCache({ entries, evidence, state, kind = 'first' }) {
-  const prefix = `${kind === 'first' ? 'cpu-collection' : 'cpu-second'}/cache/${evidence.key}`;
+export function validateRetainedCache({ entries, evidence, state }) {
+  const prefix = `cpu-collection/cache/${evidence.key}`;
   insist(evidence.cache?.prefix === prefix && evidence.cache.digest === evidence.execution.finalCacheSha256, 'cache receipt differs from exact measured case');
   const cache = verifyCache({ entries, prefix, expectedDigest: evidence.execution.finalCacheSha256 });
   insist(cache.manifestSha256 === evidence.cache.manifestSha256 && cache.manifest.workspaceRoot === state.root &&
@@ -427,134 +419,6 @@ export function validateFirstBindings({ state, evidence, cohortEntries, actualMa
   return { schema: 1, runtimeSha256: fingerprint, manifestSha256: sha256(manifestBytes), nodeSha256: recordedManifest.node.sha256 };
 }
 
-const IMAGE_FIELDS = new Set(['ImageOS', 'ImageVersion']);
-const IMAGE_ROLLED = 'cpu-second/image-rolled.json';
-const MEASURED_MEMBERS = /^(?:second\.json|manifest\.json|cpu-second\/(?:cases|cache|reports)\/.*|cpu-second\/results\.json)$/;
-const imageRollMessage = (suite, receipt) =>
-  `${suite} not certified: runner image rolled ${receipt.expected.ImageVersion}→${receipt.actual.ImageVersion}; fresh run required`;
-
-/** A runner image rollover between first and second jobs cannot form a pair: the
- * second job records it unmeasured. Every other environment change stays a hard refusal. */
-export function imageRollReceipt({ suite, expected, environment, runId, firstJobId }) {
-  const differences = environmentMismatch(expected, environment);
-  if (!differences.length) return null;
-  insist(differences.every(({ field }) => IMAGE_FIELDS.has(field)), `environment identity mismatch: ${JSON.stringify(differences)}`);
-  return { schema: 1, suite, status: 'image-rolled', measured: false, runId, firstJobId,
-    expected: environmentIdentity(expected), actual: environmentIdentity(environment), differences };
-}
-
-/** The typed per-suite refusal for an authentic unmeasured receipt; never a certificate. */
-export function imageRolledRefusal({ suite, entries, expected, logBytes, runId, firstJobId }) {
-  if (!entries.has(IMAGE_ROLLED)) return null;
-  const receipt = jsonMember(entries, IMAGE_ROLLED);
-  let differences;
-  try { differences = environmentMismatch(expected, receipt.actual); } catch { differences = []; }
-  insist(receipt.schema === 1 && receipt.suite === suite && receipt.status === 'image-rolled' && receipt.measured === false &&
-    receipt.runId === runId && receipt.firstJobId === firstJobId && same(receipt.expected, environmentIdentity(expected)) &&
-    differences.length > 0 && differences.every(({ field }) => IMAGE_FIELDS.has(field)) && same(receipt.differences, differences) &&
-    ![...entries.keys()].some((name) => MEASURED_MEMBERS.test(name)) && !Buffer.from(logBytes).includes('CPU_CASE_BEGIN '),
-  'invalid image-rolled receipt');
-  return imageRollMessage(suite, receipt);
-}
-
-async function secondMeasurement(context, suite, destination) {
-  requireCpuRemeasureSuite(suite);
-  insist(context.env.GITHUB_RUN_ATTEMPT === '1', 'no third measurement via a job retry');
-  const { plan, bundle: planBundle } = await loadPlan(context), row = plan.suites.find((item) => item.suite === suite);
-  const pairedBundle = suite === 'bitget' ? await loadBitgetPaired(context) : undefined;
-  insist(row, 'suite missing from authenticated plan');
-  const selected = row.cases.filter((item) => item.decision === 'second');
-  insist(selected.length > 0, 'unissued second runner');
-  const firstBundle = await authenticatedBundle(context, context.runId, `strict-replay-${suite}`,
-    `Rust / replay measurement (${suite})`, 'Retain strict gate reports and artifact budgets', context.checkoutSha);
-  insist(firstBundle.meta.id === row.firstArtifactId && firstBundle.meta.digest === row.firstArtifactDigest, 'first artifact changed after planning');
-  const firsts = selected.map(({ key, case: item }) => firstEvidence(firstBundle.entries, key, item));
-  const state = jsonMember(firstBundle.entries, 'cpu-collection/state.json');
-  const tiny = await authenticatedBundle(context, context.runId, `cpu-cohort-${suite}`,
-    `Rust / replay measurement (${suite})`, 'Retain CPU runtime capsule', context.checkoutSha);
-  insist(tiny.job.id === firstBundle.job.id, 'first uploads have different physical producers');
-  const sealedEnvironment = jsonMember(tiny.entries, 'manifest.json').environment;
-  insist(same(state.environment, sealedEnvironment), 'first state environment differs from sealed manifest');
-  const rolled = imageRollReceipt({ suite, expected: sealedEnvironment, runId: context.runId, firstJobId: firstBundle.job.id });
-  if (rolled) {
-    rmSync(resolve(context.root, 'sdk-rs/harness/out'), { recursive: true, force: true });
-    write(resolve(context.root, 'sdk-rs/harness/out', IMAGE_ROLLED), rolled);
-    console.log(`::error::${imageRollMessage(suite, rolled)} (not measured)`);
-    return [];
-  }
-  const capsule = await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
-    `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha);
-  insist(capsule.job.id === firstBundle.job.id, 'first uploads have different physical producers');
-  const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
-  for (const first of firsts) {
-    await authenticateCase(context, first, firstBundle.job, suite);
-    validateFirstBindings({ state, evidence: first, cohortEntries: tiny.entries });
-    validateRetainedCache({ entries: firstBundle.entries, evidence: first, state });
-  }
-  // Filesystem restoration follows complete ZIP validation and blob/manifest
-  // validation. It writes only controlled runtime entries, never .git.
-  artifactEntriesToDirectory(capsule.entries, destination);
-  // The second job has a pristine checkout; the first state is data, not new
-  // authority. Its full runtime/Node/image/cache identity must validate here.
-  rmSync(resolve(context.root, 'sdk-rs/harness/out'), { recursive: true, force: true });
-  const runtime = restoreRuntime({ root: context.root, directory: destination });
-  insist(runtime.fingerprint === state.runtimeSha256 && runtime.nodePath === state.nodePath, 'restored runtime differs from first');
-  for (const first of firsts) validateFirstBindings({ state, evidence: first, cohortEntries: tiny.entries, actualManifest: runtime.manifest });
-  const { resetCollectionCache, capturePublicRaw } = await import('./cpu-collection.mjs');
-  restoreOriginalOutputs(context, firstBundle.entries);
-  for (const first of firsts) {
-    revalidateRecordedEvidence(first, { root: context.root });
-    insist(assessEligibility(first, paired).eligible, 'planned case no longer eligible');
-  }
-  clearSecondOutputs({ root: context.root, directory: destination });
-  const { run, job } = await currentPhysical(context, `Rust / CPU remeasurement (${suite})`);
-  const claims = [], results = [], errors = [];
-  for (const first of firsts) {
-    const reset = resetCollectionCache({ root: context.root, cachePath: state.cachePath, destination,
-      environment: runtime.manifest.environment, runtimeSha256: state.runtimeSha256, nodePath: runtime.nodePath });
-    const startedAt = new Date().toISOString();
-    console.log(formatMeasurementMarker('BEGIN', first.key, startedAt));
-    const reportPath = resolve(context.root, `sdk-rs/harness/out/cpu-second/reports/${first.key}.json`);
-    mkdirSync(dirname(reportPath), { recursive: true });
-    const item = first.claim.case;
-    const child = spawnSync(runtime.nodePath, [resolve(context.root, 'sdk-rs/harness/gate.mjs'),
-      '--venue', item.venue, '--tape', item.tape, '--books', item.books, '--runs', String(PUBLIC_REPLAY_PAIRS),
-      '--runtime-capsule', destination, '--report', reportPath], {
-      cwd: context.root, env: { ...process.env, ...reset.env, CPU_COLLECTION_STATE: '' }, stdio: 'inherit',
-    });
-    const completedAt = new Date().toISOString();
-    insist(!child.error && !child.signal && [0, 1].includes(child.status), 'second measurement did not complete; slot consumed');
-    const finalCacheSha256 = cacheDigest(context.root, state.cachePath);
-    const prefix = `cpu-second/cache/${first.key}`;
-    const cache = captureCache({ root: context.root, cachePath: state.cachePath, destination: `sdk-rs/harness/out/${prefix}` });
-    insist(cache.digest === finalCacheSha256, 'second cache changed before snapshot');
-    verifyRuntime({ root: context.root, directory: destination });
-    const reportBytes = readFileSync(reportPath), report = parseCohortJson(reportBytes);
-    const raw = capturePublicRaw({ root: context.root, report });
-    const actual = verifyRuntime({ root: context.root, directory: destination });
-    const execution = { measuredCheckoutSha: context.checkoutSha,
-      inputsSha256: first.claim.inputsSha256, policySha256: first.claim.policySha256, runtimeSha256: actual.fingerprint,
-      nodeSha256: actual.manifest.node.sha256, imageOS: actual.manifest.environment.ImageOS, imageVersion: actual.manifest.environment.ImageVersion,
-      architecture: actual.manifest.environment.arch, nodeVersion: actual.manifest.environment.nodeVersion, runId: String(run.id), jobId: String(job.id), runnerId: String(job.runner_id), attempt: 1,
-      startedAt, completedAt, initialCacheSha256: reset.initialCacheSha256, finalCacheSha256 };
-    const evidence = { schema: 1, key: first.key, claim: first.claim, authority: { plan: artifactRef(planBundle), strict: artifactRef(firstBundle), tiny: artifactRef(tiny), runtime: artifactRef(capsule) }, cache: { prefix, digest: cache.digest, manifestSha256: cache.manifestSha256 }, exitCode: child.status,
-      report, reportBytes: reportBytes.toString('utf8'), reportSha256: sha256(reportBytes), raw, execution };
-    console.log(formatMeasurementMarker('END', first.key, completedAt));
-    revalidateRecordedEvidence(evidence, { root: context.root });
-    const decision = decideRemeasurement(first, evidence, paired);
-    if (!decision.accepted) errors.push(...decision.errors.map((error) => `${first.key}: ${error}`));
-    const claim = { ...first.claim, jobId: job.id, firstJobId: first.claim.firstJobId };
-    claims.push(claim); results.push({ key: first.key, decision });
-    write(resolve(context.root, `sdk-rs/harness/out/cpu-second/cases/${first.key}.json`), evidence);
-  }
-  insist(same(claims.map((item) => item.key).sort(), selected.map((item) => item.key).sort()), 'second roster changed');
-  write(resolve(context.root, 'sdk-rs/harness/out/manifest.json'), runtime.manifest);
-  write(resolve(context.root, 'sdk-rs/harness/out/second.json'), { schema: 1, suite, claims });
-  write(resolve(context.root, 'sdk-rs/harness/out/cpu-second/results.json'), { schema: 1, suite, results, errors });
-  insist(errors.length === 0, errors.join('\n'));
-  return results;
-}
-
 export function retainApiEvidence(reader, destination) {
   const snapshot = reader.snapshots(), responses = [];
   for (const value of snapshot.responses) {
@@ -582,7 +446,7 @@ export function retainApiEvidence(reader, destination) {
 }
 
 
-/** Every automatic cohort has one original measurement and at most one second.
+/** Every cohort has one original measurement, re-measured at most once in its own job.
  * The whole first suite (including private diagnostics) remains mandatory. */
 export function validatePlannedCases(plan) {
   insist(plan?.schema === 1 && Number.isSafeInteger(plan.runId) && plan.runId > 0 &&
@@ -590,6 +454,10 @@ export function validatePlannedCases(plan) {
   insist(same(plan.suites.map(row => row.suite).sort(), [...CPU_REMEASURE_SUITES].sort()), 'missing/duplicate/substituted suite roster');
   for (const row of plan.suites) {
     requireCpuRemeasureSuite(row.suite);
+    if (Object.hasOwn(row, 'refused')) {
+      insist(same(Object.keys(row).sort(), ['refused', 'suite']) && typeof row.refused === 'string' && row.refused, 'invalid refused suite row');
+      continue;
+    }
     insist(Number.isSafeInteger(row.firstArtifactId) && /^sha256:[a-f0-9]{64}$/.test(row.firstArtifactDigest ?? '') &&
       Array.isArray(row.cases) && same(row.cases.map(value => gateCaseKey(value.case)).sort(), publicCases(row.suite).map(gateCaseKey).sort()), 'missing/duplicate/substituted complete public roster');
     insist(new Set(row.cases.map(value => value.key)).size === row.cases.length, 'duplicate case key');
@@ -598,26 +466,10 @@ export function validatePlannedCases(plan) {
       row.oracleRefusal?.name === 'bitget-paired-steady' && Number.isSafeInteger(row.oracleRefusal.artifactId) && row.oracleRefusal.artifactId > 0 &&
       /^sha256:[a-f0-9]{64}$/.test(row.oracleRefusal.digest ?? '') && Number.isSafeInteger(row.oracleRefusal.bytes) && row.oracleRefusal.bytes > 0
       : row.oracleRefusal === undefined, 'invalid Bitget-only refusal plan authority');
-    for (const value of row.cases) insist(['first', 'second', 'not-certified'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
+    for (const value of row.cases) insist(['first', 'cpu-refused', 'not-certified'].includes(value.decision) && /^[a-f0-9]{64}$/.test(value.key ?? '') &&
       value.case.private === false && value.case.runs === PUBLIC_REPLAY_PAIRS && value.case.correctnessRuns === 1 && /^[a-f0-9]{64}$/.test(value.case.tapeSha256 ?? ''), 'invalid public disposition');
   }
   return plan;
-}
-
-export function secondMatrix(plan) {
-  validatePlannedCases(plan);
-  return { include: plan.suites.filter(row => row.cases.some(value => value.decision === 'second')).map(({ suite }) => ({ suite })) };
-}
-
-export function requireSecondState(dispositions, jobs) {
-  const required = dispositions.some(value => value.decision === 'second');
-  insist(Array.isArray(jobs), 'missing complete second-job inventory');
-  if (!required) {
-    insist(jobs.length <= 1 && jobs.every(job => job.status === 'completed' && job.conclusion === 'skipped'), 'second runner ran without a first miss');
-    return false;
-  }
-  insist(jobs.length === 1 && jobs[0].run_attempt === 1 && jobs[0].status === 'completed' && jobs[0].conclusion === 'success', 'missing, failed, duplicate or retried second runner');
-  return true;
 }
 
 async function familyIdentityForSuite(context, suite, strict, state, tiny, required = false) {
@@ -667,12 +519,13 @@ async function gatherSuite(context, suite) {
 
 async function planMeasurements(context, destination) {
   const suites = [];
-  for (const suite of CPU_REMEASURE_SUITES) suites.push(await gatherSuite(context, suite));
+  // One suite's missing or failed first evidence refuses only that suite (fail closed).
+  for (const suite of CPU_REMEASURE_SUITES) {
+    try { suites.push(await gatherSuite(context, suite)); }
+    catch (error) { suites.push({ suite, refused: String(error?.message ?? error).slice(0, 2000) || 'first evidence refused' }); }
+  }
   const plan = validatePlannedCases({ schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, suites });
   write(resolve(destination, 'plan.json'), plan);
-  const matrix = secondMatrix(plan);
-  if (context.env.GITHUB_OUTPUT) writeFileSync(context.env.GITHUB_OUTPUT,
-    `has_eligible=${matrix.include.length > 0}\nmatrix=${JSON.stringify(matrix)}\n`, { flag: 'a' });
   return plan;
 }
 
@@ -684,21 +537,15 @@ async function loadPlan(context) {
   return { plan, bundle };
 }
 
-export function requireAuthorityRefs(evidence, originals) {
-  for (const kind of ['plan', 'strict', 'tiny', 'runtime'])
-    insist(originals[kind] && same(evidence.authority?.[kind], artifactRef(originals[kind])), 'second consumed substituted authority');
-}
-
 async function certifySuite(context, suite, destination) {
   requireCpuRemeasureSuite(suite);
-  const { plan, bundle: planBundle } = await loadPlan(context), recomputed = await gatherSuite(context, suite);
-  const pairedBundle = suite === 'bitget' ? await loadBitgetPaired(context) : undefined;
+  const { plan, bundle: planBundle } = await loadPlan(context);
   const row = plan.suites.find(value => value.suite === suite);
+  insist(row, 'suite missing from plan');
+  if (row.refused) throw new Error(row.refused);
+  const recomputed = await gatherSuite(context, suite);
+  const pairedBundle = suite === 'bitget' ? await loadBitgetPaired(context) : undefined;
   insist(same(row, recomputed), 'authenticated plan differs from full current first-evidence revalidation');
-  const { jobs: allJobs } = await evidenceInventory(context);
-  const hasSecond = requireSecondState(row.cases, allJobs.filter(job => job.name === `Rust / CPU remeasurement (${suite})`));
-  context.secondDispositions ??= new Map();
-  context.secondDispositions.set(suite, row.cases);
   if (row.oracleRefusal) {
     insist(isBitgetOracleRefusal(pairedBundle?.refusal), 'missing authenticated Bitget refusal');
     write(resolve(destination, 'refusal.json'), { schema: 1, suite, runId: context.runId,
@@ -715,58 +562,30 @@ async function certifySuite(context, suite, destination) {
   const state = jsonMember(strict.entries, 'cpu-collection/state.json');
   const paired = pairedCertificateForRuntime(pairedBundle, state, tiny.entries);
   const family = await familyIdentityForSuite(context, suite, strict, state, tiny);
-  const second = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-second-${suite}`,
-    `Rust / CPU remeasurement (${suite})`, 'Retain CPU remeasurement results', context.checkoutSha) : null;
-  if (second) {
-    const rolled = imageRolledRefusal({ suite, entries: second.entries, expected: jsonMember(tiny.entries, 'manifest.json').environment,
-      logBytes: second.logBytes, runId: context.runId, firstJobId: strict.job.id });
-    insist(!rolled, rolled);
-  }
-  const capsule = hasSecond ? await authenticatedBundle(context, context.runId, `cpu-runtime-${suite}`,
-    `Rust / replay measurement (${suite})`, 'Retain the eligible original runtime bytes', context.checkoutSha, true) : null;
-  if (capsule) {
-    insist(capsule.job.id === strict.job.id, 'runtime has different physical first producer');
-    insist(same(jsonMember(second.entries, 'manifest.json'), jsonMember(tiny.entries, 'manifest.json')), 'restored runtime manifest differs from premeasurement authority');
-  }
-  const secondRoster = second && jsonMember(second.entries, 'second.json');
-  if (second) insist(secondRoster.schema === 1 && secondRoster.suite === suite &&
-    same(secondRoster.claims.map(value => value.key).sort(), row.cases.filter(value => value.decision === 'second').map(value => value.key).sort()), 'second result roster differs');
   const cases = [];
   for (const value of row.cases) {
     const first = firstEvidence(strict.entries, value.key, value.case);
     restoreOriginalOutputs(context, strict.entries);
     revalidateRecordedEvidence(first, { root: context.root });
-    if (value.decision === 'first') {
-      const initial = classifyInitialCase(first, manifest(), paired, family);
-      insist(initial.decision === 'first',
-        'first result fails strict policy and authenticated byte/steady supplement');
-      cases.push({ key: value.key, case: value.case, decision: { accepted: true, rule: first.report.status === 'PASS' ? 'strict-first-pass' : initial.unchanged ? 'unchanged bytes, not measured' : 'strict-declared-diagnostic', receipt: null } });
-    } else {
-      const evidence = jsonMember(second.entries, `cpu-second/cases/${value.key}.json`);
-      insist(evidence.key === first.key && same(evidence.claim, first.claim), 'second case/first claim differs');
-      requireAuthorityRefs(evidence, { plan: planBundle, strict, tiny, runtime: capsule });
-      validateRetainedCache({ entries: second.entries, evidence, state, kind: 'second' });
-      await authenticateCase(context, evidence, second.job, suite, 'second');
-      restoreOriginalOutputs(context, second.entries);
-      revalidateRecordedEvidence(evidence, { root: context.root });
-      const decision = decideRemeasurement(first, evidence, paired);
-      insist(decision.accepted, decision.errors.join('\n'));
-      cases.push({ key: value.key, case: value.case, decision });
-    }
+    insist(value.decision !== 'cpu-refused', `${gateCaseKey(value.case)}: Rust slower than TS after the in-job re-measure; not certified`);
+    const initial = classifyInitialCase(first, manifest(), paired, family);
+    insist(initial.decision === 'first',
+      'first result fails strict policy and authenticated byte/steady supplement');
+    cases.push({ key: value.key, case: value.case, decision: { accepted: true, rule: first.report.status === 'PASS' ? 'strict-first-pass' : initial.unchanged ? 'unchanged bytes, not measured' : 'strict-declared-diagnostic', receipt: null } });
   }
   const certificate = { schema: 1, suite, runId: context.runId, checkoutSha: context.checkoutSha,
-    plan: artifactRef(planBundle), first: artifactRef(strict), runtime: capsule ? artifactRef(capsule) : null, second: second ? artifactRef(second) : null, cases,
+    plan: artifactRef(planBundle), first: artifactRef(strict), cases,
     ...(family ? { familyIdentity: family } : {}),
     ...(paired ? { pairedSteady: { artifact: artifactRef(pairedBundle.bundle), certificate: paired } } : {}) };
   write(resolve(destination, 'certificate.json'), certificate);
+  const warning = bitgetSteadyWarning(paired);
+  if (warning) console.log(`::warning title=CPU bitget::${warning}`);
   return certificate;
 }
 
 export async function evidenceEndCheck(context) {
   const { run, jobs, artifacts } = await evidenceInventory(context, true);
   insist(run.run_attempt === 1, 'workflow attempt changed during certification');
-  for (const [suite, dispositions] of context.secondDispositions ?? [])
-    requireSecondState(dispositions, jobs.filter(job => job.name === `Rust / CPU remeasurement (${suite})`));
   for (const binding of context.bindings ?? []) {
     const inventory = artifacts.filter(value => value.name === binding.artifact.name);
     insist(inventory.length === 1 && same(inventory[0], binding.artifact), 'artifact identity became duplicate/changed');
@@ -775,7 +594,7 @@ export async function evidenceEndCheck(context) {
   }
 }
 
-/** One refused suite fails only its own replay gate; overall certification stays false. */
+/** One refused suite fails only its own CPU gate; overall certification stays false. */
 export async function certifySuites(suites, certifyOne) {
   const certificates = {}, results = { certified: true, suites: {}, reasons: {} };
   for (const suite of suites) {
@@ -793,8 +612,7 @@ export async function certifySuites(suites, certifyOne) {
 
 async function certifyAll(context, destination) {
   const { results: outcome, certificates } = await certifySuites(CPU_REMEASURE_SUITES, async (suite) => {
-    try { return await certifySuite(context, suite, resolve(destination, suite)); }
-    catch (error) { if (!isBitgetOracleRefusal(error.oracleRefusal)) context.secondDispositions?.delete(suite); throw error; }
+    return certifySuite(context, suite, resolve(destination, suite));
   });
   await evidenceEndCheck(context);
   const results = { schema: 1, runId: context.runId, checkoutSha: context.checkoutSha, ...outcome };
@@ -836,11 +654,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (values.command === 'prepare') await prepareMeasurement(context, values.suite, resolve(values.out), values.mode);
     else if (values.command === 'collect') await collectMeasurement(context, values.suite);
     else if (values.command === 'plan') { await planMeasurements(context, resolve(values.out)); await evidenceEndCheck(context); }
-    else if (values.command === 'second') { await secondMeasurement(context, values.suite, resolve(values.out)); await evidenceEndCheck(context); }
     else if (values.command === 'certify') await certifyAll(context, resolve(values.out));
     else throw new Error('unknown bounded CPU command');
   } finally {
     if (['plan', 'certify'].includes(values.command)) retainApiEvidence(context.reader, resolve(values.out));
-    else if (values.command === 'second') retainApiEvidence(context.reader, resolve(context.root, 'sdk-rs/harness/out/cpu-second'));
   }
 }

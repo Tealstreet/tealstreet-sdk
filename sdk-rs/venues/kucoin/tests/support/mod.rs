@@ -9,6 +9,8 @@ pub fn jittered(actual: f64, nominal: f64) -> bool {
 #[allow(dead_code)]
 pub mod credentials;
 #[allow(dead_code)]
+pub mod hosted_parity;
+#[allow(dead_code)]
 pub mod native_sign;
 
 #[allow(dead_code)]
