@@ -411,7 +411,7 @@ fn a_frame_fed_protective_amend_resolves_identity_and_size_before_cancellation()
         &mut source,
         socket,
         1200.,
-        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"80","triggerPx":"80","origSz":"0","sz":"0","reduceOnly":true,"orderType":"Stop Market"},"status":"open"}]}"#,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"A","limitPx":"120","triggerPx":"120","origSz":"0","sz":"0","reduceOnly":true,"orderType":"Take Profit Market","isPositionTpsl":true},"status":"open"}]}"#,
     );
     let frame = source.snapshot_frame(1500.).to_vec();
     for role_ok in [false, true] {
@@ -556,6 +556,12 @@ fn a_retired_amend_role_cannot_resolve_or_release_its_successor() {
         .unwrap();
     e.handle(7000., Event::TimerFired { timer });
     prepared_now(&mut e);
+    use base64::Engine as _;
+    let zipped = miniz_oxide::deflate::compress_to_vec(br#"{"BTC":{"markPx":"100"}}"#, 6);
+    let quote = serde_json::json!({"channel":"fastAssetCtxs","data":base64::engine::general_purpose::STANDARD.encode(zipped)}).to_string();
+    message(&mut source, socket, 7100., &quote);
+    e.apply_frame(7100., source.snapshot_frame(7100.), true)
+        .unwrap();
     e.handle(
         7100.,
         Event::Command(Command::AmendOrder {

@@ -222,8 +222,12 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_817_600,
-  hyperliquid: 2_180_096,
-  hyperliquidspot: 2_180_096,
+  // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
+  // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
+  // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
+  // Hyperliquid 2,184,857 B. CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
+  hyperliquid: 2_195_456,
+  hyperliquidspot: 2_195_456,
   kraken: 2_136_064,
   krakenspot: 2_136_064,
   kucoin: 1_802_240,
