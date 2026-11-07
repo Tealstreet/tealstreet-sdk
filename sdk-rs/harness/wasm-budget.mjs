@@ -236,8 +236,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // Hyperliquid 2,184,857 B. CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   hyperliquid: 2_195_456,
   hyperliquidspot: 2_195_456,
-  kraken: 2147328,
-  krakenspot: 2147328,
+  kraken: 2_147_328,
+  krakenspot: 2_147_328,
   kucoin: 1_838_080,
   kucoinspot: 2_357_248,
   lighter: 2_093_056,

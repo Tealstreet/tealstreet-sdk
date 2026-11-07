@@ -51,6 +51,11 @@ retain explicit “check Open Orders” wording; the engine continues to own the
 original write fact and aggregate command outcome. Unguarded classifications
 and their existing controls are unchanged.
 
+After an ordinary single write's permitted nonce-21104 retry, a native
+23000/23100 response presents its unknown/Open Orders guidance instead of the
+earlier nonce refusal. The journal still projects the outcome and retains the
+write evidence; presentation cannot authorize another resend or put-back.
+
 VENUE_STATE remains the same 11-byte version 1 (account index and tier). Native
 provenance and mark receipts are not exported as fake frame-local evidence.
 Frame-fed protective price edits refuse `reference stale`; ordinary orders,

@@ -161,10 +161,13 @@ fn cancel_ack_requires_exact_unfilled_terminal_target_before_replacement() {
 fn guarded_rate_and_uncertain_replacement_never_put_back_or_resend() {
     for (status, body) in [
         (429, r#"{"code":23000,"message":"throttle"}"#),
+        (429, r#"{"code":21104,"message":"invalid nonce"}"#),
         (405, r#"{"code":21104,"message":"invalid nonce"}"#),
         (200, r#"{"code":23000,"message":"throttle"}"#),
+        (200, r#"{"code":23100,"message":"throttle"}"#),
         (408, r#"{"code":21104,"message":"invalid nonce"}"#),
         (500, r#"{"code":21702,"message":"refused"}"#),
+        (503, r#"{"code":21702,"message":"refused"}"#),
         (200, "bad json"),
     ] {
         let (mut e, _, mut t) = boot();
@@ -173,6 +176,22 @@ fn guarded_rate_and_uncertain_replacement_never_put_back_or_resend() {
         let out = advance(&mut e, &mut t, NOW + 1000.0);
         assert!(!out.iter().any(|a|matches!(a,Action::Http(r) if r.url.contains("sendTx")||r.url.contains("nextNonce"))),"{status}: {out:?}");
         assert!(out.iter().any(|a|matches!(a,Action::Notice(Notice::CommandFailed{error,..}) if error.outcome==Some(Outcome::Unknown)&&error.protection.is_none())),"{out:?}");
+        let error = out
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .unwrap();
+        let message = error.message.to_ascii_lowercase();
+        assert!(
+            message.contains("unknown") && message.contains("check open orders"),
+            "{error:?}"
+        );
+        assert!(
+            !message.contains("refused") && !message.contains("no stop"),
+            "{error:?}"
+        );
     }
 }
 fn tx(r: &HttpRequest) -> Value {
