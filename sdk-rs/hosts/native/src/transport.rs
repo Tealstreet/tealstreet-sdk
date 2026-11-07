@@ -372,6 +372,8 @@ fn report_failure(kind: crate::report::ErrorKind, target: &str, venue: Option<&s
         error_kind: None,
         venue_code: None,
         venue,
+        startup_unloaded: None,
+        startup_refused: None,
     });
 }
 

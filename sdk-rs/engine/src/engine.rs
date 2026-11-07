@@ -1879,6 +1879,9 @@ struct IoCore {
     /// `V::http_mutation_barriers()`, copied by `Engine::new` for admission in `Cx`.
     #[cfg(feature = "http-mutation-barriers")]
     mutation_barriers_declared: bool,
+    /// `V::http_plans()`, copied by `Engine::new` for Preflight admission in `Cx`.
+    #[cfg(feature = "http-plans")]
+    http_plans_declared: bool,
     request_contexts: request_context_registry::ContextRegistry,
     http_delivery: Option<request_context_registry::Delivery>,
     #[cfg(feature = "http-plans")]
@@ -2176,6 +2179,8 @@ impl Default for IoCore {
             managed_sockets_declared: false,
             #[cfg(feature = "http-mutation-barriers")]
             mutation_barriers_declared: false,
+            #[cfg(feature = "http-plans")]
+            http_plans_declared: true,
             request_contexts: Default::default(),
             http_delivery: None,
             #[cfg(feature = "http-plans")]
@@ -4182,6 +4187,17 @@ pub trait Venue {
         false
     }
 
+    /// Whether this venue may open HTTP Preflights (and so Plans). Engine<V> reads
+    /// it statically: a venue declaring false compiles the per-event Plan sweeps
+    /// out and cannot open a Preflight. Plan adopters keep the default.
+    #[inline]
+    fn http_plans() -> bool
+    where
+        Self: Sized,
+    {
+        true
+    }
+
     /// The venue's one FIFO release domain, if any. Its group must be registered
     /// in `http_pacing`; the engine stamps it onto every member Context.
     #[cfg(feature = "release-domains")]
@@ -4780,6 +4796,8 @@ struct CoreSpec<'a> {
     dispatch_nonce: bool,
     #[cfg(feature = "http-mutation-barriers")]
     http_mutation_barriers: bool,
+    #[cfg(feature = "http-plans")]
+    http_plans: bool,
     #[cfg(feature = "managed-sockets")]
     managed_sockets: bool,
     #[cfg(feature = "managed-sockets")]
@@ -4829,6 +4847,8 @@ fn new_core(
         nonce_enabled: spec.dispatch_nonce,
         #[cfg(feature = "http-mutation-barriers")]
         mutation_barriers_declared: spec.http_mutation_barriers,
+        #[cfg(feature = "http-plans")]
+        http_plans_declared: spec.http_plans,
         #[cfg(feature = "managed-sockets")]
         managed_sockets_declared: spec.managed_sockets,
         #[cfg(feature = "managed-sockets")]
@@ -4858,6 +4878,8 @@ impl<V: Venue> Engine<V> {
                 dispatch_nonce: V::dispatch_nonce(),
                 #[cfg(feature = "http-mutation-barriers")]
                 http_mutation_barriers: V::http_mutation_barriers(),
+                #[cfg(feature = "http-plans")]
+                http_plans: V::http_plans(),
                 #[cfg(feature = "managed-sockets")]
                 managed_sockets: V::managed_sockets(),
                 #[cfg(feature = "managed-sockets")]
@@ -5273,6 +5295,12 @@ impl<V: Venue> Engine<V> {
     /// for an account that can sign, matching the SDK's readiness rule.
     pub fn set_account_startup(&mut self, account: bool) {
         self.account_startup = account;
+    }
+
+    /// Whether startup expects the account sections (`set_account_startup`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn account_startup(&self) -> bool {
+        self.account_startup
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -6507,7 +6535,9 @@ impl<V: Venue> Engine<V> {
 
     fn finish_event_scope(&mut self, now: f64) {
         #[cfg(feature = "http-plans")]
-        self.io.core.request_contexts.end_preflight_admission();
+        if V::http_plans() {
+            self.io.core.request_contexts.end_preflight_admission();
+        }
         self.io.core.request_contexts.end_plan_admission();
         self.flush_bearer_fences(now);
         self.flush_http_owner_retirements();
@@ -7128,6 +7158,11 @@ impl<V: Venue> Engine<V> {
     /// at this tail, not left queued for a later event.
     #[cfg(feature = "http-plans")]
     fn flush_http_plans(&mut self, now: f64) {
+        // A venue without Preflights has no Plan state: the plan-less tail.
+        if !V::http_plans() {
+            self.flush_bearer_fences(now);
+            return;
+        }
         #[cfg(all(feature = "serial-plans", feature = "session-bearer"))]
         self.flush_keyless_session_roots(now);
         if self.io.core.request_contexts.has_plans() {
@@ -7208,6 +7243,9 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "http-plans")]
     fn expire_plan_timer(&mut self, now: f64, event: &Event<'_>) -> bool {
+        if !V::http_plans() {
+            return false;
+        }
         let Event::TimerFired { timer } = event else {
             return false;
         };
@@ -7226,6 +7264,10 @@ impl<V: Venue> Engine<V> {
 
     #[cfg(feature = "http-plans")]
     fn flush_http_owner_retirements(&mut self) {
+        if !V::http_plans() {
+            self.assert_live();
+            return;
+        }
         self.io.core.request_contexts.end_plan_admission();
         self.assert_live();
         if self.io.core.request_contexts.has_retirements() {

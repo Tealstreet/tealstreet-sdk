@@ -576,6 +576,9 @@ impl Woo {
 }
 
 impl Venue for Woo {
+    fn http_plans() -> bool {
+        false
+    }
     fn managed_sockets() -> bool {
         true
     }
