@@ -560,7 +560,7 @@ ported. The linked inventory records exact callers and product constraints.
 | Names | Readiness / remaining deletion prerequisites |
 | --- | --- |
 | `coinbase`, `coinbasespot` | Rust defaults; CFM/spot and saved spot-only covered. Retired INTX is fixture compatibility only. Keep frozen TS reference and inert Starbase evidence separate. |
-| `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | Rust defaults, one broker-configured Orderly crate. Keep frozen reference until its replay oracle is replaced deliberately. |
+| `kodiakfi`, `mode`, `what`, `woofi` | Rust defaults, one broker-configured Orderly crate. Keep frozen reference until its replay oracle is replaced deliberately. |
 | `txflow` | Rust default for testnet USDC perpetuals; mainnet rejects before I/O, production/preview availability remains disabled. Both registries use Rust; retain the independent TS replay/audit reference under `__tests__/reference/txflow` and the production `txflow.client-id` helper. Generic consumer proofs do not enable measurement-gated order controls; preserve the [exact protocol/query scope and gate evidence](TXFLOW_RUST_PORT.md). |
 | `binance`, `binancepm` | Opt-in USD-M/PM; preserve their account/query/routing behavior and regression gates while the shared crate now also supplies Spot/COIN-M. Shared TS/oracle removal still requires all callers/defaults to migrate. |
 | `binancespot` | Opt-in Spot; signed user-data WebSocket API ACK/liveness, native currency balances, no derivative positions/settings, native client-ID order identity and final-fill-aware cancel/replace. Preserve supported regular/protective/order-list preflight; private history/fills/income retain TS empty results, public-trades/client-lookup unsupported. Live public and documented private evidence: [variant plan](BINANCE_VARIANTS_PORT.md). |
@@ -723,13 +723,16 @@ and cleanup; incomplete cleanup remains a failure.
 After cancel-all, mutable leverage is lowered by one (bounded by the market
 minimum) and restored to its captured value, exercising both writes. Fixed or
 already-minimum leverage is set to its original value without increasing risk.
+A `--mainnet` run skips amend and both leverage writes and reports them as
+skipped (RUST_LIVE_SMOKE.md, Mainnet sequence).
 
 All variables below have the exact prefix `RUST_LIVE_SMOKE_`; concatenate the
 family, selected mode (`TESTNET`, `DEMO`, or `MAINNET`) and suffix, for example
 `RUST_LIVE_SMOKE_BINANCE_TESTNET_KEY`. Every optional field uses the same mode
 prefix. Legacy names and another mode's values are never used as a fallback. Credentials are read
-only from the process environment, never command-line arguments or committed
-configuration. Do not print them or commit shell history, environment files, raw
+only from the process environment or, with `--credentials-stdin`, from one JSON
+object of these suffixes on stdin (see RUST_LIVE_SMOKE.md); never command-line
+arguments or committed configuration. Do not print them or commit shell history, environment files, raw
 requests, or unredacted recordings. The private tape retains the selected
 environment's official URLs and redacts credential material before writing.
 Credential fields shorter than four characters are refused before I/O because
@@ -743,11 +746,14 @@ overrides and refuse unsupported environments before reading credentials.
 | Venue name(s) | Family | Required suffixes | Engine-supported nonproduction environment |
 | --- | --- | --- | --- |
 | `binance` | `BINANCE` | `KEY`, `SECRET` | Testnet: `demo-fapi.binance.com`, `demo-fstream.binance.com` |
-| `binancepm`, `binanceinverse`, `binancespot` | — | — | Newly landed during this harness change; their distinct endpoint/auth, unit and leverage contracts have no reviewed live-smoke profile yet. Refused before credential access. USD-M `binance` remains supported. |
+| `binanceinverse` | `BINANCE` | `KEY`, `SECRET` | Testnet: `demo-dapi.binance.com`, `dstream.binancefuture.com` (the engine's COIN-M pairing). Shares the USD-M demo keys; quantity is whole contracts of `contractSize` USD. |
+| `binancespot` | `BINANCESPOT` | `KEY`, `SECRET` | Testnet: `testnet.binance.vision`, `stream.testnet.binance.vision`, `ws-api.testnet.binance.vision` |
+| `binancepm` | — | — | No test environment; no reviewed live-smoke profile. Refused before credential access. |
+| `binanceoptions` | — | — | No reviewed live-smoke profile. Every mode is refused before credential access. |
 | `bybit`, `bybitinverse`, `bybitspot` | `BYBIT` | `KEY`, `SECRET` | Testnet: `api-testnet.bybit.com`, `stream-testnet.bybit.com` |
 | `bybitdemo` | `BYBIT` | `KEY`, `SECRET` | Demo by default: `api-demo.bybit.com`, `stream-demo.bybit.com`; public market data on `stream.bybit.com`. Testnet also supported. |
 | `bitget`, `bitgetusdc`, `bitgetinverse` | `BITGET` | `KEY`, `SECRET`, `PASSPHRASE` | Testnet selects `susdt-futures`, `susdc-futures`, `scoin-futures` and simulated collateral on the shared `api.bitget.com` / `ws.bitget.com` origins. UTA testnet is unsupported. |
-| `orderly`, `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | `ORDERLY` | `KEY`, `SECRET`, `ACCOUNT_ID` | Testnet: `testnet-api-evm.orderly.org`, separate `testnet-ws-evm.orderly.org` and `testnet-ws-private-evm.orderly.org` sockets. Key and secret use the engine's `ed25519:` format. |
+| `orderly`, `kodiakfi`, `mode`, `what`, `woofi` | `ORDERLY` | `KEY`, `SECRET`, `ACCOUNT_ID` | Testnet: `testnet-api-evm.orderly.org`, separate `testnet-ws-evm.orderly.org` and `testnet-ws-private-evm.orderly.org` sockets. Key and secret use the engine's `ed25519:` format. |
 | `lighter` | `LIGHTER` | `PRIVATE_KEY`, `ACCOUNT_INDEX`, `API_KEY_INDEX` | Testnet: `testnet-api.lighter.xyz`, `testnet.zklighter.elliot.ai`; indices are decimal strings. |
 | `lighter-robinhood` | — | — | Broker endpoint and signing replay are covered, but credentialed lifecycle capture/sizing has no reviewed live-smoke profile. Every mode refuses before credential access. |
 | `phemex` | `PHEMEX` | `KEY`, `SECRET` | Testnet: `testnet-api.phemex.com` |
@@ -758,7 +764,8 @@ overrides and refuse unsupported environments before reading credentials.
 | `paradex` | `PARADEX` | `PRIVATE_KEY`, `ACCOUNT_ADDRESS`, `SUBKEY_ADDRESS` | Testnet: `api.testnet.paradex.trade`, `ws.api.testnet.paradex.trade` |
 | `woo` | `WOO` | `KEY`, `SECRET`, `APPLICATION_ID` | Staging through `--testnet`: `api.staging.woox.io`, `wss.staging.woox.io`; public candles use `api-pub.woox.io` |
 | `blofin` | `BLOFIN` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: `demo-trading-openapi.blofin.com` |
-| `okx`, `okxdemo`, `okxeu`, `okxeudemo` | `OKX` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: simulated-trading header, `openapi.okx.com` / `wspap.okx.com` (default TLS 443); EU `eea.okx.com` / `wseeapap.okx.com` (default TLS 443) |
+| `okx`, `okxdemo` | `OKX` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: simulated-trading header, `openapi.okx.com` / `wspap.okx.com` (default TLS 443) |
+| `okxeu`, `okxeudemo` | `OKX_EEA` | `KEY`, `SECRET`, `PASSPHRASE` | Demo: simulated-trading header, `eea.okx.com` / `wseeapap.okx.com` (default TLS 443). EEA keys are separate from global OKX keys. |
 | `kraken` | `KRAKEN` | `KEY`, `SECRET` | Futures demo: `demo-futures.kraken.com` |
 | `coinbase`, `coinbasespot` | `COINBASE` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. CDP key name and ES256 private key PEM. |
 | `backpack` | `BACKPACK` | `KEY`, `SECRET` | None wired; explicit `--mainnet` only. Base64 Ed25519 public key and seed. |

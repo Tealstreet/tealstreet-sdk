@@ -1951,4 +1951,82 @@ mod serial_plans {
             "lock held across the expired wait"
         );
     }
+
+    /// A refused call, then a second call the engine seals on a 503 the venue
+    /// never sees; `words` are registered before that second call, if any.
+    fn refused_then_unproven(words: Option<&str>) -> VenueError {
+        let mut e = engine(Serial {
+            total: 2,
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let (actions, now) = drive(&mut e, 0., ["reject"]);
+        if let Some(words) = words {
+            let plan = e.venue.plan.clone().expect("a live Plan");
+            let mut cx = Cx {
+                now,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            cx.present_plan_failure(&plan, words).unwrap();
+        }
+        let token = prepared(&actions).expect("the second call");
+        release(&mut e, token, now);
+        e.handle(
+            now + STEP_MS,
+            Event::HttpResponse {
+                request: token.attempt().request,
+                response: Response {
+                    status: 503,
+                    headers: "",
+                    body: "",
+                },
+            },
+        );
+        failed(&e.drain_actions().collect::<Vec<_>>()).expect("the engine seals the Plan")
+    }
+
+    #[test]
+    fn serial_22_an_unproven_seal_after_a_refusal_never_shows_the_refusal() {
+        let error = refused_then_unproven(None);
+        assert_eq!(error.message, crate::request_context::UNKNOWN_AFTER_REFUSAL);
+        assert_eq!(error.outcome, Some(crate::Outcome::Unknown));
+        assert_eq!(error.protection, None);
+    }
+
+    #[test]
+    fn serial_22_presented_words_change_only_the_message() {
+        let words = "Your BTCUSD stop's put-back outcome is unknown. Check Open Orders";
+        let plain = refused_then_unproven(None);
+        let error = refused_then_unproven(Some(words));
+        assert_eq!(error.message, words);
+        assert_eq!(error.outcome, plain.outcome, "outcome stays projected");
+        assert_eq!(error.protection, plain.protection, "protection stays projected");
+        // A Plan that ends on its own refusals keeps their outcome too.
+        let mut e = engine(Serial {
+            total: 2,
+            ..Default::default()
+        });
+        command(&mut e, 0., None);
+        admitted(&e);
+        let plan = e.venue.plan.clone().unwrap();
+        let mut cx = Cx {
+            now: 0.,
+            store: &mut e.store,
+            io: &mut e.io,
+        };
+        cx.present_plan_failure(&plan, words).unwrap();
+        let refused = failed(&drive(&mut e, 0., ["reject", "reject"]).0).unwrap();
+        let unworded = failed(&refusals(false, false, &["reject", "reject"])).unwrap();
+        assert_eq!(refused.outcome, unworded.outcome);
+        assert_eq!(refused.protection, unworded.protection);
+    }
+
+    #[test]
+    fn serial_22_a_venue_recorded_unproven_write_keeps_its_evidence_text() {
+        // Only an engine-sealed status reply replaces the retained refusal.
+        let error = failed(&refusals(false, false, &["reject", "unknown"])).unwrap();
+        assert_ne!(error.message, crate::request_context::UNKNOWN_AFTER_REFUSAL);
+    }
 }

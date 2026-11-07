@@ -338,3 +338,15 @@ and the registry's 20 unit plus four signer controls pass, zero ignored.
 `cargo check --workspace --all-targets` passes with CARGO_BUILD_JOBS=4;
 normal bans and ratchets pass. The composed-tree exception authorizes no fresh
 CI; the published exact-head Rust run 40122205178 remains the source receipt.
+
+## Hosted and remote signing adoption
+
+BloFin's construction row now declares `dispatchSigning` with the shared
+OKX/Bitget passphrase policy and enabled remote signing
+(`signatureEncoding: "hex-base64"`, `ACCESS-PASSPHRASE` presentation). The
+registry arm takes identities from trusted signer setup like Bitget; the
+venue-local `blofin_signer` is removed. This supersedes the four-case native
+passphrase matrix above: a private account with a missing or empty Primary
+passphrase, or an explicit empty Secondary one, is now refused at construction,
+before any provider or engine exists (`registry/tests/blofin_signer.rs`). The
+dispatch recipes and their wire are unchanged.

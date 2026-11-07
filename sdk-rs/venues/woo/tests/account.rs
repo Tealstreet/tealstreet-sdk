@@ -43,6 +43,13 @@ fn established_stream() -> (TestEngine, SocketId, Vec<HttpRequest>, TimerId) {
     (engine, socket, reads, timer)
 }
 
+/// The private stream goes live: its open, auth and subscription handoff release the reads.
+fn stream_ready(e: &mut TestEngine, socket: SocketId, at: f64) -> Vec<HttpRequest> {
+    e.handle(at, Event::WsOpened { socket });
+    ws(e, socket, at, r#"{"event":"auth","success":true}"#);
+    released_requests(e, at)
+}
+
 fn reconnect_stream(
     e: &mut TestEngine,
     socket: SocketId,
@@ -86,7 +93,7 @@ fn reconnect_stream(
         retry_at + 2.,
         r#"{"event":"auth","success":true}"#,
     );
-    reads.extend(requests(e));
+    reads.extend(released_requests(e, retry_at + 2.));
     (replacement, retry_at + 2., reads)
 }
 /// Also returns the catalogue re-read timer a partial catalogue schedules.
@@ -291,8 +298,7 @@ fn failed_algo_snapshot_preserves_complete_known_orders() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     response(&mut e, &regular, 80.0, &page(""));
     let algo = take(&mut reads, "/v3/algo/orders?");
@@ -382,6 +388,71 @@ fn flat_leverage_uses_legacy_oneway_cross_and_updates_both_rails() {
     )));
 }
 #[test]
+fn flat_leverage_without_margin_mode_preserves_margin_knowledge() {
+    use safe_cex_engine::model::MarginType;
+    for margin_type in [None, Some(MarginType::Cross), Some(MarginType::Isolated)] {
+        let (mut e, _, _, _) = start();
+        e.store_mut()
+            .update_setting("BTCUSDT", |s| s.margin_type = margin_type);
+        e.handle(
+            30.0,
+            Event::Command(Command::FetchLeverage {
+                command: 7,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let read = requests(&mut e).remove(0);
+        response(
+            &mut e,
+            &read,
+            40.0,
+            r#"{"success":true,"data":{"symbol":"PERP_BTC_USDT","position_mode":"ONE_WAY","details":[{"position_side":"BOTH","leverage":"12"}]}}"#,
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        let result = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandDone { command: 7, result }) => Some(result),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing leverage confirmation: {actions:?}"));
+        let result: serde_json::Value = serde_json::from_str(result).unwrap();
+        assert_eq!(result["buyLeverage"], 12.0);
+        assert_eq!(result["sellLeverage"], 12.0);
+        assert!(result.get("marginType").is_none(), "{result}");
+        let setting = e.store().setting("BTCUSDT").unwrap();
+        assert_eq!(setting.leverage, 12.0);
+        assert_eq!(setting.margin_type, margin_type);
+    }
+}
+
+#[test]
+fn flat_leverage_explicitly_wrong_margin_mode_is_not_published() {
+    let (mut e, _, _, _) = start();
+    e.store_mut()
+        .update_setting("BTCUSDT", |s| s.leverage = 10.0);
+    e.handle(
+        30.0,
+        Event::Command(Command::FetchLeverage {
+            command: 7,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let read = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &read,
+        40.0,
+        r#"{"success":true,"data":{"symbol":"PERP_BTC_USDT","margin_mode":"ISOLATED","position_mode":"ONE_WAY","details":[{"position_side":"BOTH","leverage":"12"}]}}"#,
+    );
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+    );
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+}
+
+#[test]
 fn non_futures_account_never_marks_balance_or_positions_loaded() {
     let (mut e, _, mut reads, _) = start();
     let r = take(&mut reads, "accountinfo");
@@ -449,8 +520,7 @@ fn malformed_positions_read_preserves_known_positions() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let p = take(&mut reads, "/v3/positions");
     response(
         &mut e,
@@ -532,8 +602,7 @@ fn malformed_known_order_keeps_its_stored_copy_while_the_rest_commits() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     response(
         &mut e,
@@ -551,8 +620,7 @@ fn account_equity_always_excludes_current_unrealized_pnl() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let info = take(&mut reads, "accountinfo");
     response(&mut e, &info, 80.0, INFO);
     assert_eq!(e.store().balance().upnl, 0.01);
@@ -608,8 +676,7 @@ fn old_position_read_cannot_restore_preconfirmation_leverage() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let old = take(&mut reads, "/v3/positions");
     e.handle(
         80.0,
@@ -638,8 +705,7 @@ fn old_position_read_cannot_restore_preconfirmation_mode() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let old = take(&mut reads, "/v3/positions");
     e.handle(
         80.0,
@@ -739,8 +805,7 @@ fn malformed_executable_algo_leaf_keeps_its_stored_copy_while_siblings_commit() 
         let (mut e, socket, mut reads, _) = start();
         load(&mut e, &mut reads);
         e.drain_actions().for_each(drop);
-        e.handle(70.0, Event::WsOpened { socket });
-        let mut reads = requests(&mut e);
+        let mut reads = stream_ready(&mut e, socket, 70.0);
         let r = take(&mut reads, "/v1/orders?");
         response(&mut e, &r, 80.0, &page(""));
         let r = take(&mut reads, "/v3/algo/orders?");
@@ -854,8 +919,7 @@ fn invalid_regular_or_algo_page_metadata_preserves_complete_known_orders() {
             let (mut e, socket, mut reads, _) = start();
             load(&mut e, &mut reads);
             e.drain_actions().for_each(drop);
-            e.handle(70.0, Event::WsOpened { socket });
-            let mut reads = requests(&mut e);
+            let mut reads = stream_ready(&mut e, socket, 70.0);
             let regular = take(&mut reads, "/v1/orders?");
             let plan = take(&mut reads, "/v3/algo/orders?");
             let good = if algo { page("") } else { algos("") };
@@ -892,8 +956,7 @@ fn invalid_second_page_metadata_cannot_publish_a_successful_prefix() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     let first = page(&ORDER.replace("9007199254740993", "81"))
         .replace("\"total\":1", "\"total\":2")
@@ -948,7 +1011,13 @@ fn rejected_algo_snapshot_cannot_change_later_amend_classification() {
                 socket: replacement,
             },
         );
-        let mut reads = requests(&mut e);
+        ws(
+            &mut e,
+            replacement,
+            retry_at + 1.,
+            r#"{"event":"auth","success":true}"#,
+        );
+        let mut reads = released_requests(&mut e, retry_at + 1.);
         let regular = take(&mut reads, "/v1/orders?");
         response(&mut e, &regular, retry_at + 10., &page(""));
         let algo = take(&mut reads, "/v3/algo/orders?");
@@ -1034,8 +1103,7 @@ fn one_unmappable_position_row_neither_freezes_nor_drops_the_rest() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let p = take(&mut reads, "/v3/positions");
     response(
         &mut e,
@@ -1058,8 +1126,7 @@ fn unidentified_position_row_keeps_every_stored_position() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let p = take(&mut reads, "/v3/positions");
     response(
         &mut e,
@@ -1076,8 +1143,7 @@ fn unidentified_order_row_keeps_every_stored_order() {
     load(&mut e, &mut reads);
     assert!(e.store().order("9007199254740993").is_some());
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     response(&mut e, &regular, 80.0, &page(r#"{"order_id":[1]}"#));
     let algo = take(&mut reads, "/v3/algo/orders?");
@@ -1090,8 +1156,7 @@ fn invalid_known_position_row_keeps_its_stored_copy() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let p = take(&mut reads, "/v3/positions");
     response(
         &mut e,
@@ -1249,8 +1314,7 @@ fn unknown_working_regular_or_protective_order_retains_the_whole_previous_snapsh
         load(&mut e, &mut reads);
         let before = e.store().orders().to_vec();
         e.drain_actions().for_each(drop);
-        e.handle(70.0, Event::WsOpened { socket });
-        let mut reads = requests(&mut e);
+        let mut reads = stream_ready(&mut e, socket, 70.0);
         let regular = take(&mut reads, "/v1/orders?");
         let unknown_regular = ORDER.replace("PERP_BTC_USDT", "PERP_MISSING_USDT");
         response(
@@ -1413,8 +1477,7 @@ fn rest_ahead_of_no_id_execution_emits_once_without_moving_position_twice() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.take_frame(60.0);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     response(
         &mut e,
@@ -1439,8 +1502,7 @@ fn no_id_execution_after_blind_rest_interval_does_not_reprice_the_gap() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.take_frame(60.0);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let regular = take(&mut reads, "/v1/orders?");
     response(
         &mut e,
@@ -1819,8 +1881,7 @@ fn snapshot_token_rejects_both_join_orders_after_explicit_invalidation() {
         load(&mut e, &mut reads);
         let before = e.store().orders().to_vec();
         e.drain_actions().for_each(drop);
-        e.handle(70.0, Event::WsOpened { socket });
-        let mut reads = requests(&mut e);
+        let mut reads = stream_ready(&mut e, socket, 70.0);
         let normal = take(&mut reads, "/v1/orders?");
         let algo = take(&mut reads, "/v3/algo/orders?");
         if algo_first {
@@ -1845,8 +1906,7 @@ fn snapshot_token_accepted_cancel_ack_fences_an_older_join() {
     load(&mut e, &mut reads);
     let before = e.store().orders().to_vec();
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let normal = take(&mut reads, "/v1/orders?");
     let algo = take(&mut reads, "/v3/algo/orders?");
     e.handle(
@@ -1877,8 +1937,7 @@ fn snapshot_token_capture_and_late_exhaustion_leave_orders_and_polling_owned() {
         if !late {
             safe_cex_engine::test_support::exhaust_order_snapshots(e.store_mut());
         }
-        e.handle(70.0, Event::WsOpened { socket });
-        let mut reads = requests(&mut e);
+        let mut reads = stream_ready(&mut e, socket, 70.0);
         if late {
             let normal = take(&mut reads, "/v1/orders?");
             let algo = take(&mut reads, "/v3/algo/orders?");
@@ -1903,8 +1962,7 @@ fn snapshot_token_ws_peer_stays_current_and_healthy_algo_rows_commit() {
     let (mut e, socket, mut reads, _) = start();
     load(&mut e, &mut reads);
     e.drain_actions().for_each(drop);
-    e.handle(70.0, Event::WsOpened { socket });
-    let mut reads = requests(&mut e);
+    let mut reads = stream_ready(&mut e, socket, 70.0);
     let normal = take(&mut reads, "/v1/orders?");
     let algo = take(&mut reads, "/v3/algo/orders?");
     let sibling = e.store_mut().begin_orders_snapshot().unwrap();
@@ -2050,4 +2108,50 @@ fn snapshot_token_discarded_initial_join_cannot_seed_execution_prefix_or_readine
             "fresh_read={fresh_read}: {amounts:?}"
         );
     }
+}
+
+#[test]
+fn account_reads_wait_for_the_private_subscriptions_on_the_first_open() {
+    let (mut e, socket, mut reads, _) = start();
+    load(&mut e, &mut reads);
+    e.drain_actions().for_each(drop);
+    e.handle(70.0, Event::WsOpened { socket });
+    assert!(
+        requests(&mut e).is_empty(),
+        "a read at open predates the auth and the subscribe"
+    );
+    ws(&mut e, socket, 71.0, r#"{"event":"auth","success":true}"#);
+    let mut reads = released_requests(&mut e, 71.0);
+    take(&mut reads, "/v3/positions");
+    take(&mut reads, "/v1/orders?");
+    take(&mut reads, "/v3/algo/orders?");
+}
+
+#[test]
+fn a_read_in_flight_when_the_private_stream_goes_live_is_read_again_after_it_settles() {
+    let (mut e, socket, mut reads, _) = start();
+    let info = take(&mut reads, "accountinfo");
+    response(&mut e, &info, 30.0, INFO);
+    reads.extend(requests(&mut e));
+    let positions = take(&mut reads, "/v3/positions");
+    let normal = take(&mut reads, "/v1/orders?");
+    let algo = take(&mut reads, "/v3/algo/orders?");
+    let repeated = stream_ready(&mut e, socket, 40.0);
+    assert!(
+        !repeated
+            .iter()
+            .any(|r| r.url.contains("/v3/positions") || r.url.contains("/orders?")),
+        "the reads in flight are still the only ones"
+    );
+    response(&mut e, &positions, 50.0, POS);
+    response(&mut e, &normal, 51.0, &page(ORDER));
+    assert!(
+        requests(&mut e).is_empty(),
+        "the second read waits for every read in flight"
+    );
+    response(&mut e, &algo, 52.0, &algos(ALGO));
+    let mut again = requests(&mut e);
+    take(&mut again, "/v3/positions");
+    take(&mut again, "/v1/orders?");
+    take(&mut again, "/v3/algo/orders?");
 }

@@ -14,6 +14,7 @@ pub mod error;
 pub mod execution;
 pub mod execution_group;
 pub mod fence;
+pub mod fresh_positions;
 pub mod history;
 mod id_map;
 pub(crate) use id_map::IdMap;
@@ -26,13 +27,16 @@ pub mod nonce;
 pub mod num;
 #[cfg(feature = "order-locks")]
 mod order_locks;
+pub mod order_read_cover;
 pub mod paging;
 mod placement_acks;
+pub mod protective_amend;
 mod protocol_clock;
 pub mod public_feed;
 pub mod read_scheduler;
 #[cfg(feature = "repair-mutations")]
 pub mod repair;
+pub mod request_budget;
 pub mod request_context;
 pub mod resource_ids;
 pub mod selected_read;
@@ -44,14 +48,19 @@ mod signing_dispatch;
 pub mod signing_headers;
 pub mod signing_policy;
 mod signing_release;
+pub mod text;
 pub use signing_dispatch::{DispatchContext, SignStep};
 pub use signing_release::{SigningRelease, StampFloor};
+pub mod frame_fed;
+pub mod ingest;
+pub mod setting_holds;
 pub mod socket;
 #[cfg(feature = "managed-sockets")]
 mod socket_driver;
 #[cfg(feature = "managed-sockets")]
 pub mod socket_lifecycle;
 pub mod startup;
+mod startup_causes;
 pub mod store;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
@@ -63,18 +72,21 @@ pub use capabilities::{
     AccountLookup, CancelAll, Capabilities, ClosedPositionFormat, FillHistoryTime, LeverageQuery,
     MaxLeverage, PositionHistory, QuantityUnits,
 };
-pub use credentials::ReadCredentials;
+pub use credentials::{READ_CREDENTIALS_INVALID, ReadCredentials};
 pub use engine::{
     AccountReadScope, Action, AuthOutcome, Command, CommandId, CommandWait, CredentialSlot, Cx,
-    DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpRelease, HttpRequest,
-    MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PayloadSignRequest, PollTimerBounds,
-    Query, ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SignatureTarget,
-    SigningTarget, SocketChannel, SocketContext, SocketId, SocketSpec, TimerId, Venue, VenueAction,
+    DEFAULT_COMMAND_WAIT_MS, Engine, Event, Fill, FillFinancials, HttpReadClass, HttpRelease,
+    HttpRequest, MAX_COMMAND_WAIT_MS, MergedScopeAuth, Method, Notice, PollTimerBounds, Query,
+    ROUTE_EXHAUSTED_CLOSE, RequestId, RequestRoute, Response, SigningTarget, SocketChannel,
+    SocketContext, SocketId, SocketSpec, SubscriptionTopic, TimerId, Venue, VenueAction,
     unsupported_venue_action,
 };
 pub use error::{
-    BuilderAuthorization, BuilderAuthorizationReason, ErrorKind, Outcome, Partial, VenueError,
+    BuilderAuthorization, BuilderAuthorizationReason, ErrorCause, ErrorKind, Outcome, Partial,
+    VenueError,
 };
+#[cfg(feature = "history-row-diagnostics")]
+pub use error::{HistoryDecode, HistoryDecodeReason, HistorySchema};
 pub use log::{Health, Level, LogEvent, Redacted, Value};
 pub use model::{OrderIdentityKind, OrderIdentityReceipt};
 pub use store::{OrderSnapshotToken, Store};

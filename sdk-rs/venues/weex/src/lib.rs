@@ -26,6 +26,7 @@ use safe_cex_engine::request_context::{
     Context, Egress, Operation, Owner, Policy, RetryPolicy, Scope,
 };
 use safe_cex_engine::selected_read::{ReadRole, SelectedRead};
+use safe_cex_engine::text::JoinWith;
 
 use safe_cex_engine::{
     Command, CommandId, CommandWait, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId,
@@ -327,7 +328,13 @@ impl WeexFutures {
             seed_generation: self.seed_generation,
         };
         if pending.task.is_seed() {
-            let context = match cx.http_context_with_egress(
+            let issue = if matches!(&pending.task, Task::Daily(_) | Task::BookTickers(_)) {
+                Cx::http_live_context_with_egress
+            } else {
+                Cx::http_context_with_egress
+            };
+            let context = match issue(
+                cx,
                 Scope::Background,
                 Policy {
                     operation: Operation::Read,
@@ -585,12 +592,12 @@ impl WeexFutures {
             .books
             .iter()
             .filter(|(_, b)| b.last.is_some() && b.retry.is_none())
-            .map(|(s, _)| format!("{s}@depth200"))
+            .map(|(s, _)| socket_codec::book_topic(s))
             .collect();
         desired.extend(
             self.candles
                 .keys()
-                .map(|(s, i)| format!("{s}@kline_{i}_LAST_PRICE")),
+                .map(|(s, i)| socket_codec::candle_topic(s, *i)),
         );
         desired.sort();
         let capacity = 90.min(100usize.saturating_sub(desired.len()));
@@ -740,12 +747,28 @@ fn interval(i: Interval, stream: bool) -> bool {
     matches!(i, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1) || (stream && matches!(i, H2 | H6))
 }
 impl Venue for WeexFutures {
+    fn observe_unproven_http_response(&mut self, now: f64, _: &Pending, response: Response<'_>) {
+        if response.status == 429 {
+            self.paused_until = self.paused_until.max(now + rate::delay(response, now));
+        }
+    }
+
+    fn managed_sockets() -> bool {
+        true
+    }
     fn on_socket_event(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         event: safe_cex_engine::socket_lifecycle::LifecycleEvent,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.socket_event(cx, event)
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn encode_socket_interests(
         &self,
@@ -782,6 +805,16 @@ impl Venue for WeexFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &pending.task {
+            Task::Markets(_) => S::MARKETS,
+            Task::Daily(_) | Task::BookTickers(_) => S::TICKERS,
+            Task::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.invalid_read_credentials {
             cx.notice(
@@ -1017,7 +1050,7 @@ impl Venue for WeexFutures {
             if response.status == 429 {
                 self.paused_until = self
                     .paused_until
-                    .max(cx.now + rate::delay(response, cx.now));
+                    .max(cx.now + rate::delay(response, cx.protocol_now()));
             }
             if response.status >= 400 {
                 request.failed(
@@ -1027,9 +1060,7 @@ impl Venue for WeexFutures {
             } else if p.invalid {
                 request.failed(cx, "malformed REST row".into());
             } else {
-                request
-                    .rows
-                    .sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut request.rows);
                 let result = serde_json::to_string(&request.rows).expect("candles");
                 let _ = request.completion.finish(cx, Ok(result));
                 if let Some(leg) = request.leg {
@@ -1045,7 +1076,7 @@ impl Venue for WeexFutures {
             if response.status == 429 {
                 self.paused_until = self
                     .paused_until
-                    .max(cx.now + rate::delay(response, cx.now));
+                    .max(cx.now + rate::delay(response, cx.protocol_now()));
             }
             if p.seed_generation == self.seed_generation
                 && self.account_delivery_current(cx, &request)
@@ -1053,6 +1084,9 @@ impl Venue for WeexFutures {
                 if response.status >= 400 {
                     if let Some(context) = &context {
                         let _ = cx.finish_http_context(context);
+                    }
+                    if let Some(error) = account::key_refusal(response.body) {
+                        cx.startup_read_refused(&error);
                     }
                     self.account_failed(
                         cx,
@@ -1090,7 +1124,7 @@ impl Venue for WeexFutures {
         if response.status == 429 {
             self.paused_until = self
                 .paused_until
-                .max(cx.now + rate::delay(response, cx.now));
+                .max(cx.now + rate::delay(response, cx.protocol_now()));
         }
         if let Task::History(request) = &p.task
             && !self.history_delivery_current(cx, request)
@@ -1122,7 +1156,7 @@ impl Venue for WeexFutures {
                 format!(
                     "WEEX skipped {} malformed {kind} row(s): {}",
                     p.skipped.len(),
-                    p.skipped.join(", ")
+                    p.skipped.join_with(", ")
                 ),
             );
         }
@@ -1213,6 +1247,9 @@ impl Venue for WeexFutures {
                 request.retire_leg(cx);
             }
         } else {
+            if let Some(error) = account::key_refusal(response.body) {
+                cx.startup_read_refused(&error);
+            }
             self.on_request_failed(cx, p, &message);
         }
     }
@@ -1223,7 +1260,7 @@ impl Venue for WeexFutures {
         p: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match p.task {
+        cx.with_startup_request_failure(p, error, |cx, p, error| match p.task {
             Task::Candles(request) => request.failed(cx, error),
             Task::BookQuery(request) => request.failed(cx, error),
             Task::Account(r) => {
@@ -1234,7 +1271,7 @@ impl Venue for WeexFutures {
             Task::Trade(r) => self.trade_failed(cx, r, error),
             Task::History(r) => self.history_refused(cx, r, error),
             task => self.on_request_failed(cx, Pending { task, ..p }, &error.message),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,
@@ -1262,6 +1299,10 @@ impl Venue for WeexFutures {
         owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
     ) {
         self.retire_trade(owner);
+    }
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.account.invalidate_orders();
+        self.refresh_account(cx);
     }
     fn unproven_http_evidence(
         &self,

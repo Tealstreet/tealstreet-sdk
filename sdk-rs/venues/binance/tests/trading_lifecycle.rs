@@ -49,10 +49,14 @@ fn ready(variant: Variant) -> Harness {
         r#"[{{"symbol":"{symbol}","orderId":12,"clientOrderId":"maker","price":"9000","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY","timeInForce":"GTC"}},{{"symbol":"{symbol}","orderId":13,"clientOrderId":"second","price":"9000","origQty":"7","executedQty":"2","type":"LIMIT","side":"BUY"}}]"#
     );
     h.respond(&format!("{prefix}/openOrders"), 200, &orders);
+    if !spot {
+        h.respond("/dapi/v1/openAlgoOrders", 200, "[]");
+    }
     let socket = h
         .socket(if spot { "ws-api/v3" } else { "/ws/coin-key" })
         .unwrap();
     h.event(Event::WsOpened { socket });
+    h.answer_open_position_read();
     if spot {
         h.message(
             "ws-api/v3",
@@ -302,9 +306,13 @@ fn inverse_full_close_stop_price_amend_recreates_a_zero_quantity_close_position_
     let body =
         ack(Variant::CoinM, 14, "0", "CANCELED").replace(r#""origQty":"7""#, r#""origQty":"0""#);
     h.reply(cancel.id, 200, "", &body);
-    let place = h.take("/dapi/v1/order");
+    // A stop placed before the algo migration is cancelled where it lives and comes
+    // back as an algo order.
+    assert!(cancel.url.contains("orderId=14"));
+    let place = h.take("/dapi/v1/algoOrder");
+    assert_eq!(place.method, Method::Post);
     assert!(place.url.contains("closePosition=true"));
-    assert!(place.url.contains("stopPrice=8100"));
+    assert!(place.url.contains("triggerPrice=8100"));
     assert!(!place.url.contains("quantity="));
 }
 

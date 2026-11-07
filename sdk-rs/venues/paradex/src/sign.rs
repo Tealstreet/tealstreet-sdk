@@ -1,9 +1,10 @@
 use alloy_primitives::U256;
-use safe_cex_crypto::{eip712, ethereum, sha256, starknet};
-use serde::{Deserialize, Serialize};
+use safe_cex_crypto::ethereum;
+use safe_cex_engine::signing::KeyRef;
+use serde::Deserialize;
 use starknet_crypto::{Felt, pedersen_hash};
 
-const CURVE_ORDER: &str =
+pub(crate) const CURVE_ORDER: &str =
     "3618502788666131213697322783095070105526743751716087489154079457884512865583";
 const FIELD_PRIME: &str = "800000000000011000000000000000000000000000000000000000000000001";
 
@@ -18,38 +19,18 @@ pub struct SystemConfig {
     pub paraclear_account_proxy_hash: Option<String>,
 }
 
+pub mod dispatch;
+
+/// Public signing facts: the account, chain and the provider's sealed Stark
+/// key. The scalar is never here; every signature comes from the provider.
+#[derive(Clone)]
 pub struct Credentials {
-    key: Option<zeroize::Zeroizing<[u8; 32]>>,
-    public_key: Option<String>,
+    signing: KeyRef,
+    public: Felt,
     address_felt: Felt,
     address: String,
     subkey: String,
     chain_id: Felt,
-}
-
-#[derive(Debug, Serialize)]
-pub struct OrderSignature {
-    pub signature: String,
-    pub signature_timestamp: u64,
-}
-
-pub struct AuthSignature {
-    pub signature: String,
-    pub timestamp: u64,
-    pub expiration: u64,
-}
-
-impl AuthSignature {
-    pub fn headers(&self, address: &str) -> Vec<(&'static str, String)> {
-        vec![
-            ("Content-Type", "application/json".into()),
-            ("Accept", "application/json".into()),
-            ("PARADEX-STARKNET-ACCOUNT", address.into()),
-            ("PARADEX-STARKNET-SIGNATURE", self.signature.clone()),
-            ("PARADEX-TIMESTAMP", self.timestamp.to_string()),
-            ("PARADEX-SIGNATURE-EXPIRATION", self.expiration.to_string()),
-        ]
-    }
 }
 
 fn unsigned(input: &str) -> Result<U256, String> {
@@ -83,15 +64,6 @@ pub(crate) fn felt(input: &str) -> Result<Felt, String> {
     Ok(Felt::from_bytes_be(&number.to_be_bytes()))
 }
 
-fn secret(input: &str) -> Result<Felt, String> {
-    let value = unsigned(input).map_err(|_| "Invalid Paradex private key")?;
-    let order = U256::from_str_radix(CURVE_ORDER, 10).expect("curve order");
-    if value == U256::ZERO || value >= order {
-        return Err("Invalid Paradex private key".into());
-    }
-    Ok(Felt::from_bytes_be(&value.to_be_bytes()))
-}
-
 pub(crate) fn chain_id(input: &str) -> Result<Felt, String> {
     let value = if input.starts_with("0x")
         || input.starts_with("0X")
@@ -107,28 +79,54 @@ pub(crate) fn chain_id(input: &str) -> Result<Felt, String> {
     Ok(value)
 }
 
+/// The Ethereum chain an Ethereum-derived Stark key was derived on.
+pub fn ethereum_chain(testnet: bool) -> &'static str {
+    if testnet { "11155111" } else { "1" }
+}
+
 impl Credentials {
+    /// `derived` accounts own the address their sealed key derives under the
+    /// configured class hashes, on the network's fixed Ethereum chain; a
+    /// configured chain that differs refuses rather than re-deriving.
     pub fn new(
-        key: &str,
-        address: &str,
+        signing: KeyRef,
+        public: [u8; 32],
+        account: &str,
         subkey: &str,
+        derived: Option<bool>,
         config: &SystemConfig,
     ) -> Result<Self, String> {
-        let supplied_address = felt(address).map_err(|_| "Invalid Paradex account address")?;
+        let supplied_address = felt(account).map_err(|_| "Invalid Paradex account address")?;
         if supplied_address == Felt::ZERO
             || felt(subkey).map_err(|_| "Invalid Paradex subkey address")? == Felt::ZERO
         {
             return Err("Invalid Paradex account or subkey address".into());
         }
         let chain_id = chain_id(&config.starknet_chain_id)?;
-        let (key, address_felt, address) = if key.len() == 66 {
-            (secret(key)?, supplied_address, address.to_lowercase())
-        } else {
-            derive_ethereum(key, config)?
+        let public = Felt::from_bytes_be(&public);
+        let (address_felt, address) = match derived {
+            None => (supplied_address, account.to_lowercase()),
+            Some(testnet) => {
+                let expected = unsigned(ethereum_chain(testnet)).expect("fixed chain");
+                let configured = config
+                    .l1_chain_id
+                    .as_deref()
+                    .ok_or("Missing Paradex Ethereum chain ID")?;
+                if unsigned(configured).map_err(|_| "Invalid Paradex Ethereum chain ID")?
+                    != expected
+                {
+                    return Err("Paradex Ethereum chain ID does not match this network".into());
+                }
+                let address = derived_address(public, config)?;
+                if address == Felt::ZERO {
+                    return Err("Invalid Paradex derived account address".into());
+                }
+                (address, format!("{address:#x}"))
+            }
         };
         Ok(Self {
-            key: Some(zeroize::Zeroizing::new(key.to_bytes_be())),
-            public_key: None,
+            signing,
+            public,
             address_felt,
             address,
             subkey: subkey.into(),
@@ -139,127 +137,38 @@ impl Credentials {
     pub fn address(&self) -> &str {
         &self.address
     }
-    pub fn delegated(
-        key: &str,
-        address: &str,
-        subkey: &str,
-        config: &SystemConfig,
-    ) -> Result<Self, String> {
-        let address_felt = felt(address).map_err(|_| "Invalid Paradex account address")?;
-        if key.is_empty()
-            || address_felt == Felt::ZERO
-            || felt(subkey).map_err(|_| "Invalid Paradex subkey address")? == Felt::ZERO
-        {
-            return Err("Invalid Paradex account or subkey address".into());
-        }
-        Ok(Self {
-            key: None,
-            public_key: Some(key.into()),
-            address_felt,
-            address: address.to_lowercase(),
-            subkey: subkey.into(),
-            chain_id: chain_id(&config.starknet_chain_id)?,
-        })
-    }
-    pub fn payload_request(&self, hash: &str) -> Option<safe_cex_engine::PayloadSignRequest> {
-        Some(safe_cex_engine::PayloadSignRequest {
-            exchange_name: "paradex",
-            key: self.public_key.as_ref()?.clone(),
-            payload: hash.into(),
-            scheme: "stark",
-            encoding: "felt-pair",
-        })
-    }
-    pub fn is_delegated(&self) -> bool {
-        self.public_key.is_some()
-    }
     pub fn subkey(&self) -> &str {
         &self.subkey
     }
-
-    fn signature(&self, definition: &str, values: &[Felt]) -> Result<String, String> {
-        let hash = typed_hash(self.chain_id, self.address_felt, definition, values)?;
-        let Some(key) = self.key.as_ref() else {
-            return Ok(format!("{hash:#x}"));
-        };
-        let (r, s) = starknet::sign(&hash, &Felt::from_bytes_be(key))
-            .map_err(|_| "Paradex signing failed")?;
-        Ok(format!(
-            "[\"{}\",\"{}\"]",
-            U256::from_be_bytes(r.to_bytes_be()),
-            U256::from_be_bytes(s.to_bytes_be())
-        ))
-    }
-
-    pub fn auth(&self, now_ms: u64) -> Result<AuthSignature, String> {
-        let timestamp = now_ms / 1000;
-        let expiration = timestamp
-            .checked_add(300)
-            .ok_or("Invalid Paradex auth timestamp")?;
-        let signature = self.signature(AUTH_TYPE, &auth_values(timestamp, expiration))?;
-        Ok(AuthSignature {
-            signature,
-            timestamp,
-            expiration,
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn order(
-        &self,
-        now_ms: u64,
-        market: &str,
-        side: &str,
-        order_type: &str,
-        size: &str,
-        price: Option<&str>,
-    ) -> Result<OrderSignature, String> {
-        self.sign_order(now_ms, market, side, order_type, size, price, None)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn modify(
-        &self,
-        now_ms: u64,
-        market: &str,
-        side: &str,
-        order_type: &str,
-        size: &str,
-        price: &str,
-        id: &str,
-    ) -> Result<OrderSignature, String> {
-        if id.is_empty() {
-            return Err("Cannot sign a Paradex amendment without an order ID".into());
-        }
-        self.sign_order(
-            now_ms,
-            market,
-            side,
-            order_type,
-            size,
-            Some(price),
-            Some(id),
+    /// The `/auth` typed-data hash for these seconds.
+    pub fn auth_hash(&self, timestamp: u64, expiration: u64) -> Result<Felt, String> {
+        typed_hash(
+            self.chain_id,
+            self.address_felt,
+            AUTH_TYPE,
+            &auth_values(timestamp, expiration),
         )
     }
-
-    #[allow(clippy::too_many_arguments)]
-    fn sign_order(
-        &self,
-        now_ms: u64,
-        market: &str,
-        side: &str,
-        order_type: &str,
-        size: &str,
-        price: Option<&str>,
-        id: Option<&str>,
-    ) -> Result<OrderSignature, String> {
-        let (definition, values, len) =
-            order_values(now_ms, market, side, order_type, size, price, id)?;
-        let signature = self.signature(definition, &values[..len])?;
-        Ok(OrderSignature {
-            signature,
-            signature_timestamp: now_ms,
-        })
+    /// An order's (or, with `id`, an amendment's) typed-data hash at `now_ms`.
+    pub fn order_hash(&self, now_ms: u64, order: &dispatch::Preimage<'_>) -> Result<Felt, String> {
+        let (definition, values, len) = order_values(
+            now_ms,
+            order.market,
+            order.side,
+            order.kind,
+            order.size,
+            order.price,
+            order.id,
+        )?;
+        typed_hash(self.chain_id, self.address_felt, definition, &values[..len])
+    }
+    /// The venue's signature text for a canonical provider `r || s`.
+    pub fn signature_text(r: &[u8; 32], s: &[u8; 32]) -> String {
+        format!(
+            "[\"{}\",\"{}\"]",
+            U256::from_be_bytes(*r),
+            U256::from_be_bytes(*s)
+        )
     }
 }
 
@@ -443,61 +352,8 @@ fn account_address(public: Felt, proxy: Felt, calldata: &[Felt]) -> Felt {
     Felt::from_bytes_be(&address.to_be_bytes())
 }
 
-fn ethereum_digest(chain: &str) -> Result<[u8; 32], String> {
-    let chain = unsigned(chain).map_err(|_| "Invalid Paradex Ethereum chain ID")?;
-    // EIP712Domain(string name,string version,uint256 chainId), with no
-    // verifyingContract field. Each string occupies its hashed 32-byte word.
-    let mut domain = [0u8; 128];
-    domain[..32].copy_from_slice(&ethereum::keccak256(
-        b"EIP712Domain(string name,string version,uint256 chainId)",
-    ));
-    domain[32..64].copy_from_slice(&ethereum::keccak256(b"Paradex"));
-    domain[64..96].copy_from_slice(&ethereum::keccak256(b"1"));
-    domain[96..].copy_from_slice(&chain.to_be_bytes::<32>());
-    let mut constant = [0u8; 64];
-    constant[..32].copy_from_slice(&ethereum::keccak256(b"Constant(string action)"));
-    constant[32..].copy_from_slice(&ethereum::keccak256(b"STARK Key"));
-    Ok(eip712::hash_prehashed(
-        ethereum::keccak256(&domain),
-        ethereum::keccak256(&constant),
-    ))
-}
-
-fn derive_ethereum(key: &str, config: &SystemConfig) -> Result<(Felt, Felt, String), String> {
-    let chain = config
-        .l1_chain_id
-        .as_deref()
-        .ok_or("Missing Paradex Ethereum chain ID")?;
-    let digest = ethereum_digest(chain)?;
-    let seed = ethereum::sign_digest(&digest, key).map_err(|_| "Invalid Paradex Ethereum key")?;
-    let r = seed
-        .strip_prefix("0x")
-        .unwrap_or(&seed)
-        .get(..64)
-        .ok_or("Invalid Paradex Ethereum signature")?;
-    let mut r_bytes = [0u8; 32];
-    for (byte, pair) in r_bytes.iter_mut().zip(r.as_bytes().as_chunks::<2>().0) {
-        *byte = u8::from_str_radix(
-            std::str::from_utf8(pair).map_err(|_| "Invalid Paradex Ethereum signature")?,
-            16,
-        )
-        .map_err(|_| "Invalid Paradex Ethereum signature")?;
-    }
-    let order = U256::from_str_radix(CURVE_ORDER, 10).expect("curve order");
-    // 2^256 - (2^256 mod order), represented without overflowing U256.
-    let limit = U256::MAX - (U256::MAX % order);
-    let private = (0u32..)
-        .find_map(|index| {
-            let index_bytes = index.to_be_bytes();
-            let index_start = index_bytes.iter().position(|b| *b != 0).unwrap_or(3);
-            let mut material = r_bytes.to_vec();
-            material.extend_from_slice(&index_bytes[index_start..]);
-            let digest = U256::from_be_bytes(sha256(&material));
-            (digest < limit).then_some(digest % order)
-        })
-        .ok_or("Paradex key derivation failed")?;
-    let private = secret(&private.to_string())?;
-    let public = starknet::public_key(&private);
+/// The Paraclear account address a Stark public key derives under `config`.
+fn derived_address(public: Felt, config: &SystemConfig) -> Result<Felt, String> {
     let implementation = felt(
         config
             .paraclear_account_hash
@@ -517,13 +373,13 @@ fn derive_ethereum(key: &str, config: &SystemConfig) -> Result<(Felt, Felt, Stri
         public,
         Felt::ZERO,
     ];
-    let address = account_address(public, proxy, &calldata);
-    Ok((private, address, format!("{address:#x}")))
+    Ok(account_address(public, proxy, &calldata))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use safe_cex_crypto::starknet;
 
     #[derive(Deserialize)]
     struct TextVector {
@@ -601,7 +457,7 @@ mod tests {
     #[test]
     fn fixed_eip712_digest_and_seed_match_independent_ethers() {
         for row in vectors().ethereum {
-            let digest = ethereum_digest(&row.chain).unwrap();
+            let digest = starknet::ethereum_key_digest(&row.chain).unwrap();
             assert_eq!(format!("0x{}", safe_cex_crypto::hex(&digest)), row.digest);
             assert_eq!(ethereum::sign_digest(&digest, &row.key).unwrap(), row.seed);
         }
@@ -615,7 +471,7 @@ mod tests {
             "1e3",
             "0x10000000000000000000000000000000000000000000000000000000000000000",
         ] {
-            let error = ethereum_digest(chain).unwrap_err();
+            let error = starknet::ethereum_key_digest(chain).unwrap_err();
             assert_eq!(error, "Invalid Paradex Ethereum chain ID");
         }
     }

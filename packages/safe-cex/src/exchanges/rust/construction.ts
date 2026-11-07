@@ -6,12 +6,13 @@ import { hasAsterDEXV3AuthContext, resolveAsterDEXApiVersion } from '../asterdex
 
 export type PassphraseSetupPolicy = 'optional' | 'requiredForPrivate' | 'requiredWithPrimaryFallback';
 export type KeyEncoding = 'utf8' | 'base64' | 'hex' | 'pem' | 'base64Text' | 'base58';
-export type ExtraKeyPolicy = { key: 'zklinkSeed' | 'l1Wallet'; field?: 'optional' | 'requiredForPrivate'; encoding?: KeyEncoding };
+export type ExtraKeyPolicy = { key: 'zklinkSeed' | 'l1Wallet' | 'kucoinBroker'; field?: 'optional' | 'requiredForPrivate' | 'aliasPrimary'; encoding?: KeyEncoding; trim?: boolean };
 /** Asymmetric only: a declared signing ref may answer public operations (P4). */
 export type SigningAlgorithm = 'ed25519' | 'es256' | 'secp256k1Digest' | 'starkDigest' | 'schnorrDigest';
 export type IdentitySetupPolicy = {
   trimCredential?: boolean; trimSigning?: boolean; passphrase?: PassphraseSetupPolicy; secretEncoding?: KeyEncoding; extra?: ExtraKeyPolicy;
   signingAlgorithm?: SigningAlgorithm;
+  source?: 'required' | 'scalarOnly';
   /** Credential-only primaries (no signing ref); omitted means required, today's behaviour. */
   signing?: 'optional';
 };
@@ -24,7 +25,8 @@ export type RemoteSigningPolicy = Readonly<{
   payloadSupported?: boolean;
   payloadRestOnly?: boolean;
   protectedHeaders?: readonly string[];
-  signatureEncoding?: 'hex' | 'base64';
+  /** `hex-base64` is base64 of the MAC's lowercase hex text (BloFin). */
+  signatureEncoding?: 'hex' | 'base64' | 'hex-base64';
   passphraseHeader?: string;
   wire?: Readonly<{
     exchangeName: ExchangeName; extraData?: 'bybitExpiry' | 'binanceSpot' | 'secondsTimestamp'; requestId?: string;
@@ -38,7 +40,7 @@ type Rule = {
   signerSetup?: CredentialSetupPolicy;
   remoteSigning?: RemoteSigningPolicy;
   /** Family-specific trusted setup mapping, declared rather than name-matched. */
-  setupMapping?: 'asterdex' | 'apexomni' | 'lighter' | 'mexc';
+  setupMapping?: 'asterdex' | 'apexomni' | 'lighter' | 'mexc' | 'hyperliquid' | 'paradex';
   bridge?: Partial<Omit<EngineBridgeConstruction, 'demo'>> & { demo?: 'always' | 'hyroMode' };
 };
 
@@ -51,6 +53,10 @@ export const deriveSignerSetupPolicy = (name: ExchangeName): SignerSetupPolicy =
 
 export const deriveSignerSetupMapping = (name: ExchangeName): Rule['setupMapping'] =>
   (rules.venues as Record<string, Rule>)[name]?.setupMapping;
+
+/** Hyro mode selects configured endpoints in both SDK and native construction. */
+export const deriveEndpointSetupPolicy = (name: ExchangeName): 'hyrotrader' | undefined =>
+  (rules.venues as Record<string, Rule>)[name]?.bridge?.demo === 'hyroMode' ? 'hyrotrader' : undefined;
 
 export const deriveRemoteSigningPolicy = (name: ExchangeName): RemoteSigningPolicy | undefined =>
   (rules.venues as Record<string, Rule>)[name]?.remoteSigning;

@@ -5,45 +5,20 @@ use safe_cex_venue_paradex::Options;
 use support::*;
 
 fn private() -> Harness {
-    private_with_signer(false)
-}
-fn private_with_signer(delegated: bool) -> Harness {
-    let mut h = Harness::empty(Options {
-        key: Some(if delegated {
-            "opaque-public-subkey".into()
-        } else {
-            format!("0x{}1", "0".repeat(63))
-        }),
-        paradex_address: Some("0x123".into()),
-        subkey_address: Some("0x456".into()),
-        payload_signer: delegated,
-        ..Options::default()
-    });
+    let mut h = Harness::keyed(
+        Options {
+            paradex_address: Some("0x123".into()),
+            subkey_address: Some("0x456".into()),
+            ..Options::default()
+        },
+        STARK_KEY,
+    );
     h.reply("/markets", MARKETS);
     h.reply("summary", TICKERS);
     h.reply(
         "/system/config",
         r#"{"starknet_chain_id":"PRIVATE_SN_PARACLEAR_MAINNET"}"#,
     );
-    if delegated {
-        let request = h
-            .actions
-            .iter()
-            .find_map(|a| match a {
-                safe_cex_engine::Action::SignPayload { request, .. } => Some(*request),
-                _ => None,
-            })
-            .unwrap();
-        h.e.handle(
-            h.now,
-            safe_cex_engine::Event::PayloadSigned {
-                request,
-                signature: "fixture signature",
-                headers: vec![],
-            },
-        );
-        h.collect();
-    }
     h.reply("/auth/", r#"{"jwt_token":"test-jwt"}"#);
     h.reply("/account/margin", r#"{"configs":[]}"#);
     h.reply("/positions", r#"{"results":[]}"#);
@@ -615,9 +590,10 @@ fn bounded_history_page_cap_owns_warning_before_retained_rows_at_error_only_leve
         .expect("semantic bounded-history cap marker");
     assert_eq!(event.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(37.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(37.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     let done = h
         .actions
         .iter()
@@ -760,9 +736,10 @@ fn assert_owned_marker(h: &Harness, id: u32) {
     );
     assert_eq!(markers[0].1.level, Level::Warn);
     assert_eq!(
-        markers[0].1.fields,
-        vec![("command", Value::Num(f64::from(id)))]
+        markers[0].1.fields[..1],
+        [("command", Value::Num(f64::from(id)))]
     );
+    assert_eq!(markers[0].1.fields[1].0, "reason");
     let done = h
         .actions
         .iter()
@@ -933,39 +910,43 @@ fn capped_open_lookup_keeps_nondefinitive_proof_without_a_new_warning() {
 
 #[test]
 fn owned_history_preparation_refusal_after_accepted_rows_remains_strict() {
-    for delegated in [false, true] {
+    {
         for kind in 0..3 {
-            let mut h = private_with_signer(delegated);
+            let mut h = private();
             h.actions.clear();
+            // The first page is sent just before the JWT refresh point and
+            // answered within its window, just after it: the next leg waits for
+            // `/auth`, which fails, so that page is never sent. It ends at the
+            // walk's window, which a later page does not renew.
+            h.now += 179_995.0;
             read(&mut h, 105, owned_history_query(kind));
-            // Expire JWT before the first response schedules the next leg.
-            h.now += 180_001.0;
+            h.now += 6.0;
             let row = if kind == 1 { ORDER } else { FILL };
             h.reply(
                 owned_history_path(kind),
                 &format!(r#"{{"results":[{row}],"next":"queued-auth"}}"#),
             );
-            if delegated {
-                let request = h
-                    .actions
-                    .iter()
-                    .rev()
-                    .find_map(|a| match a {
-                        safe_cex_engine::Action::SignPayload { request, .. } => Some(*request),
-                        _ => None,
-                    })
-                    .unwrap();
-                h.e.handle(
-                    h.now,
-                    safe_cex_engine::Event::PayloadSignFailed {
-                        request,
-                        error: "fixture signing refusal",
-                    },
-                );
-                h.collect();
-            } else {
+            let from = h.actions.len();
+            {
                 let auth = h.take("/auth/");
                 h.respond(auth, 503, r#"{"error":"auth unavailable"}"#);
+            }
+            let windows: Vec<_> = h.actions[..from]
+                .iter()
+                .filter_map(|a| match a {
+                    safe_cex_engine::Action::SetTimer { timer, at_ms }
+                        if *at_ms == h.now + 20_000. =>
+                    {
+                        Some(*timer)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(!windows.is_empty(), "the parked page has the walk's window");
+            h.now += 20_000.;
+            for timer in windows {
+                h.e.handle(h.now, safe_cex_engine::Event::TimerFired { timer });
+                h.collect();
             }
             assert!(h.result(105).is_err());
             assert_eq!(
@@ -1075,4 +1056,159 @@ fn fills_empty_traversal_fallback_retains_its_owner_and_single_page_shape() {
     h.reply("/fills?", r#"{"results":[]}"#);
     assert_eq!(h.result(109), Ok("[]"));
     assert!(!h.pending.iter().any(|r| r.url.contains("orders-history")));
+}
+
+#[test]
+fn a_market_delisted_between_pages_fails_the_walk_unsent_without_rows() {
+    let mut h = private();
+    read(
+        &mut h,
+        110,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let listed: Vec<_> =
+        h.e.store()
+            .markets()
+            .iter()
+            .filter(|market| market.symbol != "BTC-USD-PERP")
+            .cloned()
+            .collect();
+    h.e.store_mut().set_markets(listed);
+    h.reply(
+        "/orders-history",
+        &format!(r#"{{"next":"page-2","results":[{ORDER}]}}"#),
+    );
+    assert_eq!(h.result(110), Err("Paradex market is no longer listed"));
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::NotSent)
+    );
+    assert!(!h.actions.iter().any(|a| matches!(a,
+        safe_cex_engine::Action::Notice(safe_cex_engine::Notice::Event(e)) if e.code==safe_cex_engine::log::code::HISTORY_INCOMPLETE
+    )));
+    assert!(!h.pending.iter().any(|r| r.url.contains("cursor=page-2")));
+}
+
+#[test]
+fn a_market_unlisted_at_admission_keeps_its_native_empty_answers() {
+    let mut h = private();
+    read(
+        &mut h,
+        111,
+        Query::OrderHistory {
+            symbol: Some("UNKNOWN-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    assert_eq!(h.result(111), Ok("[]"));
+    read(
+        &mut h,
+        112,
+        Query::OrderByClientId {
+            symbol: "UNKNOWN-USD-PERP".into(),
+            client_order_id: "caller".into(),
+        },
+    );
+    assert_eq!(h.result(112), Ok(r#"{"found":false,"definitive":false}"#));
+    assert!(
+        !h.pending
+            .iter()
+            .any(|r| r.url.contains("/orders-history") || r.url.contains("/orders?"))
+    );
+}
+#[test]
+fn a_lookup_says_placed_only_for_an_order_the_venue_took() {
+    let unfilled = ORDER.replace(r#""remaining_size":"0.5""#, r#""remaining_size":"2""#);
+    for (row, expected) in [
+        (
+            unfilled.replace("USER_CANCELED", "POST_ONLY_WOULD_CROSS"),
+            r#"{"found":false,"definitive":true}"#,
+        ),
+        (
+            unfilled.replace(r#""status":"CLOSED""#, r#""status":"REJECTED""#),
+            r#"{"found":false,"definitive":true}"#,
+        ),
+        (
+            unfilled.replace("USER_CANCELED", ""),
+            r#"{"found":false,"definitive":false}"#,
+        ),
+    ] {
+        let mut h = private();
+        read(
+            &mut h,
+            11,
+            Query::OrderByClientId {
+                symbol: "BTC-USD-PERP".into(),
+                client_order_id: "caller".into(),
+            },
+        );
+        h.reply("/orders?", r#"{"results":[]}"#);
+        h.reply("/orders-history", &format!(r#"{{"results":[{row}]}}"#));
+        assert_eq!(h.result(11).unwrap(), expected, "{row}");
+    }
+    let mut h = private();
+    read(
+        &mut h,
+        12,
+        Query::OrderByClientId {
+            symbol: "BTC-USD-PERP".into(),
+            client_order_id: "caller".into(),
+        },
+    );
+    h.reply("/orders?", r#"{"results":[]}"#);
+    h.reply("/orders-history", &format!(r#"{{"results":[{unfilled}]}}"#));
+    let result: serde_json::Value = serde_json::from_str(h.result(12).unwrap()).unwrap();
+    assert_eq!(result["found"], true, "a user cancel after acknowledgement");
+}
+
+#[test]
+fn a_null_flags_field_does_not_drop_a_history_row() {
+    let mut h = private();
+    read(
+        &mut h,
+        6,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let row = ORDER.replace(r#""flags":[]"#, r#""flags":null"#);
+    assert_ne!(row, ORDER);
+    h.reply("/orders-history", &format!(r#"{{"results":[{row}]}}"#));
+    let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(6).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::Fills {
+            symbol: Some("BTC-USD-PERP".into()),
+            order_id: None,
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: Some(1_681_376_000_000.),
+            limit: None,
+        },
+    );
+    let rows = (0..100)
+        .map(|n| FILL.replace("fill-a", &format!("fill-{n}")))
+        .collect::<Vec<_>>()
+        .join(",");
+    h.reply(
+        "/fills?",
+        &format!(r#"{{"next":"page-2","results":[{rows}]}}"#),
+    );
+    assert!(h.pending.iter().any(|r| r.url.contains("cursor=page-2")));
 }

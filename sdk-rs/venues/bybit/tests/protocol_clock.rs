@@ -12,6 +12,9 @@ struct Probe {
     samples: Vec<(f64, f64)>,
 }
 impl Venue for Probe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Pending;
     fn capabilities(&self) -> Capabilities {
         self.inner.capabilities()
@@ -59,6 +62,10 @@ impl Venue for Probe {
 }
 
 fn started() -> (Engine<Probe>, HttpRequest) {
+    started_at(1_000.0)
+}
+
+fn started_at(now: f64) -> (Engine<Probe>, HttpRequest) {
     let (inner, signer) = Options {
         key: Some("clock-probe-key".into()),
         secret: Some("clock-probe-secret".into()),
@@ -70,9 +77,9 @@ fn started() -> (Engine<Probe>, HttpRequest) {
         samples: Vec::new(),
     });
     engine.set_signer(Some(signer)).unwrap();
-    engine.start(1_000.0);
+    engine.start(now);
     // The fee read is managed: the fixture driver completes its preparation.
-    let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 1_000.0)
+    let request = safe_cex_engine::test_support::prepared_actions(&mut engine, now)
         .into_iter()
         .find_map(|action| match action {
             Action::Http(request) if request.url.contains("/v5/account/fee-rate") => Some(request),
@@ -149,4 +156,86 @@ fn invalid_server_observations_leave_the_shared_clock_and_retry_stamp_raw() {
                 .any(|(name, value)| *name == "X-BAPI-TIMESTAMP" && value == "6000")
         );
     }
+}
+
+#[test]
+fn fast_713_second_clock_re_signs_once_with_corrected_timestamp_and_signature() {
+    use safe_cex_crypto::{Encoding, hmac_sha256};
+    let host = 1_793_990_020_473.0;
+    let server = 1_793_989_307_022.0;
+    let (mut engine, first) = started_at(host);
+    let refusal = format!(
+        r#"{{"retCode":10002,"retMsg":"invalid request, please check your server timestamp or recv_window param. req_timestamp[{host}],server_timestamp[{server}],recv_window[20000]","result":{{}}}}"#
+    );
+    engine.handle(
+        host,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: &refusal,
+            },
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut engine, host);
+    let retries: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Http(r) if r.url.contains("/v5/account/fee-rate") => Some(r),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(retries.len(), 1);
+    let second = retries[0];
+    let header = |r: &HttpRequest, key: &str| {
+        r.headers
+            .iter()
+            .find(|(name, _)| *name == key)
+            .unwrap()
+            .1
+            .clone()
+    };
+    assert_eq!(header(&first, "X-BAPI-TIMESTAMP"), host.to_string());
+    assert_eq!(header(second, "X-BAPI-TIMESTAMP"), server.to_string());
+    assert_ne!(header(second, "X-BAPI-SIGN"), header(&first, "X-BAPI-SIGN"));
+    let payload = format!(
+        "{server}clock-probe-key20000{}",
+        second.url.split_once('?').unwrap().1
+    );
+    assert_eq!(
+        header(second, "X-BAPI-SIGN"),
+        hmac_sha256(b"clock-probe-secret", payload.as_bytes(), Encoding::Hex)
+    );
+    assert_eq!(second.url, first.url);
+    assert_eq!(second.body, first.body);
+    let clock: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Event(e))
+                if e.code == "bybit.clock.corrected" =>
+            {
+                Some(e)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(clock.len(), 1, "one typed calibration observation");
+    assert_eq!(clock[0].fields, vec![("offsetMs", (server - host).into())]);
+    engine.handle(
+        host + 1.,
+        Event::HttpResponse {
+            request: second.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: &refusal,
+            },
+        },
+    );
+    assert!(
+        !safe_cex_engine::test_support::prepared_actions(&mut engine, host + 1.)
+            .into_iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/v5/account/fee-rate")))
+    );
 }

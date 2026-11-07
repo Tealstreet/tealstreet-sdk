@@ -2,6 +2,14 @@
 import type { EngineCapabilities } from './wire.mjs';
 
 export type { EngineCapabilities };
+export type HistoryDecodeDetail = {
+  schema: 'bitgetClassicFills' | 'bitgetUtaFills' | 'bitgetClassicOrders' | 'bitgetUtaOrders'
+    | 'bitgetClassicIncome' | 'bitgetUtaIncome' | 'bitgetPublicTrades' | 'krakenFills' | 'krakenOrders' | 'krakenIncome';
+  reason: 'rowShape' | 'identity' | 'symbol' | 'quantity' | 'filledQuantity' | 'timestamp'
+    | 'timestampOrder' | 'side' | 'orderStatus' | 'orderType' | 'fee' | 'market' | 'economics';
+};
+export function historyDecodeOf(value: unknown): HistoryDecodeDetail | undefined;
+
 export const DEFAULT_COMMAND_TIMEOUT_MS: 120000;
 
 export interface Socket {
@@ -26,11 +34,14 @@ export interface HttpPacket {
   request?: number;
   method: string;
   route?: 'direct' | 'publicCors' | 'primary' | 'secondary';
+  requestClass?: 'discovery' | 'orderRead' | 'orderWrite' | 'history' | 'read';
   /** Remaining original lifecycle timeout, never renewed by binding. */
   timeoutMs?: number;
   url: string;
   headers: Record<string, string>;
   body?: string;
+  /** Native admission hint; never sent as an HTTP header or payload field. */
+  readClass?: 'normal' | 'critical' | 'reconciliation' | 'bulk';
   signal?: AbortSignal;
 }
 export interface PreparedHttp {
@@ -43,7 +54,9 @@ export interface PreparedHttp {
 }
 export interface BoundHttp {
   ready(): boolean;
-  /** Invoke the transport API synchronously, return its response promise. */
+  /** Recheck shared admission, then invoke claim + dispatch synchronously in handoff. Not group-compatible. */
+  admitDispatch?(handoff: () => void): Promise<void>;
+  /** Invoke synchronously inside admitDispatch when supplied; otherwise synchronously at call. */
   dispatch(): Promise<HttpResponse>;
   cancel?(): void;
 }
@@ -51,9 +64,6 @@ export interface BoundHttp {
 export interface Transport {
   /** Default account HTTP adapter, resolved by the routing host. */
   httpMode?: 'direct' | 'how';
-  signPayload?(request: {
-    exchangeName: 'paradex'; key: string; payload: string; scheme: 'stark'; encoding: 'felt-pair';
-  }, context: { signal: AbortSignal }): Promise<{ signature: string; headers?: Record<string, string> }> | { signature: string; headers?: Record<string, string> };
   /** Host-derived protocol options; apply after caller options when constructing the engine. */
   engineOptions?: Readonly<Record<string, unknown>>;
   /** Header-capable raw socket constructor for HOW and relay protocol clients. */
@@ -66,7 +76,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean; rejectRoute?: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void; onRouteExhausted?(): void },
+    handlers: { binary?: boolean; onBinary?(data: Uint8Array): void; context?: { feed: string; recover: boolean; rejectRoute?: boolean }; channel?: 'public' | 'private' | 'business'; publicTopics?: boolean; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void; onRouteExhausted?(): void },
   ): Socket;
   /** Explicit prepare/bind/claim support is mandatory for managed HTTP. */
   prepareHttp?(request: HttpPacket & { intent: 'public' | 'primary' | 'secondary' }): PreparedHttp | Promise<PreparedHttp>;
@@ -87,12 +97,16 @@ export function builderAuthorizationOf(value: unknown): BuilderAuthorizationDeta
 /** Structured engine failure (`engine/src/error.rs`); `message` is the user-facing text. */
 export interface VenueErrorDetail {
   message: string;
-  kind?: 'rejected' | 'invalidInput' | 'authInvalid' | 'authExpired' | 'authPermission' | 'rateLimited'
-    | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
+  kind?: 'rejected' | 'invalidInput' | 'insufficientBalance' | 'authInvalid' | 'authExpired' | 'authPermission'
+    | 'rateLimited' | 'network' | 'timeout' | 'venueUnavailable' | 'unsupported' | 'internal';
   outcome?: 'notSent' | 'rejected' | 'unknown';
+  causeCode?: string;
+  historyDecode?: HistoryDecodeDetail;
   venueCode?: string;
   venueMessage?: string;
   retryAfterMs?: number;
+  /** A stop or take-profit edit refused after its cancel: the old order was put back, or nothing protects the position. */
+  protection?: 'restored' | 'unprotected';
   partial?: { orderIds: string[]; total?: number; failedIndex?: number };
   builderAuthorization?: BuilderAuthorizationDetail;
 }
@@ -123,6 +137,18 @@ export interface EngineHandlers {
   onEvent?(event: EngineEvent): void;
   /** A socket opened, received its first frame, or closed; never per frame. */
   onSocketChange?(): void;
+  /** One Rust algo reply, as the worker posts it: `error`, `warning`, `log`,
+   * `chaser:complete`, `twap:stateUpdate`, `exec-log`, `exec-result`, or `store`
+   * (`{ activeChasers, activeTWAPs }` rows). */
+  onAlgoEmit?(op: string, data: unknown): void;
+}
+
+export interface AlgoStopAllResult {
+  stoppedChasers: string[];
+  stoppedTwaps: string[];
+  settled: boolean;
+  /** Symbols the algos attempted a placement on; their orders may not show yet. */
+  placedSymbols?: string[];
 }
 
 export interface AccountAuthResult {
@@ -182,9 +208,12 @@ export class ExchangeError extends Error {
   readonly kind?: NonNullable<VenueErrorDetail['kind']>;
   /** `unknown`: the write may have executed; `notSent`/`rejected`: it did not take effect. */
   readonly outcome?: NonNullable<VenueErrorDetail['outcome']>;
+  readonly causeCode?: string;
+  readonly historyDecode?: HistoryDecodeDetail;
   readonly venueCode?: string;
   readonly venueMessage?: string;
   readonly retryAfterMs?: number;
+  readonly protection?: NonNullable<VenueErrorDetail['protection']>;
   readonly partialOrderIds?: string[];
   readonly partialOrderCount?: number;
   readonly totalOrderCount?: number;
@@ -260,7 +289,7 @@ export interface SigningIdentity {
   /** Trusted caller-assigned identity/nonce scope; never a key hash or slot name. */
   stableId?: string;
   /** Additional provider-owned signing refs; never an identity or nonce scope. */
-  extra?: { zklinkSeed?: string; l1Wallet?: string };
+  extra?: { zklinkSeed?: string; l1Wallet?: string; kucoinBroker?: string };
 }
 export interface SigningIdentities { primary?: SigningIdentity; secondary?: SigningIdentity }
 export interface LocalIdentityMetadata {
@@ -285,11 +314,12 @@ export interface SignResult {
 export interface HostedSigningClock { stampMs: number; revision: string }
 export type HostedSigningInput = { kind: 'credential' }
   | { kind: 'http'; payload: string; stampMs: number; revision: string }
-  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' };
+  | { kind: 'wsAuth'; toSign: string; outputFormat: 'hex' | 'base64' | 'hex-base64' | 'bitunix-double-sha256' | 'backpack-ed25519' | 'kucoin-batch' };
 export interface HostedSigningOutput { credential?: string; signature?: string; headers?: [string, string][] }
 export interface SignRequest {
   receipt: SignReceipt;
-  operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] })[];
+  operations: ({ kind: 'sign'; algorithm: SignAlgorithm; key: string; payload: SignPart[] } | { kind: 'present'; key: string } | { kind: 'sha256'; payload: SignPart[] }
+    | { kind: 'publicAddress'; key: string } | { kind: 'publicKey'; algorithm: SignAlgorithm; key: string })[];
   context: { venue: string; method: string; host: string; path: string };
 }
 export type SigningScope = 'account' | 'balance' | 'orders' | 'positions' | 'settings';
@@ -310,6 +340,10 @@ export interface SignMeta {
 export type Signer = (request: SignRequest, context: { signal: AbortSignal; meta?: SignMeta }) => Promise<SignResult> | SignResult;
 
 export interface EngineHostOptions {
+  /** Drain a newly observed protocol clock correction at a host entry, outside
+   * physical HTTP handoffs. Must only sample/drain data, never call the engine.
+   * A refused correction stays pending in the host until a later successful entry. */
+  protocolTime?: () => { now: number; utc: number } | undefined;
   /** Transfer raw engine allocation ownership after successful construction.
    * Defaults false; borrowed callers dispose the host, then free their engine.
    * Trap cleanup is best effort. */
@@ -344,6 +378,9 @@ export interface CommandOptions {
    * Installed before dispatch and released on settlement, timeout or disposal.
    * Observer failures cannot replace the native result. */
   onEvent?(event: EngineEvent): void;
+  /** Stamps this write's engine stages: `signed` only for a provider signer, and
+   * `sent`/`response` for requests this command started. Observer failures are ignored. */
+  onStage?(stage: 'accepted' | 'signed' | 'sent' | 'response' | 'reply'): void;
 }
 
 export interface EngineEvent {
@@ -356,6 +393,7 @@ export interface EngineEvent {
 }
 
 /** One socket channel's state since host construction; times are `Date.now()`. */
+/** Per carried channel; a multiplexed physical socket contributes to both channels. */
 export interface EngineSocketStats {
   /** Sockets currently open. */
   open: number;
@@ -422,8 +460,22 @@ export interface WasmEngineLike {
   health?(): string;
   /** JSON of the venue's capability record. */
   capabilities(): string;
+  syncHostTime?(now: number, utc: number): boolean;
   start(now: number): string;
   command(json: string, now: number): string;
+  /** `algos` builds: `now` is the engine clock, `wall` epoch ms. */
+  algoStart?(accountName: string, now: number, wall: number): void;
+  algoOp?(op: string, dataJson: string, now: number, wall: number): string;
+  algoAdvance?(now: number, wall: number): string;
+  algoDeadline?(): number | undefined;
+  algoEmits?(): string;
+  algoDispose?(now: number, wall: number, reason?: string): string;
+  algoStopAll?(now: number, wall: number, reason?: string): string;
+  algoRunning?(): boolean;
+  /** A `frameFed` engine's ingest of one data-source frame; returns actions JSON. */
+  applyFrame?(frame: Uint8Array, snapshot: boolean, now: number): string;
+  /** A `frameFed` engine's data-source clock minus the host's, in ms. */
+  setSourceClockOffset?(offsetMs: number | undefined): void;
   takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   /** Full private sections and unflushed catalog; absence is unsupported. */
@@ -446,9 +498,11 @@ export interface WasmEngineLike {
   setAddressSetupSupport?(protocol: 'publicAddressOwned'): void;
   initializeAddressSetup?(now: number, reinitialize: boolean): string;
   addressSetupReady?(): boolean;
+  hostedWalletSigning?(toSign: string, outputFormat: string, now: number): string;
   addressSetupRetired?(token: string, now: number): string;
   /** Optional engine ownership export; invalid or absent data retains the legacy context. */
   signMeta?(attempt: number): string | undefined;
+  httpReadClass?(request: number): 0 | 1 | 2 | 3;
   httpPreparationPending?(preparation: string): boolean;
   httpPrepared?(preparation: string, resource: string, expiresAt: number | undefined, now: number): string;
   httpPreparationFailed?(preparation: string, code: 'unsupported' | 'timedOut' | 'stale' | 'invalid' | 'network', now: number): string;
@@ -467,8 +521,6 @@ export interface WasmEngineLike {
   signed?(attempt: number, resultJson: string, now: number): string;
   signFailed?(attempt: number, code: 'refused' | 'timedOut' | 'invalidResult' | 'unavailable', now: number): string;
   prepareDispatch?(now: number): string;
-  payloadSigned?(request: number, signature: string, headers: string, now: number): string;
-  payloadSignFailed?(request: number, error: string, now: number): string;
   timer(timer: number, now: number): string;
 }
 
@@ -479,21 +531,48 @@ export class EngineHost {
   capabilities(): EngineCapabilities;
   constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: EngineHostOptions);
   start(): void;
+  /** Bind address-bound slots through the injected signer before `start`; resolves
+   * once every setup task has settled (bound or refused). A no-op without a signer. */
+  prepareAddressSetup(): Promise<void>;
   /** Sign compatibility bytes without startup, transport actions or account mutation. */
   hostedSigningClock(): HostedSigningClock;
   hostedSigning(input: HostedSigningInput): Promise<HostedSigningOutput>;
+  /** Device answer for a keyless server's wallet ws-auth request, signed by the
+   * local provider; refuses an injected signer. Returns the `0x` hex result. */
+  hostedWalletSigning(input: { toSign: string; outputFormat: 'grvt-order' | 'grvt-address' | 'hyperliquid-l1' | 'hyperliquid-address' | 'lighter-tx' | 'paradex-stark' | 'paradex-public' }): string;
   /** Resolves with the command's result for commands that report one. */
   command(command: { op: string; [field: string]: unknown }, options?: CommandOptions): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
+  /** Apply one data-source frame to a `frameFed` engine; a snapshot resets its account state first. */
+  applyFrame(frame: ArrayBuffer | Uint8Array, snapshot: boolean): void;
+  /** A `frameFed` engine's data-source clock minus this host's, in ms. */
+  syncHostTime(utc: number, observedNow?: number): void;
+  setSourceClockOffset(offsetMs: number | undefined): void;
   snapshot(): ArrayBuffer;
   accountSnapshot(): ArrayBuffer;
   socketHealth(): Record<EngineSocketChannel, EngineSocketStats>;
   /** Abnormally close the open sockets of `channel` (all when omitted) so the
    * venue reconnects; returns how many were closed. */
   reconnectSockets(channel?: EngineSocketChannel): number;
+  /** Sockets waiting out plain backoff redial now; a venue-imposed floor still binds. */
+  redialWaitingSockets(): void;
   /** Undefined for an engine without `health()`. */
   health(): EngineHealth | undefined;
+  /** Start this account's Rust algos on an `algos` engine build; the host then
+   * keeps their timer armed and delivers replies to `onAlgoEmit`. */
+  algoStart(accountName: string): void;
+  /** Started and not yet stopped or disposed. */
+  readonly algosRunning: boolean;
+  /** One algo op (`chaser:start`, `twap:stop`, `exec`, ...); throws if refused. */
+  algoOp(op: string, data: unknown): void;
+  /** Stop every algo (chases once their cancels settle, bounded); resolves when
+   * they are gone. Dispose the host after that. */
+  algoDispose(reason?: string): Promise<void>;
+  /** A nuke's first step: stop every TWAP and chase, the algos staying up.
+   * Resolves once chase cancels settle (bounded by the engine at 10 s);
+   * `settled` is false when they did not or the algos ended first. */
+  algoStopAll(reason?: string): Promise<AlgoStopAllResult>;
   dispose(): void;
 }
 

@@ -2,6 +2,7 @@
 //! positions and the unified wallet, and the reconciliation that keeps them
 //! honest against the stream.
 use crate::sign::Query;
+use crate::venue_state::category_code;
 use crate::wire::*;
 use crate::{BybitLinear, Category, Channel, Pending, Rest, Then, venue_error};
 use safe_cex_engine::Level;
@@ -14,12 +15,28 @@ use safe_cex_engine::model::{
     TimeInForce,
 };
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Response, SocketId, Store, TimerId, num};
+use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::{Cx, ErrorKind, Fill, Response, SocketId, Store, TimerId, VenueError, num};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+/// Account info that got no answer is read again after this wait, doubling to the cap.
+const ACCOUNT_INFO_RETRY_MIN_MS: f64 = 5_000.0;
+const ACCOUNT_INFO_RETRY_MAX_MS: f64 = 60_000.0;
 /// Positions and the wallet are re-read this often; the stream carries
 /// changes in between, so this only repairs what a dropped frame missed.
 const RECONCILE_INTERVAL_MS: f64 = 5_000.0;
+/// While the private topics are live, positions (with no position open) and the
+/// wallet come from them; REST re-reads them only this often as a safety
+/// reconcile (TS polled every tick).
+const SAFETY_RECONCILE_MS: f64 = 60_000.0;
+/// /v5/position/list lags the private stream: a read issued this soon after a
+/// symbol's frame may omit it, so the frame wins (TS merges for the same 1 s).
+const POSITION_FRAME_GUARD_MS: f64 = 1_000.0;
+/// How long the per-tick position read outlives the last open position, so a
+/// lagging read that wrongly showed flat is repaired before the safety reconcile.
+const POSITION_READ_TAIL_MS: f64 = 30_000.0;
+/// How soon `readPositions` tries again after a read a stream frame overrode.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
 /// Consecutive Hyro reads the private stream may overtake before one is admitted.
 const HYRO_OVERTAKEN_READS: u8 = 2;
 const FILL_REPAIR_GRACE_MS: f64 = 8_000.0;
@@ -28,6 +45,8 @@ const ORDERS_RETRY_MS: f64 = 15_000.0;
 const ORDERS_PAGE_LIMIT: u32 = 50;
 /// The window for a whole paged account read; each page keeps its own 20 s.
 const ACCOUNT_READ_WINDOW_MS: u32 = 60_000;
+/// Public traffic cannot keep a failed private bootstrap pending forever.
+const PRIVATE_STARTUP_TIMEOUT_MS: f64 = 60_000.0;
 const POSITIONS_PAGE_LIMIT: u32 = 200;
 const EXECUTION_CACHE_LIMIT: usize = 4096;
 const TERMINAL_ORDER_CACHE_LIMIT: usize = 4096;
@@ -100,7 +119,7 @@ pub enum Request {
         coin: &'static str,
         cursor: String,
         rows: Vec<Mapped>,
-        unsupported: Vec<String>,
+        unsupported: Vec<(String, String)>,
         invalid: bool,
         rejected: RowAdmission<String>,
     },
@@ -111,6 +130,7 @@ pub enum Request {
         rows: Vec<MappedPosition>,
         invalid: bool,
         rejected: RowAdmission<String>,
+        unlisted: Vec<String>,
     },
     Wallet {
         session: u32,
@@ -135,6 +155,9 @@ pub struct Mapped {
     /// A position TP/SL (`tpslMode` Full or Partial), rather than an
     /// opening trigger. Full stops have zero amount in the store.
     pub position_bound: bool,
+    /// A futures trailing take-profit (`TrailingProfit`): shown as a take
+    /// profit at its trigger, but Bybit offers no way to edit it in place.
+    pub trailing_profit: bool,
     fill_cursor: Option<Cursor>,
     terminal: bool,
     /// A spot TP/SL classified with neither a trigger direction nor a price
@@ -159,11 +182,14 @@ struct PositionsJoin {
     /// Position-event count when the reads were issued; a newer stream event
     /// makes the snapshot stale.
     version: u32,
+    issued_at: f64,
     pending: usize,
     rows: Vec<MappedPosition>,
     failed: bool,
     rejected: RowAdmission<String>,
     cursors: HashSet<String>,
+    /// Owned rows this product does not trade, on no catalogued market.
+    unlisted: Vec<String>,
 }
 
 struct OrdersJoin {
@@ -176,7 +202,7 @@ struct OrdersJoin {
     issued_at: f64,
     pending: usize,
     rows: Vec<Mapped>,
-    unsupported: Vec<String>,
+    unsupported: Vec<(String, String)>,
     failed: bool,
     rejected: RowAdmission<String>,
     cursors: HashSet<String>,
@@ -198,6 +224,9 @@ pub struct Wallet {
 
 struct HyroSnapshot {
     revision: u32,
+    /// The positions read of this snapshot.
+    generation: u32,
+    unlisted: Vec<String>,
     orders: Option<Vec<Mapped>>,
     positions: Option<Vec<MappedPosition>>,
     wallet: Option<Wallet>,
@@ -241,26 +270,72 @@ pub struct AccountState {
     pub margin_type: Option<MarginType>,
     /// `unifiedMarginStatus` 1 is a classic account: USDT only, CONTRACT wallet.
     classic: bool,
+    /// The wait before reading account info again after it got no answer; 0 when answered.
+    info_retry_ms: f64,
+    info_retry_timer: Option<TimerId>,
     tick_timer: Option<TimerId>,
     partial_stop_refresh: Option<TimerId>,
     position_version: u32,
+    /// When each symbol's latest position frame landed.
+    position_frames_at: HashMap<String, f64>,
+    last_open_position_at: f64,
+    /// Bumped by acknowledged leverage and mode writes only, unlike `position_version`.
+    pub(crate) settings_version: u32,
     positions_generation: u32,
     positions: Option<PositionsJoin>,
     positions_follow_up: bool,
+    /// The venue's error for the private read that just failed.
+    read_error: Option<VenueError>,
     orders_generation: u32,
     orders: Option<OrdersJoin>,
     orders_follow_up: bool,
     orders_stale: bool,
+    /// Stale only because the last read rejected rows, on these markets: it is
+    /// retried, but it still proves absence everywhere else.
+    orders_stale_unproven: Option<Vec<String>>,
     last_orders_retry_at: f64,
     wallet_in_flight: bool,
     wallet_follow_up: bool,
     wallet: Option<Wallet>,
+    /// The private topics are subscribed on an authenticated socket.
+    topics_live: bool,
+    /// When positions and the wallet were last read over REST.
+    last_account_read_at: f64,
     /// Bybit permits different position modes on different symbols.
     pub position_modes: HashMap<String, bool>,
     pub position_bound: HashSet<String>,
+    /// Ids of futures trailing take-profits, which amends refuse.
+    pub trailing_profit: HashSet<String>,
+    /// Frame-fed: the mode this engine switched to, held over the data source
+    /// until its VENUE_STATE agrees (`SettingKey::Venue(MODE_HOLD, category)`).
+    pub held_mode: Option<bool>,
+}
+
+impl Request {
+    fn is_startup_snapshot_read(&self) -> bool {
+        matches!(
+            self,
+            Self::Orders { .. } | Self::Positions { .. } | Self::Wallet { .. }
+        )
+    }
+
+    /// A full private snapshot read, where no rows means no rows.
+    pub(crate) fn is_snapshot_read(&self) -> bool {
+        matches!(self, Self::Orders { .. } | Self::Positions { .. })
+    }
 }
 
 impl AccountState {
+    fn mark_orders_stale(&mut self) {
+        self.orders_stale = true;
+        self.orders_stale_unproven = None;
+    }
+
+    /// Whether the last order read may release an uncertain-write fence.
+    fn orders_read_proves(&self) -> bool {
+        !self.orders_stale || self.orders_stale_unproven.is_some()
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             unsupported_logged: RowReports::unbounded(RowRepeat::Once),
@@ -327,6 +402,19 @@ pub(crate) fn valid_hyro_order(row: &OrderRow<'_>) -> bool {
         ]
         .into_iter()
         .all(optional_numeric)
+}
+
+/// A hedged position speaks for its own side's rail; a one-way one for both.
+fn position_leverage(setting: &mut MarketSetting, position: &Position) {
+    setting.leverage = position.leverage;
+    if position.position_mode != Some(PositionMode::Hedged) {
+        setting.buy_leverage = None;
+        setting.sell_leverage = None;
+    } else if position.side == PositionSide::Long {
+        setting.buy_leverage = Some(position.leverage);
+    } else {
+        setting.sell_leverage = Some(position.leverage);
+    }
 }
 
 fn valid_hyro_position(row: &PositionRow<'_>) -> bool {
@@ -402,6 +490,24 @@ fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
         })
 }
 
+/// retCode 0 with `result.list` explicitly null: an empty page, on this read only.
+pub(crate) fn success_with_null_list(body: &str) -> bool {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Envelope<'a> {
+        ret_code: i64,
+        #[serde(borrow)]
+        result: Result<'a>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Result<'a> {
+        #[serde(borrow)]
+        list: &'a serde_json::value::RawValue,
+    }
+    serde_json::from_str::<Envelope<'_>>(body)
+        .is_ok_and(|envelope| envelope.ret_code == 0 && envelope.result.list.get() == "null")
+}
+
 pub(crate) fn valid_snapshot_list(body: &str, cursor: &str) -> bool {
     #[derive(serde::Deserialize)]
     struct Envelope {
@@ -410,7 +516,7 @@ pub(crate) fn valid_snapshot_list(body: &str, cursor: &str) -> bool {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct List {
-        list: Vec<serde::de::IgnoredAny>,
+        list: Option<Vec<serde::de::IgnoredAny>>,
         #[serde(default)]
         next_page_cursor: Option<String>,
     }
@@ -437,6 +543,21 @@ pub fn order_side(text: Option<&str>) -> Option<OrderSide> {
     }
 }
 
+fn note_unknown_order_trigger(cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) {
+    if [
+        (&row.trigger_by, &row.trigger_price),
+        (&row.tp_trigger_by, &row.take_profit),
+        (&row.sl_trigger_by, &row.stop_loss),
+    ]
+    .iter()
+    .any(|(reference, level)| {
+        float_of(level) > 0.0
+            && present(reference).is_some_and(|name| trigger(Some(name)).is_none())
+    }) {
+        cx.notice(Level::Warn, "order.trigger_unknown", "Bybit order has an unrecognized trigger reference; a TP write will use LastPrice when no reference is known");
+    }
+}
+
 fn trigger(text: Option<&str>) -> Option<StopTriggerType> {
     match text? {
         "MarkPrice" => Some(StopTriggerType::MarkPrice),
@@ -450,9 +571,12 @@ pub fn order_type(text: &str) -> Option<OrderType> {
     Some(match text {
         "Limit" => OrderType::Limit,
         "Market" => OrderType::Market,
-        "Stop" | "StopLoss" | "PartialStopLoss" => OrderType::StopLoss,
+        // MmRateClose closes the position when margin use reaches a set rate.
+        "Stop" | "StopLoss" | "PartialStopLoss" | "MmRateClose" => OrderType::StopLoss,
         "TakeProfit" | "PartialTakeProfit" => OrderType::TakeProfit,
         "TrailingStop" => OrderType::TrailingStopLoss,
+        // A futures trailing take-profit: a take profit at its current trigger.
+        "TrailingProfit" => OrderType::TakeProfit,
         _ => return None,
     })
 }
@@ -535,6 +659,19 @@ fn priced_tpsl_kind(order: &Order, store: &Store) -> Option<OrderType> {
     })
 }
 
+/// The wire fields `map_order` reads to type an order, for the unsupported-order log.
+fn unsupported_detail(o: &OrderRow<'_>) -> String {
+    format!(
+        "orderType {:?}, stopOrderType {:?}, createType {:?}, tpslMode {:?}, side {:?}, triggerPrice {:?}",
+        present(&o.order_type),
+        present(&o.stop_order_type),
+        present(&o.create_type),
+        present(&o.tpsl_mode),
+        o.side.as_deref(),
+        present(&o.trigger_price),
+    )
+}
+
 pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     let stop_order_type = present(&o.stop_order_type);
     let tpsl_mode = present(&o.tpsl_mode);
@@ -545,12 +682,16 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
             "CreateByTakeProfit" | "CreateByPartialTakeProfit" => Some("TakeProfit"),
             "CreateByStopLoss" | "CreateByPartialStopLoss" => Some("StopLoss"),
             "CreateByTrailingStop" => Some("TrailingStop"),
+            "CreateByTrailingProfit" => Some("TrailingProfit"),
             _ => None,
         })
         .flatten();
     let is_stop = stop_order_type.is_some_and(|t| t != "UNKNOWN") || from_create_type.is_some();
     let trigger_price = present(&o.trigger_price);
-    let spot_tpsl = stop_order_type == Some("tpslOrder");
+    let spot_tpsl = matches!(
+        stop_order_type,
+        Some("tpslOrder" | "OcoOrder" | "BidirectionalTpslOrder")
+    );
     let last = store.ticker(&o.symbol).map_or(0.0, |ticker| ticker.last);
     let unpriced_tpsl = spot_tpsl && o.trigger_direction.is_none() && last <= 0.0;
     let spot_tpsl_kind = spot_tpsl.then(|| {
@@ -580,6 +721,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         && !o.reduce_only
         && !o.close_on_trigger
         && !position_bound
+        && wire_type != "TrailingProfit"
         && (trigger_price.map_or(0.0, float) > 0.0 || create_type == Some("CreateByStopOrder"));
     let kind = if opening_trigger {
         OrderType::Conditional
@@ -601,7 +743,9 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
         Some(leaves) => float(leaves),
         None => subtract(qty, filled),
     };
-    let amount = if matches!(wire_type, "StopLoss" | "TakeProfit") && tpsl_mode == Some("Full") {
+    let amount = if matches!(wire_type, "StopLoss" | "TakeProfit" | "TrailingProfit")
+        && tpsl_mode == Some("Full")
+    {
         0.0
     } else {
         qty
@@ -614,13 +758,20 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     };
     let reject = present(&o.reject_reason);
     let inverse = is_inverse_symbol(&o.symbol);
-    let extra = (inverse || reject == Some("EC_PostOnlyWillTakeLiquidity")).then(|| OrderExtra {
-        remaining_native: inverse.then_some(remaining),
-        remaining_notional: inverse.then_some(remaining),
-        reject_reason: (reject == Some("EC_PostOnlyWillTakeLiquidity"))
-            .then_some(RejectReason::PostOnly),
-        ..OrderExtra::default()
-    });
+    // A Limit stop executes at its own price once triggered; an edit must keep it.
+    let stop_limit = (is_stop && present(&o.order_type) == Some("Limit"))
+        .then(|| o.price.as_deref().map(float))
+        .flatten()
+        .filter(|price| price.is_finite() && *price > 0.0);
+    let extra = (inverse || reject == Some("EC_PostOnlyWillTakeLiquidity") || stop_limit.is_some())
+        .then(|| OrderExtra {
+            remaining_native: inverse.then_some(remaining),
+            remaining_notional: inverse.then_some(remaining),
+            reject_reason: (reject == Some("EC_PostOnlyWillTakeLiquidity"))
+                .then_some(RejectReason::PostOnly),
+            conditional_order_price: stop_limit,
+            ..OrderExtra::default()
+        });
     let id = o.order_id.to_string();
     let parent = Order {
         id: id.clone(),
@@ -677,7 +828,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
                     amount
                 },
                 client_order_id: None,
-                trigger_type: trigger(present(by)).or(parent.trigger_type),
+                trigger_type: trigger(present(by)),
                 extra: inverse.then(|| OrderExtra {
                     remaining_native: Some(remaining),
                     remaining_notional: Some(remaining),
@@ -691,6 +842,7 @@ pub fn map_order(o: &OrderRow<'_>, store: &Store, now: f64) -> Option<Mapped> {
     Some(Mapped {
         orders,
         position_bound,
+        trailing_profit: wire_type == "TrailingProfit",
         unpriced_tpsl,
         terminal: matches!(
             o.order_status.as_ref(),
@@ -1055,6 +1207,22 @@ impl BybitLinear {
         self.account.partial_stop_refresh = Some(cx.set_timer(250.0));
     }
 
+    /// A fresh order read after the venue changed orders no row of ours names.
+    pub(crate) fn refresh_order_source(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.variant.is_hyro() {
+            if self.account.authed && self.account.handshake.is_none() {
+                if self.account.snapshot.is_some() {
+                    self.account.revision = self.account.revision.wrapping_add(1);
+                } else {
+                    self.start_hyro_snapshot(cx);
+                }
+            }
+        } else {
+            self.account.orders_follow_up |= self.account.orders.is_some();
+            self.fetch_orders(cx);
+        }
+    }
+
     pub(crate) fn note_order_terminal(&mut self, ids: &[String]) {
         // Terminal rows can be removed, or share the snapshot issue timestamp.
         self.account.revision = self.account.revision.wrapping_add(1);
@@ -1119,6 +1287,11 @@ impl BybitLinear {
         is_linear(category, symbol) && (!self.variant.is_hyro() || symbol.ends_with("USDT"))
     }
 
+    /// A REST row answers the category requested: spot rows carry it only at the top level.
+    fn read_row_trades(&self, category: &Option<Str<'_>>, symbol: &str) -> bool {
+        self.trades_row(category, symbol) || self.variant.is_spot() && present(category).is_none()
+    }
+
     fn map_account_position(
         &self,
         row: &PositionRow<'_>,
@@ -1138,6 +1311,7 @@ impl BybitLinear {
             cx.clear_timer(timer);
         }
         self.account.authed = false;
+        self.account.topics_live = false;
         if !self.variant.is_hyro() {
             self.account.session_version += 1;
             self.account.orders_generation += 1;
@@ -1145,9 +1319,13 @@ impl BybitLinear {
             self.drop_account_reads(cx);
             self.account.orders_follow_up = false;
             self.account.positions_follow_up = false;
-            self.account.orders_stale = true;
+            self.account.mark_orders_stale();
             self.account.wallet_in_flight = false;
             self.account.wallet_follow_up = false;
+            // The dropped read owed a command; REST does not need the socket.
+            if self.fresh_positions.owed(category_code(self.category)) {
+                self.fetch_positions(cx);
+            }
             return;
         }
         self.account.session_version += 1;
@@ -1169,6 +1347,14 @@ impl BybitLinear {
     /// A periodic read that failed in transport keeps the healthy stream and the
     /// last good state; the next tick retries. Bad content still reconnects.
     fn hyro_read_failed(&mut self, cx: &mut Cx<'_, Pending>, message: &str) {
+        // A snapshot is atomic: any failed leg fails the commands it would answer.
+        let error = self
+            .account
+            .read_error
+            .take()
+            .unwrap_or_else(|| VenueError::new(format!("HyroTrader {message}")));
+        let key = category_code(self.category);
+        self.fresh_positions.failed(cx, key, u32::MAX, &error);
         let disposition = hyro_failure(
             self.account.ready,
             std::mem::take(&mut self.account.hyro_transient),
@@ -1270,6 +1456,8 @@ impl BybitLinear {
         self.account.hyro_local_refusal = false;
         self.account.snapshot = Some(HyroSnapshot {
             revision: self.account.revision,
+            generation: 0,
+            unlisted: Vec::new(),
             orders: None,
             positions: None,
             wallet: None,
@@ -1277,6 +1465,9 @@ impl BybitLinear {
         });
         self.fetch_orders(cx);
         self.fetch_positions(cx);
+        if let Some(snapshot) = &mut self.account.snapshot {
+            snapshot.generation = self.account.positions_generation;
+        }
         self.fetch_wallet(cx);
     }
 
@@ -1314,6 +1505,7 @@ impl BybitLinear {
         }
         let mut orders = Vec::new();
         self.account.position_bound.clear();
+        self.account.trailing_profit.clear();
         for mapped in snapshot.orders.expect("checked above") {
             if self.stale_terminal_snapshot(&mapped) {
                 continue;
@@ -1339,6 +1531,11 @@ impl BybitLinear {
             if mapped.position_bound {
                 self.account
                     .position_bound
+                    .insert(mapped.orders[0].id.clone());
+            }
+            if mapped.trailing_profit {
+                self.account
+                    .trailing_profit
                     .insert(mapped.orders[0].id.clone());
             }
             orders.extend(mapped.orders);
@@ -1381,6 +1578,9 @@ impl BybitLinear {
         self.account.ready = true;
         // A complete committed snapshot is the fresh order read for the fence.
         cx.orders_reconciled(None);
+        let key = category_code(self.category);
+        self.fresh_positions
+            .committed(cx, key, snapshot.generation, &snapshot.unlisted);
     }
 
     fn settle_coins(&self) -> &'static [&'static str] {
@@ -1393,8 +1593,25 @@ impl BybitLinear {
         }
     }
 
-    fn margin_type(&self) -> MarginType {
+    pub(crate) fn margin_type(&self) -> MarginType {
         self.account.margin_type.unwrap_or(MarginType::Cross)
+    }
+
+    /// Reads made on an assumed mode went to the wrong wallet and settle coins.
+    fn account_mode_corrected(&mut self, cx: &mut Cx<'_, Pending>) {
+        let margin = self.margin_type();
+        cx.store.update_positions(|p| p.margin_type = Some(margin));
+        let category = self.category;
+        for other in self.categories() {
+            self.select_category(other);
+            self.account.wallet_follow_up |= self.account.wallet_in_flight;
+            self.account.orders_follow_up |= self.account.orders.is_some();
+            self.account.positions_follow_up |= self.account.positions.is_some();
+            self.fetch_wallet(cx);
+            self.fetch_orders(cx);
+            self.fetch_positions(cx);
+        }
+        self.select_category(category);
     }
 
     pub(crate) fn request_account_info(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -1411,7 +1628,9 @@ impl BybitLinear {
     }
 
     pub(crate) fn try_start_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if !self.catalog_ready
+        // A key the venue refused is never used for the private feed or account reads.
+        if self.credentials_rejected
+            || !self.catalog_ready
             || !self.startup.account_info
             || std::mem::replace(&mut self.account.started, true)
         {
@@ -1423,9 +1642,13 @@ impl BybitLinear {
         if self.variant.is_hyro() {
             return;
         }
+        if self.category == self.primary_category {
+            self.private_startup_timer = Some(cx.set_timer(PRIVATE_STARTUP_TIMEOUT_MS));
+        }
         self.fetch_orders(cx);
         self.fetch_positions(cx);
         self.fetch_wallet(cx);
+        self.account.last_account_read_at = cx.now;
         self.account.tick_timer = Some(cx.set_poll_timer(RECONCILE_INTERVAL_MS));
     }
 
@@ -1480,6 +1703,7 @@ impl BybitLinear {
             rows: Vec::new(),
             invalid: false,
             rejected: RowAdmission::default(),
+            unlisted: Vec::new(),
         };
         let rest = Rest::get("/v5/position/list", query).streamed().signed();
         self.send_page(cx, generation, rest, Then::Account(request));
@@ -1560,9 +1784,14 @@ impl BybitLinear {
         }
     }
 
-    /// Reconcile an uncertain write with a fresh order read: an older read
-    /// still out predates the write, so it is abandoned rather than joined.
+    /// A source refresh joins an older census and owes one fresh successor;
+    /// its epoch/cover still proves only its own cut. Native uncertain writes
+    /// without a source ask keep abandoning their older read.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.orders_refresh_pending() && self.account.orders.is_some() {
+            self.account.orders_follow_up = true;
+            return;
+        }
         if let Some(old) = self.account.orders.take() {
             Self::finish_read_root(cx, old.root, &old.legs);
         }
@@ -1597,6 +1826,10 @@ impl BybitLinear {
     }
 
     pub(crate) fn fetch_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Frame-fed: positions arrive in the data source's frames, never read here.
+        if cx.frame_fed() {
+            return;
+        }
         if self.variant.is_spot() {
             cx.store.set_positions(Vec::new());
             return;
@@ -1606,6 +1839,9 @@ impl BybitLinear {
         }
         self.account.positions_generation += 1;
         let generation = self.account.positions_generation;
+        if !self.variant.is_hyro() {
+            self.account.read_error = None;
+        }
         let coins = self.settle_coins();
         let root = self.account_read_root(cx);
         self.account.positions = Some(PositionsJoin {
@@ -1613,11 +1849,13 @@ impl BybitLinear {
             legs: Vec::new(),
             generation,
             version: self.account.position_version,
+            issued_at: cx.now,
             pending: coins.len(),
             rows: Vec::new(),
             failed: false,
             rejected: RowAdmission::default(),
             cursors: HashSet::new(),
+            unlisted: Vec::new(),
         });
         for coin in coins {
             self.request_positions_page(cx, generation, coin, String::new());
@@ -1773,29 +2011,50 @@ impl BybitLinear {
     }
 
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.private_startup_timer == Some(timer) {
+            self.private_startup_timer = None;
+            let loaded = cx.store.loaded();
+            let missing: Vec<_> = [
+                ("balance", loaded.balance),
+                ("orders", loaded.orders),
+                ("positions", loaded.positions),
+            ]
+            .into_iter()
+            .filter_map(|(name, ready)| (!ready).then_some(name))
+            .collect();
+            if !missing.is_empty() && !self.private_startup_failed && !self.credentials_rejected {
+                self.private_startup_failed = true;
+                let mut error = self.private_startup_error.take().unwrap_or_else(|| {
+                    VenueError::new("No successful private account snapshot was received")
+                });
+                error.message = format!(
+                    "Bybit private startup timed out waiting for {}. Last failure: {}",
+                    missing.join_with(", "),
+                    error.message
+                );
+                cx.startup_failed(error.kind(ErrorKind::Timeout));
+            }
+            return;
+        }
         if let Some((id, symbol, placed_at)) = self.account.fill_repairs.remove(&timer) {
             self.request_fill_repair(cx, id, symbol, placed_at);
             return;
         }
         if self.account.partial_stop_refresh == Some(timer) {
             self.account.partial_stop_refresh = None;
-            if self.variant.is_hyro() {
-                if self.account.authed && self.account.handshake.is_none() {
-                    if self.account.snapshot.is_some() {
-                        self.account.revision = self.account.revision.wrapping_add(1);
-                    } else {
-                        self.start_hyro_snapshot(cx);
-                    }
-                }
-            } else {
-                self.account.orders_follow_up |= self.account.orders.is_some();
-                self.fetch_orders(cx);
-            }
+            self.refresh_order_source(cx);
             return;
         }
         if self.account.handshake_timer == Some(timer) {
             self.account.handshake_timer = None;
             self.fail_hyro(cx, "private handshake acknowledgement timed out");
+            return;
+        }
+        if self.account.info_retry_timer == Some(timer) {
+            self.account.info_retry_timer = None;
+            if !self.credentials_rejected {
+                self.request_account_info(cx);
+            }
             return;
         }
         if self.account.tick_timer != Some(timer) {
@@ -1816,8 +2075,32 @@ impl BybitLinear {
             self.account.last_orders_retry_at = now;
             self.fetch_orders(cx);
         }
-        self.fetch_positions(cx);
-        self.fetch_wallet(cx);
+        let reconcile = self.account_reads_due(now);
+        // Position unrealized PnL is venue-reported and the position topic may push
+        // only on position changes, so an open position keeps its per-tick read.
+        if cx
+            .store
+            .positions()
+            .iter()
+            .any(|position| position.contracts > 0.0)
+        {
+            self.account.last_open_position_at = now;
+        }
+        let recently_open = self.account.last_open_position_at > 0.0
+            && now - self.account.last_open_position_at < POSITION_READ_TAIL_MS;
+        if reconcile || recently_open {
+            self.fetch_positions(cx);
+        }
+        if reconcile {
+            self.account.last_account_read_at = now;
+            self.fetch_wallet(cx);
+        }
+    }
+
+    /// Positions and the wallet stream on the private topics; REST re-reads them
+    /// every tick only while those topics are down, else as the safety reconcile.
+    pub(crate) fn account_reads_due(&self, now: f64) -> bool {
+        !self.account.topics_live || now - self.account.last_account_read_at >= SAFETY_RECONCILE_MS
     }
 
     pub(crate) fn on_private_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -1825,6 +2108,10 @@ impl BybitLinear {
             self.account.session_version += 1;
             self.account.handshake = Some("auth");
             self.account.handshake_timer = Some(cx.set_timer(10_000.0));
+        }
+        // Hyro never reads the clock, so its handshake bookkeeping above never waits.
+        if self.auth_waits_for_clock(socket) {
+            return;
         }
         if let Some(credentials) = &self.credentials {
             let request_id = self
@@ -1859,7 +2146,7 @@ impl BybitLinear {
                 let Ok(frame) =
                     serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
                 else {
-                    self.account.orders_stale = true;
+                    self.account.mark_orders_stale();
                     if let Some(join) = &mut self.account.orders {
                         join.rejected.reject(None);
                     }
@@ -1945,14 +2232,26 @@ impl BybitLinear {
                 if self.variant.is_hyro() {
                     return;
                 }
-                if let Ok(frame) = serde_json::from_str::<TopicFrame<ExecutionRow>>(text) {
-                    let rows: Vec<_> = frame
-                        .data
-                        .iter()
-                        .filter(|r| self.trades_row(&r.category, &r.symbol))
-                        .collect();
-                    for row in rows {
-                        on_execution(cx, row, &mut self.account);
+                // One bad row must not cost the frame's other fills.
+                if let Ok(frame) =
+                    serde_json::from_str::<TopicFrame<&serde_json::value::RawValue>>(text)
+                {
+                    for item in &frame.data {
+                        match serde_json::from_str::<ExecutionRow>(item.get()) {
+                            Ok(row) => {
+                                if self.trades_row(&row.category, &row.symbol) {
+                                    on_execution(cx, &row, &mut self.account);
+                                }
+                            }
+                            Err(_) => {
+                                self.account.mark_orders_stale();
+                                row_skipped(
+                                    cx,
+                                    Level::Warn,
+                                    "Bybit malformed execution row; its order is re-read",
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -2073,6 +2372,8 @@ impl BybitLinear {
                 }
             }
             ("subscribe", Some(true)) if self.account.authed => {
+                self.account.topics_live = true;
+                self.account.last_account_read_at = cx.now;
                 // Cover the gap before topics became live, including the first connection.
                 self.account.orders_follow_up = self.account.orders.is_some();
                 self.account.positions_follow_up = self.account.positions.is_some();
@@ -2098,15 +2399,19 @@ impl BybitLinear {
             }
             (_, Some(false)) => {
                 let message = frame.ret_msg.as_deref().unwrap_or_default();
-                cx.notice(
-                    Level::Error,
-                    if op == "auth" {
-                        code::AUTH_REJECTED
-                    } else {
-                        code::SUBSCRIPTION_REJECTED
-                    },
-                    format!("[WS]{op}:{message}"),
-                );
+                let mut error = VenueError::new(format!("[WS]{op}:{message}"));
+                if op == "auth" {
+                    if let Some(code) = frame.venue_code() {
+                        error = error.venue_code(code);
+                    }
+                    cx.notice_error(Level::Error, code::AUTH_REJECTED, &error);
+                } else {
+                    cx.notice(Level::Error, code::SUBSCRIPTION_REJECTED, error.message);
+                }
+                // Bybit's clock, read before the re-auth, corrects a slow host.
+                if op == "auth" {
+                    self.read_auth_clock(cx);
+                }
                 // An unauthenticated socket answers pings but carries no topics.
                 if op == "auth"
                     && let Some(feed) = self.private.feed
@@ -2146,6 +2451,7 @@ impl BybitLinear {
         mut mapped: Mapped,
     ) {
         let status = row.order_status.as_ref();
+        note_unknown_order_trigger(cx, row);
         self.note_unpriced_tpsl(&mapped);
         if self.stale_terminal_snapshot(&mapped) {
             return;
@@ -2172,11 +2478,25 @@ impl BybitLinear {
                 } else {
                     OrderStatus::Canceled
                 };
+                let parent = mapped.orders.first().map(|order| order.id.clone());
                 for order in mapped.orders.drain(..) {
                     cx.store.upsert_order(Order {
                         status: final_status,
                         ..order
                     });
+                }
+                // A terminal row may not repeat its TP/SL; the legs do not outlive it anyway.
+                if let Some(parent) = parent {
+                    for suffix in ["__stop_loss", "__take_profit"] {
+                        let leg = format!("{parent}{suffix}");
+                        if cx
+                            .store
+                            .order(&leg)
+                            .is_some_and(|o| o.status == OrderStatus::Open)
+                        {
+                            cx.store.set_order_status(&leg, OrderStatus::Canceled);
+                        }
+                    }
                 }
             }
             "New" | "Untriggered" | "PartiallyFilled" => {
@@ -2221,6 +2541,11 @@ impl BybitLinear {
         } else if !self.account.position_bound.is_empty() {
             self.account.position_bound.remove(id);
         }
+        if mapped.trailing_profit {
+            self.account.trailing_profit.insert(id.clone());
+        } else if !self.account.trailing_profit.is_empty() {
+            self.account.trailing_profit.remove(id);
+        }
     }
 
     fn on_position_rows(&mut self, cx: &mut Cx<'_, Pending>, rows: &[PositionRow<'_>]) {
@@ -2234,6 +2559,10 @@ impl BybitLinear {
             .filter(|r| self.trades_row(&r.category, &r.symbol))
             .collect();
         for row in rows {
+            // The legs a mode switch left behind: their mode and leverage are stale.
+            if present(&row.position_status) == Some("Inactive") {
+                continue;
+            }
             // A malformed supplied Greek is not an authoritative zero. Validate
             // before changing either the position or its exact-ID metadata.
             if self.category == Category::Option && !valid_position_greeks(row) {
@@ -2257,11 +2586,16 @@ impl BybitLinear {
                     .insert(position.symbol.clone(), mode == PositionMode::Hedged);
             }
             if position.leverage > 0.0 {
-                let leverage = position.leverage;
                 cx.store.update_setting(&position.symbol, |s| {
-                    s.leverage = leverage;
+                    position_leverage(s, &position);
                     s.margin_type = Some(margin_type);
                 });
+            }
+            self.account
+                .position_frames_at
+                .insert(position.symbol.clone(), cx.now);
+            if position.contracts > 0.0 {
+                self.account.last_open_position_at = cx.now;
             }
             cx.store.upsert_position(position);
             if self.category == Category::Option {
@@ -2305,17 +2639,21 @@ impl BybitLinear {
         let identity = rejected_identity(item);
         if let Some(identity) = &identity
             && let Some(symbol) = identity.symbol.as_deref().filter(|v| !v.is_empty())
-            && !self.trades_row(&identity.category.as_deref().map(Into::into), symbol)
+            && !self.read_row_trades(&identity.category.as_deref().map(Into::into), symbol)
         {
             return;
         }
+        let symbol = identity
+            .as_ref()
+            .and_then(|r| r.symbol.clone())
+            .unwrap_or_default();
         let key = identity.and_then(|r| {
             r.symbol
                 .filter(|v| !v.is_empty())
                 .and(r.order_id.filter(|v| !v.is_empty()))
         });
-        rejected.skip(cx, key, Level::Warn, "Bybit malformed order row; cached identity/protection retained and reconciliation scheduled");
-        self.account.orders_stale = true;
+        rejected.skip_in(cx, key, &symbol, Level::Warn, "Bybit malformed order row; cached identity/protection retained and reconciliation scheduled");
+        self.account.mark_orders_stale();
     }
     fn reject_position_item(
         &mut self,
@@ -2368,7 +2706,7 @@ impl BybitLinear {
                     }
                     return;
                 }
-                if !self.trades_row(&row.category, &row.symbol) {
+                if !self.read_row_trades(&row.category, &row.symbol) {
                     return;
                 }
                 let mapped = map_order(&row, cx.store, cx.now);
@@ -2376,8 +2714,8 @@ impl BybitLinear {
                 // A sound row of a type the store cannot hold must not block every
                 // other order; finish_orders keeps its last known state and says so.
                 if well_formed && mapped.is_none() && !self.variant.is_hyro() {
-                    rejected.reject(Some(row.order_id.to_string()));
-                    unsupported.push(row.order_id.to_string());
+                    rejected.reject_in(Some(row.order_id.to_string()), &row.symbol);
+                    unsupported.push((row.order_id.to_string(), unsupported_detail(&row)));
                 } else if !well_formed
                     || mapped.as_ref().is_none_or(|mapped| {
                         mapped.orders.iter().any(|order| !valid_order(order))
@@ -2390,6 +2728,7 @@ impl BybitLinear {
                         self.reject_order_item(cx, rejected, item);
                     }
                 } else if let Some(mapped) = mapped {
+                    note_unknown_order_trigger(cx, &row);
                     self.note_unpriced_tpsl(&mapped);
                     rows.push(mapped);
                 }
@@ -2398,12 +2737,21 @@ impl BybitLinear {
                 rows,
                 invalid,
                 rejected,
+                unlisted,
                 ..
             } => {
                 let Ok(row) = serde_json::from_str::<PositionRow>(item) else {
                     if self.variant.is_hyro() {
                         *invalid = true;
                     } else {
+                        // Its size is unreadable, so an uncatalogued row is listed.
+                        if let Some(identity) = rejected_identity(item)
+                            && let Some(symbol) = identity.symbol.filter(|s| !s.is_empty())
+                            && !self.trades_row(&identity.category.map(Into::into), &symbol)
+                            && cx.store.market(&symbol).is_none()
+                        {
+                            unlisted.push(symbol);
+                        }
                         self.reject_position_item(cx, rejected, item);
                     }
                     return;
@@ -2417,6 +2765,10 @@ impl BybitLinear {
                     return;
                 }
                 if !self.trades_row(&row.category, &row.symbol) {
+                    let flat = present(&row.size).is_some_and(|s| s.parse() == Ok(0.0));
+                    if !flat && cx.store.market(&row.symbol).is_none() {
+                        unlisted.push(row.symbol.to_string());
+                    }
                     return;
                 }
                 if !admitted_position_numbers(&row, self.variant.is_hyro()) {
@@ -2446,6 +2798,37 @@ impl BybitLinear {
             },
             Err(error) => Err((*error).to_owned()),
         };
+        // The table's classification of a venue or transport failure; a reply
+        // the codec rejects later carries none. Each notice keeps its own text.
+        let classified = match &response {
+            Ok(response) => crate::read_refusal(response, ""),
+            Err(error) => Some(VenueError::new(*error).kind(ErrorKind::Network)),
+        };
+        let failed = |message: String| {
+            let mut error = classified.clone().unwrap_or_else(|| VenueError::new(""));
+            error.message = message;
+            error
+        };
+        if self.private_startup_timer.is_some()
+            && !self.private_startup_failed
+            && request.is_startup_snapshot_read()
+            && let Some(error) = &classified
+            && matches!(
+                error.kind,
+                Some(ErrorKind::AuthInvalid | ErrorKind::AuthExpired | ErrorKind::AuthPermission)
+            )
+        {
+            self.private_startup_failed = true;
+            cx.clear_timer(self.private_startup_timer.take().expect("checked above"));
+            if let Some((native, message)) = response.as_ref().ok().and_then(venue_error)
+                && crate::CREDENTIAL_REJECTIONS.contains(&native)
+            {
+                self.reject_credentials(cx, native, &message);
+            } else {
+                // Missing read permissions do not prove the trading key invalid.
+                cx.startup_failed(error.clone());
+            }
+        }
         match request {
             Request::FillRepair {
                 order_id,
@@ -2464,10 +2847,12 @@ impl BybitLinear {
                         cx, order_id, symbol, placed_at, cursor, filled, pages, body,
                     ),
                     Err(message) => {
-                        cx.notice(
+                        cx.notice_error(
                             Level::Warn,
                             code::REQUEST_FAILED,
-                            format!("Bybit fill check for order {order_id} failed: {message}"),
+                            &failed(format!(
+                                "Bybit fill check for order {order_id} failed: {message}"
+                            )),
                         );
                         // After the grace a failed check still lets open orders correct the row.
                         if cx.now - placed_at >= FILL_REPAIR_GRACE_MS {
@@ -2478,6 +2863,8 @@ impl BybitLinear {
                 }
             }
             Request::AccountInfo => {
+                let assumed = (self.account.classic, self.margin_type());
+                let reread = self.account.info_retry_ms > 0.0;
                 match outcome {
                     Ok(body) => {
                         if let Ok(info) = serde_json::from_str::<AccountInfoEnvelope>(body)
@@ -2492,10 +2879,49 @@ impl BybitLinear {
                             self.account.classic = info.unified_margin_status == Some(1);
                         }
                     }
-                    // Public data still loads; trading reports its own errors.
-                    Err(message) => cx.notice(Level::Warn, code::REQUEST_FAILED,
-                        format!("Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable"),
-                    ),
+                    Err(message) => {
+                        let refused = response
+                            .as_ref()
+                            .ok()
+                            .and_then(venue_error)
+                            .filter(|(code, _)| crate::CREDENTIAL_REJECTIONS.contains(code));
+                        match refused {
+                            // The key itself was refused (an IP allowlist, bad key or
+                            // expiry): fail visibly instead of loading empty account data.
+                            Some((code, venue_message)) => {
+                                self.reject_credentials(cx, code, &venue_message);
+                            }
+                            // Public data still loads; the private failure is an Error.
+                            // No answer is not a refusal, and markets may still be loading.
+                            None => {
+                                let lost = response.is_err();
+                                if lost {
+                                    let told = reread;
+                                    let wait = (self.account.info_retry_ms * 2.0).clamp(
+                                        ACCOUNT_INFO_RETRY_MIN_MS,
+                                        ACCOUNT_INFO_RETRY_MAX_MS,
+                                    );
+                                    self.account.info_retry_ms = wait;
+                                    self.account.info_retry_timer = Some(cx.set_timer(wait));
+                                    if told {
+                                        return;
+                                    }
+                                }
+                                let text = if lost {
+                                    format!("Bybit could not read this account: {message}")
+                                } else if cx.store.loaded().markets {
+                                    format!(
+                                        "Bybit market data is ready, but the private API was rejected ({message}) — trading is unavailable"
+                                    )
+                                } else {
+                                    format!(
+                                        "Bybit: the private API was rejected ({message}) — trading is unavailable"
+                                    )
+                                };
+                                cx.notice_error(Level::Error, code::REQUEST_FAILED, &failed(text));
+                            }
+                        }
+                    }
                 }
                 self.startup.account_info = true;
                 let classic = self.account.classic;
@@ -2511,6 +2937,12 @@ impl BybitLinear {
                     self.try_start_account(cx);
                 }
                 self.select_category(category);
+                if reread && self.account.info_retry_timer.is_none() {
+                    self.account.info_retry_ms = 0.0;
+                    if assumed != (classic, self.margin_type()) {
+                        self.account_mode_corrected(cx);
+                    }
+                }
             }
             Request::Orders {
                 generation,
@@ -2558,15 +2990,21 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.retried_failure(
-                            "bybit.account:2216",
-                            format!("Bybit orders: {message}"),
-                        );
+                        let error = failed(format!("Bybit orders: {message}"));
+                        self.private_startup_error = Some(error.clone());
+                        cx.retried_failure_error("bybit.account:2216", &error);
                         join.failed = true;
+                        if self.variant.is_hyro() {
+                            let typed = self.account.read_error.take();
+                            self.account.read_error = Some(typed.unwrap_or(error));
+                        }
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
                 }
                 self.finish_orders(cx);
+                if self.account.orders.is_none() {
+                    self.unlisted_read_landed(cx, !self.account.orders_stale);
+                }
             }
             Request::Positions {
                 generation,
@@ -2575,6 +3013,7 @@ impl BybitLinear {
                 rows,
                 invalid,
                 rejected,
+                unlisted,
             } => {
                 let malformed = invalid
                     || outcome
@@ -2601,6 +3040,7 @@ impl BybitLinear {
                     Ok(_) => {
                         join.rows.extend(rows);
                         join.rejected.extend(rejected);
+                        join.unlisted.extend(unlisted);
                         if let Some(next) = next {
                             if !join.cursors.insert(next.clone()) || join.cursors.len() > 100 {
                                 join.failed = true;
@@ -2612,11 +3052,12 @@ impl BybitLinear {
                         join.pending -= 1;
                     }
                     Err(message) => {
-                        cx.retried_failure(
-                            "bybit.account:2269",
-                            format!("Bybit positions: {message}"),
-                        );
+                        let error = failed(format!("Bybit positions: {message}"));
+                        self.private_startup_error = Some(error.clone());
+                        cx.retried_failure_error("bybit.account:2269", &error);
                         join.failed = true;
+                        let typed = self.account.read_error.take();
+                        self.account.read_error = Some(typed.unwrap_or(error));
                         self.account.hyro_transient |= !malformed && !malformed_stream(&message);
                     }
                 }
@@ -2684,16 +3125,23 @@ impl BybitLinear {
                         }
                     }
                     Err(message) => {
-                        cx.retried_failure(
-                            "bybit.account:2342",
-                            format!("Bybit balance: {message}"),
-                        );
+                        let error = failed(format!("Bybit balance: {message}"));
+                        self.private_startup_error = Some(error.clone());
+                        cx.retried_failure_error("bybit.account:2342", &error);
                         if self.variant.is_hyro() {
+                            self.account.read_error = Some(error);
                             self.hyro_read_failed(cx, "wallet reconciliation failed");
                         }
                     }
                 }
             }
+        }
+        let loaded = cx.store.loaded();
+        if loaded.balance && loaded.orders && loaded.positions {
+            if let Some(timer) = self.private_startup_timer.take() {
+                cx.clear_timer(timer);
+            }
+            self.private_startup_error = None;
         }
     }
 
@@ -2712,13 +3160,17 @@ impl BybitLinear {
             self.fetch_orders(cx);
         }
         if join.failed {
-            self.account.orders_stale = true;
+            self.account.mark_orders_stale();
             if self.variant.is_hyro() {
                 self.hyro_read_failed(cx, "orders reconciliation failed");
             }
             return;
         }
         self.account.orders_stale = join.rejected.any();
+        self.account.orders_stale_unproven = join
+            .rejected
+            .any()
+            .then(|| join.rejected.unproven().to_vec());
         if self.variant.is_hyro() {
             if let Some(snapshot) = &mut self.account.snapshot {
                 snapshot.orders = Some(join.rows);
@@ -2738,10 +3190,21 @@ impl BybitLinear {
             .filter(|id| !join.rejected.conflicts(*id))
             .map(str::to_owned)
             .collect();
-        self.account.position_bound.retain(|id| {
+        let kept = |id: &String| {
             join.rejected.holds(parent_order_id(id))
                 && !admitted_parents.contains(parent_order_id(id))
-        });
+        };
+        // Route metadata changes with its rows, after the commit says which
+        // symbols this read may replace (a refused symbol keeps both).
+        let route_symbols: HashMap<String, String> = cx
+            .store
+            .orders()
+            .iter()
+            .map(|o| (o.id.clone(), o.symbol.clone()))
+            .collect();
+        let mut bound_new: Vec<(String, String)> = Vec::new();
+        let mut trailing_new: Vec<(String, String)> = Vec::new();
+        let mut priced: Vec<(String, String)> = Vec::new();
         let mut orders = Vec::new();
         for mut mapped in join.rows {
             if join
@@ -2758,12 +3221,14 @@ impl BybitLinear {
                 && let Some(kind) = priced_tpsl_kind(&mapped.orders[0], cx.store)
             {
                 mapped.orders[0].kind = kind;
-                self.account.unpriced_tpsl.remove(&mapped.orders[0].id);
+                priced.push((mapped.orders[0].id.clone(), mapped.orders[0].symbol.clone()));
             }
+            let identity = || (mapped.orders[0].id.clone(), mapped.orders[0].symbol.clone());
             if mapped.position_bound {
-                self.account
-                    .position_bound
-                    .insert(mapped.orders[0].id.clone());
+                bound_new.push(identity());
+            }
+            if mapped.trailing_profit {
+                trailing_new.push(identity());
             }
             orders.extend(mapped.orders);
         }
@@ -2797,7 +3262,7 @@ impl BybitLinear {
                 merged.push(order.clone());
             }
         }
-        for id in &join.unsupported {
+        for (id, detail) in &join.unsupported {
             let known = cx.store.order(id).filter(|o| self.owns_symbol(&o.symbol));
             if let Some(order) = known
                 && !merged.iter().any(|o| o.id == *id)
@@ -2810,24 +3275,57 @@ impl BybitLinear {
                 Level::Error,
                 if known.is_some() {
                     format!(
-                        "Bybit order {id} has an unsupported type; its last known state is kept"
+                        "Bybit order {id} has an unsupported type ({detail}); its last known state is kept"
                     )
                 } else {
-                    format!("Bybit order {id} has an unsupported type and is not shown")
+                    format!("Bybit order {id} has an unsupported type ({detail}) and is not shown")
                 },
             );
         }
-        let old: Vec<String> = cx
-            .store
-            .orders()
-            .iter()
-            .filter(|order| self.owns_symbol(&order.symbol))
-            .map(|order| order.id.clone())
+        // This category's rows and the cover its read proves, together: a symbol
+        // whose rows changed after the read went out keeps them, and a newer
+        // committed read of this category refuses this one whole.
+        let account: Vec<&str> = self
+            .required_categories()
+            .into_iter()
+            .map(Category::as_str)
             .collect();
-        let old_refs: Vec<&str> = old.iter().map(String::as_str).collect();
-        cx.store.remove_orders(&old_refs);
-        for order in merged.drain(..) {
-            cx.store.upsert_order(order);
+        // Rows the read could not map commit nothing new and prove no cover:
+        // a rejected row's market, or any account-wide when it names none.
+        let mut unproven = join.rejected.unproven().to_vec();
+        if !join.unsupported.is_empty() {
+            unproven.push(String::new());
+        }
+        let committed = cx.commit_orders_read(
+            safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                key: self.category.as_str(),
+                account: &account,
+            },
+            |symbol| self.owns_symbol(symbol),
+            merged,
+            &unproven,
+        );
+        if let Some(refused) = committed {
+            let refused_id = |id: &String| {
+                route_symbols
+                    .get(id)
+                    .is_some_and(|symbol| refused.contains(symbol))
+            };
+            let replace = |held: &mut HashSet<String>, new: Vec<(String, String)>| {
+                held.retain(|id| refused_id(id) || kept(id));
+                held.extend(
+                    new.into_iter()
+                        .filter(|(_, symbol)| !refused.contains(symbol))
+                        .map(|(id, _)| id),
+                );
+            };
+            replace(&mut self.account.position_bound, bound_new);
+            replace(&mut self.account.trailing_profit, trailing_new);
+            for (id, symbol) in priced {
+                if !refused.contains(&symbol) {
+                    self.account.unpriced_tpsl.remove(&id);
+                }
+            }
         }
         self.orders_loaded.insert(self.category);
         if self
@@ -2835,24 +3333,36 @@ impl BybitLinear {
             .iter()
             .all(|c| self.orders_loaded.contains(c))
         {
-            cx.store.set_orders(cx.store.orders().to_vec());
+            cx.store.set_orders_loaded();
         }
         // A committed, wholly admitted fresh read clears the engine's
         // uncertain-write fence once no product's order read is still out.
-        if !join.rejected.any()
-            && !self.account.orders_stale
-            && self.account.orders.is_none()
+        if self.account.orders.is_none()
+            && self.account.orders_read_proves()
             && self
                 .products
                 .iter()
-                .all(|state| state.account.orders.is_none() && !state.account.orders_stale)
+                .all(|state| state.account.orders.is_none() && state.account.orders_read_proves())
         {
-            cx.orders_reconciled(None);
+            // Only the markets of rejected rows stay fenced.
+            let mut unproven = join.rejected.unproven().to_vec();
+            for state in &self.products {
+                unproven.extend(
+                    state
+                        .account
+                        .orders_stale_unproven
+                        .iter()
+                        .flatten()
+                        .cloned(),
+                );
+            }
+            cx.orders_reconciled_except(&unproven, u64::MAX);
         }
     }
 
     /// A read issued before an acknowledged setting cannot publish old rails.
     pub(crate) fn note_leverage_ack(&mut self) {
+        self.account.settings_version = self.account.settings_version.wrapping_add(1);
         // Hyro owns an atomic snapshot guarded by note_hyro_write/revision.
         if self.variant.is_hyro() {
             return;
@@ -2862,6 +3372,7 @@ impl BybitLinear {
     }
 
     pub(crate) fn refresh_after_mode_change(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.settings_version = self.account.settings_version.wrapping_add(1);
         // A response issued before the switch cannot restore the old mode.
         self.account.position_version += 1;
         if self.category == Category::Inverse {
@@ -2892,24 +3403,45 @@ impl BybitLinear {
         if join.failed {
             if self.variant.is_hyro() {
                 self.hyro_read_failed(cx, "positions reconciliation failed");
+                return;
             }
+            let error = self
+                .account
+                .read_error
+                .take()
+                .unwrap_or_else(|| VenueError::new("Bybit positions: unusable page cursor"));
+            let key = category_code(self.category);
+            self.fresh_positions
+                .failed(cx, key, join.generation, &error);
+            self.read_fresh_positions_again(cx, join.generation);
             return;
         }
         if self.variant.is_hyro() {
             if let Some(snapshot) = &mut self.account.snapshot {
                 snapshot.positions = Some(join.rows);
+                snapshot.unlisted = join.unlisted;
             }
             self.finish_hyro_snapshot(cx);
             return;
         }
         if join.version != self.account.position_version {
             // A stream event landed after these reads went out; it is newer.
+            self.read_fresh_positions_again(cx, join.generation);
             return;
         }
+        // Issued too soon after a symbol's frame: this read cannot speak for it.
+        let frames = &mut self.account.position_frames_at;
+        frames.retain(|_, at| join.issued_at - *at < POSITION_FRAME_GUARD_MS);
+        let frame_held = !frames.is_empty();
+        let frame_guarded = frames.clone();
+        let frame_guarded = |symbol: &str| frame_guarded.contains_key(symbol);
         let mut best = best_positions(
             join.rows
                 .into_iter()
-                .filter(|r| !join.rejected.conflicts(&r.position.symbol))
+                .filter(|r| {
+                    !join.rejected.conflicts(&r.position.symbol)
+                        && !frame_guarded(&r.position.symbol)
+                })
                 .collect(),
         );
         // Unknown neighbors cannot prove a same-symbol mode transition. Keep
@@ -2934,7 +3466,7 @@ impl BybitLinear {
         for row in &best {
             if row.position.leverage > 0.0 {
                 cx.store.update_setting(&row.position.symbol, |setting| {
-                    setting.leverage = row.position.leverage;
+                    position_leverage(setting, &row.position);
                     setting.margin_type = row.position.margin_type;
                 });
             }
@@ -2947,6 +3479,7 @@ impl BybitLinear {
             .filter(|row| {
                 cx.store.position(&row.position_id).is_some_and(|position| {
                     !self.owns_symbol(&position.symbol)
+                        || frame_guarded(&position.symbol)
                         || (join.rejected.holds(&position.symbol)
                             && !best.iter().any(|r| r.position.id == position.id))
                 })
@@ -2968,6 +3501,7 @@ impl BybitLinear {
         cx.store.update_positions(|position| {
             if (spot || Category::for_symbol(&position.symbol) == category)
                 && !join.rejected.holds(&position.symbol)
+                && !frame_guarded(&position.symbol)
             {
                 position.contracts = 0.0;
             }
@@ -2987,6 +3521,81 @@ impl BybitLinear {
             cx.store.set_positions(cx.store.positions().to_vec());
         }
         self.commit_balance(cx);
+        let key = category_code(self.category);
+        if join.rejected.any() {
+            let error = VenueError::new("Bybit positions: a row could not be mapped");
+            self.fresh_positions
+                .failed(cx, key, join.generation, &error);
+        } else if !frame_held {
+            self.fresh_positions
+                .committed(cx, key, join.generation, &join.unlisted);
+        }
+        self.read_fresh_positions_again(cx, join.generation);
+    }
+
+    /// The engine's typed cause of a failed read, for the command it answers.
+    pub(crate) fn keep_read_error(&mut self, then: &Then, error: &VenueError) {
+        if self.variant.is_hyro() || matches!(then, Then::Account(Request::Positions { .. })) {
+            self.account.read_error = Some(error.clone());
+        }
+    }
+
+    /// `readPositions`: wait on every product's next read. A read already out
+    /// may predate the close, so it is followed by a new one, never joined.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        let selected = self.category;
+        let mut legs = Vec::new();
+        let mut started = !self.credentials_rejected;
+        for category in self.required_categories() {
+            self.select_category(category);
+            started &= self.account.started;
+            legs.push((
+                category_code(category),
+                self.account.positions_generation + 1,
+            ));
+        }
+        self.select_category(selected);
+        if !started {
+            let error =
+                VenueError::new("Bybit account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        if !self.fresh_positions.admit(cx, legs) {
+            return;
+        }
+        for category in self.required_categories() {
+            self.select_category(category);
+            if self.variant.is_hyro() {
+                self.reconcile_hyro_snapshot(cx);
+            } else {
+                self.account.positions_follow_up = self.account.positions.is_some();
+                self.fetch_positions(cx);
+            }
+        }
+        self.select_category(selected);
+    }
+
+    /// A read that left a waiter on this product is followed: at once when it
+    /// predates the waiter, else once a stream frame's guard can have passed.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>, generation: u32) {
+        let key = category_code(self.category);
+        if self.fresh_positions.predates(key, generation) {
+            self.fetch_positions(cx);
+        } else if self.fresh_positions.owed(key) && self.fresh_positions_timer.is_none() {
+            self.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
+    }
+
+    pub(crate) fn retry_fresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        let selected = self.category;
+        for category in self.required_categories() {
+            self.select_category(category);
+            if self.fresh_positions.owed(category_code(category)) {
+                self.fetch_positions(cx);
+            }
+        }
+        self.select_category(selected);
     }
 }
 
@@ -3079,6 +3688,19 @@ fn hyro_failure(ready: bool, transient: bool, local: bool, streak: u8) -> HyroFa
         HyroFailure::Retry { counts: !local }
     } else {
         HyroFailure::Reconnect
+    }
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Wallet { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::AccountInfo => S::ACCOUNT,
+            _ => S::NONE,
+        }
     }
 }
 
@@ -3181,5 +3803,35 @@ mod tests {
             );
             assert!(mapped.notional > 0.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod row_class_tests {
+    use super::*;
+
+    #[test]
+    fn documented_stop_order_types_map() {
+        assert_eq!(order_type("MmRateClose"), Some(OrderType::StopLoss));
+    }
+
+    #[test]
+    fn a_null_list_counts_only_on_success() {
+        let null = r#"{"retCode":0,"result":{"list":null}}"#;
+        assert!(success_with_null_list(null));
+        assert!(valid_snapshot_list(null, ""));
+        assert!(!success_with_null_list(
+            r#"{"retCode":10001,"result":{"list":null}}"#
+        ));
+        assert!(!success_with_null_list(
+            r#"{"retCode":0,"result":{"list":[]}}"#
+        ));
+    }
+
+    #[test]
+    fn a_wallet_with_null_coins_still_decodes() {
+        let row: crate::wire::WalletAccount<'_> =
+            serde_json::from_str(r#"{"accountType":"UNIFIED","coin":null}"#).unwrap();
+        assert!(row.coin.is_empty());
     }
 }

@@ -50,6 +50,10 @@ import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC, mapCand
 import { CryptocomPrivateWebSocket } from './cryptocom.ws-private';
 import { CryptocomPublicWebSocket } from './cryptocom.ws-public';
 
+// Future-support watchpoint: Crypto.com now advertises a separate US
+// CFTC-regulated perpetuals path via Foris DAX FCM. This reference stays on
+// the existing Exchange v1 rail until the US rail's endpoints, credentials,
+// market ids, permissions, and order semantics are confirmed.
 export class CryptocomExchange extends BaseExchange {
   protected readonly clientOrderIdRule = patternClientOrderIdRule('Crypto.com', /^.{1,36}$/);
 

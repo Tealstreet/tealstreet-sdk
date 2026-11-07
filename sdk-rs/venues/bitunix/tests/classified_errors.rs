@@ -57,7 +57,7 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
     for (status, kind, outcome) in [
         (401, ErrorKind::AuthInvalid, Outcome::Rejected),
         (403, ErrorKind::AuthPermission, Outcome::Rejected),
-        (429, ErrorKind::RateLimited, Outcome::Rejected),
+        (429, ErrorKind::RateLimited, Outcome::Unknown),
         (400, ErrorKind::Rejected, Outcome::Rejected),
         (408, ErrorKind::Timeout, Outcome::Unknown),
         (503, ErrorKind::VenueUnavailable, Outcome::Unknown),
@@ -81,12 +81,12 @@ fn write_failures_classify_http_before_body_and_keep_native_diagnostics() {
         assert_eq!(error.kind, Some(kind));
         assert_eq!(error.outcome, Some(outcome));
         // The status classifies a non-2xx answer; its body code is not evidence,
-        // and the engine seals 408/5xx before the venue reads the body.
-        let unproven = status == 408 || status >= 500;
+        // and the engine seals 408/429/5xx before the venue reads the body.
+        let unproven = matches!(status, 408 | 429) || status >= 500;
         assert_eq!(
             error.message,
             if unproven {
-                "HTTP response does not prove the write outcome"
+                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             } else {
                 "Sign signature error"
             }

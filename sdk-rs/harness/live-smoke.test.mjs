@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LIVE_SMOKE_MAX_NOTIONAL, smokeArgs, smokeOrder, marketRules, fencedTransport, selectSmokeMarket } from './live-smoke.mjs';
+import { LIVE_SMOKE_MAX_NOTIONAL, smokeArgs, smokeOrder, marketRules, fencedTransport, selectSmokeMarket, readCredentials, main } from './live-smoke.mjs';
+import { Readable } from 'node:stream';
 import { MARKET_FLAG } from '../hosts/wasm/js/wire.mjs';
 import { subscriptionKey } from './requests.mjs';
 import { assertLiveSmokeComplete } from './live-smoke-proof.mjs';
@@ -29,6 +30,24 @@ test('minimum resting order is aligned and covers notional at its lower amended 
   assert.deepEqual(order, { symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.001, price: 90000, amendPrice: 89000, timeInForce: 'PostOnly' });
   assert.ok(order.amount * order.amendPrice >= 50);
   assert.ok((order.amount - market.precisionAmount) * order.amendPrice < 50);
+});
+
+test('fine ticks on high prices keep the floor-bound order and amendment one tick apart', () => {
+  // 57000.97 / 0.01 is 5700096.9999999 in binary; a fixed epsilon rounded it to 57000.96.
+  const order = smokeOrder({ ...market, precisionPrice: 0.01 }, { bids: [60000], asks: [60001] },
+    { minNotional: 5, lowerMultiplier: 0.95, notionalKnown: true });
+  assert.equal(order.price, 57000.97);
+  assert.equal(order.amendPrice, 57000.96);
+});
+
+test('a real fraction of a step still rounds in the requested direction', () => {
+  const lot = { ...market, precisionPrice: 1e-8, minAmount: 1e-8, precisionAmount: 1e-8, maxAmount: 1e6 };
+  // Floor: 0.09999999995 sits 0.005 of a tick below 0.1, so the order price is 0.09999999.
+  const below = smokeOrder(lot, { bids: [0.09999999995 / 0.9], asks: [0.2] }, { minNotional: 0, notionalKnown: true });
+  assert.equal(below.price, 0.09999999);
+  // Ceil: a 0.10000000005 minimum quantity, 0.005 of a lot above 0.1, rounds up to 0.10000001.
+  const above = smokeOrder({ ...lot, minAmount: 0.10000000005 }, { bids: [1], asks: [2] }, { minNotional: 0, notionalKnown: true });
+  assert.equal(above.amount, 0.10000001);
 });
 
 test('inverse minimum notional uses quote contracts', () => {
@@ -159,4 +178,34 @@ test('managed smoke fence preserves receivers and validates signed data once bef
   assert.deepEqual(events, ['validate', 'bind', 'send']);
   ready.cancel(); prepared.cancel();
   assert.deepEqual(events.slice(-2), ['bound-cancel', 'prepare-cancel']);
+});
+
+test('CLI accepts stdin credentials, dry run and the credential listing without a venue', () => {
+  assert.deepEqual(smokeArgs(['--list-credentials']), { listCredentials: true });
+  const values = smokeArgs(['--venue', 'bitunix', '--mainnet', '--credentials-stdin', '--dry-run']);
+  assert.equal(values.credentialsStdin, true);
+  assert.equal(values.dryRun, true);
+  assert.equal(smokeArgs(['--venue', 'binance']).dryRun, false);
+});
+
+test('stdin credentials are one bounded object of strings and are never echoed', async () => {
+  const read = (text) => readCredentials(Readable.from([Buffer.from(text)]));
+  assert.deepEqual(await read('{"KEY":"stdin-key","SECRET":"stdin-secret"}'), { KEY: 'stdin-key', SECRET: 'stdin-secret' });
+  for (const text of ['not-json-secret-value', '["secret-value"]', '{"KEY":7}', 'null'])
+    await assert.rejects(read(text), (error) => !error.message.includes('secret-value') && !error.message.includes('not-json'));
+  await assert.rejects(readCredentials(Readable.from([Buffer.alloc(64 * 1024 + 1, 0x20)])), /too large/);
+});
+
+test('a credential failure on stdin prints only the generic refusal', async () => {
+  const output = [];
+  const log = console.log, error = console.error;
+  console.log = (...items) => output.push(items.join(' '));
+  console.error = (...items) => output.push(items.join(' '));
+  try {
+    const code = await main(['--venue', 'bitunix', '--mainnet', '--credentials-stdin'], {},
+      Readable.from([Buffer.from('{"KEY":"stdin-key-must-not-print","SECRET":"x"}')]));
+    assert.equal(code, 1);
+  } finally { console.log = log; console.error = error; }
+  assert.equal(output.some((line) => line.includes('stdin-key-must-not-print')), false);
+  assert.equal(output.length, 1);
 });

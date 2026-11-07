@@ -2,7 +2,7 @@ mod support;
 use safe_cex_engine::{Action, Command, Event, Notice, Venue};
 use safe_cex_venue_coinbase::{Coinbase, Options};
 use support::*;
-const SYMBOL: &str = "BTC-PERP-INTX";
+const SYMBOL: &str = "BTC-USD";
 
 fn candle_rows(e: &mut Driver, now: f64) -> Vec<[f64; 6]> {
     let Some(frame) = e.take_frame(now) else {
@@ -54,13 +54,13 @@ fn seconds_and_three_minute_streams_use_trades_and_roll_over() {
         message(
             &mut e,
             socket,
-            r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"0","open":"1","high":"2","low":"1","close":"2","volume":"99"}]}]}"#,
+            r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-USD","start":"0","open":"1","high":"2","low":"1","close":"2","volume":"99"}]}]}"#,
         );
         assert!(candle_rows(&mut e, 2000.).is_empty());
         message(
             &mut e,
             socket,
-            r#"{"channel":"market_trades","sequence_num":1,"events":[{"type":"update","trades":[{"product_id":"BTC-PERP-INTX","time":"1970-01-01T00:03:01Z","price":"100","size":"2"},{"product_id":"BTC-PERP-INTX","time":"1970-01-01T00:03:02Z","price":"110","size":"3"}]}]}"#,
+            r#"{"channel":"market_trades","sequence_num":1,"events":[{"type":"update","trades":[{"product_id":"BTC-USD","time":"1970-01-01T00:03:01Z","price":"100","size":"2"},{"product_id":"BTC-USD","time":"1970-01-01T00:03:02Z","price":"110","size":"3"}]}]}"#,
         );
         let rows = candle_rows(&mut e, 2000.);
         assert_eq!(rows.len(), if interval == "1s" { 2 } else { 1 });
@@ -78,7 +78,7 @@ fn seconds_and_three_minute_streams_use_trades_and_roll_over() {
         message(
             &mut e,
             socket,
-            r#"{"channel":"market_trades","sequence_num":2,"events":[{"type":"update","trades":[{"product_id":"BTC-PERP-INTX","time":"1970-01-01T00:06:00Z","price":"90","size":"4"}]}]}"#,
+            r#"{"channel":"market_trades","sequence_num":2,"events":[{"type":"update","trades":[{"product_id":"BTC-USD","time":"1970-01-01T00:06:00Z","price":"90","size":"4"}]}]}"#,
         );
         assert_eq!(
             candle_rows(&mut e, 2000.),
@@ -103,13 +103,13 @@ fn four_hour_stream_forwards_five_minute_candles_and_trade_prices() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"300","open":"2","high":"4","low":"1","close":"3","volume":"5"}]}]}"#,
+        r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-USD","start":"300","open":"2","high":"4","low":"1","close":"3","volume":"5"}]}]}"#,
     );
     assert_eq!(candle_rows(&mut e, 2000.), vec![[300., 2., 4., 1., 3., 5.]]);
     message(
         &mut e,
         socket,
-        r#"{"channel":"market_trades","sequence_num":1,"events":[{"type":"update","trades":[{"product_id":"BTC-PERP-INTX","time":"1970-01-01T00:05:01Z","price":"3.5","size":"2"}]}]}"#,
+        r#"{"channel":"market_trades","sequence_num":1,"events":[{"type":"update","trades":[{"product_id":"BTC-USD","time":"1970-01-01T00:05:01Z","price":"3.5","size":"2"}]}]}"#,
     );
     assert_eq!(
         candle_rows(&mut e, 2000.),
@@ -144,7 +144,7 @@ fn streaming_intervals_do_not_expand_the_rest_granularity_whitelist() {
     }
 }
 #[test]
-fn discovers_instruments_without_credentials_and_keeps_full_depth() {
+fn discovers_spot_without_credentials_and_keeps_full_depth() {
     let (mut e, socket) = ready();
     assert_eq!(e.store().markets()[0].symbol, SYMBOL);
     assert_eq!(e.store().tickers()[0].last, 60000.);
@@ -157,7 +157,7 @@ fn discovers_instruments_without_credentials_and_keeps_full_depth() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"l2_data","sequence_num":0,"events":[{"type":"snapshot","product_id":"BTC-PERP-INTX","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"},{"side":"bid","price_level":"59999","new_quantity":"3"},{"side":"offer","price_level":"60001","new_quantity":"4"}]}]}"#,
+        r#"{"channel":"l2_data","sequence_num":0,"events":[{"type":"snapshot","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"},{"side":"bid","price_level":"59999","new_quantity":"3"},{"side":"offer","price_level":"60001","new_quantity":"4"}]}]}"#,
     );
     assert_eq!(
         e.venue().book(SYMBOL).unwrap().bids(),
@@ -166,7 +166,7 @@ fn discovers_instruments_without_credentials_and_keeps_full_depth() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"l2_data","sequence_num":1,"events":[{"type":"update","product_id":"BTC-PERP-INTX","updates":[{"side":"bid","price_level":"60000","new_quantity":"0"},{"side":"bid","price_level":"59998","new_quantity":"8"}]}]}"#,
+        r#"{"channel":"l2_data","sequence_num":1,"events":[{"type":"update","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"60000","new_quantity":"0"},{"side":"bid","price_level":"59998","new_quantity":"8"}]}]}"#,
     );
     assert_eq!(
         e.venue().book(SYMBOL).unwrap().bids(),
@@ -185,13 +185,13 @@ fn sequence_gap_invalidates_all_books_and_reconnects() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"l2_data","sequence_num":0,"events":[{"type":"snapshot","product_id":"BTC-PERP-INTX","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"}]}]}"#,
+        r#"{"channel":"l2_data","sequence_num":0,"events":[{"type":"snapshot","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"}]}]}"#,
     );
     assert!(e.venue().book(SYMBOL).is_some());
     message(
         &mut e,
         socket,
-        r#"{"channel":"l2_data","sequence_num":2,"events":[{"type":"update","product_id":"BTC-PERP-INTX","updates":[]}]}"#,
+        r#"{"channel":"l2_data","sequence_num":2,"events":[{"type":"update","product_id":"BTC-USD","updates":[]}]}"#,
     );
     assert!(e.venue().book(SYMBOL).is_none());
     assert!(
@@ -211,7 +211,7 @@ fn malformed_snapshot_cannot_partially_replace_book() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"l2_data","sequence_num":0,"events":[{"type":"snapshot","product_id":"BTC-PERP-INTX","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"},{"side":"offer","price_level":"60001","new_quantity":"-1"}]}]}"#,
+        r#"{"channel":"l2_data","sequence_num":0,"events":[{"type":"snapshot","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"},{"side":"offer","price_level":"60001","new_quantity":"-1"}]}]}"#,
     );
     assert!(e.venue().book(SYMBOL).is_none());
 }
@@ -233,18 +233,19 @@ fn failed_poll_preserves_last_known_good_tickers() {
     assert_eq!(e.store().tickers()[0].last, 60000.);
 }
 #[test]
-fn intx_error_status_with_valid_instruments_is_usable() {
+fn spot_error_status_cannot_commit_a_catalogue() {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: true,
             ..Options::default()
         })
         .unwrap(),
     );
     e.start(1000.);
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 500, INSTRUMENTS);
-    assert_eq!(e.store().markets().len(), 1);
+    reply(&mut e, &r, 500, PRODUCTS);
+    assert!(!e.store().loaded().markets);
 }
 #[test]
 fn candle_fetch_uses_public_route_and_orders_chronologically() {
@@ -256,12 +257,12 @@ fn candle_fetch_uses_public_route_and_orders_chronologically() {
             symbol: SYMBOL.into(),
             interval: safe_cex_engine::model::Interval::M1,
             limit: Some(2),
-            from_ms: None,
-            to_ms: None,
+            from_ms: Some(120000.),
+            to_ms: Some(240000.),
         }),
     );
     let r = requests(&mut e).pop().unwrap();
-    assert!(r.url.contains("/market/products/BTC-PERP-INTX/candles"));
+    assert!(r.url.contains("/market/products/BTC-USD/candles"));
     assert!(r.headers.is_empty());
     reply(
         &mut e,
@@ -294,7 +295,7 @@ fn duplicate_depth_message_is_ignored() {
             symbol: SYMBOL.into(),
         }),
     );
-    let snapshot = r#"{"channel":"l2_data","sequence_num":0,"events":[{"type":"snapshot","product_id":"BTC-PERP-INTX","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"}]}]}"#;
+    let snapshot = r#"{"channel":"l2_data","sequence_num":0,"events":[{"type":"snapshot","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"}]}]}"#;
     message(&mut e, socket, snapshot);
     message(&mut e, socket, snapshot);
     assert_eq!(e.venue().book(SYMBOL).unwrap().bids(), [(60000., 2.)]);
@@ -326,7 +327,7 @@ fn socket_sequence_advances_across_every_channel_and_product() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"l2_data","sequence_num":3,"events":[{"type":"snapshot","product_id":"BTC-PERP-INTX","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"}]}]}"#,
+        r#"{"channel":"l2_data","sequence_num":3,"events":[{"type":"snapshot","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"60000","new_quantity":"2"}]}]}"#,
     );
     message(
         &mut e,
@@ -341,7 +342,7 @@ fn socket_sequence_advances_across_every_channel_and_product() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"l2_data","sequence_num":6,"events":[{"type":"update","product_id":"BTC-PERP-INTX","updates":[{"side":"bid","price_level":"60000","new_quantity":"3"}]}]}"#,
+        r#"{"channel":"l2_data","sequence_num":6,"events":[{"type":"update","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"60000","new_quantity":"3"}]}]}"#,
     );
     assert_eq!(e.venue().book(SYMBOL).unwrap().bids(), [(60000., 3.)]);
 }
@@ -350,13 +351,14 @@ fn watchdog_covers_socket_that_never_opens() {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: true,
             ..Options::default()
         })
         .unwrap(),
     );
     e.start(1000.);
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 200, INSTRUMENTS);
+    reply(&mut e, &r, 200, PRODUCTS);
     let actions: Vec<_> = e.drain_actions().collect();
     let socket = actions
         .iter()
@@ -397,7 +399,7 @@ fn daily_candle_seed_retains_earlier_day_and_counts_bucket_volume_once() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"candles","events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"90000","open":"2","high":"4","low":"1","close":"3","volume":"5"},{"product_id":"BTC-PERP-INTX","start":"90000","open":"2","high":"4","low":"1","close":"3","volume":"7"},{"product_id":"BTC-PERP-INTX","start":"90300","open":"3","high":"5","low":"2","close":"4","volume":"2"}]}]}"#,
+        r#"{"channel":"candles","events":[{"type":"update","candles":[{"product_id":"BTC-USD","start":"90000","open":"2","high":"4","low":"1","close":"3","volume":"5"},{"product_id":"BTC-USD","start":"90000","open":"2","high":"4","low":"1","close":"3","volume":"7"},{"product_id":"BTC-USD","start":"90300","open":"3","high":"5","low":"2","close":"4","volume":"2"}]}]}"#,
     );
     let r = requests(&mut e).pop().unwrap();
     assert!(r.url.contains("granularity=FIVE_MINUTE"));
@@ -484,7 +486,7 @@ fn daily_candles_backfill_reconnect_gaps_and_reject_old_seed_generations() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"87300","open":"120","high":"125","low":"115","close":"124","volume":"2"}]}]}"#,
+        r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-USD","start":"87300","open":"120","high":"125","low":"115","close":"124","volume":"2"}]}]}"#,
     );
     assert!(candle_rows(&mut e, 87400000.).is_empty());
     let (_, fresh) = reopen(&mut e, socket, 87401000.);
@@ -513,6 +515,7 @@ fn daily_subscriptions_before_first_open_or_during_reconnect_seed_at_open() {
         let mut e = safe_cex_engine::test_support::seeded_engine(
             Coinbase::new(Options {
                 public_data_only: true,
+                spot_only: true,
                 ..Options::default()
             })
             .unwrap(),
@@ -526,7 +529,7 @@ fn daily_subscriptions_before_first_open_or_during_reconnect_seed_at_open() {
                 response: safe_cex_engine::Response {
                     status: 200,
                     headers: "",
-                    body: INSTRUMENTS,
+                    body: PRODUCTS,
                 },
             },
         );
@@ -605,7 +608,7 @@ fn delayed_websocket_bucket_cannot_regress_a_newer_rest_daily_seed() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"86400","open":"100","high":"140","low":"90","close":"120","volume":"8"}]}]}"#,
+        r#"{"channel":"candles","sequence_num":0,"events":[{"type":"update","candles":[{"product_id":"BTC-USD","start":"86400","open":"100","high":"140","low":"90","close":"120","volume":"8"}]}]}"#,
     );
     assert_eq!(
         candle_rows(&mut e, 86500000.),
@@ -614,7 +617,7 @@ fn delayed_websocket_bucket_cannot_regress_a_newer_rest_daily_seed() {
     message(
         &mut e,
         socket,
-        r#"{"channel":"candles","sequence_num":1,"events":[{"type":"update","candles":[{"product_id":"BTC-PERP-INTX","start":"86400","open":"100","high":"160","low":"80","close":"135","volume":"11"}]}]}"#,
+        r#"{"channel":"candles","sequence_num":1,"events":[{"type":"update","candles":[{"product_id":"BTC-USD","start":"86400","open":"100","high":"160","low":"80","close":"135","volume":"11"}]}]}"#,
     );
     assert_eq!(
         candle_rows(&mut e, 86500000.),
@@ -676,13 +679,14 @@ fn initial_socket_uses_primary_route_and_missing_snapshot_recovers() {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: true,
             ..Options::default()
         })
         .unwrap(),
     );
     e.start(1000.);
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 200, INSTRUMENTS);
+    reply(&mut e, &r, 200, PRODUCTS);
     let actions: Vec<_> = e.drain_actions().collect();
     let (socket, context) = actions
         .iter()
@@ -846,13 +850,14 @@ fn unknown_envelopes_cannot_keep_stale_socket_alive() {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: true,
             ..Options::default()
         })
         .unwrap(),
     );
     e.start(1000.);
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 200, INSTRUMENTS);
+    reply(&mut e, &r, 200, PRODUCTS);
     let actions: Vec<_> = e.drain_actions().collect();
     let socket = actions
         .iter()
@@ -974,6 +979,7 @@ fn unsubscribe_before_discovery_does_not_leave_a_pending_book() {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: true,
             ..Options::default()
         })
         .unwrap(),
@@ -992,7 +998,7 @@ fn unsubscribe_before_discovery_does_not_leave_a_pending_book() {
             symbol: SYMBOL.into(),
         }),
     );
-    reply(&mut e, &request, 200, INSTRUMENTS);
+    reply(&mut e, &request, 200, PRODUCTS);
     let socket = e
         .drain_actions()
         .find_map(|a| {
@@ -1120,50 +1126,6 @@ fn malformed_first_product_page_does_not_hide_a_valid_later_page() {
     assert_eq!(e.store().markets()[0].symbol, "BTC-USD");
 }
 
-#[test]
-fn valid_catalogue_with_rejected_quotes_starts_markets_and_retries_without_clearing_prices() {
-    for prior_quote in [false, true] {
-        let mut e = safe_cex_engine::test_support::seeded_engine(
-            Coinbase::new(Options {
-                public_data_only: true,
-                ..Options::default()
-            })
-            .unwrap(),
-        );
-        if prior_quote {
-            let (previous, _) = ready();
-            e.store_mut()
-                .set_markets(previous.store().markets().to_vec());
-            e.store_mut()
-                .set_tickers(previous.store().tickers().to_vec());
-        }
-        e.start(1000.);
-        let request = requests(&mut e).pop().unwrap();
-        let before = serde_json::to_value(e.store().tickers()).unwrap();
-        reply(
-            &mut e,
-            &request,
-            200,
-            &INSTRUMENTS.replace("\"trade_price\":\"60000\"", "\"trade_price\":\"-1\""),
-        );
-        assert!(e.store().loaded().markets);
-        assert_eq!(serde_json::to_value(e.store().tickers()).unwrap(), before);
-        assert_eq!(e.store().loaded().tickers, prior_quote);
-        let timer = e
-            .drain_actions()
-            .find_map(|action| match action {
-                Action::SetTimer { timer, at_ms } if jittered(at_ms - 1000., 1000.) => Some(timer),
-                _ => None,
-            })
-            .unwrap();
-        e.handle(2000., Event::TimerFired { timer });
-        let retry = requests(&mut e).pop().unwrap();
-        reply(&mut e, &retry, 200, INSTRUMENTS);
-        assert_eq!(e.store().ticker(SYMBOL).unwrap().last, 60000.);
-        assert!(e.store().loaded().tickers);
-    }
-}
-
 #[path = "support/socket.rs"]
 mod socket_checks;
 #[test]
@@ -1177,6 +1139,7 @@ fn suppressed_public_feed_is_not_supervised() {
     let mut e = safe_cex_engine::test_support::seeded_engine(
         Coinbase::new(Options {
             public_data_only: true,
+            spot_only: true,
             ..Options::default()
         })
         .unwrap(),
@@ -1185,7 +1148,7 @@ fn suppressed_public_feed_is_not_supervised() {
         .unwrap();
     e.start(1000.);
     let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 200, INSTRUMENTS);
+    reply(&mut e, &r, 200, PRODUCTS);
     let mut timers = std::collections::HashMap::new();
     let mut fired = 0;
     let mut now = 1000.;
@@ -1199,7 +1162,7 @@ fn suppressed_public_feed_is_not_supervised() {
                 Action::ClearTimer { timer } => {
                     timers.remove(&timer);
                 }
-                Action::Http(r) => reply(&mut e, &r, 200, INSTRUMENTS),
+                Action::Http(r) => reply(&mut e, &r, 200, PRODUCTS),
                 Action::WsConnect { .. } | Action::WsClose { .. } => {
                     panic!("suppressed public feed reached the host")
                 }

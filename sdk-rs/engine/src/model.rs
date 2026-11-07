@@ -491,6 +491,29 @@ pub struct OrderExtra {
     pub conditional_order_price: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reject_reason: Option<RejectReason>,
+    /// Routed through the venue's algo endpoints rather than its order endpoint, as a
+    /// Binance COIN-M algo row beside stops placed before the migration. ORDERS carries
+    /// it as bit 16 of the trigger word, which older decoders mask away.
+    #[serde(skip)]
+    pub native_algo: bool,
+}
+
+/// ORDERS' per-row trigger word: bits 0-7 the take-profit trigger and 8-15 the
+/// stop-loss trigger (0 none, else the type + 1), bit 16 `OrderExtra::native_algo`.
+/// Decoders mask each field, so a bit an older build does not know is ignored.
+pub mod order_trigger_word {
+    pub const TP_SHIFT: u32 = 0;
+    pub const SL_SHIFT: u32 = 8;
+    pub const TRIGGER_MASK: u32 = 0xff;
+    pub const NATIVE_ALGO: u32 = 1 << 16;
+
+    /// The word for one order's extra fields.
+    pub fn encode(extra: &super::OrderExtra) -> u32 {
+        let trigger = |t: Option<super::StopTriggerType>| t.map_or(0, |t| t as u32 + 1);
+        (trigger(extra.tp_trigger_type) << TP_SHIFT)
+            | (trigger(extra.sl_trigger_type) << SL_SHIFT)
+            | if extra.native_algo { NATIVE_ALGO } else { 0 }
+    }
 }
 
 /// Order identity supplied by the caller when cancellation precedes reconciliation.
@@ -498,6 +521,34 @@ pub struct OrderExtra {
 pub struct CancelOrderRef {
     pub id: String,
     pub symbol: String,
+}
+
+impl CancelOrderRef {
+    /// A row to plan this cancel from when the store has none: an algo's own
+    /// resting limit order, known only by its id and symbol.
+    pub fn limit_stand_in(&self) -> Order {
+        Order {
+            id: self.id.clone(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: self.symbol.clone(),
+            kind: OrderType::Limit,
+            side: OrderSide::Buy,
+            price: 0.0,
+            amount: 0.0,
+            filled: 0.0,
+            remaining: 0.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 0.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -606,6 +657,13 @@ pub struct Candle {
     pub volume: f64,
 }
 
+/// Oldest first, stable (equal timestamps keep their input order), by `f64::total_cmp`.
+/// One concrete copy for every venue: a per-site closure would monomorphize the sort each time.
+#[inline(never)]
+pub fn sort_candles_by_time(rows: &mut [Candle]) {
+    rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BybitBbo {
@@ -682,6 +740,49 @@ fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candles_sort_oldest_first_stably_with_total_cmp_placement() {
+        let candle = |timestamp: f64, close: f64| Candle {
+            timestamp,
+            open: 0.,
+            high: 0.,
+            low: 0.,
+            close,
+            volume: 0.,
+        };
+        let mut rows = vec![
+            candle(2., 1.),
+            candle(f64::NAN, 2.),
+            candle(0., 3.),
+            candle(1., 4.),
+            candle(-f64::NAN, 5.),
+            candle(f64::INFINITY, 6.),
+            candle(-0., 7.),
+            candle(2., 8.),
+            candle(f64::NEG_INFINITY, 9.),
+            candle(1., 10.),
+        ];
+        let mut inline = rows.clone();
+        inline.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+        sort_candles_by_time(&mut rows);
+        let closes: Vec<_> = rows.iter().map(|row| row.close).collect();
+        // -NaN, -inf, -0 before +0, ties in input order, +inf, +NaN.
+        assert_eq!(closes, [5., 9., 7., 3., 4., 10., 1., 8., 6., 2.]);
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.timestamp.to_bits())
+                .collect::<Vec<_>>(),
+            inline
+                .iter()
+                .map(|row| row.timestamp.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            closes,
+            inline.iter().map(|row| row.close).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn only_two_positive_finite_steps_are_tradable() {

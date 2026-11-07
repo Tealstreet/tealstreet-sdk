@@ -293,3 +293,249 @@ fn malformed_current_text_retains_the_native_any_text_liveness_policy() {
     );
     assert_eq!(engine.store().ticker("BTCUSDT").unwrap().last, 21000.);
 }
+
+/// Phemex's documented `kline_p` shapes: a subscribe answers with history as a
+/// `snapshot` (newest first), then live rows come as `incremental`.
+const KLINE_SNAPSHOT: &str = r#"{"kline_p":[[1666854120,60,"20735.3","20735.3","20741.0","20735.3","20740.1","0.120","2488.8"],[1666854060,60,"20730.0","20730.0","20736.0","20729.5","20735.3","0.300","6220.6"],[1666854000,60,"20725.0","20725.0","20731.0","20724.0","20730.0","0.200","4146.0"]],"sequence":62147218,"symbol":"BTCUSDT","type":"snapshot"}"#;
+const KLINE_INCREMENTAL: &str = r#"{"kline_p":[[1666854180,60,"20740.1","20740.1","20745.0","20740.1","20744.2","0.050","1037.2"]],"sequence":62147219,"symbol":"BTCUSDT","type":"incremental"}"#;
+
+fn subscribed_to_candles() -> (Engine<PhemexPerpetuals>, SocketId) {
+    use safe_cex_engine::{Command, model::Interval};
+    let (mut engine, socket, _) = opened();
+    engine.handle(
+        4.,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: Interval::M1,
+        }),
+    );
+    actions(&mut engine, 4.);
+    engine.take_frame(4.);
+    (engine, socket)
+}
+
+/// Each candle in a frame's candles section, by its timestamp: rows end the section as six f64s.
+fn candle_timestamps(frame: &[u8]) -> Vec<f64> {
+    safe_cex_engine::wire::sections(frame)
+        .filter(|(kind, _)| *kind == 6)
+        .flat_map(|(_, body)| {
+            let count = u32::from_le_bytes(body[..4].try_into().unwrap()) as usize;
+            let rows = &body[body.len() - count * 48..];
+            (0..count)
+                .map(|row| f64::from_le_bytes(rows[row * 48..row * 48 + 8].try_into().unwrap()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn kline_snapshots_never_publish_live_candles() {
+    let (mut engine, socket) = subscribed_to_candles();
+    // Multi-row, single-row and empty history snapshots must all stay out of
+    // the live path, including a delayed snapshot after a live update.
+    for text in [
+        KLINE_SNAPSHOT.to_owned(),
+        KLINE_INCREMENTAL.replace("incremental", "snapshot"),
+        r#"{"kline_p":[],"symbol":"BTCUSDT","type":"snapshot"}"#.to_owned(),
+    ] {
+        engine.handle(
+            5.,
+            Event::WsMessage {
+                socket,
+                text: &text,
+            },
+        );
+        let frame = engine.take_frame(5.).unwrap_or_default();
+        assert!(
+            candle_timestamps(frame).is_empty(),
+            "snapshot must never publish a live candle: {text}"
+        );
+    }
+    engine.handle(
+        6.,
+        Event::WsMessage {
+            socket,
+            text: KLINE_INCREMENTAL,
+        },
+    );
+    let live = engine.take_frame(6.).expect("the live candle").to_vec();
+    assert_eq!(candle_timestamps(&live), [1666854180.0]);
+    engine.handle(
+        7.,
+        Event::WsMessage {
+            socket,
+            text: KLINE_SNAPSHOT,
+        },
+    );
+    assert!(candle_timestamps(engine.take_frame(7.).unwrap_or_default()).is_empty());
+}
+
+#[test]
+fn live_klines_keep_seconds_and_native_ohlcv() {
+    let (mut engine, socket) = subscribed_to_candles();
+    engine.handle(
+        5.,
+        Event::WsMessage {
+            socket,
+            text: KLINE_INCREMENTAL,
+        },
+    );
+    let frame = engine.take_frame(5.).expect("live candle");
+    assert_eq!(candle_timestamps(frame), [1666854180.0]);
+    let (_, body) = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == 6)
+        .unwrap();
+    let row: Vec<_> = body[body.len() - 48..]
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|bytes| f64::from_le_bytes(*bytes))
+        .collect();
+    assert_eq!(row, [1666854180., 20740.1, 20745., 20740.1, 20744.2, 0.05]);
+}
+
+#[test]
+fn only_incremental_klines_can_publish_live_candles() {
+    let (mut engine, socket) = subscribed_to_candles();
+    for text in [
+        KLINE_INCREMENTAL.replace("incremental", "backfill"),
+        KLINE_INCREMENTAL.replace(r#","type":"incremental""#, ""),
+    ] {
+        engine.handle(
+            5.,
+            Event::WsMessage {
+                socket,
+                text: &text,
+            },
+        );
+        assert!(
+            candle_timestamps(engine.take_frame(5.).unwrap_or_default()).is_empty(),
+            "unclassified/backfill rows must never enter the live path: {text}"
+        );
+    }
+}
+
+fn malformed_notices(output: &[Action]) -> Vec<&safe_cex_engine::log::LogEvent> {
+    output
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::Event(event))
+                if event.code == safe_cex_engine::log::code::STREAM_MALFORMED =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_kline_parse_failure_logs_raw_byte_size_and_type() {
+    let (mut engine, socket) = subscribed_to_candles();
+    let short =
+        r#"{"kline_p":[[1666854180,60]],"symbol":"BTCUSDT","type":"incremental","extra":"€"}"#;
+    for at in [5., 6., 6.] {
+        engine.handle(
+            at,
+            Event::WsMessage {
+                socket,
+                text: short,
+            },
+        );
+    }
+    let output = actions(&mut engine, 6.);
+    let notices = malformed_notices(&output);
+    assert_eq!(notices.len(), 3, "every failed frame needs a diagnostic");
+    for event in notices {
+        assert_eq!(event.level, safe_cex_engine::Level::Warn);
+        assert!(
+            event.message.contains(&format!("bytes={}", short.len())),
+            "{}",
+            event.message
+        );
+        assert!(
+            event.message.contains(r#"type="incremental""#),
+            "{}",
+            event.message
+        );
+    }
+    assert!(candle_timestamps(engine.take_frame(6.).unwrap_or_default()).is_empty());
+}
+
+#[test]
+fn malformed_kline_shapes_are_logged_without_publishing_partial_rows() {
+    let (mut engine, socket) = subscribed_to_candles();
+    let mixed = KLINE_INCREMENTAL.replace(r#""1037.2"]]"#, r#""1037.2"],[1666854240,60]]"#);
+    let bad_number = KLINE_INCREMENTAL.replace("20744.2", "bad");
+    let bad_type = KLINE_INCREMENTAL.replace(r#""type":"incremental""#, r#""type":123"#);
+    for (text, kind) in [
+        (mixed.as_str(), r#""incremental""#),
+        (bad_number.as_str(), r#""incremental""#),
+        (bad_type.as_str(), "123"),
+        (
+            r#"{"kline_p":{},"symbol":"BTCUSDT","type":"snapshot"}"#,
+            r#""snapshot""#,
+        ),
+        (
+            r#"{"kline_p":[[1666854180,60]],"symbol":123,"type":"incremental"}"#,
+            r#""incremental""#,
+        ),
+        (r#"{"kline_p":[],"type":"incremental""#, "unknown"),
+    ] {
+        engine.handle(5., Event::WsMessage { socket, text });
+        let output = actions(&mut engine, 5.);
+        let notices = malformed_notices(&output);
+        assert_eq!(notices.len(), 1, "failed frame: {text}");
+        assert!(
+            notices[0]
+                .message
+                .contains(&format!("bytes={}", text.len())),
+            "{}",
+            notices[0].message
+        );
+        assert!(
+            notices[0].message.contains(&format!("type={kind}")),
+            "{}",
+            notices[0].message
+        );
+        assert!(candle_timestamps(engine.take_frame(5.).unwrap_or_default()).is_empty());
+    }
+    // A rejected frame must not prevent subsequent live delivery.
+    engine.handle(
+        6.,
+        Event::WsMessage {
+            socket,
+            text: KLINE_INCREMENTAL,
+        },
+    );
+    assert_eq!(
+        candle_timestamps(engine.take_frame(6.).unwrap()),
+        [1666854180.]
+    );
+}
+
+#[test]
+fn other_public_parse_failures_also_log_frame_size_and_type() {
+    let (mut engine, socket) = subscribed_to_candles();
+    for (text, kind) in [
+        (
+            r#"{"method":"perp_market24h_pack_p.update","data":false}"#,
+            "unknown",
+        ),
+        (
+            r#"{"orderbook_p":false,"symbol":"BTCUSDT","sequence":1,"type":"snapshot"}"#,
+            r#""snapshot""#,
+        ),
+    ] {
+        engine.handle(5., Event::WsMessage { socket, text });
+        let output = actions(&mut engine, 5.);
+        let notices = malformed_notices(&output);
+        assert_eq!(notices.len(), 1, "failed public frame: {text}");
+        assert!(
+            notices[0]
+                .message
+                .contains(&format!("bytes={}", text.len()))
+        );
+        assert!(notices[0].message.contains(&format!("type={kind}")));
+    }
+}

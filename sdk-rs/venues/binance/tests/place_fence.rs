@@ -28,28 +28,34 @@ fn order_path(variant: Variant) -> &'static str {
         Variant::PortfolioMargin => "/papi/v1/um/order",
         Variant::Spot => "/api/v3/order",
         Variant::CoinM => "/dapi/v1/order",
+        Variant::Options => "/eapi/v1/order",
     }
 }
 /// The open-orders reads one Binance snapshot joins.
 fn order_reads(variant: Variant) -> &'static [&'static str] {
     match variant {
         Variant::UsdM => &["/fapi/v1/openOrders", "/fapi/v1/openAlgoOrders"],
-        Variant::PortfolioMargin => &[
-            "/papi/v1/um/openOrders",
-            "/papi/v1/um/conditional/openOrders",
-        ],
+        Variant::PortfolioMargin => &["/papi/v1/um/openOrders", "/papi/v1/um/algo/openAlgoOrders"],
         Variant::Spot => &["/api/v3/openOrders"],
-        Variant::CoinM => &["/dapi/v1/openOrders"],
+        Variant::CoinM => &["/dapi/v1/openOrders", "/dapi/v1/openAlgoOrders"],
+        Variant::Options => &["/eapi/v1/openOrders"],
     }
 }
 
-fn futures_ready(variant: Variant) -> Harness {
-    let mut h = Harness::started(Options {
+fn keyed(variant: Variant) -> Options {
+    Options {
         variant,
         key: Some("api-key".into()),
         secret: Some("secret".into()),
         ..Options::default()
-    });
+    }
+}
+
+fn futures_ready(variant: Variant) -> Harness {
+    futures_loaded(variant, Harness::started(keyed(variant)))
+}
+
+fn futures_loaded(variant: Variant, mut h: Harness) -> Harness {
     let pm = variant == Variant::PortfolioMargin;
     let root = if pm { "/papi/v1/um" } else { "/fapi/v1" };
     h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
@@ -96,12 +102,7 @@ fn futures_ready(variant: Variant) -> Harness {
 
 fn coin_or_spot_ready(variant: Variant) -> Harness {
     let spot = variant == Variant::Spot;
-    let mut h = Harness::started(Options {
-        variant,
-        key: Some("api-key".into()),
-        secret: Some("secret".into()),
-        ..Options::default()
-    });
+    let mut h = Harness::started(keyed(variant));
     let symbol = symbol(variant);
     let prefix = if spot { "/api/v3" } else { "/dapi/v1" };
     h.respond(&format!("{prefix}/exchangeInfo"), 200, &format!(r#"{{"symbols":[{{"symbol":"{symbol}","status":"TRADING","baseAsset":"BTC","quoteAsset":"USD","marginAsset":"BTC","contractType":"PERPETUAL","contractSize":100,"filters":[{{"filterType":"PRICE_FILTER","tickSize":"0.1"}},{{"filterType":"LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}},{{"filterType":"MARKET_LOT_SIZE","stepSize":"1","minQty":"1","maxQty":"100"}}]}}]}}"#));
@@ -133,7 +134,9 @@ fn coin_or_spot_ready(variant: Variant) -> Harness {
             r#"{"assets":[]}"#
         },
     );
-    h.respond(&format!("{prefix}/openOrders"), 200, "[]");
+    for path in order_reads(variant) {
+        h.respond(path, 200, "[]");
+    }
     let socket = h
         .socket(if spot { "ws-api/v3" } else { "/ws/coin-key" })
         .unwrap();
@@ -224,6 +227,7 @@ fn unknown_placement(h: &mut Harness, variant: Variant, command: u32) {
 /// An order event schedules a REST snapshot; after the debounce its reads are in flight.
 fn pre_mark_reads(h: &mut Harness, variant: Variant) -> Vec<HttpRequest> {
     match variant {
+        Variant::Options => unreachable!("Options owns separate production-binding fence controls"),
         Variant::Spot => h.message("ws-api/v3", r#"{"subscriptionId":0,"event":{"e":"executionReport","i":99,"s":"BTCUSDT","c":"other","S":"BUY","o":"LIMIT","X":"NEW","x":"NEW","p":"9000","q":"1","z":"0","l":"0","L":"0"}}"#),
         Variant::CoinM => h.message("/ws/coin-key", r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":99,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"NEW","p":"9000","q":"1","z":"0"}}"#),
         Variant::PortfolioMargin => h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","fs":"UM","o":{"i":99,"c":"other","s":"BTCUSDT","S":"BUY","o":"LIMIT","X":"NEW","p":"99","q":"0.01","z":"0"}}"#),
@@ -268,6 +272,46 @@ fn fence_sequence(variant: Variant) {
         1,
         "{variant:?} retry places after release"
     );
+}
+
+/// One row that does not decode costs only itself, not the whole read.
+#[test]
+fn an_undecodable_row_does_not_fail_the_read() {
+    let variant = Variant::UsdM;
+    let mut h = ready(variant);
+    let stale = pre_mark_reads(&mut h, variant);
+    unknown_placement(&mut h, variant, 70);
+    answer(&mut h, stale, "[]");
+    let mut fresh = take_reads(&mut h, variant);
+    let regular = fresh.remove(0);
+    answer(
+        &mut h,
+        vec![regular],
+        r#"[{"symbol":"ETHUSDT","orderId":77}]"#,
+    );
+    answer(&mut h, fresh, "[]");
+    place(&mut h, variant, 73);
+    assert_eq!(posts(&h, variant), 1);
+}
+
+/// A rejected row keeps only its own market's fence.
+#[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let variant = Variant::UsdM;
+    let mut h = ready(variant);
+    let stale = pre_mark_reads(&mut h, variant);
+    unknown_placement(&mut h, variant, 70);
+    answer(&mut h, stale, "[]");
+    let mut fresh = take_reads(&mut h, variant);
+    let regular = fresh.remove(0);
+    answer(
+        &mut h,
+        vec![regular],
+        r#"[{"symbol":"ETHUSDT","orderId":77,"side":"BUY","type":"WEIRD","price":"1","origQty":"1","executedQty":"0","status":"NEW"}]"#,
+    );
+    answer(&mut h, fresh, "[]");
+    place(&mut h, variant, 73);
+    assert_eq!(posts(&h, variant), 1);
 }
 
 #[test]
@@ -408,8 +452,8 @@ fn engine_reasks_join_a_slow_post_write_read_that_still_releases() {
     assert_eq!(posts(&h, variant), 1, "the retry places after release");
 }
 
-/// A two-read census (regular plus algo/conditional) pins a read token per
-/// request. One begun before the Unknown write never releases it, even when its
+/// A two-read census (regular plus algo/conditional) records its epoch before
+/// either read. One begun before the Unknown write never releases it, even when its
 /// last half answers after the write; the owed census that follows does.
 #[test]
 fn a_two_read_census_begun_before_the_unknown_write_does_not_release_it() {
@@ -440,4 +484,47 @@ fn a_two_read_census_begun_before_the_unknown_write_does_not_release_it() {
             "{variant:?} the follow-up census releases"
         );
     }
+}
+
+/// The census epoch, not each half's release, decides: with signing deferred,
+/// openOrders releases before the Unknown write and openAlgoOrders after it,
+/// yet the census began before the write and so never releases the fence.
+#[test]
+fn a_census_whose_halves_release_either_side_of_the_unknown_write_does_not_release_it() {
+    let variant = Variant::UsdM;
+    let mut h = futures_loaded(variant, Harness::started_deferred(keyed(variant)));
+    h.requests.clear();
+    h.hold_signatures(true);
+    h.message("/private/ws", r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":99,"c":"other","s":"BTCUSDT","S":"BUY","o":"LIMIT","X":"NEW","p":"99","q":"0.01","z":"0"}}"#);
+    h.advance(10_000.0);
+    assert_eq!(
+        order_reads_pending(&h, variant),
+        0,
+        "both halves await signing"
+    );
+    h.sign("/fapi/v1/openOrders");
+    let regular = h.take("/fapi/v1/openOrders");
+    place(&mut h, variant, 90);
+    h.sign(order_path(variant));
+    let post = h.take(order_path(variant));
+    h.reply(post.id, 503, "", "Service Unavailable");
+    assert_eq!(outcome(&h, 90), Some(Outcome::Unknown));
+    h.sign("/fapi/v1/openAlgoOrders");
+    let algo = h.take("/fapi/v1/openAlgoOrders");
+    answer(&mut h, vec![regular, algo], "[]");
+    // The owed census stays parked; an admitted retry would now POST at once.
+    h.hold_signatures(false);
+    place(&mut h, variant, 91);
+    assert_eq!(posts(&h, variant), 0, "the stale census sends nothing");
+    assert!(
+        refused_uncertain(&h, 91),
+        "still refused after the stale census"
+    );
+    // The owed follow-up census begins after the write and releases it.
+    h.sign("/fapi/v1/openOrders");
+    h.sign("/fapi/v1/openAlgoOrders");
+    let fresh = take_reads(&mut h, variant);
+    answer(&mut h, fresh, "[]");
+    place(&mut h, variant, 92);
+    assert_eq!(posts(&h, variant), 1, "the follow-up census releases");
 }

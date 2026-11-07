@@ -3,8 +3,7 @@ use safe_cex_engine::book::Book;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::{
     AccountReadScope, Action, AuthOutcome, Command, CredentialSlot, Cx, Engine, Event, Level,
-    LogEvent, Method, Notice, PayloadSignRequest, RequestId, Response, SignatureTarget, SocketId,
-    TimerId, Venue,
+    LogEvent, Method, Notice, RequestId, Response, SocketId, TimerId, Venue,
 };
 
 /// Diagnostic the fixture venue emits so tests can see which callback ran.
@@ -21,9 +20,10 @@ fn marker(level: Level, message: &str) -> Action {
 struct AccountReads {
     streamed: bool,
     tagged: bool,
-    delegated: bool,
     valid_before: Option<f64>,
     token: Option<safe_cex_engine::OrderSnapshotToken>,
+    refusal: Option<safe_cex_engine::VenueError>,
+    loaded_before_refusal: bool,
 }
 
 impl Venue for AccountReads {
@@ -49,20 +49,6 @@ impl Venue for AccountReads {
         };
         if self.tagged {
             cx.tag_account_read(request, CredentialSlot::Secondary, AccountReadScope::Orders);
-        }
-        if self.delegated {
-            cx.sign_request(
-                request,
-                PayloadSignRequest {
-                    exchange_name: "fixture",
-                    key: "public-key".into(),
-                    payload: "payload".into(),
-                    scheme: "fixture",
-                    encoding: "hex",
-                },
-                SignatureTarget::Header("signature"),
-            )
-            .unwrap();
         }
     }
     fn account_auth_outcome(
@@ -101,6 +87,17 @@ impl Venue for AccountReads {
         *count += 1;
     }
     fn on_response(&mut self, cx: &mut Cx<'_, usize>, count: usize, _: Response<'_>) {
+        if let Some(error) = &self.refusal {
+            if self.loaded_before_refusal {
+                cx.store.set_balance(Default::default());
+                cx.store.set_orders(vec![]);
+                cx.store.set_positions(vec![]);
+            }
+            let first = cx.startup_read_refused(error);
+            let second = cx.startup_read_refused(error);
+            cx.notice(Level::Info, MARKER, format!("refusal:{first}:{second}"));
+            return;
+        }
         cx.store.invalidate_order_snapshots();
         cx.notice(Level::Info, MARKER, format!("response:{count}"));
     }
@@ -124,13 +121,14 @@ impl Venue for AccountReads {
     }
 }
 
-fn engine(streamed: bool, tagged: bool, delegated: bool) -> Engine<AccountReads> {
+fn engine(streamed: bool, tagged: bool) -> Engine<AccountReads> {
     let mut engine = support::seeded_engine(AccountReads {
         streamed,
         tagged,
-        delegated,
         valid_before: None,
         token: None,
+        refusal: None,
+        loaded_before_refusal: false,
     });
     engine.start(0.);
     engine.drain_actions().for_each(drop);
@@ -167,7 +165,7 @@ fn buffered_evidence_is_attributed_and_precedes_unchanged_response_once() {
         (200, r#"{"accepted":false}"#, AuthOutcome::Rejected),
         (401, "", AuthOutcome::Rejected),
     ] {
-        let mut engine = engine(false, true, false);
+        let mut engine = engine(false, true);
         assert_eq!(
             complete(&mut engine, status, body),
             vec![evidence(verdict), marker(Level::Info, "response:0")]
@@ -178,7 +176,7 @@ fn buffered_evidence_is_attributed_and_precedes_unchanged_response_once() {
 
 #[test]
 fn streamed_rows_preserve_context_until_final_envelope() {
-    let mut engine = engine(true, true, false);
+    let mut engine = engine(true, true);
     engine.handle(
         1.,
         Event::HttpStart {
@@ -218,7 +216,7 @@ fn streamed_rows_preserve_context_until_final_envelope() {
 #[test]
 fn missing_stream_list_can_reject_but_cannot_report_recovery() {
     for accepted in [false, true] {
-        let mut engine = engine(true, true, false);
+        let mut engine = engine(true, true);
         let actions = complete(&mut engine, 200, &format!(r#"{{"accepted":{accepted}}}"#));
         let mut expected = Vec::new();
         if !accepted {
@@ -232,7 +230,7 @@ fn missing_stream_list_can_reject_but_cannot_report_recovery() {
 #[test]
 fn invalid_or_truncated_stream_never_reports_auth_even_with_reject_status() {
     for body in [br#"{"accepted":false,"rows":[{}"#.as_slice(), b"\xff"] {
-        let mut engine = engine(true, true, false);
+        let mut engine = engine(true, true);
         engine.handle(
             1.,
             Event::HttpStart {
@@ -264,14 +262,14 @@ fn invalid_or_truncated_stream_never_reports_auth_even_with_reject_status() {
 
 #[test]
 fn malformed_unstreamed_and_untagged_public_responses_cannot_manufacture_auth() {
-    let mut malformed = engine(false, true, false);
+    let mut malformed = engine(false, true);
     assert!(
         complete(&mut malformed, 200, "not-json")
             .iter()
             .all(|a| !matches!(a, Action::Notice(Notice::AccountAuth { .. })))
     );
     for status in [200, 401] {
-        let mut public = engine(false, false, false);
+        let mut public = engine(false, false);
         assert!(
             complete(&mut public, status, r#"{"accepted":true}"#)
                 .iter()
@@ -282,31 +280,24 @@ fn malformed_unstreamed_and_untagged_public_responses_cannot_manufacture_auth() 
 
 #[test]
 fn transport_and_sign_failure_drain_context_without_credential_evidence() {
-    for delegated in [false, true] {
-        let mut engine = engine(false, true, delegated);
-        let event = if delegated {
-            Event::PayloadSignFailed {
-                request: RequestId(1),
-                error: "offline",
-            }
-        } else {
-            Event::HttpFailed {
-                request: RequestId(1),
-                error: "offline",
-            }
-        };
-        engine.handle(1., event);
-        assert_eq!(
-            engine.drain_actions().collect::<Vec<_>>(),
-            vec![marker(Level::Error, "failed")]
-        );
-        assert!(complete(&mut engine, 401, "").is_empty());
-    }
+    let mut engine = engine(false, true);
+    engine.handle(
+        1.,
+        Event::HttpFailed {
+            request: RequestId(1),
+            error: "offline",
+        },
+    );
+    assert_eq!(
+        engine.drain_actions().collect::<Vec<_>>(),
+        vec![marker(Level::Error, "failed")]
+    );
+    assert!(complete(&mut engine, 401, "").is_empty());
 }
 
 #[test]
 fn invalid_utf8_buffer_cannot_report_http_status_auth() {
-    let mut engine = engine(false, true, false);
+    let mut engine = engine(false, true);
     engine.handle(
         1.,
         Event::HttpStart {
@@ -340,9 +331,10 @@ fn response_event_time_preserves_time_sensitive_classifier_admission() {
         let mut engine = support::seeded_engine(AccountReads {
             streamed: false,
             tagged: true,
-            delegated: false,
             valid_before: Some(2.),
             token: None,
+            refusal: None,
+            loaded_before_refusal: false,
         });
         engine.start(0.);
         engine.drain_actions().for_each(drop);
@@ -380,11 +372,11 @@ fn response_event_time_preserves_time_sensitive_classifier_admission() {
 #[test]
 fn token_stale_auth_is_suppressed_using_the_same_store_before_account_callbacks() {
     for streamed in [false, true] {
-        let mut subject = engine(streamed, true, false);
+        let mut subject = engine(streamed, true);
         subject.store_mut().invalidate_order_snapshots();
         let actions = complete(&mut subject, 200, r#"{"accepted":true,"rows":[]}"#);
         assert_eq!(actions, vec![marker(Level::Info, "response:0")]);
-        let mut subject = engine(streamed, true, false);
+        let mut subject = engine(streamed, true);
         subject.store_mut().invalidate_order_snapshots();
         let actions = complete(&mut subject, 200, r#"{"accepted":false}"#);
         assert_eq!(
@@ -394,5 +386,69 @@ fn token_stale_auth_is_suppressed_using_the_same_store_before_account_callbacks(
                 if streamed { "missing:0" } else { "response:0" }
             )]
         );
+    }
+}
+
+#[test]
+fn startup_refusal_notice_keeps_its_actual_venue_code_and_existing_guards() {
+    for (tagged, loaded) in [(false, false), (true, false), (false, true)] {
+        let error = safe_cex_engine::VenueError::new("key refused")
+            .kind(safe_cex_engine::ErrorKind::AuthPermission)
+            .venue_code("40018")
+            .venue_message("native reason");
+        let mut engine = support::seeded_engine(AccountReads {
+            streamed: false,
+            tagged,
+            valid_before: None,
+            token: None,
+            refusal: Some(error.clone()),
+            loaded_before_refusal: loaded,
+        });
+        engine.start(0.);
+        engine.drain_actions().for_each(drop);
+        let actions = complete(&mut engine, 401, "{}");
+        let notices: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::AUTH_REJECTED =>
+                {
+                    Some(event)
+                }
+                _ => None,
+            })
+            .collect();
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|action| match action {
+                Action::Notice(Notice::StartupFailed { error, .. }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        if tagged || loaded {
+            assert!(notices.is_empty());
+            assert!(failures.is_empty());
+        } else {
+            assert_eq!(notices.len(), 1, "one-shot refusal");
+            assert_eq!(failures, vec![&error]);
+            #[cfg(not(target_arch = "wasm32"))]
+            assert!(actions.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::StartupFailed {
+                    read_refusal: true,
+                    ..
+                })
+            )));
+            assert!(
+                notices[0].fields.contains(&("venueCode", "40018".into())),
+                "{:?}",
+                notices[0]
+            );
+            assert!(
+                notices[0]
+                    .fields
+                    .contains(&("kind", "authPermission".into()))
+            );
+        }
     }
 }

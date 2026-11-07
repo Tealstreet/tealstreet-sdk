@@ -4,17 +4,21 @@
 // refused by name before any wasm is fetched. Account-mode policy (local key vs
 // remote or payload signer, Paradex local only) is not here: it is enforced at
 // construction by safe-cex's assertBetaAccount (exchanges/rust/betaVenues.ts).
+import { ExchangeError } from './host.mjs';
 import { venueFamily } from './venues.mjs';
 
 const betaVenues = Object.freeze({
   apexomni: { family: 'apexomni' },
   asterdex: { family: 'asterdex' },
+  backpack: { family: 'backpack' },
   binance: { family: 'binance' },
   binanceinverse: { family: 'binance' },
+  binanceoptions: { family: 'binance' },
   binancepm: { family: 'binance' },
   binancespot: { family: 'binance' },
   bingx: { family: 'bingx' },
   bitget: { family: 'bitget' },
+  bitgetinverse: { family: 'bitget' },
   bitgetusdc: { family: 'bitget' },
   bitunix: { family: 'bitunix' },
   blofin: { family: 'blofin' },
@@ -22,27 +26,42 @@ const betaVenues = Object.freeze({
   bybitdemo: { family: 'bybit' },
   bybitinverse: { family: 'bybit' },
   bybitspot: { family: 'bybit' },
+  coinbase: { family: 'coinbase' },
+  coinbasespot: { family: 'coinbase' },
   cryptocom: { family: 'cryptocom' },
+  grvt: { family: 'grvt' },
   hyperliquid: { family: 'hyperliquid' },
   hyperliquidspot: { family: 'hyperliquid' },
+  hyrotrader: { family: 'bybit' },
+  kodiakfi: { family: 'orderly' },
   kraken: { family: 'kraken' },
   krakenspot: { family: 'kraken' },
+  kucoin: { family: 'kucoin' },
+  kucoinspot: { family: 'kucoinspot' },
   lighter: { family: 'lighter' },
+  'lighter-robinhood': { family: 'lighter' },
+  mexc: { family: 'mexc' },
+  mode: { family: 'orderly' },
   okx: { family: 'okx' },
   okxdemo: { family: 'okx' },
   okxeu: { family: 'okx' },
   okxeudemo: { family: 'okx' },
+  orderly: { family: 'orderly' },
   paradex: { family: 'paradex' },
   phemex: { family: 'phemex' },
+  what: { family: 'orderly' },
+  woo: { family: 'woo' },
+  woofi: { family: 'orderly' },
 });
 
 export const betaVenueNames = Object.freeze(Object.keys(betaVenues).sort());
 
 export const betaVenueFamilies = Object.freeze([...new Set(Object.values(betaVenues).map((venue) => venue.family))].sort());
 
-export class BetaVenueUnavailableError extends Error {
+export class BetaVenueUnavailableError extends ExchangeError {
   constructor(venue) {
-    super(`${venue} is not available in the beta bundle`);
+    const message = `${venue} is not available in the beta bundle`;
+    super(message, { message, kind: 'unsupported', outcome: 'notSent' });
     this.name = 'BetaVenueUnavailableError';
     this.venue = venue;
   }

@@ -4,7 +4,7 @@ use super::*;
 #[cfg(feature = "address-nonce")]
 use crate::nonce::{NonceDomain, NonceSelectionError};
 #[cfg(feature = "address-nonce")]
-use crate::signing::{Identity, KeyRef, SignError};
+use crate::signing::{Algorithm, Identity, KeyRef, SignError};
 #[cfg(feature = "address-nonce")]
 use std::sync::Arc;
 
@@ -109,6 +109,14 @@ mod enabled {
     enum AddressState {
         Refused(SignError),
         Verified(VerifiedAddress),
+        Key(VerifiedKey),
+    }
+    /// A host-answered provider's public key, bound to its signing ref and slot.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct VerifiedKey {
+        bytes: Box<[u8]>,
+        algorithm: Algorithm,
+        signing: KeyRef,
     }
     #[derive(Clone, PartialEq, Eq)]
     pub(crate) struct VerifiedAddress {
@@ -145,6 +153,11 @@ mod enabled {
                 state: Some(Box::new(AddressState::Verified(value))),
             }
         }
+        fn keyed(value: VerifiedKey) -> Self {
+            Self {
+                state: Some(Box::new(AddressState::Key(value))),
+            }
+        }
         pub(crate) fn verified(
             &self,
             identity: &Identity,
@@ -177,6 +190,20 @@ mod enabled {
                 _ => Err(SignError::InvalidRequest),
             }
         }
+        /// The setup-bound public key for this identity's current signing ref,
+        /// at the algorithm's length (32 Stark/Ed25519, 40 Schnorr).
+        pub fn verified_setup_public_key(&self, algorithm: Algorithm) -> Result<&[u8], SignError> {
+            let signing = self.signing_ref()?;
+            match self.address.state.as_deref() {
+                Some(AddressState::Key(value))
+                    if value.signing == *signing && value.algorithm == algorithm =>
+                {
+                    Ok(&value.bytes)
+                }
+                Some(AddressState::Refused(error)) => Err(*error),
+                _ => Err(SignError::InvalidRequest),
+            }
+        }
     }
 
     struct Task {
@@ -188,7 +215,7 @@ mod enabled {
         deadline: f64,
         timer: TimerId,
         owner: Option<Box<dyn OwnedSetupExecution>>,
-        result: Option<Result<[u8; 20], SignError>>,
+        result: Option<Result<Vec<u8>, SignError>>,
         joined: bool,
         retiring: bool,
         token: Option<Arc<SetupRetirement>>,
@@ -204,8 +231,36 @@ mod enabled {
         support: SetupHostSupport,
         domain: Option<&'static NonceDomain>,
         slots: AddressSetupSlots,
+        /// `Some` binds a public key of this algorithm instead of an address.
+        key: Option<Algorithm>,
     }
     impl AddressNonceSetup {
+        fn operation(&self) -> crate::sign_meta::SetupOperation {
+            self.key.map_or(
+                crate::sign_meta::SetupOperation::PublicAddress,
+                crate::sign_meta::SetupOperation::PublicKey,
+            )
+        }
+        /// The venue's declaration: address slots, or key slots and algorithm.
+        fn declare<V: Venue>(&mut self, venue: &V) -> Result<(), SignError> {
+            let address = venue.public_address_slots();
+            match venue.public_key_setup() {
+                Some(_) if address != AddressSetupSlots::None => Err(SignError::InvalidRequest),
+                Some((slots, algorithm)) => {
+                    if crate::signing::public_key_length(algorithm).is_none() {
+                        return Err(SignError::InvalidRequest);
+                    }
+                    self.slots = slots;
+                    self.key = Some(algorithm);
+                    Ok(())
+                }
+                None => {
+                    self.slots = address;
+                    self.key = None;
+                    Ok(())
+                }
+            }
+        }
         fn invalidate(&mut self, actions: &mut Actions, identities: &mut Identities) {
             for identity in [&mut identities.primary, &mut identities.secondary]
                 .into_iter()
@@ -249,7 +304,7 @@ mod enabled {
                 deadline_ms: task.deadline,
                 kind: crate::sign_meta::SignKind::Setup {
                     generation: task.generation,
-                    operation: crate::sign_meta::SetupOperation::PublicAddress,
+                    operation: self.operation(),
                     slot: task.slot,
                 },
             })
@@ -275,98 +330,25 @@ mod enabled {
             });
         }
     }
+    /// The one value, at the length its operation declares.
     fn valid_result(
         work: &SignRequest,
         result: Result<SignResult, SignError>,
-    ) -> Result<[u8; 20], SignError> {
+    ) -> Result<Vec<u8>, SignError> {
         let result = result?;
         work.validate_result(&result)?;
-        result
-            .values
-            .first()
-            .ok_or(SignError::InvalidResult)?
-            .as_slice()
-            .try_into()
-            .map_err(|_| SignError::InvalidResult)
+        match result.values.as_slice() {
+            [value] => Ok(value.clone()),
+            _ => Err(SignError::InvalidResult),
+        }
     }
 
-    impl<V: Venue> Engine<V> {
-        pub fn set_address_setup_host_support(
-            &mut self,
-            support: SetupHostSupport,
-        ) -> Result<(), VenueError> {
-            if self.started {
-                return Err(SignError::InvalidRequest.venue_error());
-            }
-            self.invalidate_address_setup()?;
-            self.io.core.address_setup.support = support;
-            Ok(())
-        }
-        pub fn initialize_address_nonce(
-            &mut self,
-            now: f64,
-        ) -> Result<AddressSetupProgress, VenueError> {
-            if self.started
-                || !now.is_finite()
-                || now < 0.
-                || !(now + BOUND_MS).is_finite()
-                || now + BOUND_MS <= now
-            {
-                return Err(SignError::InvalidRequest.venue_error());
-            }
-            if !self.io.core.address_setup.initialized {
-                let domain = self.venue.address_nonce_domain();
-                if domain.is_some_and(|domain| {
-                    *domain != crate::nonce::HYPERLIQUID_AGENT
-                        && *domain != crate::nonce::ASTERDEX_V3
-                }) {
-                    return Err(SignError::InvalidRequest.venue_error());
-                }
-                let issued = issuer()?;
-                let setup = &mut self.io.core.address_setup;
-                setup.initialized = true;
-                setup.generation = 1;
-                setup.issuer = Some(issued);
-                setup.domain = domain;
-                setup.slots = self.venue.public_address_slots();
-                self.launch_address_setup(now);
-            }
-            self.poll_address_setup(now, &mut TaskContext::from_waker(std::task::Waker::noop()));
-            Ok(self.io.core.address_setup.progress())
-        }
-        pub fn reinitialize_address_nonce(
-            &mut self,
-            now: f64,
-        ) -> Result<AddressSetupProgress, VenueError> {
-            if self.started
-                || !now.is_finite()
-                || now < 0.
-                || !(now + BOUND_MS).is_finite()
-                || now + BOUND_MS <= now
-            {
-                return Err(SignError::InvalidRequest.venue_error());
-            }
-            if !self.io.core.address_setup.initialized {
-                return self.initialize_address_nonce(now);
-            }
-            let core = &mut self.io.core;
-            if !core.address_setup.replacement {
-                if core.address_setup.generation >= MAX_GENERATION {
-                    return Err(SignError::Unavailable.venue_error());
-                }
-                core.address_setup.generation += 1;
-                core.address_setup.replacement = true;
-                core.address_setup
-                    .invalidate(&mut core.actions, &mut core.identities);
-            }
-            self.poll_address_setup(now, &mut TaskContext::from_waker(std::task::Waker::noop()));
-            Ok(self.io.core.address_setup.progress())
-        }
-        pub fn address_nonce_setup_ready(&self) -> bool {
-            self.io.core.address_setup.initialized && self.io.core.address_setup.tasks.is_empty()
-        }
+    // Setup execution uses only core state. Keep these bodies shared across
+    // venue engines instead of inlining them into each Engine<V> instance.
+    impl IoCore {
+        #[inline(never)]
         fn launch_address_setup(&mut self, now: f64) {
-            let core = &mut self.io.core;
+            let core = &mut *self;
             for slot in [CredentialSlot::Primary, CredentialSlot::Secondary] {
                 if !core.address_setup.slots.contains(slot) {
                     continue;
@@ -392,11 +374,18 @@ mod enabled {
                     identity.address = AddressCapability::refused(SignError::Unsupported);
                     continue;
                 }
+                let operation = match core.address_setup.key {
+                    Some(algorithm) => Operation::PublicKey {
+                        algorithm,
+                        key: signing.clone(),
+                    },
+                    None => Operation::PublicAddress {
+                        key: signing.clone(),
+                    },
+                };
                 let work = SignRequest {
                     receipt: SignReceipt::default(),
-                    operations: vec![Operation::PublicAddress {
-                        key: signing.clone(),
-                    }],
+                    operations: vec![operation],
                     context: Context::default(),
                 };
                 let owner = core
@@ -444,11 +433,12 @@ mod enabled {
                 }
             }
         }
-        pub fn poll_address_setup(&mut self, now: f64, cx: &mut TaskContext<'_>) {
+        #[inline(never)]
+        fn poll_address_setup(&mut self, now: f64, cx: &mut TaskContext<'_>) {
             if !now.is_finite() || now < 0. {
                 return;
             }
-            let core = &mut self.io.core;
+            let core = &mut *self;
             let setup = &mut core.address_setup;
             for task in &mut setup.tasks {
                 if now >= task.deadline && !task.retiring {
@@ -498,16 +488,24 @@ mod enabled {
                     && let Some(identity) = identity_mut(&mut core.identities, task.slot)
                 {
                     identity.address = match task.result.unwrap_or(Err(SignError::InvalidResult)) {
-                        Ok(bytes) if now < task.deadline && !task.retiring => {
-                            AddressCapability::bound(VerifiedAddress {
-                                bytes,
+                        Ok(bytes) if now < task.deadline && !task.retiring => match setup.key {
+                            Some(algorithm) => AddressCapability::keyed(VerifiedKey {
+                                bytes: bytes.into_boxed_slice(),
+                                algorithm,
                                 signing: task.signing,
-                                slot: task.slot,
-                                domain: setup.domain,
-                                issuer: setup.issuer.as_ref().unwrap().clone(),
-                                generation: setup.generation,
-                            })
-                        }
+                            }),
+                            None => match <[u8; 20]>::try_from(bytes.as_slice()) {
+                                Ok(bytes) => AddressCapability::bound(VerifiedAddress {
+                                    bytes,
+                                    signing: task.signing,
+                                    slot: task.slot,
+                                    domain: setup.domain,
+                                    issuer: setup.issuer.as_ref().unwrap().clone(),
+                                    generation: setup.generation,
+                                }),
+                                Err(_) => AddressCapability::refused(SignError::InvalidResult),
+                            },
+                        },
                         Err(error) => AddressCapability::refused(error),
                         _ => AddressCapability::refused(SignError::TimedOut),
                     };
@@ -517,6 +515,86 @@ mod enabled {
                 setup.replacement = false;
                 self.launch_address_setup(now);
             }
+        }
+    }
+
+    impl<V: Venue> Engine<V> {
+        pub fn set_address_setup_host_support(
+            &mut self,
+            support: SetupHostSupport,
+        ) -> Result<(), VenueError> {
+            if self.started {
+                return Err(SignError::InvalidRequest.venue_error());
+            }
+            self.invalidate_address_setup()?;
+            self.io.core.address_setup.support = support;
+            Ok(())
+        }
+        pub fn initialize_address_nonce(
+            &mut self,
+            now: f64,
+        ) -> Result<AddressSetupProgress, VenueError> {
+            if self.started
+                || !now.is_finite()
+                || now < 0.
+                || !(now + BOUND_MS).is_finite()
+                || now + BOUND_MS <= now
+            {
+                return Err(SignError::InvalidRequest.venue_error());
+            }
+            if !self.io.core.address_setup.initialized {
+                let domain = self.venue.address_nonce_domain();
+                if domain.is_some_and(|domain| {
+                    *domain != crate::nonce::HYPERLIQUID_AGENT
+                        && *domain != crate::nonce::ASTERDEX_V3
+                }) {
+                    return Err(SignError::InvalidRequest.venue_error());
+                }
+                let issued = issuer()?;
+                let setup = &mut self.io.core.address_setup;
+                setup.declare(&self.venue).map_err(SignError::venue_error)?;
+                setup.initialized = true;
+                setup.generation = 1;
+                setup.issuer = Some(issued);
+                setup.domain = domain;
+                self.io.core.launch_address_setup(now);
+            }
+            self.poll_address_setup(now, &mut TaskContext::from_waker(std::task::Waker::noop()));
+            Ok(self.io.core.address_setup.progress())
+        }
+        pub fn reinitialize_address_nonce(
+            &mut self,
+            now: f64,
+        ) -> Result<AddressSetupProgress, VenueError> {
+            if self.started
+                || !now.is_finite()
+                || now < 0.
+                || !(now + BOUND_MS).is_finite()
+                || now + BOUND_MS <= now
+            {
+                return Err(SignError::InvalidRequest.venue_error());
+            }
+            if !self.io.core.address_setup.initialized {
+                return self.initialize_address_nonce(now);
+            }
+            let core = &mut self.io.core;
+            if !core.address_setup.replacement {
+                if core.address_setup.generation >= MAX_GENERATION {
+                    return Err(SignError::Unavailable.venue_error());
+                }
+                core.address_setup.generation += 1;
+                core.address_setup.replacement = true;
+                core.address_setup
+                    .invalidate(&mut core.actions, &mut core.identities);
+            }
+            self.poll_address_setup(now, &mut TaskContext::from_waker(std::task::Waker::noop()));
+            Ok(self.io.core.address_setup.progress())
+        }
+        pub fn address_nonce_setup_ready(&self) -> bool {
+            self.io.core.address_setup.initialized && self.io.core.address_setup.tasks.is_empty()
+        }
+        pub fn poll_address_setup(&mut self, now: f64, cx: &mut TaskContext<'_>) {
+            self.io.core.poll_address_setup(now, cx);
         }
         pub(in crate::engine) fn address_setup_timer(&mut self, now: f64, timer: TimerId) -> bool {
             let core = &mut self.io.core;
@@ -606,7 +684,10 @@ mod enabled {
         }
         pub(in crate::engine) fn seal_address_setup(&mut self) {
             if !self.io.core.address_setup.initialized {
-                self.io.core.address_setup.slots = self.venue.public_address_slots();
+                // A conflicting declaration seals with no slots, refusing nothing.
+                if self.io.core.address_setup.declare(&self.venue).is_err() {
+                    self.io.core.address_setup.slots = AddressSetupSlots::None;
+                }
                 self.io.core.address_setup.domain = self.venue.address_nonce_domain();
             }
             let core = &mut self.io.core;
@@ -668,6 +749,19 @@ mod enabled {
     impl<P> Cx<'_, P> {
         pub fn address_nonce_identities(&self) -> &Identities {
             &self.io.core.identities
+        }
+        /// A slot's setup-bound public key; see `Identity::verified_setup_public_key`.
+        pub fn setup_public_key(
+            &self,
+            slot: CredentialSlot,
+            algorithm: Algorithm,
+        ) -> Result<&[u8], SignError> {
+            match slot {
+                CredentialSlot::Primary => self.io.core.identities.primary.as_ref(),
+                CredentialSlot::Secondary => self.io.core.identities.secondary.as_ref(),
+            }
+            .ok_or(SignError::MissingKey)?
+            .verified_setup_public_key(algorithm)
         }
     }
 

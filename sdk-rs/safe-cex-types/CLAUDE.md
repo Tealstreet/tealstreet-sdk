@@ -65,11 +65,28 @@ while the 128-level serde recursion limit remains a separate CHOSEN budget.
 MANIFEST-SPEC §19 defines the observability discriminator; diagnostic-only text
 must not be assumed when a caller can read the retained unit programmatically.
 
-Gates: `cargo test -p safe-cex-types`, which drives the Node oracles in
-`tests/`, plus strict clippy on the host **and** the wasm target. Generated
-bindings come from root `yarn types:generate`; `tests/generate.test.cjs` is their
-freshness check — regenerating is not a substitute for running it. The oracles
-are the reason a field rename here is cheap and a shape change is not.
+Gates: `cargo test --locked -p safe-cex-types --tests`, which drives the Node
+oracles in `tests/`, plus strict clippy on the host.
+Rust CI runs these tests in the isolated candle-cache lane with locked root Yarn
+dependencies and `SAFE_CEX_TYPESCRIPT_PATH` pointing at `node_modules/typescript`.
+Keep this package out of workspace-wide feature unification: its serde_json
+number/map features belong to the restored candle-cache stack, not the engine.
+From `sdk-rs`, generate bindings with
+`cargo run --locked -p safe-cex-types --example generate`, then
+`node safe-cex-types/generate.cjs`. `tests/generate.test.cjs` checks the generation
+rules; run it as well. The oracles are the reason a field rename here is cheap
+and a shape change is not.
+
+Exchange metadata has a dedicated `Rust / native metadata` CI check: run
+`node --test safe-cex-types/tests/metadata-freshness.test.cjs` and
+`cargo test --locked -p safe-cex-types --test exchange_metadata` from `sdk-rs`.
+Regenerate its snapshot and typed records with `corepack yarn rust:metadata`
+from the repo root (`rust:metadata:check` verifies; both need `rustfmt` on PATH); readonly arrays
+retain their element enums and nested property records stay typed objects.
+The explicit 47-name roster includes Binance Options and excludes the retired
+SalsaDEX/Tealstreet DEX brokers and DXtrade venue. Roster changes must update
+this independent fixture and the strict native enum, not replace equality checks
+with floors.
 
 `position_record` defines the canonical 24-field linear-perpetual journal type.
 Gross realized PnL, fees and signed funding remain separate; closeCount is the
@@ -281,3 +298,9 @@ refusals are unchanged. JSON string parsing copies unescaped spans together;
 escape/control validation and duplicate-property order keep their existing rules.
 
 StoreData.socketHealth uses RetainedJsonInput so own undefined diagnostic fields survive typed notifications and native Store payloads. Ordinary JSON output omits those keys. StoreUpdate and the Store health getter/merge use the same carrier; a JSON map is an explicit ingress conversion.
+
+StoreData and WritableStoreData latency are required nullable numbers. Null means
+unmeasured, not zero; absent/non-numeric values still refuse. Native STATUS uses
+an explicit presence flag, with legacy positive samples retained.
+Their canonical fields retain the required-nullable deserialize metadata used by
+the private companions, so the strict metadata inventory remains exact.

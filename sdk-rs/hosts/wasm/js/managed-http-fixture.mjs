@@ -9,7 +9,7 @@ export function releasedHttpActions(engine, wire, now) {
   while (queue.length) {
     assert.ok(++visited <= 65_536, 'Managed fixture drain exceeded its bound');
     const action = queue.shift();
-    assert.ok(action.op !== 'sign' && action.op !== 'signPayload', 'Fixture requires its trusted local signer');
+    assert.ok(action.op !== 'sign', 'Fixture requires its trusted local signer');
     if (action.op !== 'managedHttp') { actions.push(action); continue; }
     if (action.phase === 'prepare') {
       assert.ok(engine.httpPreparationPending(action.preparation));

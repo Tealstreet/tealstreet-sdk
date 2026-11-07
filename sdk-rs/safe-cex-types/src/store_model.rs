@@ -85,6 +85,13 @@ pub struct ActiveChaser {
         skip_serializing_if = "Option::is_none"
     )]
     pub origin: Option<TaskOrigin>,
+    #[serde(
+        default,
+        deserialize_with = "crate::deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[serde(rename = "twapId")]
+    pub twap_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -171,7 +178,8 @@ pub struct ActiveTWAP {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoreData {
-    pub latency: f64,
+    #[serde(deserialize_with = "Option::<f64>::deserialize")]
+    pub latency: Option<f64>,
     pub balance: Balance,
     pub markets: Vec<Market>,
     pub tickers: Vec<Ticker>,
@@ -692,6 +700,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         origin: Option<TaskOrigin>,
+        #[serde(
+            default,
+            deserialize_with = "crate::deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        #[serde(rename = "twapId")]
+        twap_id: Option<String>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::ActiveChaser {
@@ -792,7 +807,8 @@ mod strict_codecs {
     #[serde(remote = "super::StoreData")]
     #[serde(rename_all = "camelCase")]
     struct WireStoreData {
-        latency: f64,
+        #[serde(deserialize_with = "Option::<f64>::deserialize")]
+        latency: Option<f64>,
         balance: Balance,
         markets: Vec<Market>,
         tickers: Vec<Ticker>,

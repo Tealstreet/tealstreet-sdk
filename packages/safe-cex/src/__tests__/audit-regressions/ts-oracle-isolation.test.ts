@@ -22,11 +22,13 @@ const KEPT_VENUE_FILES = [
   'binance/binanceinverse.types.ts',
   'binance/binancepm.types.ts',
   'binance/binancespot.types.ts',
+  'bingx/bingx.signing.ts',
   'bitget/bitget.signing.ts',
   'bitget/bitget.types.ts',
   'bitunix/bitunix.income.ts',
   'bitunix/bitunix.signing.ts',
   'blofin/blofin.income.ts',
+  'blofin/blofin.signing.ts',
   'blofin/blofin.types.ts',
   'bybit/bybit.closed-pnl.ts',
   'bybit/bybit.inverse.ts',
@@ -60,7 +62,6 @@ const SOURCE_CONSUMER_FILES = ['bitget/bitget.family.ts', 'kraken/kraken.fills.t
 
 // Kept venue code outside the beta families, each for a named runtime consumer.
 const NON_BETA_KEPT_FAMILIES: Record<string, string> = {
-  grvt: 'index.ts exports the GRVT builder-authorization helpers the web app uses',
   txflow: 'rust/rust.exchange.ts applies the TxFlow client order ID rule',
 };
 

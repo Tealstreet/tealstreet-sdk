@@ -10,7 +10,7 @@ A typing-first trading interface. Place orders, build chains, and run
 TWAPs from a prompt that feels like a shell and trades like a terminal.
 
 ```text
-:hltest [BTC-PERP $81,284.5] > buy $100 stop -1%
+:hltest [BTC-PERP $81,284.5] > buy $100 stop $last -1%
 :hltest [BTC-PERP $81,284.5] > chase sell %all% 20% reduce to 1%
 :hltest [BTC-PERP $81,284.5] > set ec; cancel; close; nuke
 ```

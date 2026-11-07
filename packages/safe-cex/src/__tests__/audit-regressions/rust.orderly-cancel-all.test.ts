@@ -11,7 +11,7 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
-it.each<ExchangeName>(['tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])(
+it.each<ExchangeName>(['kodiakfi', 'mode', 'what', 'woofi'])(
   '%s cancel-all sends the unscoped native cancel instead of looping stored symbols',
   async (name) => {
     const store = new DefaultStore();

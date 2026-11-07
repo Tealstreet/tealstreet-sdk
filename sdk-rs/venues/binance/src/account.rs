@@ -7,17 +7,22 @@ use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::SnapshotCoverage;
 use safe_cex_engine::credential_selection::CredentialRole;
+use safe_cex_engine::fresh_positions;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::{
     Balance, CoinBalance, CurrencyBalance, MarginType, Market, Order, OrderExtra, OrderSide,
     OrderStatus, OrderType, Position, PositionMode, PositionSide, RejectReason, StopTriggerType,
     TimeInForce,
 };
+use safe_cex_engine::socket_lifecycle::RetireReason;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Cx, Fill, Method, Response, TimerId, json, num};
+use safe_cex_engine::text::JoinWith;
+use safe_cex_engine::{Cx, ErrorKind, Fill, Method, Response, TimerId, VenueError, json, num};
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+mod venue_state;
 
 /// Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS: f64 = 30.0 * 60_000.0;
@@ -28,12 +33,20 @@ const HEALTH_CHECK_MS: f64 = 3_000.0;
 const ACCOUNT_INTERVAL_MS: f64 = 25_000.0;
 const DEGRADED_ACCOUNT_INTERVAL_MS: f64 = 3_000.0;
 const POSITION_RISK_INTERVAL_MS: f64 = 75_000.0;
+/// A failed position read is tried again this soon, not at the next interval.
+const FAILED_POSITION_RETRY_MS: f64 = 5_000.0;
 /// `ACCOUNT_UPDATE` omits leverage, margin type and liquidation price; the
 /// REST repair that fills them in runs at most this often.
 const POSITION_REPAIR_THROTTLE_MS: f64 = 10_000.0;
+/// How soon `readPositions` tries again after a newer stream event discarded a read.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
+const FRESH_PAUSED: &str = "Binance background reads are paused near the weight limit";
 /// Order events trigger a full REST order snapshot this long after the last one.
 const ORDERS_REFRESH_DEBOUNCE_MS: f64 = 10_000.0;
 const ORDERS_RETRY_MS: f64 = 15_000.0;
+/// -2011 is no proof the order is gone. Snapshots still listing the row this many
+/// times (one refresh debounce apart, past any read lag) mean the order is live.
+const UNKNOWN_CANCEL_RELISTINGS: u8 = 2;
 /// Retain execution identities across reconnects without an unbounded event log.
 const DERIVATIVE_EXECUTION_WINDOW: usize = 16_384;
 const SPOT_EXECUTION_WINDOW: usize = 16_384;
@@ -54,6 +67,8 @@ pub enum Request {
         rows: Vec<Position>,
         marks: Vec<(String, f64)>,
         skipped: SnapshotCoverage<String>,
+        /// Owned rows on a contract the clean catalogue excludes.
+        unlisted: Vec<String>,
     },
     SymbolConfig {
         generation: u32,
@@ -71,6 +86,9 @@ pub enum Request {
 }
 
 struct PositionsJoin {
+    unlisted: Vec<String>,
+    /// The venue's error for the half that failed.
+    error: Option<VenueError>,
     generation: u32,
     /// Position-state version when the reads were issued; a newer stream
     /// event makes the snapshot stale.
@@ -81,9 +99,22 @@ struct PositionsJoin {
     failed: bool,
 }
 
+/// A row whose cancel answered -2011, keyed as the snapshot lists it.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum CancelledRow {
+    Native(String, u64),
+    Strategy(String, u64),
+    Algo(String),
+}
+
+/// The one read-cover scope of Binance's account-wide open-orders read.
+const ORDERS_SCOPE: &str = "orders";
+
 struct OrdersJoin {
     generation: u32,
     token: safe_cex_engine::OrderSnapshotToken,
+    /// Order-uncertainty epoch before the first read: a census spans one or two contexts.
+    epoch: u64,
     native_orders: Vec<(String, String, u64, f64)>,
     native_strategies: Vec<(String, String, u64)>,
     regular: Option<Vec<Order>>,
@@ -92,6 +123,35 @@ struct OrdersJoin {
     /// Symbols of the rows rejected under each id; "" when the row's symbol is unreadable.
     rejected_symbols: HashMap<String, Vec<String>>,
     failed: bool,
+    /// The earliest release among the census's reads (regular and algo legs are
+    /// independent owners); `None` until a leg answers. Its rows are that old.
+    read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+    /// A leg answered outside its read response: the census proves nothing.
+    read_lost: bool,
+    /// Per-order classification, applied only for the symbols the commit admits:
+    /// `(symbol, id, executes at its limit)` and `(symbol, id, position side)`.
+    limit_stops: Vec<(String, String, bool)>,
+    position_sides: Vec<(String, String, Option<String>)>,
+}
+
+impl OrdersJoin {
+    /// One leg answered: its release joins the census's earliest, and its
+    /// classification waits for the commit's admission.
+    fn note_leg(
+        &mut self,
+        read: Option<safe_cex_engine::order_read_cover::OrderReadMark>,
+        limit_stops: Vec<(String, String, bool)>,
+        position_sides: Vec<(String, String, Option<String>)>,
+    ) {
+        match read {
+            Some(read) => {
+                self.read = Some(self.read.map_or(read, |earliest| earliest.earliest(read)));
+            }
+            None => self.read_lost = true,
+        }
+        self.limit_stops.extend(limit_stops);
+        self.position_sides.extend(position_sides);
+    }
 }
 
 struct WalletAsset {
@@ -141,8 +201,22 @@ pub struct AccountState {
     derivative_trade_order: VecDeque<(String, u64, i64)>,
     derivative_fill_watermarks: HashMap<(String, u64), f64>,
     terminal_algo_ids: HashSet<String>,
+    /// Open trailing stops' native callback rate and activation price, from the last
+    /// open-algo snapshot: what an amend's put-back restores exactly.
+    pub(crate) trailing: HashMap<String, crate::trading::NativeTrailing>,
+    /// The same from the regular open-orders snapshot: COIN-M lists trailing stops there.
+    pub(crate) regular_trailing: HashMap<String, crate::trading::NativeTrailing>,
     /// Orders whose native type executes at a limit price once triggered.
     pub(crate) limit_stops: HashSet<String>,
+    /// The native hedge side of open rows; `reduceOnly` alone does not prove it.
+    order_position_sides: HashMap<String, &'static str>,
+    /// Rows a -2011 marked gone, with how many later snapshots still listed them.
+    unknown_order_cancels: HashMap<CancelledRow, u8>,
+    position_mode_retry: bool,
+    leverage_brackets_retry: bool,
+    last_settings_retry_at: f64,
+    /// Until read, every market's maximum leverage is the catalogue's placeholder 1x.
+    pub(crate) leverage_brackets_unread: bool,
     strategy_client_native: HashMap<(String, String), u64>,
     terminal_strategies: HashSet<(String, u64)>,
     pm_order_owners: HashMap<String, PmOrderOwner>,
@@ -163,6 +237,8 @@ pub struct AccountState {
     last_repair_at: Option<f64>,
     positions_generation: u32,
     positions: Option<PositionsJoin>,
+    pub(crate) fresh_positions: safe_cex_engine::fresh_positions::FreshPositions,
+    fresh_positions_timer: Option<TimerId>,
     orders_generation: u32,
     orders: Option<OrdersJoin>,
     orders_refresh_timer: Option<TimerId>,
@@ -187,7 +263,20 @@ pub struct AccountState {
 }
 
 impl AccountState {
-    fn order_terminal(&self, order: &Order) -> bool {
+    pub(crate) fn observe_snapshot_orders(&mut self, orders: &[Order]) {
+        for order in orders {
+            if let Ok(native) = order.id.parse::<u64>() {
+                let evidence = self
+                    .native_executed
+                    .entry((order.symbol.clone(), native))
+                    .or_default();
+                evidence.0 = evidence.0.max(order.filled);
+                evidence.1 |= matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled);
+            }
+        }
+    }
+
+    pub(crate) fn order_terminal(&self, order: &Order) -> bool {
         self.terminal_algo_ids.contains(&order.id)
             || order.id.parse().is_ok_and(|native: u64| {
                 self.native_executed
@@ -311,6 +400,36 @@ fn nonnegative_number(value: &str) -> bool {
         .is_ok_and(|n| n.is_finite() && n >= 0.0)
 }
 
+/// A failed private read, classified by the Binance table (rules 2-6). The
+/// message stays the venue's text; the code goes in the native evidence.
+pub(crate) fn read_error(response: &Response<'_>) -> VenueError {
+    use safe_cex_engine::classify::{self, Native, NativeCode, Released};
+    let (code, message) =
+        venue_error(response).unwrap_or_else(|| (0, format!("HTTP {}", response.status)));
+    let native = (code != 0).then(|| Native {
+        code: NativeCode::Int(code),
+        message: &message,
+    });
+    classify::read(
+        &crate::trading::BINANCE,
+        Released::Response(response),
+        native.as_ref(),
+        message.clone(),
+    )
+    .error
+}
+
+/// A read lost in transport: `network`, by rule 2.
+fn transport_error(message: String) -> VenueError {
+    use safe_cex_engine::classify::{self, Released};
+    classify::read(&crate::trading::BINANCE, Released::Transport, None, message).error
+}
+
+fn prefixed(mut error: VenueError, prefix: &str) -> VenueError {
+    error.message = format!("{prefix}{}", error.message);
+    error
+}
+
 /// The body's Binance error, if the request failed.
 pub fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
     let body = response.body;
@@ -333,6 +452,7 @@ impl BinanceFutures {
         if self.is_spot() {
             return;
         }
+        self.account.leverage_brackets_unread = true;
         self.background_signed_read(
             cx,
             self.paths.leverage_bracket,
@@ -364,6 +484,30 @@ impl BinanceFutures {
         self.account.last_risk_at = cx.now;
         self.account.last_account_at = cx.now;
         self.account.tick_timer = Some(cx.set_poll_timer(HEALTH_CHECK_MS));
+    }
+
+    /// Data source: re-read the position mode and, for a named symbol, the
+    /// positions join whose symbol config carries leverage and margin type.
+    /// Never a write.
+    pub(crate) fn reread_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        if cx.frame_fed()
+            || !self.account.started
+            || !self.credentials.has_primary()
+            || self.is_spot()
+            || self.is_options()
+        {
+            return;
+        }
+        self.background_signed_read(
+            cx,
+            self.paths.position_mode,
+            Query::new(),
+            None,
+            Pending::Account(Request::PositionMode),
+        );
+        if symbol.is_some() {
+            self.fetch_positions(cx);
+        }
     }
 
     pub(crate) fn request_listen_key(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -400,6 +544,8 @@ impl BinanceFutures {
         let generation = self.account.positions_generation;
         let symbol_config = self.paths.symbol_config;
         self.account.positions = Some(PositionsJoin {
+            unlisted: Vec::new(),
+            error: None,
             generation,
             version: self.account.position_version,
             rows: None,
@@ -419,6 +565,7 @@ impl BinanceFutures {
                 rows: Vec::new(),
                 marks: Vec::new(),
                 skipped: SnapshotCoverage::default(),
+                unlisted: Vec::new(),
             }),
         );
         if let Some(path) = symbol_config {
@@ -463,6 +610,10 @@ impl BinanceFutures {
     }
 
     pub(crate) fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.options_read(cx, crate::options::Kind::Orders);
+            return;
+        }
         if self.account.orders.is_some() {
             return;
         }
@@ -480,13 +631,18 @@ impl BinanceFutures {
         self.account.orders = Some(OrdersJoin {
             generation,
             token,
+            epoch: cx.order_read_epoch(),
             native_orders: Vec::new(),
             native_strategies: Vec::new(),
             regular: None,
-            algo: (self.is_spot() || self.is_inverse()).then(Vec::new),
+            algo: self.is_spot().then(Vec::new),
             skipped: SnapshotCoverage::default(),
             rejected_symbols: HashMap::new(),
             failed: false,
+            read: None,
+            read_lost: false,
+            limit_stops: Vec::new(),
+            position_sides: Vec::new(),
         });
         self.background_signed_read(
             cx,
@@ -495,7 +651,7 @@ impl BinanceFutures {
             None,
             Pending::Account(Request::OpenOrders { generation }),
         );
-        if self.is_spot() || self.is_inverse() {
+        if self.is_spot() {
             return;
         }
         let conditional = if self.options.portfolio_margin {
@@ -541,6 +697,10 @@ impl BinanceFutures {
     }
 
     pub(crate) fn on_private_open(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.is_options() {
+            self.options_refresh(cx);
+            return;
+        }
         if self.is_spot() {
             self.subscribe_spot_account(cx);
             return;
@@ -549,19 +709,33 @@ impl BinanceFutures {
     }
 
     fn private_ready(&mut self, cx: &mut Cx<'_, Pending>) {
-        // Order events while no stream was open were never delivered.
-        if self.account.resync_orders_on_open || self.account.has_opened {
-            self.account.resync_orders_on_open = false;
+        // Events while no stream was open were never delivered, the first open included:
+        // the startup snapshot was read before the stream subscribed.
+        self.account.resync_orders_on_open = false;
+        if !cx.frame_fed() {
             self.schedule_orders_refresh(cx);
+        }
+        // A snapshot from before the open still in flight proves nothing: repair after it.
+        if !self.is_spot() && !cx.frame_fed() {
+            if self.account.positions.is_none() {
+                self.account.last_risk_at = cx.now;
+                self.fetch_positions(cx);
+            } else {
+                self.account.pending_position_events = true;
+                self.schedule_position_repair(cx);
+            }
         }
         self.account.has_opened = true;
     }
 
     pub(crate) fn on_account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         let account = &mut self.account;
-        if account.listen_key_timer == Some(timer) {
+        if account.fresh_positions_timer == Some(timer) {
+            account.fresh_positions_timer = None;
+            self.retry_fresh_positions(cx);
+        } else if account.listen_key_timer == Some(timer) {
             account.listen_key_timer = None;
-            if self.private.socket.is_none() && !self.private.supervisor.is_waiting() {
+            if self.private.idle() {
                 self.request_listen_key(cx);
             }
         } else if account.keepalive_timer == Some(timer) {
@@ -596,6 +770,7 @@ impl BinanceFutures {
         if self.background_paused(now) {
             return;
         }
+        self.retry_failed_settings_reads(cx);
         if now - self.account.last_risk_at >= POSITION_RISK_INTERVAL_MS {
             self.account.last_risk_at = now;
             self.fetch_positions(cx);
@@ -612,67 +787,96 @@ impl BinanceFutures {
         }
     }
 
+    /// Position mode and leverage limits are read once at start; a failure must
+    /// not leave hedge orders refused or leverage clamped until a reload.
+    fn retry_failed_settings_reads(&mut self, cx: &mut Cx<'_, Pending>) {
+        let due = cx.now - self.account.last_settings_retry_at >= ORDERS_RETRY_MS;
+        if !due || !(self.account.position_mode_retry || self.account.leverage_brackets_retry) {
+            return;
+        }
+        self.account.last_settings_retry_at = cx.now;
+        if std::mem::take(&mut self.account.position_mode_retry) {
+            self.background_signed_read(
+                cx,
+                self.paths.position_mode,
+                Query::new(),
+                None,
+                Pending::Account(Request::PositionMode),
+            );
+        }
+        if std::mem::take(&mut self.account.leverage_brackets_retry) {
+            self.request_leverage_brackets(cx);
+        }
+    }
+
     pub(crate) fn on_account_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: &str,
     ) {
-        self.account_request_failed(cx, request, format!("network error: {error}"));
+        self.account_request_failed(
+            cx,
+            request,
+            transport_error(format!("network error: {error}")),
+        );
     }
 
     pub(crate) fn account_request_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: Request,
-        message: String,
+        error: VenueError,
     ) {
+        cx.startup_read_refused(&error);
         match request {
             Request::ListenKey => {
-                let message = format!("Binance user data stream unavailable: {message}");
+                let error = prefixed(error, "Binance user data stream unavailable: ");
                 // One toast per failure streak; later attempts only log.
                 let level = if self.account.listen_key_failures == 0 {
                     Level::Error
                 } else {
                     Level::Warn
                 };
-                cx.notice(level, code::STREAM_UNAVAILABLE, message);
+                cx.notice_error(level, code::STREAM_UNAVAILABLE, &error);
                 self.account.resync_orders_on_open = true;
                 let delay = cx.jittered(LISTEN_KEY_RETRY.delay(self.account.listen_key_failures));
                 self.account.listen_key_failures += 1;
                 self.account.listen_key_timer = Some(cx.set_timer(delay));
             }
             Request::Keepalive => {
-                let message = format!("Binance user data stream keepalive failed: {message}");
+                let error = prefixed(error, "Binance user data stream keepalive failed: ");
                 let level = if self.account.keepalive_failing {
                     Level::Warn
                 } else {
                     Level::Error
                 };
-                cx.notice(level, code::STREAM_UNAVAILABLE, message);
+                cx.notice_error(level, code::STREAM_UNAVAILABLE, &error);
                 self.account.keepalive_failing = true;
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_RETRY_MAX_MS));
             }
             Request::PositionRisk { generation, .. } | Request::SymbolConfig { generation, .. } => {
-                cx.retried_failure(
-                    "binance.account:615",
-                    format!("Binance positions: {message}"),
-                );
+                let error = prefixed(error, "Binance positions: ");
+                cx.retried_failure_error("binance.account:615", &error);
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
                 {
                     join.failed = true;
+                    join.error = Some(error);
                 }
                 self.finish_positions(cx);
             }
             Request::Account { .. } => {
                 self.account.account_in_flight = false;
-                cx.retried_failure("binance.account:629", format!("Binance account: {message}"));
+                cx.retried_failure_error(
+                    "binance.account:629",
+                    &prefixed(error, "Binance account: "),
+                );
             }
             Request::OpenOrders { generation } | Request::OpenAlgoOrders { generation } => {
-                cx.retried_failure(
+                cx.retried_failure_error(
                     "binance.account:636",
-                    format!("Binance fetchOrders error: {message}"),
+                    &prefixed(error, "Binance fetchOrders error: "),
                 );
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
@@ -681,8 +885,13 @@ impl BinanceFutures {
                 }
                 self.finish_orders(cx);
             }
-            Request::LeverageBrackets(_) | Request::PositionMode => {
-                cx.retried_failure("binance.account:649", format!("Binance: {message}"));
+            Request::LeverageBrackets(_) => {
+                cx.retried_failure_error("binance.account:649", &prefixed(error, "Binance: "));
+                self.account.leverage_brackets_retry = true;
+            }
+            Request::PositionMode => {
+                cx.retried_failure_error("binance.account:649", &prefixed(error, "Binance: "));
+                self.account.position_mode_retry = true;
             }
         }
     }
@@ -708,6 +917,7 @@ impl BinanceFutures {
                 generation,
                 marks,
                 skipped,
+                unlisted,
             } => {
                 let Ok(p) = serde_json::from_str::<PositionSnapshot>(item) else {
                     #[derive(Deserialize)]
@@ -735,6 +945,7 @@ impl BinanceFutures {
                 {
                     // A clean catalogue excludes delivery/non-trading contracts by design.
                     if !self.catalogue_partial {
+                        unlisted.push(p.symbol.into_owned());
                         return;
                     }
                     // Discovery is retrying the catalogue; hold the snapshot until it settles.
@@ -871,13 +1082,14 @@ impl BinanceFutures {
         request: Request,
         response: Response<'_>,
     ) {
-        if let Some((_, message)) = venue_error(&response) {
-            self.account_request_failed(cx, request, message);
+        if venue_error(&response).is_some() {
+            self.account_request_failed(cx, request, read_error(&response));
             return;
         }
         let body = response.body;
         match request {
             Request::LeverageBrackets(max_by_symbol) => {
+                self.account.leverage_brackets_unread = false;
                 cx.store.update_markets(|market| {
                     if let Some(max) = max_by_symbol.get(&market.symbol) {
                         market.limits.leverage.max = *max;
@@ -900,28 +1112,35 @@ impl BinanceFutures {
                     url.push_str(&safe_cex_engine::url::encode(&key.listen_key));
                     self.connect_url(cx, Channel::Private, &url);
                 }
-                Err(error) => {
-                    self.account_request_failed(cx, Request::ListenKey, error.to_string())
-                }
+                Err(error) => self.account_request_failed(
+                    cx,
+                    Request::ListenKey,
+                    VenueError::new(error.to_string()),
+                ),
             },
             Request::Keepalive => {
                 self.account.keepalive_failing = false;
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_REFRESH_MS));
             }
-            Request::PositionMode => {
-                if let Ok(mode) = serde_json::from_str::<PositionModeBody>(body) {
-                    cx.store.set_hedged(mode.dual_side_position);
-                }
-            }
+            Request::PositionMode => match serde_json::from_str::<PositionModeBody>(body) {
+                Ok(mode) => cx.store.set_hedged(mode.dual_side_position),
+                Err(error) => self.account_request_failed(
+                    cx,
+                    Request::PositionMode,
+                    VenueError::new(error.to_string()),
+                ),
+            },
             Request::PositionRisk {
                 generation,
                 rows,
                 marks,
                 skipped,
+                unlisted,
             } => {
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
                 {
+                    join.unlisted = unlisted;
                     if !join.failed {
                         self.account.native_asset_marks.extend(marks);
                     }
@@ -1024,19 +1243,37 @@ impl BinanceFutures {
                 let mut native_orders = Vec::new();
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
+                let mut position_sides = Vec::new();
                 let client_keyed = self.options.portfolio_margin || self.is_spot();
                 let spot = self.is_spot();
-                let parsed = json::each::<OpenOrder>(body, |o| {
+                let mut trailing = HashMap::new();
+                let (parsed, undecodable) = each_decodable::<OpenOrder>(body, |o| {
                     let id = match (&o.client_order_id, client_keyed) {
                         (Some(client), true) => client.to_string(),
                         _ => o.order_id.to_string(),
                     };
+                    if &*o.kind == "TRAILING_STOP_MARKET"
+                        && let Some(rate) =
+                            o.price_rate.as_deref().and_then(|r| r.parse::<f64>().ok())
+                        && rate > 0.0
+                    {
+                        trailing.insert(
+                            id.clone(),
+                            crate::trading::NativeTrailing {
+                                rate,
+                                activate_price: o
+                                    .activate_price
+                                    .as_deref()
+                                    .filter(|p| p.parse::<f64>().is_ok_and(|p| p > 0.0))
+                                    .map(str::to_owned),
+                            },
+                        );
+                    }
                     let Some(kind) = order_type(&o.kind) else {
                         let message = format!("Binance open order {id} has an unsupported type");
                         rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
-                    limit_stops.push((id.clone(), executes_at_limit(&o.kind, spot)));
                     if client_keyed
                         && (!matches!(o.side.as_ref(), "BUY" | "SELL")
                             || [&o.price, &o.orig_qty, &o.executed_qty]
@@ -1055,6 +1292,16 @@ impl BinanceFutures {
                     let amount = num::parse(&o.orig_qty);
                     let filled = num::parse(&o.executed_qty);
                     native_orders.push((o.symbol.to_string(), id.clone(), o.order_id, filled));
+                    limit_stops.push((
+                        o.symbol.to_string(),
+                        id.clone(),
+                        executes_at_limit(&o.kind, spot),
+                    ));
+                    position_sides.push((
+                        o.symbol.to_string(),
+                        id.clone(),
+                        o.position_side.as_deref().map(str::to_owned),
+                    ));
                     orders.push(Order {
                         id,
                         parent_id: None,
@@ -1085,7 +1332,11 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
-                self.note_limit_stops(limit_stops);
+                rejected.extend(undecodable);
+                if parsed.is_ok() {
+                    self.account.regular_trailing = trailing;
+                }
+                let read = cx.order_read_mark();
                 if self.is_inverse() {
                     for order in &mut orders {
                         order.extra = Some(OrderExtra {
@@ -1097,6 +1348,7 @@ impl BinanceFutures {
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
+                    join.note_leg(read, limit_stops, position_sides);
                     match parsed {
                         Ok(()) => {
                             join.regular = Some(orders);
@@ -1114,17 +1366,37 @@ impl BinanceFutures {
                 let mut native_strategies = Vec::new();
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
-                let parsed = json::each::<PmConditionalOrder>(body, |o| {
-                    let id = o.new_client_strategy_id.as_ref();
-                    let Some(kind) = order_type(&o.strategy_type) else {
+                let mut position_sides = Vec::new();
+                let mut trailing = HashMap::new();
+                let (parsed, undecodable) = each_decodable::<PmAlgoOrder>(body, |o| {
+                    let id = o.client_algo_id.as_ref();
+                    if &*o.order_type == "TRAILING_STOP_MARKET"
+                        && let Some(rate) = o
+                            .callback_rate
+                            .as_deref()
+                            .and_then(|r| r.parse::<f64>().ok())
+                        && rate > 0.0
+                    {
+                        trailing.insert(
+                            id.to_owned(),
+                            crate::trading::NativeTrailing {
+                                rate,
+                                activate_price: o
+                                    .activate_price
+                                    .as_deref()
+                                    .filter(|p| p.parse::<f64>().is_ok_and(|p| p > 0.0))
+                                    .map(str::to_owned),
+                            },
+                        );
+                    }
+                    let Some(kind) = order_type(&o.order_type) else {
                         let message =
                             format!("Binance conditional order {id} has an unsupported type");
                         rejected.push((id.to_owned(), o.symbol.to_string(), message));
                         return;
                     };
-                    limit_stops.push((id.to_owned(), executes_at_limit(&o.strategy_type, false)));
                     if !matches!(o.side.as_ref(), "BUY" | "SELL")
-                        || [&o.price, &o.orig_qty, &o.stop_price]
+                        || [&o.price, &o.quantity, &o.trigger_price]
                             .iter()
                             .any(|n| n.as_deref().is_some_and(|n| !nonnegative_number(n)))
                     {
@@ -1134,16 +1406,26 @@ impl BinanceFutures {
                         return;
                     }
                     let price = opt(&o.price);
-                    let amount = opt(&o.orig_qty);
-                    if let Some(native) = o.strategy_id {
+                    let amount = opt(&o.quantity);
+                    if let Some(native) = o.algo_id {
                         native_strategies.push((
                             o.symbol.to_string(),
-                            o.new_client_strategy_id.to_string(),
+                            o.client_algo_id.to_string(),
                             native,
                         ));
                     }
+                    limit_stops.push((
+                        o.symbol.to_string(),
+                        id.to_owned(),
+                        executes_at_limit(&o.order_type, false),
+                    ));
+                    position_sides.push((
+                        o.symbol.to_string(),
+                        id.to_owned(),
+                        o.position_side.as_deref().map(str::to_owned),
+                    ));
                     orders.push(Order {
-                        id: o.new_client_strategy_id.into_owned(),
+                        id: o.client_algo_id.into_owned(),
                         parent_id: None,
                         status: OrderStatus::Open,
                         symbol: o.symbol.into_owned(),
@@ -1152,13 +1434,13 @@ impl BinanceFutures {
                         price: if price != 0.0 {
                             price
                         } else {
-                            opt(&o.stop_price)
+                            opt(&o.trigger_price)
                         },
                         amount,
                         filled: 0.0,
                         remaining: amount,
                         reduce_only: o.reduce_only,
-                        close: Some(false),
+                        close: Some(o.close_position),
                         client_order_id: None,
                         time_in_force: None,
                         last_update: now,
@@ -1168,10 +1450,15 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
-                self.note_limit_stops(limit_stops);
+                rejected.extend(undecodable);
+                if parsed.is_ok() {
+                    self.account.trailing = trailing;
+                }
+                let read = cx.order_read_mark();
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
+                    join.note_leg(read, limit_stops, position_sides);
                     match parsed {
                         Ok(()) => {
                             join.algo = Some(orders);
@@ -1188,18 +1475,45 @@ impl BinanceFutures {
                 let mut orders = Vec::new();
                 let mut rejected = Vec::new();
                 let mut limit_stops = Vec::new();
-                let parsed = json::each::<OpenAlgoOrder>(body, |o| {
+                let mut position_sides = Vec::new();
+                let mut trailing = HashMap::new();
+                let (parsed, undecodable) = each_decodable::<OpenAlgoOrder>(body, |o| {
+                    if &*o.order_type == "TRAILING_STOP_MARKET"
+                        && let Some(rate) = o
+                            .callback_rate
+                            .as_deref()
+                            .and_then(|r| r.parse::<f64>().ok())
+                        && rate > 0.0
+                    {
+                        trailing.insert(
+                            o.algo_id.to_string(),
+                            crate::trading::NativeTrailing {
+                                rate,
+                                activate_price: o
+                                    .activate_price
+                                    .as_deref()
+                                    .filter(|p| p.parse::<f64>().is_ok_and(|p| p > 0.0))
+                                    .map(str::to_owned),
+                            },
+                        );
+                    }
                     let Some(kind) = order_type(&o.order_type) else {
                         let id = o.algo_id.to_string();
                         let message = format!("Binance open order {id} has an unsupported type");
                         rejected.push((id, o.symbol.to_string(), message));
                         return;
                     };
+                    let amount = opt(&o.quantity);
+                    position_sides.push((
+                        o.symbol.to_string(),
+                        o.algo_id.to_string(),
+                        o.position_side.as_deref().map(str::to_owned),
+                    ));
                     limit_stops.push((
+                        o.symbol.to_string(),
                         o.algo_id.to_string(),
                         executes_at_limit(&o.order_type, false),
                     ));
-                    let amount = opt(&o.quantity);
                     orders.push(Order {
                         id: o.algo_id.to_string(),
                         parent_id: None,
@@ -1222,10 +1536,26 @@ impl BinanceFutures {
                         extra: None,
                     });
                 });
-                self.note_limit_stops(limit_stops);
+                rejected.extend(undecodable);
+                // COIN-M algo rows say so on the row itself, so the routing reaches a
+                // frame-fed engine with the order (stops placed before the migration lack it).
+                if self.is_inverse() {
+                    for order in &mut orders {
+                        order.extra = Some(OrderExtra {
+                            remaining_native: Some(order.remaining),
+                            native_algo: true,
+                            ..OrderExtra::default()
+                        });
+                    }
+                }
+                if parsed.is_ok() {
+                    self.account.trailing = trailing;
+                }
+                let read = cx.order_read_mark();
                 if let Some(join) = &mut self.account.orders
                     && join.generation == generation
                 {
+                    join.note_leg(read, limit_stops, position_sides);
                     match parsed {
                         Ok(()) => {
                             join.algo = Some(orders);
@@ -1248,6 +1578,19 @@ impl BinanceFutures {
             return;
         }
         let join = self.account.positions.take().expect("checked above");
+        if join.failed {
+            self.account.last_risk_at =
+                cx.now - POSITION_RISK_INTERVAL_MS + FAILED_POSITION_RETRY_MS;
+        }
+        let generation = join.generation;
+        let unlisted = join.unlisted;
+        let current = join.version == self.account.position_version;
+        let rejected = join.skipped.rejected() != 0;
+        let failure = join.failed.then(|| {
+            join.error
+                .clone()
+                .unwrap_or_else(|| VenueError::new("Binance positions: snapshot not usable"))
+        });
         if !join.failed {
             let configs = join.configs.unwrap_or_default();
             let settings: std::collections::HashMap<&str, MarketSetting> =
@@ -1310,6 +1653,52 @@ impl BinanceFutures {
         } else if self.account.pending_position_events {
             self.schedule_position_repair(cx);
         }
+        let fresh = &mut self.account.fresh_positions;
+        if let Some(error) = failure {
+            fresh.failed(cx, 0, generation, &error);
+        } else if rejected && current {
+            let error = VenueError::new("Binance positions: a row could not be mapped");
+            fresh.failed(cx, 0, generation, &error);
+        } else if current {
+            fresh.committed(cx, 0, generation, &unlisted);
+        }
+        if self.account.fresh_positions.predates(0, generation) {
+            self.retry_fresh_positions(cx);
+        } else if self.account.fresh_positions.owed(0)
+            && self.account.fresh_positions_timer.is_none()
+        {
+            self.account.fresh_positions_timer = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
+    }
+
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so its answer is followed by a new read and never settles this.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started || !self.credentials.has_primary() {
+            let error =
+                VenueError::new("Binance account is not loaded").kind(ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        if self.background_paused(cx.now) {
+            let wait = self.background_paused_until - cx.now;
+            fresh_positions::refuse(cx, fresh_positions::rate_limited(FRESH_PAUSED, wait));
+            return;
+        }
+        let need = self.account.positions_generation + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.fetch_positions(cx);
+        }
+    }
+
+    fn retry_fresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.background_paused(cx.now) {
+            let wait = self.background_paused_until - cx.now;
+            let error = fresh_positions::rate_limited(FRESH_PAUSED, wait);
+            self.account.fresh_positions.failed(cx, 0, u32::MAX, &error);
+            return;
+        }
+        self.fetch_positions(cx);
     }
 
     pub(crate) fn client_order_row_is_foreign(
@@ -1365,6 +1754,31 @@ impl BinanceFutures {
             self.schedule_orders_refresh(cx);
             return;
         }
+        // What this census may replace, decided before any per-order state moves:
+        // a symbol the stream changed after the earliest leg's release keeps its
+        // rows and its state (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+        let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+            key: ORDERS_SCOPE,
+            account: &[ORDERS_SCOPE],
+        };
+        let Some(earliest) = join.read.filter(|_| !join.read_lost) else {
+            self.account.orders_stale = true;
+            self.schedule_orders_refresh(cx);
+            return;
+        };
+        let read_rows: Vec<Order> = join
+            .regular
+            .iter()
+            .flatten()
+            .chain(join.algo.iter().flatten())
+            .cloned()
+            .collect();
+        // Refused whole: a newer read of these rows has already committed.
+        let Some(refused) = cx.orders_read_refusals_from(earliest, scope, |_| true, &read_rows)
+        else {
+            return;
+        };
+        self.believe_relisted_unknown_cancels(&join, &refused);
         if join
             .native_orders
             .iter()
@@ -1429,77 +1843,221 @@ impl BinanceFutures {
                 return;
             }
         }
-        let clean = join.skipped.rejected() == 0;
-        if !cx
-            .store
-            .commit_orders_snapshot([join.token], |current_rows| {
-                self.account.orders_stale = false;
-                let mut orders = join.regular.unwrap_or_default();
-                orders.extend(join.algo.unwrap_or_default());
-                // A clean snapshot re-arms every skip log; otherwise only the ids it mapped.
-                if join.skipped.rejected() == 0 {
-                    self.account.order_skip_logged.clear();
-                } else {
-                    for order in &orders {
-                        self.account.order_skip_logged.remove(&order.id);
-                    }
-                }
-                for (symbol, client, native, filled) in join.native_orders {
-                    if self.is_spot() {
-                        // Only the first accepted REST observation establishes history.
-                        // Live events create a zero floor; ACKs never touch delivery.
-                        self.account
-                            .spot_delivery
-                            .entry((symbol.clone(), native))
-                            .or_insert(SpotDelivery {
-                                bootstrap_floor: filled,
-                                delivered_cumulative: filled,
-                            });
-                    }
-                    let entry = self
-                        .account
-                        .native_executed
-                        .entry((symbol.clone(), native))
-                        .or_default();
-                    entry.0 = entry.0.max(filled);
-                    if self.is_spot() || self.options.portfolio_margin {
-                        self.bind_regular_native(&symbol, &client, native);
-                    }
-                }
-                for (symbol, client, native) in join.native_strategies {
-                    self.bind_strategy_native(&symbol, &client, native);
-                }
-                for current in current_rows {
-                    let terminal = self.account.order_terminal(current);
-                    // A rejected row on another symbol is a different order reusing the id.
-                    let same_order = join
-                        .rejected_symbols
-                        .get(&current.id)
-                        .is_none_or(|symbols| {
-                            symbols
-                                .iter()
-                                .any(|symbol| symbol.is_empty() || *symbol == current.symbol)
-                        });
-                    if current.status == OrderStatus::Open
-                        && !terminal
-                        && !join.skipped.allows_absence(&current.id)
-                        && same_order
-                        && !orders.iter().any(|o| o.id == current.id)
-                    {
-                        orders.push(current.clone());
-                    }
-                }
-                orders
-            })
+        // The read's rows, plus every row it cannot prove gone.
+        let mut orders = join.regular.unwrap_or_default();
+        orders.extend(join.algo.unwrap_or_default());
+        for current in cx.store.orders() {
+            let terminal = self.account.order_terminal(current);
+            // A rejected row on another symbol is a different order reusing the id.
+            let same_order = join
+                .rejected_symbols
+                .get(&current.id)
+                .is_none_or(|symbols| {
+                    symbols
+                        .iter()
+                        .any(|symbol| symbol.is_empty() || *symbol == current.symbol)
+                });
+            if current.status == OrderStatus::Open
+                && !terminal
+                && !join.skipped.allows_absence(&current.id)
+                && same_order
+                && !orders.iter().any(|o| o.id == current.id)
+            {
+                orders.push(current.clone());
+            }
+        }
+        let admitted = |symbol: &str| !refused.iter().any(|held| held == symbol);
+        let limit_stops: Vec<(String, bool)> = join
+            .limit_stops
+            .into_iter()
+            .filter(|(symbol, ..)| admitted(symbol))
+            .map(|(_, id, limit)| (id, limit))
+            .collect();
+        self.note_limit_stops(limit_stops);
+        for (symbol, id, position_side) in join.position_sides {
+            if admitted(&symbol) {
+                self.note_position_side(&id, position_side.as_deref());
+            }
+        }
+        self.account.orders_stale = false;
+        // A clean snapshot re-arms every skip log; otherwise only the ids it mapped.
+        if join.skipped.rejected() == 0 {
+            self.account.order_skip_logged.clear();
+        } else {
+            for order in &orders {
+                self.account.order_skip_logged.remove(&order.id);
+            }
+        }
+        for (symbol, client, native, filled) in join.native_orders {
+            if !admitted(&symbol) {
+                continue;
+            }
+            if self.is_spot() {
+                // Only the first accepted REST observation establishes history.
+                // Live events create a zero floor; ACKs never touch delivery.
+                self.account
+                    .spot_delivery
+                    .entry((symbol.clone(), native))
+                    .or_insert(SpotDelivery {
+                        bootstrap_floor: filled,
+                        delivered_cumulative: filled,
+                    });
+            }
+            let entry = self
+                .account
+                .native_executed
+                .entry((symbol.clone(), native))
+                .or_default();
+            entry.0 = entry.0.max(filled);
+            if self.is_spot() || self.options.portfolio_margin {
+                self.bind_regular_native(&symbol, &client, native);
+            }
+        }
+        for (symbol, client, native) in join.native_strategies {
+            if admitted(&symbol) {
+                self.bind_strategy_native(&symbol, &client, native);
+            }
+        }
+        let mut unproven = join.skipped.unproven().to_vec();
+        // Any row the read could not map proves the account nothing.
+        let mut cover_unproven = unproven.clone();
+        if join.skipped.rejected() > 0 {
+            cover_unproven.push(String::new());
+        }
+        if cx
+            .commit_orders_read_from(earliest, scope, |_| true, orders, &cover_unproven)
+            .is_none()
         {
             self.account.orders_stale = true;
             self.schedule_orders_refresh(cx);
-        } else if clean && !(self.account.orders_owed && !(self.is_spot() || self.is_inverse())) {
-            // Published and fully mapped: this read may resolve an uncertain placement.
-            // Each half of a two-read census pins its own read token, so one owed a
-            // successor may have begun before the write and leaves release to it.
-            cx.orders_reconciled(None);
+        } else {
+            cx.store.set_orders_loaded();
+            // Published: resolves an uncertain placement, except on a rejected
+            // row's market or one this read could not replace.
+            unproven.extend(refused);
+            cx.orders_reconciled_except(&unproven, join.epoch);
         }
+        self.account
+            .order_position_sides
+            .retain(|id, _| cx.store.order(id).is_some());
+    }
+
+    /// Counts this fresh snapshot against rows a -2011 marked gone: one no longer
+    /// listed is settled, and one that stays listed is live, so it stops poisoning
+    /// every snapshot and comes back.
+    /// Rows on a symbol this census may not replace (`refused`) keep their
+    /// cancel evidence untouched; with any refusal, a row whose symbol is
+    /// unknown here does too.
+    fn believe_relisted_unknown_cancels(&mut self, join: &OrdersJoin, refused: &[String]) {
+        let account = &mut self.account;
+        if account.unknown_order_cancels.is_empty() {
+            return;
+        }
+        let held = |row: &CancelledRow| {
+            if refused.is_empty() {
+                return false;
+            }
+            let symbol = match row {
+                CancelledRow::Native(symbol, _) | CancelledRow::Strategy(symbol, _) => {
+                    Some(symbol.as_str())
+                }
+                CancelledRow::Algo(id) => join
+                    .algo
+                    .iter()
+                    .flatten()
+                    .find(|order| order.id == *id)
+                    .map(|order| order.symbol.as_str()),
+            };
+            symbol.is_none_or(|symbol| refused.iter().any(|r| r == symbol))
+        };
+        let listed: HashSet<CancelledRow> = join
+            .native_orders
+            .iter()
+            .map(|(symbol, _, native, _)| CancelledRow::Native(symbol.clone(), *native))
+            .chain(
+                join.native_strategies
+                    .iter()
+                    .map(|(symbol, _, native)| CancelledRow::Strategy(symbol.clone(), *native)),
+            )
+            .chain(
+                join.algo
+                    .iter()
+                    .flatten()
+                    .map(|order| CancelledRow::Algo(order.id.clone())),
+            )
+            .collect();
+        account
+            .unknown_order_cancels
+            .retain(|row, _| held(row) || listed.contains(row));
+        let mut live = Vec::new();
+        for (row, relistings) in &mut account.unknown_order_cancels {
+            if held(row) {
+                continue;
+            }
+            *relistings += 1;
+            if *relistings >= UNKNOWN_CANCEL_RELISTINGS {
+                live.push(row.clone());
+            }
+        }
+        for row in live {
+            account.unknown_order_cancels.remove(&row);
+            match row {
+                CancelledRow::Native(symbol, native) => {
+                    let key = (symbol, native);
+                    account.unquantified_cancels.remove(&key);
+                    if let Some(execution) = account.native_executed.get_mut(&key) {
+                        execution.1 = false;
+                    }
+                }
+                CancelledRow::Strategy(symbol, native) => {
+                    account.terminal_strategies.remove(&(symbol, native));
+                }
+                CancelledRow::Algo(id) => {
+                    account.terminal_algo_ids.remove(&id);
+                }
+            }
+        }
+    }
+
+    /// A -2011 cancel: the rows look gone, but only a snapshot can say so.
+    pub(crate) fn note_unknown_cancels(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        rows: impl IntoIterator<Item = (String, String, u64, bool)>,
+    ) {
+        let portfolio_margin = self.options.portfolio_margin;
+        for (id, symbol, native, strategy) in rows {
+            let row = match (strategy, portfolio_margin) {
+                (false, _) => CancelledRow::Native(symbol, native),
+                (true, true) => CancelledRow::Strategy(symbol, native),
+                (true, false) => CancelledRow::Algo(id),
+            };
+            self.account.unknown_order_cancels.insert(row, 0);
+        }
+        self.schedule_orders_refresh(cx);
+    }
+
+    fn note_position_side(&mut self, id: &str, position_side: Option<&str>) {
+        match position_side {
+            Some("LONG") => {
+                self.account
+                    .order_position_sides
+                    .insert(id.to_owned(), "LONG");
+            }
+            Some("SHORT") => {
+                self.account
+                    .order_position_sides
+                    .insert(id.to_owned(), "SHORT");
+            }
+            Some(_) => {
+                self.account.order_position_sides.remove(id);
+            }
+            None => {}
+        }
+    }
+
+    pub(crate) fn order_position_side(&self, id: &str) -> Option<&'static str> {
+        self.account.order_position_sides.get(id).copied()
     }
 
     /// Keeps the last known state of listed orders that could not be mapped.
@@ -1538,8 +2096,10 @@ impl BinanceFutures {
             join.rejected_symbols
                 .entry(id.clone())
                 .or_default()
-                .push(symbol);
-            join.skipped.reject(Some(id));
+                .push(symbol.clone());
+            let fence = symbol;
+            join.skipped
+                .reject_in((!id.is_empty()).then_some(id), &fence);
         }
     }
 
@@ -1695,7 +2255,7 @@ impl BinanceFutures {
             cx.notice(Level::Debug, code::BALANCE_SUMMARY,
                 format!(
                     "Balance aggregation: {}; Total: ${:.2}, Free: ${:.2}, Used: ${:.2}, UPnL: ${:.2}",
-                    details.join(", "),
+                    details.join_with(", "),
                     balance.total,
                     balance.free,
                     balance.used,
@@ -1721,6 +2281,48 @@ impl BinanceFutures {
                 if let Ok(event) = serde_json::from_str::<ConditionalUpdateEvent>(text) {
                     self.on_conditional_update(cx, event.so);
                     self.schedule_orders_refresh(cx);
+                }
+            }
+            Some("ALGO_UPDATE") if self.options.portfolio_margin => {
+                if let Ok(event) = serde_json::from_str::<PmAlgoUpdateEvent>(text)
+                    && event.fs.as_deref() != Some("CM")
+                {
+                    let o = event.ao;
+                    if let Some(client) = o.caid {
+                        let status = if matches!(o.status.as_ref(), "CANCELED" | "CANCELLED") {
+                            match o.aq.as_deref().and_then(|q| q.parse::<f64>().ok()) {
+                                Some(0.0) => o.status,
+                                // A child execution is a trigger, not a zero-fill cancel proof.
+                                Some(q) if q.is_finite() && q > 0.0 => Cow::Borrowed("TRIGGERED"),
+                                _ => {
+                                    // Missing or malformed execution evidence cannot retire the order.
+                                    self.schedule_orders_refresh(cx);
+                                    return;
+                                }
+                            }
+                        } else {
+                            o.status
+                        };
+                        self.on_conditional_update(
+                            cx,
+                            ConditionalUpdate {
+                                si: Some(o.aid),
+                                ps: o.ps,
+                                s: o.s,
+                                c: client,
+                                side: o.side,
+                                st: o.o,
+                                os: status,
+                                p: o.p,
+                                sp: o.tp,
+                                q: o.q,
+                                reduce_only: o.reduce_only,
+                                cp: o.cp,
+                                wt: o.wt,
+                            },
+                        );
+                        self.schedule_orders_refresh(cx);
+                    }
                 }
             }
             Some("ALGO_UPDATE") => {
@@ -1751,11 +2353,9 @@ impl BinanceFutures {
                     });
                 }
             }
+            // The listen key is the stream's credential; the reconnect fetches a fresh one.
             Some("listenKeyExpired") => {
-                if let Some(socket) = self.private.socket {
-                    cx.close(socket);
-                    self.on_socket_closed(cx, Channel::Private, 4001);
-                }
+                self.retire(cx, Channel::Private, RetireReason::Authentication)
             }
             _ => {}
         }
@@ -1773,6 +2373,7 @@ impl BinanceFutures {
         if let Some(native) = o.ot.as_deref().or(o.o.as_deref()) {
             self.note_limit_stops([(id.clone(), executes_at_limit(native, false))]);
         }
+        self.note_position_side(&id, o.ps.as_deref());
         if status == "NEW" && kind.is_none() {
             return;
         }
@@ -1985,7 +2586,14 @@ impl BinanceFutures {
         }
         let is_terminal = matches!(
             o.os.as_ref(),
-            "TRIGGERED" | "FINISHED" | "FILLED" | "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED"
+            "TRIGGERING"
+                | "TRIGGERED"
+                | "FINISHED"
+                | "FILLED"
+                | "CANCELED"
+                | "CANCELLED"
+                | "EXPIRED"
+                | "REJECTED"
         );
         if let Some(native) = o.si {
             let key = (o.s.to_string(), native);
@@ -2019,7 +2627,7 @@ impl BinanceFutures {
             }
         }
         match o.os.as_ref() {
-            "TRIGGERED" | "FINISHED" | "FILLED" => {
+            "TRIGGERING" | "TRIGGERED" | "FINISHED" | "FILLED" => {
                 cx.store.set_order_status(&id, OrderStatus::Closed);
             }
             "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED" => {
@@ -2030,6 +2638,7 @@ impl BinanceFutures {
                     return;
                 };
                 self.note_limit_stops([(id.clone(), executes_at_limit(&o.st, false))]);
+                self.note_position_side(&id, o.ps.as_deref());
                 let price = opt(&o.p);
                 let amount = opt(&o.q);
                 cx.store.upsert_order(Order {
@@ -2044,7 +2653,7 @@ impl BinanceFutures {
                     filled: 0.0,
                     remaining: amount,
                     reduce_only: o.reduce_only,
-                    close: Some(false),
+                    close: Some(o.cp),
                     client_order_id: None,
                     time_in_force: None,
                     last_update: cx.now,
@@ -2087,6 +2696,7 @@ impl BinanceFutures {
                     return;
                 };
                 self.note_limit_stops([(id.clone(), executes_at_limit(&o.o, false))]);
+                self.note_position_side(&id, o.ps.as_deref());
                 let amount = opt(&o.q);
                 cx.store.upsert_order(Order {
                     id,
@@ -2107,7 +2717,11 @@ impl BinanceFutures {
                     trigger_type: trigger_type(kind, o.wt.as_deref()),
                     take_profit: None,
                     stop_loss: None,
-                    extra: None,
+                    extra: self.is_inverse().then(|| OrderExtra {
+                        remaining_native: Some(amount),
+                        native_algo: true,
+                        ..OrderExtra::default()
+                    }),
                 });
             }
             _ => {}
@@ -2544,8 +3158,8 @@ impl BinanceFutures {
         cx.store.invalidate_order_snapshots();
     }
     fn next_spot_request_id(&mut self, prefix: &str) -> String {
-        let id = self.private.next_request_id;
-        self.private.next_request_id += 1;
+        let id = self.private.next_request_id.get();
+        self.private.next_request_id.set(id + 1);
         format!("{prefix}-{id}")
     }
     fn subscribe_spot_account(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -2602,10 +3216,7 @@ impl BinanceFutures {
             code::SUBSCRIPTION_REJECTED,
             format!("Binance Spot user-data subscription {reason}"),
         );
-        if let Some(socket) = self.private.socket {
-            cx.close(socket);
-            self.on_socket_closed(cx, Channel::Private, 4001);
-        }
+        self.retire(cx, Channel::Private, RetireReason::Authentication);
     }
     fn on_spot_user_event(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
         let Ok(envelope) = serde_json::from_str::<SpotEnvelope<'_>>(text) else {
@@ -3116,6 +3727,57 @@ impl BinanceFutures {
         execution.0 = execution.0.max(filled);
         execution.1 = true;
         cx.store.invalidate_order_snapshots();
+    }
+}
+
+/// Each row that decodes; those that do not come back as (id, symbol, message), so
+/// one bad row costs only itself. A body that is not a list is still an error.
+fn each_decodable<'de, T: serde::Deserialize<'de>>(
+    body: &'de str,
+    mut each: impl FnMut(T),
+) -> (serde_json::Result<()>, Vec<(String, String, String)>) {
+    #[derive(serde::Deserialize, Default)]
+    #[serde(rename_all = "camelCase", default)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        symbol: Option<std::borrow::Cow<'a, str>>,
+        #[serde(borrow)]
+        client_order_id: Option<std::borrow::Cow<'a, str>>,
+        order_id: Option<crate::wire::Id>,
+        strategy_id: Option<crate::wire::Id>,
+        algo_id: Option<crate::wire::Id>,
+    }
+    let mut undecodable = Vec::new();
+    let parsed = json::each::<&'de serde_json::value::RawValue>(body, |raw| {
+        match serde_json::from_str::<T>(raw.get()) {
+            Ok(row) => each(row),
+            Err(_) => {
+                let row = serde_json::from_str::<Identity<'_>>(raw.get()).unwrap_or_default();
+                let id = row
+                    .order_id
+                    .or(row.strategy_id)
+                    .or(row.algo_id)
+                    .map(|id| id.to_string())
+                    .or(row.client_order_id.map(|id| id.into_owned()))
+                    .unwrap_or_default();
+                let message = format!("Binance open order {id} could not be read");
+                undecodable.push((id, row.symbol.unwrap_or_default().into_owned(), message));
+            }
+        }
+    });
+    (parsed, undecodable)
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Account { .. } => S::BALANCE,
+            Self::PositionRisk { .. } => S::POSITIONS,
+            Self::OpenOrders { .. } => S::ORDERS,
+            Self::OpenAlgoOrders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
     }
 }
 

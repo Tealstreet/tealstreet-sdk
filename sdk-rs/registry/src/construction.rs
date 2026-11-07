@@ -44,6 +44,8 @@ pub enum SetupMapping {
     /// The OmniKey seed as the primary's zkLink role; no read credentials.
     ApexOmni,
     Lighter,
+    Hyperliquid,
+    Paradex,
 }
 
 struct BridgeRule {

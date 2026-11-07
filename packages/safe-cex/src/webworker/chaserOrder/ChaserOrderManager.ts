@@ -23,6 +23,21 @@ import {
   ChaserCompleteEvent,
 } from './ChaserOrderOptions';
 
+/**
+ * A placement refusal a re-priced retry only repeats, as its stop reason: a refused key, or an
+ * order no price fixes (a reduce-only size above the position, unaffordable, malformed, unsupported).
+ */
+const settledRefusal = (error: unknown): string | undefined => {
+  if (!(error instanceof Error) || isUnknownOutcome(error)) return undefined;
+  const { kind, partialOrderIds } = error as { kind?: unknown; partialOrderIds?: unknown[] };
+  if (partialOrderIds?.length) return undefined;
+  if (kind === 'authInvalid' || kind === 'authPermission') return "The venue refused this account's key";
+  if (kind === 'invalidInput' || kind === 'insufficientBalance' || kind === 'unsupported') {
+    return 'The venue refused the order';
+  }
+  return undefined;
+};
+
 const FILL_RECONCILED_VENUES = new Set(['hyperliquid', 'grvt', 'bybitdemo']);
 
 const CHASER_PRICE_CHECK_MIN_INTERVAL_MS = 50;
@@ -302,6 +317,17 @@ export class ChaserOrderManager {
           return [];
         }
       }
+    }
+
+    const settled = orderIds.length === 0 ? settledRefusal(placementError) : undefined;
+    if (settled && !instance.isStopped) {
+      const message = `Chaser for ${instance.options.symbol} stopped: ${settled.toLowerCase()}: ${(placementError as Error).message}`;
+      this.log(message, instance);
+      exchange.emitter.emit('error', message);
+      instance.markComplete(settled);
+      this.checkAndMarkIfComplete(instance);
+      void this.cleanupInstance(instance);
+      return [];
     }
 
     // If the user cancelled while `placeOrder` was in flight, cancel
@@ -946,6 +972,7 @@ export class ChaserOrderManager {
       filled: reconciledOverRest
         ? instance.filledSize
         : Math.max(instance.filledSize, this.bybitDemoPositionFill(instance)),
+      placed: orderIds.length > 0,
       stopReason,
     };
     try {
@@ -980,6 +1007,24 @@ export class ChaserOrderManager {
       // cancellation await, so callers can dispose the exchange immediately.
       void this.cleanupInstance(instance);
     }
+  }
+
+  /**
+   * A nuke's first step: stop every running chase on `exchange` and wait until
+   * each has cancelled its resting order, so none places again behind the nuke.
+   * Returns the ids it stopped. The exchange stays up, so no disposal warning.
+   */
+  async stopForNuke(exchange: Exchange, reason = 'Stopped by nuke'): Promise<string[]> {
+    const instances = this._chaserOrderInstances.filter((instance) => instance.exchange === exchange);
+    const stopped: string[] = [];
+    for (const instance of instances) {
+      if (!instance.isStopped) {
+        instance.markComplete(reason);
+        stopped.push(instance.id);
+      }
+    }
+    for (const instance of instances) await this.cleanupInstance(instance);
+    return stopped;
   }
 
   remove(id: string) {

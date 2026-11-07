@@ -93,6 +93,19 @@ impl Harness {
         self.collect();
         socket
     }
+    fn private_traffic_until(&mut self, until: f64, socket: SocketId) {
+        while self.now < until {
+            self.now = (self.now + 30_000.).min(until);
+            self.engine.handle(
+                self.now,
+                Event::WsMessage {
+                    socket,
+                    text: "Pong",
+                },
+            );
+            self.collect();
+        }
+    }
     /// Fire every timer due by `until` in chronological order, with private
     /// traffic before each so an idle watchdog, if armed, stays satisfied.
     fn run_until(&mut self, until: f64, socket: SocketId, stop: impl Fn(&Self) -> bool) {
@@ -133,7 +146,7 @@ fn a_hung_listen_key_keepalive_fails_at_its_bound_and_retries() {
     // retry run. A full-order probe gives the same outcome.
     h.timers.retain(|(t, due)| *t != timer && *due >= at);
     h.requests.clear();
-    h.now = at;
+    h.private_traffic_until(at, socket);
     h.engine.handle(
         at,
         Event::WsMessage {
@@ -209,7 +222,7 @@ fn listen_key_requests_present_only_the_api_key() {
         .iter()
         .find(|(_, at)| *at == h.now + 30.0 * 60_000.0)
         .expect("30 min keepalive");
-    h.now = at;
+    h.private_traffic_until(at, socket);
     h.engine.handle(
         at,
         Event::WsMessage {

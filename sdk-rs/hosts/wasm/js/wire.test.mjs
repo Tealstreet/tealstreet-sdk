@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState, marketQuantityUnits, orderEnums, positionEnums } from './wire.mjs';
+import { Frame, NONE, ORDER_COLUMNS, ORDER_TRIGGER_WORD, SECTION, TICKER_FIELDS, TickerState, marketQuantityUnits, orderEnums, positionEnums } from './wire.mjs';
 
 test('account read markers survive transfer and do not change legacy frames', () => {
   const buffer = new ArrayBuffer(24);
@@ -701,6 +702,21 @@ test('revision one preserves pretty symbols, independent order fields and orphan
   assert.equal(frame.positions().id(1), 'ETH-USD');
 });
 
+test('the Rust-only native_algo bit in the ORDERS trigger word leaves both triggers as decoded', () => {
+  const frame = withStrings(numericFrame([revisedTable(SECTION.ORDERS)]));
+  const triggers = () => [0, 1].map((i) => [frame.orders().tpTriggerType(i), frame.orders().slTriggerType(i)]);
+  const before = triggers();
+  const count = 2;
+  const data = Math.ceil((frame.first(SECTION.ORDERS).offset + 4 + count * 20) / 8) * 8;
+  const words = data + count * ORDER_COLUMNS.length * 8 + count * 32;
+  const view = new DataView(frame.buffer);
+  for (const i of [0, 1]) {
+    view.setUint32(words + i * 4, view.getUint32(words + i * 4, true) | ORDER_TRIGGER_WORD.NATIVE_ALGO, true);
+  }
+  assert.deepEqual(triggers(), before);
+  assert.deepEqual(before[0], ['mark_price', 'index_price']);
+});
+
 test('revised table extensions cannot borrow bytes from a later section', () => {
   const readers = new Map([[SECTION.MARKETS, 'markets'], [SECTION.TICKERS, 'tickers'], [SECTION.ORDERS, 'orders'], [SECTION.POSITIONS, 'positions'], [SECTION.SETTINGS, 'settings'], [SECTION.FILLS, 'fills']]);
   for (const [kind, reader] of readers) {
@@ -1040,6 +1056,11 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
     isolatedBookSubscriptions: false,
     inverseClosedPositions: false,
     scheduleCancel: false,
+    orderHistoryNeedsSymbol: false,
+    freshPositions: false,
+    nukeAccountCancel: false,
+    symbolCancelMissesUnseen: false,
+    orderReadCovers: false,
     account: 'afterLoad',
     cancelAll: 'eachPlacedSymbol',
     leverageQuery: 'onMetadata',
@@ -1055,6 +1076,14 @@ test('capabilities decode the words engine/src/capabilities.rs pins', () => {
   assert.equal(capabilities(1 << 15, 0).marketRefresh, true);
   assert.equal(capabilities(1 << 25, 0).scheduleCancel, true);
   assert.equal(capabilities(0, 0).scheduleCancel, false);
+  // Bit 30 is carried like every flag, so a page's record matches the worker's;
+  // only Rust ingest acts on it.
+  assert.equal(capabilities(1 << 30, 0).orderReadCovers, true);
+  assert.equal(capabilities(0, 0).orderReadCovers, false);
+  assert.equal(capabilities(1 << 27, 0).freshPositions, true);
+  assert.equal(capabilities(0, 0).freshPositions, false);
+  assert.equal(capabilities(1 << 28, 0).nukeAccountCancel, true);
+  assert.equal(capabilities(1 << 29, 0).symbolCancelMissesUnseen, true);
   assert.equal(capabilities(0, 3 << 8).leverageQuery, 'onReadAndMetadata');
   const bridge = capabilities(0x1ff << 16, (6 << 20) | (3 << 24) | (2 << 28));
   for (const name of ['stpControls', 'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
@@ -1141,4 +1170,61 @@ test('revision two rejects invalid identity refs, truncated columns and unsuppor
   for (const [kind, revision] of [[SECTION.FILLS, 3], [SECTION.SETTINGS, 2]]) {
     assert.throws(() => numericFrame([{ kind, revision, length: 0, write() {} }]), /unsupported section/);
   }
+});
+
+// Read covers (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.2): a decoder that
+// predates ORDERS_READ (23) reads the orders beside it and ignores it.
+test('an ORDERS_READ section beside ORDERS is ignored by this decoder', () => {
+  const buffer = new ArrayBuffer(16 + 8 + 8 + 8 + 16);
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 2, true);
+  view.setUint16(16, SECTION.ORDERS, true);
+  view.setUint16(18, 1, true);
+  view.setUint32(20, 8, true);
+  view.setUint16(32, 23, true);
+  view.setUint16(34, 1, true);
+  view.setUint32(36, 16, true);
+  view.setFloat64(48, 1_000, true);
+  const frame = new Frame(buffer);
+  assert.equal(frame.orders().count, 0);
+  assert.equal(frame.accountRead(), false);
+});
+
+test('STATUS distinguishes unmeasured latency from a measured zero and legacy samples', () => {
+  const buffer = new ArrayBuffer(40);
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 1, true);
+  view.setUint16(16, SECTION.STATUS, true);
+  view.setUint32(20, 16, true);
+  assert.equal(new Frame(structuredClone(buffer)).status().latency, null);
+  view.setUint32(28, 2, true); // LATENCY_MEASURED, independent of HEDGED.
+  assert.equal(new Frame(structuredClone(buffer)).status().latency, 0);
+  view.setUint32(28, 0, true);
+  view.setFloat64(32, 42.5, true);
+  assert.equal(new Frame(structuredClone(buffer)).status().latency, 42.5);
+});
+
+
+test('observation sections preserve format 1 and are ignorable by the legacy section reader', async () => {
+  const observation = { kind: 24, length: 32, write(view, at) {
+    [0, 1000, 8500, -Infinity].forEach((value, slot) => view.setFloat64(at + slot * 8, value, true));
+  } };
+  const frame = numericFrame([tickerTable(100), observation]);
+  assert.equal(new DataView(frame.buffer).getUint16(4, true), 1);
+  assert.deepEqual([...frame.tickerObservations()], [0, 1000, 8500, -Infinity]);
+  // Legacy consumers select TICKERS/TICKER_DELTAS and skip unknown sections.
+  const previousReader = readFileSync(new URL('./wire.mjs', import.meta.url), 'utf8')
+    .replace('  TICKER_OBSERVATIONS: 24,\n', '')
+    .replace(/  \/\*\* Source receipt times,[\s\S]*?(?=  \/\*\* Full books:)/, '');
+  assert.ok(!previousReader.includes('TICKER_OBSERVATIONS') && !previousReader.includes('tickerObservations()'));
+  const { Frame: OldFrame, TickerState: OldTickerState } = await import(`data:text/javascript;base64,${Buffer.from(previousReader).toString('base64')}`);
+  const legacy = new OldTickerState();
+  legacy.apply(new OldFrame(frame.buffer));
+  assert.deepEqual([...legacy.columns.mark], [106, 107]);
+  assert.equal(numericFrame([tickerTable(100)]).tickerObservations(), undefined);
+  assert.throws(() => numericFrame([{ ...observation, length: 24, write() {} }]).tickerObservations(), /observation length/);
 });

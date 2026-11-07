@@ -12,7 +12,7 @@ import { afterEach, expect, it } from 'vitest';
 
 import { ASTERDEX_MAIN_WALLET_REQUIRED_MESSAGE, resolveAsterDEXApiVersion } from '../exchanges/asterdex/asterdex.types';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
-import { deriveBridgeConstruction } from '../exchanges/rust/construction';
+import { deriveBridgeConstruction, deriveRemoteSigningPolicy } from '../exchanges/rust/construction';
 import { RUST_VENUES } from '../exchanges/rust/rust.exchange';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
@@ -59,8 +59,6 @@ const startRejects = async (name: ExchangeName, options: Partial<ExchangeOptions
   expect(requests).toEqual([]);
 };
 
-it('BreakoutProp market data still needs DXtrade credentials', () =>
-  startRejects('breakoutprop', { publicDataOnly: true }, 'BreakoutProp market data requires a legacy DXtrade username and password'));
 
 it('AsterDEX wallet keys without the main wallet carry the message the app routes on', () =>
   startRejects(
@@ -73,7 +71,7 @@ it('Polymarket private accounts need a wallet private key', () =>
   startRejects('polymarket', { key: 'not-a-key' }, 'Polymarket requires a local 32-byte wallet private key'));
 
 it('Orderly private accounts need an application id', () =>
-  startRejects('tealstreet-dex', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
+  startRejects('woofi', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
 // Unadopted native families still refuse payload callbacks before I/O.
 it('unadopted private venues refuse a payload signer before any I/O', () =>
@@ -170,7 +168,7 @@ it.each([{ key: '' }, { paradexAddress: '' }, { subkeyAddress: '' }])(
     }, 'Rust Paradex private accounts require a key, Paradex address and subkey address'),
 );
 
-it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
+it.each(['hyperliquid', 'hyperliquidspot', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lighter', 'lighter-robinhood'] as const)(
   'compiled native payload refusal on %s keeps startup and validation classification before I/O', async (name) => {
     setWasmEngineLoader(loadNodeEngine);
     const requests: string[] = [];
@@ -183,11 +181,26 @@ it.each(['hyperliquid', 'txflow', 'coinbase', 'coinbasespot', 'polymarket', 'lig
     };
     setRustEngineTransport(() => transport);
     let signatures = 0;
-    for (const secret of name.startsWith('lighter') ? ['local'] : ['', 'local']) {
-      const exchange = new RustEngineExchange(name, {
+    // A venue with hosted remote signing but no payload signing refuses in the bridge, at construction.
+    const bridgeRefuses = deriveRemoteSigningPolicy(name)?.payloadSupported === false;
+    for (const secret of name.startsWith('lighter') || name === 'hyperliquidspot' ? ['local'] : ['', 'local']) {
+      const options = {
         key: 'key', secret, apiKeyIndex: '2', testnet: true,
         payloadSigner: async () => { signatures++; return { signature: 'unexpected' }; },
-      }, new DefaultStore());
+      };
+      if (bridgeRefuses) {
+        let failure: unknown;
+        try {
+          running.push(new RustEngineExchange(name, options, new DefaultStore()));
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toMatchObject({
+          message: 'This Rust account has no REST-only PayloadSigner lifecycle', kind: 'unsupported', outcome: 'notSent',
+        });
+        continue;
+      }
+      const exchange = new RustEngineExchange(name, options, new DefaultStore());
       running.push(exchange);
       const message = `Rust ${name} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials.`;
       await expect(exchange.start()).rejects.toMatchObject({ message, kind: 'unsupported', outcome: 'notSent' });

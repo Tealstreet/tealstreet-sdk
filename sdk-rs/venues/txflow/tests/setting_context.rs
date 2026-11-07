@@ -76,6 +76,11 @@ fn setting(e: &mut Driver) -> HttpRequest {
             _ => None,
         });
     let r = requests.next().expect("one physical native setting read");
+    assert_eq!(r.timeout_ms, Some(20_000));
+    assert_eq!(
+        e.http_read_class(r.id),
+        safe_cex_engine::HttpReadClass::Reconciliation
+    );
     assert!(requests.next().is_none());
     r
 }
@@ -102,7 +107,6 @@ fn no_command_or_signing(a: &[Action]) {
     assert!(!a.iter().any(|a| matches!(
         a,
         Action::Sign { .. }
-            | Action::SignPayload { .. }
             | Action::Notice(Notice::CommandDone { .. } | Notice::CommandFailed { .. })
     )));
 }

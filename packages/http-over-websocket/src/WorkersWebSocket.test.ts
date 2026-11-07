@@ -1,3 +1,4 @@
+// @vitest-environment node
 import type { InternalAxiosRequestConfig } from 'axios';
 
 import { AxiosHeaders } from 'axios';
@@ -36,7 +37,10 @@ class WorkerSocket extends EventTarget {
     } else if (frame.type === 'rpc.http') {
       queueMicrotask(() => this.message(JSON.stringify({
         type: 'rpc.http', nonce: frame.nonce,
-        data: { status: 200, headers: { 'x-upstream': 'venue' }, data_raw: '{"id":18446744073709551615}' },
+        data: { status: 200, headers: { 'x-upstream': 'venue' },
+          data_raw: frame.arg.url.startsWith('https://api.bitget.com/')
+            ? '{"code":"00000","msg":"success","data":[{"marginCoin":"USDT","accountEquity":"100"}]}'
+            : '{"id":18446744073709551615}' },
       })));
     } else if (frame.type === 'rpc.relay') {
       this.relayed = true;
@@ -83,6 +87,39 @@ afterEach(() => {
 });
 
 describe('real HOW and relay protocols over Workers fetch upgrades', () => {
+  it.each(['managed', 'legacy'])('completes the first %s Bitget startup read after each reload with no page globals', async (mode) => {
+    for (const name of ['window', 'document']) {
+      vi.stubGlobal(name, undefined);
+      Reflect.deleteProperty(globalThis, name);
+      expect(name in globalThis).toBe(false);
+    }
+    vi.stubGlobal('self', { importScripts() {} });
+    for (let reload = 0; reload < 2; reload++) {
+      const adapter = createAxiosHttpOverWebsocketAdapter({ region: 'JA', WebSocket: WorkersWebSocket, customParser: JSON.parse });
+      disposals.push(adapter.dispose);
+      const input: InternalAxiosRequestConfig = {
+        method: 'GET',
+        url: 'https://api.bitget.com/api/v2/mix/account/accounts?productType=USDT-FUTURES',
+        baseURL: 'https://api.bitget.com',
+        headers: new AxiosHeaders({ 'ACCESS-KEY': 'fixture-read-key', 'ACCESS-SIGN': 'fixture-signature' }),
+        timeout: 2000,
+      };
+      const prepared = mode === 'managed' ? await adapter.prepare(input) : undefined;
+      const bound = prepared?.bind(input);
+      if (bound) expect(bound.ready()).toBe(true);
+      const response = await (bound ? bound.dispatch() : adapter(input));
+      expect(response.status).toBe(200);
+      const body = mode === 'managed' ? JSON.parse(response.data) : response.data;
+      expect(body).toMatchObject({ code: '00000', data: [{ marginCoin: 'USDT' }] });
+      expect(upgrades).toHaveLength(reload + 1);
+      const frames = upgrades[reload].socket.sent.map((text) => JSON.parse(text));
+      expect(frames.map((frame) => frame.type)).toEqual(['rpc.auth', 'rpc.http']);
+      expect(frames[1].arg).toMatchObject({ url: input.url, method: 'GET' });
+      adapter.dispose();
+      expect(upgrades[reload].socket.closed).toBe(true);
+    }
+  });
+
   it('HOW forwards required WAF headers and preserves signed bytes through the actual worker socket', async () => {
     const transport = workersTransport();
     expect(transport.serverHeaders).toBe(true);
@@ -94,7 +131,8 @@ describe('real HOW and relay protocols over Workers fetch upgrades', () => {
     expect(upgrades).toHaveLength(1);
     const { url, init, socket } = upgrades[0];
     const target = new URL(url);
-    expect(target.origin + target.pathname).toBe('https://fsjnpy143pbz.jp.tealstreet.io/tunnel');
+    // Was fsjnpy143pbz.jp (AWS) until AWS_EXIT.md step 3e put every region on the Vultr host.
+    expect(target.origin + target.pathname).toBe('https://fsjnpy143pbz-tyo.tealstreet.io/tunnel');
     expect(target.searchParams.get('v')).toBe('2');
     expect(Number(target.searchParams.get('t'))).toBeGreaterThan(0);
     expect(init.headers).toEqual({ ...upgradeHeaders, Upgrade: 'websocket' });

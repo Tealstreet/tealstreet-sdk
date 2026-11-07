@@ -204,7 +204,8 @@ impl SignStep for WsLogin {
         struct Login<'a> {
             api_key: &'a str,
             passphrase: &'a str,
-            timestamp: &'a str,
+            // As legacy; Bitunix did not answer this field as a string.
+            timestamp: u64,
             sign: &'a str,
         }
         #[derive(serde::Serialize)]
@@ -217,7 +218,7 @@ impl SignStep for WsLogin {
             args: [Login {
                 api_key: key,
                 passphrase,
-                timestamp: &self.stamp,
+                timestamp: self.stamp.parse().map_err(|_| SignError::InvalidResult)?,
                 sign: &signature,
             }],
         })

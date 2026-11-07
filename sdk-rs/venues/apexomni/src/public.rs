@@ -1,6 +1,5 @@
 //! Market discovery and one quote socket with reference-counted consumers.
 use crate::{ApexOmni, Pending, public_wire as wire};
-use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::json::ArrayAt;
@@ -12,10 +11,12 @@ use safe_cex_engine::request_context::{
     Context, Operation, Policy, RetryEvidence, RetryPolicy, Scope,
 };
 use safe_cex_engine::selected_read::{BackgroundReadError, ReadPolicy, ReadRole, SelectedRead};
-use safe_cex_engine::socket::{Config, Supervisor, Tick};
+use safe_cex_engine::socket_lifecycle::{FeedId, Interest, SocketError};
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{
-    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, VenueError,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketId, TimerId, VenueError,
 };
+use safe_cex_engine::{Level, SubscriptionTopic};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -66,13 +67,12 @@ struct CandleState {
 pub struct Public {
     pub books: HashMap<String, Depth>,
     candles: HashMap<(String, Interval), CandleState>,
-    socket: Option<SocketId>,
-    open: bool,
-    ping_at: f64,
+    pub(super) socket: Option<SocketId>,
+    pub(super) feed: Option<FeedId>,
+    pub(super) ping_at: f64,
     seed_retry: safe_cex_engine::startup::Backoff<()>,
     unlisted: HashSet<String>,
     unlisted_reported: HashSet<String>,
-    supervisor: Supervisor,
 }
 impl Default for Public {
     fn default() -> Self {
@@ -80,19 +80,11 @@ impl Default for Public {
             books: HashMap::new(),
             candles: HashMap::new(),
             socket: None,
-            open: false,
+            feed: None,
             ping_at: 0.0,
             seed_retry: safe_cex_engine::startup::Backoff::default(),
             unlisted: HashSet::new(),
             unlisted_reported: HashSet::new(),
-            supervisor: Supervisor::new(Config {
-                connect_timeout_ms: 30_000.0,
-                idle_timeout_ms: 30_000.0,
-                ping_interval_ms: Some(10_000.0),
-                backoff_base_ms: 1_000.0,
-                backoff_cap_ms: 16_000.0,
-                ..Config::default()
-            }),
         }
     }
 }
@@ -381,7 +373,10 @@ impl ApexOmni {
                     cx.notice(
                         Level::Warn,
                         code::ROW_SKIPPED,
-                        format!("ApeX skipped malformed market rows ({})", labels.join(", ")),
+                        format!(
+                            "ApeX skipped malformed market rows ({})",
+                            labels.join_with(", ")
+                        ),
                     );
                 }
                 self.public.unlisted = skipped
@@ -573,7 +568,7 @@ impl ApexOmni {
             let _ = cx.fail_context(&context, "No usable ApeX candles");
             return;
         }
-        rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+        safe_cex_engine::model::sort_candles_by_time(&mut rows);
         {
             let result: Result<String, String> =
                 serde_json::to_string(&rows).map_err(|e| e.to_string());
@@ -589,38 +584,36 @@ impl ApexOmni {
     }
 
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
-        let host = if self.options.testnet {
-            "qa-quote.omni.apex.exchange"
-        } else {
-            "quote.omni.apex.exchange"
-        };
-        // Suppressed public feeds never open; supervising them would only churn retries.
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public.supervisor.connecting(cx);
+        if cx.public_feed_policy() != PublicFeedPolicy::Direct {
+            return;
         }
-        self.public.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(format!(
-                    "wss://{host}/realtime_public?v=2&timestamp={}&requestId=rust-{}",
-                    cx.now as u64, cx.now as u64
-                ))
-                .channel(SocketChannel::Public),
-            ),
-        );
+        if let Err(error) = self.connect_feed(cx, false) {
+            Self::socket_notice(cx, error);
+        }
     }
-    fn public_topics(&self) -> Vec<String> {
+    pub(super) fn book_topic(symbol: &str) -> String {
+        format!("orderBook200.H.{symbol}")
+    }
+    /// `None` when ApeX has no native candle for `interval`.
+    pub(super) fn candle_topic(symbol: &str, interval_value: Interval) -> Option<String> {
+        interval(interval_value).map(|(native, _)| format!("candle.{native}.{symbol}"))
+    }
+    /// The public feed and interest key `topic` streams on.
+    pub(super) fn topic_interest(&self, topic: &SubscriptionTopic) -> Option<(FeedId, String)> {
+        let key = match topic {
+            SubscriptionTopic::OrderBook { symbol } => Self::book_topic(symbol),
+            SubscriptionTopic::Candles { symbol, interval } => {
+                Self::candle_topic(symbol, *interval)?
+            }
+        };
+        Some((self.public.feed?, key))
+    }
+    pub(super) fn public_topics(&self) -> Vec<String> {
         let mut topics = vec!["instrumentInfo.all".to_owned()];
-        topics.extend(
-            self.public
-                .books
-                .keys()
-                .map(|s| format!("orderBook200.H.{s}")),
-        );
+        topics.extend(self.public.books.keys().map(|s| Self::book_topic(s)));
         let mut trades = HashSet::new();
         for (s, i) in self.public.candles.keys() {
-            if let Some((i, _)) = interval(*i) {
-                topics.push(format!("candle.{i}.{s}"));
-            }
+            topics.extend(Self::candle_topic(s, *i));
             if !self.options.public_data_only {
                 trades.insert(format!("recentlyTrade.H.{s}"));
             }
@@ -629,37 +622,39 @@ impl ApexOmni {
         topics.sort();
         topics
     }
-    fn public_subscribe(&self, cx: &mut Cx<'_, Pending>, op: &str, args: &[String]) {
-        if !self.public.open {
-            return;
+    fn admit_public_model(&self, cx: &mut Cx<'_, Pending>) -> Result<(), SocketError> {
+        let items: Vec<_> = self
+            .public_topics()
+            .into_iter()
+            .map(Interest::from_wire_args)
+            .collect();
+        crate::socket_codec::validate_public_replay(&items)?;
+        if let Some(feed) = self.public.feed {
+            cx.set_socket_interests(feed, items)?;
         }
-        let Some(socket) = self.public.socket else {
-            return;
-        };
-        for args in args.chunks(50) {
-            cx.send(
-                socket,
-                serde_json::to_string(&Subscription { op, args }).expect("string subscription"),
-            );
-        }
+        Ok(())
     }
-    pub(crate) fn public_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
+    pub(crate) fn public_open(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        socket: SocketId,
+    ) -> Result<(), SocketError> {
         if self.public.socket != Some(socket) {
-            return false;
+            return Err(SocketError::Stale);
         }
-        self.public.open = true;
-        self.public.supervisor.opened(cx);
-        self.public_subscribe(cx, "subscribe", &self.public_topics());
-        cx.send(socket, r#"{"op":"ping"}"#);
+        self.admit_public_model(cx)?;
+        cx.send_after_socket_interests(
+            self.public.feed.ok_or(SocketError::Stale)?,
+            r#"{"op":"ping"}"#.into(),
+        )?;
         self.public.ping_at = cx.now;
-        true
+        Ok(())
     }
     pub(crate) fn public_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.public.socket != Some(socket) {
             return false;
         }
         self.public.socket = None;
-        self.public.open = false;
         for (symbol, depth) in &mut self.public.books {
             if !depth.book.is_empty() {
                 depth.book.clear();
@@ -667,7 +662,7 @@ impl ApexOmni {
             }
             depth.sequence = None;
         }
-        self.public.supervisor.retry(cx);
+
         true
     }
     pub(crate) fn public_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
@@ -675,24 +670,7 @@ impl ApexOmni {
             self.start_public(cx);
             return true;
         }
-        match self.public.supervisor.on_timer(cx, timer) {
-            Tick::Unhandled => return false,
-            Tick::Reconnect => self.connect_public(cx),
-            Tick::Ping => {
-                if let Some(socket) = self.public.socket {
-                    cx.send(socket, r#"{"op":"ping"}"#);
-                    self.public.ping_at = cx.now;
-                }
-            }
-            Tick::TimedOut(_) => {
-                if let Some(socket) = self.public.socket {
-                    cx.close(socket);
-                    self.public_close(cx, socket);
-                }
-            }
-            Tick::Handled => (),
-        }
-        true
+        false
     }
     pub(crate) fn public_message(
         &mut self,
@@ -703,14 +681,13 @@ impl ApexOmni {
         if self.public.socket != Some(socket) {
             return false;
         }
-        self.public.supervisor.received(cx.now);
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
             return true;
         };
         if message.op == "ping" {
             cx.send(
                 socket,
-                format!(r#"{{"op":"pong","args":["{}"]}}"#, cx.now as u64),
+                format!(r#"{{"op":"pong","args":["{}"]}}"#, cx.protocol_now() as u64),
             );
             return true;
         }
@@ -733,6 +710,11 @@ impl ApexOmni {
                     let Some(symbol) = symbol else {
                         continue;
                     };
+                    // A delta row restating an unchanged price still observes it.
+                    let observed = u16::from(row.p.is_some()) << 2
+                        | u16::from(row.mp.or(row.xp).is_some()) << 3
+                        | u16::from(row.xp.is_some()) << 4;
+                    cx.store.observe_ticker_fields(&symbol, observed);
                     cx.store.update_ticker(&symbol, |t| {
                         if let Some(n) = row.p {
                             t.last = n;
@@ -798,8 +780,12 @@ impl ApexOmni {
                     depth.book.clear();
                     depth.sequence = None;
                     cx.book_changed(symbol);
-                    self.public_subscribe(cx, "unsubscribe", &[message.topic.to_string()]);
-                    self.public_subscribe(cx, "subscribe", &[message.topic.to_string()]);
+                    if let Some(feed) = self.public.feed
+                        && let Err(error) =
+                            cx.repair_socket_interests(feed, vec![message.topic.to_string()])
+                    {
+                        self.public_socket_error(cx, error);
+                    }
                     return true;
                 }
             } else {
@@ -904,6 +890,84 @@ impl ApexOmni {
         }
         true
     }
+    fn change_book(&mut self, cx: &mut Cx<'_, Pending>, symbol: String, add: bool) {
+        if let Some(depth) = self.public.books.get_mut(&symbol) {
+            if add {
+                depth.count += 1;
+                return;
+            }
+            if depth.count > 1 {
+                depth.count -= 1;
+                return;
+            }
+        } else if !add {
+            return;
+        }
+        let previous = self.public.books.remove(&symbol);
+        if add {
+            self.public.books.insert(
+                symbol.clone(),
+                Depth {
+                    count: 1,
+                    book: Book::default(),
+                    sequence: None,
+                },
+            );
+        }
+        if let Err(error) = self.admit_public_model(cx) {
+            self.public.books.remove(&symbol);
+            if let Some(previous) = previous {
+                self.public.books.insert(symbol, previous);
+            }
+            Self::socket_notice(cx, error);
+        }
+    }
+    fn change_candle(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: String,
+        interval_value: Interval,
+        add: bool,
+    ) {
+        if interval(interval_value).is_none() {
+            cx.notice(
+                Level::Error,
+                code::COMMAND_UNSUPPORTED,
+                interval_value.unsupported("ApeX"),
+            );
+            return;
+        }
+        let key = (symbol, interval_value);
+        if let Some(state) = self.public.candles.get_mut(&key) {
+            if add {
+                state.count += 1;
+                return;
+            }
+            if state.count > 1 {
+                state.count -= 1;
+                return;
+            }
+        } else if !add {
+            return;
+        }
+        let previous = self.public.candles.remove(&key);
+        if add {
+            self.public.candles.insert(
+                key.clone(),
+                CandleState {
+                    count: 1,
+                    last: None,
+                },
+            );
+        }
+        if let Err(error) = self.admit_public_model(cx) {
+            self.public.candles.remove(&key);
+            if let Some(previous) = previous {
+                self.public.candles.insert(key, previous);
+            }
+            Self::socket_notice(cx, error);
+        }
+    }
     pub(crate) fn public_command(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -911,86 +975,13 @@ impl ApexOmni {
     ) -> Result<(), Command> {
         match command {
             Command::SetTickerSymbols { .. } => {}
-            Command::SubscribeOrderBook { symbol } => {
-                let depth = self
-                    .public
-                    .books
-                    .entry(symbol.clone())
-                    .or_insert_with(|| Depth {
-                        count: 0,
-                        book: Book::default(),
-                        sequence: None,
-                    });
-                depth.count += 1;
-                if depth.count == 1 {
-                    self.public_subscribe(cx, "subscribe", &[format!("orderBook200.H.{symbol}")]);
-                }
+            Command::SubscribeOrderBook { symbol } => self.change_book(cx, symbol, true),
+            Command::UnsubscribeOrderBook { symbol } => self.change_book(cx, symbol, false),
+            Command::SubscribeCandles { symbol, interval } => {
+                self.change_candle(cx, symbol, interval, true)
             }
-            Command::UnsubscribeOrderBook { symbol } => {
-                if let Some(depth) = self.public.books.get_mut(&symbol) {
-                    depth.count = depth.count.saturating_sub(1);
-                    if depth.count == 0 {
-                        self.public.books.remove(&symbol);
-                        self.public_subscribe(
-                            cx,
-                            "unsubscribe",
-                            &[format!("orderBook200.H.{symbol}")],
-                        );
-                    }
-                }
-            }
-            Command::SubscribeCandles {
-                symbol,
-                interval: i,
-            } => {
-                let Some((native, _)) = interval(i) else {
-                    cx.notice(
-                        Level::Error,
-                        code::COMMAND_UNSUPPORTED,
-                        i.unsupported("ApeX"),
-                    );
-                    return Ok(());
-                };
-                let was_trades = self.public.candles.keys().any(|(s, _)| s == &symbol);
-                let state = self.public.candles.entry((symbol.clone(), i)).or_default();
-                state.count += 1;
-                if state.count == 1 {
-                    self.public_subscribe(cx, "subscribe", &[format!("candle.{native}.{symbol}")]);
-                    if !self.options.public_data_only && !was_trades {
-                        self.public_subscribe(
-                            cx,
-                            "subscribe",
-                            &[format!("recentlyTrade.H.{symbol}")],
-                        );
-                    }
-                }
-            }
-            Command::UnsubscribeCandles {
-                symbol,
-                interval: i,
-            } => {
-                if let Some(state) = self.public.candles.get_mut(&(symbol.clone(), i)) {
-                    state.count = state.count.saturating_sub(1);
-                    if state.count == 0 {
-                        self.public.candles.remove(&(symbol.clone(), i));
-                        if let Some((native, _)) = interval(i) {
-                            self.public_subscribe(
-                                cx,
-                                "unsubscribe",
-                                &[format!("candle.{native}.{symbol}")],
-                            );
-                        }
-                        if !self.options.public_data_only
-                            && !self.public.candles.keys().any(|(s, _)| s == &symbol)
-                        {
-                            self.public_subscribe(
-                                cx,
-                                "unsubscribe",
-                                &[format!("recentlyTrade.H.{symbol}")],
-                            );
-                        }
-                    }
-                }
+            Command::UnsubscribeCandles { symbol, interval } => {
+                self.change_candle(cx, symbol, interval, false)
             }
             Command::FetchCandles {
                 command,
@@ -1006,7 +997,7 @@ impl ApexOmni {
                 };
                 let limit = limit.filter(|n| *n > 0);
                 let count = limit.unwrap_or(500).min(1500) as f64;
-                let end = to_ms.filter(|n| n.is_finite()).unwrap_or(cx.now) / 1000.0;
+                let end = to_ms.filter(|n| n.is_finite()).unwrap_or(cx.protocol_now()) / 1000.0;
                 let start = if limit.is_none() {
                     from_ms
                         .filter(|n| n.is_finite())
@@ -1029,9 +1020,4 @@ impl ApexOmni {
         }
         Ok(())
     }
-}
-#[derive(serde::Serialize)]
-struct Subscription<'a> {
-    op: &'a str,
-    args: &'a [String],
 }

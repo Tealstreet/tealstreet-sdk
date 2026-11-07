@@ -2,7 +2,7 @@
 use support::Options;
 mod support;
 use safe_cex_engine::model::{Balance, CurrencyBalance, MarginType, OrderStatus};
-use safe_cex_engine::{Event, Method};
+use safe_cex_engine::{Command, Event, Method, Query};
 use safe_cex_venue_binance::Variant;
 use support::Harness;
 
@@ -111,7 +111,10 @@ fn spot_subscription_hmac_is_raw_sorted_parameters_and_ids_are_correlated() {
 #[test]
 fn spot_balance_events_are_partial_and_stale_snapshots_do_not_roll_them_back() {
     let mut h = spot();
-    h.now += 30_000.0;
+    // Live traffic inside each 20 s idle window keeps the stream's epoch current.
+    h.now += 15_000.0;
+    h.message("ws-api/v3", r#"{"id":"unrelated","status":200}"#);
+    h.now += 15_000.0;
     let health = h.timers.iter().find(|(_, at)| *at == 4000.0).unwrap().0;
     h.event(Event::TimerFired { timer: health });
     let read = h.take("/api/v3/account");
@@ -284,8 +287,10 @@ fn inverse_with(extra_catalogue_rows: &str, position_risk: &str) -> Harness {
     h.respond("/dapi/v1/positionRisk", 200, position_risk);
     h.respond("/dapi/v1/account",200,r#"{"assets":[{"asset":"BTC","walletBalance":"1","availableBalance":"0.8","initialMargin":"0.1","unrealizedProfit":"0.01"}]}"#);
     h.respond("/dapi/v1/openOrders",200,r#"[{"symbol":"BTCUSD_PERP","orderId":12,"clientOrderId":"native","price":"9000","origQty":"5","executedQty":"2","type":"LIMIT","side":"BUY"}]"#);
+    h.respond("/dapi/v1/openAlgoOrders", 200, "[]");
     let private = h.socket("/ws/coin-key").unwrap();
     h.event(Event::WsOpened { socket: private });
+    h.answer_open_position_read();
     h
 }
 #[test]
@@ -687,4 +692,33 @@ fn inverse_delivery_position_excluded_from_complete_catalogue_does_not_block_per
     let positions = h.engine.store().positions();
     assert_eq!(positions.len(), 1);
     assert_eq!(positions[0].notional, 400.0);
+}
+
+// Row from Binance's COIN-M account trade list documentation.
+#[test]
+fn inverse_fills_read_the_coin_m_trade_list() {
+    let mut h = inverse();
+    h.event(Event::Command(Command::Query {
+        command: 41,
+        query: Query::Fills {
+            symbol: Some("BTCUSD_PERP".into()),
+            order_id: Some("28".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1000),
+        },
+    }));
+    let trades = h.take("/dapi/v1/userTrades");
+    assert!(trades.url.contains("orderId=28"));
+    h.reply(
+        trades.id,
+        200,
+        "",
+        r#"[{"symbol":"BTCUSD_PERP","id":6,"orderId":28,"pair":"BTCUSD","side":"SELL","price":"8800","qty":"1","realizedPnl":"0","marginAsset":"BTC","baseQty":"0.01136364","commission":"0.00000454","commissionAsset":"BTC","time":1590743483586,"positionSide":"BOTH","buyer":false,"maker":false}]"#,
+    );
+    let answer = h.result(41).unwrap().as_ref().unwrap();
+    assert!(answer.contains("28"), "{answer}");
+    let rows: serde_json::Value = serde_json::from_str(answer).unwrap();
+    assert_eq!(rows[0]["orderId"], "28", "{answer}");
+    assert_eq!(rows[0]["qty"], 1.0, "{answer}");
 }

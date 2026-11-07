@@ -1,4 +1,7 @@
 //! L1 phantom-agent signing. Struct declaration order is part of the hash.
+pub mod dispatch;
+pub mod statement;
+
 use safe_cex_crypto::{eip712, ethereum};
 use serde::Serialize;
 
@@ -14,7 +17,16 @@ pub fn action_hash(
     vault: Option<&str>,
     nonce: u64,
 ) -> Result<[u8; 32], String> {
-    let mut bytes = rmp_serde::to_vec_named(action).map_err(|e| e.to_string())?;
+    let encoded = rmp_serde::to_vec_named(action).map_err(|e| e.to_string())?;
+    action_hash_encoded(&encoded, vault, nonce)
+}
+
+fn action_hash_encoded(
+    encoded: &[u8],
+    vault: Option<&str>,
+    nonce: u64,
+) -> Result<[u8; 32], String> {
+    let mut bytes = encoded.to_vec();
     bytes.extend_from_slice(&nonce.to_be_bytes());
     bytes.push(u8::from(vault.is_some()));
     if let Some(vault) = vault {
@@ -63,7 +75,7 @@ pub fn reserve_agent_nonce<P>(
 
 // The phantom agent has a fixed EIP-712 schema. Encode its ABI words here so
 // the venue does not pull the general JSON typed-data parser into the host.
-fn agent_digest(connection_id: [u8; 32], mainnet: bool) -> [u8; 32] {
+pub(crate) fn agent_digest(connection_id: [u8; 32], mainnet: bool) -> [u8; 32] {
     let mut domain = [0u8; 160];
     domain[..32].copy_from_slice(&ethereum::keccak256(
         b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",

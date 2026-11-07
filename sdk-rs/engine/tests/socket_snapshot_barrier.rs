@@ -19,6 +19,9 @@ struct Native {
     deliveries: Arc<AtomicUsize>,
 }
 impl Venue for Native {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = ();
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
@@ -61,6 +64,8 @@ impl Venue for Native {
             controls: ControlPolicy::Native,
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
+            close_floors: &[],
+            data_silence: None,
         };
         let feed = if self.snapshot_policy {
             cx.register_socket_feed_with_snapshot(policy)

@@ -146,6 +146,9 @@ impl ScopeProbe {
     }
 }
 impl Venue for ScopeProbe {
+    fn managed_sockets() -> bool {
+        true
+    }
     type Pending = Context;
     fn start(&mut self, _cx: &mut Cx<'_, Context>) {
         #[cfg(feature = "managed-sockets")]
@@ -836,6 +839,8 @@ fn readiness_socket_policy() -> crate::socket_lifecycle::FeedPolicy {
         controls: ControlPolicy::Native,
         invalidation: Invalidation::Required,
         subscription_interval_ms: 0.,
+        close_floors: &[],
+        data_silence: None,
     }
 }
 #[cfg(feature = "managed-sockets")]

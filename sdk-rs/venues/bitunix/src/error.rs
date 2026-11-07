@@ -60,12 +60,25 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
         Some(10001) => ErrorKind::Network,
         Some(0) => ErrorKind::Internal,
         Some(10002 | 10008 | 10010 | 10011) => ErrorKind::InvalidInput,
-        Some(10009 | 20001..=20016 | 30001..=30042 | 40001..=40008) | None => ErrorKind::Rejected,
+        Some(
+            10009
+            | 20001..=20016
+            | 30001..=30042
+            | 40001..=40008
+            | 200001..=200099
+            | 300001..=300099
+            | 500001..=500099,
+        )
+        | None => ErrorKind::Rejected,
         _ => ErrorKind::VenueUnavailable,
     };
     let mut error = VenueError::new(message.clone()).kind(kind);
     if let Some(code) = code {
         error = error.venue_code(code.0.to_string()).venue_message(message);
+    }
+    // 10004: the current IP is not in the API key's IP whitelist.
+    if code.is_some_and(|code| code.0 == 10004) {
+        error = error.ip_whitelist_refused();
     }
     if write {
         error = error.outcome(
@@ -81,6 +94,8 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
     }
     error
 }
+pub(crate) const NO_DATA: &str = "Bitunix response has no data";
+
 pub(crate) fn response_data<'a>(
     response: &Response<'a>,
     write: bool,
@@ -146,7 +161,7 @@ pub(crate) fn response_data<'a>(
     envelope
         .data
         .map(|data| data.get())
-        .ok_or_else(|| malformed("Bitunix response has no data", write))
+        .ok_or_else(|| malformed(NO_DATA, write))
 }
 
 #[cfg(test)]
@@ -212,7 +227,15 @@ mod tests {
                     )
                     .unwrap_err();
                     assert_eq!(error.kind, Some(kind));
-                    assert_eq!(error.message, "verbatim");
+                    // 10004 is the IP whitelist refusal: the venue's words, then what to do.
+                    if code == 10004 {
+                        assert_eq!(
+                            error.message,
+                            format!("verbatim. {}", safe_cex_engine::error::IP_WHITELIST_HINT)
+                        );
+                    } else {
+                        assert_eq!(error.message, "verbatim");
+                    }
                     assert_eq!(error.venue_code, Some(code.to_string()));
                     assert_eq!(
                         error.outcome,

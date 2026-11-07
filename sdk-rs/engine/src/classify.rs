@@ -42,6 +42,8 @@ pub enum Verdict {
     Unknown(Option<ErrorKind>),
     /// "Not open / already in that state" for one intent. Not a store transition.
     Satisfied(SatisfiedIntent),
+    /// Exact native proof of nonce rejection before execution; never a resend.
+    NonceRefused,
 }
 
 impl Verdict {
@@ -50,11 +52,15 @@ impl Verdict {
             Self::Refused(kind) | Self::RefusedResend(kind) => Some(kind),
             Self::Unknown(kind) => kind,
             Self::Satisfied(_) => None,
+            Self::NonceRefused => Some(ErrorKind::InvalidInput),
         }
     }
 
     pub fn is_refusal(self) -> bool {
-        matches!(self, Self::Refused(_) | Self::RefusedResend(_))
+        matches!(
+            self,
+            Self::Refused(_) | Self::RefusedResend(_) | Self::NonceRefused
+        )
     }
 }
 
@@ -67,6 +73,15 @@ pub enum Key {
     /// The exact native message, only for code-less venues. The venue codec
     /// strips only its documented suffix grammar before building `Native`.
     Message(&'static str),
+    /// One integer code and its exact message, for a code the venue reuses
+    /// across reasons. It wins over that code's plain row in its scope; any
+    /// other wording falls through to the plain row. Each needs a recorded
+    /// fixture carrying the text (`error_corpus::assert_message_rows_recorded`).
+    IntMessage(i64, &'static str),
+    /// A refusal the venue names by its text whatever code it carries (or none):
+    /// the message contains it, ASCII case-insensitively. It refines only a plain
+    /// `Refused` code verdict (listed or `unlisted`), and the reported code stays the venue's.
+    Phrase(&'static str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,6 +148,13 @@ impl Key {
             (Self::Range(low, high), NativeCode::Int(code)) => (low..=high).contains(&code),
             (Self::Text(key), NativeCode::Text(code)) => key == code,
             (Self::Message(message), NativeCode::None) => native.message == message,
+            (Self::IntMessage(key, message), NativeCode::Int(code)) => {
+                key == code && native.message == message
+            }
+            (Self::Phrase(phrase), _) => native
+                .message
+                .to_ascii_lowercase()
+                .contains(&phrase.to_ascii_lowercase()),
             _ => false,
         }
     }
@@ -144,17 +166,45 @@ impl CodeTable {
         if self.success.iter().any(|key| key.matches(native)) {
             return Verdict::Unknown(Some(ErrorKind::Internal));
         }
-        let verdict = self
-            .row(native, intent)
-            .map_or(self.unlisted, |row| row.verdict);
+        let row = self.row(native, intent);
+        let verdict = row.map_or(self.unlisted, |row| row.verdict);
+        // A phrase only names which refusal it is: it never upgrades an unproven
+        // or resend-granting verdict.
+        if let (Verdict::Refused(_), Some(phrase)) = (verdict, self.phrase(native, intent)) {
+            return scoped(phrase.verdict, intent);
+        }
+        if verdict == Verdict::NonceRefused
+            && !row.is_some_and(|row| matches!(row.key, Key::Int(_) | Key::Text(_)))
+        {
+            return Verdict::Unknown(Some(ErrorKind::InvalidInput));
+        }
         scoped(verdict, intent)
     }
 
+    /// Within each intent scope a code-and-message row wins over the code's
+    /// plain row, so table order never shadows it.
     fn row(&self, native: &Native<'_>, intent: Intent) -> Option<&Row> {
         let scoped = |only: Option<Intent>| {
-            self.rows
-                .iter()
-                .find(|row| row.only == only && row.key.matches(native))
+            let candidates = || {
+                self.rows.iter().filter(move |row| {
+                    row.only == only
+                        && !matches!(row.key, Key::Phrase(_))
+                        && row.key.matches(native)
+                })
+            };
+            candidates()
+                .find(|row| matches!(row.key, Key::IntMessage(..)))
+                .or_else(|| candidates().next())
+        };
+        scoped(Some(intent)).or_else(|| scoped(None))
+    }
+
+    /// The phrase row naming this refusal, exact intent first.
+    fn phrase(&self, native: &Native<'_>, intent: Intent) -> Option<&Row> {
+        let scoped = |only: Option<Intent>| {
+            self.rows.iter().find(|row| {
+                row.only == only && matches!(row.key, Key::Phrase(_)) && row.key.matches(native)
+            })
         };
         scoped(Some(intent)).or_else(|| scoped(None))
     }
@@ -164,6 +214,7 @@ impl CodeTable {
             .iter()
             .find(|(documented, _)| *documented == status)
             .map(|(_, verdict)| *verdict)
+            .filter(|verdict| *verdict != Verdict::NonceRefused)
     }
 }
 
@@ -206,40 +257,50 @@ pub fn verdict(
     released: Released<'_>,
     native: Option<&Native<'_>>,
 ) -> Verdict {
-    verdict_for_delivery(table, intent, released, native, false)
-}
-
-fn verdict_for_delivery(
-    table: &CodeTable,
-    intent: Intent,
-    released: Released<'_>,
-    native: Option<&Native<'_>>,
-    status_exempt: bool,
-) -> Verdict {
     let response = match released {
         Released::Transport => return Verdict::Unknown(Some(ErrorKind::Network)),
         Released::Response(response) => response,
     };
-    if !status_exempt && let Some(verdict) = unproven_status(response) {
+    if let Some(verdict) = unproven_status(response, intent) {
         return verdict;
     }
     // A code-less envelope that matches no message row is no native evidence.
     let native = native
         .filter(|native| native.code != NativeCode::None || table.row(native, intent).is_some());
     if let Some(native) = native {
-        return table.verdict(native, intent);
+        return write_verdict(table.verdict(native, intent), intent, released);
     }
-    match table.status_verdict(response.status) {
+    let verdict = match table.status_verdict(response.status) {
         Some(verdict) if !(200..300).contains(&response.status) => scoped(verdict, intent),
         _ => Verdict::Unknown(status_kind(response)),
-    }
+    };
+    write_verdict(verdict, intent, released)
 }
 
-/// Rule 3, shared with the managed-write guard: 408 and 5xx prove nothing.
-fn unproven_status(response: &Response<'_>) -> Option<Verdict> {
+/// Reads retain their native 429 retry policy; released writes prove nothing.
+fn unproven_status(response: &Response<'_>, intent: Intent) -> Option<Verdict> {
+    if intent == Intent::Read && response.status == 429 {
+        return None;
+    }
     match crate::request_context::ResponseProof::from_status(response.status) {
         crate::request_context::ResponseProof::Unproven(kind) => Some(Verdict::Unknown(Some(kind))),
         crate::request_context::ResponseProof::NativeCodec => None,
+    }
+}
+
+fn write_verdict(verdict: Verdict, intent: Intent, released: Released<'_>) -> Verdict {
+    if intent == Intent::Read {
+        return verdict;
+    }
+    if let Released::Response(response) = released
+        && let Some(unproven) = unproven_status(response, intent)
+    {
+        return unproven;
+    }
+    if verdict.kind() == Some(ErrorKind::RateLimited) {
+        Verdict::Unknown(Some(ErrorKind::RateLimited))
+    } else {
+        verdict
     }
 }
 
@@ -261,6 +322,7 @@ pub fn error(
     native: Option<&Native<'_>>,
     message: impl Into<String>,
 ) -> VenueError {
+    let verdict = write_verdict(verdict, intent, released);
     let mut error = VenueError::new(message);
     error.kind = verdict.kind();
     if intent != Intent::Read {
@@ -268,6 +330,7 @@ pub fn error(
             Verdict::Refused(_) | Verdict::RefusedResend(_) => Some(Outcome::Rejected),
             Verdict::Unknown(_) => Some(Outcome::Unknown),
             Verdict::Satisfied(_) => None,
+            Verdict::NonceRefused => Some(Outcome::NotSent),
         };
     }
     if let Some(native) = native {
@@ -334,18 +397,7 @@ pub fn fact(
     native: Option<&Native<'_>>,
     message: impl Into<String>,
 ) -> Fact {
-    fact_for_delivery(table, intent, released, native, message, false)
-}
-
-pub(crate) fn fact_for_delivery(
-    table: &CodeTable,
-    intent: Intent,
-    released: Released<'_>,
-    native: Option<&Native<'_>>,
-    message: impl Into<String>,
-    status_exempt: bool,
-) -> Fact {
-    let verdict = verdict_for_delivery(table, intent, released, native, status_exempt);
+    let verdict = verdict(table, intent, released, native);
     Fact {
         verdict,
         error: error(verdict, intent, released, native, message),
@@ -453,7 +505,7 @@ pub(crate) fn batch(
         return Err(crate::request_context::Error::Invalid);
     }
     let released = Released::Response(response);
-    if let Some(verdict) = unproven_status(response) {
+    if let Some(verdict) = unproven_status(response, intent) {
         let error = self::error(verdict, intent, released, None, message);
         return Ok(WriteResult::Failed(error));
     }
@@ -481,10 +533,12 @@ pub(crate) fn batch(
         .enumerate()
         .filter_map(|(index, item)| match item {
             BatchItem::Accepted(_) => None,
-            BatchItem::Native(native) => match table.verdict(native, intent) {
-                Verdict::Satisfied(_) => None,
-                verdict => Some((index, native, verdict)),
-            },
+            BatchItem::Native(native) => {
+                match write_verdict(table.verdict(native, intent), intent, released) {
+                    Verdict::Satisfied(_) => None,
+                    verdict => Some((index, native, verdict)),
+                }
+            }
         });
     let Some(first) = failures.next() else {
         return Ok(WriteResult::Accepted { order_ids: ids });
@@ -575,7 +629,7 @@ pub fn read(
             None
         }
         (Verdict::Unknown(_), _) => Some(header.map_or(ReadRetry::ReadFailure, ReadRetry::After)),
-        (Verdict::Refused(_) | Verdict::Satisfied(_), _) => None,
+        (Verdict::Refused(_) | Verdict::Satisfied(_) | Verdict::NonceRefused, _) => None,
     };
     ReadFailure { error, retry }
 }
@@ -597,12 +651,55 @@ pub fn assert_table(table: &CodeTable) {
             row.verdict != Verdict::RefusedResend(ErrorKind::RateLimited),
             "row {index}: a rate limit waits; it never resends"
         );
+        assert!(
+            row.verdict != Verdict::NonceRefused || matches!(row.key, Key::Int(_) | Key::Text(_)),
+            "nonce refusal needs one exact native code"
+        );
         if let Key::Range(low, high) = row.key {
             assert!(low <= high, "row {index}: empty range");
         }
-        for (other_index, other) in table.rows.iter().enumerate().skip(index + 1) {
+        if let Key::IntMessage(code, message) = row.key {
             assert!(
-                row.only != other.only || !keys_overlap(row.key, other.key),
+                !message.is_empty(),
+                "row {index}: an empty message is no evidence"
+            );
+            // Precedence is per scope: an intent-scoped plain row for the same code
+            // would win before an unscoped code-and-message row is ever tried.
+            let shadowed = row.only.is_none()
+                && table.rows.iter().any(|other| {
+                    other.only.is_some()
+                        && match other.key {
+                            Key::Int(plain) => plain == code,
+                            Key::Range(low, high) => (low..=high).contains(&code),
+                            _ => false,
+                        }
+                });
+            assert!(
+                !shadowed,
+                "row {index}: an intent-scoped plain row for {code} shadows this unscoped message row"
+            );
+            assert!(
+                !matches!(row.verdict, Verdict::Satisfied(_) | Verdict::NonceRefused),
+                "row {index}: a code-and-message row cannot be Satisfied or a nonce refusal"
+            );
+        }
+        if let Key::Phrase(phrase) = row.key {
+            assert!(
+                phrase.trim().len() >= 8,
+                "row {index}: a phrase this short is no evidence"
+            );
+            assert!(
+                matches!(row.verdict, Verdict::Refused(_)),
+                "row {index}: a phrase row only refines one refusal into another"
+            );
+        }
+        for (other_index, other) in table.rows.iter().enumerate().skip(index + 1) {
+            // An exact code listed before a range that contains it refines the
+            // range: rows match first to last, so the exact row always wins.
+            let refines = matches!((row.key, other.key),
+                (Key::Int(code), Key::Range(low, high)) if (low..=high).contains(&code));
+            assert!(
+                row.only != other.only || refines || !keys_overlap(row.key, other.key),
                 "rows {index} and {other_index} overlap for the same intent scope"
             );
         }
@@ -610,7 +707,7 @@ pub fn assert_table(table: &CodeTable) {
     assert!(
         !matches!(
             table.unlisted,
-            Verdict::Satisfied(_) | Verdict::RefusedResend(_)
+            Verdict::Satisfied(_) | Verdict::RefusedResend(_) | Verdict::NonceRefused
         ),
         "unlisted codes cannot be Satisfied or RefusedResend"
     );
@@ -659,6 +756,8 @@ fn keys_overlap(a: Key, b: Key) -> bool {
         _ => match (a, b) {
             (Key::Text(a), Key::Text(b)) => a == b,
             (Key::Message(a), Key::Message(b)) => a == b,
+            (Key::IntMessage(a, m), Key::IntMessage(b, n)) => a == b && m == n,
+            (Key::Phrase(a), Key::Phrase(b)) => a.eq_ignore_ascii_case(b),
             _ => false,
         },
     }
@@ -667,3 +766,7 @@ fn keys_overlap(a: Key, b: Key) -> bool {
 #[cfg(test)]
 #[path = "classify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "nonce_refusal_tests.rs"]
+mod nonce_refusal_tests;

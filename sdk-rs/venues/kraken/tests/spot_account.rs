@@ -272,30 +272,38 @@ fn support_fill_count(frame: &[u8]) -> u32 {
 }
 #[test]
 fn balance_read_signature_rejection_resigns_once() {
-    let (mut e, _, private) = ready(false);
-    message(
-        &mut e,
-        private.unwrap(),
-        r#"{"channel":"balances","type":"update","data":[]}"#,
-    );
-    let first = requests(&mut e).pop().unwrap();
-    reply(
-        &mut e,
-        &first,
-        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
-    );
-    let second = requests(&mut e).pop().unwrap();
-    assert_ne!(first.body, second.body);
-    assert_ne!(first.headers, second.headers);
-    reply(
-        &mut e,
-        &second,
-        r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
-    );
-    assert!(
-        requests(&mut e).is_empty(),
-        "a signature rejection resigns once"
-    );
+    for status in [200, 429] {
+        let (mut e, _, private) = ready(false);
+        message(
+            &mut e,
+            private.unwrap(),
+            r#"{"channel":"balances","type":"update","data":[]}"#,
+        );
+        let first = requests(&mut e).pop().unwrap();
+        e.handle(
+            NOW,
+            Event::HttpResponse {
+                request: first.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body: r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+                },
+            },
+        );
+        let second = requests(&mut e).pop().expect("reads still re-sign once");
+        assert_ne!(first.body, second.body);
+        assert_ne!(first.headers, second.headers);
+        reply(
+            &mut e,
+            &second,
+            r#"{"error":["EAPI:Invalid signature"],"result":{}}"#,
+        );
+        assert!(
+            requests(&mut e).is_empty(),
+            "a signature rejection resigns once"
+        );
+    }
 }
 
 #[test]
@@ -1086,4 +1094,101 @@ fn definitive_revoked_key_and_read_permission_still_report_auth_rejection() {
         ));
         assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
     }
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut e = safe_cex_engine::test_support::seeded_engine(
+        safe_cex_venue_kraken::KrakenSpot::new(options()),
+    );
+    e.start(NOW);
+    let mut failures = 0;
+    for _ in 0..12 {
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+        if actions.is_empty() {
+            break;
+        }
+        for action in actions {
+            match action {
+                Action::Http(r) => {
+                    let body = if r.url.ends_with("AssetPairs") {
+                        META
+                    } else if r.url.ends_with("Ticker") {
+                        TICKERS
+                    } else {
+                        r#"{"error":["EAPI:Invalid key"]}"#
+                    };
+                    reply(&mut e, &r, body);
+                }
+                Action::Notice(Notice::StartupFailed { .. }) => failures += 1,
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(failures, 1);
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (200, r#"{"error":["EAPI:Invalid key"],"result":{}}"#),
+        (403, r#"{"error":["EAPI:Invalid key"],"result":{}}"#),
+        (
+            200,
+            r#"{"error":["EGeneral:Permission denied"],"result":{}}"#,
+        ),
+        (
+            403,
+            r#"{"error":["EGeneral:Permission denied"],"result":{}}"#,
+        ),
+    ] {
+        let (mut e, _, private) = ready(false);
+        message(
+            &mut e,
+            private.unwrap(),
+            r#"{"channel":"balances","type":"update","data":[]}"#,
+        );
+        let first = requests(&mut e).pop().unwrap();
+        e.handle(
+            1.0,
+            Event::HttpResponse {
+                request: first.id,
+                response: safe_cex_engine::Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let actions = e.drain_plain().collect::<Vec<_>>();
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::Deactivate))),
+            "{status} {body}"
+        );
+    }
+}
+
+#[test]
+fn missing_execution_timestamps_use_protocol_utc_after_a_host_correction() {
+    let (mut e, _, private) = ready(false);
+    let utc = NOW + 162. * 86_400_000.;
+    assert!(e.sync_host_time(NOW, utc));
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","exec_type":"trade","cum_qty":1.5,"order_qty":2,"last_qty":1,"avg_price":99}]}"#,
+    );
+    let order = e.store().order("O-100").unwrap();
+    assert_eq!(order.filled, 1.5);
+    assert_eq!(order.last_update, utc);
+    let kept_price = order.price;
+    // A later explicit UTC row must be compared to the same UTC fallback fence.
+    message(
+        &mut e,
+        private.unwrap(),
+        r#"{"channel":"executions","type":"update","data":[{"order_id":"O-100","symbol":"BTC/USD","exec_type":"new","order_type":"limit","side":"buy","order_qty":2,"cum_qty":1.5,"limit_price":90,"timestamp":"2023-11-14T22:13:21Z"}]}"#,
+    );
+    assert_eq!(e.store().order("O-100").unwrap().price, kept_price);
 }

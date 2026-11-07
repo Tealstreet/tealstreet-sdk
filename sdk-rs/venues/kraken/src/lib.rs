@@ -10,6 +10,7 @@ pub mod sign;
 mod trading;
 mod wire;
 use safe_cex_engine::Level;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
@@ -210,15 +211,16 @@ impl Kraken {
         if self.ticker_in_flight {
             return;
         }
-        let context =
-            match cx.http_context(Scope::Background, public_context::policy(Operation::Read)) {
-                Ok(context) => context,
-                Err(reason) => {
-                    self.discovery.failed(cx, true);
-                    cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
-                    return;
-                }
-            };
+        let context = match cx
+            .http_live_context(Scope::Background, public_context::policy(Operation::Read))
+        {
+            Ok(context) => context,
+            Err(reason) => {
+                self.discovery.failed(cx, true);
+                cx.notice(Level::Warn, code::REQUEST_FAILED, reason.to_string());
+                return;
+            }
+        };
         self.ticker_in_flight = true;
         self.live_tickers.begin();
         match cx.request_managed(
@@ -341,7 +343,7 @@ impl Kraken {
             return;
         }
         let step = interval.ms();
-        let to = to_ms.unwrap_or(cx.now);
+        let to = to_ms.unwrap_or(cx.protocol_now());
         let from = from_ms.unwrap_or(to - step * f64::from(limit.unwrap_or(500).clamp(1, 5000)));
         if !from.is_finite() || !to.is_finite() || from < 0.0 || from > to {
             if command.is_some() {
@@ -412,7 +414,7 @@ impl Kraken {
         let policy = public_context::policy(Operation::Read);
         let issued = match root {
             Some(root) => cx.http_leg_context(root, policy),
-            None => cx.http_context(Scope::Background, policy),
+            None => cx.http_live_context(Scope::Background, policy),
         };
         let leg = match issued {
             Ok(leg) => leg,
@@ -535,10 +537,16 @@ fn resolution(interval: Interval) -> Option<&'static str> {
     matches!(interval, M1 | M5 | M15 | M30 | H1 | H4 | H12 | D1 | W1).then(|| interval.as_str())
 }
 impl Venue for Kraken {
+    fn http_plans() -> bool {
+        false
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }
     fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         true
     }
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
@@ -549,18 +557,52 @@ impl Venue for Kraken {
         true
     }
 
+    #[inline]
+    fn managed_sockets() -> bool {
+        true
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::FillsAccount,
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             leverage_query: safe_cex_engine::LeverageQuery::OnMetadata,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn socket_control(
         &self,
@@ -589,6 +631,13 @@ impl Venue for Kraken {
         ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError>,
     ) -> Result<(), safe_cex_engine::socket_lifecycle::SocketError> {
         self.managed_encode(feed, subscribe, items, emit)
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(read) = &self.options.read_credentials
@@ -1091,7 +1140,7 @@ impl Venue for Kraken {
                     );
                     return;
                 }
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 rows.dedup_by(|a, b| a.timestamp == b.timestamp);
                 if let Some(root) = &root {
                     if let Some(context) = &context {
@@ -1129,6 +1178,26 @@ impl Venue for Kraken {
             _ => unreachable!(),
         }
     }
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        match pending {
+            Pending::History(request) => self.history_stream_error(cx, *request, response),
+            Pending::Account(request) => self.account_http(cx, request, response),
+            pending => self.on_request_failed(
+                cx,
+                pending,
+                &format!(
+                    "response did not contain the expected list: {}",
+                    response.body
+                ),
+            ),
+        }
+    }
+
     fn on_http_preparation_failed(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1136,16 +1205,18 @@ impl Venue for Kraken {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        if matches!(pending, Pending::Candles { .. }) {
-            self.candles_failed(cx, pending, error);
-        } else {
-            match pending {
-                Pending::PublicTrades(r, child) => {
-                    self.public_trades_preparation_failed(cx, *r, Some(child), error)
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if matches!(pending, Pending::Candles { .. }) {
+                self.candles_failed(cx, pending, error);
+            } else {
+                match pending {
+                    Pending::PublicTrades(r, child) => {
+                        self.public_trades_preparation_failed(cx, *r, Some(child), error)
+                    }
+                    pending => self.on_sign_error(cx, pending, error),
                 }
-                pending => self.on_sign_error(cx, pending, error),
             }
-        }
+        });
     }
     fn on_http_failed(
         &mut self,
@@ -1173,7 +1244,11 @@ impl Venue for Kraken {
                     error.message = format!("Kraken history failed: {}", error.message);
                     self.public_trades_failed(cx, *r, child, error)
                 }
-                pending => self.on_request_failed(cx, pending, &error.message),
+                pending => {
+                    self.account.read_error = Some(error.clone());
+                    self.on_request_failed(cx, pending, &error.message);
+                    self.account.read_error = None;
+                }
             }
         }
     }

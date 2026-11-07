@@ -37,7 +37,12 @@ against the engine's OWN immutable installed Primary identity. A Some write
 credential must be the exact Selection::credential for that slot: its reference
 equals the installed identity's credential KeyRef. A signing ref, passphrase or
 extra-role ref cannot stand in as the root credential. Signed calls also require
-that identity's signing ref.
+that identity's signing ref. That rule applies to presentable credentials. A
+trusted ScalarOnly primary (credential-absent, marked only by trusted setup) has
+no presentable credential: its authority-bound root credential is its signing
+ref (`authority_ref()`), which it binds but never presents or interpolates. Any
+other identity's signing, passphrase or extra ref still cannot stand in. See
+RUST_SCALAR_ONLY_SESSION_ROOT.md.
 Foreign refs, accounts, slots, stale or retired Sessions refuse before IDs.
 Never trust a venue-supplied Identity or Selection as this comparison's source.
 The one real Present-only login Session suffices; no dummy header Session exists.

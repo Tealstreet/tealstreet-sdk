@@ -218,9 +218,21 @@ describe('command outcome serialization', () => {
     });
   });
 
+  it('carries what a refused protective edit left the position with, and nothing else', async () => {
+    const { ExchangeError } = await import('@tealstreet/safe-cex-wasm/host');
+    for (const protection of ['restored', 'unprotected'] as const) {
+      const error = new ExchangeError('Your BTCUSDT stop is unchanged', { message: 'x', kind: 'rejected', protection });
+      expect(error.protection).toBe(protection);
+      expect(deserializeCommandError(serializeCommandError(error))).toMatchObject({ protection });
+    }
+    expect(new ExchangeError('x', { message: 'x', protection: 'maybe' as never }).protection).toBeUndefined();
+    expect(serializeCommandError({ message: 'x', protection: 'maybe' })).toEqual({ message: 'x' });
+  });
+
   it('maps each classified kind onto the health categories and leaves unclassified errors to text', () => {
     expect(exchangeErrorCategory({ kind: 'authExpired' })).toBe('auth_expired');
     expect(exchangeErrorCategory({ kind: 'venueUnavailable' })).toBe('exchange_down');
+    expect(exchangeErrorCategory({ kind: 'insufficientBalance' })).toBe('insufficient_balance');
     expect(exchangeErrorCategory(new Error('plain'))).toBeUndefined();
   });
 });
@@ -232,7 +244,33 @@ describe('exchange error tags', () => {
         Object.assign(new Error('rejected key'), { kind: 'authInvalid', outcome: 'rejected', venueCode: '10003' }),
       ),
     ).toEqual({ error_kind: 'authInvalid', error_category: 'auth_invalid', error_outcome: 'rejected', venue_code: '10003' });
+    expect(exchangeErrorTags(Object.assign(new Error('Margin is insufficient.'), { kind: 'insufficientBalance' }))).toEqual({
+      error_kind: 'insufficientBalance',
+      error_category: 'insufficient_balance',
+    });
     expect(exchangeErrorTags(Object.assign(new Error('x'), { kind: 'made-up', venueCode: 'has spaces and more' }))).toEqual({});
     expect(exchangeErrorTags('plain text')).toEqual({});
   });
+});
+
+
+it('keeps a closed native history cause separately from the venue code through worker serialization', () => {
+  const error = Object.assign(new Error('history refused'), {
+    kind: 'rateLimited', causeCode: 'HISTORY_RATE_LIMITED', venueCode: '100410',
+  });
+  expect(deserializeCommandError(JSON.parse(JSON.stringify(serializeCommandError(error))))).toMatchObject({
+    message: 'history refused', kind: 'rateLimited', causeCode: 'HISTORY_RATE_LIMITED', venueCode: '100410',
+  });
+  expect(serializeCommandError({ message: 'bad cause', causeCode: 'https://signed?secret' }))
+    .not.toHaveProperty('causeCode');
+});
+
+it('keeps closed history row evidence through worker serialization without extra properties', () => {
+  const error = Object.assign(new Error('invalid row'), {
+    kind: 'internal', causeCode: 'HISTORY_DECODE',
+    historyDecode: { schema: 'bitgetClassicOrders', reason: 'quantity', raw: 'must not cross' },
+  });
+  const serialized = serializeCommandError(error);
+  expect(serialized).toHaveProperty('historyDecode', { schema: 'bitgetClassicOrders', reason: 'quantity' });
+  expect(deserializeCommandError(structuredClone(serialized))).toHaveProperty('historyDecode', { schema: 'bitgetClassicOrders', reason: 'quantity' });
 });

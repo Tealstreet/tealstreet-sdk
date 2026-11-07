@@ -1486,8 +1486,20 @@ def manifest(text):
     return value
 
 
-def subset(counts, baseline):
-    return all(count <= baseline.get(digest, 0) for digest, count in counts.items())
+# The one ruled growth allowance (ddi, 2026-10-27; owner m26ps4): Paradex PR-2's
+# interim sign_http helper. Paradex PR-3 removes that site and this tuple together;
+# while it lingers with the site gone, the check fails.
+RULED_GROWTH = (
+    ('venues/paradex/src/account.rs',
+     'de9d09faf6d835f5164746112b2915550e9364b218dcf7701191482bbc0b492e', 1),
+)
+
+
+def subset(counts, baseline, ceilings=None):
+    """`ceilings` are absolute: a ruled digest never exceeds its count."""
+    ceilings = ceilings or {}
+    return all(count <= max(baseline.get(digest, 0), ceilings.get(digest, 0))
+               for digest, count in counts.items())
 
 
 def maximum_manifest(manifests):
@@ -1500,13 +1512,18 @@ def maximum_manifest(manifests):
     return result
 
 
-def check(current, allowed, previous):
+def check(current, allowed, previous, ruled=()):
     failures = []
     if current != allowed:
         failures.append('current sites must exactly match the inventory (prune removals; no new sites)')
+    ceilings = {}
+    for path, digest, count in ruled:
+        ceilings.setdefault(path, {})[digest] = count
+        if digest not in allowed.get(path, {}):
+            failures.append(f'{path}: stale ruled allowance; delete it with its site')
     for label, baseline in previous:
         for path, counts in allowed.items():
-            if not subset(counts, baseline.get(path, {})):
+            if not subset(counts, baseline.get(path, {}), ceilings.get(path)):
                 failures.append(f'{path}: inventory grew against {label}')
     return failures
 
@@ -1555,7 +1572,8 @@ def previous_manifests(inventory=None, predecessor=None, merge_parents=False):
 def main():
     try:
         prod, test = request_sites()
-        failures = check(prod, manifest((ROOT / MANIFEST).read_text()), previous_manifests(merge_parents=True))
+        failures = check(prod, manifest((ROOT / MANIFEST).read_text()),
+                         previous_manifests(merge_parents=True), RULED_GROWTH)
         failures += ['test inventory: ' + failure for failure in check(
             test, manifest((ROOT / TEST_MANIFEST).read_text()),
             previous_manifests(TEST_MANIFEST, MANIFEST, merge_parents=True))]

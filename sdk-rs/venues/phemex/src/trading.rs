@@ -15,6 +15,8 @@ use safe_cex_engine::request_context::plan::{SerialCall, SerialPolicy, Slot};
 use safe_cex_engine::request_context::{
     Context, Operation, Plan, Preflight, PreflightPolicy, PreflightPurpose,
 };
+use safe_cex_engine::setting_holds::SettingKey;
+use safe_cex_engine::text::JoinWith;
 pub(crate) use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, ErrorKind, Method, Response, VenueError, num};
 use serde::Deserialize;
@@ -23,6 +25,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Default)]
 pub(crate) struct State {
+    /// The venue answered the current write with a code.
+    answered: bool,
     acknowledged: HashMap<String, Order>,
     jobs: HashMap<CommandId, Job>,
     retired: Vec<RetiredWrite>,
@@ -58,6 +62,36 @@ struct Job {
     revision: u64,
     signed_until: Option<f64>,
     live: Option<Request>,
+    /// Set while a replacement waits for its accepted cancel to end.
+    cancel_wait: Option<safe_cex_engine::request_context::ConditionWait>,
+    /// The amended order, once its cancel is proven and its replacement is issued.
+    replacing: Option<(String, OrderSide, OrderType)>,
+    /// The amended stop's put-back, taken from its replacement when issued.
+    protect: Option<Box<StopProtect>>,
+    /// The put-back is under way: the replacement was refused.
+    restoring: bool,
+}
+impl Job {
+    fn gone_note(&self, unknown: bool) -> Option<String> {
+        self.replacing
+            .as_ref()
+            .filter(|_| self.ids.is_empty())
+            .map(|(symbol, side, kind)| {
+                if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
+                    safe_cex_engine::error::stop_gone_text(symbol, *side, *kind, unknown)
+                } else {
+                    safe_cex_engine::error::order_gone_text(symbol, unknown)
+                }
+            })
+    }
+}
+/// One symbol-scoped position read ahead of a command that needs its mode.
+pub struct SymbolModeRead {
+    pub(crate) preflight: Preflight,
+    pub(crate) context: Context,
+    command: Command,
+    symbol: String,
+    tried: Vec<String>,
 }
 struct RetiredWrite {
     request: Request,
@@ -97,6 +131,11 @@ const REFUSALS: CodeTable = CodeTable {
             only: None,
         },
         Row {
+            key: Key::Int(11038),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
             key: Key::Int(11027),
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
@@ -127,6 +166,51 @@ const REFUSALS: CodeTable = CodeTable {
             only: None,
         },
         Row {
+            key: Key::Int(11011),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(11041),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(11043),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(11044),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(11048),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(11085),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(11150),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(20004),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(39999),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
             key: Key::Text("Rejected"),
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
@@ -146,6 +230,8 @@ pub(crate) enum Outcome {
 }
 /// Margin for the client clock running ahead of Phemex's when bounding a late write.
 const CLOCK_SKEW_MS: f64 = 5_000.;
+/// How long an amend waits for the socket to end the order its cancel moved to PendingCancel.
+const CANCEL_CONFIRM_MS: u32 = 10_000;
 struct Step {
     method: Method,
     path: &'static str,
@@ -155,8 +241,94 @@ struct Step {
 }
 struct Guard {
     id: String,
+    symbol: String,
+    /// The amended order's own, which a virtual leg does not share with its parent.
+    side: OrderSide,
+    kind: OrderType,
     amount: f64,
     filled: f64,
+    /// A stop, take-profit or trigger edit: its cancel's final check and put-back.
+    stop: Option<Box<StopProtect>>,
+}
+/// An amended stop's final pre-cancel check, and what puts it back.
+struct StopProtect {
+    guard: StopGuard,
+    /// The original placed again, unchanged, once its replacement is refused.
+    restore: VecDeque<Step>,
+    /// False when the original cannot be proven again (its entry has fills):
+    /// a refused replacement then says the stop was removed.
+    restorable: bool,
+}
+/// The amended order (and its entry, for a leg) as planned, and the
+/// replacement trigger's reference.
+struct StopGuard {
+    order: Order,
+    parent: Option<Order>,
+    trigger: f64,
+    reference: StopTriggerType,
+    /// The side a live trigger must stay on; None while nothing can fire at
+    /// once (a leg of an unfilled entry).
+    below: Option<bool>,
+    /// A reduce-only or closing stop needs a position on the side it closes.
+    closes: Option<PositionSide>,
+}
+impl StopGuard {
+    /// A refusal is typed NotSent and leaves the order untouched.
+    fn validate(&self, store: &safe_cex_engine::Store, now: f64) -> Result<(), VenueError> {
+        use safe_cex_engine::protective_amend::{fresh_reference, refused};
+        let unchanged = || format!("Your {} order was not changed", self.order.symbol);
+        // This cancel's own optimistic Canceling status is not a change.
+        let same = |planned: &Order| {
+            store.order(&planned.id).is_some_and(|current| {
+                current == planned
+                    || (current.status == OrderStatus::Canceling && {
+                        let mut current = current.clone();
+                        current.status = planned.status;
+                        current == *planned
+                    })
+            })
+        };
+        if self.order.filled != 0.0
+            || !same(&self.order)
+            || self.parent.as_ref().is_some_and(|parent| !same(parent))
+        {
+            return Err(refused(Some(format!(
+                "{}: it changed or filled before cancellation",
+                unchanged()
+            ))));
+        }
+        if let Some(side) = self.closes
+            && !store
+                .positions()
+                .iter()
+                .any(|p| p.symbol == self.order.symbol && p.side == side && p.contracts > 0.0)
+        {
+            return Err(refused(Some(format!(
+                "{}: no position for it to protect",
+                unchanged()
+            ))));
+        }
+        let label = match self.reference {
+            StopTriggerType::MarkPrice => "mark",
+            StopTriggerType::IndexPrice => "index",
+            StopTriggerType::LastPrice => "last",
+        };
+        let Some(price) = fresh_reference(store, &self.order.symbol, self.reference, now) else {
+            return Err(refused(Some(format!(
+                "{}: the {label} price reference is stale",
+                unchanged()
+            ))));
+        };
+        if let Some(below) = self.below
+            && ((below && self.trigger >= price) || (!below && self.trigger <= price))
+        {
+            return Err(refused(Some(format!(
+                "{}: the new trigger has already crossed the {label} price",
+                unchanged()
+            ))));
+        }
+        Ok(())
+    }
 }
 #[derive(Clone)]
 enum Call {
@@ -169,6 +341,8 @@ enum Call {
         before: Vec<Order>,
         ids: Vec<String>,
     },
+    /// A nuke's venue cancel-all; it names no order, so no row or repair state follows it.
+    CancelAccount,
     Settings {
         symbol: String,
         leverage: Option<f64>,
@@ -205,13 +379,14 @@ pub(crate) fn unproven_diagnostics(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Identity {
-    #[serde(rename = "orderID")]
+    // A gone batch row answers bizError 10002 with every other field null.
+    #[serde(default, rename = "orderID", deserialize_with = "nullable_string")]
     order_id: String,
     #[serde(default, rename = "clOrdID")]
     client_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_string")]
     ord_status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "nullable_string")]
     exec_status: String,
     #[serde(default)]
     biz_error: i64,
@@ -224,6 +399,9 @@ struct Identity {
     #[serde(default)]
     code: i64,
 }
+fn nullable_string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
+}
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum CancelResult {
@@ -234,9 +412,26 @@ enum CancelResult {
 struct CancelAck {
     accepted: HashSet<String>,
     finalized: HashMap<String, OrderStatus>,
+    /// The venue no longer has these: filled or canceled, it cannot say which.
+    gone: HashSet<String>,
     fills: Vec<(String, f64)>,
     problem: Option<String>,
     refusals: HashMap<String, NativeCode<'static>>,
+}
+/// OM_ORDER_NOT_FOUND on a cancel: the order is already gone.
+const ORDER_NOT_FOUND: i64 = 10002;
+fn gone_ack(ids: &[String]) -> CancelAck {
+    CancelAck {
+        accepted: ids.iter().cloned().collect(),
+        finalized: ids
+            .iter()
+            .map(|id| (id.clone(), OrderStatus::Canceled))
+            .collect(),
+        gone: ids.iter().cloned().collect(),
+        fills: Vec::new(),
+        problem: None,
+        refusals: HashMap::new(),
+    }
 }
 fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
     let result: CancelResult =
@@ -248,15 +443,30 @@ fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
     let mut seen = HashSet::new();
     let mut accepted = HashSet::new();
     let mut finalized = HashMap::new();
+    let mut gone = HashSet::new();
     let mut problem = None;
     let mut refusals = HashMap::new();
     let mut fills = Vec::new();
-    for row in rows {
+    let positional = !array || rows.len() == ids.len();
+    for (index, mut row) in rows.into_iter().enumerate() {
+        if row.order_id.is_empty()
+            && row.biz_error != 0
+            && positional
+            && let Some(id) = ids.get(index)
+        {
+            row.order_id.clone_from(id);
+        }
         if !ids.contains(&row.order_id) || !seen.insert(row.order_id.clone()) {
             accepted.remove(&row.order_id);
             finalized.remove(&row.order_id);
             refusals.remove(&row.order_id);
             problem = Some("Phemex cancel identity mismatch".to_string());
+            continue;
+        }
+        if row.code == ORDER_NOT_FOUND || row.biz_error == ORDER_NOT_FOUND {
+            accepted.insert(row.order_id.clone());
+            finalized.insert(row.order_id.clone(), OrderStatus::Canceled);
+            gone.insert(row.order_id);
             continue;
         }
         if row.code != 0 || row.biz_error != 0 || row.exec_status.eq_ignore_ascii_case("Rejected") {
@@ -281,10 +491,13 @@ fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
             problem = Some("Phemex invalid cancel cumulative fill".into());
             continue;
         }
+        // PendingCancel is accepted but not final: the socket frame ends the order.
+        let pending_cancel = row.exec_status.eq_ignore_ascii_case("PendingCancel");
         let status = match row.ord_status.to_ascii_lowercase().as_str() {
             "init" => None,
-            "canceled" | "cancelled" => Some(OrderStatus::Canceled),
+            "canceled" | "cancelled" | "deactivated" => Some(OrderStatus::Canceled),
             "filled" => Some(OrderStatus::Closed),
+            "new" | "partiallyfilled" if pending_cancel => None,
             _ => {
                 problem = Some("Phemex cancel acknowledgement has no confirmed outcome".into());
                 continue;
@@ -309,6 +522,7 @@ fn decode_cancel_ack(raw: &str, ids: &[String]) -> Result<CancelAck, String> {
     Ok(CancelAck {
         accepted,
         finalized,
+        gone,
         fills,
         problem,
         refusals,
@@ -330,7 +544,7 @@ fn query(pairs: Vec<(&str, String)>) -> String {
         .into_iter()
         .map(|(k, v)| format!("{k}={}", encode(&v)))
         .collect::<Vec<_>>()
-        .join("&")
+        .join_with("&")
 }
 fn positive(v: f64, step: f64) -> Result<f64, String> {
     let n = num::adjust(v, step);
@@ -363,7 +577,15 @@ pub(crate) fn valid_client(id: &str) -> bool {
             .chars()
             .any(|c| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
 }
+/// A row's id until its placement is answered: no venue call can name it.
+const CREATING_PREFIX: &str = "__phemex_creating_";
 fn native(id: &str) -> Result<&str, String> {
+    if id.starts_with(CREATING_PREFIX) {
+        return Err(
+            "This Phemex order is still being placed. Try again once it has a venue order ID, or use Cancel All, which waits for it"
+                .into(),
+        );
+    }
     let base = id
         .strip_suffix("__stop_loss")
         .or_else(|| id.strip_suffix("__take_profit"))
@@ -443,9 +665,6 @@ impl PhemexPerpetuals {
             if o.client_order_id.is_some() && o.amount > m.limits.amount.max {
                 return Err("Phemex caller clientOrderId cannot span split orders".into());
             }
-            self.account
-                .context(&o.symbol)
-                .ok_or("Phemex leverage/margin context is unknown; await account reconciliation")?;
             let mode = self
                 .account
                 .mode(&o.symbol)
@@ -651,7 +870,7 @@ impl PhemexPerpetuals {
                     params.push(("pegPriceType", "TrailingStopPeg".into()));
                 }
                 let row = Order {
-                    id: format!("__phemex_creating_{id}"),
+                    id: format!("{CREATING_PREFIX}{id}"),
                     parent_id: None,
                     status: OrderStatus::Creating,
                     symbol: o.symbol.clone(),
@@ -721,8 +940,9 @@ impl PhemexPerpetuals {
                 .ok_or(
                     "Phemex cancel requires a cached order to resolve symbol and position side",
                 )?;
+            // Already over: a terminal row must not stop the live ones being canceled.
             if !active(o) {
-                return Err("Phemex cannot cancel a terminal order".into());
+                continue;
             }
             let m = cx
                 .store
@@ -791,7 +1011,7 @@ impl PhemexPerpetuals {
                     query: query(vec![
                         ("symbol", symbol.clone()),
                         ("posSide", pos.clone()),
-                        ("orderID", chunk.join(",")),
+                        ("orderID", chunk.join_with(",")),
                     ]),
                     call: Call::Cancel {
                         before,
@@ -804,6 +1024,20 @@ impl PhemexPerpetuals {
         Ok(steps)
     }
 
+    /// Untriggered first, so no conditional can trigger into an active order after that cancel.
+    /// https://github.com/phemex/phemex-api-docs/blob/master/Public-Hedged-Perpetual-API.md#cancelall
+    fn account_cancel_steps() -> VecDeque<Step> {
+        ["true", "false"]
+            .map(|untriggered| Step {
+                method: Method::Delete,
+                path: "/g-orders/all",
+                query: query(vec![("untriggered", untriggered.into())]),
+                call: Call::CancelAccount,
+                replacement: None,
+            })
+            .into()
+    }
+
     fn amend_plan(
         &self,
         cx: &Cx<'_, Pending>,
@@ -814,16 +1048,19 @@ impl PhemexPerpetuals {
         if price.is_none() && amount.is_none() {
             return Err("Phemex amendment requires price or amount".into());
         }
-        if self.account.has_unreconciled_fills() {
-            return Err(
-                "Phemex fills are awaiting order reconciliation; wait before amending".into(),
-            );
-        }
         let base = native(&id)?.to_owned();
         let parent = cx
             .store
             .order(&base)
             .ok_or("Phemex replacement parent order not found")?;
+        if self
+            .account
+            .has_unreconciled_fills_for(&parent.symbol, &base)
+        {
+            return Err(
+                "Phemex fills are awaiting order reconciliation; wait before amending".into(),
+            );
+        }
         if parent.status != OrderStatus::Open {
             return Err("Phemex replacement requires an open parent order".into());
         }
@@ -871,6 +1108,7 @@ impl PhemexPerpetuals {
         if tp.is_some() && types.tp.is_none() || sl.is_some() && types.sl.is_none() {
             return Err("Phemex cannot preserve imported bracket trigger type".into());
         }
+        let (original_tp, original_sl) = (tp, sl);
         let child_amend = id != base;
         if child_amend && amount.is_some() {
             return Err("Phemex virtual bracket quantity amendment is unsupported".into());
@@ -882,11 +1120,41 @@ impl PhemexPerpetuals {
                 _ => return Err("Phemex invalid virtual bracket".into()),
             }
         }
+        // Hedged rows report reduceOnly false, so the row's flag would turn a close's
+        // replacement into an opening order on the other side.
+        let position_side = self
+            .trading
+            .sides
+            .get(&base)
+            .filter(|_| self.live_order_metadata(cx, &base))
+            .map(String::as_str)
+            .or_else(|| self.account.order_pos_side(&base));
+        let reduce_only = match position_side {
+            Some("Long") => parent.side == OrderSide::Sell,
+            Some("Short") => parent.side == OrderSide::Buy,
+            Some(_) => parent.reduce_only,
+            None if self.account.mode(&parent.symbol) == Some(PositionMode::Hedged) => {
+                return Err("Phemex amendment position side is unknown".into());
+            }
+            None => parent.reduce_only,
+        };
         let opts = PlaceOrderOpts {
             symbol: parent.symbol.clone(),
             kind: parent.kind,
             side: parent.side,
-            amount: amount.unwrap_or(parent.remaining),
+            // A resting stop reports leavesQty 0; zero here would mean a full close.
+            amount: amount
+                .map(|total| num::left_of_total(total, parent.filled))
+                .transpose()?
+                .unwrap_or(
+                    if matches!(parent.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                        && parent.filled == 0.
+                    {
+                        parent.amount
+                    } else {
+                        parent.remaining
+                    },
+                ),
             price: Some(if child_amend {
                 parent.price
             } else {
@@ -896,7 +1164,7 @@ impl PhemexPerpetuals {
             max_slippage_pct: None,
             stop_loss: sl,
             take_profit: tp,
-            reduce_only: Some(parent.reduce_only),
+            reduce_only: Some(reduce_only),
             time_in_force: parent.time_in_force,
             trigger_type: parent.trigger_type,
             tp_trigger_type: if parent.kind == OrderType::TakeProfit {
@@ -924,17 +1192,156 @@ impl PhemexPerpetuals {
             bybit_slippage_tolerance_ticks: None,
             implied_volatility: None,
         };
+        let stop = self.stop_protect(cx, &opts, parent, child, original_tp, original_sl)?;
         let mut replacement = self.place_plan(cx, vec![opts])?;
         if let Some(step) = replacement.front_mut() {
             step.replacement = Some(Guard {
                 id: base.clone(),
+                symbol: parent.symbol.clone(),
+                side: child.side,
+                kind: child.kind,
                 amount: parent.amount,
                 filled: parent.filled,
+                stop,
             });
         }
         let mut cancel = self.cancel_plan(cx, vec![base])?;
         cancel.extend(replacement);
         Ok(cancel)
+    }
+
+    /// For a stop, take-profit or trigger edit: the final pre-cancel check and
+    /// the original's exact put-back (`opts` is the edited replacement).
+    fn stop_protect(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+        parent: &Order,
+        child: &Order,
+        original_tp: Option<f64>,
+        original_sl: Option<f64>,
+    ) -> Result<Option<Box<StopProtect>>, String> {
+        let leg = child.id != parent.id;
+        if !leg
+            && !matches!(
+                parent.kind,
+                OrderType::StopLoss | OrderType::TakeProfit | OrderType::Conditional
+            )
+        {
+            return Ok(None);
+        }
+        let m = cx
+            .store
+            .market(&parent.symbol)
+            .ok_or("Phemex amendment market not found")?;
+        let trigger = num::adjust(
+            if leg {
+                if child.kind == OrderType::TakeProfit {
+                    opts.take_profit
+                } else {
+                    opts.stop_loss
+                }
+            } else {
+                opts.price
+            }
+            .ok_or("Phemex amendment has no trigger")?,
+            m.precision.price,
+        );
+        let stops = matches!(child.kind, OrderType::StopLoss | OrderType::Conditional);
+        // A leg acts only once its entry fills; a standalone stop acts at once.
+        let live = !leg || parent.filled > 0.0;
+        let below = live.then_some(stops == (child.side == OrderSide::Sell));
+        let closes =
+            (!leg && (opts.reduce_only == Some(true) || opts.close == Some(true))).then(|| {
+                if child.side == OrderSide::Sell {
+                    PositionSide::Long
+                } else {
+                    PositionSide::Short
+                }
+            });
+        // The source the replacement is sent with, defaulted as placement does,
+        // so the veto checks the price the venue will trigger on.
+        let reference = match child.kind {
+            OrderType::TakeProfit => opts.tp_trigger_type.unwrap_or(StopTriggerType::LastPrice),
+            OrderType::StopLoss => opts.sl_trigger_type.unwrap_or(StopTriggerType::MarkPrice),
+            _ => parent.trigger_type.unwrap_or(StopTriggerType::LastPrice),
+        };
+        let guard = StopGuard {
+            order: child.clone(),
+            parent: leg.then(|| parent.clone()),
+            trigger,
+            reference,
+            below,
+            closes,
+        };
+        guard
+            .validate(cx.store, cx.now)
+            .map_err(|error| error.message)?;
+        let original = PlaceOrderOpts {
+            price: Some(parent.price),
+            take_profit: original_tp,
+            stop_loss: original_sl,
+            amount: if matches!(parent.kind, OrderType::StopLoss | OrderType::TakeProfit)
+                && parent.filled == 0.
+            {
+                parent.amount
+            } else {
+                parent.remaining
+            },
+            ..opts.clone()
+        };
+        let restore = self.place_plan(cx, vec![original])?;
+        let restorable = !leg
+            && original_tp.is_none()
+            && original_sl.is_none()
+            && parent.filled == 0.0
+            && restore.len() == 1;
+        Ok(Some(Box::new(StopProtect {
+            guard,
+            restore,
+            restorable,
+        })))
+    }
+    /// The final-claim re-check of an amended stop's cancel.
+    pub(crate) fn stop_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        let Pending::PlannedTrade(request) = pending else {
+            return Ok(());
+        };
+        let Call::Cancel { .. } = &request.native.call else {
+            return Ok(());
+        };
+        let Some(job) = request
+            .native
+            .command
+            .and_then(|id| self.trading.jobs.get(&id))
+        else {
+            return Ok(());
+        };
+        if job.restoring {
+            return Ok(());
+        }
+        let Some(protect) = job
+            .steps
+            .front()
+            .and_then(|step| step.replacement.as_ref())
+            .and_then(|guard| guard.stop.as_ref())
+        else {
+            return Ok(());
+        };
+        if self
+            .account
+            .has_unreconciled_fills_for(&protect.guard.order.symbol, &protect.guard.order.id)
+        {
+            return Err(safe_cex_engine::protective_amend::refused(Some(
+                "Phemex fills are awaiting order reconciliation; order was not changed".into(),
+            )));
+        }
+        protect.guard.validate(store, release.time.raw_ms)
     }
 
     fn settings_plan(
@@ -1032,11 +1439,191 @@ impl PhemexPerpetuals {
     fn live_order_metadata(&self, cx: &Cx<'_, Pending>, id: &str) -> bool {
         cx.store.order(id).is_some_and(active) || self.live_acknowledged(cx, id)
     }
+    /// A symbol this command needs whose position mode was never read: the
+    /// account read lists only symbols the account has touched.
+    fn unread_symbol(
+        &self,
+        cx: &Cx<'_, Pending>,
+        command: &Command,
+        tried: &[String],
+    ) -> Option<String> {
+        let unread = |symbol: &String, settings: bool| {
+            !tried.contains(symbol)
+                && cx.store.market(symbol).is_some()
+                && if settings {
+                    self.account.context(symbol).is_none()
+                } else {
+                    self.account.mode(symbol).is_none()
+                }
+        };
+        match command {
+            Command::PlaceOrders { orders, .. } => orders
+                .iter()
+                .map(|o| &o.symbol)
+                .find(|symbol| unread(symbol, false))
+                .cloned(),
+            Command::SetLeverage { symbol, .. } | Command::SetMarginType { symbol, .. } => {
+                unread(symbol, true).then(|| symbol.clone())
+            }
+            _ => None,
+        }
+    }
+    fn read_symbol_mode(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: Command,
+        symbol: String,
+        resume: Option<Preflight>,
+        tried: Vec<String>,
+    ) -> Result<(), Command> {
+        let Some((credential, identity)) = self
+            .read_slots
+            .select(CredentialRole::Mutation)
+            .ok()
+            .map(|(selection, identity)| {
+                (
+                    selection.credential(identity.credential.clone()),
+                    identity.clone(),
+                )
+            })
+        else {
+            return Err(command);
+        };
+        let preflight = match resume {
+            Some(preflight) => preflight,
+            None => {
+                let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
+                    purpose: PreflightPurpose::WriteAfterReads,
+                    read_credential: Some(credential.clone()),
+                    write_credential: Some(credential.clone()),
+                }) else {
+                    return Ok(());
+                };
+                preflight
+            }
+        };
+        let context = match cx.preflight_read_context(
+            &preflight,
+            safe_cex_engine::request_context::Policy {
+                operation: Operation::Read,
+                credential: Some(credential),
+                timeout_ms: 20_000,
+                pacing: None,
+                retry: safe_cex_engine::request_context::RetryPolicy::Never,
+            },
+            safe_cex_engine::request_context::plan::CallTerms {
+                wait_ms: 0,
+                timeout_ms: 20_000,
+                attempts: 1,
+                retry_window: safe_cex_engine::request_context::plan::RetryWindow::FreshAttempt,
+            },
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                reject(cx, &preflight, not_sent(error.venue_error().message));
+                return Ok(());
+            }
+        };
+        let currency = if symbol.ends_with("USDC") {
+            "USDC"
+        } else {
+            "USDT"
+        };
+        let path = "/g-accounts/accountPositions";
+        let query = query(vec![
+            ("currency", currency.to_owned()),
+            ("symbol", self.native_symbol(&symbol).to_owned()),
+        ]);
+        let recipe = crate::dispatch_signing::Http::new(
+            identity,
+            self.options.testnet,
+            Method::Get,
+            path.into(),
+            query.clone(),
+            None,
+        );
+        let url = format!("{}{path}?{query}", self.rest());
+        let pending = Pending::SymbolMode(Box::new(SymbolModeRead {
+            preflight,
+            context: context.clone(),
+            command,
+            symbol,
+            tried,
+        }));
+        if let Err((Pending::SymbolMode(read), error)) = cx.request_signed_managed(
+            context,
+            None,
+            Method::Get,
+            url,
+            None,
+            Box::new(recipe),
+            pending,
+        ) {
+            self.symbol_mode_failed(cx, *read, &error.venue_error().message);
+        }
+        Ok(())
+    }
+    pub(crate) fn symbol_mode_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: SymbolModeRead,
+        error: &str,
+    ) {
+        reject(
+            cx,
+            &read.preflight,
+            not_sent(format!(
+                "Phemex could not read the position mode of {}: {error}",
+                read.symbol
+            )),
+        );
+    }
+    pub(crate) fn symbol_mode_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: SymbolModeRead,
+        body: &str,
+    ) {
+        let SymbolModeRead {
+            preflight,
+            context,
+            command,
+            symbol,
+            mut tried,
+        } = read;
+        if cx.finish_preflight_call(&preflight, &context).is_err() {
+            return;
+        }
+        self.install_symbol_mode(cx, &symbol, body);
+        tried.push(symbol);
+        let _ = self.trade_command_resumed(cx, command, Some(preflight), tried);
+    }
     pub(crate) fn trade_command(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Option<Command> {
+        self.trade_command_resumed(cx, command, None, Vec::new())
+    }
+    fn trade_command_resumed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: Command,
+        resume: Option<Preflight>,
+        tried: Vec<String>,
+    ) -> Option<Command> {
+        let command = if !self.options.public_data_only
+            && !cx.frame_fed()
+            && self.credentials.is_some()
+            && let Some(symbol) = self.unread_symbol(cx, &command, &tried)
+        {
+            match self.read_symbol_mode(cx, command, symbol, resume.clone(), tried) {
+                Ok(()) => return None,
+                Err(command) => command,
+            }
+        } else {
+            command
+        };
         let is_settings = matches!(
             command,
             Command::SetLeverage { .. }
@@ -1084,6 +1671,10 @@ impl PhemexPerpetuals {
                 )
             }
             Command::CancelOrders { command, ids } => (command, self.cancel_plan(cx, ids)),
+            Command::Venue {
+                command,
+                action: safe_cex_engine::VenueAction::CancelAccountOrders,
+            } => (command, Ok(Self::account_cancel_steps())),
             Command::CancelSymbolOrders { command, symbol } => {
                 let ids = cx
                     .store
@@ -1226,12 +1817,18 @@ impl PhemexPerpetuals {
             let _ = cx.fail_context(&context, error);
             return None;
         }
-        let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
-            purpose: PreflightPurpose::WriteAfterReads,
-            read_credential: None,
-            write_credential: credential.clone(),
-        }) else {
-            return None;
+        let preflight = match resume {
+            Some(preflight) => preflight,
+            None => {
+                let Ok(preflight) = cx.begin_preflight(PreflightPolicy {
+                    purpose: PreflightPurpose::WriteAfterReads,
+                    read_credential: None,
+                    write_credential: credential.clone(),
+                }) else {
+                    return None;
+                };
+                preflight
+            }
         };
         if self.trading.jobs.len() >= 32 {
             reject(
@@ -1322,6 +1919,10 @@ impl PhemexPerpetuals {
                         revision: 0,
                         signed_until: None,
                         live: None,
+                        cancel_wait: None,
+                        replacing: None,
+                        protect: None,
+                        restoring: false,
                     },
                 );
                 if let Some(symbol) = cancel_all {
@@ -1333,47 +1934,111 @@ impl PhemexPerpetuals {
         None
     }
 
+    fn note_canceled_replacement(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId) {
+        let Some(job) = self.trading.jobs.get_mut(&id) else {
+            return;
+        };
+        let Some(guard) = job
+            .steps
+            .front_mut()
+            .and_then(|step| step.replacement.as_mut())
+        else {
+            return;
+        };
+        if !cx
+            .store
+            .order(&guard.id)
+            .is_some_and(|order| order.status == OrderStatus::Canceled)
+        {
+            return;
+        }
+        if let Some(protect) = guard.stop.take() {
+            job.replacing = Some((guard.symbol.clone(), guard.side, guard.kind));
+            job.protect = Some(protect);
+        }
+        if job.protect.is_some()
+            && let Some(gone) = job.gone_note(true)
+        {
+            let _ = cx.present_plan_failure(
+                &job.plan,
+                format!("{gone}; check Open Orders and re-place it if missing"),
+            );
+        }
+    }
+
     fn trade_next(&mut self, cx: &mut Cx<'_, Pending>, id: CommandId) {
+        self.note_canceled_replacement(cx, id);
         let Some(job) = self.trading.jobs.get_mut(&id) else {
             return;
         };
         let Some(step) = job.steps.pop_front() else {
             let job = self.trading.jobs.remove(&id).unwrap();
-            let _ = cx.done_plan(&job.plan, serde_json::to_string(&job.ids).unwrap());
+            if job.restoring {
+                let what = job.replacing.as_ref().map_or_else(
+                    || "order".to_owned(),
+                    |(symbol, ..)| format!("{symbol} stop"),
+                );
+                let mut error = VenueError::new(format!(
+                    "Your {what} is unchanged: its replacement was refused, so the original was put back as a new order"
+                ));
+                error.protection = Some(safe_cex_engine::error::Protection::Restored);
+                error.presents = true;
+                cx.command_error(id, error.message.clone());
+                let _ = cx.fail_plan(&job.plan, error.partial_ids(&job.ids));
+            } else {
+                let _ = cx.done_plan(&job.plan, serde_json::to_string(&job.ids).unwrap());
+            }
             self.orders_reconcile(cx);
             return;
         };
         if cx.now < self.paused_until {
-            let job = self.trading.jobs.remove(&id).unwrap();
-            cx.command_error(
-                id,
-                "Phemex requests are rate limited; mutation was not sent",
-            );
-            let _ = cx.fail_plan(
-                &job.plan,
-                "Phemex requests are rate limited; mutation was not sent",
-            );
-            // Earlier steps of this batch were sent, so the batch outcome is open.
-            self.orders_uncertain(cx, job.placing, None, cx.now);
+            if job.protect.is_some() {
+                let _ = cx.inherit_plan_uncertainty(&job.plan);
+                let error = VenueError::new("Phemex requests are rate limited after cancellation")
+                    .kind(ErrorKind::RateLimited)
+                    .outcome(safe_cex_engine::Outcome::Unknown)
+                    .retry_after_ms(self.paused_until - cx.now);
+                self.fail_unissued_trade(cx, id, error);
+            } else {
+                let message = if step.replacement.as_ref().is_some_and(|guard| {
+                    cx.store
+                        .order(&guard.id)
+                        .is_some_and(|order| order.status == OrderStatus::Canceled)
+                }) {
+                    "Phemex order was canceled; replacement not sent (rate limited); re-place it"
+                } else {
+                    "Phemex requests are rate limited; mutation was not sent"
+                };
+                let job = self.trading.jobs.remove(&id).unwrap();
+                cx.command_error(id, message);
+                let _ = cx.fail_plan(&job.plan, message);
+                self.orders_uncertain(cx, job.placing, None, cx.now);
+            }
             return;
         }
         if let Some(g) = &step.replacement
             && (!cx.store.order(&g.id).is_some_and(|o| {
                 o.status == OrderStatus::Canceled && o.amount == g.amount && o.filled == g.filled
-            }) || self.account.has_unreconciled_fills())
+            }) || self.account.has_unreconciled_fills_for(&g.symbol, &g.id))
         {
-            let job = self.trading.jobs.remove(&id).unwrap();
-            cx.command_error(
+            self.fail_unissued_trade(
+                cx,
                 id,
-                "Phemex order changed while canceling; replacement was not sent",
-            );
-            let _ = cx.fail_plan(
-                &job.plan,
-                "Phemex order changed while canceling; replacement was not sent",
+                VenueError::new("Phemex order changed while canceling; replacement was not sent"),
             );
             return;
         }
+        // Ordinary amends retain the original set-at-send bookkeeping: a local
+        // fill veto above must not claim that an unissued replacement was refused.
+        if let Some(guard) = &step.replacement {
+            job.replacing = Some((guard.symbol.clone(), guard.side, guard.kind));
+        }
         let Some(slot) = job.slot.take() else {
+            self.fail_unissued_trade(
+                cx,
+                id,
+                VenueError::new("Phemex replacement has no send authority"),
+            );
             return;
         };
         let plan = job.plan.clone();
@@ -1416,6 +2081,18 @@ impl PhemexPerpetuals {
             for order in before {
                 cx.store.set_order_status(&order.id, OrderStatus::Canceling);
             }
+        }
+        // A 408 or 5xx on a put-back is sealed before this venue sees it:
+        // say what is unknown rather than repeat the replacement's refusal.
+        if let Call::Place { .. } = &step.call
+            && let Some(job) = self.trading.jobs.get(&command)
+            && job.restoring
+            && let Some((symbol, ..)) = &job.replacing
+        {
+            let words = format!(
+                "Your {symbol} stop's replacement was refused and its put-back's outcome is unknown. Check Open Orders"
+            );
+            let _ = cx.present_plan_failure(&plan, words);
         }
         self.account_write(cx);
         let revision = self.account.order_revision();
@@ -1608,6 +2285,7 @@ impl PhemexPerpetuals {
             .command
             .and_then(|id| self.trading.jobs.get(&id))
             .map_or(0, |job| job.ids.len());
+        self.trading.answered = false;
         let mut resolved = false;
         let mut refusal_code = None;
         let mut known_effects = false;
@@ -1625,26 +2303,50 @@ impl PhemexPerpetuals {
                 return Err(format!("Phemex {} {}", env.code.unwrap_or(-1), env.msg));
             }
             let code = env.code.ok_or("Phemex malformed write acknowledgement")?;
+            if code == ORDER_NOT_FOUND
+                && let Call::Cancel { before, ids } = &request.call
+            {
+                let ack = gone_ack(ids);
+                known_effects = true;
+                self.apply_cancel_ack(cx, before, &ack);
+                return Ok(());
+            }
+            // As its open-order list does, OM_ORDER_NOT_FOUND here means nothing rests.
+            if code == ORDER_NOT_FOUND
+                && let Call::CancelAccount = &request.call
+            {
+                return Ok(());
+            }
             if code != 0 {
                 // Only documented balance/parameter/risk rejects with no order data
                 // prove no placement. Duplicate/routing/internal errors stay unknown.
                 // https://github.com/phemex/phemex-api-docs/blob/master/TradingErrorCode.md
                 let call = &request.call;
+                self.trading.answered = true;
                 if matches!(call, Call::Place { .. })
                     && env.data.as_ref().is_none_or(|data| data.get() == "null")
                     && matches!(
                         code,
                         11001
+                            | 11011
                             | 11027
                             | 11034
                             | 11035
                             | 11036
+                            | 11038
+                            | 11041
+                            | 11043
+                            | 11044
+                            | 11048
                             | 11053
                             | 11055
                             | 11056
                             | 11058
                             | 11081
                             | 11082
+                            | 11150
+                            | 20004
+                            | 39999
                     )
                 {
                     request
@@ -1685,10 +2387,12 @@ impl PhemexPerpetuals {
                     if row.symbol.to_ascii_uppercase() != order.symbol
                         || crate::account_wire::order_side(&row.side) != Some(order.side)
                         || row.order_qty.or(row.order_qty_rq).is_none() && order.amount > 0.0
-                        || row
-                            .order_qty
-                            .or(row.order_qty_rq)
-                            .is_some_and(|q| order.amount > 0.0 && q != order.amount)
+                        || row.order_qty.or(row.order_qty_rq).is_some_and(|q| {
+                            order.amount > 0.0
+                                    && q != order.amount
+                                    // The venue trims an oversize reduce-only order.
+                                    && !(order.reduce_only && q > 0.0 && q < order.amount)
+                        })
                         || !row.pos_side.is_empty() && row.pos_side != pos_side.as_str()
                         || !matches!(
                             row.kind.as_ref(),
@@ -1757,9 +2461,8 @@ impl PhemexPerpetuals {
                         .push(identity.order_id);
                 }
                 Call::Cancel { before, ids } => {
-                    if self.account.order_revision() != request.revision {
-                        return Err("Phemex order changed during cancel acknowledgement; await reconciliation".into());
-                    }
+                    // A socket frame may beat this ack: apply_cancel_ack only moves
+                    // orders still Canceling, so the newer state stands.
                     let raw = env
                         .data
                         .filter(|raw| raw.get() != "null")
@@ -1771,6 +2474,9 @@ impl PhemexPerpetuals {
                         return Err(error);
                     }
                 }
+                // Documented `"data":0`: a bare number that names no order.
+                // Code 0 is the acknowledgement; data is not a count (shown live).
+                Call::CancelAccount => {}
                 Call::Settings {
                     symbol,
                     leverage,
@@ -1801,6 +2507,15 @@ impl PhemexPerpetuals {
                     }
                     self.account
                         .apply_settings(symbol, *leverage, *side, *margin, *mode);
+                    // Frame-fed: kept over the source's frames until it re-reads.
+                    let held = [
+                        leverage.map(|_| SettingKey::Leverage(symbol.clone())),
+                        margin.map(|_| SettingKey::MarginType(symbol.clone())),
+                        mode.map(|_| SettingKey::PositionMode(symbol.clone())),
+                    ];
+                    for key in held.into_iter().flatten() {
+                        cx.hold_setting(key);
+                    }
                     if let Some(mode) = mode {
                         cx.store.update_positions(|p| {
                             if p.symbol == *symbol {
@@ -1813,6 +2528,11 @@ impl PhemexPerpetuals {
             }
             Ok(())
         })();
+        if result.is_ok()
+            && let Some(command) = request.command
+        {
+            self.note_canceled_replacement(cx, command);
+        }
         if let Some((plan, slot, context)) = &managed {
             let fact = match &result {
                 Ok(()) => WriteFact::Accepted {
@@ -1865,7 +2585,38 @@ impl PhemexPerpetuals {
                     .command
                     .and_then(|id| self.trading.jobs.get(&id))
                     .is_some_and(|job| !job.steps.is_empty());
-                if has_next {
+                let wait_for_cancel = request
+                    .command
+                    .and_then(|id| self.trading.jobs.get(&id))
+                    .and_then(|job| job.steps.front())
+                    .and_then(|step| step.replacement.as_ref())
+                    .is_some_and(|g| cx.store.order(&g.id).is_some_and(active));
+                if wait_for_cancel {
+                    match cx.serial_plan_condition_wait(
+                        plan,
+                        slot,
+                        context,
+                        serial_call(),
+                        Some(CANCEL_CONFIRM_MS),
+                    ) {
+                        Ok(wait) => {
+                            if let Some(job) = request
+                                .command
+                                .and_then(|id| self.trading.jobs.get_mut(&id))
+                            {
+                                job.cancel_wait = Some(wait);
+                                job.effective = true;
+                            }
+                            self.account_write(cx);
+                            self.replace_wait_refresh(cx);
+                            return;
+                        }
+                        Err(error) => {
+                            self.finish_failed_trade(cx, request, error.venue_error(), false);
+                            return;
+                        }
+                    }
+                } else if has_next {
                     match cx.continue_serial_plan(plan, slot, context, serial_call()) {
                         Ok(next) => {
                             if let Some(job) = request
@@ -1883,6 +2634,36 @@ impl PhemexPerpetuals {
                 } else if let Err(error) = cx.finish_plan_call(plan, slot, context) {
                     self.finish_failed_trade(cx, request, error.venue_error(), true);
                     return;
+                }
+            } else if resolved
+                && let Call::Place { .. } = &request.call
+                && let Some(job) = request
+                    .command
+                    .and_then(|id| self.trading.jobs.get_mut(&id))
+                && !job.restoring
+                && job
+                    .protect
+                    .as_ref()
+                    .is_some_and(|p| p.restorable && !p.restore.is_empty())
+            {
+                // A definite refusal proves no replacement exists: put the original back once.
+                match cx.continue_serial_plan(plan, slot, context, serial_call()) {
+                    Ok(next) => {
+                        let restore = job.protect.as_mut().map(|p| std::mem::take(&mut p.restore));
+                        job.steps = restore.unwrap_or_default();
+                        job.restoring = true;
+                        job.slot = Some(next);
+                        let command = request.command;
+                        self.restore_failed_trade(cx, &request);
+                        if let Some(command) = command {
+                            self.trade_next(cx, command);
+                        }
+                        return;
+                    }
+                    Err(error) => {
+                        self.finish_failed_trade(cx, request, error.venue_error(), false);
+                        return;
+                    }
                 }
             } else if let Err(error) = cx.finish_plan_call(plan, slot, context) {
                 self.finish_failed_trade(cx, request, error.venue_error(), true);
@@ -1941,12 +2722,25 @@ impl PhemexPerpetuals {
         let Some(job) = self.trading.jobs.remove(&id) else {
             return;
         };
+        let gone = job.gone_note(error.outcome == Some(safe_cex_engine::Outcome::Unknown));
+        if job.protect.is_some()
+            && let Some(gone) = &gone
+        {
+            error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+            error.presents = true;
+            error.message = format!("{gone}; please re-place it ({})", error.message);
+        }
         if job.effective || !job.ids.is_empty() {
             error.outcome = None;
         }
         self.account_refresh(cx);
         cx.command_error(id, error.message.clone());
-        let _ = cx.fail_plan(&job.plan, error.partial_ids(&job.ids));
+        let error = error.partial_ids(&job.ids);
+        let gone = gone.filter(|_| error.protection.is_none());
+        let _ = match &gone {
+            Some(gone) => cx.fail_plan_noted(&job.plan, error, gone),
+            None => cx.fail_plan(&job.plan, error),
+        };
         self.orders_reconcile(cx);
     }
 
@@ -1954,6 +2748,7 @@ impl PhemexPerpetuals {
         let CancelAck {
             accepted,
             finalized,
+            gone,
             fills,
             ..
         } = ack;
@@ -1996,19 +2791,90 @@ impl PhemexPerpetuals {
         for id in finalized.keys() {
             self.account.terminal(id, cx.now);
         }
+        for o in before {
+            if native(&o.id).is_ok_and(|id| gone.contains(id)) {
+                cx.store.remove_orders(&[o.id.as_str()]);
+            }
+        }
         if !accepted.is_empty() {
             self.account_write(cx);
         }
     }
+    /// A socket frame may have ended the order a replacement waits on.
+    pub(crate) fn wake_replacements(&mut self, cx: &mut Cx<'_, Pending>) {
+        for job in self.trading.jobs.values_mut() {
+            let settled = job.steps.front().is_none_or(|step| {
+                step.replacement
+                    .as_ref()
+                    .is_none_or(|g| !cx.store.order(&g.id).is_some_and(active))
+            });
+            if settled
+                && let Some(wait) = &job.cancel_wait
+                && cx.release_condition_wait(wait).is_ok()
+            {
+                job.cancel_wait = None;
+            }
+        }
+    }
+    pub(crate) fn replacement_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::ConditionOwner,
+    ) {
+        let safe_cex_engine::request_context::ConditionOwner::Plan(plan) = owner else {
+            return;
+        };
+        let Some(id) = self
+            .trading
+            .jobs
+            .iter()
+            .find_map(|(id, job)| (job.plan.owner() == plan.owner()).then_some(*id))
+        else {
+            return;
+        };
+        let job = self.trading.jobs.remove(&id).unwrap();
+        let error = "Phemex cancel was accepted but not confirmed within 10 s; replacement was not sent. Check the order and any position it protected";
+        cx.command_error(id, error);
+        let _ = cx.fail_plan(&job.plan, error);
+        self.orders_reconcile(cx);
+    }
+    pub(crate) fn trading_plan_ready(&mut self, cx: &mut Cx<'_, Pending>, plan: &Plan) {
+        let Some(id) = self
+            .trading
+            .jobs
+            .iter()
+            .find_map(|(id, job)| (job.plan.owner() == plan.owner()).then_some(*id))
+        else {
+            return;
+        };
+        let Some(slot) = cx
+            .plan_slots(plan)
+            .ok()
+            .and_then(|slots| slots.into_iter().next())
+        else {
+            return;
+        };
+        if let Some(job) = self.trading.jobs.get_mut(&id) {
+            job.slot = Some(slot);
+        }
+        self.trade_next(cx, id);
+    }
     fn restore_failed_trade(&mut self, cx: &mut Cx<'_, Pending>, request: &Request) {
+        self.reopen_failed_trade(cx, request, false);
+    }
+    /// `not_sent`: the write never left, so its rows are reopened even if they
+    /// changed meanwhile (an amend's vetoed cancel).
+    fn reopen_failed_trade(&mut self, cx: &mut Cx<'_, Pending>, request: &Request, not_sent: bool) {
         match &request.call {
             Call::Place { order, .. } => cx.store.remove_orders(&[order.id.as_str()]),
-            Call::Cancel { before, .. } if self.account.order_revision() == request.revision => {
+            Call::Cancel { before, .. }
+                if not_sent || self.account.order_revision() == request.revision =>
+            {
                 for o in before {
                     if cx.store.order(&o.id).is_some_and(|current| {
                         current.status == OrderStatus::Canceling
-                            && current.amount == o.amount
-                            && current.filled == o.filled
+                            && (not_sent
+                                || current.amount == o.amount && current.filled == o.filled)
                     }) {
                         cx.store.set_order_status(&o.id, o.status);
                     }
@@ -2025,21 +2891,44 @@ impl PhemexPerpetuals {
         mut error: VenueError,
         uncertain: bool,
     ) {
-        self.restore_failed_trade(cx, &request);
+        self.reopen_failed_trade(
+            cx,
+            &request,
+            error.outcome == Some(safe_cex_engine::Outcome::NotSent),
+        );
         let Some(command) = request.command else {
             return;
         };
         let job = self.trading.jobs.remove(&command);
         self.account_refresh(cx);
+        let gone = job.as_ref().and_then(|job| {
+            job.gone_note(uncertain || error.outcome == Some(safe_cex_engine::Outcome::Unknown))
+        });
         if let Some(job) = &job {
             if !uncertain && (job.effective || !job.ids.is_empty()) {
                 error.outcome = None;
             }
             error = error.partial_ids(&job.ids);
+            // The cancel landed and nothing stands in its place.
+            if gone.is_some() && job.protect.is_some() && !uncertain {
+                error.protection = Some(safe_cex_engine::error::Protection::Unprotected);
+                error.presents = true;
+                if !job.restoring
+                    && let Some((symbol, ..)) = &job.replacing
+                {
+                    error.message = format!(
+                        "Your {symbol} stop was removed: its replacement was refused, please re-place it ({})",
+                        error.message
+                    );
+                }
+            }
         }
         if let Some(job) = &job {
             cx.command_error(command, error.message.clone());
-            let _ = cx.fail_plan(&job.plan, error);
+            let _ = match &gone {
+                Some(gone) => cx.fail_plan_noted(&job.plan, error, gone),
+                None => cx.fail_plan(&job.plan, error),
+            };
         }
         if uncertain {
             let expiry = job
@@ -2060,11 +2949,17 @@ impl PhemexPerpetuals {
                 Call::Place { order, .. } => Some(&**order),
                 _ => None,
             };
+            // An answered write cannot still land: its fence clears on the next read.
+            let read_at = if std::mem::take(&mut self.trading.answered) {
+                cx.now
+            } else {
+                expiry + CLOCK_SKEW_MS
+            };
             self.orders_uncertain(
                 cx,
                 job.map(|job| job.placing).unwrap_or_default(),
                 lost,
-                expiry + CLOCK_SKEW_MS,
+                read_at,
             );
         } else {
             self.orders_uncertain(cx, vec![], None, cx.now);
@@ -2076,7 +2971,7 @@ impl PhemexPerpetuals {
         cx.notice(Level::Warn, code::ORDERS_REPLACED,
             format!(
                 "Phemex order {} from an unknown-outcome placement landed after cancel-all on {symbol}; canceling it",
-                ids.join(", ")
+                ids.join_with(", ")
             ),
         );
         match self.cancel_plan(cx, ids) {
@@ -2090,5 +2985,128 @@ impl PhemexPerpetuals {
                 ),
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use safe_cex_engine::signing::{Identities, Identity, KeyRef};
+    use safe_cex_engine::{Action, CredentialSlot, Event, Notice, SocketId, TimerId, Venue};
+
+    // Fault injection only: a real admitted Plan whose venue-local slot was lost.
+    // No test-only hook is exposed to production or integration consumers.
+    struct MissingSlot(PhemexPerpetuals);
+    impl Venue for MissingSlot {
+        type Pending = Pending;
+        fn start(&mut self, _: &mut Cx<'_, Pending>) {}
+        fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {}
+        fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {}
+        fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
+        fn on_command(&mut self, cx: &mut Cx<'_, Pending>, _: Command) {
+            let identity = Identity::new(KeyRef("fixture".into()), Some(KeyRef("signing".into())));
+            let credential = safe_cex_engine::request_context::Credential {
+                slot: CredentialSlot::Primary,
+                reference: identity.credential.clone(),
+            };
+            let preflight = cx
+                .begin_preflight(PreflightPolicy {
+                    purpose: PreflightPurpose::WriteAfterReads,
+                    read_credential: None,
+                    write_credential: Some(credential.clone()),
+                })
+                .unwrap();
+            let (plan, _slot) = cx
+                .admit_serial_plan(
+                    &preflight,
+                    serial_call(),
+                    SerialPolicy {
+                        credential: Some(credential),
+                        pacing: None,
+                        refusals_complete: false,
+                    },
+                )
+                .unwrap();
+            self.0.trading.jobs.insert(
+                1,
+                Job {
+                    plan,
+                    slot: None,
+                    identity,
+                    steps: VecDeque::from([Step {
+                        method: Method::Delete,
+                        path: "/g-orders/all",
+                        query: String::new(),
+                        call: Call::CancelAccount,
+                        replacement: None,
+                    }]),
+                    ids: vec![],
+                    settings: false,
+                    placing: vec![],
+                    effective: false,
+                    revision: 0,
+                    signed_until: None,
+                    live: None,
+                    cancel_wait: None,
+                    replacing: None,
+                    protect: None,
+                    restoring: false,
+                },
+            );
+            self.0.trade_next(cx, 1);
+            assert!(!self.0.trading.jobs.contains_key(&1));
+        }
+        fn book(&self, _: &str) -> Option<&safe_cex_engine::book::Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &safe_cex_engine::book::Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[test]
+    fn a_missing_send_slot_terminates_once_without_io() {
+        let mut engine = safe_cex_engine::test_support::seeded_engine(MissingSlot(
+            PhemexPerpetuals::new(Default::default()),
+        ));
+        engine
+            .set_identities(Identities {
+                primary: Some(Identity::new(
+                    KeyRef("fixture".into()),
+                    Some(KeyRef("signing".into())),
+                )),
+                secondary: None,
+            })
+            .unwrap();
+        engine.handle(
+            1000.,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "old".into(),
+                price: Some(67900.),
+                amount: None,
+            }),
+        );
+        let actions: Vec<_> = engine.drain_actions().collect();
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(_) | Action::ManagedHttp(_)))
+        );
+        let failures: Vec<_> = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(
+            failures[0].message,
+            "Phemex replacement has no send authority"
+        );
     }
 }

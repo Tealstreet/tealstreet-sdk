@@ -19,7 +19,8 @@ const policies = new Set([
   'quantityUnits', 'positionHistory', 'closedPositionFormat', 'fillHistoryTime',
   'bybitExecutionControls', 'rejectClientSlippage', 'finiteCommandNumbers',
   'finiteHistoryBounds', 'rejectOrderHistoryFilters', 'publicCatalogueValidation',
-  'isolatedBookSubscriptions', 'inverseClosedPositions',
+  'isolatedBookSubscriptions', 'inverseClosedPositions', 'orderHistoryNeedsSymbol',
+  'symbolCancelMissesUnseen', 'orderReadCovers',
 ]);
 const conditional = {
   account: (v) => v !== 'unsupported' ? [{ op: 'fetchAccount' }] : [],
@@ -47,6 +48,8 @@ const conditional = {
   marketRefresh: () => [{ op: 'refreshMarkets' }],
   stpControls: () => [{ op: 'fetchStpMode' }, { op: 'setStpMode', mode: 'EXPIRE_TAKER' }],
   scheduleCancel: () => [{ op: 'scheduleCancel', time: 5000 }, { op: 'scheduleCancel', time: null }],
+  freshPositions: () => [{ op: 'readPositions' }],
+  nukeAccountCancel: () => [{ op: 'cancelAccountOrders' }],
 };
 const fields = [...new Set([...Object.keys(enums), ...Object.keys(conditional), ...policies])];
 
@@ -105,7 +108,8 @@ function managedHttp(action) {
       && (!Object.hasOwn(action, 'signing') || u32(action.signing));
   }
   if (action.phase === 'prepare') {
-    if (!closed(action, ['op', 'phase', 'preparation', 'intent', 'packet'])
+    if (!closed(action, ['op', 'phase', 'preparation', 'intent', 'packet'], ['requestClass'])
+      || (Object.hasOwn(action, 'requestClass') && (!Number.isInteger(action.requestClass) || action.requestClass < 0 || action.requestClass > 4))
       || !['public', 'primary', 'secondary'].includes(action.intent)) return false;
   } else if (action.phase === 'bind') {
     if (!closed(action, ['op', 'phase', 'preparation', 'permit', 'packet'])) return false;
@@ -145,7 +149,6 @@ export function probeCapabilityCommand(instance, command, label) {
       case 'http': valid = integer(action.request) && ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(action.method)
         && typeof action.url === 'string' && headers(action.headers) && optional('body', (v) => typeof v === 'string'); break;
       case 'sign': valid = integer(action.attempt) && object(action.work) && Number.isFinite(action.timeoutMs); break;
-      case 'signPayload': valid = integer(action.request) && object(action.payload) && Number.isFinite(action.timeoutMs); break;
       case 'wsSend': valid = integer(action.socket) && typeof action.text === 'string'; break;
       case 'wsConnect': valid = integer(action.socket) && typeof action.url === 'string' && optional('headers', headers); break;
       case 'wsClose': valid = integer(action.socket); break;
@@ -190,7 +193,7 @@ export function probeCapabilityCommand(instance, command, label) {
   // This result is ingress evidence, not valid-state positive handler proof.
   const terminal = actions.find((action) => action.op === 'done');
   const evidence = terminal ? (Object.hasOwn(terminal, 'error') ? 'precondition' : 'terminal')
-    : actions.some((action) => ['http', 'sign', 'signPayload', 'wsSend'].includes(action.op)
+    : actions.some((action) => ['http', 'sign', 'wsSend'].includes(action.op)
       || (action.op === 'managedHttp' && ['prepare', 'bind'].includes(action.phase))) ? 'request' : 'deferred';
   return { evidence, actions };
 }
@@ -226,7 +229,6 @@ export function constructionProfiles(venue) {
     secret: `0x01${randomBytes(31).toString('hex')}`,
     applicationId: `0x${randomBytes(20).toString('hex')}`,
   });
-  if (venue === 'breakoutprop') Object.assign(base, { key: 'user', secret: 'password' });
   if (venue === 'hyrotrader') base.endpoints = {
     rest: 'https://hyro.test', publicWs: 'wss://hyro.test/public', privateWs: 'wss://hyro.test/private',
   };
