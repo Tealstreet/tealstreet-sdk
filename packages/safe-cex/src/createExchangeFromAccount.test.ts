@@ -74,6 +74,19 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
         enforceWsTunnel: false,
         privateProxyRegions: { SG: ['1.2.3.4'] },
       },
+      binanceinverse: {
+        exchangeName: 'binanceinverse',
+        requiresCors: true,
+        requiresPassphrase: false,
+        requiresApplicationId: false,
+        requiresApiKeyIndex: false,
+        supportsVault: false,
+        requiresOmniKeySeed: false,
+        requiresParadexAddress: false,
+        supportsSubaccount: false,
+        enforceWsTunnel: false,
+        privateProxyRegions: { JA: ['5.6.7.8'] },
+      },
       grvt: {
         exchangeName: 'grvt',
         requiresCors: false,
@@ -304,10 +317,11 @@ describe('accountToExchangeOptions', () => {
         ...(proxyRegion ? { proxyRegion } : {}),
       });
 
-      it('threads the AWS public CORS host into secondaryProxyUrl, regardless of region', () => {
-        const AWS = 'https://exchange-proxy.jp.tealstreet.io/api/exchange_proxy';
-        expect(accountToExchangeOptions(withSecondary('okx', 'SG')).secondaryProxyUrl).toBe(AWS);
-        expect(accountToExchangeOptions(withSecondary('bybit')).secondaryProxyUrl).toBe(AWS);
+      it('threads the public CORS host into secondaryProxyUrl, regardless of region', () => {
+        // Was AWS's exchange-proxy.jp; moved to the edge Worker's /api/public_proxy (AWS_EXIT.md 3d).
+        const PUBLIC = 'https://fsjnpy143pbz-tyo.tealstreet.io/api/public_proxy';
+        expect(accountToExchangeOptions(withSecondary('okx', 'SG')).secondaryProxyUrl).toBe(PUBLIC);
+        expect(accountToExchangeOptions(withSecondary('bybit')).secondaryProxyUrl).toBe(PUBLIC);
       });
 
       it('sets no secondaryProxyUrl without a secondary key', () => {
@@ -369,6 +383,21 @@ describe('accountToExchangeOptions', () => {
       const options = accountToExchangeOptions(account);
 
       expect(options.tealstreetTunnel).toBe(true);
+    });
+
+    it('should force Binance inverse through proxy and tunnel because COIN-M writes fail browser CORS', () => {
+      const account: ExchangeAccountConfig = {
+        exchange: 'binanceinverse',
+        name: 'test-binance-inverse',
+        apiKey: 'test-key',
+        apiSecret: 'test-secret',
+      };
+
+      const options = accountToExchangeOptions(account);
+
+      expect(options.tealstreetProxy).toBe(true);
+      expect(options.tealstreetTunnel).toBe(true);
+      expect(options.proxyRegion).toBe('JA');
     });
 
     it('should set tealstreetProxy when exchange enforces WS tunnel', () => {

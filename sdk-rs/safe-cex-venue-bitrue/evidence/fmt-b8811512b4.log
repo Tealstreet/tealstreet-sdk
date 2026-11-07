@@ -1,3 +1,0 @@
-SHA b8811512b462d1a4b27d115a841291e935576d3a
-COMMAND ["/opt/homebrew/opt/rustup/bin/cargo", "fmt", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-store", "-p", "safe-cex-venue-bitrue", "--check"]
-EXIT 0

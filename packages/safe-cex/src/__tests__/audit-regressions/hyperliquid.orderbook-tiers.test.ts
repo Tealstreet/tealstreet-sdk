@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { HyperliquidPublicWebSocket } from '../../exchanges/hyperliquid/hyperliquid.ws-public';
+import { HyperliquidPublicWebSocket } from '../reference/hyperliquid/hyperliquid.ws-public';
 
 const createWebsocket = () => {
   const market = {

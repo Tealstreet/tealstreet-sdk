@@ -7,6 +7,7 @@ draft: false
 hide_table_of_contents: false
 ---
 
+import ProxyFleetIps from '@site/src/components/ProxyFleetIps';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import ThemedImage from '@theme/ThemedImage';
 import ApiMore from '/img/connect/binance/apimore.png';
@@ -114,13 +115,17 @@ You can get to this page directly by navigating to [Binance API Management](http
     - You need to hit the confirm button after you paste in the IPs in order for them to save properly.
 5. Click ‘Save’
 
+:::note
+Binance Futures modes in Tealstreet use the same Binance API-key permission flow. When available, choose the desired mode, such as USD-M Perps, COIN-M Inverse, Portfolio, or Spot, from the Binance setup mode selector in Tealstreet.
+:::
+
 :::caution
 Users **MUST** use the **Whitelisted IP Addresses** when creating this API. Please Ensure all IP addresses are correct as shown in the **Tealstreet terminal** window (images below/above are for reference only)
 :::
 
 <div class="text--center">
 
-![API-Whitelist](/img/connect/binance/v3/apiwhitelist.png)
+<ProxyFleetIps exchange="binance" />
 
 </div>
 

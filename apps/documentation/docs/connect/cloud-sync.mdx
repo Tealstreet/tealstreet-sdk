@@ -1,0 +1,150 @@
+---
+title: Cloud Sync for API Keys
+description: Keep your Tealstreet exchange API keys available on every device with encrypted cloud sync.
+sidebar_position: 2
+hide_title: false
+draft: false
+hide_table_of_contents: false
+---
+
+Cloud sync keeps your Tealstreet exchange API keys available on each device where
+you sign in. It is useful when you use both web and desktop, add a new computer,
+or want an easier path while Tealstreet moves infrastructure from AWS to Vultr.
+
+Your keys are encrypted on your device before they are stored in Tealstreet's
+cloud sync system. Tealstreet does not receive your cloud sync password.
+
+:::warning Keep your cloud sync password safe
+The cloud sync password cannot be recovered by Tealstreet. If you forget it, you
+can only reset cloud sync from a device that still has the API keys locally.
+:::
+
+## What syncs
+
+Cloud sync covers the exchange API key accounts you manage in **Settings ->
+Accounts**.
+
+It syncs added API keys, edited API keys, removed API keys, and account metadata
+needed for the connected account list. It is an all-or-nothing setting for your
+Tealstreet user account, so every synced API key follows you to every device
+where you unlock cloud sync.
+
+Cloud sync does not replace exchange-side security settings. If an exchange API
+key uses Tealstreet IP whitelisting, TS Network, or another allowed-IP setting,
+you still need to keep that whitelist current on the exchange.
+
+## Before you turn it on
+
+1. Make sure you are signed in to your Tealstreet V3 account.
+2. Confirm the API keys on this device are the keys you want to keep using.
+3. Choose a strong password that you can store safely in your password manager.
+4. If you are preparing for the AWS-to-Vultr migration, confirm whether your
+   exchange API keys also need whitelist updates. Cloud sync moves the saved key
+   entries between your devices; it does not edit exchange whitelists for you.
+
+## Turn on cloud sync
+
+1. Open Tealstreet.
+2. Go to **Settings -> Accounts**.
+3. Find **Cloud sync for API keys**.
+4. Turn on the **Cloud sync** switch.
+5. Read the confirmation and continue.
+6. Enter and confirm your cloud sync password.
+7. Confirm that you understand the password cannot be recovered.
+8. Keep the local pre-sync backup Tealstreet creates, and optionally download
+   `accounts.json` if you want an additional plain-text backup.
+9. Finish the setup and wait until the status shows **Up to date**.
+
+After cloud sync is on, changes usually upload automatically within a few
+seconds. Other unlocked devices pull updates when they load, return to the
+foreground, sync on the background interval, or when you click **Sync now**.
+
+:::caution Protect downloaded backups
+The optional `accounts.json` export contains API secrets in plain text. Store it
+securely or delete it after you no longer need it.
+:::
+
+## Use cloud sync on another device
+
+1. Sign in to the same Tealstreet account on the second device.
+2. Open **Settings -> Accounts**.
+3. Turn on **Cloud sync** if it is not already on.
+4. When prompted, enter the cloud sync password you created on the first device.
+5. Wait for the account list to load and confirm the expected API keys are
+   present.
+
+Each device unlocks once. If a browser or app storage reset removes the cached
+sync key, Tealstreet will ask for the cloud sync password again on that device.
+
+## Move an old cloud backup into sync
+
+Some users have an older manual cloud backup created with **Save to Cloud** /
+**Retrieve from Cloud**. That backup is separate from cloud sync and is left
+untouched.
+
+If Tealstreet shows **Move my cloud backup to sync**:
+
+1. Start from Tealstreet on your computer.
+2. Choose **Move my cloud backup to sync**.
+3. Enter the old cloud backup password.
+4. Review the API keys Tealstreet can add.
+5. Select the keys you want to move into sync.
+6. Create your new cloud sync password.
+7. Finish the migration and confirm cloud sync reaches **Up to date**.
+
+You can still retrieve the old cloud backup later with its original password.
+
+## Reset or turn off cloud sync
+
+Turning cloud sync off disables syncing across your Tealstreet account. The API
+keys already present on each device stay on that device, and the cloud copy is
+kept so you can turn sync back on later.
+
+Use **Reset cloud sync** only when you need a new cloud sync password or need to
+replace the cloud copy. Resetting erases the synced cloud copy and publishes the
+API keys currently on this device with a new password. Other devices will need
+that new password before they can sync again.
+
+## Migration checklist
+
+Use this checklist before changing devices, reinstalling Tealstreet, or working
+through the AWS-to-Vultr migration:
+
+1. Turn on cloud sync from a device that already has your API keys.
+2. Wait for **Up to date**.
+3. Unlock cloud sync on any other device you use for trading.
+4. Confirm the same exchange accounts appear on each device.
+5. Update exchange-side IP whitelists separately if your API keys use
+   Tealstreet Network, TS Network, or allowed-IP restrictions.
+6. Keep direct access to the exchange available while making whitelist changes.
+
+## Troubleshooting
+
+### Cloud sync says Locked
+
+Enter your cloud sync password on this device. Nothing syncs while the device is
+locked.
+
+### I forgot the cloud sync password
+
+Tealstreet cannot recover it. If one of your devices still has the API keys
+locally, open **Settings -> Accounts** on that device and use **Reset cloud
+sync** to create a new password.
+
+### An API key did not connect after syncing
+
+Cloud sync copies the saved Tealstreet API key entry. It does not change the
+exchange account itself. Check that the exchange API key still has the correct
+permissions and IP whitelist values, then reconnect or edit the key in
+Tealstreet.
+
+### I deleted a key on one device and it came back
+
+If another device had not synced the delete yet, it may restore the account once.
+Delete it again after cloud sync is on and unlocked on your devices, then click
+**Sync now**.
+
+### My layout profiles are different
+
+Layout profiles are managed separately from API key cloud sync. To manage
+layouts, open **Settings -> Layout**.

@@ -41,11 +41,17 @@ That fetches `tealstreet-windows-x64.exe` and puts a `tealstreet` command on
 your PATH. For a direct download, grab the `.exe` from the releases page and
 put it somewhere on your PATH yourself.
 
-Two things to know:
+Three things to know:
 
 - **Run it from Windows Terminal or PowerShell 7.** The REPL draws a pinned
   top bar and bottom footer using ANSI escape sequences. Legacy `cmd.exe`
   does not render those correctly.
+- **The legacy console gets ASCII markers.** Outside Windows Terminal, or on a
+  non-UTF-8 code page, the CLI prints `[x] [!] [ok] [i]` instead of
+  `✗ ⚠ ✓ ℹ`, and plain `- | +` for table borders, because the legacy console
+  font shows those glyphs as `?`. Set `TEALSTREET_ASCII=1` to force ASCII
+  in any terminal, or `TEALSTREET_ASCII=0` to keep Unicode. `--json` and
+  piped output are never changed.
 - **`tealstreet update` works either way.** An npm install upgrades through
   `npm update -g`. A directly-downloaded `.exe` is replaced by renaming the
   running binary aside and moving the new one into place — Windows will not
@@ -98,18 +104,19 @@ tealstreet account exchanges
 
 ### HyroTrader trial accounts
 
-HyroTrader trial accounts use Tealstreet's `hyrotrader` exchange adapter,
-but the standalone CLI needs the Hyro simulator REST origin in your shell
+HyroTrader challenge accounts use Tealstreet's `hyrotrader` exchange adapter,
+but the standalone CLI needs the HyroTrader production REST origin in your shell
 environment before it can connect. Without it, connection fails with:
 
 ```text
-HyroTrader simulator REST URL is not configured
+HyroTrader production REST URL is not configured
 ```
 
-Set the simulator origin, then add the account:
+Set the production origin, then add the challenge account with the API key and
+secret HyroTrader provides for that challenge:
 
 ```bash
-export NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL="https://<hyro-simulator-origin>"
+export NEXT_PUBLIC_HYROTRADER_PROD_REST_URL="https://<hyro-production-origin>"
 
 tealstreet account add -n hyro-trial -e hyrotrader -k <KEY> -s <SECRET> --default
 tealstreet interactive --account hyro-trial

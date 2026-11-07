@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:03:11.878Z",
+  "endpoint": "/v5/account/wallet-balance?accountType=UNIFIED",
+  "http_status": 401,
+  "body": "",
+  "expect": {
+    "kind": "authInvalid",
+    "outcome": null,
+    "path": "read"
+  }
+}

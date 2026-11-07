@@ -7,8 +7,9 @@ import { BaseCommand, CommandCategory } from '@tealstreet/cli-core';
 // export from `@tealstreet/cli-core` still points at the legacy result type and
 // is incompatible with `BaseCommand.execute`. Tracked as cross-package drift.
 import type { CommandContext, NewCommandResult as CommandResult } from '@tealstreet/cli-core';
+import { BRAND } from '../../brand';
 
-const DEFAULT_PATH = join(homedir(), '.tealstreet', 'cli-export.json');
+const DEFAULT_PATH = join(homedir(), BRAND.configDirName, 'cli-export.json');
 
 interface ImportPayload {
   version?: number;

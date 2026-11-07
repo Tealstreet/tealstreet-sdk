@@ -1,4 +1,4 @@
-import { ApexOmniPrivateWebsocket } from '../../exchanges/apexomni/apexomni.ws-private';
+import { ApexOmniPrivateWebsocket } from '../reference/apexomni/apexomni.ws-private';
 import { virtualClock } from '../../utils/virtualClock';
 
 /**

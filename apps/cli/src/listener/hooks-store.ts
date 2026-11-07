@@ -2,8 +2,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkS
 import { homedir } from 'os';
 import { join } from 'path';
 import crypto from 'crypto';
+import { BRAND } from '../brand';
 
-const DIR = join(homedir(), '.tealstreet');
+const DIR = join(homedir(), BRAND.configDirName);
 const HOOKS_FILE = join(DIR, 'hooks.json');
 
 const ID_BYTES = 16; // 32 hex chars

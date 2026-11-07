@@ -51,7 +51,8 @@ jobs:
         with:
           node-version: 22
           check-latest: true
-          cache: yarn
+      - uses: ./.github/actions/prepare-yarn
+        id: yarn
 
       - name: Use npm with trusted publishing support
         run: npm install -g npm@^11.5.1 && npm --version
@@ -100,23 +101,38 @@ jobs:
             fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
           '
 
-      - run: yarn install --frozen-lockfile --network-timeout 600000
+      - uses: ./.github/actions/install-yarn
+        with:
+          cache-dir: ${{ steps.yarn.outputs.cache-dir }}
+          cache-key: ${{ steps.yarn.outputs.cache-key }}
+          cache-hit: ${{ steps.yarn.outputs.cache-hit }}
 
       - name: Typecheck
-        run: yarn --cwd "$PACKAGE_DIR" typecheck
+        run: corepack yarn --cwd "$PACKAGE_DIR" typecheck
 
       - name: Test
-        run: yarn --cwd "$PACKAGE_DIR" test-ci
+        run: corepack yarn --cwd "$PACKAGE_DIR" test-ci
+
+      - name: Install pinned binaryen (wasm-opt)
+        run: bash sdk-rs/harness/install-binaryen.sh
+
+      - name: Build the Rust engine included in the package
+        env:
+          SAFE_CEX_WASM_OPT: required
+        run: |
+          (cd sdk-rs && rustup show)
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+          corepack yarn -s rust:build-wasm
 
       # Also writes dist/THIRD_PARTY_LICENSES.md, and fails on a bundled
       # dependency whose licence is not allowed.
       - name: Build
-        run: yarn --cwd "$PACKAGE_DIR" build
+        run: corepack yarn --cwd "$PACKAGE_DIR" build
 
       # Boots dist/index.js over stdio, then loads the Poseidon WASM that
       # Lighter signs through from the same dist/ directory.
       - name: Smoke-test the bundle
-        run: yarn --cwd "$PACKAGE_DIR" smoke
+        run: corepack yarn --cwd "$PACKAGE_DIR" smoke
 
       # The bundle is self-contained: a runtime dependency on an unpublished
       # @tealstreet/* workspace is what broke `npm install -g @tealstreet/cli`.
@@ -137,6 +153,8 @@ jobs:
             'dist/THIRD_PARTY_LICENSES.md',
             'dist/index.js',
             'dist/wasm/poseidon_crypto.wasm',
+            'dist/wasm/rust/safe_cex_wasm.cjs',
+            'dist/wasm/rust/safe_cex_wasm_bg.wasm',
             'package.json',
           ];
           const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));

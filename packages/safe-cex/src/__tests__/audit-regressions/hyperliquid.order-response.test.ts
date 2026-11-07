@@ -8,7 +8,7 @@ import {
   HyperliquidUnreadableOrderResponseError,
   isOnlyHyperliquidTerminalCancelError,
   parseHyperliquidOrderResponse,
-} from '../../exchanges/hyperliquid/hyperliquid.order-response';
+} from '../reference/hyperliquid/hyperliquid.order-response';
 import { describeHttpFailure } from '../../utils/httpFailure';
 
 describe('Hyperliquid order response contract', () => {

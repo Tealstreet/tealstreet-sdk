@@ -18,7 +18,6 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | asterdex, bitunix, phemex, weex       | `{B}{Q}`           | `BTCUSDT`        | USDT          | Concatenated, WEEX Contract V3 `symbol`                  |
 | bingx                                 | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT` but symbol is concat                |
 | apexomni                              | `{B}{Q}`           | `BTCUSDT`        | USDT          | API id is `BTC-USDT`                                     |
-| breakoutprop                          | `{B}USD`           | `BTCUSD`         | USD           | Quote hardcoded to 'USD'                                 |
 | blofin                                | `{B}{Q}`           | `BTCUSDC`        | USDC          | API id is `BTC-USDC`                                     |
 | okx                                   | `{B}{Q}`           | `ACTUSDT`        | USDT          | API id `ACT-USDT-SWAP`, normalized                       |
 | woo                                   | `{B}{Q}`           | `BCHUSDT`        | USDT          |                                                          |
@@ -35,7 +34,7 @@ Each exchange normalizes market symbols differently. The `symbol` field on marke
 | backpack                              | `{B}_{Q}_PERP`     | `BTC_USDC_PERP`  | USDC          | Underscore-sep, spot: `{B}_{Q}`                          |
 | cryptocom                             | `{B}{Q}-PERP`      | `BTCUSD-PERP`    | USD           | Concat base+quote then `-PERP`                           |
 | lighter                               | `{B}`              | `APT`            | USDT          | Just base, some have `{B}/USDC`                          |
-| orderly variants                      | `{B}{Q}`           | `BTCUSDC`        | USDC          | woofi, kodiakfi, mode, salsadex, what, tealstreet-dex    |
+| orderly variants                      | `{B}{Q}`           | `BTCUSDC`        | USDC          | woofi, kodiakfi, mode, what, |
 | polymarket                            | `{slug}-{outcome}` | `slug-Yes`       | USDC          | Non-standard, not convertible                            |
 
 ### Key Gotchas
@@ -196,7 +195,8 @@ it inflates the e2e load-gate's diagnostic counters.
 **The Tealstreet endpoints are not in this file.** `virtualClock` takes a host
 clock through `setServerTimeSource`; `transport/registerTealstreetTransport`
 registers `transport/tealstreet/tealstreetTimeSource` (same-origin `/api/time`,
-or `NEXT_PUBLIC_TIME_API_ORIGIN`, with half-RTT correction). Without a
+or a full endpoint URL in `NEXT_PUBLIC_TIME_API_ORIGIN` for the native app, with half-RTT correction, keeping the shortest of three
+round trips: one slow reply reads late by half its delay and could cross the 1 s threshold). Without a
 registered source — a plain OSS consumer — generic sync uses venue time (Bybit
 through the transport's public CORS proxy, which is `api.bybit.com` directly
 under the direct transport and can 403 in geo-blocked regions or fail CORS in a
@@ -215,6 +215,17 @@ the 403 noise for every geo-blocked user. The offset only needs ~1s
 accuracy, so the edge `/api/time` clock is plenty. Generic clock sync starts
 immediately, then runs every 300 seconds; do not shorten it without a new
 drift measurement.
+
+The default Rust transport requests `syncClientServerTime({ afterClockStep: true })`
+after detecting a wall-versus-monotonic discontinuity. This refreshes the cached
+offset promptly, including a one-off request in a browser worker. Ordinary worker
+startup and periodic sync still preserve page-pushed offsets without network I/O.
+Overlapping requests share the existing in-flight synchronization.
+Completed clock-step attempts also share a realm-wide 15 s cooldown measured by
+`performance.now()`, including Node notifications and failed attempts. Neither
+another transport nor a further wall step bypasses it. If both registered and
+venue sources fail in this mode, the prior offset and subscribers stay unchanged;
+ordinary synchronization retains its local-UTC fallback and five-minute cadence.
 
 ## Files
 
@@ -297,3 +308,21 @@ drift measurement.
   exponent (`2.5e-7` has eight decimal places); do not reduce it to the
   exponent's absolute value.
 - `__testdata__/market-samples.json` — Real symbol samples from supported exchanges
+
+## Live polling slowdown
+
+`tickIntervalOverride.ts` publishes multiplier changes through
+`subscribeTickIntervalMultipliers`. Engine pollers subscribe once and remove the
+listener on disposal; Rust accounts send the resolved interval as a scale on
+each venue's own cadence (plus that interval as a ceiling) rather than
+reconstructing wildcard/exact precedence. A paused interval stays paused across configuration
+updates. Other TS pollers continue reading the multiplier at their next tick.
+
+## Native position sizing
+
+`nativePositionSize.ts` is the shared sizing leaf for SDK bulk closes and the
+existing script-api-core re-export. It converts base contracts for linear
+markets and quote notional for inverse markets, retaining the existing maximum
+of derived size and `extra.contractsNative`. Missing/zero contract size defaults
+to one. Rounding and input validation belong to the caller; do not add a reverse
+dependency on script-api-core.

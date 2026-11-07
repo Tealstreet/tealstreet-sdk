@@ -77,6 +77,17 @@ export const replacementClientOrderIdOf = (orderIds: unknown): string | undefine
   return typeof clientOrderId === 'string' && clientOrderId ? clientOrderId : undefined;
 };
 
+/** `updateOrder`'s result across a worker bridge, where array properties may not survive. */
+export type WorkerOrderIds = { orderIds: string[]; clientOrderId?: string };
+
+export const encodeWorkerOrderIds = (orderIds: string[]): WorkerOrderIds => {
+  const clientOrderId = replacementClientOrderIdOf(orderIds);
+  return { orderIds: [...orderIds], ...(clientOrderId ? { clientOrderId } : {}) };
+};
+
+export const decodeWorkerOrderIds = ({ orderIds, clientOrderId }: WorkerOrderIds): ReplacementOrderIds =>
+  clientOrderId ? withReplacementClientOrderId([...orderIds], clientOrderId) : [...orderIds];
+
 /**
  * `definitive` is true only when the venue was asked about closed orders too
  * and said no order carries the ID; an open-orders scan can never say that.

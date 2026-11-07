@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { exchangeMetadata } from '../../exchangeMetadata';
-import { AsterDEXExchange } from '../../exchanges/asterdex/asterdex.exchange';
+import { AsterDEXExchange } from '../reference/asterdex/asterdex.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
 

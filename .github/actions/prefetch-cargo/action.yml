@@ -1,0 +1,9 @@
+name: Prefetch locked crates
+description: Fetch every Cargo.lock dependency with bounded retries so later cargo steps stay offline
+runs:
+  using: composite
+  steps:
+    - name: Fetch locked crates with bounded retries
+      shell: bash
+      working-directory: sdk-rs
+      run: bash "$GITHUB_ACTION_PATH/prefetch.sh"

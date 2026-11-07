@@ -58,7 +58,7 @@ fn numeric_fields(ticker: &Ticker, start: f64, timestamp: f64) -> [(&'static str
         ("ask", ticker.ask, start + 1.0),
         ("last", ticker.last, start + 2.0),
         ("mark", ticker.mark, start + 3.0),
-        ("index", ticker.index, start + 4.0),
+        ("index", ticker.index.unwrap(), start + 4.0),
         ("percentage", ticker.percentage, start + 5.0),
         ("openInterest", ticker.open_interest, start + 6.0),
         ("fundingRate", ticker.funding_rate, start + 7.0),

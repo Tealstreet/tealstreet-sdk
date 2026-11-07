@@ -86,6 +86,16 @@ writes use. `createCoreAdapter.test.ts` pins this by handing back a fresh
 `placeOrder` from every `getExchange` call and asserting the two legs used
 different ones.
 
+### Web amend ownership is a host binding
+
+`HostBindings.submitOrderAmend` is optional because optimistic aliases, wake and
+engine replacement belong to the browser host. The common body still resolves
+the order and applies amend rounding/minimums before calling it. Web always
+supplies the binding; it is shared by scripts and Agent execution and refuses
+stale or unsafe amends after id resolution. Hosts without browser lifetime
+state retain the existing direct SDK send. The binding is a send boundary,
+not another CoreAdapter implementation or a second sizing policy.
+
 ### The policy is `order/prepareOrder.ts`, NOT the adapter closure
 
 `toSafeCexPlaceOrder` and `clampReduceOnly` used to live inside
@@ -317,7 +327,8 @@ the `?? position.contracts` fallback was BASE, carried over verbatim from the
 old web adapter. They differ by `market.contractSize`, so a bare
 `api.orders.closePosition(position)` asked for a thousandfold on OKX's
 `DOGE-USDT-SWAP` and a fraction of the position on a Bybit inverse market. It
-goes through `nativePositionSize` now, and `createCoreAdapter.test.ts` pins
+goes through `nativePositionSize` now (the SDK utility re-exported from
+`src/order/positionSizing.ts`), and `createCoreAdapter.test.ts` pins
 both halves — the fallback converts, an explicit `amount` does not.
 
 `resolveOemsPlan` only routed to this verb when `contractSize === 1 && !isInverse`,

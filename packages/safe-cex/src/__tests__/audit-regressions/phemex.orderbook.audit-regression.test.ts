@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { BinancePublicWebsocket } from '../../exchanges/phemex/phemex.ws-public';
+import { BinancePublicWebsocket } from '../reference/phemex/phemex.ws-public';
 import { LogSeverity, OrderBook } from '../../types';
 
 const applyUpdate = (orderBook: OrderBook, update: Record<string, string[][]>) => {

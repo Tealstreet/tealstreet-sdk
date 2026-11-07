@@ -2,7 +2,7 @@ import type { Axios } from 'axios';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { ParadexExchange } from '../exchanges/paradex/paradex.exchange';
+import { ParadexExchange } from './reference/paradex/paradex.exchange';
 import { DefaultStore } from '../store/store.base';
 
 describe('Paradex error logging', () => {

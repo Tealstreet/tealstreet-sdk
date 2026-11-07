@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
-import { ENDPOINTS } from '../../exchanges/coinbase/coinbase.types';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
+import { ENDPOINTS } from '../reference/coinbase/coinbase.types';
 import { DefaultStore } from '../../store/store.base';
 
 describe('Coinbase account identity audit regression', () => {

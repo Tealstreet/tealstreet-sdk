@@ -361,3 +361,102 @@ describe('ExchangeHealthMonitor', () => {
     });
   });
 });
+
+describe('typed classification', () => {
+  it('uses the error kind instead of matching text', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    expect(monitor.processMessage('something new happened', true, { kind: 'authInvalid' })).toBe('auth_invalid');
+    expect(monitor.processMessage('invalid api key', true, { outcome: 'unknown' })).toBe('auth_invalid');
+    expect(monitor.processMessage('unmatched', true, { kind: 'rateLimited' })).toBe('rate_limit');
+    // A catch-all kind never hides a text-detected auth failure.
+    expect(monitor.processMessage('invalid api key', true, { kind: 'rejected' })).toBe('auth_invalid');
+    expect(monitor.processMessage('something unmatched', true, { kind: 'rejected' })).toBe('order_rejected');
+  });
+
+  it('reports an insufficient balance by its kind, even when the text matches another pattern', () => {
+    const monitor = new ExchangeHealthMonitor('binance');
+    expect(monitor.processMessage('Margin is insufficient.', true, { kind: 'insufficientBalance' })).toBe(
+      'insufficient_balance',
+    );
+    expect(monitor.processMessage('rejected with 503', true, { kind: 'insufficientBalance' })).toBe(
+      'insufficient_balance',
+    );
+    expect(monitor.getState().errorCounts.insufficient_balance).toBe(2);
+  });
+});
+
+
+describe('coded native health', () => {
+  it('uses the code despite changed or misleading auth wording', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    const event = (code: string, message: string) => ({ code, message, level: 'warn' as const, fields: {} });
+    expect(monitor.processEvent(event('auth.rejected', 'new credential refusal'))).toBe('auth_invalid');
+    expect(monitor.processEvent(event('request.failed', 'invalid api key'))).toBe('unknown');
+    expect(monitor.processEvent(event('rate_limited', 'unauthorized'))).toBe('rate_limit');
+    expect(monitor.getErrorCount('auth_invalid')).toBe(1);
+    expect(monitor.getLastError()?.code).toBe('rate_limited');
+    expect(monitor.getState().status).toBe('error');
+    monitor.dispose();
+  });
+
+  it('reads the kind a classified notice carries in its fields', () => {
+    const monitor = new ExchangeHealthMonitor('binance');
+    const fields = { kind: 'insufficientBalance', venueCode: '-2019', venueMessage: 'Margin is insufficient.' };
+    expect(monitor.processEvent({ code: 'order.rejected', message: 'Margin is insufficient.', level: 'warn', fields }))
+      .toBe('insufficient_balance');
+    expect(monitor.processEvent({ code: 'auth.rejected', message: 'x', level: 'error', fields: { kind: 'authPermission' } }))
+      .toBe('auth_permissions');
+    // Behaviour change: Bitunix's request.failed already carries a kind, which now types it.
+    expect(monitor.processEvent({ code: 'request.failed', message: 'x', level: 'warn', fields: { kind: 'rateLimited', venueCode: '10006' } }))
+      .toBe('rate_limit');
+    expect(monitor.processEvent({ code: 'startup.degraded', message: 'x', level: 'warn', fields: { read: 'markets', kind: 'venueUnavailable' } }))
+      .toBe('exchange_down');
+    monitor.reset();
+    // A field-carried auth kind never latches an auth category: request.failed and
+    // order.rejected stay what they were, and the monitor stays healthy of auth.
+    expect(monitor.processEvent({ code: 'request.failed', message: 'x', level: 'error', fields: { kind: 'authInvalid', venueCode: '10003' } }))
+      .toBe('unknown');
+    expect(monitor.processEvent({ code: 'order.rejected', message: 'x', level: 'warn', fields: { kind: 'authPermission' } }))
+      .toBe('order_rejected');
+    expect(monitor.hasAuthError()).toBe(false);
+    // An explicit classification still wins, and an unknown field kind is ignored.
+    expect(monitor.processEvent({ code: 'order.rejected', message: 'x', level: 'warn', fields }, { kind: 'invalidInput' }))
+      .toBe('order_rejected');
+    expect(monitor.processEvent({ code: 'request.failed', message: 'x', level: 'warn', fields: { kind: 'made-up' } }))
+      .toBe('unknown');
+    monitor.dispose();
+  });
+
+  it('keeps typed auth subcategories and ignores routine diagnostic text', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    expect(monitor.processEvent({ code: 'auth.rejected', message: '', level: 'error', fields: {} },
+      { kind: 'authExpired' })).toBe('auth_expired');
+    expect(monitor.processEvent({ code: 'auth.rejected', message: 'invalid api key', level: 'error', fields: {} },
+      { kind: 'authPermission' })).toBe('auth_permissions');
+    monitor.reset();
+    expect(monitor.processEvent({ code: 'startup.progress', message: 'invalid api key', level: 'info', fields: {} })).toBeNull();
+    expect(monitor.processEvent({ code: 'ws.closed', message: 'closed', level: 'debug', fields: {} })).toBe('network');
+    expect(monitor.isHealthy()).toBe(true);
+    monitor.dispose();
+  });
+
+  it('copies authoritative counters without counting reports twice or inferring hidden messages', () => {
+    const monitor = new ExchangeHealthMonitor('bybit');
+    const health = { wsOpened: 3, wsClosed: 2, reconnects: 2, authFailures: 1, httpFailures: 4,
+      rateLimited: 2, snapshotsDiscarded: 5, rowsSkipped: 7, lastPrivateMessage: 123 };
+    monitor.processEvent({ code: 'auth.rejected', message: 'refused', level: 'error', fields: {} });
+    monitor.processHealth(health);
+    monitor.processHealth(health);
+    health.rowsSkipped = 99;
+    const state = monitor.getState();
+    expect(state.engineHealth).toEqual({ ...health, rowsSkipped: 7 });
+    state.engineHealth!.wsOpened = 99;
+    expect(monitor.getState().engineHealth?.wsOpened).toBe(3);
+    expect(monitor.getErrorCount('auth_invalid')).toBe(1);
+    monitor.processHealth(undefined);
+    expect(monitor.getState().engineHealth?.rowsSkipped).toBe(7);
+    monitor.reset();
+    expect(monitor.getState().engineHealth).toBeUndefined();
+    monitor.dispose();
+  });
+});

@@ -1,5 +1,0 @@
-BASE SHA: cce8c97b0a0c965a25c360d8928827888eaf03a1
-VARIANT: clean tracked tree
-COMMAND: ["/opt/homebrew/opt/rustup/bin/cargo", "fmt", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-cryptocom", "--check"]
-
-MEASURED EXIT: 0

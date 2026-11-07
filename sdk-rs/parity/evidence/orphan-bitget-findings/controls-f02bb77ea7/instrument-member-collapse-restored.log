@@ -1,9 +1,0 @@
-   Compiling safe-cex-store v0.1.0 (<worktree>/sdk-rs/safe-cex-store)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.56s
-     Running tests/instrument_native.rs (sdk-rs/target/debug/deps/instrument_native-f4b17847c2a6d9f1)
-
-running 1 test
-test inherited_instrument_members_keep_native_identity_tags ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
-

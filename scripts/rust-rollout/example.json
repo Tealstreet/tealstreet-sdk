@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "stage": "internal",
+  "assignment": {
+    "pseudonym": "synthetic-user",
+    "target": "rust",
+    "revision": 1
+  },
+  "artifacts": {
+    "frozen": {
+      "app": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "server": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "worker": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "wasm": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "wireVersion": "synthetic-wire",
+      "engine": "typescript",
+      "supportedAliases": ["okx"]
+    },
+    "rust": {
+      "app": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "server": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "worker": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "wasm": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "wireVersion": "synthetic-wire",
+      "engine": "rust",
+      "supportedAliases": ["okx"]
+    }
+  },
+  "accounts": [
+    {
+      "id": "synthetic-account",
+      "venue": "okx",
+      "shape": "one-way"
+    }
+  ],
+  "sessions": [
+    {
+      "accountId": "synthetic-account",
+      "clientEngine": "rust",
+      "serverEngine": "rust",
+      "revision": 1,
+      "app": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "server": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "wireVersion": "synthetic-wire",
+      "previousWriterRetired": true,
+      "resumeFenced": true,
+      "unknownWrites": 0,
+      "protectionOwnerTransferred": true
+    }
+  ],
+  "storage": {
+    "oldNewOldFixture": "synthetic-only",
+    "backwardCompatible": true,
+    "frozenDbOpens": true,
+    "cacheAuthority": "display-only"
+  },
+  "controls": {
+    "internalIsolation": "synthetic-only",
+    "killSwitch": "synthetic-only",
+    "monitoringThresholds": "synthetic-only",
+    "rollbackRehearsal": "synthetic-only",
+    "samApproval": "synthetic-only"
+  },
+  "evidence": [
+    {
+      "venue": "okx",
+      "shape": "one-way",
+      "sdkRef": "2badd1cb0e3217b844e73d6b81ec023b3abc6d8b",
+      "app": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "server": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "observedDays": 7,
+      "maintenanceEvent": true,
+      "consumer": "synthetic-only",
+      "publicQuiet": "synthetic-only",
+      "publicVolatile": "synthetic-only",
+      "privateShadow": "synthetic-only",
+      "smoke": "synthetic-only",
+      "sessionParity": "synthetic-only",
+      "rollback": "synthetic-only",
+      "productScope": "synthetic-only"
+    }
+  ]
+}

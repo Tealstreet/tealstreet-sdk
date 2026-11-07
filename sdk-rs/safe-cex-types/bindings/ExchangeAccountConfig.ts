@@ -112,6 +112,10 @@ export type ExchangeAccountConfig = {
     /**
      * @ts-mutable
      */
+    hyrotraderDemo?: boolean;
+    /**
+     * @ts-mutable
+     */
     useExtensionDirect?: boolean;
     /**
      * @ts-mutable

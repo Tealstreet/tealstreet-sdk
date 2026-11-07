@@ -8,7 +8,7 @@ import {
   CoinbaseStarbaseJsonRpcClient,
   CoinbaseStarbaseProtocolError,
   CoinbaseStarbaseRpcError,
-} from '../../exchanges/coinbase/coinbase.starbase';
+} from '../reference/coinbase/coinbase.starbase';
 import {
   assessCoinbaseStarbaseWriteResultParity,
   buildCoinbaseStarbaseBuy,
@@ -23,7 +23,7 @@ import {
   decodeCoinbaseStarbaseCancelResult,
   decodeCoinbaseStarbaseWriteResult,
   mapCoinbaseStarbaseTimeInForce,
-} from '../../exchanges/coinbase/coinbase.starbase-orders';
+} from '../reference/coinbase/coinbase.starbase-orders';
 import {
   STARBASE_FILLED_WRITE_RESULT_FIXTURE,
   STARBASE_OTOCO_CHILD_FIXTURE,
@@ -236,7 +236,7 @@ describe('Coinbase Starbase inert order-write contracts', () => {
       method: 'private/cancel',
       params: { order_id: 'USDC-ORDER-1' },
     });
-    const source = readFileSync(resolve(__dirname, '../../exchanges/coinbase/coinbase.starbase-orders.ts'), 'utf8');
+    const source = readFileSync(resolve(__dirname, '../reference/coinbase/coinbase.starbase-orders.ts'), 'utf8');
     expect(source).not.toContain('private/edit_by_label');
     expect(source).not.toContain('private/cancel_by_label');
   });
@@ -338,15 +338,15 @@ describe('Coinbase Starbase inert order-write contracts', () => {
 
   it('remains statically inert outside the Starbase contract files', () => {
     for (const file of [
-      'coinbase.api.ts',
-      'coinbase.exchange.ts',
-      'coinbase.ws-private.ts',
-      'coinbase.ws-public.ts',
-      '../../createExchangeFromAccount.ts',
-      '../../exchangeMetadata.ts',
-      '../../transport/tealstreet/routing/routingTable.ts',
+      '__tests__/reference/coinbase/coinbase.api.ts',
+      '__tests__/reference/coinbase/coinbase.exchange.ts',
+      '__tests__/reference/coinbase/coinbase.ws-private.ts',
+      '__tests__/reference/coinbase/coinbase.ws-public.ts',
+      'createExchangeFromAccount.ts',
+      'exchangeMetadata.ts',
+      'transport/tealstreet/routing/routingTable.ts',
     ]) {
-      const source = readFileSync(resolve(__dirname, '../../exchanges/coinbase', file), 'utf8');
+      const source = readFileSync(resolve(__dirname, '../..', file), 'utf8');
       expect(source).not.toContain('coinbase.starbase-orders');
     }
   });

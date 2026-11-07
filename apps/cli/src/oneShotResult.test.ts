@@ -64,6 +64,7 @@ describe('findKeyRejection', () => {
     expect(findKeyRejection(['OKX: Invalid OK-ACCESS-KEY'])).toBeDefined();
     expect(findKeyRejection(["OKX: API key doesn't exist"])).toBeDefined();
     expect(findKeyRejection(['Binance: Signature for this request is not valid.'])).toBeDefined();
+    expect(findKeyRejection(['bybit credentials were rejected'])).toBeDefined();
   });
 
   it('ignores ordinary exchange chatter', () => {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '../transport/registerTealstreetTransport';
 
-import { createLighterSDKClient, stripUnsupportedLighterRestHeaders } from '../exchanges/lighter/lighter.api';
+import { createLighterSDKClient, stripUnsupportedLighterRestHeaders } from './reference/lighter/lighter.api';
 import { getPublicCorsProxy } from '../transport/tealstreet/transportResolution';
 
 const axiosMocks = vi.hoisted(() => {

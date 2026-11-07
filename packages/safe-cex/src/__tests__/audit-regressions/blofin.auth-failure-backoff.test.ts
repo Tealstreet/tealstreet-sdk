@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createAPI } from '../../exchanges/blofin/blofin.api';
-import { BlofinExchange } from '../../exchanges/blofin/blofin.exchange';
+import { createAPI } from '../reference/blofin/blofin.api';
+import { BlofinExchange } from '../reference/blofin/blofin.exchange';
 import { DefaultStore } from '../../store/store.base';
 
 const tickInterval = (exchange: BlofinExchange) => (exchange as any).getTickInterval() as number;

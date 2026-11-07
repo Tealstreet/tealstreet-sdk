@@ -16,6 +16,43 @@ This directory contains the Bitget exchange integration for Tealstreet, supporti
 - **CCXT REST Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/bitget.ts
 - **CCXT WebSocket Reference**: https://github.com/ccxt/ccxt/blob/master/ts/src/pro/bitget.ts
 
+## Rust engine parity
+
+The engine (`sdk-rs/venues/bitget`) supports `bitget`, `bitgetusdc` and
+`bitgetinverse`. Inverse order amount/filled and placement sizes preserve the TS
+native units; only remaining and position display sizes use the TS price-based
+8-decimal conversion. Collateral uses each market's base coin and preserves the
+per-coin balance map through worker frames.
+
+An empty inverse catalogue keeps its terminal `venueUnavailable` startup failure
+and emits the same cause as an error-level `request.failed` event for UI consumers.
+It does not retry discovery or change the selected API product.
+
+UTA bills use v3 `financial-records`, retaining raw signed amount and fee metadata
+without assuming trade rows are gross PnL. Classic trailing modifies through
+`modify-plan-order`; UTA trailing uses `type=trailing_stop` and native distance
+parameters. Size-only edits preserve original callback parameters and activation
+basis. Unsupported external opening, ambiguous exposure, limit-execution or
+index-triggered trailing configurations remain visible and cancelable; edits
+fail before canceling them.
+
+Classic TP/SL cancellation uses `/api/v2/mix/order/cancel-plan-order` with
+`orderIdList: [{ orderId }]`, just like trailing stops. Whole-position TP/SL
+retain `pos_profit`/`pos_loss`; sized orders retain `profit_plan`/`loss_plan`.
+A top-level `orderId` does not address an individual Classic plan cancellation.
+A matching native ID or a client-only acknowledgement matching the known order's
+client ID proves cancellation; conflicting native IDs do not fall back to client
+IDs. Empty or unrelated success lists leave it visible and fail the command.
+Retained placement routes keep the same bounded ID list and client identity
+before private updates arrive. Documented `moving_plan` rows remain visible as
+trailing orders and retain that type for cancellation; `track_plan` and `track`
+retain their existing mapping. UTA
+continues using `/api/v3/trade/cancel-strategy-order` with a single `orderId`.
+
+Documented native regressions and private tapes cover these engine paths; the TS
+implementation below remains the replay reference for its supported overlap.
+See `docs/plans/RUST_BITGET_PARITY.md` for verification and explicit TS fixes.
+
 ## UTA Support Status
 
 Bitget Unified Trading Account (UTA) keys cannot call Classic v2 account/trade
@@ -46,11 +83,9 @@ endpoints. The adapter now routes UTA for **livenet `bitget` USDT-futures** and
   documented `tpslMode: "full"` shape.
 - Private WS uses `wss://ws.bitget.com/v3/ws/private` and subscribes with
   `{ instType: "UTA", topic: "account" | "position" | "order" }`.
-  The existing Tealstreet Bitget private WS fallback route only targets Classic
-  v2 (`/bitget/v2/private`). Before routing UTA private WS through the proxy
-  fleet, add infra support for a v3 upstream path (for example
-  `/bitget/v3/private` -> `wss://ws.bitget.com/v3/ws/private`) and then wire
-  the client routing table/fallback logic to that route.
+  Its proxied route is the v3 equivalent of Classic's: the relay upstream
+  `ws.bitget.com/v3/ws/private` (routing `privateUta`, resolved as
+  `wsPrivateUta`). See "Private WS egress".
 
 Account-type detection is eager during validation/startup and lazy on private
 methods that choose between Classic v2 and UTA v3. The lazy path shares one
@@ -159,7 +194,8 @@ The `start()` method (`bitget.exchange.ts:144-191`) initializes in this **strict
 7. **`tick()`** -- first polling cycle: fetches positions (every tick), balance (every 2nd tick)
 8. **`fetchOrders()`** -- Classic fetches all three order types sequentially;
    UTA fetches v3 unfilled normal orders only:
-   - `fetchNormalOrders()` (limit/market orders, paginated)
+   - `fetchNormalOrders()` (limit/market orders, paginated separately for
+     `status=live` and `status=partially_filled`)
    - `fetchAlgoOrders()` (TP/SL, paginated with `planType: 'profit_loss'`)
    - `fetchTrailingStopOrders()` (trailing stops, paginated with `planType: 'track_plan'`)
 9. Store updated with `orders`, sets `loaded.orders = true`
@@ -177,8 +213,8 @@ web topbar can show a degraded private stream even though REST writes still
 succeed and the socket may appear connected. Any authenticated private payload
 clears the degraded reason. This mirrors Coinbase's post-write user-stream
 watchdog and is intentionally lighter than Lighter's full route-recovery system.
-For Classic private WS, the watchdog also promotes the connection to the
-Tealstreet fallback route and reconnects. Literal `pong` heartbeat frames must
+The watchdog only reconnects the current route; route changes follow evidence
+about the route (see "Private WS egress"). Literal `pong` heartbeat frames must
 not count as private-stream payloads for this decision: a browser can keep the
 direct socket alive with pongs while receiving zero authenticated order,
 position, or account data. While degraded, Bitget runs its own periodic REST
@@ -186,6 +222,22 @@ private snapshot (`fetchPositions`, full `fetchOrders`, fast `fetchBalance`)
 until a real private frame arrives. Do not rely on private WS reconnect-open
 handlers for this: `ENABLE_RECONNECTING_WEBSOCKET` is false in this repo, and
 the ordinary tick loop does not poll standalone Classic algo TP/SL orders.
+
+**Only the instance that started its private stream arms this watchdog**
+(`privateStreamStarted`, set in `start()`). The web's main-thread mirror places
+every UI order but is never started (see `apps/web/src/controllers/CLAUDE.md` →
+dual-instance model), so it never sees a private frame; before the guard, every
+UI order fired the toast 8s later, started this REST loop writing the UI's
+store, and `recoverMissingPrivateStream` opened a second private socket from
+the mirror.
+
+**Bitget answers a failed login with `event: "error"`, not `event: "login"`**
+(30005 login failed, 30011 key, 30012 passphrase, 30013 timestamp, 30015 sign;
+IP and region refusals arrive the same way). `onMessage` reports it once per
+failure streak and reconnects when it arrives before a successful login; after
+login it is a refused subscription and is reported without reconnecting. Left
+unhandled, a rejected socket kept answering pings with zero subscriptions and
+passed every liveness check while delivering nothing.
 
 ## REST API Endpoints
 
@@ -222,7 +274,7 @@ below. UTA routing is gated by `usesUtaRouting` (`isUta && supportsUtaRouting &&
 | `PLACE_ORDER`               | `/api/v2/mix/order/place-order`         | Place single order (not used; batch is preferred)  |
 | `BATCH_ORDERS`              | `/api/v2/mix/order/batch-place-order`   | Place batch orders (up to 50 per symbol)           |
 | `UPDATE_ORDER`              | `/api/v2/mix/order/modify-order`        | Modify a normal order                              |
-| `ORDERS`                    | `/api/v2/mix/order/orders-pending`      | Fetch pending normal orders (paginated, limit 200) |
+| `ORDERS`                    | `/api/v2/mix/order/orders-pending`      | Fetch pending normal orders (paginated, limit 100) |
 | `ORDER_HISTORY`             | `/api/v2/mix/order/orders-history`      | Fetch historical filled orders                     |
 | `CANCEL_ORDERS`             | `/api/v2/mix/order/batch-cancel-orders` | Batch cancel normal orders                         |
 | `CANCEL_ALL_ORDERS`         | `/api/v2/mix/order/cancel-all-orders`   | Cancel all orders                                  |
@@ -287,8 +339,52 @@ The implementation uses **four WebSocket connections** simultaneously:
 
 ### 4. Private WebSocket (`bitget.ws-private.ts`)
 
-- **Classic URL**: `wss://ws.bitget.com/v2/ws/private` (or fallback: `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`)
-- **UTA URL**: `wss://ws.bitget.com/v3/ws/private`
+- **Classic URL**: `wss://ws.bitget.com/v2/ws/private` direct; a proxied account dials the relay `wss://fsjnpy143pbz-tyo.tealstreet.io/tunnel?ts-relay=wss://ws.bitget.com/v2/ws/private` (the exchange server: ws-proxy `wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private`, then the relay)
+- **UTA URL**: `wss://ws.bitget.com/v3/ws/private` direct; proxied: the relay to `ws.bitget.com/v3/ws/private` (the exchange server: ws-proxy `.../bitget/v3/private`, then the relay)
+
+#### Private WS egress (Bitget checks the key's bound IP)
+
+Since 2026-10, Bitget rejects a private login whose source IP the API key is not
+bound to: `{event: "error", code: 40018, msg: "Current IP does not match the bound
+IP"}`. REST was unaffected (it egresses through our proxies), so users saw a dead
+private stream while orders still placed — the browser's and the hosted
+container's IPs are never on a key's whitelist.
+
+Routing (`routingTable.ts`) is OKX's pattern: `private`/`privateUta` are
+`proxyConditional` to ws-proxy (`python/ws-proxy`, egress `54.255.57.166`, which
+legacy's add-account form asks Bitget users to bind via `exchangesRequireWsIp`;
+master's form no longer does, AWS_EXIT.md 3e) with a
+`relayUpstream` and `relayWhenTunnelled`, so the tradetunnel relay — egressing
+from the private proxy fleet, i.e. the account's REST IPs — is offered even to a
+proxied account. Bitget does NOT gate the relay on `WS_RELAY_PRIVATE`.
+
+**Since AWS_EXIT step 3e the browser build has no ws-proxy**: its `host` and
+`fallback` ARE the relay url (`BROWSER_WS_HOSTS`), so a proxied socket offers the
+relay twice and a direct one walks direct → relay. The ws-proxy-first chain above
+runs in no runtime since the hosted exchange server's AWS pin was removed
+(AWS_EXIT step 4); only `bitget.private-ws-egress.test.ts` still exercises it.
+
+`bitget.ws-private.ts` walks the chain with `WsDirectFallback`:
+
+- **40018 (or 40024, restricted location) before login** → `rejectCurrent()` and switch to the next route at once;
+  reported (once) only when every route is refused, and then it stops
+  switching routes (the socket may still reconnect to the last one).
+- **A tunnel socket** (ReconnectingWebSocket — it reconnects internally and never
+  re-runs the route choice) advances after 2 opens that closed before login, or
+  6 connects that failed before opening (an outage does that too, hence the
+  higher bar). Both counters reset on every switch; a login clears the
+  closes-before-login count, an open clears the failed-connects count.
+- **A native direct socket** (non-proxied account: direct → relay → ws-proxy)
+  advances through its own close path (`processClose` → `connectAndSubscribe`
+  → `resolveUrl`), and after 2 silent connects as before.
+
+Infra this depends on: ws-proxy's `bitget/v2/private` + `bitget/v3/private`
+routes; tradetunnel `RELAY_ALLOWED_UPSTREAMS` including `ws.bitget.com/v2/ws/private`
+and `/v3/ws/private` (live `kubectl` env + `terraform/{tokyo,singapore}`); the
+private fleet's `stream_bitget_backend` (already present). The browser build's
+relay dials `fsjnpy143pbz-tyo`; the exchange server's dials `fsjnpy143pbz.jp`
+(Bitget's HOW egress is Tokyo).
+
 - **Authentication**: Required before subscribing (login op)
 - **Channels subscribed**:
   - `account` with `coin: 'default'` - Balance/account updates
@@ -306,15 +402,13 @@ Normal-order fill handling recognizes the documented `partially_filled` status. 
 
 ### Reconnection & Fallback URL Logic
 
-All WebSocket connections implement a **fallback URL mechanism** (`bitget.ws-public.ts:26-29`, `bitget.ws-private.ts:16-19`, `bitget.ws-secondary-public.ts:23-27`):
+The two PUBLIC WebSocket classes implement this **fallback URL mechanism** (`bitget.ws-public.ts`, `bitget.ws-secondary-public.ts`); the private socket uses `WsDirectFallback` instead (see "Private WS egress"):
 
 - Each connection tracks `messageCount` and `lastMessageCount`
 - On each `connectAndSubscribe()` call, if both `lastMessageCount` and `messageCount` are 0 (no messages received since last connection), `connectionAttempts` increments
 - After `MAX_ATTEMPTS` (2) consecutive connections with zero messages, `useFallbackUrl` is set to `true`
 - On switch to fallback, a `grafana-info` event is emitted for monitoring
 - `messageCount` is reset to 0 on every new connection
-- Private WS counts non-heartbeat frames only. Pongs prove socket liveness, not
-  authenticated channel delivery.
 
 ### Ping/Pong Heartbeat
 
@@ -649,10 +743,9 @@ The private WS triggers throttled REST fetches (500ms debounce) after receiving 
   autoDownSizeReduceOrders: true,
   supportsChaser: true,
   supportsTunnel: true,
-  // No supportsWsRoute: bitget's routing entry is `fallbackOnly`, which the
-  // resolver evaluates without consulting `tealstreetWsRoute`, and all three ws
-  // classes hardcode `useFallbackUrl = false` and flip it themselves after
-  // failed connects. Advertising it rendered a checkbox nothing read.
+  // No supportsWsRoute: bitget never reads `tealstreetWsRoute` — public is
+  // `fallbackOnly`, private follows `tealstreetProxy`. Advertising it rendered
+  // a checkbox nothing read.
   tvMaxGetBarFetches: 5,
   alwaysCalculateUnrealizedPnlFromLastPrice: true,
   supportedTPSLTriggerTypes: [MarkPrice],      // Only mark price trigger type
@@ -708,7 +801,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 12. **`alwaysCalculateUnrealizedPnlFromLastPrice: true`**: The frontend calculates unrealized PnL from last price rather than trusting the exchange-provided value.
 
-13. **Pagination**: Normal orders, algo orders, and trailing stop orders all use cursor-based pagination with `idLessThan` and `endId`, limited to 200 per page with a safety cap of 20 iterations.
+13. **Pagination and empty pages**: Classic normal orders, algo orders, and trailing stop orders all use cursor-based pagination with `idLessThan` and `endId`, limited to 100 per page with a safety cap of 20 iterations. For Classic normal orders, fetch both `status=live` and `status=partially_filled`; Bitget's default regular pending-order query does not prove partially-filled orders absent. Treat both `entrustedList: null` and `entrustedList: []` as empty pages for these successful pending-order endpoints.
 
 14. **Commented-out leverage fetching**: `fetchCurrentLeverage()` and `fetchLeverageBrackets()` are fully implemented but commented out (`bitget.exchange.ts:593-667`). Leverage is instead obtained from position data.
 
@@ -726,7 +819,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 21. **UTA vs Classic routing is explicit and linear-only for now**: UTA accounts are detected by `_detectAccountType()`, a shared probe of `ACCOUNT_SETTINGS_V3` during validation/startup and lazily before private v2/v3 branch points on unstarted instances — 200 → `isUta=true`, 40084 (`Classic Account mode`) → `isUta=false`. Other Bitget business-error envelopes from the probe, including environment mismatch and auth failures, are terminal validation errors and must not fall through to Classic v2 endpoints; only transport/transient failures keep the safe `isUta=false` fallback. The private startup path awaits this probe before `privateWebsocket.connectAndSubscribe()` and before `tick()`, so v3-routed accounts do not race into v2 private endpoints. Every v3 path must read `usesUtaRouting`, not bare `isUta`; `supportsUtaRouting` is inherited by livenet `bitget` and `bitgetusdc`, but stays false on `bitgetinverse` until its own UTA slice exists. The `40084` reply is a **feature signal**, not an error — it lives in `SILENT_ERROR_CODES` in `bitget.api.ts` so the response interceptor does not surface it as a toast on every Classic-account login. A `40085` reply from v2 private endpoints is the opposite signal: the key is UTA and the requested Classic API is unsupported. Supported linear variants must promote to UTA routing and retry; variants still on Classic routing should surface `BITGET_UTA_VARIANT_UNSUPPORTED_MESSAGE`.
 
-22. **Order placement resolves position-mode + margin-type via the account endpoint, NOT via an open position.** `formatCreateOrder` / `placeOrderBatch` need `posMode` + `marginMode` to build the `side`/`tradeSide`/`marginMode` fields, and bitget is the **only** adapter that gates _every_ order on resolving these (woo/bitmex derive side without it). `getOrFetchPositionMode` / `getOrFetchMarginType` therefore go through `resolveSymbolPositioning(symbol)`, which prefers an existing position but **falls back to `fetchPositionMetadata([symbol])`** (a GET to `FETCH_SINGLE_ACCOUNT` carrying `posMode`/`marginMode` with no open position required). **This fallback is load-bearing in hosted-exchange-server mode:** user order writes run on the never-`start()`ed main-thread mirror (see `apps/web/src/controllers/CLAUDE.md` → dual-instance model), whose `store.loaded.positions` is `false`, so `getOrFetchPositionsForSymbol` returns `[]` for a flat symbol. The previous code **raw-threw** there ("No positions found …") — and because the throw bypassed `emitAndLogError`, orders silently never POSTed (no toast, no log, position never opened → e2e "expected 0 to equal 1"). Do **not** revert these methods to throwing on an empty position list.
+22. **Order placement resolves position-mode + margin-type via the account endpoint, NOT via an open position.** `formatCreateOrder` / `placeOrderBatch` need `posMode` + `marginMode` to build the `side`/`tradeSide`/`marginMode` fields, and bitget is the **only** adapter that gates _every_ order on resolving these (woo derives side without it). `getOrFetchPositionMode` / `getOrFetchMarginType` therefore go through `resolveSymbolPositioning(symbol)`, which prefers an existing position but **falls back to `fetchPositionMetadata([symbol])`** (a GET to `FETCH_SINGLE_ACCOUNT` carrying `posMode`/`marginMode` with no open position required). **This fallback is load-bearing in hosted-exchange-server mode:** user order writes run on the never-`start()`ed main-thread mirror (see `apps/web/src/controllers/CLAUDE.md` → dual-instance model), whose `store.loaded.positions` is `false`, so `getOrFetchPositionsForSymbol` returns `[]` for a flat symbol. The previous code **raw-threw** there ("No positions found …") — and because the throw bypassed `emitAndLogError`, orders silently never POSTed (no toast, no log, position never opened → e2e "expected 0 to equal 1"). Do **not** revert these methods to throwing on an empty position list.
 
 23. **`formatCreateOrder` lot-split must guard `maxSize > 0`.** The large-order split is `lots = (maxSize > 0 && amount > maxSize) ? ceil(amount / maxSize) : 1`. The `maxSize > 0` guard is load-bearing: on the hosted-server **mirror**, the streamed market can carry `limits.amount.max === 0`, and `ceil(amount / 0) = Infinity` — lodash **`times(Infinity)` returns `[]`**, so `formatCreateOrder` produced **zero payloads** and the order silently never POSTed (no throw, no error; e2e "expected 0 to equal 1"). The same zeroed `maxSize` would surface as `rest = amount % 0 = NaN`, so `rest` is guarded identically. Real users in worker mode have a real `maxSize` and never hit this. **Root cause not yet fixed:** why the mirror's bitget market gets `limits.amount.max === 0` (server→mirror market serialization) is a separate follow-up — the guard makes order placement correct regardless, but if you touch market hydration, check whether the mirror's `limits` survive the stream.
 
@@ -853,3 +946,102 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Classic and UTA both send `clientOid`, rule `^[.A-Z:/a-z0-9_-]{1,32}$`. Inherited by inverse and USDC.
 - **The native modify-order sends `newClientOid: uuid()`**, so an amend rewrites the client ID even though it keeps the order. Not changed: whether Bitget accepts the old ID as `newClientOid` is unverified, and a rejection falls back to cancel+replace silently.
+
+## Rust account and trading audit fixes
+
+Isolated hedge leverage preserves the requested Long/Short through the shared
+command: Classic uses `holdSide`, UTA uses `posSide`; omission defaults long.
+Successful writes and snapshots retain independent buy/sell settings, including
+flat legs and stale-read fences. Cross and one-way leverage stay coupled.
+Commands wait for the existing account probe. Anonymous orders below one lot
+are skipped within a batch; explicit caller IDs still fail preflight if no
+order can honor them. Sized full-position stops emit a downgrade warning.
+
+Classic history recognizes forced-close long/short suffixes and absent profit
+as zero. An unmappable or malformed REST position/order row (including one on
+a market missing from a partial catalogue) is skipped with a redacted warning
+and keeps only its own stored copy: orders by native id (preset TP/SL children
+follow their parent id), positions by symbol and side (no side keeps both legs;
+no symbol keeps every stored position). Valid peers still update; a skipped row
+with no stored copy waits for the next snapshot. Actual empty lists clear state.
+Rust inverse positions size coin quantity by the row's own mark price, then
+ticker mark/last, then entry (TS skips the row mark), so a snapshot read before
+tickers load is not sized at entry.
+Malformed envelopes and failed reads never clear good state. Busy
+Classic stream refreshes reschedule, zero leverage limits default to 1/20, and
+invalid bounds fail visibly before writes. UTA one-way fills retain their
+execution-derived position leg. The Confirm audit item remains outside this
+change.
+
+Rust private startup is gated on the `/api/v3/account/settings` probe, at
+startup and after a late `40085` promotion. 40084 detects Classic; a 200 with
+valid settings detects UTA. A first-probe transport or HTML 5xx failure keeps
+the TS fallback to Classic (a later 40085 promotes). Every other failure (429/418,
+5xx or system-code envelopes, non-JSON, malformed settings, unknown codes, and
+transport failures once UTA is confirmed) retries through `startup::Backoff`
+(1 s doubling to 30 s, forever), so polling never stalls undetected. Before the
+account loads, only documented key refusals end startup with one
+`StartupFailed`: 40001/40006/40011/40012/40037 or an "environment is incorrect"
+message (`AuthInvalid`), 40014/40018 (`AuthPermission`), and 40009 after one
+re-signed resend; timestamp codes stay transient. A UTA account on inverse or
+testnet fails startup as `Unsupported`, a missing passphrase or invalid
+read-only credentials as `InvalidInput`. Before the account loads, a socket login
+refused with 30011/30012 (`event: "error"` or `login`) fails startup; other login
+errors (30005 etc.) reconnect with backoff. A rejection stops the probe and
+account timers and retires the private socket; a refused trading key also emits
+`Deactivate`. A 418/429 sets `rest_paused_until` from `Retry-After`, else 30 s,
+and the probe retry waits out that window; transport failures keep plain backoff.
+
+## Rust private WS row recovery
+
+Ordinary order/position arrays decode rows independently. Valid Classic/UTA peers
+advance while rejected cached identities retain exposure, protection and native
+routing metadata. Unknown identity holds absence. Rejection observers protect
+older pending REST reads without replacing or renewing actual WS financial
+freshness; fresh admitted reads can heal. Partial snapshots preserve an earlier
+clean snapshot's older-read fence without claiming new global financial authority.
+All-rejected initial snapshots never establish loaded-empty readiness; valid empty
+snapshots still load and clear positions.
+
+Position mode is account/product-wide: partial or contradictory rows, including
+incremental deltas, cannot flip global routing while retaining exposure in another
+mode. A complete consistent snapshot can change mode. Retained cached positions
+do not republish stale settings. Native plans and trailing metadata use the same
+revision/terminal/opened fence as retained order rows, preserving cancel routes.
+Read-only recovery uses the existing coalesced timers and busy/pause handling;
+malformed-only or foreign-only traffic does not claim useful financial liveness.
+The financial fill channel, auth, signing and write-retry policy are unchanged.
+
+## Rust dispatch signer checkpoint
+
+The draft native migration stages private HTTP and Classic/UTA login with shared
+engine SignStep work. Venue state carries opaque identities; trusted setup owns
+all material. Private primary passphrase is mandatory; an absent secondary
+passphrase inherits its primary provider ref, while explicit empty rejects.
+Ordinary GET uses secondary, degraded balance recovery remains primary, and POST
+and WS stay primary. Public broker headers remain unchanged.
+
+Owned identity/history/trade read provider refusal bypasses network read retries.
+Background account failures retain existing recovery/backoff, and provider refusal
+cannot promote an unconfirmed Classic account. Earlier accepted writes, native40009 resend evidence
+and original rollback diagnostics retain existing outcome semantics. Hosted
+admission is described below. No secret restoration or venue-local signing
+fallback is permitted.
+
+## Rust hosted and remote signing
+
+Hosted `signHttpRequest`/`signWsAuth` and keyless `remoteSigner` are admitted
+for all three aliases through the shared owned provider; no TS venue is built.
+`bitget.signing.ts` is the standalone HTTP codec shared with the `bitget.api.ts`
+interceptor: same `$` symbol strip (except candles), `encode: false` query,
+underscore-stripped signed body and ms timestamp. Hosted capture uses primary
+custody only and sets `ACCESS-KEY`/`ACCESS-SIGN`/`ACCESS-TIMESTAMP`/
+`ACCESS-PASSPHRASE`; the passphrase comes from the provider's Present result.
+
+Remote WS login keeps the legacy wire (`exchangeName: 'bitget'`, Base64,
+`extraData.timestamp` in seconds over `timestamp + "GET" + "/user/verify"`).
+The decode is declared in `construction-rules.json` as `secondsTimestamp` with
+`secondsSuffix`, shared with OKX; native login work is three typed parts.
+Private `PayloadSigner` is typed unsupported (the TS interceptor never calls
+it), RemoteSigner wins without fallback, and primary-only remote wire refuses
+secondary-identity work before any callback. Actual-WASM proofs are CI-run.

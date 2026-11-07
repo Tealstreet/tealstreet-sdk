@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { KrakenPublicWebsocket } from '../exchanges/kraken/kraken.ws-public';
+import { KrakenPublicWebsocket } from './reference/kraken/kraken.ws-public';
 
 const createMockParent = (overrides: Record<string, unknown> = {}) => {
   const parent = {

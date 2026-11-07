@@ -355,7 +355,7 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * Convert a normalized order `amount` (base units / contract count, as
    * produced by parseSizeForEntry / notionalToSize) back to USD notional
    * — the inverse of `notionalToSize`. Inverse contracts ARE USD
-   * (notional = amount × contractSize); linear/quanto are base×price.
+   * (notional = amount × contractSize); linear/quanto are contracts × contractSize × price.
    * Returns 0 when price is unavailable so the budget gate fails open
    * rather than mis-counting.
    */
@@ -367,7 +367,9 @@ export abstract class TradingBaseCommand extends BaseCommand {
     }
     const price = exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
     if (!price) return 0;
-    return Math.abs(amount) * price;
+    // The inverse of `baseToNativeContracts`: a linear contract (OKX, BloFin) is `contractSize` base.
+    const contractSize = market?.contractSize && market.contractSize > 0 ? market.contractSize : 1;
+    return Math.abs(amount) * contractSize * price;
   }
 
   /**

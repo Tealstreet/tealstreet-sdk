@@ -2,7 +2,7 @@ import type { ExchangeOptions, Market, OrderBook, Ticker } from '../../types';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { LighterExchange } from '../../exchanges/lighter/lighter.exchange';
+import { LighterExchange } from '../reference/lighter/lighter.exchange';
 import { ENDPOINTS } from '../../exchanges/lighter/lighter.types';
 import { DefaultStore } from '../../store/store.base';
 
@@ -227,6 +227,8 @@ describe('Lighter public-data audit regressions', () => {
   it('rearms active OHLCV recovery after reconnect without reviving cleaned-up or disposed topics', () => {
     vi.useFakeTimers();
     const { exchange, websocket } = createExchange();
+    // onOpen primes REST market stats as well as the OHLCV recovery timers.
+    vi.spyOn(exchange.lighterApiClient, 'get').mockResolvedValue({ market_stats: {} });
     const candleTopic = 'candle/77/1m';
     const reconnect = vi.spyOn(websocket, 'reconnect').mockImplementation(async () => {
       websocket.ws = { readyState: WebSocket.OPEN } as WebSocket;

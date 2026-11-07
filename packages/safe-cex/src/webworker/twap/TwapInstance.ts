@@ -1,3 +1,5 @@
+import type { PlaceOrderOpts } from '../../types';
+
 import random from 'lodash/random';
 import { nanoid } from 'nanoid';
 
@@ -17,9 +19,10 @@ export class TwapInstance {
   public options: TwapOptions;
   private timerId: NodeJS.Timeout | undefined;
   private readonly updateStateCallback: (state: TwapState) => void;
-  private exchange: Exchange;
+  readonly exchange: Exchange;
   private ctx: Worker;
   private trackedChaserOrderIds: string[] = [];
+  private trackedLimitOrderIds: string[] = [];
   /** Per-slice timeout timers used by `twap chase` policy enforcement.
    *  Stored so terminate() can cancel them. */
   private sliceTimers: ReturnType<typeof setTimeout>[] = [];
@@ -43,6 +46,10 @@ export class TwapInstance {
     } else {
       this.state = this.createNewState();
     }
+  }
+
+  get currentOrderIds(): string[] {
+    return this.trackedLimitOrderIds;
   }
 
   private updateState(state: Partial<TwapState>) {
@@ -88,7 +95,32 @@ export class TwapInstance {
     };
   }
 
-  placeOrder = async (orderSize: number) => {
+  /** The order a market or limit slice sends; chaser slices mint their own ids. */
+  private sliceOrder(orderSize: number): PlaceOrderOpts | undefined {
+    if (this.options.useChaserOrders) return undefined;
+    if (this.options.useLimitOrders) {
+      const ticker = this.exchange.store.tickers.find((ticker) => ticker.symbol === this.options.activeMarket.symbol);
+      const price =
+        this.options.side === OrderSide.Buy ? ticker?.bid || ticker?.last || 0 : ticker?.ask || ticker?.last || 0;
+      return {
+        symbol: this.options.activeMarket.symbol,
+        side: this.options.side,
+        type: price ? OrderType.Limit : OrderType.Market,
+        ...(price ? { price } : {}),
+        amount: orderSize,
+        reduceOnly: Boolean(this.options.reduceOnly),
+      };
+    }
+    return {
+      symbol: this.options.activeMarket.symbol,
+      side: this.options.side,
+      type: OrderType.Market,
+      amount: orderSize,
+      reduceOnly: Boolean(this.options.reduceOnly),
+    };
+  }
+
+  placeOrder = async (orderSize: number, order: PlaceOrderOpts | undefined = this.sliceOrder(orderSize)) => {
     if (this.options.useChaserOrders) {
       const chaserInstance = new ChaserOrderInstance(this.exchange, {
         symbol: this.options.activeMarket.symbol,
@@ -112,26 +144,11 @@ export class TwapInstance {
       if (this.options.timeoutPct !== undefined) {
         this.scheduleSliceTimeout(chaserInstance.id, orderSize);
       }
-    } else if (this.options.useLimitOrders) {
-      const ticker = this.exchange.store.tickers.find((ticker) => ticker.symbol === this.options.activeMarket.symbol);
-      const price =
-        this.options.side === OrderSide.Buy ? ticker?.bid || ticker?.last || 0 : ticker?.ask || ticker?.last || 0;
-      await this.exchange.placeOrder({
-        symbol: this.options.activeMarket.symbol,
-        side: this.options.side,
-        type: price ? OrderType.Limit : OrderType.Market,
-        ...(price ? { price } : {}),
-        amount: orderSize,
-        reduceOnly: Boolean(this.options.reduceOnly),
-      });
-    } else {
-      await this.exchange.placeOrder({
-        symbol: this.options.activeMarket.symbol,
-        side: this.options.side,
-        type: OrderType.Market,
-        amount: orderSize,
-        reduceOnly: Boolean(this.options.reduceOnly),
-      });
+    } else if (order) {
+      const orderIds = await this.exchange.placeOrder(order);
+      if (order.type === OrderType.Limit && orderIds.length > 0) {
+        this.trackedLimitOrderIds.push(...orderIds);
+      }
     }
   };
 
@@ -222,6 +239,9 @@ export class TwapInstance {
           LogSeverity.Error,
         );
       }
+      // terminate() can run while the placement above is awaiting a reply.
+      // Its continuation must not schedule another slice on the old exchange.
+      if ([TwapStatus.Completed].includes(this.state.status)) return false;
       ordersExecuted++;
     }
 

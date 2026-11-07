@@ -1,3 +1,0 @@
-[[exempt]]
-rs = "example/src/lib.rs::Helper"
-reason = "test glue"
