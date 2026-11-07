@@ -14,6 +14,7 @@ mod kucoin;
 
 #[derive(Clone, Copy, Deserialize)]
 pub enum OutputFormat {
+    #[cfg(feature = "backpack")]
     #[serde(rename = "backpack-ed25519")]
     BackpackEd25519,
     #[serde(rename = "kucoin-batch")]
@@ -364,10 +365,20 @@ pub fn prepare(
             Input::Credential {} => {}
         }
     }
+    #[cfg(feature = "backpack")]
     if matches!(
         &input,
         Input::WsAuth {
-            output_format: OutputFormat::KucoinBatch | OutputFormat::BackpackEd25519,
+            output_format: OutputFormat::BackpackEd25519,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::KucoinBatch,
             ..
         }
     ) {
@@ -505,6 +516,7 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
     let signature = match kind {
         #[cfg(feature = "backpack")]
         OutputKind::Backpack { .. } => unreachable!(),
+        #[cfg(feature = "backpack")]
         OutputKind::WsAuth(OutputFormat::BackpackEd25519) => return Err(SignError::Unsupported),
         #[cfg(feature = "kucoin")]
         OutputKind::Kucoin { .. } => unreachable!(),
@@ -854,6 +866,17 @@ mod presentation_tests {
 mod input_parse_tests {
     use super::*;
 
+    #[cfg(not(feature = "backpack"))]
+    #[test]
+    fn backpack_codec_is_absent_without_venue_feature() {
+        for input in [
+            r#"{"kind":"wsAuth","toSign":"x","outputFormat":"backpack-ed25519"}"#,
+            r#"["wsAuth","x","backpack-ed25519"]"#,
+        ] {
+            assert!(parse(input).is_err(), "{input}");
+        }
+    }
+
     /// The wasm host maps every parse failure to `InvalidRequest` this way.
     fn parse(input: &str) -> Result<Input, SignError> {
         serde_json::from_str(input).map_err(|_| SignError::InvalidRequest)
@@ -883,6 +906,11 @@ mod input_parse_tests {
             ));
         }
         for (format, input) in [
+            #[cfg(feature = "backpack")]
+            (
+                "backpack-ed25519",
+                r#"{"kind":"wsAuth","toSign":"x","outputFormat":"backpack-ed25519"}"#,
+            ),
             (
                 "kucoin-batch",
                 r#"{"kind":"wsAuth","toSign":"x","outputFormat":"kucoin-batch"}"#,
@@ -916,6 +944,7 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    #[cfg(feature = "backpack")]
                     OutputFormat::BackpackEd25519 => "backpack-ed25519",
                     OutputFormat::KucoinBatch => "kucoin-batch",
                     OutputFormat::Hex => "hex",

@@ -1268,7 +1268,8 @@ pub fn build<T: Visit>(
             && options.signing.is_none()
         {
             let (provider, identities) = prepare_local_signer_for(venue, &mut options)?;
-            let empty_backpack = venue == "backpack"
+            let empty_backpack = cfg!(feature = "backpack")
+                && venue == "backpack"
                 && identities.primary.is_none()
                 && identities.secondary.is_none();
             options.signing = Some(identities);

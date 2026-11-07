@@ -1,6 +1,6 @@
-# Backpack hosted signing — hold for Sam
+# Backpack hosted signing
 
-This production signing activation must remain unmerged until Sam approves it.
+Sam approved this production signing activation; review is required before merge.
 Backpack perpetuals only; private PayloadSigner remains unsupported.
 
 ## Admission and custody
@@ -36,6 +36,8 @@ and returns a JSON string `{credential, signature}` with canonical padded
 base64 for exactly 64 signature bytes. No seed or opaque ref crosses that wire.
 The origin binds the credential to its selected slot and validates the complete
 reply before publishing any value. A raw HMAC output format cannot substitute.
+The native format is compiled only with the `backpack` feature so other venue
+families retain their existing format decoder.
 
 Missing device custody, foreign refs, unsupported algorithms, partial graphs,
 malformed/wrong-account replies, unavailability, cancellation and callback
