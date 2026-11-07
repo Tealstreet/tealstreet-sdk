@@ -4060,7 +4060,8 @@ fn preset_legs_end_when_a_terminal_row_does_not_repeat_them() {
 #[test]
 fn a_fills_start_with_no_end_walks_to_now_and_no_limit_reads_every_page() {
     let mut h = ready();
-    let from = h.now - 15.0 * 86_400_000.0;
+    // The ready fixture calibrates protocol UTC independently of scheduling time.
+    let from = h.engine.signing_clock(h.now).0 - 15.0 * 86_400_000.0;
     h.command(Command::Query {
         command: 36,
         query: Query::Fills {

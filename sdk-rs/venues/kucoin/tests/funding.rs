@@ -383,7 +383,7 @@ fn zero_width_requested_range_is_filtered_after_native_window_expansion() {
 #[test]
 fn open_ended_funding_window_with_no_limit_walks_past_the_default() {
     let mut h = Harness::new();
-    let now = h.now as u64;
+    let now = h.engine.signing_clock(h.now).0 as u64;
     h.event(Event::Command(Command::Query {
         command: 1,
         query: Query::Income {
