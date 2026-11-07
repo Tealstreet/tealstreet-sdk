@@ -454,10 +454,10 @@ test('#3129 guarded GRVT edits (run 42145552491) retain measured headroom', () =
   assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
 });
 
-test('#3170 managed KuCoin protective edits (run 42232257311) retain measured family headroom', () => {
+test('#3170 managed KuCoin protective edits on master (run 42318845632) retain measured family headroom', () => {
   for (const [venue, measured, cap] of [
-    ['kucoin', 1_780_364, 1_790_976],
-    ['kucoinspot', 2_327_462, 2_337_792],
+    ['kucoin', 1_791_027, 1_802_240],
+    ['kucoinspot', 2_346_832, 2_357_248],
   ]) {
     assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
