@@ -6,6 +6,8 @@ use safe_cex_engine::signing::{
 use safe_cex_engine::signing_policy::{RemoteSigningPolicy, SignatureEncoding};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "apexomni")]
+mod apexomni;
 #[cfg(feature = "backpack")]
 mod backpack;
 
@@ -14,6 +16,9 @@ mod kucoin;
 
 #[derive(Clone, Copy, Deserialize)]
 pub enum OutputFormat {
+    #[cfg(feature = "apexomni")]
+    #[serde(rename = "apexomni-batch")]
+    ApexOmniBatch,
     #[cfg(feature = "backpack")]
     #[serde(rename = "backpack-ed25519")]
     BackpackEd25519,
@@ -152,6 +157,11 @@ impl<'de> Deserialize<'de> for Input {
 /// Formatting metadata remains bound to its one capture token.
 #[derive(Clone, Copy)]
 pub enum OutputKind {
+    #[cfg(feature = "apexomni")]
+    ApexOmni {
+        contracts: usize,
+        ws: bool,
+    },
     #[cfg(feature = "backpack")]
     Backpack {
         ws: bool,
@@ -306,6 +316,7 @@ fn family(venue: &str) -> bool {
         || (cfg!(feature = "bingx") && venue == "bingx")
         || (cfg!(feature = "blofin") && venue == "blofin")
         || (cfg!(feature = "backpack") && venue == "backpack")
+        || (cfg!(feature = "apexomni") && venue == "apexomni")
         || (cfg!(feature = "kucoin") && venue == "kucoin")
         || double_sha256(venue)
         || (cfg!(feature = "phemex") && venue == "phemex")
@@ -318,6 +329,40 @@ pub fn prepare(
     identities: &Identities,
     input: Input,
 ) -> Result<(SignRequest, OutputKind), SignError> {
+    #[cfg(feature = "apexomni")]
+    if venue == "apexomni" {
+        match input {
+            Input::Http {
+                payload, stamp_ms, ..
+            } => {
+                return apexomni::prepare(
+                    identities,
+                    payload,
+                    SignReceipt {
+                        stamp_ms: Some(stamp_ms),
+                        ..Default::default()
+                    },
+                    false,
+                );
+            }
+            Input::WsAuth {
+                to_sign,
+                output_format: OutputFormat::ApexOmniBatch,
+            } => return apexomni::prepare(identities, to_sign, SignReceipt::default(), true),
+            Input::WsAuth { .. } => return Err(SignError::Unsupported),
+            Input::Credential {} => {}
+        }
+    }
+    #[cfg(feature = "apexomni")]
+    if matches!(
+        &input,
+        Input::WsAuth {
+            output_format: OutputFormat::ApexOmniBatch,
+            ..
+        }
+    ) {
+        return Err(SignError::Unsupported);
+    }
     #[cfg(feature = "backpack")]
     if venue == "backpack" {
         match input {
@@ -467,6 +512,10 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    #[cfg(feature = "apexomni")]
+    if let OutputKind::ApexOmni { contracts, ws } = kind {
+        return apexomni::finish(contracts, ws, result);
+    }
     #[cfg(feature = "backpack")]
     if let OutputKind::Backpack { ws } = kind {
         return backpack::finish(ws, result);
@@ -515,6 +564,10 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         return Err(SignError::InvalidResult);
     }
     let signature = match kind {
+        #[cfg(feature = "apexomni")]
+        OutputKind::ApexOmni { .. } => unreachable!(),
+        #[cfg(feature = "apexomni")]
+        OutputKind::WsAuth(OutputFormat::ApexOmniBatch) => return Err(SignError::Unsupported),
         #[cfg(feature = "backpack")]
         OutputKind::Backpack { .. } => unreachable!(),
         #[cfg(feature = "backpack")]
@@ -867,6 +920,14 @@ mod presentation_tests {
 mod input_parse_tests {
     use super::*;
 
+    #[cfg(not(feature = "apexomni"))]
+    #[test]
+    fn apexomni_codec_is_absent_without_venue_feature() {
+        assert!(
+            parse(r#"{"kind":"wsAuth","toSign":"x","outputFormat":"apexomni-batch"}"#).is_err()
+        );
+    }
+
     #[cfg(not(feature = "backpack"))]
     #[test]
     fn backpack_codec_is_absent_without_venue_feature() {
@@ -945,6 +1006,8 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    #[cfg(feature = "apexomni")]
+                    OutputFormat::ApexOmniBatch => "apexomni-batch",
                     #[cfg(feature = "backpack")]
                     OutputFormat::BackpackEd25519 => "backpack-ed25519",
                     OutputFormat::KucoinBatch => "kucoin-batch",

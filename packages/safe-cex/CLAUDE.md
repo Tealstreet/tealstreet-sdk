@@ -202,6 +202,11 @@ WOO RemoteSigner setup refuses any configured secondary credentials with
 `unsupported` / `notSent` before native construction or callbacks: its HMAC wire
 cannot select the device's read-key slot. Remove the secondary credentials to
 use Hosted with the primary key, or use read keys in local browser mode.
+ApeX Omni admits RemoteSigner through `apexomni-batch`: device-held OmniKey
+contracts precede base64-text-key HMAC signing. Origins retain their API
+passphrase in Present-only provider custody; the secret and OmniKey stay on the
+device. Private PayloadSigner and secondary read keys refuse before I/O.
+See `docs/plans/callers/apexomni-hosted-signing.md` for the wire and parity contract.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
