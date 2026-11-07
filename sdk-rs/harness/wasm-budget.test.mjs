@@ -157,6 +157,21 @@ test('#3150 final CI 42258955401 cap refresh: refresh-ask caps (PR run 418044699
   assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
 });
 
+test('#3193 coinbase CI job 128343606114 retains measured headroom and the exact boundary', () => {
+  const measured = 1_841_539;
+  const cap = 1_852_416;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.coinbase, cap);
+  for (const alias of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(alias);
+    assert.equal(family, 'coinbase');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
 test('#3148 protective edit live fixes (run 42196761441) retain headroom and siblings match', () => {
   const measured = 2_348_153;
   const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -739,6 +754,21 @@ test('#3190 engine de-monomorphisation (run 42248954523) retains WOO and Paradex
   }
 });
 
+test('#3193 woo CI job 128343606230 retains measured headroom and the exact boundary', () => {
+  const measured = 2_417_950;
+  const cap = 2_428_928;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.woo, cap);
+  for (const alias of ['woo']) {
+    const family = venueFamily(alias);
+    assert.equal(family, 'woo');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
+});
+
 test('#3178 intent cleanup (run 42239151280, job 127965614325) retains HL headroom and equal siblings', () => {
   const measured = 2_154_756;
   const measuredCap = 2_165_760;
@@ -793,7 +823,7 @@ test('#3150 merged-tree caps retain the approved exact boundaries', () => {
     ['bingx', 2_085_888],
     ['bitrue', 1_851_392],
     ['blofin', 2_001_920],
-    ['coinbase', 1_838_080],
+    ['coinbase', 1_852_416],
     ['okx', 1_986_560],
     ['weex', 1_948_672],
   ]) {

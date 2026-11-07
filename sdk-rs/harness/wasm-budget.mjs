@@ -220,7 +220,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   blofin: 2_001_920,
   breakoutprop: 1_580_032,
   bybit: 2_270_208,
-  coinbase: 1_838_080,
+  // #3193 at 90750c898c2, CI job 128343606114: 1,841,539 B + 10 KiB, rounded up to KiB.
+  coinbase: 1_852_416,
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   grvt: 1_830_912,
@@ -246,7 +247,8 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   polymarket: 1_611_776,
   txflow: 1_852_416,
   weex: 1_948_672,
-  woo: 2_416_640,
+  // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
+  woo: 2_428_928,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];
