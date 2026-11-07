@@ -299,9 +299,9 @@ struct PositionWire<'a> {
     #[serde(
         default,
         alias = "liquidation_threshold",
-        deserialize_with = "wire::number"
+        deserialize_with = "safe_cex_engine::de::lenient_optional_number"
     )]
-    liquidation_price: f64,
+    liquidation_price: Option<f64>,
     #[serde(default, deserialize_with = "wire::optional_number")]
     max_fixed_leverage: Option<f64>,
 }
@@ -1244,9 +1244,9 @@ impl Kraken {
             realized_pnl: None,
             contracts: quantity.abs(),
             liquidation_price: if live {
-                row.liquidation_price
+                row.liquidation_price.unwrap_or(f64::NAN)
             } else {
-                old.map_or(0.0, |p| p.liquidation_price)
+                old.map_or(f64::NAN, |p| p.liquidation_price)
             },
             margin_size: None,
             last_update: Some(cx.now),

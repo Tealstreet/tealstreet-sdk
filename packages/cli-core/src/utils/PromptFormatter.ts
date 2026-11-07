@@ -203,7 +203,7 @@ export function formatPrompt(options: PromptOptions): PromptInfo {
     info.positionSize = Math.abs(position.contracts);
     info.unrealizedPnl = position.unrealizedPnl;
     info.entryPrice = position.entryPrice;
-    info.liquidationPrice = position.liquidationPrice;
+    info.liquidationPrice = position.liquidationPrice ?? undefined;
   }
   info.openOrderCount = openOrders.length;
   if (connStatus) info.connectionIndicator = connStatus.trim();
@@ -236,7 +236,10 @@ export function formatPrompt(options: PromptOptions): PromptInfo {
       position && position.entryPrice
         ? formatPnlPercent(position.unrealizedPnl, position.entryPrice, Math.abs(position.contracts))
         : '',
-    liq: position && position.liquidationPrice > 0 ? formatPriceCompact(position.liquidationPrice, pricePrecision) : '',
+    liq:
+      position && position.liquidationPrice !== null && position.liquidationPrice > 0
+        ? formatPriceCompact(position.liquidationPrice, pricePrecision)
+        : '',
     leverage: position ? `${position.leverage}x` : '',
     orders: openOrders.length > 0 ? openOrders.length.toString() : '',
     conn: connStateToken || (connStatus ? connStatus.trim() + ' ' : ''),

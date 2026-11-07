@@ -304,7 +304,7 @@ describe('PromptFormatter', () => {
           contracts: number;
           entryPrice: number;
           unrealizedPnl: number;
-          liquidationPrice?: number;
+          liquidationPrice?: number | null;
           leverage?: number;
         };
         orders?: number;
@@ -319,7 +319,8 @@ describe('PromptFormatter', () => {
                 contracts: options.position.contracts,
                 entryPrice: options.position.entryPrice,
                 unrealizedPnl: options.position.unrealizedPnl,
-                liquidationPrice: options.position.liquidationPrice || 0,
+                liquidationPrice:
+                  options.position.liquidationPrice === undefined ? 0 : options.position.liquidationPrice,
                 leverage: options.position.leverage || 1,
               },
             ]
@@ -390,6 +391,21 @@ describe('PromptFormatter', () => {
         expect(result.unrealizedPnl).toBe(3000);
         expect(result.entryPrice).toBe(48000);
         expect(result.liquidationPrice).toBe(40000);
+      });
+
+      it('omits an unknown liquidation price from prompt info', () => {
+        const exchange = createMockExchange({
+          position: {
+            side: PositionSide.Long,
+            contracts: 1,
+            entryPrice: 100,
+            unrealizedPnl: 0,
+            liquidationPrice: null,
+          },
+        });
+        const result = formatPrompt({ symbol: 'BTCUSDT', exchange, config: { format: '[{liq}]> ', hideEmpty: true } });
+        expect(result.liquidationPrice).toBeUndefined();
+        expect(result.prompt).not.toContain('null');
       });
 
       it('should return short position info', () => {

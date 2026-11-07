@@ -4,6 +4,7 @@ import { expect, it } from 'vitest';
 
 import { FrameApplier } from '../../store/frameApplier';
 import { DefaultStore } from '../../store/store.base';
+import { inverseUnitsFrame } from '../fixtures/scxfFrame';
 
 const cols = (fields: Record<string, number>) =>
   Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, Float64Array.of(value)]));
@@ -71,13 +72,13 @@ const frame = (position: Record<string, number>) =>
     settings: () => undefined,
   }) as unknown as Frame;
 
-it('reads non-finite display numbers as 0, keeps sizing NaN and drops non-finite optionals', () => {
+it('keeps liquidation unknown while normalizing other display fields and preserving sizing guards', () => {
   const store = new DefaultStore();
   new FrameApplier(store).apply(
     frame({ leverage: NaN, liquidationPrice: Infinity, unrealizedPnl: -Infinity, contracts: NaN }),
   );
   const [position] = store.positions;
-  expect(position).toMatchObject({ leverage: 0, liquidationPrice: 0, unrealizedPnl: 0, notional: 1000 });
+  expect(position).toMatchObject({ leverage: 0, liquidationPrice: null, unrealizedPnl: 0, notional: 1000 });
   expect(position.contracts).toBeNaN();
   expect(position).not.toHaveProperty('realizedPnl');
   expect(position).not.toHaveProperty('marginSize');
@@ -128,4 +129,23 @@ it('keeps finite settings leverage, with a finite side overriding a non-finite t
   expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 3, sellLeverage: 4 });
   new FrameApplier(store).apply(withSettings(10, NaN));
   expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 10, sellLeverage: 10 });
+});
+
+it.each([NaN, Infinity, -Infinity])('exposes an unknown native liquidation price as null (%s)', (liquidationPrice) => {
+  const store = new DefaultStore();
+  const applier = new FrameApplier(store);
+  applier.apply(frame({ leverage: 5, liquidationPrice: 67.8, unrealizedPnl: 0 }));
+  expect(store.positions[0].liquidationPrice).toBe(67.8);
+  applier.apply(frame({ leverage: 5, liquidationPrice, unrealizedPnl: 0 }));
+  expect(store.positions[0].liquidationPrice).toBeNull();
+  expect(JSON.parse(JSON.stringify(store.positions[0])).liquidationPrice).toBeNull();
+});
+
+it('preserves unknown liquidation through the packed frame decoder and store serialization', () => {
+  const packed = inverseUnitsFrame({ positions: true, inverse: false, positionLiquidationPrice: NaN });
+  expect(packed.positions()!.liquidationPrice[0]).toBeNaN();
+  const store = new DefaultStore();
+  new FrameApplier(store).apply(packed);
+  expect(store.positions[0].liquidationPrice).toBeNull();
+  expect(JSON.parse(JSON.stringify(store.serialize())).positions[0].liquidationPrice).toBeNull();
 });

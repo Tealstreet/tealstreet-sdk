@@ -21,6 +21,10 @@ string references for venue-defined position IDs; preserve these when present
 so simultaneous Cross and Isolated rows for a symbol remain distinct. Older
 frames still derive identity from symbol and position mode.
 
+Position `liquidationPrice` preserves an unknown/non-finite native column as
+`null`, including through serialization and worker snapshots. Finite values,
+including an explicit venue zero, remain numbers.
+
 Revised SCXF sections carry explicit revisions with fixed tails. Preserve venue
 `prettySymbol`, bracket trigger types, conditional prices, remaining notionals,
 and ticker `midPrice`, including clearing midpoint on packed and object worker

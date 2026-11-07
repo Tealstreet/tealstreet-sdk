@@ -32,7 +32,8 @@ export class FrameApplyError extends Error {}
 
 const finite = (value: number) => (Number.isFinite(value) ? value : undefined);
 /**
- * Display-only position numbers read a non-finite engine value as the venue's 0 (none/unknown).
+ * Other display fields retain the existing zero fallback; liquidation prices
+ * preserve unknown separately as null.
  * Sizing inputs (`contracts`, `notional`) stay raw: a NaN there makes nuke refuse the close.
  */
 const displayNumber = (value: number) => (Number.isFinite(value) ? value : 0);
@@ -531,7 +532,7 @@ export class FrameApplier {
                       }),
                 },
               }),
-            liquidationPrice: displayNumber(positions.liquidationPrice[i]),
+            liquidationPrice: finite(positions.liquidationPrice[i]) ?? null,
             ...(mode !== undefined && { positionMode: mode }),
             ...(enums.marginType !== undefined && { marginType: enums.marginType as MarginType }),
             ...(finite(positions.realizedPnl[i]) !== undefined && { realizedPnl: positions.realizedPnl[i] }),

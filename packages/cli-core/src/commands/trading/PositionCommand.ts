@@ -82,7 +82,7 @@ export class PositionCommand extends BaseCommand {
     lines.push(`Size:   ${formatSizeCompact(Math.abs(position.contracts), amountPrecision)} (${formatPriceCompact(Math.abs(position.notional))})`);
     lines.push(`Entry:  ${formatPriceCompact(position.entryPrice, pricePrecision)} → ${formatPriceCompact(markPrice, pricePrecision)}`);
     lines.push(`uPnL:   ${pnlSign}${formatPriceCompact(position.unrealizedPnl)} (${pnlSign}${pnlPercent}%)`);
-    lines.push(`Liq:    ${position.liquidationPrice > 0 ? formatPriceCompact(position.liquidationPrice, pricePrecision) : 'N/A'}`);
+    lines.push(`Liq:    ${position.liquidationPrice !== null && position.liquidationPrice > 0 ? formatPriceCompact(position.liquidationPrice, pricePrecision) : 'N/A'}`);
     lines.push(`Lev:    ${accountLev.toFixed(2)}x / ${position.leverage}x`);
     lines.push('─'.repeat(40));
 
