@@ -89,7 +89,9 @@ caught legacy ES256 issuer reuse and delayed-response cooldown timing.
 ## Private derivatives reads (S2)
 
 Selecting the existing INTX portfolio exchanges the primary CDP key on drb
-before starting derivatives account reads. A successful, correlated
+before starting S1’s drb catalogue and derivatives account reads. Private
+positions, orders and fills use the catalogue’s native instrument symbols.
+A successful, correlated
 `public/auth` response enables `Coinbase::drb_authenticated()`; a configured
 key or failed exchange does not. Consumers of the INTX retirement notice should
 suppress it only when this hook is true. Spot-only and CFM accounts retain their

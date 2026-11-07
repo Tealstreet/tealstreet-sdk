@@ -4,6 +4,13 @@ use crate::drb;
 use safe_cex_engine::model::*;
 use serde_json::{Value, json};
 
+// Validate through S0's closed instrument mapping, but publish S1's native
+// symbol so private rows join the public catalogue without a second alias.
+fn instrument_symbol(value: &str) -> Result<String, String> {
+    drb::from_instrument(value)?;
+    Ok(value.to_owned())
+}
+
 pub(super) fn number(v: &Value, key: &str) -> Result<f64, String> {
     v.get(key)
         .and_then(Value::as_f64)
@@ -100,7 +107,7 @@ pub(super) fn position(v: Value) -> Result<Position, String> {
     if text(&v, "kind")? != "future" {
         return Err("drb unsupported position kind".into());
     }
-    let symbol = drb::from_instrument(text(&v, "instrument_name")?)?;
+    let symbol = instrument_symbol(text(&v, "instrument_name")?)?;
     let base = number(&v, "size_currency")?;
     let size = number(&v, "size")?;
     let direction = text(&v, "direction")?;
@@ -161,7 +168,7 @@ pub(super) fn position(v: Value) -> Result<Position, String> {
 }
 pub(super) fn order(v: Value) -> Result<Order, String> {
     let id = identity(&v, "order_id")?;
-    let symbol = drb::from_instrument(text(&v, "instrument_name")?)?;
+    let symbol = instrument_symbol(text(&v, "instrument_name")?)?;
     let side = side(&v)?;
     let status = match text(&v, "order_state")? {
         "open" | "untriggered" | "triggered" => OrderStatus::Open,
@@ -276,7 +283,7 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
 pub(super) fn trade(v: &Value) -> Result<Value, String> {
     let id = identity(v, "trade_id")?;
     let order_id = identity(v, "order_id")?;
-    let symbol = drb::from_instrument(text(v, "instrument_name")?)?;
+    let symbol = instrument_symbol(text(v, "instrument_name")?)?;
     let price = unsigned(v, "price")?;
     let qty = unsigned(v, "amount")?;
     if price <= 0. || qty <= 0. {
