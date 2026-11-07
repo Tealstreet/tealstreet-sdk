@@ -198,11 +198,13 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // 2,409,448 B. CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
 // #3179 run 42250922133, job 128010105166 measured binance 2,207,171 B: COIN-M algo routing
 // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
+// #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
+// binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
   backpack: 1_948_672,
-  binance: 2_223_104,
+  binance: 2_235_392,
   bingx: 2_085_888,
   bitget: 2_419_712,
   bitgetusdc: 2_419_712,

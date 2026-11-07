@@ -293,8 +293,10 @@ test('master b0d2122742d release cut (run 41901638294) retains the ruled binance
 });
 
 test('#3187 PM algo migration (run 42251340763) retains headroom for every Binance alias', () => {
-  const [measured, cap] = [2_212_299, 2_223_104];
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const [measured, minimumCap] = [2_212_299, 2_223_104];
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.binance;
+  assert.ok(cap >= minimumCap);
   for (const venue of ['binance', 'binanceinverse', 'binancepm', 'binanceoptions', 'binancespot']) {
     const family = venueFamily(venue);
     assert.equal(family, 'binance');
@@ -571,7 +573,7 @@ test('#3178 intent cleanup (run 42239151280, job 127965614325) retains HL headro
 });
 
 test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroom and exact boundaries', () => {
-  for (const [venue, measured, incomingCap, cap] of [
+  for (const [venue, measured, incomingCap, ruledCap] of [
     ['asterdex', 2_150_517, 2_150_400, 2_161_664],
     ['binance', 2_208_976, 2_223_104, 2_223_104],
     ['bitunix', 1_853_221, 1_849_344, 1_863_680],
@@ -586,8 +588,9 @@ test('#3188 startup causes (run 42260192686 at cda38ed52a9) retain ruled headroo
     ['txflow', 1_842_121, 1_838_080, 1_852_416],
     ['woo', 2_406_393, 2_410_496, 2_416_640],
   ]) {
-    assert.equal(cap, Math.max(incomingCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024));
-    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(ruledCap, Math.max(incomingCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024));
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= ruledCap);
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
@@ -641,5 +644,19 @@ test('#3202 on #3207 (run 42305638406) uses CI plus 10 KiB and keeps Bitget sibl
     assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
     assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3179 on master 160884d020d (run 42319187479) uses CI plus 10 KiB for every Binance alias', () => {
+  const measured = 2_224_977;
+  const cap = 2_235_392;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['binance', 'binanceinverse', 'binancepm', 'binanceoptions', 'binancespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'binance');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
   }
 });
