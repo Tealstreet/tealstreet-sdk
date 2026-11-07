@@ -38,6 +38,7 @@ class VirtualClock {
   private syncInFlight: Promise<void> | null = null;
   private lastAfterClockStepSync: number | null = null;
   private afterClockStepTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private afterClockStepPending = false;
   private serverTimeSource: ServerTimeSource | undefined;
   private readonly syncListeners = new Set<TimeSyncListener>();
 
@@ -67,6 +68,7 @@ class VirtualClock {
   };
 
   stop = () => {
+    this.afterClockStepPending = false;
     if (this.afterClockStepTimeoutId !== null) {
       clearTimeout(this.afterClockStepTimeoutId);
       this.afterClockStepTimeoutId = null;
@@ -179,6 +181,8 @@ class VirtualClock {
 
   public syncClientServerTime = ({ afterClockStep = false } = {}) => {
     if (this.syncInFlight) {
+      // A step during sampling can invalidate the result already being fetched.
+      if (afterClockStep) this.afterClockStepPending = true;
       return this.syncInFlight;
     }
 
@@ -208,6 +212,12 @@ class VirtualClock {
       // Failed attempts also observe the floor, rather than retrying per engine.
       if (afterClockStep) this.lastAfterClockStepSync = performance.now();
       this.syncInFlight = null;
+      if (this.afterClockStepPending) {
+        this.afterClockStepPending = false;
+        void this.syncClientServerTime({ afterClockStep: true }).catch(() => {
+          // Best effort; scheduled synchronization can retry.
+        });
+      }
     });
 
     return this.syncInFlight;
@@ -233,7 +243,8 @@ class VirtualClock {
   };
 
   private fetchServerTime = async (afterClockStep: boolean) =>
-    (await this.fetchFromServerTimeSource()) ?? (await this.fetchVenueTime()) ??
+    (await this.fetchFromServerTimeSource()) ??
+    (await this.fetchVenueTime()) ??
     (afterClockStep ? undefined : dayjs.utc());
 
   public syncBybitClientServerTime = async (time?: number) => {
