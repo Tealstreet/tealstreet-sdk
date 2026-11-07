@@ -624,7 +624,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             r#"{"error":[]}"#,
-            rejected(ErrorKind::RateLimited),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
             "Kraken Spot HTTP 429",
         ),
     ] {
@@ -1077,7 +1077,7 @@ fn http_429_signature_error_must_not_resend_add_order() {
 
 #[test]
 fn beta_unproven_status_never_grants_a_signature_resend() {
-    for status in [408, 500, 503] {
+    for status in [429, 408, 500, 502, 503, 504] {
         let (mut e, _, _) = ready(false);
         e.handle(
             NOW,
@@ -1098,18 +1098,104 @@ fn beta_unproven_status_never_grants_a_signature_resend() {
                 },
             },
         );
-        let actions = e.drain_plain().collect::<Vec<_>>();
-        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {error, ..}) if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
         assert!(
             !actions
                 .iter()
-                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder")))
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder"))),
+            "HTTP {status} must not physically dispatch another AddOrder: {actions:?}"
+        );
+        assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandFailed {command: 81, error}) if error.outcome == Some(safe_cex_engine::Outcome::Unknown))));
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("OpenOrders"))),
+            "HTTP {status} must reconcile the uncertain placement: {actions:?}"
         );
         assert!(
             !actions
                 .iter()
                 .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
         );
+    }
+}
+
+#[test]
+fn rate_limited_writes_ignore_native_auth_and_refusal_codes() {
+    use safe_cex_engine::{ErrorKind, Outcome, Response};
+    for native in [
+        "EAPI:Invalid signature",
+        "EAPI:Invalid key",
+        "EAPI:Invalid nonce",
+        "EGeneral:Permission denied",
+        "EAPI:Rate limit exceeded",
+        "EOrder:Insufficient funds",
+    ] {
+        for (command, path) in [
+            (
+                Command::PlaceOrders {
+                    command: 81,
+                    orders: vec![opts("limit", 99.)],
+                },
+                "AddOrder",
+            ),
+            (
+                Command::AmendOrder {
+                    command: 81,
+                    id: "O-100".into(),
+                    price: Some(98.),
+                    amount: None,
+                },
+                "AmendOrder",
+            ),
+            (
+                Command::CancelOrders {
+                    command: 81,
+                    ids: vec!["O-100".into()],
+                },
+                "CancelOrder",
+            ),
+        ] {
+            let (mut e, _, _) = ready(false);
+            e.handle(NOW, Event::Command(command));
+            let first = requests(&mut e).pop().unwrap();
+            assert!(first.url.ends_with(path));
+            let body = format!(r#"{{"error":["{native}"]}}"#);
+            e.handle(
+                NOW,
+                Event::HttpResponse {
+                    request: first.id,
+                    response: Response {
+                        status: 429,
+                        headers: "",
+                        body: &body,
+                    },
+                },
+            );
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+            assert!(
+                !actions.iter().any(|a| matches!(a, Action::Http(r)
+                    if r.url.ends_with("AddOrder") || r.url.ends_with("AmendOrder")
+                        || r.url.ends_with("CancelOrder") || r.url.ends_with("CancelAll"))),
+                "{path} / {native} must not resend or fall back: {actions:?}"
+            );
+            let errors: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 81, error }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(errors.len(), 1, "{path} / {native}: {actions:?}");
+            assert_eq!(errors[0].outcome, Some(Outcome::Unknown));
+            assert_eq!(errors[0].kind, Some(ErrorKind::RateLimited));
+            assert_eq!(errors[0].message, format!("Kraken Spot: {native}"));
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
+            );
+        }
     }
 }
 
