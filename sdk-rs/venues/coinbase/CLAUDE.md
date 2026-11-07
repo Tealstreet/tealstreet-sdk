@@ -4,6 +4,34 @@
 portfolio type and can select INTX, CFM or Spot. Public-only non-spot accounts
 read the drb USDC perpetual catalogue and public stream.
 
+## Advanced Trade ambiguous writes
+
+Released Advanced Trade creates, edits and cancellations answered with HTTP
+408, 429 or 5xx remain `Unknown`, including ordinary and protective orders.
+Native `RESOURCE_EXHAUSTED` / `rate_limit_exceeded` codes also remain unknown;
+only native code fields count, not message substrings. Status uncertainty takes
+precedence over native refusal text. Preserve confirmed siblings in batch cancels.
+
+Unknown writes say "Check Open Orders", retain placement reconciliation state
+and never resend automatically. Genuine documented refusals remain `Rejected`.
+Account settings and protective amendments are unsupported before dispatch and
+remain `NotSent`; they have no HTTP failure matrix.
+
+Native codes: [Coinbase error messages](https://docs.cdp.coinbase.com/coinbase-app/api-architecture/error-messages).
+Fixtures: `tests/trading.rs` (`advanced_*`); no live credentials are needed.
+
+DRB candle history rounds an implicit or host-clamped end time down to whole
+milliseconds, since the SDK scheduling clock can be fractional. Explicit range
+inputs still require whole milliseconds. A valid summary or stream ticker can
+restore a catalogue market omitted or malformed in the initial ticker seed;
+other venues retain the shared store's seed policy.
+
+DRB auth invalidation fences both accepted and issued authentication starts.
+Replies from an exchange begun before invalidation cannot restore its token.
+Fresh exchanges need a strictly later start timestamp, including when the host
+clock has not advanced. JWT creation records issued starts without changing the
+public auth API signatures; cached tokens retain their zeroizing lifetime.
+
 ## INTX startup migration message
 
 When a positively identified INTX bootstrap read is unavailable (HTTP 404, 408,

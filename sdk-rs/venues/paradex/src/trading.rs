@@ -156,27 +156,34 @@ struct Job {
     restoring: Option<(String, OrderSide, OrderType)>,
 }
 impl Job {
-    /// One failure keeps its classification; several join their text and share
-    /// an outcome only when they agree. Any Unknown leg makes the command Unknown.
+    /// Joined failures retain the first Unknown leg's diagnostics and classification.
+    /// Without an Unknown leg, an outcome is shared only when every failure agrees.
     fn failure(mut self) -> VenueError {
         let unknown = self
             .errors
             .iter()
-            .any(|e| e.outcome == Some(Outcome::Unknown));
+            .position(|e| e.outcome == Some(Outcome::Unknown));
         let mut error = if self.errors.len() == 1 {
             self.errors.pop().expect("one failure")
         } else {
             let outcome = self.errors[0].outcome;
-            let message: Vec<_> = self.errors.iter().map(|e| e.message.as_str()).collect();
-            let error = VenueError::new(message.join_with("; "));
-            match outcome {
-                Some(outcome) if self.errors.iter().all(|e| e.outcome == Some(outcome)) => {
-                    error.outcome(outcome)
+            let messages: Vec<_> = self.errors.iter().map(|e| e.message.as_str()).collect();
+            let message = messages.join_with("; ");
+            if let Some(index) = unknown {
+                let mut error = self.errors.remove(index);
+                error.message = message;
+                error
+            } else {
+                let error = VenueError::new(message);
+                match outcome {
+                    Some(outcome) if self.errors.iter().all(|e| e.outcome == Some(outcome)) => {
+                        error.outcome(outcome)
+                    }
+                    _ => error,
                 }
-                _ => error,
             }
         };
-        if unknown {
+        if unknown.is_some() {
             error.outcome = Some(Outcome::Unknown);
         } else if (self.effective || !self.results.is_empty())
             && matches!(error.outcome, Some(Outcome::Rejected | Outcome::NotSent))
@@ -1246,7 +1253,7 @@ impl Trading {
         } = &request.kind
         {
             let result = crate::success(response)
-                .map_err(|error| answer_failure(response.status, error))
+                .map_err(|error| write_failure(response.status, error))
                 .and_then(|()| decode_placement(response.body, expected, *batch).map_err(unproven));
             let result = match result {
                 Ok(PlacementResult {
@@ -1297,7 +1304,7 @@ impl Trading {
             Ok(Vec::new())
         } else {
             result.map_err(|error| match crate::success(response) {
-                Err(_) => answer_failure(response.status, error),
+                Err(_) => write_failure(response.status, error),
                 Ok(()) => unproven(error),
             })
         };
@@ -1416,6 +1423,9 @@ impl Trading {
                 }
             }
             Err(mut error) => {
+                if error.outcome == Some(Outcome::Unknown) {
+                    error = ambiguous_write(error);
+                }
                 let gone_stop = match &request.kind {
                     Kind::Place {
                         replaces: Some(stop),
@@ -2355,6 +2365,24 @@ fn answer_failure(status: u16, message: String) -> VenueError {
         400..=499 => rejected(error, ErrorKind::Rejected),
         _ => error.outcome(Outcome::Unknown),
     }
+}
+
+/// Legacy dispatched writes do not pass the engine's HTTP proof boundary.
+/// Weaken the failure before job aggregation or protective restore decisions;
+/// keep read failures and definitive native refusals unchanged.
+fn write_failure(status: u16, message: String) -> VenueError {
+    let error = answer_failure(status, message);
+    if matches!(status, 408 | 429 | 500..) {
+        ambiguous_write(error)
+    } else {
+        error
+    }
+}
+
+fn ambiguous_write(mut error: VenueError) -> VenueError {
+    error.venue_message.get_or_insert(error.message);
+    error.message = "Paradex write outcome is unknown. Check Open Orders".into();
+    error.outcome(Outcome::Unknown)
 }
 
 #[cfg(test)]

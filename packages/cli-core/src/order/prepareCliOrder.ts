@@ -77,8 +77,8 @@ export const prepareCliOrders = <T extends { symbol: string; type: PlaceOrderOpt
 ): PlaceOrderOpts[] => orders.map((order) => prepareCliOrder(exchange, order));
 
 /**
- * Round an amend's price to the venue tick. `bump` and `move` shift a resting
- * order's price by an offset and send the result raw.
+ * Round and validate a price for amends and order-price notional sizing.
+ * `bump` and `move` shift a resting order's price by an offset and send the result raw.
  *
  * Deliberately price-only: `roundOrderSizeToNearest` is the amend SIZE rule
  * and neither command touches size, so pulling it in here would invite a
