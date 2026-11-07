@@ -42,6 +42,7 @@ const fakeEngine = ({ supported = true, frameFed = true, venue = 'bybit' as Exch
       }),
     );
   const engine = {
+    syncHostTime: () => true,
     capabilities: () => engineCapabilities(venue),
     construction: () => JSON.stringify({ frameFed, canSign: true, publicDataOnly: false }),
     start: () => {

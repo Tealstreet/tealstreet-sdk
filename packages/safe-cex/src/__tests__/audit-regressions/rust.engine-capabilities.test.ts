@@ -180,6 +180,7 @@ describe('Rust bridge routes from the engine capability record', () => {
 
   it('validates scheduleCancel before JSON and preserves arm/clear through the native command', async () => {
     const now = 1_800_000_000_000;
+    vi.spyOn(performance, 'now').mockReturnValue(0);
     vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(now);
     const { exchange, commands, commandTimes } = fixture({}, 'hyperliquid');
     await exchange.start();

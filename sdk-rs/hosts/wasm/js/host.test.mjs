@@ -937,3 +937,20 @@ for (const channel of ['private', 'public']) {
     host.dispose();
   });
 }
+
+
+test('host UTC synchronization uses scheduling time without changing it or allowing missing support', () => {
+  const calls = [];
+  let now = 1000;
+  const host = new EngineHost({ syncHostTime: (raw, utc) => { calls.push([raw, utc]); return Number.isFinite(utc); } }, { now: () => now });
+  host.syncHostTime(1800000000000);
+  now += 12000;
+  host.syncHostTime(1800000000000 - 162 * 86400000);
+  assert.deepEqual(calls, [[1000, 1800000000000], [13000, 1800000000000 - 162 * 86400000]]);
+  assert.equal(host.transport.now(), 13000);
+  assert.throws(() => host.syncHostTime(NaN), /refused host protocol time/);
+  host.dispose();
+  const old = new EngineHost({}, { now: () => 1000 });
+  assert.throws(() => old.syncHostTime(1800000000000), /does not support separate protocol time/);
+  old.dispose();
+});

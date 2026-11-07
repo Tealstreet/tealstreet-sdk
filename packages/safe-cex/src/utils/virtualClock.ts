@@ -33,6 +33,7 @@ class VirtualClock {
   // from `mapOrder` / `mapPosition` / `lastUpdate` writes / etc.
   // (~209 callsites in safe-cex), this was steady allocator pressure.
   private offsetMs = 0;
+  private receivedTimeSync = false;
   private syncInFlight: Promise<void> | null = null;
   private serverTimeSource: ServerTimeSource | undefined;
   private readonly syncListeners = new Set<TimeSyncListener>();
@@ -44,6 +45,21 @@ class VirtualClock {
       this.scheduleNextSync();
     } else if (this.syncInFlight) {
       await this.syncInFlight;
+    }
+    // A browser worker receives time from its page. Do not anchor an engine's
+    // epoch-shaped monotonic clock before that first synchronization arrives.
+    if (!isNodeOrBunRuntime() && typeof window === 'undefined' && !this.receivedTimeSync) {
+      await new Promise<void>((resolve, reject) => {
+        const unsubscribe = this.subscribeToTimeSync(() => {
+          clearTimeout(timeout);
+          unsubscribe();
+          resolve();
+        });
+        const timeout = setTimeout(() => {
+          unsubscribe();
+          reject(new Error('Clock synchronization did not arrive from the host'));
+        }, 30_000);
+      });
     }
   };
 
@@ -110,6 +126,8 @@ class VirtualClock {
       this.client = client;
       this.offsetMs = server.valueOf() - client.valueOf();
     }
+    this.receivedTimeSync = true;
+    this.notifyTimeSync();
   };
 
   private scheduleNextSync = () => {
@@ -177,7 +195,6 @@ class VirtualClock {
     if (typeof window === 'undefined') return;
 
     this.syncFromServerTime((await this.fetchServerTime()).valueOf());
-    this.notifyTimeSync();
   };
 
   private fetchServerTime = async () =>
@@ -209,6 +226,8 @@ class VirtualClock {
     } else {
       this.offsetMs = this.server.valueOf() - this.client.valueOf();
     }
+    this.receivedTimeSync = true;
+    this.notifyTimeSync();
   };
 
   // Bybit-specific sync wants Bybit's actual clock, so venue time leads here.
