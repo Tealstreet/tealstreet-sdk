@@ -1444,7 +1444,6 @@ pub enum ExchangeName {
     Bitunix,
     #[serde(rename = "blofin")]
     Blofin,
-
     #[serde(rename = "bybit")]
     Bybit,
     #[serde(rename = "bybitdemo")]
@@ -5017,7 +5016,6 @@ mod strict_codecs {
         Bitunix,
         #[serde(rename = "blofin")]
         Blofin,
-
         #[serde(rename = "bybit")]
         Bybit,
         #[serde(rename = "bybitdemo")]

@@ -12,7 +12,6 @@ mod mexc_setup;
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -34,7 +33,7 @@ mod mexc_setup;
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-venues requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
+    "safe-cex-venues requires at least one venue feature: paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, kucoinspot, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, txflow, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 #[cfg(any(feature = "kucoin", feature = "kucoinspot"))]
@@ -87,8 +86,6 @@ use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 use safe_cex_venue_bitunix::{BitunixFutures, Options as BitunixOptions};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
-#[cfg(feature = "breakoutprop")]
-use safe_cex_venue_breakoutprop::{BreakoutProp, Options as BreakoutOptions};
 #[cfg(feature = "bybit")]
 use safe_cex_venue_bybit::{
     BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
@@ -247,19 +244,6 @@ fn finish<T: Visit, V: Venue + 'static>(
     }
     engine.set_log_level(startup.log_level);
     Ok(visitor.visit(engine))
-}
-
-#[cfg(feature = "breakoutprop")]
-fn breakoutprop_rules(options: &EngineOptions) -> Result<(), VenueError> {
-    // Market data needs a DXtrade session too, so public accounts are not exempt.
-    if options.key.as_deref().is_none_or(str::is_empty)
-        || options.secret.as_deref().is_none_or(str::is_empty)
-    {
-        return Err(invalid(
-            "BreakoutProp market data requires a legacy DXtrade username and password",
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(feature = "polymarket")]
@@ -479,8 +463,6 @@ fn orderly_signer(
 /// Whether this build constructs `venue`.
 pub fn supported(venue: &str) -> bool {
     match venue {
-        #[cfg(feature = "breakoutprop")]
-        "breakoutprop" => true,
         #[cfg(feature = "grvt")]
         "grvt" => true,
         #[cfg(feature = "coinbase")]
@@ -549,7 +531,6 @@ pub fn supported(venue: &str) -> bool {
     feature = "binance",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "blofin",
@@ -571,7 +552,7 @@ pub fn supported(venue: &str) -> bool {
     feature = "okx"
 ))]
 fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), VenueError> {
-    const DELEGATED: [&str; 9] = [
+    const DELEGATED: [&str; 8] = [
         "hyperliquid",
         "paradex",
         "lighter",
@@ -580,7 +561,6 @@ fn local_signing_rules(venue: &str, options: &EngineOptions) -> Result<(), Venue
         "coinbase",
         "coinbasespot",
         "polymarket",
-        "breakoutprop",
     ];
     // Without a remote signer, missing credentials simply mean a public account.
     if options.public_data_only || !options.remote_signing || DELEGATED.contains(&venue) {
@@ -1386,7 +1366,6 @@ pub fn build_with_signer<T: Visit>(
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
-        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "blofin",
@@ -1450,35 +1429,6 @@ pub fn build_with_signer<T: Visit>(
         },
     };
     match venue {
-        #[cfg(feature = "breakoutprop")]
-        "breakoutprop" => {
-            breakoutprop_rules(&options)?;
-            finish(
-                visitor,
-                policy,
-                startup,
-                Engine::new(
-                    BreakoutProp::new(BreakoutOptions {
-                        key: options.key.take().unwrap_or_default(),
-                        secret: options.secret.take().unwrap_or_default(),
-                        subaccount: options.subaccount.take(),
-                        public_data_only: options.public_data_only,
-                        tick_interval: if options.polling_enabled == Some(false) {
-                            f64::INFINITY
-                        } else {
-                            safe_cex_engine::engine::bounded_tick_interval(
-                                options.tick_interval.take().unwrap_or(2_000.0),
-                            )
-                        },
-                        timeout_ms: options
-                            .recv_window
-                            .unwrap_or(20_000.0)
-                            .clamp(1.0, u32::MAX as f64) as u32,
-                    }),
-                    entropy,
-                )?,
-            )
-        }
         #[cfg(feature = "grvt")]
         "grvt" => finish(
             visitor,
@@ -2336,7 +2286,6 @@ pub struct KucoinExtra {
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -2465,7 +2414,6 @@ pub struct EngineOptions {
         feature = "binance",
         feature = "apexomni",
         feature = "asterdex",
-        feature = "breakoutprop",
         feature = "kucoin",
         feature = "kucoinspot",
         feature = "blofin",
@@ -2503,7 +2451,6 @@ pub struct EngineOptions {
     #[cfg(any(
         feature = "backpack",
         feature = "bitrue",
-        feature = "breakoutprop",
         feature = "binance",
         feature = "bybit",
         feature = "mexc"
@@ -2563,15 +2510,9 @@ pub struct EngineOptions {
     #[cfg(feature = "bybit")]
     #[serde(default)]
     pub hyrotrader: Option<HyroConfig>,
-    #[cfg(any(feature = "orderly", feature = "breakoutprop"))]
+    #[cfg(feature = "orderly")]
     #[serde(default)]
     pub tick_interval: Option<f64>,
-    #[cfg(feature = "breakoutprop")]
-    #[serde(default)]
-    pub subaccount: Option<String>,
-    #[cfg(feature = "breakoutprop")]
-    #[serde(default)]
-    pub polling_enabled: Option<bool>,
 }
 #[cfg(any(
     feature = "coinbase",
@@ -2580,7 +2521,6 @@ pub struct EngineOptions {
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",
@@ -2649,7 +2589,6 @@ impl EngineOptions {
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
-    feature = "breakoutprop",
     feature = "kucoin",
     feature = "kucoinspot",
     feature = "polymarket",

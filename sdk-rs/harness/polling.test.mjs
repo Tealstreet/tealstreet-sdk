@@ -422,11 +422,35 @@ const sessionVenue = {
     if (record.url?.endsWith('/login')) return {
       ...record,
       requestBody: JSON.stringify({ username: 'replay-key', password: 'replay-secret' }),
-      body: JSON.stringify({ sessionToken: 'replay-session', timeout: '00:30:00' }),
+      body: record.status === 200 ? JSON.stringify({ sessionToken: 'replay-session', timeout: '00:30:00' }) : record.body,
     };
     return record;
   },
 };
+
+test('sanitized session seeds survive a startup delay and retain definitive HTTP rejection', () => {
+  const venue = { ...sessionVenue, polling: true, isWrite: () => false };
+  for (const status of [200, 401]) {
+    const options = { key: 'actual-login', secret: 'actual-password' };
+    const policy = createRecordingPolicy(venue, options);
+    const timeline = createRecordingTimeline(venue);
+    const login = timeline(policy.sanitize({
+      type: 'http', t: 6500, method: 'POST', url: 'https://example.test/login', status,
+      requestBody: JSON.stringify({ username: options.key, password: options.secret }),
+      body: JSON.stringify(status === 200 ? { sessionToken: 'actual-session', timeout: '00:30:00' } : { message: 'Invalid credentials' }),
+    }));
+    assert.equal(login.t, 6500);
+    assert.equal(login.availableAfter, undefined);
+    assert.ok(!JSON.stringify(login).includes('actual-'));
+    const tape = new Tape([login], venue);
+    const response = tape.respond('POST', login.url, JSON.stringify({ username: 'replay-key', password: 'replay-secret' }));
+    assert.equal(response.status, status);
+    assert.deepEqual(JSON.parse(response.body), status === 200
+      ? { sessionToken: 'replay-session', timeout: '00:30:00' }
+      : { message: 'Invalid credentials' });
+    assert.equal(tape.unserved, 0);
+  }
+});
 
 test('credentialed recording substitutes login and removes response headers', () => {
   const policy = createRecordingPolicy(sessionVenue, { key: 'actual-login', secret: 'actual-password' });
