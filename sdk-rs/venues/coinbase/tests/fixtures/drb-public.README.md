@@ -35,6 +35,13 @@ rejects legacy hosts and authorization headers, and reconstructs every recorded
 book change independently. It also checks funding, candle and trade units,
 duplicate suppression, and immediate book invalidation on sequence gaps.
 
+The WASM gate also runs against the combined module with
+`node --import tsx --test sdk-rs/harness/coinbase-drb-public.integration.mjs`.
+Its transport uses `prepareRecordedHttp` for the managed prepare/bind/claim
+lifecycle before dispatching captured replies. A startup failure prints the
+request, response, stream-subscription and native-event trace; the deadline stays
+30 seconds for both combined and family builds.
+
 The HTTP capture includes funding history for protocol reference; the SDK's
 public funding surface is the ticker's projected `funding_8h` rate and next
 eight-hour settlement time. No account income ledger is inferred from public
