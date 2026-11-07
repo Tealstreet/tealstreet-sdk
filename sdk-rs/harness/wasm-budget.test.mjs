@@ -729,3 +729,13 @@ test('#3191 run 42249705679 retains measured Paradex headroom', () => {
   assert.equal(wasmBudgetError(cap, 'venue', 'paradex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'paradex'), /exceeds/);
 });
+
+test('#3221 hosted signing (run 42352558360) rounds web/node CI plus 10 KiB up to KiB', () => {
+  const measured = 2_568_219;
+  const cap = 2_579_456;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.woo, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
+  assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
+});
