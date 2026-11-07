@@ -19,9 +19,9 @@ now consumes raw credentials into the owned provider and installs opaque refs.
 The standalone `Grvt::new` compatibility API remains for native callers and
 local controls; registry and SDK construction use installed custody.
 
-The first installed-custody trading run passed 56/61 fixtures. The five RED
-protective restore cases proved that restore preflight requires a wire shape
-before signing. An unsigned preview now supplies that comparison; it never
+Five of the 61 installed-custody trading fixtures failed on protective
+restore preflight. These RED cases proved that restore preflight requires a
+wire shape before signing. An unsigned preview now supplies that comparison; it never
 reaches transport. Restored client metadata is retained in the frozen order,
 and the dispatch provider supplies and verifies the final signature.
 
@@ -54,8 +54,8 @@ used only for login. Private scalar material and opaque key refs never cross
 the delegated wire. Secondary signing is unsupported. Local construction still
 derives its signer address from custody and may discover its trading subaccount.
 
-GRVT has no signed receive window or REST clock-sync endpoint. Nonce and
-one-hour expiration are frozen once with each order. Route re-preparation signs
+This GRVT lane has no signed receive-window field or REST clock-sync operation.
+Nonce and one-hour expiration are frozen once with each order. Route re-preparation signs
 the same digest and never renews that nonce or lifetime. Device clock checks
 allow at most 30 seconds of skew; expiration still refuses. Existing provider
 recipe tests exercise stale route re-preparation, asynchronous re-signing,

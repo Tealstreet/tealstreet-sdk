@@ -501,10 +501,11 @@ test('#3150 final CI 42258955401 cap refresh: #3122 protective stop edits (run 4
 test('#3129 guarded GRVT edits (run 42145552491) retain measured headroom', () => {
   const [venue, measured, cap] = ['grvt', 1_806_590, 1_817_600];
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
-  assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+  const currentCap = WASM_VENUE_OVERRIDES[venue];
+  assert.ok(currentCap >= cap);
   assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
-  assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  assert.match(wasmBudgetError(currentCap + 1, 'venue', venue), /exceeds/);
 });
 
 test('#3170 managed KuCoin protective edits on master (run 42318845632) retain measured family headroom', () => {
@@ -728,4 +729,15 @@ test('#3191 run 42249705679 retains measured Paradex headroom', () => {
   assert.equal(wasmBudgetError(measured, 'venue', 'paradex'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'paradex'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'paradex'), /exceeds/);
+});
+
+
+test('#3227 GRVT hosted signing (run 42352873546, job 128345833529) keeps CI plus 10 KiB', () => {
+  const measured = 1_944_314;
+  const cap = 1_954_554;
+  assert.equal(cap, measured + 10 * 1024);
+  assert.equal(WASM_VENUE_OVERRIDES.grvt, cap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'grvt'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'grvt'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'grvt'), /exceeds/);
 });

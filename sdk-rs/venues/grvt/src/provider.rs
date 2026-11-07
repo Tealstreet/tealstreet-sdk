@@ -1,4 +1,4 @@
-//! Provider work over immutable GRVT orders. Installed construction is adopted separately.
+//! Dispatch-time GRVT login and immutable order signing, including hosted statements.
 use crate::account::{BUILDER_MAINNET, BUILDER_TESTNET};
 use crate::sign;
 use safe_cex_crypto::{ethereum, hex};
