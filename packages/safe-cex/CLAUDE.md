@@ -11,8 +11,11 @@ Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
 Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`), and
 Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
-policy, with no separate beta override. Robinhood is admitted through the existing Lighter
-family and remote-signing policy; its preview/production visibility flags are unchanged.
+policy, with no separate beta override. Refused `remoteSigner` accounts are told to
+turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
+accounts receive neutral delegated-signing wording. Both use the venue display
+name and retain `unsupported` / `notSent` before I/O.
+Robinhood is admitted through the existing Lighter family and remote-signing policy; its preview/production visibility flags are unchanged.
 Rust option-query capabilities remain false until the loaded native record
 explicitly enables them; a generic wrapper method alone never advertises them.
 

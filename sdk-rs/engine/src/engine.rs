@@ -826,7 +826,22 @@ impl Command {
             | Self::SetPositionMode { .. }
             | Self::SetStpMode { .. } => Intent::Setting,
             Self::Venue { .. } => Intent::Place,
-            _ => Intent::Read,
+            Self::FetchOptionChain { .. }
+            | Self::FetchOptionExpiries { .. }
+            | Self::FetchAccountGreeks { .. }
+            | Self::SetTickerSymbols { .. }
+            | Self::SubscribeOrderBook { .. }
+            | Self::UnsubscribeOrderBook { .. }
+            | Self::SubscribeCandles { .. }
+            | Self::UnsubscribeCandles { .. }
+            | Self::RepairSubscription(_)
+            | Self::FetchStpMode { .. }
+            | Self::FetchAccount { .. }
+            | Self::FetchOrderBook { .. }
+            | Self::FetchLeverage { .. }
+            | Self::FetchMaxLeverage { .. }
+            | Self::Query { .. }
+            | Self::FetchCandles { .. } => Intent::Read,
         }
     }
 
@@ -855,6 +870,31 @@ impl Command {
             | Self::Venue { command, .. } => Some(*command),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod command_intent_tests {
+    use super::Command;
+    use crate::classify::Intent;
+
+    #[test]
+    fn fetching_leverage_is_a_read() {
+        let command = Command::FetchLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+        };
+        assert_eq!(command.write_intent(), Intent::Read);
+    }
+
+    #[test]
+    fn changing_margin_type_is_a_setting_write() {
+        let command = Command::SetMarginType {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        };
+        assert_eq!(command.write_intent(), Intent::Setting);
     }
 }
 
