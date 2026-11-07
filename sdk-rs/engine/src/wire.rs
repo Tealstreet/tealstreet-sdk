@@ -56,6 +56,8 @@ pub mod section {
     /// u32 count, pad, f64 account cover (NaN when none), count u32 symbol
     /// refs, pad, count f64 symbol covers, on the writer's clock.
     pub const ORDERS_READ: u16 = 23;
+    /// Optional [ticker row, last/mark/index source-observed-at] f64 rows.
+    pub const TICKER_OBSERVATIONS: u16 = 24;
 }
 
 pub mod status_flag {
