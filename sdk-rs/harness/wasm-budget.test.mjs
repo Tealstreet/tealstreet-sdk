@@ -882,8 +882,10 @@ test('#3150 merged-tree caps retain the approved exact boundaries', () => {
 
 test('#3219 drb public consumers (run 42352093025) retain CI headroom for Coinbase and Spot', () => {
   const measured = 1_924_268;
-  const cap = 1_935_360;
-  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const minimumCap = 1_935_360;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.coinbase;
+  assert.ok(cap >= minimumCap);
   for (const venue of ['coinbase', 'coinbasespot']) {
     const family = venueFamily(venue);
     assert.equal(family, 'coinbase');
@@ -958,4 +960,18 @@ test('#3220 KuCoin hosted signing (run 42324881707, job 128258225940) keeps meas
   assert.equal(wasmBudgetError(measured, 'venue', 'kucoin'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'kucoin'), undefined);
   assert.match(wasmBudgetError(cap + 1, 'venue', 'kucoin'), /exceeds/);
+});
+
+test('#3225 private drb CI 42367168155 retains measured headroom and the exact boundary', () => {
+  const measured = 2_022_882;
+  const cap = 2_033_664;
+  assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    const family = venueFamily(venue);
+    assert.equal(family, 'coinbase');
+    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+  }
 });
