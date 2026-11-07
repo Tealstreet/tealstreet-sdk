@@ -1627,6 +1627,8 @@ impl MexcFutures {
             return;
         }
         let call = &request.call;
+        let ambiguous_batch =
+            matches!(call, Call::Batch { .. }) && matches!(response.status, 408 | 429 | 500..);
         let native_edit = matches!(call, Call::NativeEdit);
         let protective_write = self
             .trading
@@ -1646,6 +1648,8 @@ impl MexcFutures {
         let envelope = serde_json::from_str::<Envelope<'_>>(response.body);
         if let (Call::Batch { orders }, Ok(e)) = (&request.call, &envelope)
             && (200..500).contains(&response.status)
+            // A permission body cannot prove an ambiguous batch was not executed.
+            && !ambiguous_batch
             && e.success == Some(false)
             && (e.code == 511.0 || e.message.to_lowercase().contains("do not have access"))
         {
@@ -1994,6 +1998,9 @@ impl MexcFutures {
                     refused,
                     protective_write,
                 );
+                if ambiguous_batch {
+                    error.outcome = Some(Outcome::Unknown);
+                }
                 if protective_write && error.outcome.is_none() {
                     error.outcome = Some(Outcome::Unknown);
                 }

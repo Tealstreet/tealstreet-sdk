@@ -7,13 +7,14 @@ use safe_cex_engine::signing::{
 };
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Outcome, Response};
 use safe_cex_venue_woo::{Options, Woo};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 const NOW: f64 = 1_700_000_000_000.;
 const MATERIAL: &str = "fixture-signing-material";
 struct Delegate {
     local: LocalSigner,
     requests: Mutex<Vec<SignRequest>>,
-    fail: bool,
+    fail: AtomicBool,
 }
 impl Signer for Delegate {
     fn sign(&self, work: SignRequest) -> SignFuture {
@@ -22,7 +23,7 @@ impl Signer for Delegate {
     }
     fn sign_ready(&self, work: &SignRequest) -> Option<Result<SignResult, SignError>> {
         self.requests.lock().unwrap().push(work.clone());
-        Some(if self.fail {
+        Some(if self.fail.load(Ordering::SeqCst) {
             Err(SignError::Unavailable)
         } else {
             self.local.sign_now(work)
@@ -50,7 +51,7 @@ fn provider(fail: bool) -> (Arc<Delegate>, Identities) {
         Arc::new(Delegate {
             local,
             requests: Mutex::new(Vec::new()),
-            fail,
+            fail: AtomicBool::new(fail),
         }),
         identities,
     )
@@ -191,6 +192,60 @@ fn ambiguous_dispatched_writes_keep_unknown_and_are_never_replayed() {
             assert!(!format!("{actions:?}").contains(MATERIAL));
         }
     }
+}
+
+#[test]
+fn cancel_all_rate_limit_survives_the_next_legs_signing_failure() {
+    use safe_cex_engine::ErrorKind;
+    let (mut engine, provider) = engine(true, false);
+    engine.handle(
+        NOW,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 1,
+            symbol: String::new(),
+        }),
+    );
+    let first = request(&safe_cex_engine::test_support::prepared_actions(
+        &mut engine,
+        NOW,
+    ));
+    assert!(first.url.ends_with("/v3/orders/pending"));
+    provider.fail.store(true, Ordering::SeqCst);
+    engine.handle(
+        NOW + 1.,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 429,
+                headers: "",
+                body: r#"{"success":false,"code":-1003,"message":"fixture rate limit"}"#,
+            },
+        },
+    );
+    let mut actions = safe_cex_engine::test_support::prepared_actions(&mut engine, NOW + 1.);
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    for (timer, at_ms) in timers {
+        engine.handle(at_ms, Event::TimerFired { timer });
+        actions.extend(safe_cex_engine::test_support::prepared_actions(
+            &mut engine,
+            at_ms,
+        ));
+    }
+    let failure = error(&actions);
+    assert_eq!(failure.outcome, Some(Outcome::Unknown));
+    assert_eq!(failure.kind, Some(ErrorKind::RateLimited));
+    assert_eq!(failure.venue_code.as_deref(), Some("-1003"));
+    assert!(failure.message.contains("/v3/orders/pending"));
+    assert!(failure.message.contains("fixture rate limit"));
+    assert_eq!(provider.requests.lock().unwrap().len(), 2);
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(!format!("{actions:?}").contains(MATERIAL));
 }
 
 #[test]

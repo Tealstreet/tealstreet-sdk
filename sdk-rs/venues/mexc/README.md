@@ -45,3 +45,11 @@ Only a standalone stop with exact native provenance permits one put-back after a
 definitive refusal; unknown outcomes never restore or resend. See
 [`mexc-protective-edits.md`](../../../../docs/plans/callers/mexc-protective-edits.md)
 for the endpoint classes, legacy signer-window limit and native controls.
+
+## Batch refusal fallback
+
+An explicit batch-access refusal can switch ordinary orders to individual
+submits only under a non-ambiguous HTTP status. A dispatched batch answered
+408, 429 or any status at least 500 is Unknown regardless of a code 511 or
+access-denied body. It never resubmits those orders or disables batching for
+later commands. Definitive refusals retain the existing one-time paced fallback.
