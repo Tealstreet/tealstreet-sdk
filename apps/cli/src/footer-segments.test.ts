@@ -37,22 +37,22 @@ describe('renderSegment', () => {
 
   it('pnl renders signed $ + % (uPnL / |notional|) and omits with no position', () => {
     const withPos = baseState({
-      position: { side: 'long', contracts: 0.5, entryPrice: 60000, notional: 32000, unrealizedPnl: 340 },
+      position: { side: 'long', size: '0.5 BTC', entryPrice: 60000, notional: 32000, unrealizedPnl: 340 },
     });
     // 340 / 32000 * 100 = 1.06%
     expect(r({ type: 'pnl' }, withPos)).toBe('uPnL +$340 (+1.06%)');
     expect(r({ type: 'pnl' }, baseState({ position: null }))).toBe('');
     const loss = baseState({
-      position: { side: 'short', contracts: 1, entryPrice: 100, notional: 100, unrealizedPnl: -12.5 },
+      position: { side: 'short', size: '1 BTC', entryPrice: 100, notional: 100, unrealizedPnl: -12.5 },
     });
     expect(r({ type: 'pnl' }, loss)).toBe('uPnL -$12.5 (-12.50%)');
   });
 
-  it('position shows side + contracts @ entry', () => {
+  it('position shows side + base size and asset @ entry', () => {
     const s = baseState({
-      position: { side: 'long', contracts: 0.5, entryPrice: 60000, notional: 32000, unrealizedPnl: 1 },
+      position: { side: 'long', size: '240 DOGE', entryPrice: 0.1, notional: 24, unrealizedPnl: 1 },
     });
-    expect(r({ type: 'position' }, s)).toBe('LONG 0.5 @ 60,000');
+    expect(r({ type: 'position' }, s)).toBe('LONG 240 DOGE @ 0.1');
   });
 
   it('totalpnl, mark, last, funding, clock, text', () => {
