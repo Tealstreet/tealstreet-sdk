@@ -97,4 +97,9 @@ omits `id`, so the shared transport correlates that specific read through the
 engine HTTP request while retaining credit admission and the response deadline.
 Explicit wrong IDs still fail. Other RPC methods retain strict ID correlation.
 
+REST and drb share the existing Coinbase HTTP emission and public command
+completion boundaries. Public sockets also use one existing connection site;
+its scoped inventory replacement only changes the URL selection for drb.
+The frozen HTTP/completion and socket inventories gain no new call sites.
+
 See [the live tape and offline replay gate](tests/fixtures/drb-public.README.md).

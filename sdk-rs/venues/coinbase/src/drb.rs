@@ -266,7 +266,8 @@ impl Transport {
         if let Some(value) = authorization {
             headers.push(("Authorization", value.into()));
         }
-        let request = cx.request(
+        let request = crate::rest::emit(
+            cx,
             if chart_get { Method::Get } else { Method::Post },
             url,
             headers,

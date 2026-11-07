@@ -349,9 +349,13 @@ impl Coinbase {
         }
         self.public.socket = Some(
             cx.connect(
-                safe_cex_engine::SocketSpec::new(WS)
-                    .channel(SocketChannel::Public)
-                    .feed("market", self.public.recover),
+                safe_cex_engine::SocketSpec::new(if self.public.drb.active {
+                    crate::drb::PUBLIC_WS_URL
+                } else {
+                    WS
+                })
+                .channel(SocketChannel::Public)
+                .feed("market", self.public.recover),
             ),
         );
         // Suppressed public feeds never open; supervising them would only churn retries.
@@ -1170,8 +1174,8 @@ impl Coinbase {
                     } else {
                         let rows = walk.rows.into_values().collect::<Vec<_>>();
                         match serde_json::to_string(&rows).map_err(|e| e.to_string()) {
-                            Ok(data) => cx.done(command, data),
-                            Err(error) => cx.fail(command, error),
+                            Ok(data) => complete_public(cx, command, data),
+                            Err(error) => fail_public(cx, command, error),
                         };
                     };
                 }
@@ -1797,4 +1801,16 @@ fn display_round(value: f64) -> f64 {
     };
     let scale = 10f64.powi(digits);
     (value * scale).round() / scale
+}
+
+/// Common command completion boundaries for both public wire codecs.
+fn complete_public(cx: &mut Cx<'_, Pending>, command: CommandId, data: String) {
+    cx.done(command, data);
+}
+fn fail_public(
+    cx: &mut Cx<'_, Pending>,
+    command: CommandId,
+    error: impl Into<safe_cex_engine::VenueError>,
+) {
+    cx.fail(command, error);
 }

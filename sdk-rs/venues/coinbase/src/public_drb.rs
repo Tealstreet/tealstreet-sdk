@@ -1,6 +1,6 @@
 //! Public USDC perpetual data over the shared S0 JSON-RPC transport.
 use super::*;
-use crate::drb::{PUBLIC_WS_URL, RpcId};
+use crate::drb::RpcId;
 use safe_cex_engine::{ErrorKind, Query};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -197,19 +197,7 @@ impl Coinbase {
         );
     }
     fn drb_connect(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.public.socket.is_some() || self.public.supervisor.is_waiting() {
-            return;
-        }
-        self.public.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new(PUBLIC_WS_URL)
-                    .channel(SocketChannel::Public)
-                    .feed("market", self.public.recover),
-            ),
-        );
-        if cx.public_feed_policy() == PublicFeedPolicy::Direct {
-            self.public.supervisor.connecting(cx);
-        }
+        self.connect_public(cx);
     }
     fn drb_subscribe(
         &mut self,
@@ -421,7 +409,7 @@ impl Coinbase {
             Operation::Chart(mut chart) => {
                 if result["status"] != "no_data" {
                     let Some(ticks) = result["ticks"].as_array() else {
-                        cx.fail(chart.command, "Malformed Coinbase drb chart ticks");
+                        fail_public(cx, chart.command, "Malformed Coinbase drb chart ticks");
                         return;
                     };
                     let fields = ["open", "high", "low", "close", "volume"];
@@ -431,14 +419,14 @@ impl Coinbase {
                         || ticks.len() > 5001
                         || result["status"] != "ok"
                     {
-                        cx.fail(chart.command, "Malformed Coinbase drb chart arrays");
+                        fail_public(cx, chart.command, "Malformed Coinbase drb chart arrays");
                         return;
                     }
                     for (i, tick) in ticks.iter().enumerate() {
                         let Some(c) = chart_candle(
                             &json!({"tick": tick, "open":result["open"][i], "high":result["high"][i], "low":result["low"][i], "close":result["close"][i], "volume":result["volume"][i]}),
                         ) else {
-                            cx.fail(chart.command, "Invalid Coinbase drb candle");
+                            fail_public(cx, chart.command, "Invalid Coinbase drb candle");
                             return;
                         };
                         let ms = c.timestamp * 1000.;
@@ -451,7 +439,8 @@ impl Coinbase {
                 if chart.cursor < chart.end {
                     self.drb_chart_page(cx, chart);
                 } else {
-                    cx.done(
+                    complete_public(
+                        cx,
                         chart.command,
                         serde_json::to_string(&chart.rows.into_values().collect::<Vec<_>>())
                             .unwrap(),
@@ -467,18 +456,18 @@ impl Coinbase {
                     .as_array()
                     .filter(|t| t.len() <= limit as usize)
                 else {
-                    cx.fail(command, "Malformed Coinbase drb public trades");
+                    fail_public(cx, command, "Malformed Coinbase drb public trades");
                     return;
                 };
                 let mut rows = vec![];
                 for trade in trades {
                     let Some(row) = trade_result(trade, &symbol) else {
-                        cx.fail(command, "Invalid Coinbase drb public trade");
+                        fail_public(cx, command, "Invalid Coinbase drb public trade");
                         return;
                     };
                     rows.push(row);
                 }
-                cx.done(command, serde_json::to_string(&rows).unwrap());
+                complete_public(cx, command, serde_json::to_string(&rows).unwrap());
             }
         }
     }
@@ -491,10 +480,10 @@ impl Coinbase {
     fn drb_operation_failed(&mut self, cx: &mut Cx<'_, Pending>, op: Operation, error: &str) {
         match op {
             Operation::Chart(chart) => {
-                cx.fail(chart.command, error);
+                fail_public(cx, chart.command, error);
             }
             Operation::Trades { command, .. } => {
-                cx.fail(command, error);
+                fail_public(cx, command, error);
             }
             _ => {
                 for command in std::mem::take(&mut self.public.deferred) {
@@ -504,7 +493,8 @@ impl Coinbase {
                             command,
                             query: Query::PublicTrades { .. },
                         } => {
-                            cx.fail(
+                            fail_public(
+                                cx,
                                 command,
                                 safe_cex_engine::VenueError::new(
                                     "Coinbase public catalogue unavailable",
@@ -927,11 +917,11 @@ impl Coinbase {
                 to_ms,
             } => {
                 let Some(resolution) = resolution(interval) else {
-                    cx.fail(command, interval.unsupported("Coinbase drb"));
+                    fail_public(cx, command, interval.unsupported("Coinbase drb"));
                     return None;
                 };
                 if cx.store.market(&symbol).is_none() {
-                    cx.fail(command, "Unknown Coinbase drb market");
+                    fail_public(cx, command, "Unknown Coinbase drb market");
                     return None;
                 }
                 if from_ms
@@ -939,7 +929,7 @@ impl Coinbase {
                     .chain(to_ms)
                     .any(|n| !n.is_finite() || n.fract() != 0.)
                 {
-                    cx.fail(command, "Invalid Coinbase drb candle range");
+                    fail_public(cx, command, "Invalid Coinbase drb candle range");
                     return None;
                 }
                 let end = to_ms.unwrap_or(cx.now).min(cx.now);
@@ -951,11 +941,11 @@ impl Coinbase {
                     .all(|n| n.is_finite() && *n >= 0. && n.fract() == 0. && *n <= 253402300799999.)
                     || (end - start) / interval.ms() > 100_000.
                 {
-                    cx.fail(command, "Invalid Coinbase drb candle range");
+                    fail_public(cx, command, "Invalid Coinbase drb candle range");
                     return None;
                 }
                 if end <= start {
-                    cx.done(command, "[]".into());
+                    complete_public(cx, command, "[]".into());
                     return None;
                 }
                 self.drb_chart_page(
@@ -978,7 +968,7 @@ impl Coinbase {
             } => {
                 let limit = limit.unwrap_or(100);
                 if cx.store.market(&symbol).is_none() || !(1..=1000).contains(&limit) {
-                    cx.fail(command, "Invalid Coinbase drb public trade request");
+                    fail_public(cx, command, "Invalid Coinbase drb public trade request");
                     return None;
                 }
                 self.drb_request(
