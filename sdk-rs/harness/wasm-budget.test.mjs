@@ -998,3 +998,18 @@ test('#3221 run 42393607294 artifact 13582294491 retains measured Woo headroom',
   assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
   assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
 });
+
+test('#3264 Kraken Spot ambiguous-write fence (run 42403521233 at d1f8b3c2e40) retains headroom and siblings match', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['kraken', 2_136_521, 2_147_328],
+    ['krakenspot', 2_136_521, 2_147_328],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
