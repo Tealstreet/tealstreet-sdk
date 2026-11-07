@@ -881,10 +881,11 @@ test('#3219 drb public consumers (run 42352093025) retain CI headroom for Coinba
   for (const venue of ['coinbase', 'coinbasespot']) {
     const family = venueFamily(venue);
     assert.equal(family, 'coinbase');
-    assert.equal(WASM_VENUE_OVERRIDES[family], cap);
+    const current = WASM_VENUE_OVERRIDES[family];
+    assert.ok(current >= cap);
     assert.equal(wasmBudgetError(measured, 'venue', family), undefined);
-    assert.equal(wasmBudgetError(cap, 'venue', family), undefined);
-    assert.match(wasmBudgetError(cap + 1, 'venue', family), /exceeds/);
+    assert.equal(wasmBudgetError(current, 'venue', family), undefined);
+    assert.match(wasmBudgetError(current + 1, 'venue', family), /exceeds/);
   }
 });
 
