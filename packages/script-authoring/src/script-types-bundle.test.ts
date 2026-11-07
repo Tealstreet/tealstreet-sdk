@@ -14,39 +14,37 @@
  * is non-trivial — give it a generous timeout. CI invokes this check
  * explicitly, independently of package-task caching.
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { generateCoreMonacoTypes } from '../../script-api-core/scripts/generate-monaco-types';
-import { generateWebMonacoTypes } from '../../script-api-web/scripts/generate-monaco-types';
-import { CORE_TYPES_DTS, WEB_TYPES_DTS } from './script-types-bundle';
+import { generateScriptTypesBundle, renderBundleFile } from '../scripts/render-script-types-bundle';
+import { CORE_TYPES_DTS } from './script-types-bundle';
 
 const DRIFT_TEST_TIMEOUT_MS = 180_000;
 
-// Both package generators ship in the mirror; the root orchestrator does not.
-// Import them directly so missing tooling fails instead of silently skipping.
-// The empty module marker is redundant inside an ambient module declaration.
-// Only strings are built here: this gate never writes a generated file.
-function ambientModule(name: string, declarations: string): string {
-  const body = declarations.replace(/^export \{\};\s*$/gm, '').trimEnd();
-  return `declare module '${name}' {\n${body}\n}\n`;
-}
-
 describe('script-types-bundle drift', () => {
   it(
-    'committed core declarations match the current source types',
+    'the complete committed file matches the shared generator',
     () => {
-      expect(CORE_TYPES_DTS).toBe(ambientModule('@tealstreet/script-api-core', generateCoreMonacoTypes()));
+      const committed = readFileSync(resolve(__dirname, 'script-types-bundle.ts'), 'utf8');
+      expect(committed).toBe(generateScriptTypesBundle());
     },
     DRIFT_TEST_TIMEOUT_MS,
   );
 
-  it(
-    'committed web declarations match the current source types',
-    () => {
-      expect(WEB_TYPES_DTS).toBe(ambientModule('@tealstreet/script-api-web', generateWebMonacoTypes()));
-    },
-    DRIFT_TEST_TIMEOUT_MS,
-  );
+  it('normalizes the terminal empty export with NX whitespace rules', () => {
+    const core = 'export interface Example {}\nexport { Example };\nexport  {  };\n';
+    const rendered = renderBundleFile(core, 'export interface Web {}\nexport {};\n');
+    expect(rendered).toContain(
+      JSON.stringify(
+        "declare module '@tealstreet/script-api-core' {\nexport interface Example {}\nexport { Example };\n}\n",
+      ),
+    );
+    expect(rendered).toContain(
+      JSON.stringify("declare module '@tealstreet/script-api-web' {\nexport interface Web {}\n}\n"),
+    );
+  });
 });
 
 /**

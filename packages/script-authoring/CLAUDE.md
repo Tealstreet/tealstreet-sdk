@@ -179,15 +179,18 @@ shared constants let `@tealstreet/cli` leave web's dependency graph entirely.
 
 Consequences to preserve:
 
-- **The monorepo's `scripts/generate-script-types-bundle.ts` writes here.**
-  That root orchestrator is absent from the mirror; its per-package generators
-  are mirrored. Never hand-edit `script-types-bundle.ts`; fix the generators.
-- **The drift test is a release gate and must stay wired.** It re-runs the type
-  generators in memory and compares the committed declarations, which stops a
-  release shipping stale `types.d.ts` to users. It imports the mirrored package
-  generators directly; missing tooling must fail, never skip the check. Mirror
-  CI runs `corepack yarn check:script-types` explicitly before its general checks,
-  independently of Turbo caching. The check never writes generated output.
+- **Regenerate in the mirror with `corepack yarn generate:script-types`.**
+  `scripts/generate-script-types-bundle.ts` in this package writes the bundle
+  through `scripts/render-script-types-bundle.ts`. That shared module owns the
+  core/web generator calls, ambient wrapping, banner, and complete file layout.
+  NX's broader root `generate:types` orchestrator must import this helper too;
+  it is not required for mirror regeneration. Never hand-edit the bundle.
+- **The drift test is a release gate and must stay wired.** It compares the
+  entire committed file with the shared generator's in-memory result, including
+  banner and layout. Missing tooling must fail, never skip. Mirror CI runs
+  `corepack yarn check:script-types` explicitly before general checks,
+  independently of Turbo caching. The check never writes output. Regenerate
+  and commit alongside source changes using the command above.
   Its bundler's TypeScript dependency is pinned to the repository's JS compiler
   API version; the native TS7 package does not expose that API.
 - **A package must not depend on an app.** If something here needs a value from

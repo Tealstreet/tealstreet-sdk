@@ -15,6 +15,7 @@
     "build": "turbo run build",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
     "check:licenses": "node scripts/check-licenses.mjs",
+    "generate:script-types": "tsx packages/script-authoring/scripts/generate-script-types-bundle.ts",
     "check:script-types": "yarn workspace @tealstreet/script-authoring check:script-types",
     "rust:build-wasm": "bash sdk-rs/harness/build.sh",
     "rust:metadata": "node sdk-rs/safe-cex-types/scripts/generate-exchange-metadata.cjs",
