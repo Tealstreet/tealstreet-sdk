@@ -1,23 +1,5 @@
-// Keep S1 legacy startup oracles on the test-only legacy route.
-mod support {
-    pub type Driver = safe_cex_engine::Engine<crate::Coinbase>;
-    pub fn actions(e: &mut Driver) -> Vec<safe_cex_engine::Action> {
-        safe_cex_engine::test_support::prepared_now(e)
-    }
-    pub fn drb_response(method: &str, request: &safe_cex_engine::HttpRequest) -> String {
-        let row = include_str!("../fixtures/drb-public.jsonl")
-            .lines()
-            .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap())
-            .find(|r| r["method"] == method)
-            .unwrap();
-        let sent: serde_json::Value =
-            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
-        let mut body: serde_json::Value =
-            serde_json::from_str(row["body"].as_str().unwrap()).unwrap();
-        body["id"] = sent["id"].clone();
-        body.to_string()
-    }
-}
+//! Legacy INTX migration contract, selected only in this internal fixture.
+//! Production gateway startup is covered by private_drb::tests.
 
 use crate::{Coinbase, Options};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -29,14 +11,14 @@ const MOVED: &str =
     "Coinbase International moved to Coinbase's new derivatives API; an update is coming.";
 
 struct Rig {
-    engine: support::Driver,
+    engine: safe_cex_engine::Engine<Coinbase>,
     now: f64,
     timers: HashMap<TimerId, f64>,
     requests: VecDeque<HttpRequest>,
 }
 impl Rig {
     fn actions(&mut self) -> Vec<Action> {
-        let actions = support::actions(&mut self.engine);
+        let actions = safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now);
         for action in &actions {
             match action {
                 Action::SetTimer { timer, at_ms } => {
@@ -294,10 +276,10 @@ fn cfm_catalogue_failure_keeps_its_existing_handling() {
 #[test]
 fn running_drb_public_feed_failure_keeps_retrying() {
     let (mut engine, request) = start(false, false);
-    let body = support::drb_response("public/get_instruments", &request);
+    let body = drb_response("public/get_instruments", &request);
     engine.reply(&request, 200, &body);
     let request = engine.request();
-    let body = support::drb_response("public/get_book_summary_by_currency", &request);
+    let body = drb_response("public/get_book_summary_by_currency", &request);
     engine.reply(&request, 200, &body);
     let actions = engine.actions();
     let timer = actions
@@ -316,4 +298,17 @@ fn running_drb_public_feed_failure_keeps_retrying() {
     let actions = engine.actions();
     assert_not_moved(&actions);
     assert!(actions.iter().any(|a| matches!(a, Action::SetTimer { .. })));
+}
+
+fn drb_response(method: &str, request: &HttpRequest) -> String {
+    let record = include_str!("../fixtures/drb-public.jsonl")
+        .lines()
+        .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap())
+        .find(|r| r["method"] == method)
+        .unwrap();
+    let sent: serde_json::Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+    let mut body: serde_json::Value =
+        serde_json::from_str(record["body"].as_str().unwrap()).unwrap();
+    body["id"] = sent["id"].clone();
+    body.to_string()
 }

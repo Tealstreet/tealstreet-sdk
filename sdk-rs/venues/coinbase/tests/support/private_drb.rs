@@ -179,19 +179,6 @@ fn intx_startup_exchanges_cdp_key_on_drb_before_private_reads() {
     assert!(!request.url.contains("token"));
 }
 
-#[test]
-fn authenticated_intx_startup_uses_s1_catalogue_without_legacy_reads() {
-    let mut r = Rig::new(false);
-    r.select_intx();
-    let auth = r.request();
-    r.rpc(auth, json!({"access_token":"fixture-http-token","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
-    let catalogue = r.request();
-    assert_eq!(
-        catalogue.url,
-        format!("{}/public/get_instruments", crate::drb::HTTP_URL)
-    );
-}
-
 fn trade_row(id: &str, seq: u64) -> Value {
     json!({"trade_id":id,"trade_seq":seq,"order_id":"USDC-123",
         "instrument_name":"BTC_USDC-PERPETUAL","timestamp":1700000001000u64,
@@ -205,15 +192,35 @@ impl Rig {
         let auth = r.request();
         r.rpc(auth,json!({"access_token":"fixture-http-token","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
         let instruments = r.request();
-        assert!(instruments.url.ends_with("/public/get_instruments"));
-        r.rpc(instruments, json!([{"instrument_name":"BTC_USDC-PERPETUAL","kind":"future","instrument_type":"linear","settlement_period":"perpetual","settlement_currency":"USDC","base_currency":"BTC","quote_currency":"USDC","is_active":true,"tick_size":0.01,"contract_size":0.001,"min_trade_amount":0.001,"max_leverage":50.}]));
+        assert!(
+            instruments.url.ends_with("/public/get_instruments"),
+            "{}",
+            instruments.url
+        );
+        r.rpc(
+            instruments,
+            json!([{
+                "instrument_name":"BTC_USDC-PERPETUAL", "kind":"future",
+                "instrument_type":"linear", "settlement_period":"perpetual",
+                "settlement_currency":"USDC", "base_currency":"BTC", "quote_currency":"USDC",
+                "is_active":true, "tick_size":0.01, "contract_size":0.001,
+                "min_trade_amount":0.001, "max_leverage":50.
+            }]),
+        );
         let summaries = r.request();
         assert!(
             summaries
                 .url
                 .ends_with("/public/get_book_summary_by_currency")
         );
-        r.rpc(summaries, json!([{"instrument_name":"BTC_USDC-PERPETUAL","funding_8h":0.0001,"mark_price":60000.,"last":60000.}]));
+        r.rpc(
+            summaries,
+            json!([{
+                "instrument_name":"BTC_USDC-PERPETUAL", "funding_8h":0.0001,
+                "last":60000., "mark_price":60000., "estimated_delivery_price":60001.,
+                "volume":2., "volume_notional":120000., "open_interest":10.
+            }]),
+        );
         for _ in 0..3 {
             let request = r.request();
             assert!(
@@ -247,12 +254,7 @@ impl Rig {
         self.actions
             .iter()
             .find_map(|a| match a {
-                Action::WsConnect {
-                    socket,
-                    url,
-                    channel: Some(safe_cex_engine::SocketChannel::Private),
-                    ..
-                } if url == crate::drb::WS_URL => Some(*socket),
+                Action::WsConnect { socket, url, .. } if url == crate::drb::WS_URL => Some(*socket),
                 _ => None,
             })
             .expect("drb private socket")
@@ -769,4 +771,280 @@ fn shared_http_session_keeps_its_engine_identity_across_fresh_cdp_refresh() {
     r.rpc(req,json!({"access_token":"refreshed-fixture","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
     assert_eq!(r.e.venue().drb_http_session().unwrap().owner(), owner);
     assert!(r.e.venue().private_drb.bearer_revision > revision);
+}
+
+impl Rig {
+    fn rpc_error(&mut self, request: HttpRequest, code: i64, message: &str) {
+        let body: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        self.reply(
+            request,
+            json!({"jsonrpc":"2.0","id":body["id"],"error":{"code":code,"message":message}}),
+        );
+        self.collect();
+    }
+    fn command_error(&self, id: u32) -> &VenueError {
+        self.actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Notice(safe_cex_engine::Notice::CommandFailed { command, error })
+                    if *command == id =>
+                {
+                    Some(error)
+                }
+                _ => None,
+            })
+            .expect("typed command failure")
+    }
+}
+#[test]
+fn native_auth_refusal_reports_typed_startup_failure_and_never_retries() {
+    let mut r = Rig::new(false);
+    r.select_intx();
+    let request = r.request();
+    r.rpc_error(request, 10000, "authorization_required");
+    let error = r
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Notice(safe_cex_engine::Notice::StartupFailed { error, .. }) => Some(error),
+            _ => None,
+        })
+        .expect("native auth refusal must retain the engine startup refusal");
+    assert_eq!(error.kind, Some(ErrorKind::AuthInvalid));
+    assert_eq!(error.venue_code.as_deref(), Some("10000"));
+    assert_eq!(
+        error.venue_message.as_deref(),
+        Some("authorization_required")
+    );
+    for _ in 0..20 {
+        r.collect();
+        if r.timers.is_empty() {
+            break;
+        }
+        r.timers.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (at, timer) = r.timers.remove(0);
+        r.now = r.now.max(at);
+        r.e.handle(r.now, Event::TimerFired { timer });
+    }
+    r.collect();
+    assert!(
+        r.http.is_empty(),
+        "a refused key must not retry authentication"
+    );
+    assert_eq!(
+        r.actions
+            .iter()
+            .filter(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            ))
+            .count(),
+        1
+    );
+}
+#[test]
+fn native_history_rate_limit_preserves_kind_code_and_native_message() {
+    let mut r = Rig::ready();
+    r.query(safe_cex_engine::Query::Fills {
+        symbol: None,
+        order_id: None,
+        from_ms: None,
+        to_ms: None,
+        limit: Some(10),
+    });
+    let request = r.request();
+    r.rpc_error(request, 10028, "too_many_requests");
+    let error = r.command_error(77);
+    assert_eq!(error.kind, Some(ErrorKind::RateLimited));
+    assert_eq!(error.venue_code.as_deref(), Some("10028"));
+    assert_eq!(error.venue_message.as_deref(), Some("too_many_requests"));
+    assert_eq!(
+        error.outcome, None,
+        "a Read classification grants no write retry authority"
+    );
+}
+#[test]
+fn history_transport_failure_preserves_network_classification() {
+    let mut r = Rig::ready();
+    r.query(safe_cex_engine::Query::Fills {
+        symbol: None,
+        order_id: None,
+        from_ms: None,
+        to_ms: None,
+        limit: Some(10),
+    });
+    let request = r.request();
+    r.e.handle(
+        r.now,
+        Event::HttpFailed {
+            request: request.id,
+            error: "offline fixture connection lost",
+        },
+    );
+    r.collect();
+    let error = r.command_error(77);
+    assert_eq!(error.kind, Some(ErrorKind::Network));
+    assert_eq!(error.venue_code, None);
+    assert_eq!(error.outcome, None);
+}
+#[test]
+fn documented_original_order_types_preserve_market_intent_and_conditional_types() {
+    // OpenAPI original_order_type is optional and closed to market/market_limit.
+    // Cross every documented native order type with both original variants.
+    for native in [
+        "limit",
+        "market",
+        "market_limit",
+        "stop_limit",
+        "stop_market",
+        "take_limit",
+        "take_market",
+        "trailing_stop",
+    ] {
+        for original in [None, Some("market"), Some("market_limit")] {
+            let mut row = order_row();
+            row["order_type"] = json!(native);
+            if let Some(original) = original {
+                row["original_order_type"] = json!(original);
+            }
+            let conditional = matches!(
+                native,
+                "stop_limit" | "stop_market" | "take_limit" | "take_market" | "trailing_stop"
+            );
+            if conditional {
+                row["trigger_price"] = json!(55000.);
+                row["trigger"] = json!("mark_price");
+            }
+            let expected = match native {
+                "limit" if original.is_none() => OrderType::Limit,
+                "limit" | "market" | "market_limit" => OrderType::Market,
+                "stop_limit" | "stop_market" => OrderType::StopLoss,
+                "take_limit" | "take_market" => OrderType::TakeProfit,
+                "trailing_stop" => OrderType::TrailingStopLoss,
+                _ => unreachable!(),
+            };
+            let mapped = order(row).unwrap();
+            assert_eq!(mapped.kind, expected, "{native} / {original:?}");
+            assert_eq!(mapped.trigger_type.is_some(), conditional);
+        }
+    }
+    for original in [
+        json!("limit"),
+        json!("stop_market"),
+        json!("unknown"),
+        json!(42),
+        Value::Null,
+    ] {
+        let mut row = order_row();
+        row["original_order_type"] = original;
+        assert!(
+            order(row).is_err(),
+            "unknown original types cannot fall back to Limit"
+        );
+    }
+}
+#[test]
+fn live_internal_limits_display_original_market_type() {
+    let mut r = Rig::ready();
+    let socket = r.subscribe();
+    let mut row = order_row();
+    row["original_order_type"] = json!("market");
+    row["last_update_timestamp"] = json!(1700000002000u64);
+    r.notification(socket, CHANNELS[0], json!({"orders":[row]}));
+    assert_eq!(
+        r.e.store().order("USDC-123").unwrap().kind,
+        OrderType::Market
+    );
+}
+#[test]
+fn historical_internal_limits_display_original_market_type() {
+    let mut r = Rig::ready();
+    r.query(safe_cex_engine::Query::OrderHistory {
+        symbol: None,
+        from_ms: None,
+        to_ms: None,
+        limit: Some(1),
+    });
+    let request = r.request();
+    assert!(request.url.ends_with("get_order_history_by_currency"));
+    let mut row = order_row();
+    row["original_order_type"] = json!("market");
+    row["order_state"] = json!("filled");
+    row["filled_amount"] = row["amount"].clone();
+    r.rpc(request, json!({"orders":[row],"continuation":null}));
+    r.collect();
+    assert_eq!(r.command_result(77).unwrap()[0]["type"], "market");
+}
+
+#[test]
+fn authenticated_gateway_suppresses_legacy_notice_before_account_ready() {
+    use safe_cex_engine::test_support::ProbeVenue;
+    let mut venue = Coinbase::new(Options::default()).unwrap();
+    venue.private_drb.active = true;
+    let probe = ProbeVenue::new(venue, |venue: &mut Coinbase, cx: &mut Cx<'_, Pending>| {
+        assert!(!venue.fail_moved_intx_startup(cx, true));
+        assert!(
+            !venue.intx_startup_failed,
+            "suppression must precede the terminal latch"
+        );
+    });
+    let mut e = safe_cex_engine::test_support::seeded_engine(probe);
+    e.start(1000.);
+    assert!(
+        !safe_cex_engine::test_support::prepared_actions(&mut e, 1000.)
+            .iter()
+            .any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            ))
+    );
+}
+
+#[test]
+fn private_state_uses_the_same_symbols_as_the_public_catalogue() {
+    let r = Rig::ready();
+    let store = r.e.store();
+    assert!(store.loaded().markets && store.loaded().tickers);
+    for order in store.orders() {
+        assert!(store.market(&order.symbol).is_some(), "{}", order.symbol);
+    }
+    for position in store.positions() {
+        assert!(
+            store.market(&position.symbol).is_some(),
+            "{}",
+            position.symbol
+        );
+    }
+    assert_eq!(store.orders().len(), 1);
+    assert_eq!(store.positions().len(), 1);
+}
+
+#[test]
+fn authenticated_gateway_catalogue_failure_never_reports_legacy_migration() {
+    let mut r = Rig::new(false);
+    r.select_intx();
+    let auth = r.request();
+    r.rpc(auth, json!({"access_token":"fixture-http-token","expires_in":900,"scope":"trade:read","token_type":"bearer"}));
+    let instruments = r.request();
+    assert!(instruments.url.ends_with("/public/get_instruments"));
+    r.e.handle(
+        r.now,
+        Event::HttpResponse {
+            request: instruments.id,
+            response: Response {
+                status: 502,
+                headers: "",
+                body: "Bad Gateway",
+            },
+        },
+    );
+    r.collect();
+    assert!(r.e.venue().drb_authenticated());
+    assert!(!r.e.venue().intx_startup_failed);
+    assert!(!r.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+    let retry = r.request();
+    assert!(retry.url.ends_with("/public/get_instruments"));
 }

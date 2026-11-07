@@ -5,6 +5,7 @@ mod history;
 #[path = "private_drb_wire.rs"]
 mod wire;
 use crate::{Coinbase, Pending, drb, drb_auth};
+use safe_cex_engine::classify::{self, Intent, Native, NativeCode, Released};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{
@@ -86,6 +87,7 @@ struct WsRequest {
 pub(crate) struct Private {
     pub(crate) enabled: bool,
     active: bool,
+    auth_refused: bool,
     ready: bool,
     http: drb_auth::Session,
     bearer: Option<Session>,
@@ -114,6 +116,7 @@ impl Default for Private {
         Self {
             enabled: false,
             active: false,
+            auth_refused: false,
             ready: false,
             http: drb_auth::Session::new(drb::Channel::Http),
             bearer: None,
@@ -150,6 +153,28 @@ fn policy() -> Policy {
 }
 fn warn(cx: &mut Cx<'_, Pending>, message: impl Into<String>) {
     cx.notice(Level::Warn, code::REQUEST_FAILED, message);
+}
+/// Project S0's verdict without reclassifying native strings or acquiring any
+/// mutation/resend authority. Native fields remain structured error evidence.
+fn rpc_read_error(
+    failure: &drb::Failure,
+    released: Released<'_>,
+    message: impl Into<String>,
+) -> VenueError {
+    let native = failure.code.map(|code| Native {
+        code: NativeCode::Int(code),
+        message: failure
+            .rpc_error
+            .as_ref()
+            .map_or("", |error| error.message.as_str()),
+    });
+    classify::error(
+        failure.verdict,
+        Intent::Read,
+        released,
+        native.as_ref(),
+        message,
+    )
 }
 fn rows(v: Value) -> Result<Vec<Value>, String> {
     let Value::Array(rows) = v else {
@@ -214,7 +239,7 @@ impl Coinbase {
         self.drb_schedule(cx);
     }
     fn drb_schedule(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.private_drb.timer.is_none() {
+        if !self.private_drb.auth_refused && self.private_drb.timer.is_none() {
             self.private_drb.timer = Some(cx.set_timer(1000.));
         }
     }
@@ -230,6 +255,9 @@ impl Coinbase {
     /// command root. Consumers retain that root while authentication is pending.
     pub(crate) fn drb_ensure_http(&mut self, cx: &mut Cx<'_, Pending>) {
         self.private_drb.now = cx.now;
+        if self.private_drb.auth_refused {
+            return;
+        }
         if !self.private_drb.enabled {
             if self.account.is_intx() && !self.options.spot_only {
                 self.drb_private_start(cx);
@@ -440,6 +468,14 @@ impl Coinbase {
                 }
             }
             Err(failure) => {
+                let error = rpc_read_error(
+                    &failure,
+                    Released::Response(&response),
+                    format!(
+                        "drb private read failed (HTTP {}, code {:?})",
+                        response.status, failure.code
+                    ),
+                );
                 if matches!(read.kind, Kind::Auth)
                     && matches!(
                         failure.verdict,
@@ -457,25 +493,41 @@ impl Coinbase {
                     );
                 }
                 if read.bearer_revision == self.private_drb.bearer_revision
-                    && (matches!(failure.code, Some(10000 | 13009)) || response.status == 401)
+                    && matches!(
+                        error.kind,
+                        Some(
+                            ErrorKind::AuthInvalid
+                                | ErrorKind::AuthExpired
+                                | ErrorKind::AuthPermission
+                        )
+                    )
                 {
                     self.private_drb.http.invalidate();
                     self.private_drb.bearer_revision += 1;
                     self.private_drb.active = false;
+                    let loaded = cx.store.loaded();
+                    if error.kind != Some(ErrorKind::AuthExpired)
+                        || !(loaded.balance && loaded.orders && loaded.positions)
+                    {
+                        self.private_drb.auth_refused = true;
+                        if let Some(timer) = self.private_drb.timer.take() {
+                            cx.clear_timer(timer);
+                        }
+                        if let Some(socket) = self.private_drb.socket {
+                            self.drb_private_close(cx, socket);
+                        }
+                        if !cx.startup_read_refused(&error) {
+                            cx.notice_error(Level::Error, code::AUTH_REJECTED, &error);
+                        }
+                    }
                 }
-                self.drb_read_failed(
-                    cx,
-                    read.kind,
-                    VenueError::new(format!(
-                        "drb private read failed (HTTP {}, code {:?})",
-                        response.status, failure.code
-                    )),
-                );
+                self.drb_read_failed(cx, read.kind, error);
             }
         }
         let _ = cx.finish_http_context(&read.context);
     }
     fn drb_read_failed(&mut self, cx: &mut Cx<'_, Pending>, kind: Kind, error: VenueError) {
+        cx.startup_read_failure(kind.sections(), &error);
         match kind {
             Kind::History(h) => {
                 let _ = h.owner.finish(cx, Err(error));
@@ -483,13 +535,19 @@ impl Coinbase {
             Kind::Auth => {
                 self.private_drb.http.invalidate();
                 self.private_drb.active = false;
+                if self.private_drb.auth_refused {
+                    return;
+                }
                 self.private_drb.failures = self.private_drb.failures.saturating_add(1);
                 self.private_drb.auth_retry_at = cx.now
                     + safe_cex_engine::backoff::Backoff::new(2000., 5, 60000.)
                         .delay(self.private_drb.failures);
-                warn(cx, error.message);
+                cx.notice_error(Level::Warn, code::REQUEST_FAILED, &error);
             }
-            _ => warn(cx, error.message),
+            _ if !self.private_drb.auth_refused => {
+                cx.notice_error(Level::Warn, code::REQUEST_FAILED, &error)
+            }
+            _ => {}
         }
     }
     pub(crate) fn drb_private_failed(
@@ -498,9 +556,21 @@ impl Coinbase {
         pending: Request,
         error: &str,
     ) {
+        self.drb_private_lost(cx, pending, error, ErrorKind::Network);
+    }
+    pub(crate) fn drb_private_lost(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Request,
+        message: &str,
+        kind: ErrorKind,
+    ) {
         if let Some(read) = self.private_drb.pending.remove(&pending.ticket) {
-            self.drb.failed(read.rpc, ErrorKind::Network);
-            self.drb_read_failed(cx, read.kind, VenueError::new(error));
+            let error = match self.drb.failed(read.rpc, kind) {
+                Some(failure) => rpc_read_error(&failure, Released::Transport, message),
+                None => VenueError::new(message).kind(kind),
+            };
+            self.drb_read_failed(cx, read.kind, error);
             let _ = cx.finish_http_context(&read.context);
         }
     }
@@ -871,13 +941,14 @@ impl Coinbase {
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
         for ticket in expired {
-            self.drb_private_failed(
+            self.drb_private_lost(
                 cx,
                 Request {
                     ticket,
                     sections: Sections::NONE,
                 },
                 "drb private read timed out",
+                ErrorKind::Timeout,
             );
         }
         if self.private_drb.http.needs_refresh(cx.now) {

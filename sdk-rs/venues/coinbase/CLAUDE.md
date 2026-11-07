@@ -24,8 +24,9 @@ migration message does not deactivate credentials. Public drb discovery and
 refresh failures retain their bounded retry handling and never emit this legacy
 INTX migration message.
 
-Deterministic legacy coverage: `tests/support/legacy_intx_moved.rs` (unit-only
-legacy protocol selector) and `tests/startup_resilience.rs`. Authenticated drb
-startup is covered by `tests/support/private_drb.rs`; after authentication it
-uses S1's public drb catalogue and native `{BASE}_USDC-PERPETUAL` symbols.
+Authenticated drb startup suppresses this legacy notice before the terminal latch.
+Private rows use the native symbols from the drb public catalogue.
+
+Deterministic coverage: internal `tests/support/legacy_intx_moved.rs`,
+`tests/support/private_drb.rs`, and `tests/startup_resilience.rs`.
 No live credentials or private requests are needed.

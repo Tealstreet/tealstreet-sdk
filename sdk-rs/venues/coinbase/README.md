@@ -89,7 +89,9 @@ caught legacy ES256 issuer reuse and delayed-response cooldown timing.
 ## Private derivatives reads (S2)
 
 Selecting the existing INTX portfolio exchanges the primary CDP key on drb
-before starting derivatives account reads. A successful, correlated
+before starting S1’s drb catalogue and derivatives account reads. Private
+positions, orders and fills use the catalogue’s native instrument symbols.
+A successful, correlated
 `public/auth` response enables `Coinbase::drb_authenticated()`; a configured
 key or failed exchange does not. Consumers of the INTX retirement notice should
 suppress it only when this hook is true. Spot-only and CFM accounts retain their
@@ -142,6 +144,18 @@ Offline protocol fixtures follow the [technical migration guide](https://docs.cd
 [OpenAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-openapi.json),
 and [AsyncAPI](https://docs.cdp.coinbase.com/api-reference/coinbase-deribit-app-api/adv-starbase-asyncapi.json).
 No live private authentication, account request, or order is part of validation.
+
+Private read failures retain S0's classified kind and native error fields in
+command failures and startup diagnostics. Rejected credentials terminate the
+startup through `startup_read_refused` and stop further gateway authentication
+attempts; transient network/rate failures retain their classification. Expired
+sessions on an already-loaded account can refresh. This read-error projection
+provides no write resend authority.
+
+Order decoding validates the optional `original_order_type` against the native
+`market`/`market_limit` enum. When the gateway represents one of these orders as
+an internal limit, both live state and history retain the original market type;
+ordinary limits and conditional stop/take/trailing types keep their own type.
 
 ## Trading (S3)
 

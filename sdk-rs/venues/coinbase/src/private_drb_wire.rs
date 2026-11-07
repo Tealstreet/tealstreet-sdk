@@ -4,6 +4,13 @@ use crate::drb;
 use safe_cex_engine::model::*;
 use serde_json::{Value, json};
 
+// Validate through S0's closed instrument mapping, but publish S1's native
+// symbol so private rows join the public catalogue without a second alias.
+fn instrument_symbol(value: &str) -> Result<String, String> {
+    drb::from_instrument(value)?;
+    Ok(value.to_owned())
+}
+
 pub(super) fn number(v: &Value, key: &str) -> Result<f64, String> {
     v.get(key)
         .and_then(Value::as_f64)
@@ -177,6 +184,21 @@ pub(super) fn order(v: Value) -> Result<Order, String> {
         "trailing_stop" => OrderType::TrailingStopLoss,
         _ => return Err("drb unsupported order type".into()),
     };
+    // Starbase executes API market orders as internal limits. Only the two
+    // documented original types restore market intent; trigger order types
+    // keep their conditional identity even when this metadata is present.
+    let original_market = match v.get("original_order_type") {
+        None => false,
+        Some(Value::String(original)) if matches!(original.as_str(), "market" | "market_limit") => {
+            true
+        }
+        _ => return Err("drb unsupported original order type".into()),
+    };
+    let kind = if kind == OrderType::Limit && original_market {
+        OrderType::Market
+    } else {
+        kind
+    };
     let amount = unsigned(&v, "amount")?;
     let filled = unsigned(&v, "filled_amount")?;
     if filled > amount {
@@ -284,10 +306,4 @@ pub(super) fn trade(v: &Value) -> Result<Value, String> {
         });
     }
     Ok(result)
-}
-
-// S1 publishes native drb names as canonical SDK symbols.
-fn instrument_symbol(instrument: &str) -> Result<String, String> {
-    drb::from_instrument(instrument)?;
-    Ok(instrument.to_owned())
 }

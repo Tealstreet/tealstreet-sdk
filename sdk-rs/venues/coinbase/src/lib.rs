@@ -149,7 +149,7 @@ impl Coinbase {
             } else {
                 loaded.tickers
             };
-        if self.options.spot_only || ready {
+        if self.options.spot_only || ready || self.drb_authenticated() {
             return false;
         }
         if !intx {
@@ -348,6 +348,15 @@ impl Venue for Coinbase {
         }
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Pending::PrivateDrb(pending) = pending {
+            self.drb_private_lost(
+                cx,
+                pending,
+                &error.message,
+                error.kind.unwrap_or(ErrorKind::Network),
+            );
+            return;
+        }
         let intx = self.is_intx_startup_read(&pending);
         if matches!(error.kind, Some(ErrorKind::Network | ErrorKind::Timeout))
             && self.fail_moved_intx_startup(cx, intx)
@@ -399,3 +408,7 @@ impl Venue for Coinbase {
         Box::new(self.public.books.iter().map(|(s, b)| (s.as_str(), &b.book)))
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/legacy_intx_moved.rs"]
+mod legacy_intx_moved_tests;
