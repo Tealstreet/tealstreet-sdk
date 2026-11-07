@@ -73,6 +73,27 @@ pub struct Coinbase {
     intx_startup_failed: bool,
 }
 impl Coinbase {
+    pub fn with_signing(
+        options: Options,
+        primary: Option<(sign::Binding, safe_cex_engine::signing::Identity)>,
+        secondary: Option<(sign::Binding, safe_cex_engine::signing::Identity)>,
+    ) -> Result<Self, String> {
+        let mut venue = Self::new(options)?;
+        if !venue.options.public_data_only {
+            venue.credentials = primary
+                .map(|(binding, identity)| sign::Credentials::external(binding, identity))
+                .transpose()?;
+            venue.read_credentials = secondary
+                .map(|(binding, identity)| sign::Credentials::external(binding, identity))
+                .transpose()?;
+            venue.read_supplied = venue.read_credentials.is_some();
+            venue.options.key = venue
+                .credentials
+                .as_ref()
+                .map_or_else(String::new, |c| c.key().to_owned());
+        }
+        Ok(venue)
+    }
     pub fn new(options: Options) -> Result<Self, String> {
         let mut options = safe_cex_crypto::secrets::Sensitive::new(options);
         let raw_key = Zeroizing::new(std::mem::take(&mut options.key));
@@ -271,6 +292,11 @@ impl Venue for Coinbase {
             Pending::Trading(p) => self.trading_failed(cx, p, error),
             Pending::History(p) => self.history_failed(cx, p, error),
         }
+    }
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.fail_unsent(cx, pending, &error.message);
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
         let intx = self.is_intx_startup_read(&pending);

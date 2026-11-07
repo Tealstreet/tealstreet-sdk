@@ -1,3 +1,5 @@
+#[path = "support/hosted_parity.rs"]
+mod hosted_parity;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Response, SocketId, TimerId};
@@ -50,7 +52,7 @@ impl Session {
         )
     }
     fn with_options(kind: &'static str, options: Options) -> Self {
-        let mut e = safe_cex_engine::test_support::seeded_engine(Coinbase::new(options).unwrap());
+        let mut e = hosted_parity::engine(options);
         e.start(1000.0);
         Self {
             details: std::collections::HashMap::new(),
@@ -90,7 +92,8 @@ impl Session {
     }
     fn collect(&mut self) -> Vec<HttpRequest> {
         let mut requests = vec![];
-        for a in self.e.drain_actions().collect::<Vec<_>>() {
+        let now = safe_cex_engine::test_support::dispatch_now(&self.e);
+        for a in safe_cex_engine::test_support::prepared_actions(&mut self.e, now) {
             match a {
                 Action::Notice(safe_cex_engine::Notice::CommandDone { command, result }) => {
                     self.results.push((command, Ok(result)))

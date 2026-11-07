@@ -71,8 +71,6 @@ const start = (name: ExchangeName, options: Partial<ExchangeOptions>) => {
 // generic local-credential guard, so before this refusal they started unsigned.
 it.each([
   'txflow',
-  'coinbase',
-  'coinbasespot',
   'polymarket',
   'binance',
   'bybit',
@@ -147,18 +145,8 @@ it('reports the structured refusal through start and validateAccount', async () 
   running.push(txflow);
   await expect(txflow.start()).rejects.toMatchObject({ kind: 'unsupported', outcome: 'notSent' });
 
-  const coinbase = new RustEngineExchange(
-    'coinbase',
-    { key: 'k', secret: '', payloadSigner } as ExchangeOptions,
-    new DefaultStore(),
-  );
-  running.push(coinbase);
-  await expect(coinbase.validateAccount()).resolves.toMatchObject({
-    kind: 'unsupported',
-    error: expect.stringContaining('Rust coinbase delegated signing is unsupported in this build'),
-  });
-  expect(construct).toHaveBeenCalledTimes(2);
-  expect(transport).toHaveBeenCalledTimes(2);
+  expect(construct).toHaveBeenCalledTimes(1);
+  expect(transport).toHaveBeenCalledTimes(1);
   expect(io).not.toHaveBeenCalled();
 });
 

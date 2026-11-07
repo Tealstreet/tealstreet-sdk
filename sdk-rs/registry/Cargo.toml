@@ -44,7 +44,7 @@ default = [
 ]
 grvt = ["dep:safe-cex-venue-grvt", "dispatch-signing", "hosted-wallet", "safe-cex-crypto/secp256k1", "dep:serde_json"]
 polymarket = ["dep:safe-cex-venue-polymarket"]
-coinbase = ["dep:safe-cex-venue-coinbase"]
+coinbase = ["dep:safe-cex-venue-coinbase", "dispatch-signing", "hosted-signing", "dep:serde_json"]
 paradex = ["dep:safe-cex-venue-paradex", "dispatch-signing", "address-nonce", "hosted-wallet", "safe-cex-crypto/stark", "dep:serde_json"]
 apexomni = ["dep:safe-cex-venue-apexomni", "dispatch-signing"]
 txflow = ["dep:safe-cex-venue-txflow"]

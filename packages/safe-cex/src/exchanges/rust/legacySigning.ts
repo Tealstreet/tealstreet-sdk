@@ -6,6 +6,7 @@ import type { InternalAxiosRequestConfig } from 'axios';
 import axios, { AxiosHeaders } from 'axios';
 import qs from 'qs';
 
+import { signCoinbaseJwt } from './coinbaseHostedSigning';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { finishBackpackRequest, prepareBackpackRequest } from './backpackHostedSigning';
 import { signHttpCapture } from '../../utils/signHttpCapture';
@@ -110,6 +111,23 @@ export const signHostedHttp = async (
   request: RemoteSignerRequest,
 ): Promise<RemoteSignerResponse> => {
   if (!request.config) return { id: request.id, error: 'Missing HTTP config for signing' };
+  if (name === 'coinbase' || name === 'coinbasespot') {
+    const xhr = axios.create();
+    xhr.interceptors.request.use(async (config) => {
+      const url = new URL(config.url ?? '', config.baseURL ?? 'https://api.coinbase.com');
+      if (url.origin !== 'https://api.coinbase.com' || url.hash || url.username || url.password
+        || !url.pathname.startsWith('/api/v3/brokerage/')) throw new Error('Coinbase signing request refused');
+      if (url.pathname.startsWith('/api/v3/brokerage/market/')) { markSkipRemoteSigning(config); return config; }
+      if (!primaryComplete) throw new Error('Signing credential is unavailable');
+      const method = (config.method ?? 'get').toUpperCase();
+      const jwt = await signCoinbaseJwt(host, `${method} api.coinbase.com${url.pathname}`);
+      const headers = new AxiosHeaders(config.headers);
+      headers.delete('Authorization');
+      headers.set({ Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' });
+      return { ...config, headers };
+    });
+    return signHttpCapture(xhr, request);
+  }
   if (name === 'backpack') {
     const xhr = axios.create({ paramsSerializer: { serialize: (params) => qs.stringify(params, { arrayFormat: 'repeat' }) },
       headers: { 'X-Broker-Id': '1200', 'Content-Type': 'application/json' } });
@@ -301,12 +319,14 @@ export const signHostedWsAuth = async (
 ): Promise<RemoteSignerResponse> => {
   const { toSign, outputFormat } = request.wsAuth ?? {};
   if (!toSign || !outputFormat) return { id: request.id, error: 'Missing wsAuth payload for WS auth signing' };
+  if (outputFormat === 'coinbase-jwt' && request.exchangeName !== 'coinbase' && request.exchangeName !== 'coinbasespot') return { id: request.id, error: 'Unsupported WS auth output format' };
+  if (outputFormat === 'coinbase-jwt') return { id: request.id, wsAuthSignature: await signCoinbaseJwt(host) };
   if (outputFormat === 'hyperliquid-l1' || outputFormat === 'hyperliquid-address' || outputFormat === 'lighter-tx'
     || outputFormat === 'grvt-order' || outputFormat === 'grvt-address'
     || outputFormat === 'paradex-stark' || outputFormat === 'paradex-public')
     return { id: request.id, wsAuthSignature: host.hostedWalletSigning({ toSign, outputFormat }) };
   if (outputFormat !== 'hex' && outputFormat !== 'base64' && outputFormat !== 'hex-base64'
-    && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519' && outputFormat !== 'kucoin-batch')
+    && outputFormat !== 'coinbase-jws' && outputFormat !== 'bitunix-double-sha256' && outputFormat !== 'backpack-ed25519' && outputFormat !== 'kucoin-batch')
     return { id: request.id, error: 'Unsupported WS auth output format' };
   const output = await host.hostedSigning({ kind: 'wsAuth', toSign, outputFormat });
   if (!output.signature) throw new Error('Signing result is unavailable');

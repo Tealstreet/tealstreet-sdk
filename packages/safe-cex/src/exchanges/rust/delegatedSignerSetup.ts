@@ -34,6 +34,7 @@ export class DelegatedSignerSetup {
   #provider: Signer | undefined;
   #identities: SigningIdentities | undefined;
   #consumed = false;
+  #coinbaseSigning: { keyName: string; algorithm: 'es256' | 'edDsa' } | undefined;
   #abort = new AbortController();
   #pending = new Set<AbortController>();
   #venue: ExchangeName;
@@ -57,6 +58,12 @@ export class DelegatedSignerSetup {
       const message = 'GRVT PayloadSigner is unsupported';
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
+    const coinbase = name === 'coinbase' || name === 'coinbasespot';
+    if (coinbase && options.publicDataOnly !== true) {
+      if (typeof options.key !== 'string' || !/^organizations\/[^/\s]+\/apiKeys\/[^/\s]+$/.test(options.key)) invalid('Coinbase requires a CDP API key name');
+      if (options.coinbaseJwtAlgorithm !== undefined && !['es256', 'edDsa'].includes(options.coinbaseJwtAlgorithm)) invalid('Coinbase unsupported JWT algorithm');
+      this.#coinbaseSigning = { keyName: options.key, algorithm: options.coinbaseJwtAlgorithm ?? 'es256' };
+    }
     const kucoin = name === 'kucoin';
     if (kucoin && this.usesPayloadSigner) invalid('KuCoin requires RemoteSigner batch custody');
     const remoteSigner = options.remoteSigner;
@@ -71,6 +78,10 @@ export class DelegatedSignerSetup {
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
       || options.secondary_passphrase !== undefined || metadata.secondary !== undefined;
+    if (coinbase && secondaryRequested) {
+      const message = 'Coinbase Hosted secondary signing is unsupported; remove the secondary credentials';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     // WOO's raw HMAC callback has no slot selector; never install unusable read refs.
     if (name === 'woo' && remoteSigner && secondaryRequested) {
       const message = 'WOO X secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser';
@@ -158,6 +169,7 @@ export class DelegatedSignerSetup {
         remoteSigner: _remote, payloadSigner: _payload, signing: _signing, readCredentials: _readCredentials, ...safe
       } = withoutSigningCredentials(parsed as ExchangeOptions) as ExchangeOptions & { signing?: unknown; readCredentials?: unknown };
       return new Constructor(venue, JSON.stringify({ ...safe, signing: this.#identities,
+        ...(this.#coinbaseSigning && { coinbaseSigning: this.#coinbaseSigning }),
         remoteSigning: true, payloadSigner: this.usesPayloadSigner, publicMode: this.#publicMode }));
     } catch (error) {
       this.dispose();

@@ -1024,6 +1024,21 @@ impl Coinbase {
             jwt: String,
         }
         for channel in ["user", "heartbeats"] {
+            if let Some(c) = &self.credentials
+                && let Some(identity) = c.identity()
+            {
+                cx.send_signed(
+                    socket,
+                    String::new(),
+                    Box::new(crate::sign::WsSubscribe::new(
+                        identity.clone(),
+                        c.key(),
+                        c.algorithm(),
+                        channel,
+                    )),
+                );
+                continue;
+            }
             let signed = self
                 .credentials
                 .as_ref()

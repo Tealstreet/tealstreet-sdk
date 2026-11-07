@@ -127,3 +127,16 @@ its scoped inventory replacement only changes the URL selection for drb.
 The frozen HTTP/completion and socket inventories gain no new call sites.
 
 See [the live tape and offline replay gate](tests/fixtures/drb-public.README.md).
+
+## Hosted CDP signing
+
+SDK/registry construction consumes local credentials into provider custody and
+uses the same dispatch JWT recipes as keyless RemoteSigner accounts for private
+REST and WS authentication. ES256 and the existing Ed25519 input formats retain
+their canonical claims and signature bytes. REST-only PayloadSigner can sign
+canonical JWS bytes and returns a 64-byte signature in unpadded base64url;
+private WS auth requires RemoteSigner. Wallet/agent and OAuth credentials are
+separate protocols, not CDP JWT substitutes. The signing-only DRB codec accepts
+CDP issuer claims without changing the S2/S3 session transport under development.
+See `docs/plans/callers/coinbase-hosted-signing.md` at the repository root for
+wire formats, typed refusals, algorithm selection and NX integration.

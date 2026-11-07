@@ -54,3 +54,14 @@ INTX migration message.
 
 Deterministic coverage: `tests/intx_moved.rs` and `tests/startup_resilience.rs`.
 No live credentials or private requests are needed.
+
+## Provider JWT custody
+
+Registry/SDK construction uses `Coinbase::with_signing`; only public JWT bindings
+and opaque references reach the venue. Private REST and both private subscription
+frames sign at dispatch. Raw `Coinbase::new` remains the local compatibility API.
+Hosted RemoteSigner sends canonical `coinbase-jws` bytes; PayloadSigner is REST
+only and cannot authenticate a private socket. Pre-dispatch signing refusal
+uses `trading_unsent`, preserving NotSent rather than transport-loss Unknown.
+The caller contract, algorithm selection and S2/S3 coordination boundary are in
+`docs/plans/callers/coinbase-hosted-signing.md` at the root.

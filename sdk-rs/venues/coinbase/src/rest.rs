@@ -105,7 +105,27 @@ impl Coinbase {
             && !public
             && self.read_supplied
             && (!read || self.read_credentials.is_none());
-        let headers = if public {
+        let selected = if read {
+            self.read_credentials.as_ref().or(self.credentials.as_ref())
+        } else {
+            self.credentials.as_ref()
+        };
+        let recipe = if public {
+            None
+        } else {
+            selected.and_then(|c| {
+                c.identity().map(|identity| {
+                    crate::sign::Http::new(
+                        identity.clone(),
+                        c.key(),
+                        c.algorithm(),
+                        request.method,
+                        &request.path,
+                    )
+                })
+            })
+        };
+        let headers = if public || recipe.is_some() {
             Ok(vec![])
         } else {
             let credentials = if read {
@@ -153,6 +173,9 @@ impl Coinbase {
             request.body,
             request.pending,
         );
+        if let Some(recipe) = recipe {
+            cx.sign_http(id, Box::new(recipe));
+        }
         if primary_route {
             cx.route_request(id, RequestRoute::Primary);
         }
@@ -177,7 +200,7 @@ impl Coinbase {
 
 impl Coinbase {
     /// A request that failed before it was sent.
-    fn fail_unsent(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+    pub(crate) fn fail_unsent(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Trading(request) => self.trading_unsent(cx, request, error),
             Pending::History(request) => self.history_unsent(cx, request, error),

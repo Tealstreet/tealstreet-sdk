@@ -73,14 +73,6 @@ it('Polymarket private accounts need a wallet private key', () =>
 it('Orderly private accounts need an application id', () =>
   startRejects('woofi', { key: '1'.repeat(32), secret: '1'.repeat(32) }, 'Orderly private applicationId is required'));
 
-// Unadopted native families still refuse payload callbacks before I/O.
-it('unadopted private venues refuse a payload signer before any I/O', () =>
-  startRejects(
-    'coinbase',
-    { key: 'key', payloadSigner: (async () => ({ signature: '' })) as unknown as ExchangeOptions['payloadSigner'] },
-    'Rust coinbase delegated signing is unsupported in this build',
-  ));
-
 it.each(['binance', 'binancepm', 'binanceinverse', 'binancespot', 'bybit', 'bybitinverse', 'bybitspot', 'bybitdemo'] as const)(
   'compiled %s admits owned PayloadSigner setup before startup without local credentials or I/O', async (name) => {
     setWasmEngineLoader(loadNodeEngine);

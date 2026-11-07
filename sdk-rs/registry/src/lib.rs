@@ -45,6 +45,8 @@ pub use safe_cex_venue_kraken::sign::dispatch::Selected as kraken_selected;
 pub use safe_cex_venue_kraken::sign::hosted as kraken_hosted;
 #[cfg(feature = "asterdex")]
 mod asterdex_setup;
+#[cfg(feature = "coinbase")]
+mod coinbase_setup;
 mod construction;
 #[cfg(feature = "hosted-signing")]
 pub mod hosted_signing;
@@ -680,6 +682,10 @@ pub fn prepare_local_signer_for(
     VenueError,
 > {
     let public_data_only = construction::signer_setup_public_data_only(options);
+    #[cfg(feature = "coinbase")]
+    if matches!(venue, "coinbase" | "coinbasespot") {
+        return coinbase_setup::raw(options);
+    }
     #[cfg(feature = "hyperliquid")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Hyperliquid) {
         return hyperliquid_setup::native(venue, options, signer_setup_policy_for(venue, options));
@@ -1072,6 +1078,10 @@ pub fn local_signer_from_capsule(
     ),
     VenueError,
 > {
+    #[cfg(feature = "coinbase")]
+    if matches!(venue, "coinbase" | "coinbasespot") {
+        return coinbase_setup::json(input, options);
+    }
     #[cfg(feature = "paradex")]
     if construction::signer_setup_mapping(venue) == Some(construction::SetupMapping::Paradex) {
         let policy = signer_setup_policy_for(venue, options);
@@ -1550,23 +1560,41 @@ pub fn build_with_signer<T: Visit>(
             finish(visitor, policy, startup, engine)
         }
         #[cfg(feature = "coinbase")]
-        "coinbase" | "coinbasespot" => finish(
-            visitor,
-            policy,
-            startup,
-            Engine::new(
-                Coinbase::new(CoinbaseOptions {
-                    key: options.key.take().unwrap_or_default(),
-                    secret: options.secret.take().unwrap_or_default(),
+        "coinbase" | "coinbasespot" => {
+            if options.key.is_some()
+                || options.secret.is_some()
+                || options.read_credentials.is_some()
+            {
+                return Err(invalid("Coinbase signing material belongs in signer setup"));
+            }
+            let identities = options.signing.take().unwrap_or_default();
+            let primary = options
+                .coinbase_signing
+                .take()
+                .zip(identities.primary.clone());
+            let secondary = options
+                .coinbase_read_signing
+                .take()
+                .zip(identities.secondary.clone());
+            if !options.public_data_only && (primary.is_none() || signer.is_none()) {
+                return Err(invalid("Coinbase requires a bound JWT signing provider"));
+            }
+            let venue = Coinbase::with_signing(
+                CoinbaseOptions {
                     public_data_only: options.public_data_only,
                     spot_only: venue == "coinbasespot" || options.spot_only,
                     testnet: options.testnet,
-                    read_credentials: options.read_credentials.clone(),
-                })
-                .map_err(invalid)?,
-                entropy,
-            )?,
-        ),
+                    ..Default::default()
+                },
+                primary,
+                secondary,
+            )
+            .map_err(invalid)?;
+            let mut engine = Engine::new(venue, entropy)?;
+            engine.set_signer(signer)?;
+            engine.set_identities(identities)?;
+            finish(visitor, policy, startup, engine)
+        }
         #[cfg(feature = "polymarket")]
         "polymarket" => {
             polymarket_rules(&options)?;
@@ -2492,6 +2520,12 @@ pub struct EngineOptions {
     #[cfg(feature = "coinbase")]
     #[serde(default)]
     pub spot_only: bool,
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    pub coinbase_signing: Option<safe_cex_venue_coinbase::sign::Binding>,
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    pub coinbase_read_signing: Option<safe_cex_venue_coinbase::sign::Binding>,
     #[cfg(feature = "polymarket")]
     #[serde(default)]
     pub polymarket: Option<PolymarketAccountOptions>,

@@ -8,12 +8,17 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "backpack")]
 mod backpack;
+#[cfg(feature = "coinbase")]
+mod coinbase;
 
 #[cfg(feature = "kucoin")]
 mod kucoin;
 
 #[derive(Clone, Copy, Deserialize)]
 pub enum OutputFormat {
+    #[cfg(feature = "coinbase")]
+    #[serde(rename = "coinbase-jws")]
+    CoinbaseJws,
     #[cfg(feature = "backpack")]
     #[serde(rename = "backpack-ed25519")]
     BackpackEd25519,
@@ -152,6 +157,8 @@ impl<'de> Deserialize<'de> for Input {
 /// Formatting metadata remains bound to its one capture token.
 #[derive(Clone, Copy)]
 pub enum OutputKind {
+    #[cfg(feature = "coinbase")]
+    Coinbase,
     #[cfg(feature = "backpack")]
     Backpack {
         ws: bool,
@@ -305,6 +312,7 @@ fn family(venue: &str) -> bool {
         || bitget
         || (cfg!(feature = "bingx") && venue == "bingx")
         || (cfg!(feature = "blofin") && venue == "blofin")
+        || (cfg!(feature = "coinbase") && matches!(venue, "coinbase" | "coinbasespot"))
         || (cfg!(feature = "backpack") && venue == "backpack")
         || (cfg!(feature = "kucoin") && venue == "kucoin")
         || double_sha256(venue)
@@ -318,6 +326,27 @@ pub fn prepare(
     identities: &Identities,
     input: Input,
 ) -> Result<(SignRequest, OutputKind), SignError> {
+    #[cfg(feature = "coinbase")]
+    {
+        if matches!(venue, "coinbase" | "coinbasespot") {
+            return match input {
+                Input::WsAuth {
+                    to_sign,
+                    output_format: OutputFormat::CoinbaseJws,
+                } => coinbase::prepare(identities, to_sign),
+                _ => Err(SignError::Unsupported),
+            };
+        }
+        if matches!(
+            &input,
+            Input::WsAuth {
+                output_format: OutputFormat::CoinbaseJws,
+                ..
+            }
+        ) {
+            return Err(SignError::Unsupported);
+        }
+    }
     #[cfg(feature = "backpack")]
     if venue == "backpack" {
         match input {
@@ -467,6 +496,10 @@ pub fn prepare(
 }
 
 pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError> {
+    #[cfg(feature = "coinbase")]
+    if let OutputKind::Coinbase = kind {
+        return coinbase::finish(result);
+    }
     #[cfg(feature = "backpack")]
     if let OutputKind::Backpack { ws } = kind {
         return backpack::finish(ws, result);
@@ -515,6 +548,10 @@ pub fn finish(kind: OutputKind, result: &SignResult) -> Result<Output, SignError
         return Err(SignError::InvalidResult);
     }
     let signature = match kind {
+        #[cfg(feature = "coinbase")]
+        OutputKind::Coinbase | OutputKind::WsAuth(OutputFormat::CoinbaseJws) => {
+            return Err(SignError::Unsupported);
+        }
         #[cfg(feature = "backpack")]
         OutputKind::Backpack { .. } => unreachable!(),
         #[cfg(feature = "backpack")]
@@ -945,6 +982,8 @@ mod input_parse_tests {
             assert_eq!(
                 format,
                 match output_format {
+                    #[cfg(feature = "coinbase")]
+                    OutputFormat::CoinbaseJws => "coinbase-jws",
                     #[cfg(feature = "backpack")]
                     OutputFormat::BackpackEd25519 => "backpack-ed25519",
                     OutputFormat::KucoinBatch => "kucoin-batch",
