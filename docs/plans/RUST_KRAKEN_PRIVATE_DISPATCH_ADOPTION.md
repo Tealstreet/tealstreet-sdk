@@ -167,8 +167,9 @@ streamed account requests and Spot private POSTs. Three additional originals
 drive actual Futures placement, Spot placement and Futures order history into
 the same host boundary. Each requires an unsigned managed preparation and no
 provider work while preparation is held. The native token probe now delegates
-the real managed-socket callbacks, so its existing live/closed token assertions
-reach the actual token request rather than failing during bootstrap.
+the real managed-socket callbacks and the static `managed_sockets()` opt-in, so
+its existing live/closed token assertions reach the actual token request rather
+than failing during bootstrap.
 
 On unchanged production at this base, the opt-in target has 16 assertion REDs
 and 13 native GREENs, with no ignored tests. Six REDs specifically prove private

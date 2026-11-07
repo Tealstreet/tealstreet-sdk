@@ -492,6 +492,9 @@ struct SpotDeliveryProbe {
 }
 impl Venue for SpotDeliveryProbe {
     type Pending = <KrakenSpot as Venue>::Pending;
+    fn managed_sockets() -> bool {
+        KrakenSpot::managed_sockets()
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         self.venue.capabilities()
     }
