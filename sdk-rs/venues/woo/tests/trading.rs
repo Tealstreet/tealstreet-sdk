@@ -1225,6 +1225,346 @@ fn invalid_orders_remain_not_sent_before_any_signed_request() {
 }
 
 #[test]
+fn unconfirmed_rate_limited_mode_write_keeps_unknown_kind_and_code() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for status in [200, 429, 408, 503] {
+        for readback in [
+            "mismatch",
+            "wrong_account",
+            "transport",
+            "rejected",
+            "malformed",
+        ] {
+            let mut e = engine();
+            e.handle(
+                1000.0,
+                Event::Command(Command::SetPositionMode {
+                    command: 1,
+                    hedged: true,
+                    symbol: None,
+                }),
+            );
+            let mut actions = e.drain_actions().collect::<Vec<_>>();
+            let write = req(&actions, Method::Post, "/v1/client/position_mode");
+            e.handle(1010.0, Event::HttpResponse {
+                request: write.id,
+                response: Response { status, headers: "", body: r#"{"success":false,"code":-1003,"message":"position mode remains unchanged"}"# },
+            });
+            let mut answer = e.drain_actions().collect::<Vec<_>>();
+            actions.extend(answer.iter().cloned());
+            for attempt in 0..3 {
+                let read = req(&answer, Method::Get, "/v3/accountinfo");
+                let now = 1020.0 + attempt as f64 * 300.0;
+                if readback == "transport" {
+                    e.handle(
+                        now,
+                        Event::HttpFailed {
+                            request: read.id,
+                            error: "connection lost",
+                        },
+                    );
+                } else {
+                    let (status, body) = match readback {
+                        "mismatch" => (
+                            200,
+                            r#"{"success":true,"data":{"accountMode":"FUTURES","positionMode":"ONE_WAY"}}"#,
+                        ),
+                        "wrong_account" => (
+                            200,
+                            r#"{"success":true,"data":{"accountMode":"SPOT","positionMode":"HEDGE_MODE"}}"#,
+                        ),
+                        "rejected" => (
+                            429,
+                            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+                        ),
+                        _ => (200, "<html>"),
+                    };
+                    e.handle(
+                        now,
+                        Event::HttpResponse {
+                            request: read.id,
+                            response: Response {
+                                status,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                answer = e.drain_actions().collect();
+                actions.extend(answer.iter().cloned());
+                if attempt < 2 {
+                    answer = tick(&mut e, &answer);
+                    actions.extend(answer.iter().cloned());
+                }
+            }
+            // A mode setter may complete on verified end state, never on unconfirmed text.
+            let error = failure(&answer);
+            assert_eq!(
+                (error.kind, error.outcome, error.venue_code.as_deref()),
+                (
+                    Some(ErrorKind::RateLimited),
+                    Some(Outcome::Unknown),
+                    Some("-1003")
+                ),
+                "{status} {readback}"
+            );
+            assert!(error.message.contains("position mode remains unchanged"));
+            assert!(error.message.contains("readback remains unconfirmed"));
+            assert!(!e.store().hedged());
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Post))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Get))
+                    .count(),
+                3
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+                    .count(),
+                1
+            );
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+            );
+        }
+    }
+}
+
+#[test]
+fn verified_mode_end_state_can_complete_even_after_rate_limit() {
+    for (status, response) in [
+        (200, "accepted"),
+        (200, "unchanged"),
+        (200, "rate_limited"),
+        (429, "rate_limited"),
+        (408, "rate_limited"),
+        (503, "rate_limited"),
+    ] {
+        let mut e = engine();
+        e.handle(
+            1000.0,
+            Event::Command(Command::SetPositionMode {
+                command: 1,
+                hedged: true,
+                symbol: None,
+            }),
+        );
+        let a = e.drain_actions().collect::<Vec<_>>();
+        let write = req(&a, Method::Post, "/v1/client/position_mode");
+        let body = match response {
+            "accepted" => r#"{"success":true}"#,
+            "unchanged" => {
+                r#"{"success":false,"code":-1005,"message":"position mode remains unchanged"}"#
+            }
+            _ => r#"{"success":false,"code":-1003,"message":"position mode remains unchanged"}"#,
+        };
+        e.handle(
+            1010.0,
+            Event::HttpResponse {
+                request: write.id,
+                response: Response {
+                    status,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        let a = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone { .. })))
+        );
+        let read = req(&a, Method::Get, "/v3/accountinfo");
+        // SetPositionMode's end state is verified by a successful, exact mode read.
+        let a = reply(
+            &mut e,
+            &read,
+            1020.0,
+            r#"{"success":true,"data":{"accountMode":"FUTURES","positionMode":"HEDGE_MODE"}}"#,
+        );
+        assert!(result(&a).is_ok());
+        assert!(e.store().hedged());
+        assert!(
+            !a.iter()
+                .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get))
+        );
+    }
+}
+
+#[test]
+fn cancel_all_preserves_rate_limit_kind_code_and_unknown_across_both_legs() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for rate_on_regular in [false, true] {
+        for peer in ["accepted", "rejected", "unknown", "rate_limited"] {
+            let mut e = engine();
+            e.handle(
+                1000.0,
+                Event::Command(Command::CancelSymbolOrders {
+                    command: 1,
+                    symbol: String::new(),
+                }),
+            );
+            let mut actions = e.drain_actions().collect::<Vec<_>>();
+            let regular = req(&actions, Method::Delete, "/v3/orders/pending");
+            let mut answer = Vec::new();
+            let mut request = regular;
+            for index in 0..2 {
+                if index == 1 {
+                    let next = tick(&mut e, &answer);
+                    request = req(&next, Method::Delete, "/v3/algo/orders/pending");
+                    actions.extend(next);
+                }
+                let is_rate = (index == 0) == rate_on_regular || peer == "rate_limited";
+                if !is_rate && peer == "unknown" {
+                    e.handle(
+                        1010.0 + index as f64 * 110.0,
+                        Event::HttpFailed {
+                            request: request.id,
+                            error: "connection lost",
+                        },
+                    );
+                } else {
+                    let (status, body) = if is_rate {
+                        (
+                            429,
+                            r#"{"success":false,"code":-1003,"message":"too many"}"#,
+                        )
+                    } else if peer == "rejected" {
+                        (
+                            400,
+                            r#"{"success":false,"code":-1005,"message":"invalid params"}"#,
+                        )
+                    } else {
+                        (200, r#"{"success":true}"#)
+                    };
+                    e.handle(
+                        1010.0 + index as f64 * 110.0,
+                        Event::HttpResponse {
+                            request: request.id,
+                            response: Response {
+                                status,
+                                headers: "",
+                                body,
+                            },
+                        },
+                    );
+                }
+                answer = e.drain_actions().collect();
+                if index == 0 {
+                    assert!(
+                        !answer
+                            .iter()
+                            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+                    );
+                }
+                actions.extend(answer.iter().cloned());
+            }
+            let error = failure(&answer);
+            assert_eq!(
+                (error.kind, error.outcome, error.venue_code.as_deref()),
+                (
+                    Some(ErrorKind::RateLimited),
+                    Some(Outcome::Unknown),
+                    Some("-1003")
+                ),
+                "{rate_on_regular} {peer}"
+            );
+            let path = if rate_on_regular {
+                "/v3/orders/pending"
+            } else {
+                "/v3/algo/orders/pending"
+            };
+            assert!(
+                error
+                    .message
+                    .contains(&format!("{path}: WOO request failed: too many"))
+            );
+            if peer != "accepted" {
+                assert!(error.message.contains("/v3/orders/pending:"));
+                assert!(error.message.contains("/v3/algo/orders/pending:"));
+            }
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Http(r) if r.method == Method::Delete))
+                    .count(),
+                2
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(
+                        a,
+                        Action::Notice(Notice::CommandFailed { command: 1, .. })
+                    ))
+                    .count(),
+                1
+            );
+            assert!(!answer.iter().any(|a| matches!(a, Action::Http(_))));
+        }
+    }
+}
+
+#[test]
+fn ambiguous_http_status_keeps_native_rate_limit_kind_without_resending() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for protective in [false, true] {
+        for status in [408, 503] {
+            let mut e = engine();
+            let mut o = opts();
+            if protective {
+                o.kind = OrderType::StopLoss;
+                o.side = OrderSide::Sell;
+            }
+            let a = placed(&mut e, vec![o]);
+            let path = if protective {
+                "/v3/algo/order"
+            } else {
+                "/v1/order"
+            };
+            let write = req(&a, Method::Post, path);
+            e.handle(
+                1010.0,
+                Event::HttpResponse {
+                    request: write.id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body: r#"{"success":false,"code":-1003,"message":"too many"}"#,
+                    },
+                },
+            );
+            let a = e.drain_actions().collect::<Vec<_>>();
+            let error = failure(&a);
+            assert_eq!(
+                (error.kind, error.outcome, error.venue_code.as_deref()),
+                (
+                    Some(ErrorKind::RateLimited),
+                    Some(Outcome::Unknown),
+                    Some("-1003")
+                )
+            );
+            assert!(
+                !a.iter()
+                    .any(|a| matches!(a, Action::Http(_) | Action::SetTimer { .. }))
+            );
+        }
+    }
+}
+
+#[test]
 fn write_failures_are_classified_without_changing_their_text() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let unknown = (None, Some(Outcome::Unknown));
