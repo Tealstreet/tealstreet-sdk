@@ -166,7 +166,7 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB, rounded up to the KiB.
 // #3199 run 42280800704, job 128112974377 at a527a7ccff0 measured okx 1,973,874 B.
 // CI size plus 10 KiB rounded up to the KiB; all OKX variants share the okx family cap.
-// #3148 run 42196761441 measured bitget 2,348,153 B; CI size plus 10 KiB rounded up
+// #3202 run 42280173727 measured bitget 2,379,303 B; CI size plus 10 KiB rounded up
 // to the KiB, bitgetusdc equal to bitget.
 // #3198 + #3201 combined on master 6228bbef939 (#3206 CI merge-ref job) measured bitget
 // 2,364,891 B; CI size plus 10 KiB rounded up to the KiB, bitgetusdc equal to bitget.
@@ -194,14 +194,16 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // Only measured over-cap families grow; shared siblings stay equal and larger incoming caps win.
 // #3207 run 42279265759, job 128106963965 measured Bitget 2,390,477 B.
 // CI size plus 10 KiB rounded up to KiB; BitgetUSDC shares the family cap.
+// #3202 on #3207 (merge 62c3b59c872), run 42305638406, job 128195021443 measured Bitget
+// 2,409,448 B. CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
   backpack: 1_948_672,
   binance: 2_223_104,
   bingx: 2_085_888,
-  bitget: 2_401_280,
-  bitgetusdc: 2_401_280,
+  bitget: 2_419_712,
+  bitgetusdc: 2_419_712,
   bitrue: 1_851_392,
   bitunix: 1_863_680,
   blofin: 2_001_920,

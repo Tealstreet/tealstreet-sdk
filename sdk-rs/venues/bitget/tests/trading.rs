@@ -967,6 +967,15 @@ fn retained_conditional_cancels_require_their_own_semantic_ack() {
                 assert_eq!(payload["symbol"], "BTCUSDT");
             }
             h.reply(cancel, 200, bad_ack);
+            if let Some(i) = h
+                .requests
+                .iter()
+                .position(|r| r.url.contains("orderId=retained-conditional"))
+            {
+                // A classic empty plan acknowledgement reads the plan back; still listed.
+                let confirm = h.requests.remove(i);
+                h.reply(confirm.id, 200, r#"{"code":"00000","data":{"entrustedList":[{"orderId":"retained-conditional","symbol":"BTCUSDT","planStatus":"live"}],"endId":"retained-conditional"}}"#);
+            }
             assert!(
                 h.done
                     .iter()
@@ -1857,6 +1866,15 @@ fn whole_position_tp_and_sl_cancel_resolve_only_when_the_requested_id_is_acknowl
                     &json!({"code":"00000","data":{"successList":accepted,"failureList":failures}})
                         .to_string(),
                 );
+                if let Some(i) = h
+                    .requests
+                    .iter()
+                    .position(|r| r.url.contains("orderId=target-plan"))
+                {
+                    // An empty acknowledgement reads the plan back; still listed.
+                    let confirm = h.requests.remove(i);
+                    h.reply(confirm.id, 200, r#"{"code":"00000","data":{"entrustedList":[{"orderId":"target-plan","symbol":"BTCUSDT","planStatus":"live"}],"endId":"target-plan"}}"#);
+                }
                 let result = &h.done.iter().find(|(id, _)| *id == 92).unwrap().1;
                 let proven = matches!(
                     acknowledgement,

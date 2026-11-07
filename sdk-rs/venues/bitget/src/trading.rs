@@ -192,6 +192,8 @@ struct Job {
     retry: Option<Request>,
     /// The write call in flight, kept for an engine-sealed retirement.
     live: Option<Planned>,
+    /// The current cancel-plan answer is exactly empty success and failure lists.
+    empty_plan_ack: bool,
     /// '; <note>' appended to the projected failure (a failed protection rollback).
     note: Option<String>,
     intent: Command,
@@ -283,6 +285,12 @@ enum Effect {
     Cancel {
         orders: Vec<Order>,
         idempotent_missing: bool,
+    },
+    /// After an empty cancel-plan acknowledgement: does Bitget still list the plan?
+    ConfirmPlanGone {
+        order: Box<Order>,
+        plan_type: &'static str,
+        unproven: String,
     },
     Amend {
         id: String,
@@ -699,6 +707,7 @@ impl BitgetFutures {
             parked: None,
             retry: None,
             live: None,
+            empty_plan_ack: false,
             note: None,
             original: if let Command::AmendOrder { id, .. } = &intent {
                 cx.store.order(id).cloned()
@@ -789,6 +798,15 @@ impl BitgetFutures {
                     )
                 }
             }
+            Effect::ConfirmPlanGone {
+                order, plan_type, ..
+            } => format!(
+                "{}?symbol={}&productType={}&planType={plan_type}&orderId={}",
+                paths::PLANS,
+                sign::encode(&order.symbol),
+                self.product(),
+                sign::encode(&native_id(order))
+            ),
             Effect::ResolveAmend { client, .. } => format!(
                 "{}?symbol={}&productType={}&clientOid={}",
                 paths::ORDER_DETAIL,
@@ -936,7 +954,10 @@ impl BitgetFutures {
         if request.call.is_place() {
             self.remember_close_requests(cx.now, &request.call.close_requests(cx));
         }
-        job.live = (!request.call.read()).then(|| request.call.clone());
+        // A confirming read stands for its cancel if the engine retires the owner.
+        job.live = (!request.call.read()
+            || matches!(request.call.effect, Effect::ConfirmPlanGone { .. }))
+        .then(|| request.call.clone());
         if let Effect::Cancel { orders, .. } = &request.call.effect {
             for order in orders {
                 cx.store.set_order_status(&order.id, OrderStatus::Canceling);
@@ -1227,6 +1248,14 @@ impl BitgetFutures {
             return vec![];
         }
         match &call.effect {
+            Effect::ConfirmPlanGone { order, .. } => std::slice::from_ref(order.as_ref())
+                .iter()
+                .filter(|o| matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit))
+                .map(|o| safe_cex_engine::model::CancelOrderRef {
+                    id: o.id.clone(),
+                    symbol: o.symbol.clone(),
+                })
+                .collect(),
             Effect::Cancel { orders, .. } => orders
                 .iter()
                 .filter(|o| matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit))
@@ -1256,6 +1285,9 @@ impl BitgetFutures {
         restore_canceling(cx, &call);
         if plain_cancel && let Effect::Cancel { orders, .. } = &call.effect {
             self.check_unknown_cancels(cx, orders);
+        }
+        if let Effect::ConfirmPlanGone { order, .. } = &call.effect {
+            self.check_unknown_cancels(cx, std::slice::from_ref(order.as_ref()));
         }
         if matches!(call.effect, Effect::Place { .. }) {
             self.account.orders_version = self.account.orders_version.wrapping_add(1);
@@ -2455,6 +2487,23 @@ impl BitgetFutures {
             return;
         }
         let current = Some((&request.slot, &request.context));
+        // Before any mode promotion: a confirming read never replans its cancel.
+        if let Effect::ConfirmPlanGone {
+            order,
+            plan_type,
+            unproven,
+        } = &request.call.effect
+        {
+            let listed = (response.status == 200)
+                .then(|| pending_plan_listed(response.body, &native_id(order)))
+                .flatten();
+            let (order, plan_type, unproven) = (order.clone(), *plan_type, unproven.clone());
+            if listed == Some(false) {
+                self.plan_cancel_proven_gone(cx, &order, plan_type);
+                return self.drive(cx, job, At::Data(&request.slot, &request.context));
+            }
+            return self.plan_cancel_unproven(cx, job, current, &order, unproven);
+        }
         let read = request.call.read();
         if serde_json::from_str::<Envelope<serde::de::IgnoredAny>>(response.body)
             .ok()
@@ -2546,6 +2595,9 @@ impl BitgetFutures {
         let diagnostic = crate::telemetry::NativeReply::parse(response.body);
         let status = response.status;
         let parsed = serde_json::from_str::<Reply>(response.body).map_err(|e| e.to_string());
+        job.empty_plan_ack = request.call.path == paths::CANCEL_PLAN
+            && status == 200
+            && empty_plan_ack(response.body);
         if let Effect::ResolveAmend { id, .. } = &request.call.effect {
             let ready = parsed.as_ref().is_ok_and(|reply| {
                 status == 200
@@ -2688,6 +2740,8 @@ impl BitgetFutures {
         let mut write_noted = false;
         // A 2xx success answer that does not account for every order.
         let mut unproven = false;
+        // An empty acknowledgement of one plan's cancel, and the pending type to read it under.
+        let mut confirm_plan: Option<(&'static str, Order)> = None;
         if error.is_none()
             && !gone
             && let Effect::Cancel { orders, .. } = &request.call.effect
@@ -2780,6 +2834,23 @@ impl BitgetFutures {
             {
                 unproven = true;
                 answer = Answer::Unproven;
+                confirm_plan = (request.call.path == paths::CANCEL_PLAN
+                    && job.is_plain_cancel()
+                    && accepted.is_empty()
+                    && job.empty_plan_ack)
+                    .then(|| {
+                        request
+                            .call
+                            .payload
+                            .plan_type
+                            .as_deref()
+                            .and_then(pending_plan_type)
+                    })
+                    .flatten()
+                    .zip(match orders.as_slice() {
+                        [order] => Some(order.clone()),
+                        _ => None,
+                    });
                 // Name them: the user otherwise believes every order is gone.
                 let rest: Vec<_> = orders
                     .iter()
@@ -2811,6 +2882,22 @@ impl BitgetFutures {
                     listed.join_with(", ")
                 ));
             }
+        }
+        let confirming = confirm_plan.is_some();
+        if let Some((plan_type, order)) = confirm_plan {
+            // The request was answered; whether the plan is gone is the read's to prove.
+            let unproven_text = error.take().unwrap_or_default();
+            unproven = false;
+            answer = Answer::Accepted(vec![]);
+            job.calls.push_front(Planned {
+                path: paths::PLANS,
+                payload: Payload::default(),
+                effect: Effect::ConfirmPlanGone {
+                    order: Box::new(order),
+                    plan_type,
+                    unproven: unproven_text,
+                },
+            });
         }
         if error.is_none() {
             let data = parsed.as_ref().ok().and_then(|r| r.data.as_ref());
@@ -3085,7 +3172,7 @@ impl BitgetFutures {
             return;
         }
         match &request.call.effect {
-            Effect::Cancel { orders, .. } => {
+            Effect::Cancel { orders, .. } if !confirming => {
                 for order in orders {
                     self.mark_canceled(cx, &order.id);
                 }
@@ -3545,6 +3632,13 @@ impl BitgetFutures {
                     return;
                 }
             }
+            if let Effect::ConfirmPlanGone {
+                order, unproven, ..
+            } = &request.call.effect
+            {
+                let (order, unproven) = (order.clone(), unproven.clone());
+                return self.plan_cancel_unproven(cx, job, None, &order, unproven);
+            }
             let resolve = request.call.is_resolve();
             let error = if resolve {
                 error.outcome(Outcome::Unknown)
@@ -3608,6 +3702,51 @@ impl BitgetFutures {
                 self.refresh_orders(cx, false);
             }
         }
+    }
+
+    /// A fresh, complete pending-plan read no longer lists the plan: it is gone,
+    /// canceled or triggered, so the row leaves the Store without a Canceled claim.
+    fn plan_cancel_proven_gone(&mut self, cx: &mut Cx<'_, Pending>, order: &Order, endpoint: &str) {
+        let id = native_id(order);
+        self.trading.acknowledged.remove(&id);
+        self.forget_order(cx, &order.id);
+        cx.event(
+            safe_cex_engine::Level::Info,
+            "bitget.cancel.confirmed",
+            "A pending-plan read answered an empty cancel acknowledgement",
+            vec![
+                ("orderId", id.into()),
+                ("result", "absent".into()),
+                ("accountMode", "classic".into()),
+                ("endpoint", format!("orders-plan-pending:{endpoint}").into()),
+            ],
+        );
+    }
+
+    /// The plan may still be live: the cancel stays Unknown, as before the read.
+    fn plan_cancel_unproven(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        job: Job,
+        current: Option<(&Slot, &Context)>,
+        order: &Order,
+        unproven: String,
+    ) {
+        cx.store.update_order(&order.id, |current| {
+            if current.status == OrderStatus::Canceling {
+                current.status = order.status;
+            }
+        });
+        self.check_unknown_cancels(cx, std::slice::from_ref(order));
+        // The cancel's fact is Accepted (Bitget answered it); the plan's fate is not.
+        if let Some(plan) = &job.plan {
+            let inherited = cx.inherit_plan_uncertainty(plan);
+            debug_assert!(inherited.is_ok(), "{inherited:?}");
+        }
+        let error = VenueError::new(format!("{unproven}; outcome unknown, check Open Orders"))
+            .outcome(Outcome::Unknown);
+        self.end(cx, job, current, error);
+        self.refresh_orders(cx, false);
     }
 
     /// Issues a read retry on the slot the Plan's timer handed back.
@@ -3997,15 +4136,116 @@ fn failure_messages(failures: &[Failure]) -> Vec<(Option<i64>, String)> {
         .collect()
 }
 
-fn restore_canceling(cx: &mut Cx<'_, Pending>, call: &Planned) {
-    if let Effect::Cancel { orders, .. } = &call.effect {
-        for order in orders {
-            cx.store.update_order(&order.id, |current| {
-                if current.status == OrderStatus::Canceling {
-                    current.status = order.status;
-                }
-            });
+/// The orders-plan-pending planType that lists a cancel-plan-order planType:
+/// `profit_loss` covers profit_plan, loss_plan, moving_plan, pos_profit and pos_loss.
+fn pending_plan_type(cancel: &str) -> Option<&'static str> {
+    match cancel {
+        "profit_plan" | "loss_plan" | "moving_plan" | "pos_profit" | "pos_loss" => {
+            Some("profit_loss")
         }
+        "normal_plan" => Some("normal_plan"),
+        "track_plan" => Some("track_plan"),
+        _ => None,
+    }
+}
+
+/// A JSON object only: derive(Deserialize) also takes a sequence for a struct,
+/// which no Bitget evidence is. Derived fields still refuse duplicate keys.
+struct ObjectOnly<T>(T);
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for ObjectOnly<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Object<T>(std::marker::PhantomData<T>);
+        impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Object<T> {
+            type Value = T;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<T, A::Error> {
+                T::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
+        }
+        d.deserialize_map(Object(std::marker::PhantomData))
+            .map(ObjectOnly)
+    }
+}
+
+/// Proof envelopes: the literal success code, never a number that parses to 0.
+#[derive(Deserialize)]
+struct ProofEnvelope<T> {
+    code: String,
+    data: ObjectOnly<T>,
+}
+fn proof<'de, T: Deserialize<'de>>(body: &'de str) -> Option<T> {
+    serde_json::from_str::<ObjectOnly<ProofEnvelope<T>>>(body)
+        .ok()
+        .filter(|e| e.0.code == "00000")
+        .map(|e| e.0.data.0)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingPlanPage<'a> {
+    /// Outer `None`: the field is missing; inner `None`: Bitget's null empty list.
+    #[serde(default, borrow, deserialize_with = "present")]
+    entrusted_list: Option<Option<Vec<ObjectOnly<PendingPlanRow<'a>>>>>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingPlanRow<'a> {
+    #[serde(default, borrow)]
+    order_id: Identifier<'a>,
+}
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
+/// `{"code":"00000","data":{"successList":[],"failureList":[]}}` and nothing
+/// else in `data`; duplicate keys refuse.
+fn empty_plan_ack(body: &str) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Lists {
+        success_list: Vec<serde::de::IgnoredAny>,
+        failure_list: Vec<serde::de::IgnoredAny>,
+    }
+    proof::<Lists>(body).is_some_and(|l| l.success_list.is_empty() && l.failure_list.is_empty())
+}
+
+/// Whether a pending-plan page lists `id`: `None` unless the page is a clean,
+/// complete answer (code "00000", an entrustedList of objects, every row
+/// identified, under the limit).
+fn pending_plan_listed(body: &str, id: &str) -> Option<bool> {
+    const PAGE_LIMIT: usize = 100;
+    let page = proof::<PendingPlanPage>(body)?;
+    let rows = page.entrusted_list?.unwrap_or_default();
+    if rows.len() >= PAGE_LIMIT {
+        return None;
+    }
+    let mut listed = false;
+    for ObjectOnly(row) in &rows {
+        let row_id = row.order_id.text();
+        if row_id.is_empty() {
+            return None;
+        }
+        listed |= row_id == id;
+    }
+    Some(listed)
+}
+
+fn restore_canceling(cx: &mut Cx<'_, Pending>, call: &Planned) {
+    let orders = match &call.effect {
+        Effect::Cancel { orders, .. } => orders.as_slice(),
+        Effect::ConfirmPlanGone { order, .. } => std::slice::from_ref(order.as_ref()),
+        _ => &[],
+    };
+    for order in orders {
+        cx.store.update_order(&order.id, |current| {
+            if current.status == OrderStatus::Canceling {
+                current.status = order.status;
+            }
+        });
     }
 }
 
@@ -4079,7 +4319,7 @@ impl Planned {
     fn read(&self) -> bool {
         matches!(
             self.effect,
-            Effect::Metadata(_) | Effect::ResolveAmend { .. }
+            Effect::Metadata(_) | Effect::ResolveAmend { .. } | Effect::ConfirmPlanGone { .. }
         )
     }
 
@@ -4093,7 +4333,9 @@ impl Planned {
 
     fn intent(&self) -> Intent {
         match self.effect {
-            Effect::Metadata(_) | Effect::ResolveAmend { .. } => Intent::Read,
+            Effect::Metadata(_) | Effect::ResolveAmend { .. } | Effect::ConfirmPlanGone { .. } => {
+                Intent::Read
+            }
             Effect::Place { .. } => Intent::Place,
             Effect::Cancel { .. } => Intent::Cancel,
             Effect::Amend { .. } => Intent::Amend,

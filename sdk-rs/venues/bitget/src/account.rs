@@ -2765,6 +2765,19 @@ impl BitgetFutures {
         self.account.positions_in_flight
     }
 
+    /// A native read proved the order absent: drop it without claiming how it ended.
+    pub(crate) fn forget_order(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        self.account
+            .terminal
+            .insert(id.to_owned(), cx.now + 10_000.0);
+        self.account.opened.remove(id);
+        self.account.plans.remove(id);
+        self.account.trailing.remove(id);
+        self.account.execution_prices.remove(id);
+        self.account.cancel_checks.retain(|c| c.target.id != id);
+        cx.store.remove_orders(&[id]);
+    }
+
     pub(crate) fn mark_canceled(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
         self.account
             .terminal

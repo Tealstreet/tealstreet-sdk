@@ -172,6 +172,21 @@ test('#3148 protective edit live fixes (run 42196761441) retain headroom and sib
   assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
 });
 
+test('#3202 plan cancel confirmation (run 42280173727) retains headroom and siblings match', () => {
+  const measured = 2_379_303;
+  const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(measuredCap, 2_390_016);
+  const cap = WASM_VENUE_OVERRIDES.bitget;
+  assert.ok(cap >= measuredCap);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.bitget, WASM_VENUE_OVERRIDES.bitgetusdc);
+});
+
 test('#3198 + #3201 combined on master 6228bbef939 retain Bitget headroom and siblings match', () => {
   const measured = 2_364_891;
   const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
@@ -594,7 +609,21 @@ test('#3150 merged-tree caps retain the approved exact boundaries', () => {
 
 test('#3207 telemetry (run 42279265759) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
   const measured = 2_390_477;
-  const cap = 2_401_280;
+  const measuredCap = Math.ceil((measured + 10 * 1024) / 1024) * 1024;
+  assert.equal(measuredCap, 2_401_280);
+  const cap = WASM_VENUE_OVERRIDES.bitget;
+  assert.ok(cap >= measuredCap);
+  for (const venue of ['bitget', 'bitgetusdc']) {
+    assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+});
+
+test('#3202 on #3207 (run 42305638406) uses CI plus 10 KiB and keeps Bitget siblings equal', () => {
+  const measured = 2_409_448;
+  const cap = 2_419_712;
   assert.equal(cap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
   for (const venue of ['bitget', 'bitgetusdc']) {
     assert.equal(WASM_VENUE_OVERRIDES[venue], cap);
