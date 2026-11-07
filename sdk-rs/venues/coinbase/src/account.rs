@@ -15,6 +15,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 const ROOT: &str = "/api/v3/brokerage";
 const STATUSES: [&str; 5] = ["PENDING", "OPEN", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
 const MAX_ROWS: usize = 10000;
+/// The crate's single private socket site: the legacy Advanced Trade user feed
+/// or the drb gateway. Each caller owns its own lifecycle for the returned socket.
+pub(crate) fn private_socket(cx: &mut Cx<'_, Pending>, url: &'static str) -> SocketId {
+    cx.connect(safe_cex_engine::SocketSpec::new(url).channel(SocketChannel::Private))
+}
 fn skip_level(kept: bool) -> Level {
     if kept { Level::Warn } else { Level::Error }
 }
@@ -1016,12 +1021,10 @@ impl Coinbase {
         self.account.has_snapshot = false;
         self.account.wire_snapshot_complete = false;
         self.account.supervisor.connecting(cx);
-        self.account.socket = Some(
-            cx.connect(
-                safe_cex_engine::SocketSpec::new("wss://advanced-trade-ws-user.coinbase.com")
-                    .channel(SocketChannel::Private),
-            ),
-        );
+        self.account.socket = Some(private_socket(
+            cx,
+            "wss://advanced-trade-ws-user.coinbase.com",
+        ));
     }
     pub(crate) fn private_on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) -> bool {
         if self.account.socket != Some(socket) {

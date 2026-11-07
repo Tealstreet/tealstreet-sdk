@@ -224,7 +224,9 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   blofin: 2_001_920,
   breakoutprop: 1_580_032,
   bybit: 2_270_208,
-  coinbase: 1_935_360,
+  // #3225: CI 42367168155, job 128387823292, head 42ef057e1: 2,022,882 B.
+  // CI size plus 10 KiB, rounded up to the KiB.
+  coinbase: 2_033_664,
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
   // #3227 hosted signing: CI run 42352873546, job 128345833529 measured 1,944,314 B.

@@ -9,13 +9,12 @@ use safe_cex_engine::classify::{self, Intent, Native, NativeCode, Released};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{
-    Context, Operation, Owner, Policy, RetryPolicy, Scope, SecretHeaderValue, Session,
-    SessionBearer, SessionHeaders, SessionPolicy,
+    Context, Operation, Owner, Policy, RetryPolicy, Scope, Session, SessionBearer, SessionHeaders,
+    SessionPolicy,
 };
 use safe_cex_engine::startup::Sections;
 use safe_cex_engine::{
-    Cx, ErrorKind, Fill, FillFinancials, Level, Response, SocketChannel, SocketId, SocketSpec,
-    TimerId, VenueError,
+    Cx, ErrorKind, Fill, FillFinancials, Level, Response, SocketId, TimerId, VenueError,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -177,9 +176,8 @@ fn rpc_read_error(
     )
 }
 fn rows(v: Value) -> Result<Vec<Value>, String> {
-    let Value::Array(rows) = v else {
-        return Err("drb expected result array".into());
-    };
+    let rows: Vec<Value> =
+        serde_json::from_value(v).map_err(|_| "drb expected result array".to_owned())?;
     if rows.len() > MAX_ROWS {
         return Err("drb account result exceeds row limit".into());
     }
@@ -198,8 +196,7 @@ impl Private {
         let headers = self
             .http
             .authorization(self.now)
-            .and_then(|s| SecretHeaderValue::new(s).ok())
-            .and_then(|s| SessionHeaders::new(vec![("Authorization", s)]).ok());
+            .and_then(|value| SessionHeaders::bearer(value.strip_prefix("Bearer ")?).ok());
         match headers {
             Some(headers) => SessionBearer::Ready {
                 headers,
@@ -661,7 +658,7 @@ impl Coinbase {
         if self.private_drb.socket.is_some() || cx.now < self.private_drb.reconnect_at {
             return;
         }
-        let socket = cx.connect(SocketSpec::new(drb::WS_URL).channel(SocketChannel::Private));
+        let socket = crate::account::private_socket(cx, drb::WS_URL);
         self.private_drb.socket = Some(socket);
         self.private_drb.ws = Some(drb_auth::Session::new(drb::Channel::WebSocket(socket)));
         self.private_drb.payload = cx.now;
