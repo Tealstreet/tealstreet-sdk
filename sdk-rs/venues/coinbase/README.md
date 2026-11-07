@@ -7,13 +7,20 @@ public, account and trading streams; S0 does not switch legacy routes itself.
 
 Integration contract:
 
+- Public order-book repair clears only the repaired book. In-flight changes are
+  ignored until its replacement snapshot arrives, then normal sequence checks
+  resume; other live books keep their state and shared socket.
+
 - HTTP takes the caller's engine-issued `request_context::Context` and an optional
   engine `request_context::Session` handle. Private methods require that session;
   its `Venue::session_bearer` callback supplies the current token at preparation,
   and `session_bearer_revision` fences the same revision at release.
   Retain the context with the pending request, validate its delivery, record any
   Mutation result, and finish the context through the engine lifecycle. Production
-  writes use genuine command/Plan authority; public reads use Background contexts.
+  writes use genuine command/Plan authority. Catalogue and ticker polls use
+  Background contexts; candle/trade queries retain their command context across
+  pages. Reads deferred during discovery retain their original caller deadline
+  and settle through `settle_caller_read_root` if the catalogue fails.
   No raw bearer strings or legacy `Cx::request` boundary are used by drb.
 - Supported methods have a closed semantic classification, independent of rate
   pools. Orders, edits, cancels, position moves and account settings (including
@@ -78,3 +85,43 @@ Validation: `cargo test --locked -j 2 -p safe-cex-venue-coinbase` from `sdk-rs`,
 plus scoped Clippy and a `wasm32-unknown-unknown` check. The foundation suite was
 run RED against the interface stubs before implementation; additional RED tests
 caught legacy ES256 issuer reuse and delayed-response cooldown timing.
+
+## Public perpetual data (S1)
+
+Keyless derivatives startup discovers active linear USDC perpetual instruments
+and then fetches their book summaries. It uses two HTTP calls for the full
+catalogue, rather than one ticker call per market. Prices and funding update
+through public ticker subscriptions, with a five-second summary refresh.
+Spot-only startup continues to use Advanced Trade spot endpoints.
+
+`public_drb.rs` consumes the shared `Coinbase::drb` transport. Pending public
+requests retain their RPC IDs and settle through `public::Request::Drb`.
+The separate account migration can call `Coinbase::drb_start` after determining
+that an authenticated account uses global derivatives; legacy private account
+discovery is outside S1's scope.
+
+Instrument IDs and symbols use the exact `{BASE}_USDC-PERPETUAL` name. Linear
+trade and book amounts are base currency amounts, without contract scaling.
+Market amount precision comes from `contract_size`, with `min_trade_amount`
+kept as the minimum order size. Summary `estimated_delivery_price` seeds the
+index; ticker notifications supply `index_price`. Funding uses the projected
+`funding_8h` rate as a fraction, with settlement times in milliseconds.
+
+Books require a snapshot before accepting changes, and every change must link
+its `prev_change_id` to that instrument's last `change_id`. Gaps clear the book
+and reconnect. Duplicate or older frames cannot rewind a book. Chart channels
+carry the requested supported minute/day interval; subminute candles aggregate
+deduplicated public trades. Chart history converts wire milliseconds into SDK
+candle seconds and returns chronological, half-open ranges, paged in blocks of
+1,000 bars. Unsupported native chart resolutions are rejected explicitly.
+The chart HTTP route uses GET: live POST calls return `-32601`. Its response
+omits `id`, so the shared transport correlates that specific read through the
+engine HTTP request while retaining credit admission and the response deadline.
+Explicit wrong IDs still fail. Other RPC methods retain strict ID correlation.
+
+REST and drb share the existing Coinbase HTTP emission and public command
+completion boundaries. Public sockets also use one existing connection site;
+its scoped inventory replacement only changes the URL selection for drb.
+The frozen HTTP/completion and socket inventories gain no new call sites.
+
+See [the live tape and offline replay gate](tests/fixtures/drb-public.README.md).

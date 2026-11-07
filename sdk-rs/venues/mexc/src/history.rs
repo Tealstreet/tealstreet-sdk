@@ -300,7 +300,7 @@ impl MexcFutures {
         });
         let (window_from, window_to) = match (from, to) {
             // Whole milliseconds keep newest-first window edges gap-free.
-            (Some(a), None) => (Some(a), Some(cx.now.floor())),
+            (Some(a), None) => (Some(a), Some(cx.protocol_now().floor())),
             (None, Some(b)) => (Some((b - 7.0 * 86_400_000.0).max(0.0)), Some(b)),
             pair => pair,
         };

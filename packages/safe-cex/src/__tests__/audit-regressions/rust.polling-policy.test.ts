@@ -67,6 +67,7 @@ function fixture(name: ExchangeName = 'binance', options: Partial<ExchangeOption
       }),
     );
   const native: WasmEngineLike = {
+    syncHostTime: () => true,
     capabilities: () => engineCapabilities(name),
     start: vi.fn(() => {
       events.push('start');

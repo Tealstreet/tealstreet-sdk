@@ -1098,3 +1098,11 @@ fn generic_invalid_parameter_text_is_not_a_missing_order_cancel_or_a_resend() {
         );
     }
 }
+
+#[test]
+fn engine_ambiguity_429_signature_body_cannot_resend() {
+    assert_uncertain_response_never_resends(
+        429,
+        r#"{"code":100001,"msg":"Signature verification failed"}"#,
+    );
+}

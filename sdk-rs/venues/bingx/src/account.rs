@@ -1290,7 +1290,7 @@ impl Account {
                 );
                 self.fresh_key(cx, credentials);
             } else {
-                let typed = read_refusal(&response, cx.now);
+                let typed = read_refusal(&response, cx.protocol_now());
                 self.request_failed(cx, request, &error, typed.as_ref(), credentials);
             }
             return;

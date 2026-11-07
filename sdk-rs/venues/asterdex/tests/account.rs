@@ -1729,16 +1729,33 @@ fn protective_amend_refusal_restores_exact_original_stop_once() {
 }
 const RATE_LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests."}"#;
 
-/// A 429 may have placed the order, so it is unknown: never "refused" or Unprotected.
+/// The ambiguous leg may have placed protection; an earlier refusal remains true.
 fn assert_unknown_stop(h: &H) {
     let error = result(h, 991).as_ref().unwrap_err();
     assert!(
         error.contains("outcome is unknown. Check Open Orders"),
         "{error}"
     );
-    assert!(!error.contains("refused"), "{error}");
+    let words = error.to_ascii_lowercase();
+    assert!(!words.contains("unprotected"), "{error}");
+    assert_eq!(
+        h.failures.last().unwrap().outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
     assert_eq!(h.failures.last().unwrap().protection, None);
     assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+}
+
+fn assert_unknown_replacement(h: &H) {
+    assert_unknown_stop(h);
+    let error = result(h, 991).as_ref().unwrap_err();
+    assert!(!error.contains("refused"), "{error}");
+}
+
+fn assert_unknown_put_back(h: &H) {
+    assert_unknown_stop(h);
+    let error = result(h, 991).as_ref().unwrap_err();
+    assert!(!error.to_ascii_lowercase().contains("no stop"), "{error}");
 }
 #[test]
 fn protective_amend_rate_limited_restore_is_unknown_not_unprotected() {
@@ -1755,7 +1772,7 @@ fn protective_amend_rate_limited_restore_is_unknown_not_unprotected() {
         let restore = h.take("/order");
         assert!(restore.url.contains("stopPrice=110"));
         h.respond_status(restore, 429, body);
-        assert_unknown_stop(&h);
+        assert_unknown_put_back(&h);
     }
 }
 #[test]
@@ -1767,7 +1784,7 @@ fn protective_amend_rate_limited_replacement_is_unknown_and_never_put_back() {
         h.respond(cancel, r#"{"orderId":991,"status":"CANCELED"}"#);
         let replacement = h.take("/order");
         h.respond_status(replacement, 429, body);
-        assert_unknown_stop(&h);
+        assert_unknown_replacement(&h);
     }
 }
 #[test]
@@ -2125,7 +2142,7 @@ fn an_unlisted_code_on_the_replacement_is_unknown_and_never_put_back() {
         replacement,
         r#"{"code":-9999,"msg":"Internal processing issue."}"#,
     );
-    assert_unknown_stop(&h);
+    assert_unknown_replacement(&h);
 }
 
 #[test]
@@ -2194,7 +2211,7 @@ fn a_too_many_orders_replacement_is_unknown_and_never_put_back() {
         400,
         r#"{"code":-1015,"msg":"Too many new orders."}"#,
     );
-    assert_unknown_stop(&h);
+    assert_unknown_replacement(&h);
 }
 
 // The put-back is a protective write too: an undocumented code on it is unknown, and
