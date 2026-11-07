@@ -1138,9 +1138,9 @@ impl Kucoin {
             return;
         }
         if status == 404
-            && !envelope
+            && envelope
                 .as_ref()
-                .is_ok_and(|row| FUTURES_RATE_CODES.contains(&row.code))
+                .is_ok_and(|row| matches!(row.code, "404" | "404000"))
             && let Call::Cancel {
                 id,
                 fallback: false,
@@ -1372,9 +1372,6 @@ impl Kucoin {
                 self.trading.timer = Some(cx.set_timer(100.0));
                 return;
             }
-            if read {
-                cx.command_error(request.command, &error);
-            }
             let mut error = if read {
                 write_failure(status, body, error)
             } else {
@@ -1415,9 +1412,7 @@ impl Kucoin {
                     format!("{gone}: {}", error.message)
                 };
             }
-            if !read {
-                cx.command_error(request.command, &error.message);
-            }
+            cx.command_error(request.command, &error.message);
             job.record(error);
             if !job.keep_going {
                 job.steps.clear();

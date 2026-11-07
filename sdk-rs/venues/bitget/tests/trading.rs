@@ -595,7 +595,7 @@ fn uta_client_only_cancel_omits_native_id_and_strategy_absence_is_idempotent() {
 #[test]
 fn uta_zero_amend_resolves_full_position_and_failed_replace_rolls_back_once() {
     let mut h = uta();
-    h.private_message(r#"{"arg":{"topic":"strategy-order"},"data":[{"category":"usdt-futures","orderId":"stop","symbol":"BTCUSDT","qty":"0.5","stopLoss":"80","side":"sell","posSide":"long","status":"pending"}]}"#);
+    h.private_message(r#"{"arg":{"topic":"strategy-order"},"data":[{"category":"usdt-futures","orderId":"stop","symbol":"BTCUSDT","qty":"0.5","stopLoss":"80","slTriggerBy":"market","slOrderType":"market","side":"sell","posSide":"long","status":"pending"}]}"#);
     h.command(Command::AmendOrder {
         command: 1,
         id: "stop".into(),
