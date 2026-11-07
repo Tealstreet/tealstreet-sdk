@@ -1,6 +1,8 @@
 //! Coinbase Advanced Trade: public INTX discovery and native account products.
 mod account;
 mod account_wire;
+pub mod drb;
+pub mod drb_auth;
 mod history;
 mod local_context;
 mod public;
@@ -47,6 +49,8 @@ pub enum Pending {
     History(history::Request),
 }
 pub struct Coinbase {
+    /// Shared derivatives transport; stream modules opt in through this state.
+    pub drb: drb::Transport,
     pub(crate) options: safe_cex_crypto::secrets::Sensitive<Options>,
     pub(crate) public: public::Public,
     pub(crate) credentials: Option<sign::Credentials>,
@@ -82,6 +86,7 @@ impl Coinbase {
             .as_ref()
             .map_or_else(String::new, |c| c.key().to_owned());
         Ok(Self {
+            drb: drb::Transport::default(),
             options,
             public: public::Public::new(),
             credentials,
