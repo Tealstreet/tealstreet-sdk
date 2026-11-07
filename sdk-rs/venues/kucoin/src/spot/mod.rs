@@ -948,7 +948,7 @@ impl KucoinSpot {
             if let Some(b) = self.books.get_mut(symbol).filter(|b| b.subscribers > 0)
                 && let Ok(d) = serde_json::from_str::<Depth>(data.get())
             {
-                let time = d.timestamp.map_or(cx.now, |n| n.0);
+                let time = d.timestamp.map_or(cx.protocol_now(), |n| n.0);
                 if time < b.last {
                     return;
                 }

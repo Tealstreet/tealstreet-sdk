@@ -289,9 +289,9 @@ export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngin
   loadWasmEngine = loader;
 };
 
-const synchronizedEngineTransport = (syncAfterSuspend: (now: number, utc: number) => void): Transport => {
+const synchronizedEngineTransport = (noteClockJump: (now: number, utc: number) => void): Transport => {
   // Keep scheduling stable across clock corrections and clocks that stop in
-  // suspend. Repair protocol UTC before the first post-wake engine operation.
+  // suspend. Clock reads only record a correction; EngineHost applies it later.
   const origin = virtualClock.getCurrentTimeMs();
   const started = performance.now();
   let sampledMonotonic = started;
@@ -304,7 +304,7 @@ const synchronizedEngineTransport = (syncAfterSuspend: (now: number, utc: number
       const now = origin + (monotonic - started);
       if (Number.isFinite(monotonic) && Number.isFinite(wall)) {
         const divergence = (wall - sampledWall) - (monotonic - sampledMonotonic);
-        if (Math.abs(divergence) > 1_000) syncAfterSuspend(now, virtualClock.getCurrentTimeMs());
+        if (Math.abs(divergence) > 1_000) noteClockJump(now, virtualClock.getCurrentTimeMs());
         sampledMonotonic = monotonic;
         sampledWall = wall;
       }
@@ -1589,12 +1589,12 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = options;
     const publicDataOnly = this.isPublicDataOnly;
-    let clockHost: EngineHostType | undefined;
+    let pendingProtocolTime: { now: number; utc: number } | undefined;
     const routedTransport = createEngineTransport(
       this.name,
       options,
       transportFactory ? transportFactory() : synchronizedEngineTransport((now, utc) => {
-        if (!this.isDisposed) clockHost?.syncHostTime(utc, now);
+        pendingProtocolTime = { now, utc };
       }),
       this.signerSetup,
       (message) => this.emitAndLogError(message),
@@ -1739,6 +1739,13 @@ export class RustEngineExchange extends BaseExchange {
         {
           commandTimeoutMs: this.commandTimeoutMs,
           ownsEngine: true,
+          ...(!transportFactory ? { protocolTime: () => {
+            // Sample only outside the HTTP handoff. now() itself never calls Rust.
+            transport.now();
+            const correction = pendingProtocolTime;
+            pendingProtocolTime = undefined;
+            return correction;
+          } } : {}),
           ...(this.signerSetup instanceof DelegatedSignerSetup
             ? { signer: this.signerSetup.signer, signerAlgorithms: this.signerSetup.signerAlgorithms }
             : {}),
@@ -1756,7 +1763,6 @@ export class RustEngineExchange extends BaseExchange {
       const capabilities = host.capabilities();
       this.adoptEngineCapabilities(capabilities);
       if (!transportFactory) {
-        clockHost = host;
         host.syncHostTime(virtualClock.getCurrentTimeMs());
         this.stopTimeSync = virtualClock.subscribeToTimeSync((utc) => host.syncHostTime(utc));
       }

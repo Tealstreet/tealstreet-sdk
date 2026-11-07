@@ -384,7 +384,8 @@ deadlines on subsequent synchronization. Browser workers wait up to 30 s for
 an initial host time push before anchoring. Later syncs update only the engine's
 protocol UTC fallback; small corrections preserve venue calibration, while a
 >1 s host-baseline discontinuity (including suspend) invalidates it. The default
-transport detects wall-versus-monotonic divergence before post-wake operations. Journal
+transport records wall-versus-monotonic divergence as pending UTC data only;
+EngineHost drains it outside HTTP handoffs before the next Rust call. Journal
 UTC bounds and scheduled-cancel validation still use synchronized wall time.
 Explicit host/recording transports retain their own clock; native servers supply
 their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue

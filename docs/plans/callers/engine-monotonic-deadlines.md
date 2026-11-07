@@ -18,11 +18,14 @@ revision. Small host updates preserve a venue's own `observe_protocol_time`
 calibration. A change larger than 1,000 ms in the host UTC-minus-scheduling
 baseline invalidates that calibration and replaces it with current host UTC.
 On every default-transport clock read, wall-clock and monotonic deltas are
-compared: a divergence larger than 1,000 ms synchronizes protocol UTC before
-the next engine operation. This handles laptop suspend where the monotonic
-clock stops; scheduling time itself never jumps. The already sampled scheduling
-value is passed to the host without recursively sampling the transport.
-The physical HTTP-group handoff still refuses reentrant engine mutations. Neither
+compared: a divergence larger than 1,000 ms records a pending UTC correction.
+`transport.now()` never calls the engine. An optional host clock-source hook
+samples and drains that observation at `EngineHost.invoke`, after the handoff
+fence and before entering Rust. A refused correction remains pending for the
+next entry; a later observation can replace it. This handles laptop suspend
+where the monotonic clock stops, including status-2 HTTP pacing wakes and clock
+steps between grouped sends. Scheduling time itself never jumps. The physical
+HTTP-group handoff and all its reentry guards are unchanged. Neither
 API changes request ownership, deadlines or retry authority; stale pre-release
 signing follows the existing revision checks. The host refuses old WASM packages
 without this clock API. Explicit injected/replay transports keep their original
@@ -49,7 +52,10 @@ explicit `utc` call line (one site before and after; no signing site added).
 The now-scalar WOO signer call no longer lexically receives a `Cx`; its old
 provenance fingerprint is pruned, with no new request site or allowance.
 Coinbase DRB `prepare(now)` only meters credits and local deadlines; it emits no
-UTC field. Store receipt/update fallbacks retain their existing clock contract.
+UTC field. Receipt-age clocks retain scheduling time. Kraken Spot execution
+fences/order-update fallback timestamps and the KuCoin Spot missing book
+timestamp use protocol UTC so comparison against venue timestamps stays in one
+domain. BreakoutProp is untouched.
 
 Controls reproduce both directions of a 162-day correction through the default
 SDK clock, a late initial worker sync, missing worker sync, disposal, explicit
@@ -60,4 +66,10 @@ Binance signing controls cover both venue-calibrated and fallback clocks, and
 history `endTime` uses corrected UTC. The sleep and UTC-bound regressions
 were RED on the submitted source before these fixes.
 The native watchdog still emits at 60 real seconds with 60,000 ms elapsed.
+A second RED-to-GREEN handoff control executes the actual status-2 group wait
+continuation under the SDK default clock: wake no longer kills the engine, and
+a step between sends no longer fails a released member. The next engine signing
+entry sees awake UTC (a stand-in packet/HMAC fixture; real Binance signing is
+pinned separately above). Kraken Spot and KuCoin Spot regressions check corrected
+fallback time and refusal of a later explicitly stale venue row/page.
 No live accounts, orders, probes or deployment are used.

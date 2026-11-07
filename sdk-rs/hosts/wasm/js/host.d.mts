@@ -340,6 +340,10 @@ export interface SignMeta {
 export type Signer = (request: SignRequest, context: { signal: AbortSignal; meta?: SignMeta }) => Promise<SignResult> | SignResult;
 
 export interface EngineHostOptions {
+  /** Drain a newly observed protocol clock correction at a host entry, outside
+   * physical HTTP handoffs. Must only sample/drain data, never call the engine.
+   * A refused correction stays pending in the host until a later successful entry. */
+  protocolTime?: () => { now: number; utc: number } | undefined;
   /** Transfer raw engine allocation ownership after successful construction.
    * Defaults false; borrowed callers dispose the host, then free their engine.
    * Trap cleanup is best effort. */

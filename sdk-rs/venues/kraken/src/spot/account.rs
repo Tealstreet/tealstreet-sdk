@@ -953,7 +953,7 @@ impl KrakenSpot {
                 rejected.push(String::new());
                 return;
             }
-            let time = crate::history::timestamp(&e.timestamp).unwrap_or(cx.now);
+            let time = crate::history::timestamp(&e.timestamp).unwrap_or(cx.protocol_now());
             if times
                 .get(&*e.order_id)
                 .or_else(|| self.account.native_times.get(&*e.order_id))
@@ -1053,7 +1053,7 @@ impl KrakenSpot {
                         .and_then(|o| o.time_in_force)
                         .unwrap_or(TimeInForce::GoodTillCancel)
                 },
-                crate::history::timestamp(&e.timestamp).unwrap_or(cx.now),
+                crate::history::timestamp(&e.timestamp).unwrap_or(cx.protocol_now()),
             );
             // A failed delivery must not consume the display baseline or row fences.
             let delivery = if !snapshot && e.exec_type == "trade" {
