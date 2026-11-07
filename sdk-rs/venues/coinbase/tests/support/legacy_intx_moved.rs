@@ -1,8 +1,27 @@
-mod support;
+// Keep S1 legacy startup oracles on the test-only legacy route.
+mod support {
+    pub type Driver = safe_cex_engine::Engine<crate::Coinbase>;
+    pub fn actions(e: &mut Driver) -> Vec<safe_cex_engine::Action> {
+        safe_cex_engine::test_support::prepared_now(e)
+    }
+    pub fn drb_response(method: &str, request: &safe_cex_engine::HttpRequest) -> String {
+        let row = include_str!("../fixtures/drb-public.jsonl")
+            .lines()
+            .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap())
+            .find(|r| r["method"] == method)
+            .unwrap();
+        let sent: serde_json::Value =
+            serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        let mut body: serde_json::Value =
+            serde_json::from_str(row["body"].as_str().unwrap()).unwrap();
+        body["id"] = sent["id"].clone();
+        body.to_string()
+    }
+}
 
+use crate::{Coinbase, Options};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use safe_cex_engine::{Action, ErrorKind, Event, HttpRequest, Level, Notice, Response, TimerId};
-use safe_cex_venue_coinbase::{Coinbase, Options};
 use std::collections::{HashMap, VecDeque};
 
 // Approved S4a user-facing contract; all responses and credentials are local fixtures.
@@ -77,24 +96,24 @@ impl Rig {
     }
 }
 fn start(private: bool, spot: bool) -> (Rig, HttpRequest) {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(
-        Coinbase::new(Options {
-            public_data_only: !private,
-            spot_only: spot,
-            key: if private {
-                "organizations/test/apiKeys/test".into()
-            } else {
-                String::new()
-            },
-            secret: if private {
-                STANDARD.encode([7; 32])
-            } else {
-                String::new()
-            },
-            ..Default::default()
-        })
-        .unwrap(),
-    );
+    let mut venue = Coinbase::new(Options {
+        public_data_only: !private,
+        spot_only: spot,
+        key: if private {
+            "organizations/test/apiKeys/test".into()
+        } else {
+            String::new()
+        },
+        secret: if private {
+            STANDARD.encode([7; 32])
+        } else {
+            String::new()
+        },
+        ..Default::default()
+    })
+    .unwrap();
+    venue.account.legacy_protocol_fixture = true;
+    let mut engine = safe_cex_engine::test_support::seeded_engine(venue);
     engine.start(1000.);
     let mut rig = Rig {
         engine,

@@ -67,7 +67,7 @@ const fn refusal(code: i64, kind: ErrorKind) -> Row {
         only: None,
     }
 }
-const CODES: CodeTable = CodeTable {
+pub(crate) const CODES: CodeTable = CodeTable {
     rows: &[
         refusal(-32700, ErrorKind::InvalidInput),
         refusal(-32600, ErrorKind::InvalidInput),

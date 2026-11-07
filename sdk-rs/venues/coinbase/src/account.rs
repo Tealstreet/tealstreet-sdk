@@ -102,6 +102,10 @@ struct Snapshot {
 }
 #[derive(Default)]
 pub(crate) struct Account {
+    /// Unit fixtures retain the old protocol's shared-code regression oracles.
+    /// This switch does not exist in production builds or public Options.
+    #[cfg(test)]
+    pub(crate) legacy_protocol_fixture: bool,
     pub kind: Option<ProductKind>,
     pub portfolio_id: Option<String>,
     pub socket: Option<SocketId>,
@@ -958,9 +962,22 @@ impl Coinbase {
         self.account.portfolio_id = Some(p.uuid);
         self.account.kind = Some(kind);
         self.account.startup_failures = 0;
-        self.private_ready(kind, cx);
+        #[cfg(test)]
+        if self.account.legacy_protocol_fixture {
+            self.private_ready(kind, cx);
+            return;
+        }
+        if kind == ProductKind::Intx {
+            self.drb_private_start(cx);
+        } else {
+            self.private_ready(kind, cx);
+        }
     }
     pub(crate) fn private_after_markets(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.private_drb.enabled {
+            self.drb_after_markets(cx);
+            return;
+        }
         if self.credentials.is_none() || self.account.kind.is_none() || self.account.ready {
             return;
         }
@@ -1074,6 +1091,10 @@ impl Coinbase {
         self.account_poll(cx, true);
     }
     fn account_poll(&mut self, cx: &mut Cx<'_, Pending>, orders: bool) {
+        if self.private_drb.enabled {
+            self.drb_poll(cx);
+            return;
+        }
         if cx.now < self.account.backoff_until {
             return;
         }
@@ -2602,3 +2623,11 @@ fn review_startup_prerequisite_has_a_section() {
         safe_cex_engine::startup::Sections::ACCOUNT
     );
 }
+
+#[cfg(test)]
+#[path = "../tests/support/legacy_account.rs"]
+mod legacy_protocol_tests;
+
+#[cfg(test)]
+#[path = "../tests/support/legacy_intx_moved.rs"]
+mod legacy_intx_moved_tests;
