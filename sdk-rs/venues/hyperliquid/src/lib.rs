@@ -142,6 +142,7 @@ struct InfoSuccessor {
 #[derive(Default)]
 struct Connection {
     feed: Option<FeedId>,
+    feed_refused: bool,
     // Native topic eligibility, updated only by accepted shared lifecycle events.
     open: bool,
     private_bootstrap: socket_codec::PrivateBootstrap,
@@ -171,6 +172,7 @@ struct Ladder {
     book: Book,
 }
 pub struct Hyperliquid {
+    repair_boot_sequence: u64,
     options: Options,
     /// The standalone `hyperliquidspot` venue: spot is the whole product.
     spot: bool,
@@ -219,6 +221,7 @@ impl Hyperliquid {
             Default::default(),
         );
         Self {
+            repair_boot_sequence: socket_codec::next_repair_boot_sequence(),
             options,
             spot: false,
             spot_markets,
@@ -1583,7 +1586,8 @@ impl Venue for Hyperliquid {
         cx: &mut Cx<'_, Pending>,
         topic: &SubscriptionTopic,
     ) -> Option<Result<(), String>> {
-        self.retry_refused(cx, topic)
+        self.unnamed_candle_repair(cx, topic)
+            .or_else(|| self.retry_refused(cx, topic))
     }
     fn socket_control(
         &self,

@@ -4579,9 +4579,10 @@ pub trait Venue {
             .into_iter()
             .collect()
     }
-    /// `Command::RepairSubscription` for a venue that owns its sockets: re-send
-    /// the native unsubscribe then subscribe for `topic`, intent unchanged.
-    /// `None` means unsupported; `Some(Err)` names why this repair was refused.
+    /// Repair an unmanaged or withdrawn managed topic, or defer/explain an
+    /// unnamed managed topic.
+    /// Intent stays unchanged. `None` uses the engine's default refusal;
+    /// `Some(Err)` names why this repair was refused.
     fn repair_subscription(
         &mut self,
         _cx: &mut Cx<'_, Self::Pending>,
@@ -6481,7 +6482,17 @@ impl<V: Venue> Engine<V> {
         if V::managed_sockets() {
             let interests = self.venue.subscription_interests(&self.store, topic);
             if interests.is_empty() {
-                return Err("the venue cannot name its stream for this topic".into());
+                let mut cx = Cx {
+                    now,
+                    store: &mut self.store,
+                    io: &mut self.io,
+                };
+                return self
+                    .venue
+                    .repair_subscription(&mut cx, topic)
+                    .unwrap_or_else(|| {
+                        Err("the venue cannot name its stream for this topic".into())
+                    });
             }
             // An optional stream that is not live is skipped; the rest still repair.
             let mut by_feed: Vec<(crate::socket_lifecycle::FeedId, Vec<String>)> = Vec::new();
