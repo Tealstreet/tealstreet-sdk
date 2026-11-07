@@ -276,6 +276,14 @@ positions and one-way position mode, because cancel-all is intentional.
 | `BINGX_MAINNET` | `KEY`, `SECRET` | bingx | perpetual read and trade; switch to one-way mode; BTC-USDT minimum 0.0001 BTC; fund 20 USDT |
 | `KRAKEN_SPOT_MAINNET` | `KEY`, `SECRET` (Base64) | krakenspot | Query Funds, Query Open Orders and Trades, Create and Modify Orders, Cancel/Close Orders; XBT/USD ordermin 0.00006, costmin 0.5 USD; fund 20 USD cash |
 
+COIN-M sizing uses the selected symbol's public `/dapi/v1/exchangeInfo` row:
+one `LOT_SIZE` filter, a positive `contractSize`, and valid supplied
+`PERCENT_PRICE` lower bounds. Quantity is in contracts, so the dollar notional
+is `quantity * contractSize`, independent of the resting price. Missing or
+ambiguous sizing metadata refuses the run; the fixed 100 USD cap still applies.
+Fine-tick prices and amounts tolerate float noise relative to their step count,
+while a real fraction of a step still floors prices and ceils minimum amounts.
+
 `binancepm` has no test environment and no profile yet. Whether it runs on
 mainnet or stays unsmoked is an open decision. `binanceoptions` (European
 Options, #2356) has no reviewed profile either and refuses every mode.

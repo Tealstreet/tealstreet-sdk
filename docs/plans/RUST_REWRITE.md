@@ -749,6 +749,7 @@ overrides and refuse unsupported environments before reading credentials.
 | `binanceinverse` | `BINANCE` | `KEY`, `SECRET` | Testnet: `demo-dapi.binance.com`, `dstream.binancefuture.com` (the engine's COIN-M pairing). Shares the USD-M demo keys; quantity is whole contracts of `contractSize` USD. |
 | `binancespot` | `BINANCESPOT` | `KEY`, `SECRET` | Testnet: `testnet.binance.vision`, `stream.testnet.binance.vision`, `ws-api.testnet.binance.vision` |
 | `binancepm` | — | — | No test environment; no reviewed live-smoke profile. Refused before credential access. |
+| `binanceoptions` | — | — | No reviewed live-smoke profile. Every mode is refused before credential access. |
 | `bybit`, `bybitinverse`, `bybitspot` | `BYBIT` | `KEY`, `SECRET` | Testnet: `api-testnet.bybit.com`, `stream-testnet.bybit.com` |
 | `bybitdemo` | `BYBIT` | `KEY`, `SECRET` | Demo by default: `api-demo.bybit.com`, `stream-demo.bybit.com`; public market data on `stream.bybit.com`. Testnet also supported. |
 | `bitget`, `bitgetusdc`, `bitgetinverse` | `BITGET` | `KEY`, `SECRET`, `PASSPHRASE` | Testnet selects `susdt-futures`, `susdc-futures`, `scoin-futures` and simulated collateral on the shared `api.bitget.com` / `ws.bitget.com` origins. UTA testnet is unsupported. |
