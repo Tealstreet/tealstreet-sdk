@@ -837,6 +837,13 @@ impl Grvt {
             ("X-Grvt-Remember-Me", "true"),
             ("Cookie", "rm=true"),
         ];
+        let credential = self.signing.as_ref().and_then(|identity| {
+            let slots = Slots::new(Some(identity), None, SlotPolicy::default());
+            slots
+                .select(CredentialRole::SessionAuth)
+                .ok()
+                .map(|(selection, id)| selection.authority(id))
+        });
         let session = match self.account.login_session.take() {
             Some(session) if cx.session_live(&session) => Ok(session),
             _ => {
@@ -847,9 +854,13 @@ impl Grvt {
                     .ok()
                     .and_then(|(selection, _)| selection.session_egress());
                 cx.open_session(SessionPolicy {
-                    credential: None,
+                    credential: credential.clone(),
                     repeat_safe: false,
-                    private_egress,
+                    private_egress: if credential.is_none() {
+                        private_egress
+                    } else {
+                        None
+                    },
                 })
             }
         };
@@ -858,7 +869,7 @@ impl Grvt {
                 &session,
                 Policy {
                     operation: Operation::Mutation,
-                    credential: None,
+                    credential: credential.clone(),
                     // The host default the unmanaged login relied on.
                     timeout_ms: 20_000,
                     pacing: None,
@@ -878,21 +889,41 @@ impl Grvt {
             context: None,
         };
         let refused = match queued {
-            Ok(context) => cx
-                .request_managed_with_headers(
-                    context.clone(),
-                    None,
-                    safe_cex_engine::Method::Post,
-                    format!("{}{AUTH}", self.edge()),
-                    HEADERS,
-                    Some(body),
-                    Pending {
-                        context: Some(context),
-                        ..pending
-                    },
-                )
-                .err()
-                .map(|(pending, _)| pending),
+            Ok(context) => {
+                let pending = Pending {
+                    context: Some(context.clone()),
+                    ..pending
+                };
+                if let Some(identity) = &self.signing {
+                    let recipe = crate::provider::Login::new(
+                        identity.credential.clone(),
+                        self.options.testnet,
+                    );
+                    cx.request_signed_managed(
+                        context,
+                        None,
+                        safe_cex_engine::Method::Post,
+                        recipe.url(),
+                        None,
+                        Box::new(recipe),
+                        pending,
+                    )
+                    .err()
+                    .map(|(pending, _)| pending)
+                } else {
+                    cx.request_managed_with_headers(
+                        context,
+                        None,
+                        safe_cex_engine::Method::Post,
+                        format!("{}{AUTH}", self.edge()),
+                        HEADERS,
+                        Some(body),
+                        pending,
+                    )
+                    .err()
+                    .map(|(pending, _)| pending)
+                }
+            }
             Err(_) => Some(pending),
         };
         if refused.is_some() {
@@ -900,7 +931,7 @@ impl Grvt {
             self.account_login_unavailable(cx);
         }
     }
-    fn retire_login_session(&mut self, cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn retire_login_session(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(session) = self.account.login_session.take() {
             let _ = cx.retire_session(&session);
         }
