@@ -849,7 +849,7 @@ fn zero_bracket_prices_mean_no_leg_on_market_and_limit_entries() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_definitive_refusals_and_explain_ambiguity() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
     let unknown = (None, Some(Outcome::Unknown));
@@ -861,19 +861,19 @@ fn write_failures_are_classified_without_changing_their_text() {
             503,
             "<html>".to_owned(),
             (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
-            "Invalid Kraken trading response",
+            "Kraken write outcome is unknown. Check Open Orders",
         ),
         (
             503,
             r#"{"result":"error"}"#.to_owned(),
             (Some(ErrorKind::VenueUnavailable), Some(Outcome::Unknown)),
-            "Kraken HTTP 503",
+            "Kraken write outcome is unknown. Check Open Orders",
         ),
         (
             429,
             r#"{"result":"error"}"#.to_owned(),
             (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
-            "Kraken HTTP 429",
+            "Kraken write outcome is unknown. Check Open Orders",
         ),
         (
             400,
@@ -885,7 +885,7 @@ fn write_failures_are_classified_without_changing_their_text() {
             200,
             r#"{"result":"error","error":"apiLimitExceeded"}"#.to_owned(),
             (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
-            "apiLimitExceeded",
+            "Kraken write outcome is unknown. Check Open Orders",
         ),
         (
             200,
@@ -1791,5 +1791,146 @@ fn a_cancel_of_an_order_already_gone_is_done() {
         let r = http(&mut e, "cancelorder");
         reply(&mut e, &r, 200, &body.to_string());
         assert!(done(&mut e).is_ok(), "{body}");
+    }
+}
+
+#[test]
+fn dispatched_write_ambiguity_matrix() {
+    for (status, body) in [
+        (429, "{}"),
+        (429, r#"{"result":"error","error":"insufficientFunds"}"#),
+        (429, r#"{"result":"error","error":"authenticationError"}"#),
+        (429, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+        (200, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+        (408, r#"{"result":"error","error":"insufficientFunds"}"#),
+        (500, r#"{"result":"error","error":"insufficientFunds"}"#),
+        (503, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+        (408, r#"{"result":"error","error":"authenticationError"}"#),
+        (500, r#"{"result":"error","error":"authenticationError"}"#),
+        (599, r#"{"result":"error","error":"authenticationError"}"#),
+        (400, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+        (404, r#"{"result":"error","error":"apiLimitExceeded"}"#),
+    ] {
+        for operation in [
+            "create",
+            "stop_create",
+            "bracket",
+            "amend",
+            "amend_stop",
+            "cancel",
+            "cancel_stop",
+            "setting",
+        ] {
+            let (mut e, _) = ready();
+            let path = match operation {
+                "create" | "stop_create" | "bracket" => {
+                    let mut o = limit();
+                    if operation == "stop_create" {
+                        o.kind = OrderType::StopLoss;
+                        o.price = Some(90.0);
+                    }
+                    if operation == "bracket" {
+                        o.stop_loss = Some(90.0);
+                        o.take_profit = Some(110.0);
+                    }
+                    place(&mut e, vec![o]);
+                    "sendorder"
+                }
+                "amend" | "amend_stop" => {
+                    inject(
+                        &mut e,
+                        "old",
+                        if operation == "amend_stop" {
+                            OrderType::StopLoss
+                        } else {
+                            OrderType::Limit
+                        },
+                        Some(StopTriggerType::LastPrice),
+                    );
+                    command(
+                        &mut e,
+                        Command::AmendOrder {
+                            command: 7,
+                            id: "old".into(),
+                            price: Some(85.0),
+                            amount: None,
+                        },
+                    );
+                    "editorder"
+                }
+                "cancel" | "cancel_stop" => {
+                    inject(
+                        &mut e,
+                        "old",
+                        if operation == "cancel_stop" {
+                            OrderType::StopLoss
+                        } else {
+                            OrderType::Limit
+                        },
+                        None,
+                    );
+                    command(
+                        &mut e,
+                        Command::CancelOrders {
+                            command: 7,
+                            ids: vec!["old".into()],
+                        },
+                    );
+                    "cancelorder"
+                }
+                _ => {
+                    command(
+                        &mut e,
+                        Command::SetLeverage {
+                            command: 7,
+                            symbol: "PF_XBTUSD".into(),
+                            leverage: 5.0,
+                            side: None,
+                        },
+                    );
+                    "leveragepreferences"
+                }
+            };
+            let mut r = http(&mut e, path);
+            if operation == "bracket" {
+                ack(&mut e, &r, "accepted-entry", "placed");
+                r = http(&mut e, path);
+                assert_eq!(param(&r, "orderType").as_deref(), Some("stp"));
+            }
+            assert_ne!(r.method, Method::Get);
+            reply(&mut e, &r, status, body);
+            let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+            let errors: Vec<_> = actions
+                .iter()
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { error, .. }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(errors.len(), 1, "{operation} {status}: {actions:?}");
+            let error = errors[0];
+            let case = format!("{operation} {status} {body}: {error:?}");
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "{case}"
+            );
+            let text = error.legacy_text().to_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "{case}"
+            );
+            assert!(
+                !text.contains("refused") && !text.contains("no stop"),
+                "{case}"
+            );
+            assert_eq!(error.protection, None, "{case}");
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+                "resend/put-back: {case}"
+            );
+        }
     }
 }
