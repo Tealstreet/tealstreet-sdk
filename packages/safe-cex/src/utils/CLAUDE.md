@@ -222,6 +222,11 @@ after detecting a wall-versus-monotonic discontinuity. This refreshes the cached
 offset promptly, including a one-off request in a browser worker. Ordinary worker
 startup and periodic sync still preserve page-pushed offsets without network I/O.
 Overlapping requests share the existing in-flight synchronization.
+Completed clock-step attempts also share a realm-wide 15 s cooldown measured by
+`performance.now()`, including Node notifications and failed attempts. Neither
+another transport nor a further wall step bypasses it. If both registered and
+venue sources fail in this mode, the prior offset and subscribers stay unchanged;
+ordinary synchronization retains its local-UTC fallback and five-minute cadence.
 
 ## Files
 

@@ -37,6 +37,7 @@ const running: RustEngineExchange[] = [];
 let monotonic = 0;
 beforeEach(() => {
   monotonic = 0;
+  (virtualClock as any).lastAfterClockStepSync = null;
   vi.spyOn(performance, 'now').mockImplementation(() => monotonic);
   virtualClock.setServerTimeSource(async () => EPOCH);
 });
@@ -297,4 +298,33 @@ it.each([
   expect(signingTimes.at(-1)).toBe(EPOCH + monotonic);
   expect(transport.now()).toBe(EPOCH + monotonic);
   expect(f.seen.filter(([event]) => event === 'command').at(-1)).toEqual(['command', EPOCH + monotonic]);
+});
+
+it('shares a completed wall-step resync across two default transports', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(EPOCH - 600_000);
+  const source = vi.fn(async () => EPOCH + monotonic);
+  virtualClock.setServerTimeSource(source);
+  setRustEngineTransport();
+  const first = fixture('mexc', () => EPOCH);
+  await first.exchange.start();
+  const second = fixture('phemex', () => EPOCH);
+  await second.exchange.start();
+  expect(source).toHaveBeenCalledOnce();
+  source.mockClear();
+
+  vi.setSystemTime(EPOCH);
+  const firstTransport: Transport = (first.exchange as any).host.transport;
+  const secondTransport: Transport = (second.exchange as any).host.transport;
+  firstTransport.now();
+  await Promise.resolve();
+  await virtualClock.syncClientServerTime({ afterClockStep: true });
+  expect(source).toHaveBeenCalledOnce();
+
+  // The second engine observes the same wall change after the first sync settled.
+  secondTransport.now();
+  await Promise.resolve();
+  await virtualClock.syncClientServerTime({ afterClockStep: true });
+  expect(source).toHaveBeenCalledOnce();
+  expect(virtualClock.getCurrentTimeMs()).toBe(EPOCH);
 });

@@ -13,6 +13,7 @@ const bybitTimeUrl = async (): Promise<string> =>
   (await import('../transport/registry')).withPublicCorsProxy('https://api.bybit.com/v5/market/time');
 
 export const TIME_SYNC_INTERVAL_MS = 300_000;
+const CLOCK_STEP_SYNC_INTERVAL_MS = 15_000;
 
 type TimeSyncListener = (timeMs: number) => void;
 
@@ -35,6 +36,7 @@ class VirtualClock {
   private offsetMs = 0;
   private receivedTimeSync = false;
   private syncInFlight: Promise<void> | null = null;
+  private lastAfterClockStepSync: number | null = null;
   private serverTimeSource: ServerTimeSource | undefined;
   private readonly syncListeners = new Set<TimeSyncListener>();
 
@@ -175,7 +177,16 @@ class VirtualClock {
       return this.syncInFlight;
     }
 
+    // All transports share this realm's floor, including synchronous Node
+    // notifications. Wall-clock steps must not shorten the cooldown itself.
+    if (afterClockStep && this.lastAfterClockStepSync !== null &&
+      performance.now() - this.lastAfterClockStepSync < CLOCK_STEP_SYNC_INTERVAL_MS) {
+      return Promise.resolve();
+    }
+
     this.syncInFlight = this.syncClientServerTimeInner(afterClockStep).finally(() => {
+      // Failed attempts also observe the floor, rather than retrying per engine.
+      if (afterClockStep) this.lastAfterClockStepSync = performance.now();
       this.syncInFlight = null;
     });
 
@@ -197,11 +208,13 @@ class VirtualClock {
     // shared request in this realm rather than waiting for the next page push.
     if (typeof window === 'undefined' && !afterClockStep) return;
 
-    this.syncFromServerTime((await this.fetchServerTime()).valueOf());
+    const serverTime = await this.fetchServerTime(afterClockStep);
+    if (serverTime) this.syncFromServerTime(serverTime.valueOf());
   };
 
-  private fetchServerTime = async () =>
-    (await this.fetchFromServerTimeSource()) ?? (await this.fetchVenueTime()) ?? dayjs.utc();
+  private fetchServerTime = async (afterClockStep: boolean) =>
+    (await this.fetchFromServerTimeSource()) ?? (await this.fetchVenueTime()) ??
+    (afterClockStep ? undefined : dayjs.utc());
 
   public syncBybitClientServerTime = async (time?: number) => {
     // A web worker has no `window` either; only a Node/Bun server skips. Testing
