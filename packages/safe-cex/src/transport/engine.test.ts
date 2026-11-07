@@ -134,7 +134,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     try {
       const reply = await routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=1', headers: {} });
       expect(new TextDecoder().decode(reply.body as Uint8Array)).toBe(body);
-      expect(report).toHaveBeenCalledExactlyOnceWith({ egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
+      expect(report).toHaveBeenCalledExactlyOnceWith({ retCode: 10006, egress: 'proxy-tokyo-2', target: 'unknown', limit: '120', remaining: '0', resetTimestamp: '1800000000000' });
       expect(mocks.adapter).toHaveBeenCalledTimes(1);
       report.mockImplementation(() => { throw new Error('listener'); });
       await expect(routed.request({ method: 'GET', url: 'https://api.bybit.com/v5/market/kline?symbol=ETHUSDT&interval=1', headers: {} })).resolves.toMatchObject({ status: 200 });

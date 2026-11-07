@@ -198,6 +198,10 @@ serialized bodies are preserved. WOO has no signing nonce or wire recvWindow.
 PayloadSigner remains refused because its legacy private lifecycle has no such
 mode; RemoteSigner cannot fall back to it or to local material. Before-dispatch
 signing failures are `notSent`; dispatched ambiguous writes remain `Unknown`.
+WOO RemoteSigner setup refuses any configured secondary credentials with
+`unsupported` / `notSent` before native construction or callbacks: its HMAC wire
+cannot select the device's read-key slot. Remove the secondary credentials to
+use Hosted with the primary key, or use read keys in local browser mode.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
@@ -1841,12 +1845,20 @@ Relay-failure notices strip URL queries from upstream error messages before
 reporting reconnect state. Request configs and signed dispatch bytes are retained
 unchanged; the web Sentry hooks provide independent diagnostic redaction.
 
-Unsigned Bybit mainnet market responses with native `retCode: 10006` generate
+Unsigned Bybit mainnet market responses with HTTP 429 or native `retCode`
+10006, 429 or legacy 10018 generate
 one causal transport diagnostic through the exchange log/Sentry channel (no
 additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+Observation runs at the shared host-transport response boundary for managed and
+legacy requests on tunnel, proxy, direct and public-CORS routes. Streamed bodies
+are observed lazily with a 1 MiB bound for native-code detection; incomplete or
+failed streams cannot supply a native-code notice. HTTP 429 reports once at the
+response headers regardless of body content, size or stream completion, without
+consuming the body. Status-only notices carry HTTP 429 instead of a guessed
+native code.
 
 
 Hyperliquid `/info` admission shares a token bucket across account workers through

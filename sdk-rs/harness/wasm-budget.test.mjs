@@ -245,6 +245,21 @@ test('#3018 after merging 78bc1ae5a39 (run 41870743418 at c9d4de158d5) retains h
   assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
 });
 
+test('#3259 KuCoin/Kraken ambiguous writes (run 42401545356 at f9ec901182f) retain headroom and siblings match', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['kraken', 2_136_165, 2_147_328],
+    ['krakenspot', 2_136_165, 2_147_328],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
+});
+
 test('#3018 protective-amend caps (run 41854021043 at 824ff543b6d) retain the ruled headroom', () => {
   for (const [venue, measured, minimumCap] of [
     ['polymarket', 1_590_031, 1_600_512],
@@ -1012,6 +1027,21 @@ test('#3221 run 42393607294 artifact 13582294491 retains measured Woo headroom',
   assert.equal(wasmBudgetError(measured, 'venue', 'woo'), undefined);
   assert.equal(wasmBudgetError(cap, 'venue', 'woo'), undefined);
   assert.equal(wasmBudgetError(cap + 1, 'venue', 'woo'), `venue wasm ${cap + 1} exceeds ${cap} bytes`);
+});
+
+test('#3264 Kraken Spot ambiguous-write fence (run 42403521233 at d1f8b3c2e40) retains headroom and siblings match', () => {
+  for (const [venue, measured, minimumCap] of [
+    ['kraken', 2_136_521, 2_147_328],
+    ['krakenspot', 2_136_521, 2_147_328],
+  ]) {
+    assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+    const cap = WASM_VENUE_OVERRIDES[venue];
+    assert.ok(cap >= minimumCap);
+    assert.equal(wasmBudgetError(measured, 'venue', venue), undefined);
+    assert.equal(wasmBudgetError(cap, 'venue', venue), undefined);
+    assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
+  }
+  assert.equal(WASM_VENUE_OVERRIDES.kraken, WASM_VENUE_OVERRIDES.krakenspot);
 });
 
 test('#3270 (run 42404311752 at 46e5a6918ec) retains measured wasm headroom', () => {
