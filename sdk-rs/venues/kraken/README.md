@@ -21,12 +21,6 @@ models paused timers, a clock jump, 50 ms socket handshakes and 50 ms server/aut
 response stages. It measures first frames separately from complete private
 snapshots; its five-second assertion is a simulation bound, not a network SLA.
 
-Rust socket `messageHandlersStats` exposes channel observations under
-`engine:public`, `engine:private` or `engine:business`, using real last-received
-timestamps without inventing native topic names or callback counts. Page mirrors
-use worker-published `store.socketHealth` timestamps. A reconnect retains the
-last observation for diagnostics without claiming the channel is healthy.
-
 Kraken Spot treats a dispatched write's HTTP 408, 429, or 5xx response as
 `Outcome::Unknown`, even when the body contains a native signature, credential,
 or rate-limit error. HTTP 429 retains `ErrorKind::RateLimited` for diagnostics.

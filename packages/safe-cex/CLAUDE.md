@@ -1,12 +1,5 @@
 # CLAUDE.md - safe-cex Package
 
-Rust `messageHandlersStats` reports observed channel timestamps under
-`engine:public`, `engine:private` and `engine:business`, with no invented native
-topic names or callback counts. Page mirrors read the worker-published
-`store.socketHealth.publicLastMessage` / `privateLastMessage`; their own page
-engine owns no data sockets. Preserve stale observations across reconnects so
-diagnostics can name the last actual message without claiming healthy delivery.
-
 The Rust-only beta build admits only `src/exchanges/rust/betaVenues.ts` names.
 SDK factories and workers have no TypeScript venue fallback; OUT names refuse
 with `unsupported` / `notSent` before I/O. Standalone signing codecs, metadata
