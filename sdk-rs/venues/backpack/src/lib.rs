@@ -164,6 +164,15 @@ pub struct Backpack {
 }
 
 impl Backpack {
+    fn signing_window(&self) -> u32 {
+        if !self.account.active {
+            return 60000;
+        }
+        self.options
+            .recv_window
+            .filter(|value| value.is_finite() && *value > 0.)
+            .map_or(60000, |value| value.min(60000.) as u32)
+    }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.public.started
             && cx.public_feed_policy() == PublicFeedPolicy::Direct

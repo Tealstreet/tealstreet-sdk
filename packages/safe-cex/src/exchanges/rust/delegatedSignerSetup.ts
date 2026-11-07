@@ -71,9 +71,19 @@ export class DelegatedSignerSetup {
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
       || options.secondary_passphrase !== undefined || metadata.secondary !== undefined;
+    // WOO's raw HMAC callback has no slot selector; never install unusable read refs.
+    if (name === 'woo' && remoteSigner && secondaryRequested) {
+      const message = 'WOO X secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
     if (secondaryRequested && !secondary) invalid('Rust engine secondary delegated signing requires a nonempty public key');
     const presence = { key: primary !== undefined, secret: Boolean(remoteSigner || payloadSigner) };
     const publicDataOnly = derivePublicMode(name, options, undefined, presence).publicDataOnly;
+    if (name === 'backpack' && this.usesPayloadSigner && !publicDataOnly) {
+      const message = 'Backpack requires RemoteSigner Ed25519 custody';
+      throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
+    }
+    const primaryDropped = setupPolicy.readCredentials === 'publicRead' && publicDataOnly;
     const primaryPassphrase = kucoin ? { value: undefined, inheritPrimary: false } : resolveSetupPassphrase('primary', primary !== undefined, options.passphrase,
       options.passphrase, setupPolicy.primary, publicDataOnly);
     const secondaryPassphrase = kucoin ? { value: undefined, inheritPrimary: false } : resolveSetupPassphrase('secondary', secondary !== undefined, options.secondary_passphrase,
@@ -93,7 +103,7 @@ export class DelegatedSignerSetup {
       ...(brokerRef === undefined ? {} : { extra: { kucoinBroker: brokerRef } }),
     });
     const identities: SigningIdentities = Object.freeze({
-      ...(primary === undefined ? {} : { primary: identity(primaryMetadata?.stableId, primaryPassphraseRef) }),
+      ...(primary === undefined || primaryDropped ? {} : { primary: identity(primaryMetadata?.stableId, primaryPassphraseRef) }),
       ...(secondary === undefined ? {} : { secondary: identity(secondaryMetadata?.stableId, secondaryPassphraseRef) }),
     });
     try {

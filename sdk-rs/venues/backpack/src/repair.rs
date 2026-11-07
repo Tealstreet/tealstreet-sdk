@@ -126,7 +126,7 @@ impl Repair {
 }
 impl Backpack {
     pub(crate) fn repair_primary(&self) -> Result<Credential, LocalRefusal> {
-        if self.options.public_data_only || self.account.credentials.is_none() {
+        if self.options.public_data_only || !self.account.active {
             return Err(LocalRefusal::NotReady);
         }
         self.options
@@ -421,11 +421,7 @@ impl Backpack {
                 path: "/api/v1/order".into(),
                 rows: vec![params],
                 body: Some(body.clone()),
-                window: self
-                    .account
-                    .credentials
-                    .as_ref()
-                    .map_or(60000, |c| c.window),
+                window: self.signing_window(),
             },
         );
         if let Err((Pending::Repair(request), error)) = cx.request_signed_managed(

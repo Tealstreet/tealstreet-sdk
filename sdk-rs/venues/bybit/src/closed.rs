@@ -85,7 +85,7 @@ impl BybitLinear {
             let _ = cx.done_context(&root, "[]".into());
             return;
         }
-        let to = to_ms.unwrap_or(cx.now);
+        let to = to_ms.unwrap_or(cx.protocol_now());
         let from = from_ms.unwrap_or(to - LOOKBACK_MS);
         let mut request = Request {
             history: CursorHistory::new(

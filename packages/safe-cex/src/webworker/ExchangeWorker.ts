@@ -14,6 +14,7 @@ import { exchangeRegistry } from '../exchanges/registry';
 import { assertBetaAccount } from '../exchanges/rust/betaVenues';
 import { RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
+import { unsupportedVenueError } from '../unsupportedVenue';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
@@ -368,7 +369,7 @@ export class ExchangeWorker {
 
       const loader = exchangeRegistry[this._exchangeName];
       if (!loader) {
-        throw new Error(`Unknown exchange: ${this._exchangeName}`);
+        throw unsupportedVenueError(`Unknown exchange: ${this._exchangeName}`);
       }
       const Exchange = await loader();
       if (startupToken !== this._startupToken) {
@@ -393,7 +394,7 @@ export class ExchangeWorker {
 
       const isRust = this._exchange instanceof RustEngineExchange;
       const startTimeoutMs = isRust ? RUST_START_TIMEOUT_MS : START_TIMEOUT_MS;
-      const startedAt = Date.now();
+      const startedAt = performance.now();
       const startPromise = this._exchange.start().then(() => 'started' as const);
       // Its calls queue under the engine's own bounds; held here they would wait out the whole start.
       if (isRust) this._flushBufferedCalls();
@@ -408,7 +409,7 @@ export class ExchangeWorker {
           Object.assign(error, {
             safeCexSentryTags: {
               ...(this._exchange instanceof RustEngineExchange ? this._exchange.startupDiagnostics : {}),
-              startup_elapsed_ms: String(Math.max(0, Date.now() - startedAt)),
+              startup_elapsed_ms: String(Math.max(0, performance.now() - startedAt)),
               startup_deadline_ms: String(startTimeoutMs),
             },
           });

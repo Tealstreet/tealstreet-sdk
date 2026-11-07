@@ -604,7 +604,7 @@ mod envelope_rate_limits {
                 if let Some(delay) = reset_ms {
                     headers.push_str(&format!(
                         "X-Bapi-Limit-Reset-Timestamp: {}\r\n",
-                        h.now + delay
+                        h.engine.signing_clock(h.now).0 + delay
                     ));
                 }
                 if let Some(seconds) = retry_seconds {
@@ -674,7 +674,7 @@ mod envelope_rate_limits {
         refresh(&mut h, 70);
         let headers = format!(
             "X-Bapi-Limit-Reset-Timestamp: {}\r\nRetry-After: 120\r\n",
-            h.now + 120_000.0
+            h.engine.signing_clock(h.now).0 + 120_000.0
         );
         reply(&mut h, "status=PreLaunch", &headers, PRELAUNCH);
         reply(

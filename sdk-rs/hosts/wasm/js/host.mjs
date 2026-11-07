@@ -355,6 +355,10 @@ export class EngineHost {
         throw new TypeError('Engine signer algorithms must be an array');
       engine.useExternalSigner(options.signerAlgorithms === undefined ? undefined : JSON.stringify(options.signerAlgorithms));
     }
+    if (options.protocolTime !== undefined && typeof options.protocolTime !== 'function')
+      throw new TypeError('Host protocol time source must be a function');
+    this.readProtocolTime = options.protocolTime;
+    this.pendingProtocolTime = undefined;
     this.signer = options.signer;
     this.primitiveSignings = new Map();
     // Provider calls still running after their wait ended, for retirement joins.
@@ -399,6 +403,14 @@ export class EngineHost {
     this.run(this.invoke(this.engine.start, this.transport.now()));
   }
 
+  /** Update protocol UTC only. Scheduling always uses transport.now(). */
+  syncHostTime(utc, now = this.transport.now()) {
+    if (typeof this.engine.syncHostTime !== 'function')
+      throw new Error('Engine does not support separate protocol time');
+    if (!this.invoke(this.engine.syncHostTime, now, utc))
+      throw new Error('Engine refused host protocol time');
+  }
+
   get dead() { return this.deadError !== undefined; }
 
   deferHttpNotification(callback, value, binary = false) {
@@ -439,6 +451,20 @@ export class EngineHost {
         return;
       }
       this.engineVerified = false;
+      // Clock reads can queue a correction during a physical group handoff.
+      // Drain it only at a fenced host entry, before the next Rust operation.
+      this.pendingProtocolTime = this.readProtocolTime?.() ?? this.pendingProtocolTime;
+      if (this.pendingProtocolTime) {
+        const { now, utc } = this.pendingProtocolTime;
+        if (!Number.isFinite(now) || !Number.isFinite(utc)) throw new Error('Invalid host protocol time observation');
+        if (typeof this.engine.syncHostTime !== 'function') throw new Error('Engine does not support separate protocol time');
+        if (!this.engine.syncHostTime(now, utc)) throw new Error('Engine refused host protocol time');
+        this.pendingProtocolTime = undefined;
+        if (this.engine.failed?.()) {
+          this.failEngine(new Error('Engine resource identities exhausted'));
+          return;
+        }
+      }
       let result;
       switch (arguments.length) {
         case 1: result = fn.call(this.engine); break;

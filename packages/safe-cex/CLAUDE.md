@@ -9,9 +9,10 @@ Historical Rust-adapter fixtures mock only beta admission through
 the real refusal boundary. These fixtures confer no beta activation.
 Hosted-enabled beta names are Binance x4, Bybit x4 and HyroTrader, OKX x4,
 Bitget x3 (USDT, USDC, inverse), Bitunix (#2262), Phemex, BloFin, BingX,
+Backpack (RemoteSigner Ed25519 custody; see `docs/plans/callers/backpack-hosted-signing.md`),
 GRVT (RemoteSigner only; `docs/plans/callers/grvt-hosted-signing.md`),
 KuCoin futures (RemoteSigner batch custody; see `docs/plans/callers/kucoin-hosted-signing.md`), and
-Hyperliquid/Spot, Lighter/Robinhood and Paradex (remoteSigner only). Provider-mode eligibility still follows each declared remote
+Hyperliquid/Spot, Lighter/Robinhood, Paradex and WOO X (remoteSigner only). Provider-mode eligibility still follows each declared remote
 policy, with no separate beta override. Refused `remoteSigner` accounts are told to
 turn Hosted Server off to use their API key in the browser. Refused `payloadSigner`
 accounts receive neutral delegated-signing wording. Both use the venue display
@@ -190,6 +191,17 @@ revision; provider text and partial results are not returned on failure.
 A native `dispatchSigning` checkpoint alone does not enable these hosted APIs;
 its family must also pass exact legacy-wire and actual WASM/SDK acceptance gates.
 The BingX native checkpoint keeps hosted admission disabled until those gates.
+WOO local and RemoteSigner accounts share provider-owned dispatch signing for all
+V1/V3 private REST calls and private WS auth. V1 signs sorted form/query bytes plus
+`|timestamp`; V3 signs timestamp, method, path/query and the exact body. Replayed
+serialized bodies are preserved. WOO has no signing nonce or wire recvWindow.
+PayloadSigner remains refused because its legacy private lifecycle has no such
+mode; RemoteSigner cannot fall back to it or to local material. Before-dispatch
+signing failures are `notSent`; dispatched ambiguous writes remain `Unknown`.
+WOO RemoteSigner setup refuses any configured secondary credentials with
+`unsupported` / `notSent` before native construction or callbacks: its HMAC wire
+cannot select the device's read-key slot. Remove the secondary credentials to
+use Hosted with the primary key, or use read keys in local browser mode.
 Phemex admits RemoteSigner (hex HMAC, no PayloadSigner); its hosted REST codec
 in `rust/legacySigning.ts` signs `path ‖ query ‖ expiry ‖ body` as the reference did.
 Trusted setup removes both local credential slots from generic options; its
@@ -212,6 +224,13 @@ WS and credential captures retain default deny.
 The delegated provider initializes UTF-8 codecs only when provider work begins.
 Importing the native registry before its host installs TextEncoder/TextDecoder
 must remain supported; signing and frame I/O require those runtime codecs.
+
+Backpack's `backpack-ed25519` device codec resolves `[Present, Sign Ed25519]`
+atomically for the selected primary/secondary slot. Registry engines hold only
+provider refs; private startup and WS use them without raw credentials. Private
+PayloadSigner remains refused. The direct native raw-options compatibility API
+retains its previous WS path. The caller document above owns parity and hold
+requirements; betaVenues.ts keeps its existing refusal wording.
 
 The beta registry always selects Rust in SDK factories and `ExchangeWorker`;
 `ExchangeOptions.engine` remains an accepted compatibility input only.
@@ -379,9 +398,20 @@ read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
 maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
 order-book queries and options. Clock selection is shared engine-host policy:
-the default SDK transport awaits the shared `virtualClock` startup and reads it
-dynamically for every venue. Explicit host/recording transports retain their own
-clock; native servers supply their OS clock and own its synchronization. There is no per-venue
+the default SDK transport awaits shared `virtualClock` startup, anchors an
+epoch-shaped scheduling clock to `performance.now()`, and never moves its live
+deadlines on subsequent synchronization. Browser workers wait up to 30 s for
+an initial host time push before anchoring. Later syncs update only the engine's
+protocol UTC fallback; small corrections preserve venue calibration, while a
+>1 s host-baseline discontinuity (including suspend) invalidates it. The default
+transport records wall-versus-monotonic divergence as pending UTC data;
+EngineHost drains it outside HTTP handoffs before the next Rust call. A detected
+step also defers a shared server-time resync to refresh the cached wall-clock
+offset. This permits a one-off request in browser workers; ordinary worker sync
+still uses page pushes. Resync notifications run after the current handoff. Journal
+UTC bounds and scheduled-cancel validation still use synchronized wall time.
+Explicit host/recording transports retain their own clock; native servers supply
+their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue
 `hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
 `start`); `engineCapabilities` is undefined before then. `leverageQuery` decides
@@ -680,7 +710,7 @@ SDK.
   included (`isHonorableShape`): a stop is one native order, and on a bracket
   the caller's ID goes on the entry while each TP/SL leg gets its own minted
   cloid. It also mints a cloid for every order it places, caller ID or not.
-  **Rejecting venues**: AsterDEX, BreakoutProp, HyroTrader, Kraken (+spot),
+  **Rejecting venues**: AsterDEX, HyroTrader, Kraken (+spot),
   Lighter, MEXC, Polymarket.
 - **No broker prefix is composed onto a caller ID.** The generated paths keep
   their broker-attributed IDs (`x-s3vFFRQp…`, OKX/BloFin `BROKER_ID…`, Phemex
@@ -966,13 +996,13 @@ its count comes from the notional.
 `Position.contracts` being expressed in base makes `entryPrice * contracts` a
 valid notional, and therefore that price/PnL code never needs an inverse
 branch. Every inverse mapper derives `contracts` from the **MARK**, not the
-entry — `bybitinverse.exchange.ts`, `bitgetinverse`, `bitmex` and `okx` all
+entry — `bybitinverse.exchange.ts`, `bitgetinverse` and `okx` all
 compute `notionalUSD / (mark || last)` — so that product equals
 `notional * entry / mark` and drifts with the market. It is only the notional
 at `mark == entry`.
 
 On top of that, **bybitinverse and bitgetinverse leave `unrealizedPnl`
-base-denominated** (bitmex and okx convert; these two do not), so on those
+base-denominated** (okx converts; these two do not), so on those
 venues the numerator of any return calculation is in the wrong currency.
 
 That false rule was used to DELETE a correct refusal from the CLI's `$roe` on
@@ -1295,7 +1325,16 @@ declares a separate `privateUta` channel, resolved as the optional
 
 **One set of hosts since AWS_EXIT step 4: the browser build's, which the hosted exchange server shares.** Master (the Rust bundle) sends every tunnel, relay, private-pool and per-venue socket to the Vultr host `fsjnpy143pbz-tyo` — Tokyo for every region, so `PRIVATE_PROXY_JP/ASIA/GRVT_TINY` and `TOKYO/SINGAPORE_HOW_EGRESS` are each one value, and okx/okxeu/bitget/blofin/coinbase private sockets are relay urls (`BROWSER_WS_HOSTS` in `routingTable.ts`). The public CORS proxy (`PUBLIC_CORS_PROXY`) is the same Vultr host's `/api/public_proxy`: the edge Worker serves it without a JWT, from the tunnel hosts' own IPs and never the whitelisted fleet, even when a caller attaches its proxy token (Binance public reads do), so public-data weight stays off the IPs users trade through (`infra/tofu/CLAUDE.md` → trade tunnel). **The rust lanes must not be released until `public_cors_enabled` is on and both tunnel hosts carry the public CORS container**, or every public read 403s. `services/exchange-server` pinned the old AWS hosts at boot (`pinTealstreetEgressHosts`); the pin was deleted on master 2026-10-29 (the running containers keep it until the cutover deploy, AWS_EXIT step 4) so a hosted account egresses exactly like a browser one, and `services/exchange-server/src/egress.test.ts` fails if the server sets a host of its own again. **Read hosts at call time** — `tunnelEgressUrl`, `getPrivateProxyHost`, `getPublicCorsProxy`, `getRoutingTable` — because tests substitute them (`setTunnelEgressUrls`, `setRoutingWsHosts`) after modules load. **`WS_RELAY_PRIVATE` is not a kill switch for the relay any more**: for a proxied okx, okxeu, bitget or blofin account the relay url IS the channel's `host`, which the flag never gated (it gates only the `relay` candidate a direct account may fall back to). Turning the flag off leaves those sockets on the relay; the rollback is redeploying the previous build (or moving the user back to legacy).
 
-**`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned families (bitmex always, bybit when tunnelling) whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
+**Fleet REST fallback allowlist.** `transport/tealstreet/proxyFleetAllowlist.ts` must
+match the active HTTPS ACLs in `terraform/private-exchange-proxy/haproxy-sg-running.cfg`.
+Its test also requires each advertised route to select an existing backend; commented ACLs
+are not routes. Remove retired DNS names from both files together, or
+`engine.ts` can select an HTTP fallback the fleet cannot serve. WEEX remains
+HTTP-only (no HOW); adding its fleet route does not enable the venue or change
+that transport policy. Lighter's `testnet-api.lighter.xyz` does not resolve and
+is intentionally absent; do not introduce another dead backend to cover it.
+
+**`howEgress` is the one derived field — it is NOT a literal in the table.** The HOW (REST-over-WS) tunnel egress region (jp/sg) is owned by the `@tealstreet/http-over-websocket` package, which is what actually picks the egress at request time. The routing table computes `howEgress` via `isTokyoEgress(name)` imported from `@tealstreet/http-over-websocket/src/egressRegion` (the single Tokyo-egress list), so the table never duplicates that list. The exception is the region-pinned family (bybit when tunnelling), whose api factories force the HOW adapter region from `proxyRegion`; those are declared `regionConditional`. The single-source lock — table's name-based egress must equal the adapter's runtime baseURL-based egress for every exchange — is enforced in `routing.equivalence.test.ts`. To move an exchange's HOW egress, edit the list in `egressRegion.ts`, not here.
 
 Canonical saved account construction lives in
 `src/accounts/buildExchangeAccountConfig.ts`, with routing normalization in
@@ -1417,10 +1456,7 @@ raw primary/secondary clients on `this._primaryXhr` / `this._secondaryXhr`. The 
 that wires it MUST equal the set the UI offers it for — i.e. everything **not** in
 `exchangesWithoutSecondaryKey` (`src/utils/exchangeSupportsSecondaryKey.ts`). That
 exclusion list is the wallet / single-keypair venues (hyperliquid, paradex,
-grvt, apexomni, lighter, polymarket, and the orderly ed25519 family) **plus** the
-session-login venue `breakoutprop` (DXtrade
-session token) — there a shared per-session token is injected on every request so a
-second client can't authenticate as a distinct key. A read-only "second API key" is
+grvt, apexomni, lighter, polymarket, and the orderly ed25519 family). A read-only "second API key" is
 not a coherent concept for any of these.
 When adding an exchange, wire the helper **and** reconcile that list.
 `binancepm` is the one bespoke case: it has no single `this.xhr` (uses
@@ -1504,7 +1540,7 @@ Is requiresCors true?
 │   └── Is enforceWsTunnel true?
 │       ├── YES → WS tunnel only, no CORS proxy
 │       │   Examples: Hyperliquid, Paradex, KuCoin, Kraken,
-│       │            AsterDEX, BreakoutProp, BitUnix, BybitDemo
+│       │            AsterDEX, BitUnix, BybitDemo
 │       └── NO → Fully direct, no proxy or tunnel
 │           Examples: OKX, Binance, BinancePM, BinanceSpot,
 │                     Bybit, BybitSpot, BybitInverse, Woo, WEEX
@@ -1561,6 +1597,14 @@ Is requiresCors true?
 - **Unknown metadata fails closed**: `getExchangeMetadata` throws for runtime
   names outside the exhaustive registry. Never restore a venue-shaped fallback;
   it can apply the wrong transport and capability flags to corrupt saved data.
+  Retired names stay saved on accounts (`bitmex`, `bitmextestnet`), so every
+  lookup refuses `unsupported`/`notSent` and the caller fails that one account:
+  factories and the worker throw `unsupportedVenueError` (`ExchangeError`), and
+  `getExchangeMetadata` throws an `Error` carrying the same fields, because the
+  Rust source oracles (`sdk-rs/safe-cex-types/scripts/accounts-source.cjs`) load
+  this file without the WASM host. Do not import `@tealstreet/safe-cex-wasm` here.
+  The WASM `venueFamily` and Rust `registry::unsupported_venue` match it
+  (`__tests__/audit-regressions/removed-venue-refusal.test.ts`).
 - **Non-browser tradetunnel callers must use the shared header-capable
   transport with a browser-like `User-Agent`.** CloudFront/WAF in front of
   `fsjnpy143pbz.{jp,asia}.tealstreet.io` (and Cloudflare in front of
@@ -1801,12 +1845,20 @@ Relay-failure notices strip URL queries from upstream error messages before
 reporting reconnect state. Request configs and signed dispatch bytes are retained
 unchanged; the web Sentry hooks provide independent diagnostic redaction.
 
-Unsigned Bybit mainnet market responses with native `retCode: 10006` generate
+Unsigned Bybit mainnet market responses with HTTP 429 or native `retCode`
+10006, 429 or legacy 10018 generate
 one causal transport diagnostic through the exchange log/Sentry channel (no
 additional toast). Only bounded egress IDs and numeric X-Bapi-Limit-* /
 Retry-After fields are copied; URLs, bodies and arbitrary headers are excluded.
 Old tunnels without node metadata report unknown. This observer changes no
 response, routing or retry behavior; the Rust venue's local kline pause remains.
+Observation runs at the shared host-transport response boundary for managed and
+legacy requests on tunnel, proxy, direct and public-CORS routes. Streamed bodies
+are observed lazily with a 1 MiB bound for native-code detection; incomplete or
+failed streams cannot supply a native-code notice. HTTP 429 reports once at the
+response headers regardless of body content, size or stream completion, without
+consuming the body. Status-only notices carry HTTP 429 instead of a guessed
+native code.
 
 
 Hyperliquid `/info` admission shares a token bucket across account workers through

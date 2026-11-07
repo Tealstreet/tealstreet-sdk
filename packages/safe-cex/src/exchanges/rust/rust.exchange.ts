@@ -289,10 +289,39 @@ export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngin
   loadWasmEngine = loader;
 };
 
-const synchronizedEngineTransport = (): Transport => ({
-  ...nativeTransport(),
-  now: () => virtualClock.getCurrentTimeMs(),
-});
+const synchronizedEngineTransport = (noteClockJump: (now: number, utc: number) => void): Transport => {
+  // Keep scheduling stable across clock corrections and clocks that stop in
+  // suspend. Clock reads record a correction and defer resync; EngineHost
+  // applies protocol time outside the physical HTTP handoff.
+  const origin = virtualClock.getCurrentTimeMs();
+  const started = performance.now();
+  let sampledMonotonic = started;
+  let sampledWall = Date.now();
+  return {
+    ...nativeTransport(),
+    now: () => {
+      const monotonic = performance.now();
+      const wall = Date.now();
+      const now = origin + (monotonic - started);
+      if (Number.isFinite(monotonic) && Number.isFinite(wall)) {
+        const divergence = (wall - sampledWall) - (monotonic - sampledMonotonic);
+        if (Math.abs(divergence) > 1_000) {
+          noteClockJump(now, virtualClock.getCurrentTimeMs());
+          // A wall step leaves virtualClock's cached server offset stale.
+          // Defer even Node's synchronous sync notification past this read.
+          void Promise.resolve()
+            .then(() => virtualClock.syncClientServerTime({ afterClockStep: true }))
+            .catch(() => {
+              // Best effort; scheduled synchronization can retry.
+            });
+        }
+        sampledMonotonic = monotonic;
+        sampledWall = wall;
+      }
+      return now;
+    },
+  };
+};
 let engineTransport: (() => Transport) | undefined;
 /** Explicit hosts own their clock; omit the factory to restore the synchronized SDK default. */
 export const setRustEngineTransport = (factory?: () => Transport) => {
@@ -494,6 +523,7 @@ export class RustEngineExchange extends BaseExchange {
   private host?: EngineHostType;
   private readReconnectDiagnostics?: ReturnType<typeof createEngineTransport>['reconnectDiagnostics'];
   private engineNow = (): number => virtualClock.getCurrentTimeMs();
+  private utcNow = (): number => virtualClock.getCurrentTimeMs();
   private engineFailure?: Error;
   private publicFeedDisabled = false;
   /** Why a start that never finishes has not: a venue answer is not a slow connection. */
@@ -588,6 +618,7 @@ export class RustEngineExchange extends BaseExchange {
   }
   private hostInitialization?: Promise<void>;
   private startup?: Promise<void>;
+  private stopTimeSync?: () => void;
   private startupState: 'idle' | 'pending' | 'ready' | 'failed' = 'idle';
   private startupFailure?: Error;
   private readonly attemptedPlacementSymbols = new Set<string>();
@@ -1034,7 +1065,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   private wooJournal = async (opts: Parameters<BaseExchange['fetchHistoricalPositions']>[0]) => {
-    const to = opts.to ?? this.engineNow();
+    const to = opts.to ?? this.utcNow();
     const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
     const orders = await this.fetchHistoricalOrders({ from, to });
     const records = wooOrdersToPositionRecords(orders, {
@@ -1568,10 +1599,13 @@ export class RustEngineExchange extends BaseExchange {
       enableSpotMarkets,
     } = options;
     const publicDataOnly = this.isPublicDataOnly;
+    let pendingProtocolTime: { now: number; utc: number } | undefined;
     const routedTransport = createEngineTransport(
       this.name,
       options,
-      (transportFactory ?? synchronizedEngineTransport)(),
+      transportFactory ? transportFactory() : synchronizedEngineTransport((now, utc) => {
+        pendingProtocolTime = { now, utc };
+      }),
       this.signerSetup,
       (message) => this.emitAndLogError(message),
       (notice) => {
@@ -1715,6 +1749,13 @@ export class RustEngineExchange extends BaseExchange {
         {
           commandTimeoutMs: this.commandTimeoutMs,
           ownsEngine: true,
+          ...(!transportFactory ? { protocolTime: () => {
+            // Sample only outside the HTTP handoff. now() itself never calls Rust.
+            transport.now();
+            const correction = pendingProtocolTime;
+            pendingProtocolTime = undefined;
+            return correction;
+          } } : {}),
           ...(this.signerSetup instanceof DelegatedSignerSetup
             ? { signer: this.signerSetup.signer, signerAlgorithms: this.signerSetup.signerAlgorithms }
             : {}),
@@ -1731,11 +1772,16 @@ export class RustEngineExchange extends BaseExchange {
     try {
       const capabilities = host.capabilities();
       this.adoptEngineCapabilities(capabilities);
+      if (!transportFactory) {
+        host.syncHostTime(virtualClock.getCurrentTimeMs());
+        this.stopTimeSync = virtualClock.subscribeToTimeSync((utc) => host.syncHostTime(utc));
+      }
     } catch (error) {
       host.dispose();
       throw error;
     }
     this.engineNow = () => transport.now();
+    if (transportFactory) this.utcNow = () => transport.now();
     this.host = host;
   };
 
@@ -3285,7 +3331,7 @@ export class RustEngineExchange extends BaseExchange {
     const ready = this.writeCapabilitiesFor('scheduleCancel');
     const capabilities = ready instanceof Promise ? await ready : ready;
     if (!capabilities.scheduleCancel) throw new Error('scheduleCancel is unavailable for this venue');
-    if (time != null && time < this.engineNow() + 5_000)
+    if (time != null && time < this.utcNow() + 5_000)
       throw new Error('Hyperliquid scheduleCancel time must be at least 5 seconds in the future');
     await this.command({ op: 'scheduleCancel', ...(time == null ? {} : { time }) });
   };
@@ -3474,7 +3520,7 @@ export class RustEngineExchange extends BaseExchange {
    * under-counted history presented as complete is the failure the journal refuses.
    */
   private bybitJournal = async (opts: { account: string; from?: number; to?: number }) => {
-    const to = opts.to ?? this.engineNow();
+    const to = opts.to ?? this.utcNow();
     const from = opts.from ?? to - 7 * 24 * 60 * 60 * 1000;
     if (this.isPublicDataOnly) return [];
     const rows = await this.fetchClosedPositionRows({ from, to }, false);
@@ -3698,6 +3744,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
+    this.stopTimeSync?.();
+    this.stopTimeSync = undefined;
     clearTimeout(this.sourceOrdersTimer);
     this.sourceOrdersTimer = undefined;
     this.sourceOrdersAsk = undefined;

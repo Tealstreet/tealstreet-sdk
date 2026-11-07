@@ -976,7 +976,7 @@ impl Hyperliquid {
     ) -> Result<(Action, Effect), String> {
         match step {
             Step::ScheduleCancel { time_ms } => {
-                let time = schedule::deadline(time_ms.map(|time| time as f64), cx.now)?;
+                let time = schedule::deadline(time_ms.map(|time| time as f64), cx.protocol_now())?;
                 Ok((Action::ScheduleCancel { time }, Effect::ScheduleCancel))
             }
 

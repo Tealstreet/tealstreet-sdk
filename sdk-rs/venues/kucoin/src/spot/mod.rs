@@ -948,7 +948,7 @@ impl KucoinSpot {
             if let Some(b) = self.books.get_mut(symbol).filter(|b| b.subscribers > 0)
                 && let Ok(d) = serde_json::from_str::<Depth>(data.get())
             {
-                let time = d.timestamp.map_or(cx.now, |n| n.0);
+                let time = d.timestamp.map_or(cx.protocol_now(), |n| n.0);
                 if time < b.last {
                     return;
                 }
@@ -1276,8 +1276,13 @@ impl Venue for KucoinSpot {
             Ok(d) => d,
             Err(e) => {
                 if let Pending::Write(job) = pending {
-                    cx.command_error(job.command, &e);
-                    let error = crate::wire::write_failure(response.status, response.body, e);
+                    let error = crate::wire::dispatched_write_failure(
+                        response.status,
+                        response.body,
+                        e,
+                        crate::wire::SPOT_RATE_CODES,
+                    );
+                    cx.command_error(job.command, &error.message);
                     self.write_failed(cx, job, error);
                 } else {
                     cx.startup_read_refused(&crate::wire::write_failure(
@@ -1863,7 +1868,7 @@ impl Venue for KucoinSpot {
                     );
                     return;
                 };
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let start = match (limit, from_ms) {
                     (None, Some(from)) => from,
                     _ => {

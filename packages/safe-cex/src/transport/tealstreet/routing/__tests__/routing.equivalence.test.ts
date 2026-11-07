@@ -29,7 +29,6 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
   bitrue: 'https://fapi.bitrue.com',
   bitunix: 'https://fapi.bitunix.com',
   blofin: 'https://openapi.blofin.com',
-  breakoutprop: 'https://breakout.prosp.devexperts.com/dxsca-web',
   bybit: 'https://api.bybit.com',
   bybitdemo: 'https://api-demo.bybit.com',
   hyrotrader: 'https://hyrotrader-simulator',

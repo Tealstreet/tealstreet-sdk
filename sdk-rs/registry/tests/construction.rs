@@ -1,4 +1,4 @@
-use safe_cex_engine::{Engine, ErrorKind, Venue, VenueError};
+use safe_cex_engine::{Engine, ErrorKind, Outcome, Venue, VenueError};
 use safe_cex_venues::{EngineOptions, Visit, build};
 
 struct Accept;
@@ -26,7 +26,23 @@ fn rejected(venue: &str, options: &str) -> String {
 
 #[test]
 fn unknown_venues_are_refused_by_name() {
-    assert_eq!(rejected("nope", "{}"), "unsupported venue: nope");
+    // Retired venues stay saved on user accounts; they must refuse, typed, before any I/O.
+    for venue in ["nope", "bitmex", "bitmextestnet"] {
+        for options in [
+            "{}",
+            r#"{"publicDataOnly":true}"#,
+            r#"{"key":"k","secret":"s"}"#,
+        ] {
+            let error = construct(venue, options).expect_err("construction is refused");
+            assert_eq!(
+                error.kind,
+                Some(ErrorKind::Unsupported),
+                "{venue} {options}"
+            );
+            assert_eq!(error.outcome, Some(Outcome::NotSent), "{venue} {options}");
+            assert_eq!(error.message, format!("unsupported venue: {venue}"));
+        }
+    }
 }
 
 #[test]
@@ -175,24 +191,6 @@ fn log_level_accepts_the_four_levels_and_refuses_anything_else() {
 
 const WALLET: &str = "0x1111111111111111111111111111111111111111";
 const PRIVATE_KEY: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
-
-#[test]
-fn breakoutprop_needs_dxtrade_credentials_even_for_market_data() {
-    let message = "BreakoutProp market data requires a legacy DXtrade username and password";
-    for options in [
-        r#"{"publicDataOnly":true}"#,
-        r#"{"key":"user"}"#,
-        r#"{"key":"user","secret":""}"#,
-        r#"{"secret":"password"}"#,
-    ] {
-        assert_eq!(rejected("breakoutprop", options), message, "{options}");
-    }
-    construct(
-        "breakoutprop",
-        r#"{"publicDataOnly":true,"key":"user","secret":"password"}"#,
-    )
-    .unwrap();
-}
 
 #[test]
 fn polymarket_private_accounts_need_a_wallet_key_and_coherent_l2_credentials() {
@@ -354,7 +352,6 @@ fn locally_signing_venues_refuse_private_accounts_without_a_key_and_secret() {
         "lighter",
         "coinbase",
         "polymarket",
-        "breakoutprop",
     ] {
         assert_ne!(
             construct(venue, r#"{"remoteSigning":true}"#)
@@ -520,7 +517,6 @@ fn raw_public_mode_distinguishes_remote_and_payload_signers() {
 
 #[test]
 fn native_payload_refusal_preserves_classification_with_or_without_local_credentials() {
-    use safe_cex_engine::Outcome;
     for venue in [
         "binance",
         "binancepm",

@@ -34,7 +34,6 @@
     "binance",
     "kucoin",
     "kraken",
-    "breakout",
     "aster",
     "paradex",
     "grvt",
@@ -291,16 +290,6 @@
       },
       "requiresCors": true,
       "enforceWsTunnel": false,
-      "supportsTunnel": false,
-      "privateProxyRegions": []
-    },
-    "breakoutprop": {
-      "routing": {
-        "restPool": "asia",
-        "howEgress": "jp"
-      },
-      "requiresCors": false,
-      "enforceWsTunnel": true,
       "supportsTunnel": false,
       "privateProxyRegions": []
     },

@@ -143,6 +143,7 @@ src/
 ├── config.ts                # Config: ~/.tealstreet/config.json
 ├── exchange-factory.ts      # Exchange instantiation from config
 ├── exchange-manager.ts      # Multi-exchange lifecycle
+├── exchange-listeners.ts    # Exchange fill/exec-log/error/warning handlers (`setupExchangeListeners`)
 ├── auth.ts                  # OAuth2 login flow (port 9876 callback)
 ├── updater.ts               # Version checking + auto-update
 ├── logger.ts                # Rate-limited, deduplicated logging
@@ -445,6 +446,8 @@ and large payloads are truncated.
 
 **Convention:** Use `logger.*` for operational details (file only). Use `print()` for user-facing status lines (terminal only).
 
+**Exchange events (`✓ Fill:`, command output, `Exchange error:` / `warning:`) are wired by `setupExchangeListeners`, once per emitter** — `use` on an already enabled account returns the same exchange, and re-wiring it printed every fill once per switch. Add handlers there; never call `exchange.emitter.on(...)` at a call site.
+
 **`logger.ts` must add no module-level timers at all.** `src/index.ts` imports
 it at the top, so every subcommand pays for it: a ref'd `setInterval` here meant
 `account add`, `exec` and friends printed their output, finished, and then hung
@@ -592,7 +595,8 @@ name}` footer segment auto-runs the named script ~1×/sec
   bounded in-memory `orderId → {runId, command, account}` map
   (`rememberOrderLineage`, gated on audit-on so it can't grow unbounded,
   oldest evicted past `MAX_LINEAGE`). The exchange `fill` handler in
-  `setupExchangeListeners` calls `recordFill(fill.orderId ?? fill.id, …)`;
+  `setupExchangeListeners` (`src/exchange-listeners.ts`) calls
+  `recordFill(fill.orderId ?? fill.id, …)`;
   on a hit it appends a `[fill]` entry stamped with the lineage's `runId`
   (set explicitly — fills arrive async, outside the run scope) and a
   `← <originating command>` pointer. Unattributable fills (placed before
@@ -675,18 +679,19 @@ name}` footer segment auto-runs the named script ~1×/sec
   repo. A package may not depend on an app; the shared constants had to live in
   the package. `apps/cli` imports them via
   `@tealstreet/script-authoring/src/...`. Generated
-  artifact, committed. Pipeline: `yarn generate:types` at the repo
-  root runs `scripts/generate-script-types-bundle.ts`, which calls
-  the three per-package `scripts/generate-monaco-types.ts` (core /
-  cli / web) and writes the assembled bundle file. The bundle is
-  `import`ed by that package's `scripts-templates.ts` to build `TYPES_TEMPLATE`,
+  artifact, committed. In this mirror, run `corepack yarn generate:script-types`
+  at the repo root. The mirrored writer in
+  `packages/script-authoring/scripts/generate-script-types-bundle.ts` uses
+  `render-script-types-bundle.ts` to call the core/web package generators,
+  wrap their declarations, and render the banner and complete bundle layout.
+  NX's broader `yarn generate:types` orchestrator must import that same helper.
+  The bundle is imported by `scripts-templates.ts` to build `TYPES_TEMPLATE`,
   which `scripts-store.ts:ensureScriptsDir` writes to
-  `~/.tealstreet/scripts/types.d.ts` on every launch. Drift safety:
-  `packages/script-authoring/src/script-types-bundle.test.ts` re-runs the orchestrator in-memory
-  and compares against the on-disk file — CI fails if the two
-  diverge, forcing `yarn generate:types` + commit. **Never
-  hand-edit `script-types-bundle.ts`** — fix the generators or the
-  source packages and regenerate. The core generator uses a
+  `~/.tealstreet/scripts/types.d.ts` on every launch. The drift test compares
+  the entire committed file against the shared generator's in-memory result.
+  Regenerate and commit alongside any input change. **Never hand-edit
+  `script-types-bundle.ts`** — fix the generators or the source packages.
+  The core generator uses a
   dedicated `packages/script-api-core/scripts/bundle.tsconfig.json`
   that carries the workspace `paths` + DOM lib inline so
   `dts-bundle-generator` can resolve `@tealstreet/*` and safe-cex's
@@ -707,20 +712,13 @@ name}` footer segment auto-runs the named script ~1×/sec
   JSDoc comments are allowed — they aren't load-bearing). When
   adding a new host symbol to `index.ts`, add it to
   `HOST_ONLY_SYMBOLS` in the same PR.
-- **Drift block skips in the OSS mirror — don't "fix" the glob import.**
-  `packages/script-authoring/src/script-types-bundle.test.ts`'s drift block re-runs
-  `scripts/generate-script-types-bundle.ts`, a monorepo-root script that
-  is **not** in the `tealstreet-sdk` mirror slice. The block loads the
-  generator via a Vite partial-dynamic specifier
-  (``import(`../../../scripts/${generatorName}.ts`)``): the glob matches
-  in the monorepo (gate runs, 0 skipped) and matches nothing in the mirror,
-  where the dir is absent (import rejects → `describe.skipIf` skips). The
-  template specifier also stops tsc binding the missing module, keeping the
-  mirror's typecheck clean. Do not convert it back to a static/literal
-  import — that breaks mirror typecheck (`TS2307`). The host-symbol leak
-  guard in the same file reads the committed in-slice bundle and runs in
-  both. (Authoritative drift gate stays in the monorepo on sync-back —
-  `docs/safe-cex-cli-mirror-plan.md` §9.)
+- **Script-types drift runs in the OSS mirror and never skips missing tooling.**
+  `corepack yarn check:script-types` imports the mirrored shared renderer and
+  core/web generators directly. CI invokes it outside Turbo caching before
+  general checks. It compares the complete bundle, including banner and layout,
+  without writing output. Fix drift with `corepack yarn generate:script-types`
+  and commit the generated bundle in the same PR; NX's excluded root
+  orchestrator is not needed. The host-symbol leak guard also runs in both.
 - **Script `runCommand` intentionally fails unhandled commands.**
   `src/script-adapter.ts:createStandaloneCoreAdapter().runCommand`
   calls `cli-core.executeCommand` directly, not `processCommand` /

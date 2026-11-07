@@ -728,7 +728,7 @@ impl Venue for BitunixFutures {
             }
         }
         if matches!(s.feed, Feed::Private) {
-            cx.send(socket, private_ping(cx.now));
+            cx.send(socket, private_ping(cx.protocol_now()));
             self.account.login_answered = false;
             self.account.private_live = false;
             self.login(cx, socket);
@@ -743,7 +743,10 @@ impl Venue for BitunixFutures {
                 self.read_axis(cx, axis);
             }
         } else {
-            cx.send(socket, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
+            cx.send(
+                socket,
+                format!(r#"{{"ping":{}}}"#, num::format(cx.protocol_now())),
+            );
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
@@ -1226,9 +1229,12 @@ impl Venue for BitunixFutures {
                 }
                 SocketTick::Ping if s.active && s.opened => {
                     if matches!(s.feed, Feed::Private) {
-                        cx.send(s.id, private_ping(cx.now));
+                        cx.send(s.id, private_ping(cx.protocol_now()));
                     } else {
-                        cx.send(s.id, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
+                        cx.send(
+                            s.id,
+                            format!(r#"{{"ping":{}}}"#, num::format(cx.protocol_now())),
+                        );
                     }
                 }
                 _ => {}
@@ -1318,7 +1324,7 @@ impl Venue for BitunixFutures {
                 };
                 let explicit_limit = limit;
                 let limit = limit.unwrap_or(200).clamp(1, 200);
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let derived = end - duration * f64::from(limit);
                 let start = if explicit_limit.is_some() {
                     derived

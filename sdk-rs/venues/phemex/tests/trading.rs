@@ -2246,7 +2246,10 @@ fn non_success_write_keeps_typed_native_diagnostics_without_proving_rejection() 
             "HTTP {status}"
         );
         assert_eq!(error.outcome, Some(Outcome::Unknown), "HTTP {status}");
-        assert_eq!(error.retry_after_ms, (status == 429).then_some(2000.));
+        assert_eq!(
+            error.retry_after_ms,
+            (matches!(status, 408 | 429) || status >= 500).then_some(2000.)
+        );
         assert!(writes(&a).is_empty());
         assert!(e.store().order("unproven-id").is_none());
         assert_eq!(
@@ -4455,7 +4458,7 @@ fn ordinary_replacement_text_matches_master() {
         let expected = if status == 200 {
             "Phemex 11082 TE_RISK_LIMIT_EXCEEDED; Your BTCUSDT order is gone: it was canceled and its replacement refused"
         } else {
-            "HTTP response does not prove the write outcome"
+            "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
         };
         assert_eq!(error.message, expected);
         assert_eq!(error.legacy_text(), expected);

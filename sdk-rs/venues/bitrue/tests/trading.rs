@@ -1405,7 +1405,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             r#"{"code":"-1003","msg":"too many"}"#,
-            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
         ),
         // The engine's unproven-status seal carries its typed kind.
         (

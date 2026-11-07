@@ -516,8 +516,8 @@ fn unproven(message: impl Into<String>) -> VenueError {
     VenueError::new(message).outcome(Outcome::Unknown)
 }
 
-/// A refused private write, classified by HTTP status and Kraken's documented
-/// error prefixes. 408/5xx and malformed answers do not prove a refusal.
+/// A failed private write, classified by HTTP status and Kraken's documented
+/// error prefixes. 408/429/5xx and malformed answers do not prove a refusal.
 pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueError {
     let error = VenueError::new(message);
     let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
@@ -525,18 +525,33 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         200..=299 => {}
         401 => return rejected(error, ErrorKind::AuthInvalid),
         403 => return rejected(error, ErrorKind::AuthPermission),
-        429 => return rejected(error, ErrorKind::RateLimited),
+        429 => return error.kind(ErrorKind::RateLimited).outcome(Outcome::Unknown),
         408 => return error.outcome(Outcome::Unknown),
         400..=499 => return rejected(error, ErrorKind::Rejected),
         _ => return error.outcome(Outcome::Unknown),
     }
-    let Some(code) = serde_json::from_str::<super::wire::Envelope<'_>>(body)
-        .ok()
-        .and_then(|e| e.error.first().map(|code| code.to_string()))
-    else {
+    let Ok(envelope) = serde_json::from_str::<super::wire::Envelope<'_>>(body) else {
         return error.outcome(Outcome::Unknown);
     };
-    let error = match code.as_str() {
+    let mut failures = envelope
+        .error
+        .iter()
+        .map(|code| native_write_failure(error.clone(), code));
+    let Some(first) = failures.next() else {
+        return error.outcome(Outcome::Unknown);
+    };
+    // Every code must prove refusal before a write may be retried or unfenced.
+    if first.outcome == Some(Outcome::Unknown) {
+        return first;
+    }
+    failures
+        .find(|failure| failure.outcome == Some(Outcome::Unknown))
+        .unwrap_or(first)
+}
+
+fn native_write_failure(error: VenueError, code: &str) -> VenueError {
+    let rejected = |error: VenueError, kind| error.kind(kind).outcome(Outcome::Rejected);
+    let error = match code {
         "EAPI:Invalid key" | "EAPI:Invalid signature" | "EAPI:Invalid nonce" => {
             rejected(error, ErrorKind::AuthInvalid)
         }
@@ -546,7 +561,7 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         | "EService:Market in cancel_only mode"
         | "EService:Market in post_only mode" => rejected(error, ErrorKind::Rejected),
         "EAPI:Rate limit exceeded" | "EOrder:Rate limit exceeded" => {
-            rejected(error, ErrorKind::RateLimited)
+            error.kind(ErrorKind::RateLimited).outcome(Outcome::Unknown)
         }
         "EService:Unavailable"
         | "EService:Busy"
@@ -559,5 +574,5 @@ pub(super) fn write_failure(status: u16, body: &str, message: String) -> VenueEr
         }
         _ => error.outcome(Outcome::Unknown),
     };
-    error.venue_code(code)
+    error.venue_code(code.to_owned())
 }
