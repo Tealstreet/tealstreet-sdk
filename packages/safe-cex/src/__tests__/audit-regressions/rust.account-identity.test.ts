@@ -69,7 +69,6 @@ const unsupportedAliases: ExchangeName[] = [
   'bitrue',
   'bitunix',
   'blofin',
-  'breakoutprop',
   'hyrotrader',
   'hyperliquid',
   'hyperliquidspot',

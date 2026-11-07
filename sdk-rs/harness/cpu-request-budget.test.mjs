@@ -87,7 +87,7 @@ async function exercise(allSecond) {
 
 test('actual paginated authority adapter stays bounded for all-PASS and worst all-second cohorts', async () => {
   const ordinary = await exercise(false), worst = await exercise(true);
-  assert.equal(ordinary.requests, 310);
+  assert.equal(ordinary.requests, 301);
   assert.equal(worst.requests, 886);
   assert(worst.requests < 1000, 'one complete cohort must fit the ordinary repository token budget before concurrent activity');
   assert.equal(worst.certifier.bindings.length, 129);

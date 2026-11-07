@@ -26,7 +26,6 @@ import { createHyperliquidRequestValidator } from './hyperliquid-protocol.mjs';
 import { krakenspot } from './krakenspot.mjs';
 import { kucoin } from './kucoin.mjs';
 import { kucoinspot } from './kucoinspot.mjs';
-import { breakoutprop } from './breakoutprop-requests.mjs';
 import { polymarket } from './polymarket.mjs';
 import { requestKey, subscriptionKeys } from './requests.mjs';
 import {
@@ -854,7 +853,6 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) => exchange.nodeSocket?.bookListeners.size >= count,
     tsSettings: (_exchange, store) => Object.entries(store.fetchedLeverage).map(([symbol, setting]) => ({ symbol, ...setting })),
   },
-  breakoutprop,
   grvt: (() => {
     // Public deterministic replay key. Never use this well-known key for funds.
     const secret = '0x' + '01'.repeat(32);
