@@ -2352,6 +2352,217 @@ fn a_targeted_unfilled_cancel_proof_releases_exactly_one_replacement_even_after_
     }
 }
 
+fn observe_proof_stop(h: &mut Harness, client_id: Option<&str>) {
+    let socket = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Private),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let mut row: serde_json::Value = serde_json::from_str(canceled_stop_row()).unwrap();
+    row["status"] = "UNTRIGGERED".into();
+    row["cancel_reason"] = "".into();
+    if let Some(client_id) = client_id {
+        row["client_id"] = client_id.into();
+    }
+    h.e.handle(
+        h.now,
+        Event::WsMessage {
+            socket,
+            text: &serde_json::json!({
+                "jsonrpc": "2.0", "method": "subscription",
+                "params": {"channel": "orders.ALL", "data": row}
+            })
+            .to_string(),
+        },
+    );
+    h.collect();
+}
+
+#[test]
+fn cancel_proof_history_window_adds_margins_to_target_creation_and_each_reads_own_time() {
+    for client_id in [None, Some("ts_original")] {
+        let mut h = with_untriggered_stop();
+        observe_proof_stop(&mut h, client_id);
+        h.now += 200.75;
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.now += 100.;
+        h.respond(cancel, 204, "");
+        for poll in 0..3 {
+            let read = take_method(&mut h, Method::Get, "/orders-history?");
+            assert!(
+                read.url.contains(&format!(
+                    "&start_at=1699999940000&end_at={:.0}",
+                    h.now.floor() + 60_000.
+                )),
+                "{}",
+                read.url
+            );
+            assert_eq!(
+                read.url.contains("&client_id=ts_original"),
+                client_id.is_some()
+            );
+            h.respond(read, 200, r#"{"results":[]}"#);
+            assert_eq!(order_posts(&h), 0);
+            if poll < 2 {
+                h.timer(h.now + 1_000.);
+            }
+        }
+        assert_eq!(
+            h.failures.last().unwrap().outcome,
+            Some(safe_cex_engine::Outcome::Unknown)
+        );
+        assert_eq!(h.failures.last().unwrap().protection, None);
+    }
+}
+
+#[test]
+fn a_clientless_bracket_leg_can_prove_its_cancel_in_the_bounded_history_window() {
+    let mut h = with_untriggered_stop();
+    let mut entry = opts(OrderType::Limit);
+    entry.amount = 2.;
+    entry.client_order_id = None;
+    entry.stop_loss = Some(90.);
+    place(&mut h, 9, vec![entry]);
+    let parent = take_method(&mut h, Method::Post, "/orders");
+    let parent_payload: Payload = serde_json::from_str(parent.body.as_deref().unwrap()).unwrap();
+    h.respond(
+        parent,
+        200,
+        &format!(
+            r#"{{"id":"entry","client_id":"{}"}}"#,
+            parent_payload.client_id.unwrap()
+        ),
+    );
+    let child = take_method(&mut h, Method::Post, "/orders");
+    let payload: Payload = serde_json::from_str(child.body.as_deref().unwrap()).unwrap();
+    assert_eq!(payload.kind, "STOP_LOSS_MARKET");
+    assert_eq!(payload.size.as_deref(), Some("2"));
+    assert_eq!(payload.trigger_price.as_deref(), Some("90"));
+    assert_eq!(
+        payload.client_id, None,
+        "native bracket children omit client_id"
+    );
+    h.respond(child, 201, r#"{"id":"123"}"#);
+    assert!(h.result(9).is_ok());
+    observe_proof_stop(&mut h, None);
+    h.now += 200.;
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let read = take_method(&mut h, Method::Get, "/orders-history?");
+    assert!(
+        read.url
+            .contains("&start_at=1699999940000&end_at=1700000060200"),
+        "{}",
+        read.url
+    );
+    assert!(!read.url.contains("client_id="));
+    h.respond(
+        read,
+        200,
+        &format!(r#"{{"results":[{}]}}"#, canceled_stop_row()),
+    );
+    assert_eq!(order_posts(&h), 1);
+}
+
+fn prove_cancel_through_an_exclusive_history_window(filter_updated: bool) {
+    let mut h = with_untriggered_stop();
+    h.now += 200.;
+    amend_stop(&mut h, 13);
+    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+    h.respond(cancel, 204, "");
+    let read = take_method(&mut h, Method::Get, "/orders-history?");
+    let bound = |name: &str| -> f64 {
+        read.url
+            .split_once('?')
+            .unwrap()
+            .1
+            .split('&')
+            .find_map(|pair| {
+                let (key, value) = pair.split_once('=')?;
+                (key == name).then(|| value.parse().unwrap())
+            })
+            .unwrap()
+    };
+    let mut row: serde_json::Value = serde_json::from_str(canceled_stop_row()).unwrap();
+    if filter_updated {
+        row["last_updated_at"] = 1_700_000_005_000_u64.into();
+        assert!(row["last_updated_at"].as_f64().unwrap() > h.now);
+    }
+    let timestamp = row[if filter_updated {
+        "last_updated_at"
+    } else {
+        "created_at"
+    }]
+    .as_f64()
+    .unwrap();
+    let body = if bound("start_at") < timestamp && timestamp < bound("end_at") {
+        serde_json::json!({"results": [row]}).to_string()
+    } else {
+        r#"{"results":[]}"#.into()
+    };
+    h.respond(read, 200, &body);
+    assert_eq!(
+        order_posts(&h),
+        1,
+        "the exact target must remain inside exclusive history bounds"
+    );
+    let place = take_method(&mut h, Method::Post, "/orders");
+    let payload: Payload = serde_json::from_str(place.body.as_deref().unwrap()).unwrap();
+    h.respond(
+        place,
+        201,
+        &format!(
+            r#"{{"id":"replacement","client_id":"{}"}}"#,
+            payload.client_id.unwrap()
+        ),
+    );
+    assert!(h.result(13).is_ok());
+}
+
+#[test]
+fn cancel_proof_window_includes_the_exact_target_creation_boundary() {
+    prove_cancel_through_an_exclusive_history_window(false);
+}
+
+#[test]
+fn cancel_proof_window_includes_a_venue_update_ahead_of_the_device_clock() {
+    prove_cancel_through_an_exclusive_history_window(true);
+}
+
+#[test]
+fn a_full_cancel_proof_page_requires_the_exact_target_even_with_a_cursor() {
+    for target_present in [false, true] {
+        let mut h = with_untriggered_stop();
+        amend_stop(&mut h, 13);
+        let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+        h.respond(cancel, 204, "");
+        let mut rows = (0..100)
+            .map(|i| canceled_stop_row().replace("\"123\"", &format!("\"peer-{i}\"")))
+            .collect::<Vec<_>>();
+        if target_present {
+            rows[99] = canceled_stop_row().into();
+        }
+        let body = format!(r#"{{"results":[{}],"next":"more"}}"#, rows.join(","));
+        let read = take_method(&mut h, Method::Get, "/orders-history?");
+        h.respond(read, 200, &body);
+        if target_present {
+            assert_eq!(order_posts(&h), 1);
+        } else {
+            assert_eq!(order_posts(&h), 0);
+            expire_cancel_proof(&mut h);
+        }
+    }
+}
+
 #[test]
 fn cancel_proof_never_infers_cancellation_or_zero_fill_from_incomplete_rows() {
     for row in [

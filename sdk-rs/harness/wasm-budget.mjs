@@ -225,6 +225,7 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   mexc: 1_858_560,
   okx: 1_986_560,
   orderly: 1_732_608,
+  // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_266_112,
   phemex: 2_079_744,
   polymarket: 1_611_776,

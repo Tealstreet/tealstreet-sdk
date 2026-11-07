@@ -632,3 +632,14 @@ test('#3202 on #3207 (run 42305638406) uses CI plus 10 KiB and keeps Bitget sibl
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+test('#3191 run 42249705679 retains measured Paradex headroom', () => {
+  const measured = 2_249_779;
+  const minimumCap = 2_260_992;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const cap = WASM_VENUE_OVERRIDES.paradex;
+  assert.ok(cap >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'paradex'), undefined);
+  assert.equal(wasmBudgetError(cap, 'venue', 'paradex'), undefined);
+  assert.match(wasmBudgetError(cap + 1, 'venue', 'paradex'), /exceeds/);
+});
