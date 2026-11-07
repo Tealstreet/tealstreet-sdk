@@ -939,7 +939,12 @@ impl Cryptocom {
                     return;
                 };
                 WriteFact::Failed {
-                    fact,
+                    // Native evidence cannot authorize replay after an ambiguous status.
+                    fact: if matches!(response.status, 408 | 429 | 500..) {
+                        fact.unproven()
+                    } else {
+                        fact
+                    },
                     known_effects: false,
                 }
             }
@@ -1061,7 +1066,7 @@ pub(crate) const ERRORS: CodeTable = CodeTable {
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },
-        // Documented refusals; 415 and 43005 come at HTTP 500.
+        // Native refusal codes only prove refusal at non-ambiguous HTTP statuses.
         Row {
             key: Key::Int(415),
             verdict: Verdict::Refused(ErrorKind::Rejected),

@@ -557,14 +557,15 @@ fn wf_status_case(status: u16, code: u32) {
     let original = http(command(&mut e, wf_place(WF_OWNER)), "create_order");
     let text = format!(r#"{{"c":{code},"m":"controlled refusal"}}"#);
     let a = reply(&mut e, &original, status, &text);
-    if code != 1000 {
+    let unproven = matches!(status, 408 | 429 | 500..);
+    if code != 1000 || unproven {
         assert_eq!(wf_results(&a, WF_OWNER).len(), 1);
         assert_eq!(
             wf_results(&a, WF_OWNER)[0].as_ref().unwrap_err().outcome,
-            Some(if status < 500 {
-                Outcome::Rejected
-            } else {
+            Some(if unproven {
                 Outcome::Unknown
+            } else {
+                Outcome::Rejected
             })
         );
         assert!(!a.iter().any(|a| matches!(a,Action::Http(r) if r.url.ends_with("auth/api_key/login") || r.url.ends_with("create_order"))));
@@ -614,11 +615,13 @@ macro_rules! wf_status_control {
     };
 }
 wf_status_control!(wf_401_parsed_1000_resends_identical_body_once, 401, 1000);
-wf_status_control!(wf_408_parsed_1000_resends_identical_body_once, 408, 1000);
-wf_status_control!(wf_503_parsed_1000_resends_identical_body_once, 503, 1000);
+wf_status_control!(wf_408_parsed_1000_never_resends, 408, 1000);
+wf_status_control!(wf_503_parsed_1000_never_resends, 503, 1000);
 wf_status_control!(wf_401_without_1000_never_resends, 401, 1001);
 wf_status_control!(wf_408_without_1000_never_resends, 408, 1001);
 wf_status_control!(wf_503_without_1000_never_resends, 503, 1001);
+wf_status_control!(wf_429_parsed_1000_never_resends, 429, 1000);
+wf_status_control!(wf_429_without_1000_never_resends, 429, 1001);
 #[test]
 fn wf_native_headers_keep_content_type_first() {
     let mut e = boot();
