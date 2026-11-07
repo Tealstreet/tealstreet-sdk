@@ -599,7 +599,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             200,
             r#"{"error":["EAPI:Rate limit exceeded"]}"#,
-            rejected(ErrorKind::RateLimited),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
             "Kraken Spot: EAPI:Rate limit exceeded",
         ),
         (
@@ -1502,6 +1502,84 @@ fn spot_outcome(actions: &[Action]) -> Option<safe_cex_engine::Outcome> {
         Action::Notice(Notice::CommandFailed { error, .. }) => error.outcome,
         _ => None,
     })
+}
+
+#[test]
+fn mixed_spot_errors_stay_unknown_without_signature_replay() {
+    use safe_cex_engine::Outcome;
+    for ambiguous in ["EService:Unavailable", "EGeneral:Internal error"] {
+        for refusal in ["EAPI:Invalid signature", "EOrder:Insufficient funds"] {
+            for codes in [[ambiguous, refusal], [refusal, ambiguous]] {
+                let (mut e, _, _) = ready(false);
+                let body = serde_json::json!({ "error": codes }).to_string();
+                let settled = add_order_answer(&mut e, 90, &body);
+                assert!(
+                    !settled
+                        .iter()
+                        .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder"))),
+                    "must not replay an ambiguous placement: {body}"
+                );
+                assert_eq!(spot_outcome(&settled), Some(Outcome::Unknown), "{body}");
+                e.handle(
+                    NOW,
+                    Event::Command(Command::PlaceOrders {
+                        command: 91,
+                        orders: vec![opts("limit", 99.)],
+                    }),
+                );
+                assert!(
+                    !requests(&mut e).iter().any(|r| r.url.ends_with("AddOrder")),
+                    "placement stays fenced: {body}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn native_spot_rate_limits_stay_unknown_until_reconciled() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    for code in ["EAPI:Rate limit exceeded", "EOrder:Rate limit exceeded"] {
+        let (mut e, _, _) = ready(false);
+        let body = serde_json::json!({ "error": [code] }).to_string();
+        let settled = add_order_answer(&mut e, 90, &body);
+        let error = settled
+            .iter()
+            .find_map(|a| match a {
+                Action::Notice(Notice::CommandFailed { command: 90, error }) => Some(error),
+                _ => None,
+            })
+            .expect("placement failure");
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{code}");
+        assert_eq!(error.kind, Some(ErrorKind::RateLimited), "{code}");
+        assert_eq!(error.venue_code.as_deref(), Some(code));
+        assert!(
+            !settled
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder"))),
+            "must not replay a rate-limited placement: {code}"
+        );
+        let read = settled
+            .iter()
+            .find_map(|a| match a {
+                Action::Http(r) if r.url.ends_with("OpenOrders") => Some(r.clone()),
+                _ => None,
+            })
+            .expect("placement reconciliation");
+        e.handle(
+            NOW,
+            Event::Command(Command::PlaceOrders {
+                command: 91,
+                orders: vec![opts("limit", 99.)],
+            }),
+        );
+        assert!(
+            !requests(&mut e).iter().any(|r| r.url.ends_with("AddOrder")),
+            "placement stays fenced: {code}"
+        );
+        reply(&mut e, &read, r#"{"error":[],"result":{"open":{}}}"#);
+        let _ = add_order_answer(&mut e, 92, r#"{"error":["EOrder:Insufficient funds"]}"#);
+    }
 }
 
 #[test]

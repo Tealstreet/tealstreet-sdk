@@ -75,8 +75,16 @@ function github(token, repository) {
 
 export async function evaluate({ token, repository, log = console.log }) {
   const api = github(token, repository);
-  const listed = await api.request('/actions/workflows/rust.yml/runs?event=workflow_dispatch&branch=master&status=completed&per_page=50');
-  const [latest, previous] = nightlyRuns(listed.workflow_runs);
+  const runs = [];
+  let nights;
+  // Manual dispatches and extra same-night runs can fill entire API pages.
+  for (let page = 1; ; page++) {
+    const batch = (await api.request(`/actions/workflows/rust.yml/runs?event=workflow_dispatch&branch=master&status=completed&per_page=50&page=${page}`)).workflow_runs;
+    runs.push(...batch);
+    nights = nightlyRuns(runs);
+    if (nights.length >= 2 || batch.length < 50) break;
+  }
+  const [latest, previous] = nights;
   if (!latest || !previous) return log('Fewer than two completed nightly runs; nothing to compare.');
   if (!consecutiveNights(latest, previous))
     return log(`Nights ${utcNight(previous)} and ${utcNight(latest)} are not consecutive; nothing is sustained.`);
