@@ -67,6 +67,8 @@ export class CancelCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
     const orders = exchange.store?.orders ?? [];
     const head = (args[1] ?? '').toLowerCase();
     const sub = (args[2] ?? '').toLowerCase();

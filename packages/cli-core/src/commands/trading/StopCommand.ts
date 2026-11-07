@@ -42,6 +42,8 @@ export class StopCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
     const targetSymbol = this.getTargetSymbol(ctx, ['buy', 'sell', 'at', 'trigger']);
 
     const isBuySellFirstArg = ['buy', 'sell'].includes(String(args[1]));
@@ -70,6 +72,21 @@ export class StopCommand extends TradingBaseCommand {
         index !== triggerOperand &&
         (this.looksLikeSize(arg) || this.looksLikePrice(arg)),
     );
+    const consumed = [sizePosition, pricePosition];
+    for (const keyword of ['buy', 'sell', 'at', 'trigger']) {
+      const index = args.indexOf(keyword);
+      if (index > 0) {
+        consumed.push(index);
+        if (keyword === 'trigger' && args[index + 1] !== undefined) consumed.push(index + 1);
+      }
+    }
+    const invalid = this.refuseUnknownOrderArgs(ctx, consumed);
+    if (invalid && stray === undefined) {
+      if (pricePosition <= 0) {
+        return this.error(`${invalid.error} stop: could not find a trigger price in "${ctx.raw}". Expected e.g. \`stop 18500\`.`);
+      }
+      return invalid;
+    }
     if (stray !== undefined) {
       const refusal = `stop: refusing "${stray}": it would be ignored and the stop would cover the whole position. A stop size needs a $, e.g. \`stop sell $500 at 1%\`; nothing was placed`;
       this.printError(ctx, refusal);
@@ -101,7 +118,7 @@ export class StopCommand extends TradingBaseCommand {
           return this.error('trigger: missing absolute price argument');
         }
         const parsed = parseFloat(triggerArg);
-        if (!Number.isFinite(parsed) || parsed <= 0) {
+        if (!/^\+?\d+(?:\.\d+)?$/.test(triggerArg) || !Number.isFinite(parsed) || parsed <= 0) {
           return this.error(`trigger: '${triggerArg}' must be an absolute positive price`);
         }
         triggerPrice = parsed;

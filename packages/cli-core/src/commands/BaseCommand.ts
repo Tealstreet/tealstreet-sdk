@@ -61,6 +61,32 @@ export abstract class BaseCommand implements Command {
     return { success: false, error };
   }
 
+  protected unknownOrderArgument(token: string): string {
+    const value = token.slice(token.indexOf('=') + 1);
+    const hint = /^sl=/i.test(token)
+      ? ` Did you mean \`stop ${value}\`?`
+      : /^tp=/i.test(token)
+        ? ` For a bracket take-profit on buy/sell, use \`tp ${value}\`; for an existing position, use \`stop at ${value}\` with the trigger past the mark.`
+        : '';
+    return `Unknown argument "${token}".${hint} Nothing was sent.`;
+  }
+
+  protected refuseOrderAssignments(ctx: CommandContext): CommandResult | undefined {
+    const token = ctx.args._.slice(1).find(token => /^(sl|tp)=/i.test(token));
+    return token === undefined ? undefined : this.error(this.unknownOrderArgument(token));
+  }
+
+  // Call after parsing, before any write or task starts. Every positional token
+  // must belong to the command's parsed grammar, including duplicate modifiers.
+  protected refuseUnknownArgs(ctx: CommandContext, consumed: Iterable<number>): CommandResult | undefined {
+    const known = new Set([0, ...consumed]);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
+    const token = ctx.args._.find((_, index) => !known.has(index));
+    if (token !== undefined) return this.error(this.unknownOrderArgument(token));
+    return undefined;
+  }
+
   /**
    * Helper: Print output via adapter
    */

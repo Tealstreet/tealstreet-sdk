@@ -1,5 +1,5 @@
 import { BaseCommand } from '../BaseCommand';
-import type { CommandContext } from '../Command';
+import type { CommandContext, CommandResult } from '../Command';
 import type { ExchangeLike } from '../../types';
 import { PositionSide } from '@tealstreet/safe-cex/src/types';
 import { add, adjust } from '@tealstreet/safe-cex/src/utils/safe-math';
@@ -13,6 +13,27 @@ import { prepareCliAmendPrice } from '../../order/prepareCliOrder';
  * Base class for trading commands with utility methods for size/price processing
  */
 export abstract class TradingBaseCommand extends BaseCommand {
+  protected refuseUnknownOrderArgs(
+    ctx: CommandContext,
+    consumed: number[],
+    { allowSymbol = true, symbolLists = false, symbolAfter = 0 }: {
+      allowSymbol?: boolean; symbolLists?: boolean; symbolAfter?: number;
+    } = {},
+  ): CommandResult | undefined {
+    if (allowSymbol && ctx.exchange) {
+      for (let i = ctx.args._.length - 1; i > symbolAfter; i--) {
+        if (consumed.includes(i)) continue;
+        const parts = ctx.args._[i].split(',');
+        if (!symbolLists && parts.length > 1) continue;
+        if (parts.every(part => this.validateSymbols(ctx.exchange!, [part]).length > 0)) {
+          consumed.push(i);
+          break;
+        }
+      }
+    }
+    return this.refuseUnknownArgs(ctx, consumed);
+  }
+
   /**
    * Check if a string looks like a price (e.g., "100", "100.5", "+100", "-50", "5%", "$100")
    */

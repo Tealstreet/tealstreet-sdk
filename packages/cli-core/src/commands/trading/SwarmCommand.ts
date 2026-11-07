@@ -43,6 +43,8 @@ export class SwarmCommand extends TradingBaseCommand {
     if (!exchange.placeOrder) return this.error('Exchange does not support placing orders');
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
 
     // Side
     const sideStr = args[1]?.toLowerCase();
@@ -95,7 +97,7 @@ export class SwarmCommand extends TradingBaseCommand {
         symbol = trailing[0];
         continue;
       }
-      return this.error(`swarm: unexpected token "${a}"`);
+      return this.error(this.unknownOrderArgument(a));
     }
 
     // Health gate — block opening exposure when the private stream is

@@ -22,6 +22,8 @@ export class MoveCommand extends BaseCommand {
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
     if (this.simulationGate(ctx)) return this.success();
+    const invalid = this.refuseUnknownArgs(ctx, [1, 2]);
+    if (invalid) return invalid;
     const orderIdArg = this.getArg(ctx, 1);
     const priceArg = this.getArg(ctx, 2);
 

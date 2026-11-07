@@ -25,6 +25,15 @@ export class LeverageCommand extends TradingBaseCommand {
       return this.error('Not connected to exchange');
     }
 
+    const args = this.getRawArgs(ctx);
+    if (args.some(arg => arg === 'isolated' || arg === 'cross')) {
+      return this.error('lev does not set margin mode; use lev <n> [SYMBOL]. Nothing was changed.');
+    }
+    if (args[1] && !/\d/.test(args[1]) && args[1] !== 'show') {
+      return this.error(this.unknownOrderArgument(args[1]));
+    }
+    const invalid = this.refuseUnknownOrderArgs(ctx, args[1] ? [1] : []);
+    if (invalid) return invalid;
     const targetSymbol = this.getTargetSymbol(ctx, []);
     const arg = this.getArg(ctx, 1);
 

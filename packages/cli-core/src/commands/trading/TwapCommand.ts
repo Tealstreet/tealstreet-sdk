@@ -80,15 +80,21 @@ export class TwapCommand extends TradingBaseCommand {
 
   async execute(ctx: CommandContext): Promise<CommandResult> {
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
     const subcommand = args[1]?.toLowerCase();
 
     // Handle list/stop subcommands — these don't write to the
     // exchange, so they bypass the simulation gate. (Stop is local
     // task management, not order placement.)
     if (subcommand === 'list') {
+      const invalid = this.refuseUnknownArgs(ctx, [1]);
+      if (invalid) return invalid;
       return this.handleList(ctx);
     }
     if (subcommand === 'stop') {
+      const invalid = this.refuseUnknownArgs(ctx, [1, 2]);
+      if (invalid) return invalid;
       return this.handleStop(ctx, args[2]);
     }
 
@@ -314,6 +320,21 @@ export class TwapCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+
+    const leadingSymbol = this.validateSymbols(exchange, args[2]?.split(',') || []).length > 0;
+    const consumed = leadingSymbol ? [1, 2, 3] : [1, 2];
+    for (const keyword of ['into', 'over', 'chaser', 'reduce']) {
+      const index = args.indexOf(keyword);
+      if (index > 0) {
+        consumed.push(index);
+        if (['into', 'over'].includes(keyword) && args[index + 1] !== undefined) consumed.push(index + 1);
+      }
+    }
+    for (let i = 3; i < args.length; i++) {
+      if (/^(duration|slices)=/.test(args[i])) consumed.push(i);
+    }
+    const invalid = this.refuseUnknownOrderArgs(ctx, consumed, { allowSymbol: !leadingSymbol });
+    if (invalid) return invalid;
 
     // Parse options from args
     let duration: number | undefined;

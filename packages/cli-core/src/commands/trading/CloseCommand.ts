@@ -59,6 +59,22 @@ export class CloseCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
+    const global = ['longs', 'shorts', 'allpos', 'all'].includes(args[1]?.toLowerCase());
+    const size = this.findSizeToken(args);
+    const consumed = size ? [args.indexOf(size)] : [];
+    for (const keyword of global ? [args[1]] : ['long', 'short']) {
+      const index = args.indexOf(keyword);
+      if (index > 0) consumed.push(index);
+    }
+    if (!global && ctx.exchange) {
+      for (let i = 1; i <= 3 && i < args.length; i++) {
+        if (args[i].split(',').every(part => this.validateSymbols(ctx.exchange!, [part]).length > 0)) consumed.push(i);
+      }
+    }
+    const invalid = this.refuseUnknownArgs(ctx, consumed);
+    if (invalid) return invalid;
 
     // Global "close every position" / side-filtered variants. These run
     // before the per-symbol path below so a `longs` / `shorts` / `allpos`

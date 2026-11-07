@@ -150,7 +150,7 @@ describe('ScaleCommand — modifier honesty', () => {
     const ex = makeExchange();
     const r = await cmd.execute(ctx(args, ex));
     expect(r.success).toBe(false);
-    expect(r.error).toBe(`modifier '${modifier}' is not implemented; supported: reduce, taker`);
+    expect(r.error).toContain(`modifier '${modifier}' is not implemented; supported: reduce, taker`);
     expect(ex.placeOrders).not.toHaveBeenCalled();
   });
 
@@ -206,7 +206,7 @@ describe('ScaleCommand — modifier honesty', () => {
       ctx(['scale', 'buy', '$1000', 'into', '3', 'from', '49000', 'to', '50000', 'BTCUSDX'], ex),
     );
     expect(r.success).toBe(false);
-    expect(r.error).toBe(
+    expect(r.error).toContain(
       'Unknown symbol "BTCUSDX". Use a valid market symbol, or omit it to trade the focused symbol (BTCUSDT).',
     );
     expect(ex.placeOrders).not.toHaveBeenCalled();

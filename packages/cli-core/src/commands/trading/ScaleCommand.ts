@@ -84,10 +84,10 @@ export class ScaleCommand extends TradingBaseCommand {
 
     const symbol = tokens.shift();
     if (symbol && (SUPPORTED_MODIFIERS.includes(symbol) || RESERVED_MODIFIERS.includes(symbol))) {
-      return `modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
+      return `${this.unknownOrderArgument(symbol!)} modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
     }
     if (tokens.length > 0) {
-      return `modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
+      return `${this.unknownOrderArgument(symbol!)} modifier '${symbol}' is not implemented; supported: ${SUPPORTED_MODIFIERS.join(', ')}`;
     }
     return { allowTaker, reduceOnly, ...(symbol ? { symbol } : {}) };
   }
@@ -103,6 +103,8 @@ export class ScaleCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
     const commandStr = args.join(' ');
     const parsedCommand = this.parseCommand(commandStr);
     if (typeof parsedCommand === 'string') {
@@ -117,7 +119,7 @@ export class ScaleCommand extends TradingBaseCommand {
       // such as BTCUSDX into BTCUSDT.
       if (!resolvedSymbol || resolvedSymbol.toUpperCase() !== parsedCommand.symbol.toUpperCase()) {
         return this.error(
-          `Unknown symbol "${parsedCommand.symbol}". Use a valid market symbol, or omit it to trade the focused symbol (${ctx.symbol}).`,
+          `${this.unknownOrderArgument(parsedCommand.symbol)} Unknown symbol "${parsedCommand.symbol}". Use a valid market symbol, or omit it to trade the focused symbol (${ctx.symbol}).`,
         );
       }
       targetSymbol = resolvedSymbol;

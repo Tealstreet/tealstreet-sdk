@@ -46,6 +46,8 @@ export class BumpCommand extends TradingBaseCommand {
     }
 
     const args = this.getRawArgs(ctx);
+    const assignment = this.refuseOrderAssignments(ctx);
+    if (assignment) return assignment;
     let i = 1;
 
     // Optional leading symbol (only if there's at least one more token to consume)
@@ -108,6 +110,9 @@ export class BumpCommand extends TradingBaseCommand {
       symbol = this.transformSymbol(exchange, args[i]);
       i++;
     }
+
+    const invalid = this.refuseUnknownArgs(ctx, Array.from({ length: i }, (_, index) => index));
+    if (invalid) return invalid;
 
     // Legacy flag fallback
     if (side === null) {
