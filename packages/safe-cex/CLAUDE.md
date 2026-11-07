@@ -379,9 +379,17 @@ read through `EngineHost.capabilities()`): account identity, client-order
 lookup, history axes, fills by order id, native cancel-all, leverage reads and
 maximum, account-wide leverage and margin type, symbol-routed cancel/amend,
 order-book queries and options. Clock selection is shared engine-host policy:
-the default SDK transport awaits the shared `virtualClock` startup and reads it
-dynamically for every venue. Explicit host/recording transports retain their own
-clock; native servers supply their OS clock and own its synchronization. There is no per-venue
+the default SDK transport awaits shared `virtualClock` startup, anchors an
+epoch-shaped scheduling clock to `performance.now()`, and never moves its live
+deadlines on subsequent synchronization. Browser workers wait up to 30 s for
+an initial host time push before anchoring. Later syncs update only the engine's
+protocol UTC fallback; small corrections preserve venue calibration, while a
+>1 s host-baseline discontinuity (including suspend) invalidates it. The default
+transport records wall-versus-monotonic divergence as pending UTC data only;
+EngineHost drains it outside HTTP handoffs before the next Rust call. Journal
+UTC bounds and scheduled-cancel validation still use synchronized wall time.
+Explicit host/recording transports retain their own clock; native servers supply
+their OS clock and own its synchronization. See `docs/plans/callers/engine-monotonic-deadlines.md`. There is no per-venue
 `hostClock` capability (wire bit14 is reserved). `RustEngineExchange` routes from that record,
 never from venue names, and adopts it once the engine exists (`ensureHost` or
 `start`); `engineCapabilities` is undefined before then. `leverageQuery` decides

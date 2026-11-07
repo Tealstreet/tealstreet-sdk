@@ -626,11 +626,15 @@ fn nonfinite_delivery(failure: bool) {
                     event.fields,
                     if seed == Seed::Markets {
                         vec![
+                            ("deadlineMs", 60_000.0.into()),
                             ("startupMarketsState", "started".into()),
                             ("startupTickersState", "neverStarted".into()),
                         ]
                     } else {
-                        vec![("startupTickersState", "started".into())]
+                        vec![
+                            ("deadlineMs", 60_000.0.into()),
+                            ("startupTickersState", "started".into()),
+                        ]
                     }
                 );
             }

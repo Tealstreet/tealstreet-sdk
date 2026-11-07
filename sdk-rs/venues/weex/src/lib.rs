@@ -1044,7 +1044,7 @@ impl Venue for WeexFutures {
             if response.status == 429 {
                 self.paused_until = self
                     .paused_until
-                    .max(cx.now + rate::delay(response, cx.now));
+                    .max(cx.now + rate::delay(response, cx.protocol_now()));
             }
             if response.status >= 400 {
                 request.failed(
@@ -1070,7 +1070,7 @@ impl Venue for WeexFutures {
             if response.status == 429 {
                 self.paused_until = self
                     .paused_until
-                    .max(cx.now + rate::delay(response, cx.now));
+                    .max(cx.now + rate::delay(response, cx.protocol_now()));
             }
             if p.seed_generation == self.seed_generation
                 && self.account_delivery_current(cx, &request)
@@ -1118,7 +1118,7 @@ impl Venue for WeexFutures {
         if response.status == 429 {
             self.paused_until = self
                 .paused_until
-                .max(cx.now + rate::delay(response, cx.now));
+                .max(cx.now + rate::delay(response, cx.protocol_now()));
         }
         if let Task::History(request) = &p.task
             && !self.history_delivery_current(cx, request)

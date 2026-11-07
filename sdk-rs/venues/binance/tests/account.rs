@@ -1889,7 +1889,7 @@ fn a_refused_key_ends_the_start_with_the_reason() {
 #[test]
 fn a_fills_start_with_no_end_walks_every_seven_day_window_to_now() {
     let mut h = ready();
-    let now = h.now;
+    let now = h.engine.signing_clock(h.now).0;
     h.event(Event::Command(Command::Query {
         command: 42,
         query: Query::Fills {

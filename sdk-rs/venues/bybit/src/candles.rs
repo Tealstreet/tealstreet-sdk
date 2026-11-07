@@ -151,7 +151,7 @@ impl BybitLinear {
                 format!("Bybit klines: {message}"),
             );
             let mut error = failure.error;
-            let pause = crate::venue_rate_limit_pause_ms(response, cx.now);
+            let pause = crate::venue_rate_limit_pause_ms(response, cx.protocol_now());
             if error.kind == Some(ErrorKind::RateLimited) && pause > 0.0 {
                 self.candles_paused_until = self.candles_paused_until.max(cx.now + pause);
                 let retry_after = error

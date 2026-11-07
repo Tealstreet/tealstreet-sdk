@@ -585,7 +585,7 @@ impl Woo {
             },
             |limit| limit as usize,
         );
-        let window = (from, to.or(from.map(|_| cx.now)));
+        let window = (from, to.or(from.map(|_| cx.protocol_now())));
         if window.0.zip(window.1).is_some_and(|(a, b)| a > b) {
             Self::fail_local_history(cx, "Invalid WOO history range");
             return;

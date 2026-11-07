@@ -896,10 +896,13 @@ impl Grvt {
         {
             return Err("GRVT client order ID is already active or repeated in batch".into());
         }
-        if !cx.now.is_finite() || cx.now < 0. || cx.now > u64::MAX as f64 {
+        if !cx.protocol_now().is_finite()
+            || cx.protocol_now() < 0.
+            || cx.protocol_now() > u64::MAX as f64
+        {
             return Err("Invalid GRVT signing clock".into());
         }
-        let expiry = sign::expiration(cx.now as u64)?;
+        let expiry = sign::expiration(cx.protocol_now() as u64)?;
         let builder = if self.options.testnet {
             BUILDER_TESTNET
         } else {
@@ -968,7 +971,7 @@ impl Grvt {
         } else {
             None
         };
-        let create_time = (cx.now as u64)
+        let create_time = (cx.protocol_now() as u64)
             .checked_mul(1_000_000)
             .ok_or("GRVT create time overflow")?;
         let signing = if self.signing.is_some() {

@@ -34,6 +34,7 @@ const fixture = (privateAccount = true) => {
       return {
         construction: () =>
           JSON.stringify({ frameFed: config.frameFed === true, publicDataOnly: config.publicDataOnly === true }),
+        syncHostTime: () => true,
         capabilities: () => engineCapabilities('bybit'),
         start: idle,
         timer: idle,
