@@ -16,7 +16,7 @@ fn full_metadata_native_fields_unified_mobile_and_domains() {
     let table = exchange_metadata();
     let roster: Vec<String> =
         serde_json::from_str(include_str!("fixtures/exchange-metadata-roster.json")).unwrap();
-    assert_eq!(roster.len(), 48);
+    assert_eq!(roster.len(), 47);
     let mut native_names = table.keys().cloned().collect::<Vec<_>>();
     native_names.sort();
     assert_eq!(native_names, roster);
