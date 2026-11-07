@@ -207,7 +207,8 @@ describe('native public-feed ownership through real private workers', () => {
       orders: true,
       positions: true,
     });
-    expect(account.store.balance.total).toBe(0);
+    expect(account.store.balance).toMatchObject({ total: 1000, free: 900, used: 100 });
+    expect(account.store.balance.currencies?.USD).toMatchObject({ total: 1000, free: 900, used: 100 });
     expect(account.store.balance.currencies?.BTC).toMatchObject({ total: 1.5, free: 1 });
     expect(input.requests.some((request) => request.includes('/products'))).toBe(true);
     expect(input.sent.find(({ packet }) => packet.channel === 'user')!.verifiedSubscribe).toBe(true);

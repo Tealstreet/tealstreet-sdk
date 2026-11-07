@@ -4,6 +4,7 @@ import { buildRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoin
 import { ReconnectingWebSocket } from '@tealstreet/reconnecting-websocket/src/ReconnectingWebsocket';
 import { BitgetExchange } from '../reference/bitget/bitget.exchange';
 import { DefaultStore } from '../../store/store.base';
+import { BROWSER_WS_HOSTS, setRoutingWsHosts } from '../../transport/tealstreet/routing/routingTable';
 
 import '../../transport/registerTealstreetTransport';
 
@@ -14,6 +15,10 @@ const WS_PROXY_V2 = 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private';
 const WS_PROXY_V3 = 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v3/private';
 const RELAY_V2 = buildRelayUrl('jp', 'wss://ws.bitget.com/v2/ws/private');
 const RELAY_V3 = buildRelayUrl('jp', 'wss://ws.bitget.com/v3/ws/private');
+// Since AWS_EXIT.md step 3e the host IS the relay in every runtime (the hosted
+// exchange server's ws-proxy pin went in step 4). Pin a ws-proxy here so the
+// two-route walk stays covered.
+setRoutingWsHosts({ ...BROWSER_WS_HOSTS, bitgetPrivate: WS_PROXY_V2, bitgetPrivateUta: WS_PROXY_V3 });
 const DIRECT_V2 = 'wss://ws.bitget.com/v2/ws/private';
 
 const live: BitgetExchange[] = [];
@@ -21,7 +26,13 @@ afterEach(() => live.splice(0).forEach((exchange) => exchange.dispose()));
 
 const fakeSocket = (tunnel: boolean) => {
   const socket = tunnel ? Object.create(ReconnectingWebSocket.prototype) : {};
-  return Object.assign(socket, { addEventListener: vi.fn(), removeEventListener: vi.fn(), close: vi.fn() });
+  // A prototype-only fake: it never ran the constructor, so it must not run the real teardown either.
+  return Object.assign(socket, {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    close: vi.fn(),
+    terminate: vi.fn(),
+  });
 };
 
 const setup = ({ proxy = true, uta = false } = {}) => {

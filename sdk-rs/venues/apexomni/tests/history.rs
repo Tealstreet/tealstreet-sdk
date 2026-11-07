@@ -852,3 +852,39 @@ fn history_rejection_does_not_erase_background_cache_or_cross_concurrent_owners(
     assert!(e.store().orders().is_empty());
     assert!(e.store().positions().is_empty());
 }
+
+#[test]
+fn window_fills_with_no_limit_flag_a_full_page() {
+    let mut e = seeded();
+    query(&mut e, None, Some(1.0), Some(2_000_000_000_000.0), None);
+    let r = e
+        .prepared(after(0))
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .expect("fills request");
+    let rows = (0..100)
+        .map(|n| format!(r#"{{"id":"f{n}","symbol":"BTCUSDT","orderId":"o","side":"BUY","price":"1","size":"1","fee":"0","createdAt":1700000000000}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    e.handle(
+        after(1),
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: &format!(r#"{{"data":{{"orders":[{rows}]}}}}"#),
+            },
+        },
+    );
+    let actions: Vec<_> = e.prepared(after(1)).collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::Event(event))
+            if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE)),
+        "{actions:?}"
+    );
+}

@@ -17,7 +17,7 @@ const teardown = replSource.slice(replSource.indexOf('async function teardownOne
 
 describe('one-shot teardown', () => {
   it('is what the single-command path ends with', () => {
-    expect(replSource).toMatch(/await teardownOneShot\(session\.currentExchange\)/);
+    expect(replSource).toMatch(/await teardownOneShot\(session\.currentExchange, chaseProblem \? 1 : 0\)/);
   });
 
   it('stops the virtual clock, whose sync timer would otherwise re-arm forever', () => {

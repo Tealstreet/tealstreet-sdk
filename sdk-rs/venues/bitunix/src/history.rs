@@ -358,7 +358,11 @@ impl BitunixFutures {
                 order_id,
                 from_ms.map(millis),
                 to_ms.map(millis),
-                limit.unwrap_or(100).clamp(1, 100) as usize,
+                // usize::MAX marks a window with no limit: nothing truncates it.
+                match limit {
+                    None if from_ms.is_some() => usize::MAX,
+                    limit => limit.unwrap_or(100).clamp(1, 100) as usize,
+                },
             ),
             Query::OrderHistory {
                 symbol,
@@ -519,7 +523,7 @@ impl BitunixFutures {
                 },
             );
         let limit = if read.kind == Kind::Fills {
-            read.limit
+            read.limit.min(100)
         } else {
             100
         };
@@ -867,6 +871,8 @@ impl BitunixFutures {
             return;
         }
         let more = read.kind != Kind::Fills && read.count >= 100 && !read.reached_start;
+        // Fills read one native page; a full one cannot prove a no-limit window covered.
+        let full_window = read.kind == Kind::Fills && read.limit == usize::MAX && read.count >= 100;
         // Endpoint facts only. A native invalid/nonadvancing time bound repeats
         // the registered cursor; the shared pager owns the resulting stall.
         let next = more.then(|| match read.kind {
@@ -901,6 +907,11 @@ impl BitunixFutures {
         read.release(cx);
         match step {
             CursorStep::More(_) => self.history_page(cx, read),
+            CursorStep::Done | CursorStep::Stalled(_) if full_window => self.history_done(
+                cx,
+                read,
+                Err(VenueError::new("Bitunix fills read one full page")),
+            ),
             CursorStep::Done | CursorStep::Stalled(_) => self.history_done(cx, read, Ok(())),
         }
     }

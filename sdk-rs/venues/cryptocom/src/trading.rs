@@ -939,7 +939,12 @@ impl Cryptocom {
                     return;
                 };
                 WriteFact::Failed {
-                    fact,
+                    // Native evidence cannot authorize replay after an ambiguous status.
+                    fact: if matches!(response.status, 408 | 429 | 500..) {
+                        fact.unproven()
+                    } else {
+                        fact
+                    },
                     known_effects: false,
                 }
             }
@@ -1015,9 +1020,10 @@ pub(crate) const ERRORS: CodeTable = CodeTable {
             verdict: Verdict::RefusedResend(ErrorKind::AuthInvalid),
             only: None,
         },
+        // INVALID_NONCE: a clock or ordering fault, not the key.
         Row {
             key: Key::Int(40102),
-            verdict: Verdict::Refused(ErrorKind::AuthInvalid),
+            verdict: Verdict::Refused(ErrorKind::InvalidInput),
             only: None,
         },
         Row {
@@ -1057,6 +1063,37 @@ pub(crate) const ERRORS: CodeTable = CodeTable {
         },
         Row {
             key: Key::Int(309),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        // Native refusal codes only prove refusal at non-ambiguous HTTP statuses.
+        Row {
+            key: Key::Int(415),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(43005),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(213),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(315),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(1110),
+            verdict: Verdict::Refused(ErrorKind::Rejected),
+            only: None,
+        },
+        Row {
+            key: Key::Int(40004),
             verdict: Verdict::Refused(ErrorKind::Rejected),
             only: None,
         },

@@ -28,18 +28,17 @@ fn order_path(variant: Variant) -> &'static str {
         Variant::PortfolioMargin => "/papi/v1/um/order",
         Variant::Spot => "/api/v3/order",
         Variant::CoinM => "/dapi/v1/order",
+        Variant::Options => "/eapi/v1/order",
     }
 }
 /// The open-orders reads one Binance snapshot joins.
 fn order_reads(variant: Variant) -> &'static [&'static str] {
     match variant {
         Variant::UsdM => &["/fapi/v1/openOrders", "/fapi/v1/openAlgoOrders"],
-        Variant::PortfolioMargin => &[
-            "/papi/v1/um/openOrders",
-            "/papi/v1/um/conditional/openOrders",
-        ],
+        Variant::PortfolioMargin => &["/papi/v1/um/openOrders", "/papi/v1/um/algo/openAlgoOrders"],
         Variant::Spot => &["/api/v3/openOrders"],
-        Variant::CoinM => &["/dapi/v1/openOrders"],
+        Variant::CoinM => &["/dapi/v1/openOrders", "/dapi/v1/openAlgoOrders"],
+        Variant::Options => &["/eapi/v1/openOrders"],
     }
 }
 
@@ -135,7 +134,9 @@ fn coin_or_spot_ready(variant: Variant) -> Harness {
             r#"{"assets":[]}"#
         },
     );
-    h.respond(&format!("{prefix}/openOrders"), 200, "[]");
+    for path in order_reads(variant) {
+        h.respond(path, 200, "[]");
+    }
     let socket = h
         .socket(if spot { "ws-api/v3" } else { "/ws/coin-key" })
         .unwrap();
@@ -226,6 +227,7 @@ fn unknown_placement(h: &mut Harness, variant: Variant, command: u32) {
 /// An order event schedules a REST snapshot; after the debounce its reads are in flight.
 fn pre_mark_reads(h: &mut Harness, variant: Variant) -> Vec<HttpRequest> {
     match variant {
+        Variant::Options => unreachable!("Options owns separate production-binding fence controls"),
         Variant::Spot => h.message("ws-api/v3", r#"{"subscriptionId":0,"event":{"e":"executionReport","i":99,"s":"BTCUSDT","c":"other","S":"BUY","o":"LIMIT","X":"NEW","x":"NEW","p":"9000","q":"1","z":"0","l":"0","L":"0"}}"#),
         Variant::CoinM => h.message("/ws/coin-key", r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":99,"s":"BTCUSD_PERP","S":"BUY","o":"LIMIT","X":"NEW","p":"9000","q":"1","z":"0"}}"#),
         Variant::PortfolioMargin => h.message("/pm/ws", r#"{"e":"ORDER_TRADE_UPDATE","fs":"UM","o":{"i":99,"c":"other","s":"BTCUSDT","S":"BUY","o":"LIMIT","X":"NEW","p":"99","q":"0.01","z":"0"}}"#),
@@ -270,6 +272,46 @@ fn fence_sequence(variant: Variant) {
         1,
         "{variant:?} retry places after release"
     );
+}
+
+/// One row that does not decode costs only itself, not the whole read.
+#[test]
+fn an_undecodable_row_does_not_fail_the_read() {
+    let variant = Variant::UsdM;
+    let mut h = ready(variant);
+    let stale = pre_mark_reads(&mut h, variant);
+    unknown_placement(&mut h, variant, 70);
+    answer(&mut h, stale, "[]");
+    let mut fresh = take_reads(&mut h, variant);
+    let regular = fresh.remove(0);
+    answer(
+        &mut h,
+        vec![regular],
+        r#"[{"symbol":"ETHUSDT","orderId":77}]"#,
+    );
+    answer(&mut h, fresh, "[]");
+    place(&mut h, variant, 73);
+    assert_eq!(posts(&h, variant), 1);
+}
+
+/// A rejected row keeps only its own market's fence.
+#[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let variant = Variant::UsdM;
+    let mut h = ready(variant);
+    let stale = pre_mark_reads(&mut h, variant);
+    unknown_placement(&mut h, variant, 70);
+    answer(&mut h, stale, "[]");
+    let mut fresh = take_reads(&mut h, variant);
+    let regular = fresh.remove(0);
+    answer(
+        &mut h,
+        vec![regular],
+        r#"[{"symbol":"ETHUSDT","orderId":77,"side":"BUY","type":"WEIRD","price":"1","origQty":"1","executedQty":"0","status":"NEW"}]"#,
+    );
+    answer(&mut h, fresh, "[]");
+    place(&mut h, variant, 73);
+    assert_eq!(posts(&h, variant), 1);
 }
 
 #[test]

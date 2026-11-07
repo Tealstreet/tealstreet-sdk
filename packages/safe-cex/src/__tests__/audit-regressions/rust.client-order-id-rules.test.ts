@@ -32,7 +32,7 @@ const setup = (name: ExchangeName) => {
   const exchange = new RustEngineExchange(name, { key: 'fixture', secret: 'fixture' }, store);
   const command = vi.fn().mockResolvedValue(['native-order']);
   // Record the actual engine-command boundary without starting any transport.
-  Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  Object.assign(exchange, { host: { command: (input: unknown) => command(input), dispose: vi.fn() } });
   adoptEngineCapabilities(exchange);
   vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
   exchanges.push(exchange);

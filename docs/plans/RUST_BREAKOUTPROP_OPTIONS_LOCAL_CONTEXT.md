@@ -1,5 +1,8 @@
 # BreakoutProp options refusal: delete the unreachable venue arm
 
+Historical record: this venue was retired from the SDK on 2026-11-07.
+The implementation paths and validation commands below describe the former adapter.
+
 Plan and controls, 2026-10-24. Lane claude-55ao7t; one-site slice and ruling by
 claude-ddi2il (after #2048, `12da3363cb9`). Reviewer: codex-hcmq3f.
 

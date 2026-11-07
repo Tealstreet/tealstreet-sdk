@@ -110,14 +110,15 @@ impl SignStep for Http {
             .ok()
             .filter(|key| !key.is_empty() && !key.contains(['\r', '\n']))
             .ok_or(SignError::InvalidResult)?;
-        let mut params = self.prepared.take().ok_or(SignError::InvalidRequest)?;
+        let params = self.prepared.take().ok_or(SignError::InvalidRequest)?;
+        let mut signed = None;
         if signs(self.path) {
             if result.values[1].len() != 32 {
                 return Err(SignError::InvalidResult);
             }
             let signature =
                 safe_cex_crypto::encode(&result.values[1], safe_cex_crypto::Encoding::Hex);
-            params = params.str("signature", &signature);
+            signed = Some(signature);
         }
         let (url, headers, body) = params.render(
             self.method,
@@ -127,13 +128,20 @@ impl SignStep for Http {
                 ("X-BX-APIKEY", key.into()),
             ],
         );
+        // BingX takes the signature last, in the query and in a JSON body alike.
+        let (url, body) = match signed {
+            Some(signature) => super::with_signature_last(self.method, url, body, &signature),
+            None => (url, body),
+        };
         http.url = url;
         http.headers = headers;
         http.body = body;
         Ok(())
     }
 
+    // BingX refuses a timestamp past its 5000 ms recvWindow (also the maximum): re-sign a held
+    // request well before, so the network still has its share of the window.
     fn freshness_ms(&self) -> f64 {
-        5_000.
+        2_000.
     }
 }

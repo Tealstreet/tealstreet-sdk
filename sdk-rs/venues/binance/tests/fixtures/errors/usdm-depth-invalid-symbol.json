@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T01:18:50.110Z",
+  "endpoint": "/fapi/v1/depth?symbol=NOPEUSDT",
+  "http_status": 400,
+  "body": "{\"code\":-1121,\"msg\":\"Invalid symbol.\"}",
+  "expect": {
+    "kind": null,
+    "outcome": null,
+    "path": "read"
+  }
+}

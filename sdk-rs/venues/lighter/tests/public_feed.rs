@@ -142,7 +142,7 @@ fn shared_price_estimates_and_native_account_pnl_keep_their_authority_after_reco
     let mut rig = Rig::new(PublicFeedPolicy::Shared);
     rig.shared_quote(120., 120., 120.);
     let reads = rig.reads.len();
-    rig.fire_due(NOW + 6000., &STATS.replace("100", "55"));
+    rig.fire_due(NOW + 7100., &STATS.replace("100", "55"));
     assert!(
         rig.reads[reads..]
             .iter()
@@ -272,4 +272,23 @@ fn robinhood_non_direct_modes_keep_own_deployment_metadata_private_state_and_sha
             }
         }
     }
+}
+
+// Live: reads every 1.8 s filled the budget, and a close was refused with a position open 8 min.
+#[test]
+fn a_streaming_account_polls_every_five_seconds_not_every_two() {
+    let mut rig = Rig::new(PublicFeedPolicy::Shared);
+    let reads = rig.reads.len();
+    rig.fire_due(NOW + 4_000., STATS);
+    assert!(
+        !rig.reads[reads..]
+            .iter()
+            .any(|url| url.contains("/account?"))
+    );
+    rig.fire_due(NOW + 7_100., STATS);
+    assert!(
+        rig.reads[reads..]
+            .iter()
+            .any(|url| url.contains("/account?"))
+    );
 }

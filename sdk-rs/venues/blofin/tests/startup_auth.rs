@@ -40,7 +40,7 @@ impl Rig {
             match action {
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
-                Action::Notice(Notice::StartupFailed { error }) => self.failures.push(error),
+                Action::Notice(Notice::StartupFailed { error, .. }) => self.failures.push(error),
                 Action::Notice(Notice::Deactivate) => self.deactivated += 1,
                 other => rest.push(other),
             }
@@ -321,6 +321,14 @@ fn rejected_read_only_ip_fails_startup_without_deactivating() {
     assert_eq!(rig.failures.len(), 1);
     assert_eq!(rig.failures[0].kind, Some(ErrorKind::AuthPermission));
     assert!(rig.failures[0].message.contains("read-only API key"));
+    // The legacy runtime's recorded BloFin body: the user is told to add the new IPs.
+    assert!(
+        rig.failures[0]
+            .message
+            .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT),
+        "{}",
+        rig.failures[0].message
+    );
     assert_eq!(rig.deactivated, 0);
 }
 
@@ -482,4 +490,30 @@ fn a_read_failing_during_a_ban_waits_out_the_ban_too() {
 /// Retry delays are jittered into `[0.75, 1.0] * nominal`.
 fn jittered(actual: f64, nominal: f64) -> bool {
     (0.75 * nominal..=nominal).contains(&actual)
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            200,
+            r#"{"code":"152406","msg":"Your IP is not included in your API key's IP whitelist"}"#,
+        ),
+        (
+            401,
+            r#"{"code":"152406","msg":"Your IP is not included in your API key's IP whitelist"}"#,
+        ),
+        (
+            403,
+            r#"{"code":"152401","msg":"Access key does not exist"}"#,
+        ),
+    ] {
+        let mut engine = engine(keyed());
+        let mut rig = Rig::default();
+        let (margin, _, _) = to_settings(&mut engine, &mut rig);
+        respond(&mut engine, &margin, status, body, 2.);
+        rig.take(&mut engine);
+        rig.run(&mut engine, 120_000.);
+        assert_eq!(rig.failures.len(), 1, "{status} {body}");
+    }
 }

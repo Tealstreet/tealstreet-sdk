@@ -219,6 +219,10 @@ export interface CancelFilter {
  * because the caller's copy is a snapshot and the venue's is not. It is
  * optional so a caller holding only an id need not fabricate an `Order` whose
  * every field is discarded.
+ *
+ * `amount` is the order's new TOTAL in native units, filled part included. An
+ * order's `remaining` is base, so doubling it on a contract venue misstates the
+ * size by the contract size: convert with `convertBaseToNative` and add the fill.
  */
 export interface UpdateOrderPatch {
   readonly order?: Order;

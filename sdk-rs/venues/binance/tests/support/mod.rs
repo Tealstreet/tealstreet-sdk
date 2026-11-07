@@ -47,12 +47,14 @@ pub struct Deferred {
     pub parked: Vec<(RequestId, SignRequest)>,
 }
 
-pub const EXCHANGE_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"#;
+pub const EXCHANGE_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"MIN_NOTIONAL","notional":"5"},{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"#;
 pub const DAILY: &str = r#"[{"symbol":"BTCUSDT","lastPrice":"100","priceChangePercent":"1","volume":"2","quoteVolume":"3"}]"#;
 pub const BOOK_TICKERS: &str = r#"[{"symbol":"BTCUSDT","bidPrice":"99.9","askPrice":"100.1"}]"#;
 pub const PREMIUM: &str = r#"[{"symbol":"BTCUSDT","markPrice":"100","indexPrice":"100","lastFundingRate":"0.0001","nextFundingTime":1700000000000}]"#;
 
 pub struct Harness {
+    /// The latest body answered per path, to repeat for the first open's position read.
+    answered: Vec<(String, String)>,
     pub engine: Engine<BinanceFutures>,
     pub now: f64,
     pub requests: Vec<HttpRequest>,
@@ -63,6 +65,9 @@ pub struct Harness {
     pub done: Vec<(u32, Result<String, String>)>,
     /// Structured detail of failed commands.
     pub failures: Vec<(u32, safe_cex_engine::VenueError)>,
+    /// Startup failures a test expects; any other panics.
+    pub expect_startup_failure: bool,
+    pub startup_failures: Vec<safe_cex_engine::VenueError>,
     pub logs: Vec<String>,
     /// Logs at `Level::Error`, also present in `logs`.
     pub errors: Vec<String>,
@@ -135,8 +140,11 @@ impl Harness {
             sent: Vec::new(),
             closed: Vec::new(),
             timers: Vec::new(),
+            answered: Vec::new(),
             done: Vec::new(),
             failures: Vec::new(),
+            expect_startup_failure: false,
+            startup_failures: Vec::new(),
             logs: Vec::new(),
             errors: Vec::new(),
             command_errors: Vec::new(),
@@ -283,9 +291,16 @@ impl Harness {
                     self.done.push((command, Err(error.legacy_text())));
                     self.failures.push((command, error));
                 }
-                Action::Notice(Notice::StartupFailed { error }) => {
-                    panic!("unexpected Binance startup failure: {error}")
+                Action::Notice(Notice::StartupFailed { error, .. }) => {
+                    assert!(
+                        self.expect_startup_failure,
+                        "unexpected Binance startup failure: {error}"
+                    );
+                    self.startup_failures.push(error);
                 }
+                // The rig's public socket stays silent, so this notice is true here.
+                Action::Notice(Notice::Event(event))
+                    if event.code == safe_cex_engine::log::code::PUBLIC_FEED_UNAVAILABLE => {}
                 Action::Notice(Notice::Event(event)) => {
                     if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE {
                         for (key, value) in &event.fields {
@@ -366,8 +381,33 @@ impl Harness {
     }
 
     pub fn respond(&mut self, path: &str, status: u16, body: &str) {
+        self.answered.push((path.to_owned(), body.to_owned()));
         let request = self.take(path).id;
         self.reply(request, status, "", body);
+    }
+
+    pub fn answered_count(&self, fragment: &str) -> usize {
+        self.answered
+            .iter()
+            .filter(|(path, _)| path.contains(fragment))
+            .count()
+    }
+
+    /// A private open re-reads positions; startup answers it with what it answered before.
+    pub fn answer_open_position_read(&mut self) {
+        for fragment in ["ositionRisk", "symbolConfig"] {
+            let answer = self
+                .answered
+                .iter()
+                .rev()
+                .find(|(path, _)| path.contains(fragment))
+                .cloned();
+            if let Some((path, body)) = answer
+                && self.has_request(&path)
+            {
+                self.respond(&path, 200, &body);
+            }
+        }
     }
 
     pub fn message(&mut self, path: &str, text: &str) {
@@ -391,6 +431,23 @@ impl Harness {
 
     pub fn best_bid(&self) -> Option<f64> {
         self.engine.book("BTCUSDT").and_then(|book| book.best_bid())
+    }
+
+    /// Answer the targeted PM algo query, separately from the DELETE acknowledgement.
+    pub fn pm_cancel_proof(&mut self, native: u64, client: &str, symbol: &str) {
+        let query = self.take("/papi/v1/um/algo/algoOrder");
+        assert_eq!(query.method, safe_cex_engine::Method::Get);
+        assert!(query.url.contains(&format!("algoId={native}")));
+        self.reply(
+            query.id,
+            200,
+            "",
+            &serde_json::json!({
+                "algoId": native, "clientAlgoId": client, "symbol": symbol,
+                "algoStatus": "CANCELED", "actualOrderId": "", "actualPrice": "0", "triggerTime": 0,
+            })
+            .to_string(),
+        );
     }
 
     /// Move the clock forward, firing every timer that comes due.

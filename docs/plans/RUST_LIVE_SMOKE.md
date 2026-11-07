@@ -277,15 +277,15 @@ positions and one-way position mode, because cancel-all is intentional.
 | `KRAKEN_SPOT_MAINNET` | `KEY`, `SECRET` (Base64) | krakenspot | Query Funds, Query Open Orders and Trades, Create and Modify Orders, Cancel/Close Orders; XBT/USD ordermin 0.00006, costmin 0.5 USD; fund 20 USD cash |
 
 `binancepm` has no test environment and no profile yet. Whether it runs on
-mainnet or stays unsmoked is an open decision.
+mainnet or stays unsmoked is an open decision. `binanceoptions` (European
+Options, #2356) has no reviewed profile either and refuses every mode.
 
 ### Hyperliquid
 
-codex-zs5e83 owns the Hyperliquid and Hyperliquid Spot entry and runs both
-smokes. The binding sequence is its written per-request list, which the overseer
-approved as written for testnet only (list SHA-256
-`8546b4ce5424bff103edd53d69a7a83eed9aa8ab78ef18553bf330096f94a7aa`). Its
-current requirements:
+Hyperliquid and Hyperliquid Spot share the `HYPERLIQUID_TESTNET` credential
+set. A profile and the symbols below do not authorize a funded run: Sam must
+supply the credentials and the overseer must approve the per-request list
+against the exact harness revision before any credentialed call.
 
 - **Entry**: `HYPERLIQUID_TESTNET` in `tealstreet-beta-livesmoke`, read with
   `peek` only and piped to `--credentials-stdin`.
@@ -304,11 +304,11 @@ current requirements:
   account owner before handoff. The harness makes no transfers.
 - **Size**: the venue minimum, never above the fixed 100 USDC cap, and never
   raised after a rejection.
-- **Precondition**: nothing runs until Sam supplies the entry, the landed
-  harness is confirmed against the list, and zs5e83 rechecks the pin hash at
-  run time.
+- **Precondition**: the operator rechecks the approved harness revision and
+  per-request list at run time. A historical approval does not cover a changed
+  harness or an additional operation.
 
-| Venue | Testnet symbol (authorized) | Mainnet symbol (not authorized) |
+| Venue | Testnet symbol (requires approval) | Mainnet symbol (not authorized) |
 | --- | --- | --- |
 | hyperliquid | BTC-PERP | BTC-PERP |
 | hyperliquidspot | PURR/USDC | UBTC/USDC |

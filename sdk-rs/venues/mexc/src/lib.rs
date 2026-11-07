@@ -1,5 +1,6 @@
 //! MEXC USDT/USDC perpetual futures, driven by the sans-I/O engine.
 mod account;
+mod clock;
 mod depth_query;
 mod history;
 mod identity;
@@ -17,7 +18,7 @@ use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, 
 use safe_cex_engine::socket::{self, Config, Supervisor};
 use safe_cex_engine::{
     Command, CommandId, Cx, ErrorKind, Method, Outcome, PublicFeedPolicy, Response, SocketId,
-    TimerId, Venue, VenueError,
+    SubscriptionTopic, TimerId, Venue, VenueError,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 use wire::*;
@@ -39,10 +40,13 @@ pub enum Pending {
     Private {
         owner: private_read::Owner,
         pending: Box<Pending>,
+        replay: private_read::Replay,
     },
+    Clock(Box<clock::Request>),
     History(history::Request),
     Identity(CommandId),
     Trade(trading::Request),
+    Protective(Box<trading::managed::ManagedRequest>),
     Account(account::Request),
     Markets {
         context: Context,
@@ -52,6 +56,7 @@ pub enum Pending {
     Tickers {
         context: Context,
         rows: Vec<Ticker>,
+        references: Vec<(String, trading::protection::References)>,
         failed: bool,
     },
     Depth {
@@ -85,6 +90,8 @@ impl Pending {
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
+    /// When the last public ping left, so its pong measures the socket's latency.
+    ping_at: f64,
 }
 
 struct BookState {
@@ -113,6 +120,7 @@ pub struct MexcFutures {
     books: HashMap<String, BookState>,
     volume_units: HashMap<String, f64>,
     ticker_symbols: Vec<String>,
+    references: HashMap<String, trading::protection::References>,
     ticker_subscriptions: BTreeSet<String>,
     candles: HashMap<(String, Interval), u32>,
     next_book_generation: u32,
@@ -126,6 +134,16 @@ pub struct MexcFutures {
 impl MexcFutures {
     fn fail_local_read(cx: &mut Cx<'_, Pending>, error: &str) {
         cx.refuse_command(Operation::Read, error);
+    }
+
+    /// A query MEXC cannot answer: typed so callers skip it rather than log a failure.
+    fn fail_unsupported_read(cx: &mut Cx<'_, Pending>, error: &str) {
+        cx.refuse_command(
+            Operation::Read,
+            safe_cex_engine::VenueError::new(error)
+                .kind(safe_cex_engine::ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent),
+        );
     }
 
     pub fn new(options: Options) -> Self {
@@ -153,6 +171,7 @@ impl MexcFutures {
             books: HashMap::new(),
             volume_units: HashMap::new(),
             ticker_symbols: vec![],
+            references: HashMap::new(),
             ticker_subscriptions: BTreeSet::new(),
             candles: HashMap::new(),
             next_book_generation: 0,
@@ -163,7 +182,7 @@ impl MexcFutures {
         }
     }
     fn get(&mut self, cx: &mut Cx<'_, Pending>, path: &str, symbol: String, generation: u32) {
-        let context = match cx.http_context(
+        let context = match cx.http_live_context(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -196,7 +215,13 @@ impl MexcFutures {
         }
     }
     fn stream(&mut self, cx: &mut Cx<'_, Pending>, path: &str, tickers: bool) {
-        let context = match cx.http_context(
+        let issue = if tickers {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(
+            cx,
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -221,6 +246,7 @@ impl MexcFutures {
             Pending::Tickers {
                 context: context.clone(),
                 rows: vec![],
+                references: vec![],
                 failed: false,
             }
         } else {
@@ -298,7 +324,7 @@ impl MexcFutures {
             }
         }
     }
-    fn mini_ticker(&self, cx: &mut Cx<'_, Pending>, item: &str) {
+    fn mini_ticker(&mut self, cx: &mut Cx<'_, Pending>, item: &str) {
         #[derive(serde::Deserialize)]
         struct Identity<'a> {
             #[serde(borrow)]
@@ -341,6 +367,10 @@ impl MexcFutures {
             );
             return;
         }
+        self.references
+            .entry(symbol.clone())
+            .or_default()
+            .observe(cx.now, [raw.last_price, raw.fair_price, raw.index_price]);
         cx.store.update_ticker(&symbol, |t| {
             // A zero price is an unavailable quote (seen in the public feed),
             // not a reason to discard valid mark/index/volume fields.
@@ -373,17 +403,73 @@ impl MexcFutures {
             }
         });
     }
-    fn subscribe_depth(&self, cx: &mut Cx<'_, Pending>, symbol: &str) {
-        if let (Some(socket), Some(market)) = (self.public.socket, cx.store.market(symbol))
-            && self.public.open
-        {
+    /// Every depth subscribe, unsubscribe and repair; false when the market is unknown.
+    fn depth_subscription(&self, cx: &mut Cx<'_, Pending>, subscribe: bool, symbol: &str) -> bool {
+        let Some(id) = cx.store.market(symbol).map(|m| m.id.clone()) else {
+            return false;
+        };
+        if !subscribe {
+            self.send(cx, "unsub.depth", &id, None);
+        } else if let Some(socket) = self.public.socket.filter(|_| self.public.open) {
             cx.send(
                 socket,
-                format!(
-                    r#"{{"method":"sub.depth","param":{{"symbol":"{}","compress":false}}}}"#,
-                    market.id
-                ),
+                format!(r#"{{"method":"sub.depth","param":{{"symbol":"{id}","compress":false}}}}"#),
             );
+        }
+        true
+    }
+    /// Every kline subscribe, unsubscribe and repair; false when the stream cannot be named.
+    fn kline_subscription(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        subscribe: bool,
+        symbol: &str,
+        interval: Interval,
+    ) -> bool {
+        let (Some(m), Some(i)) = (cx.store.market(symbol), wire::interval(interval)) else {
+            return false;
+        };
+        let id = m.id.clone();
+        let method = if subscribe {
+            "sub.kline"
+        } else {
+            "unsub.kline"
+        };
+        self.send(cx, method, &id, Some(("interval", i)));
+        true
+    }
+    fn repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        let live = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                self.candles.contains_key(&(symbol.clone(), *interval))
+            }
+            SubscriptionTopic::OrderBook { symbol } => self.books.contains_key(symbol),
+        };
+        if !live {
+            return Err(format!("{topic} is not subscribed"));
+        }
+        if !self.public.open || self.public.socket.is_none() {
+            return Err(format!("the public socket carrying {topic} is not open"));
+        }
+        // A missed depth delta shows as a version gap, which re-snapshots the book.
+        let named = match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                self.kline_subscription(cx, false, symbol, *interval)
+                    && self.kline_subscription(cx, true, symbol, *interval)
+            }
+            SubscriptionTopic::OrderBook { symbol } => {
+                self.depth_subscription(cx, false, symbol)
+                    && self.depth_subscription(cx, true, symbol)
+            }
+        };
+        if named {
+            Ok(())
+        } else {
+            Err(format!("MEXC cannot name the stream for {topic}"))
         }
     }
     fn snapshot(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -615,6 +701,7 @@ impl MexcFutures {
             Pending::Private { .. } => {
                 unreachable!("private ownership is handled before native dispatch")
             }
+            Pending::Clock(request) => self.clock_failed(cx, *request, VenueError::new(error)),
             Pending::Identity(command) => self.identity_failed(cx, command, error),
             Pending::Depth {
                 symbol, generation, ..
@@ -639,10 +726,19 @@ impl MexcFutures {
                 );
             }
             Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Protective(request) => {
+                self.protective_failed(cx, *request, VenueError::new(error))
+            }
             Pending::Trade(request) => {
                 let error = VenueError::new(error).kind(ErrorKind::Network);
                 // The amend read precedes the replacement, which was never sent.
-                let error = if matches!(request.call, trading::Call::AmendRead { .. }) {
+                let before_write = matches!(request.call, trading::Call::AmendRead { .. })
+                    || if let trading::Call::ProtectiveRead { after_cancel, .. } = &request.call {
+                        !*after_cancel
+                    } else {
+                        false
+                    };
+                let error = if before_write {
                     error.outcome(Outcome::NotSent)
                 } else {
                     error.outcome(Outcome::Unknown)
@@ -660,6 +756,13 @@ impl MexcFutures {
 }
 
 impl Venue for MexcFutures {
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn account_auth_outcome(
         &self,
         pending: &Self::Pending,
@@ -683,6 +786,22 @@ impl Venue for MexcFutures {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Private { pending, .. } => Self::startup_reads(pending),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(account::Request::Mode) => S::ACCOUNT,
+            Pending::Account(account::Request::Snapshot(read)) => match read.scope {
+                account::Scope::Assets => S::BALANCE,
+                account::Scope::Positions => S::POSITIONS,
+                _ => S::ORDERS,
+            },
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             quantity_units: safe_cex_engine::QuantityUnits::NativePlacement,
@@ -711,6 +830,7 @@ impl Venue for MexcFutures {
         }
         self.public.open = true;
         self.public_supervisor.opened(cx);
+        self.public.ping_at = cx.now;
         cx.send(socket, PING);
         // Sparse once-per-second prices cover every listed market. Detailed
         // subscriptions provide funding, index and open-interest quantities.
@@ -721,14 +841,11 @@ impl Venue for MexcFutures {
         self.reconcile_tickers(cx);
         let symbols: Vec<_> = self.books.keys().cloned().collect();
         for symbol in symbols {
-            self.subscribe_depth(cx, &symbol);
+            self.depth_subscription(cx, true, &symbol);
             self.snapshot(cx, &symbol);
         }
         for (symbol, interval) in self.candles.keys() {
-            if let (Some(m), Some(i)) = (cx.store.market(symbol), wire::interval(*interval)) {
-                let id = m.id.clone();
-                self.send(cx, "sub.kline", &id, Some(("interval", i)));
-            }
+            self.kline_subscription(cx, true, symbol, *interval);
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
@@ -743,6 +860,11 @@ impl Venue for MexcFutures {
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
+        if message.channel == "pong" {
+            cx.store
+                .set_latency(((cx.now - self.public.ping_at).max(0.0) / 2.0).round());
+            return;
+        }
         let Some(data) = message.data else {
             return;
         };
@@ -767,6 +889,14 @@ impl Venue for MexcFutures {
                     serde_json::from_str::<Tick<'_>>(data.get()),
                     cx.store.market(&symbol),
                 ) {
+                    self.references.entry(symbol.clone()).or_default().observe(
+                        cx.now,
+                        [
+                            Some(raw.last_price),
+                            Some(raw.fair_price),
+                            Some(raw.index_price),
+                        ],
+                    );
                     let ticker = Self::ticker(raw, market);
                     cx.store.update_ticker(&symbol, |t| *t = ticker);
                 }
@@ -802,6 +932,7 @@ impl Venue for MexcFutures {
         }
         self.public.socket = None;
         self.public.open = false;
+        self.references.clear();
         self.ticker_subscriptions.clear();
         self.public_supervisor.retry(cx);
         for state in self.books.values_mut() {
@@ -811,7 +942,7 @@ impl Venue for MexcFutures {
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
-        if let Pending::Private { owner, pending } = pending {
+        if let Pending::Private { owner, pending, .. } = pending {
             if owner.current(cx) {
                 self.on_item(cx, pending, item);
             }
@@ -860,9 +991,21 @@ impl Venue for MexcFutures {
                     }
                 }
             },
-            Pending::Tickers { rows, .. } => match serde_json::from_str::<Tick<'_>>(item) {
+            Pending::Tickers {
+                rows, references, ..
+            } => match serde_json::from_str::<Tick<'_>>(item) {
                 Ok(raw) => {
                     if let Some(m) = cx.store.market_by_id(&raw.symbol) {
+                        let mut receipt = trading::protection::References::default();
+                        receipt.observe(
+                            cx.now,
+                            [
+                                Some(raw.last_price),
+                                Some(raw.fair_price),
+                                Some(raw.index_price),
+                            ],
+                        );
+                        references.push((m.symbol.clone(), receipt));
                         rows.push(Self::ticker(raw, m));
                     }
                 }
@@ -872,11 +1015,31 @@ impl Venue for MexcFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        if let Pending::Private { owner, pending } = pending {
+        if let Pending::Protective(request) = pending {
+            self.protective_response(cx, *request, response);
+            return;
+        }
+        if let Pending::Clock(request) = pending {
+            self.clock_response(cx, *request, response);
+            return;
+        }
+        let Some(pending) = self.recover_clock(cx, pending, &response) else {
+            return;
+        };
+        if let Pending::Private {
+            owner,
+            pending,
+            replay,
+        } = pending
+        {
             if !owner.current(cx) {
                 self.private_failed(
                     cx,
-                    Pending::Private { owner, pending },
+                    Pending::Private {
+                        owner,
+                        pending,
+                        replay,
+                    },
                     VenueError::new("MEXC read expired"),
                 );
                 return;
@@ -922,6 +1085,19 @@ impl Venue for MexcFutures {
             self.failure(cx, pending, &error.venue_error().message);
             return;
         }
+        if matches!(
+            &pending,
+            Pending::Identity(_) | Pending::Account(_) | Pending::History(_)
+        ) && let Some(error) = Envelope::refusal(response.body)
+        {
+            if let Pending::Account(request) = &pending
+                && self.account_startup_refusal(cx, request, &response)
+            {
+                return;
+            }
+            self.read_refused(cx, pending, error);
+            return;
+        }
         // Account reads classify their own HTTP failures (a refused key ends startup).
         if response.status != 200 && !matches!(pending, Pending::Account(_)) {
             self.failure(cx, pending, &format!("MEXC HTTP {}", response.status));
@@ -930,6 +1106,7 @@ impl Venue for MexcFutures {
         let background = pending.public_context().cloned();
         let mut start_account_and_tickers = false;
         (|| match pending {
+            Pending::Clock(_) => unreachable!("clock handled before native dispatch"),
             Pending::Private { .. } => {
                 unreachable!("private ownership is handled before native dispatch")
             }
@@ -941,7 +1118,7 @@ impl Venue for MexcFutures {
                     self.refresh_stop_orders(cx);
                 }
             }
-            Pending::Trade(_) => unreachable!(),
+            Pending::Trade(_) | Pending::Protective(_) => unreachable!(),
             Pending::History(request) => self.query_response(cx, request, response),
             Pending::Markets {
                 rows, malformed, ..
@@ -979,7 +1156,10 @@ impl Venue for MexcFutures {
                 start_account_and_tickers = true;
             }
             Pending::Tickers {
-                mut rows, failed, ..
+                mut rows,
+                references,
+                failed,
+                ..
             } => {
                 if failed || rows.is_empty() {
                     cx.notice(
@@ -990,6 +1170,7 @@ impl Venue for MexcFutures {
                     self.discovery.failed(cx, true);
                     return;
                 }
+                self.references.extend(references);
                 rows.sort_by_key(|t| cx.store.market_index(&t.symbol));
                 self.discovery.succeeded(cx, &true);
                 cx.store.set_tickers(rows);
@@ -1095,11 +1276,27 @@ impl Venue for MexcFutures {
         pending: Pending,
         response: Response<'_>,
     ) {
-        if let Pending::Private { owner, pending } = pending {
+        if let Pending::Clock(request) = pending {
+            self.clock_response(cx, *request, response);
+            return;
+        }
+        let Some(pending) = self.recover_clock(cx, pending, &response) else {
+            return;
+        };
+        if let Pending::Private {
+            owner,
+            pending,
+            replay,
+        } = pending
+        {
             if !owner.current(cx) {
                 self.private_failed(
                     cx,
-                    Pending::Private { owner, pending },
+                    Pending::Private {
+                        owner,
+                        pending,
+                        replay,
+                    },
                     VenueError::new("MEXC read expired"),
                 );
                 return;
@@ -1115,6 +1312,10 @@ impl Venue for MexcFutures {
         {
             return;
         }
+        if let Some(error) = Envelope::refusal(response.body) {
+            self.read_refused(cx, pending, error);
+            return;
+        }
         self.on_request_failed(
             cx,
             pending,
@@ -1124,25 +1325,86 @@ impl Venue for MexcFutures {
             ),
         );
     }
-    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        if matches!(pending, Pending::Private { .. }) {
-            self.private_precommit_failed(
-                cx,
-                pending,
-                safe_cex_engine::request_context::Error::Invalid,
-                error,
-            );
-            return;
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
+        self.settle_protective_retirement(cx);
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        if let Pending::Protective(request) = pending {
+            self.protective_release(store, request, release.time.raw_ms)
+        } else {
+            Ok(())
         }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        pending: &Pending,
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
         match pending {
-            Pending::Candles { context, .. } => {
-                let _ = cx.fail_context(&context, error);
+            Pending::Protective(request) => {
+                safe_cex_engine::request_context::ReconciliationData::new(
+                    request.native.command.to_string(),
+                )
             }
-            Pending::BookQuery { context, .. } => {
-                let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
-            }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            _ => Err(safe_cex_engine::request_context::Error::Invalid),
         }
+    }
+    fn on_http_preflight_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        preflight: &safe_cex_engine::request_context::Preflight,
+    ) {
+        self.protective_preflight_ready(cx, preflight);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.protective_plan_ready(cx, plan);
+    }
+    fn on_http_owner_retired_preflight(
+        &mut self,
+        owner: &safe_cex_engine::request_context::HttpOwnerRetirement,
+    ) -> Option<safe_cex_engine::request_context::Preflight> {
+        self.protective_retired(owner)
+    }
+    fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if let Pending::Protective(request) = pending {
+                self.protective_failed(cx, *request, error);
+                return;
+            }
+            if let Pending::Clock(request) = pending {
+                self.clock_failed(cx, *request, error);
+                return;
+            }
+            if matches!(pending, Pending::Private { .. }) {
+                self.private_precommit_failed(
+                    cx,
+                    pending,
+                    safe_cex_engine::request_context::Error::Invalid,
+                    error,
+                );
+                return;
+            }
+            match pending {
+                Pending::Candles { context, .. } => {
+                    let _ = cx.fail_context(&context, error);
+                }
+                Pending::BookQuery { context, .. } => {
+                    let _ = cx.fail_context(&context, error.outcome(Outcome::NotSent));
+                }
+                pending => self.on_request_failed(cx, pending, &error.message),
+            }
+        });
     }
     fn on_http_preparation_failed(
         &mut self,
@@ -1151,13 +1413,23 @@ impl Venue for MexcFutures {
         reason: safe_cex_engine::request_context::Error,
         error: VenueError,
     ) {
-        if matches!(pending, Pending::Private { .. }) {
-            self.private_precommit_failed(cx, pending, reason, error);
-        } else {
-            self.on_sign_error(cx, pending, error);
-        }
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if matches!(pending, Pending::Private { .. }) {
+                self.private_precommit_failed(cx, pending, reason, error);
+            } else {
+                self.on_sign_error(cx, pending, error);
+            }
+        });
     }
     fn on_http_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
+        if let Pending::Protective(request) = pending {
+            self.protective_failed(cx, *request, error);
+            return;
+        }
+        if let Pending::Clock(request) = pending {
+            self.clock_failed(cx, *request, error);
+            return;
+        }
         if matches!(pending, Pending::Private { .. }) {
             self.private_failed(cx, pending, error);
             return;
@@ -1187,6 +1459,7 @@ impl Venue for MexcFutures {
             socket::Tick::Reconnect => self.connect_public(cx),
             socket::Tick::Ping => {
                 if let Some(socket) = self.public.socket {
+                    self.public.ping_at = cx.now;
                     cx.send(socket, PING);
                 }
             }
@@ -1235,7 +1508,7 @@ impl Venue for MexcFutures {
                         failures: 0,
                     },
                 );
-                self.subscribe_depth(cx, &symbol);
+                self.depth_subscription(cx, true, &symbol);
                 self.snapshot(cx, &symbol);
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1250,10 +1523,7 @@ impl Venue for MexcFutures {
                 {
                     cx.clear_timer(t);
                 }
-                if let Some(m) = cx.store.market(&symbol) {
-                    let id = m.id.clone();
-                    self.send(cx, "unsub.depth", &id, None);
-                }
+                self.depth_subscription(cx, false, &symbol);
             }
             Command::UnsubscribeCandles { symbol, interval } => {
                 let key = (symbol.clone(), interval);
@@ -1261,32 +1531,24 @@ impl Venue for MexcFutures {
                     *count = count.saturating_sub(1);
                     if *count == 0 {
                         self.candles.remove(&key);
-                        if let (Some(m), Some(i)) =
-                            (cx.store.market(&symbol), wire::interval(interval))
-                        {
-                            let id = m.id.clone();
-                            self.send(cx, "unsub.kline", &id, Some(("interval", i)));
-                        }
+                        self.kline_subscription(cx, false, &symbol, interval);
                     }
                 }
             }
             Command::SubscribeCandles { symbol, interval } => {
-                let Some(i) = wire::interval(interval) else {
+                if wire::interval(interval).is_none() {
                     cx.notice(
                         Level::Error,
                         code::COMMAND_UNSUPPORTED,
                         interval.unsupported("MEXC"),
                     );
                     return;
-                };
+                }
                 let key = (symbol.clone(), interval);
                 let n = self.candles.entry(key).or_insert(0);
                 *n += 1;
-                if *n == 1
-                    && let Some(m) = cx.store.market(&symbol)
-                {
-                    let id = m.id.clone();
-                    self.send(cx, "sub.kline", &id, Some(("interval", i)));
+                if *n == 1 {
+                    self.kline_subscription(cx, true, &symbol, interval);
                 }
             }
             Command::FetchOrderBook {

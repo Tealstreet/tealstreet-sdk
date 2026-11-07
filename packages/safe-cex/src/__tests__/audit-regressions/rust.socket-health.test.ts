@@ -1,4 +1,3 @@
-import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 import type { Transport, WasmEngineLike } from '@tealstreet/safe-cex-wasm/host';
 import type { WasmEngineModule } from '../../exchanges/rust/rust.exchange';
 
@@ -8,6 +7,7 @@ import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from 
 import { RUST_SOCKET_STALE_MS, RustSocketHandle } from '../../exchanges/rust/rustSockets';
 import { DefaultStore } from '../../store/store.base';
 import { engineCapabilities } from '../fixtures/engineCapabilities';
+import { installNativeStartupFrames } from './rust.native-startup.fixtures';
 
 type Handlers = Parameters<Transport['connect']>[1];
 interface FakeSocket {
@@ -26,7 +26,8 @@ afterEach(() => {
  * A venue with one public and one private socket that reopens a socket the
  * moment the engine reports it closed, like every engine venue's reconnect.
  */
-const setup = async () => {
+const setup = async (singleSocket?: 'keyed' | 'public') => {
+  const venue = singleSocket ? 'hyperliquid' : 'bybit';
   const sockets: FakeSocket[] = [];
   const engineCloses: Array<[number, number]> = [];
   let nextSocket = 1;
@@ -34,11 +35,22 @@ const setup = async () => {
   const connect = (channel: 'public' | 'private') => {
     const socket = nextSocket++;
     channels.set(socket, channel);
-    return { op: 'wsConnect', socket, url: `wss://venue.test/${channel}/${socket}`, channel };
+    return {
+      op: 'wsConnect',
+      socket,
+      url: `wss://venue.test/${channel}/${socket}`,
+      channel,
+      ...(singleSocket ? { publicTopics: true } : {}),
+    };
   };
   const engine: WasmEngineLike = {
-    capabilities: () => engineCapabilities('bybit'),
-    start: () => JSON.stringify([connect('public'), connect('private')]),
+    capabilities: () => engineCapabilities(venue),
+    start: () =>
+      JSON.stringify(
+        singleSocket
+          ? [connect(singleSocket === 'keyed' ? 'private' : 'public')]
+          : [connect('public'), connect('private')],
+      ),
     command: (json) => {
       const command = JSON.parse(json);
       return command.command ? JSON.stringify([{ op: 'done', command: command.command, result: '[]' }]) : '[]';
@@ -93,7 +105,11 @@ const setup = async () => {
   const store = new DefaultStore();
   installNativeStartupFrames(engine, store);
   store.update({ loaded: { markets: true, tickers: true, balance: true, orders: true, positions: true } });
-  const exchange = new RustEngineExchange('bybit', { key: 'k', secret: 's' }, store);
+  const exchange = new RustEngineExchange(
+    venue,
+    singleSocket === 'public' ? { key: '', secret: '', publicDataOnly: true } : { key: 'k', secret: 's' },
+    store,
+  );
   exchanges.push(exchange);
   await exchange.start();
   const live = (channel: string) => sockets.filter((s) => s.url.includes(`/${channel}/`) && !s.closed).at(-1)!;
@@ -106,6 +122,25 @@ const setup = async () => {
 };
 
 describe('Rust engine socket health (cutover B5)', () => {
+  it.each(['keyed', 'public'] as const)(
+    'publishes public health for Hyperliquid %s on its one socket',
+    async (mode) => {
+      const { exchange, store, sockets, deliver, live } = await setup(mode);
+      expect(sockets).toHaveLength(1);
+      expect(store.latency).toBeNull();
+      expect(store.socketHealth?.publicInitialized).toBe(false);
+      const primary = mode === 'keyed' ? 'private' : 'public';
+      deliver(primary);
+      expect(store.socketHealth).toMatchObject({ publicInitialized: true, publicHealthy: true });
+      expect(exchange.publicWebsocket?.isInitialized).toBe(true);
+      if (mode === 'keyed') expect(store.socketHealth?.privateInitialized).toBe(true);
+      live(primary).handlers.onClose(1006);
+      exchange.syncSocketHealthToStore();
+      expect(store.socketHealth?.publicInitialized).toBe(false);
+      if (mode === 'keyed') expect(store.socketHealth?.privateInitialized).toBe(false);
+    },
+  );
+
   it('frames write store.socketHealth from engine sockets', async () => {
     const { exchange, store, deliver } = await setup();
     expect(store.socketHealth).toMatchObject({ privateInitialized: false, publicInitialized: false });
@@ -125,6 +160,35 @@ describe('Rust engine socket health (cutover B5)', () => {
     expect(exchange.publicWebsocket?.lastReceived).toBeGreaterThan(0);
     // web createLimitOrder reads this off a venue-specific private socket.
     expect((exchange.privateWebsocket as unknown as RustSocketHandle).isReadonlyFallbackActive()).toBe(false);
+  });
+
+  it('publishes the transport close attribution in the existing account socket health', async () => {
+    const { exchange, store, live, deliver } = await setup();
+    deliver('private');
+    live('private').handlers.onClose(1006);
+    exchange.syncSocketHealthToStore();
+    expect(store.socketHealth?.reconnectDiagnostics?.private).toMatchObject({
+      initiator: 'unknown',
+      phase: 'established',
+      route: 'direct',
+      port: '443',
+      lifetime: '<5s',
+    });
+    const snapshot = store.socketHealth?.reconnectDiagnostics;
+    exchange.syncSocketHealthToStore();
+    expect(store.socketHealth?.reconnectDiagnostics).toBe(snapshot);
+  });
+
+  it('keeps the page-clock private message timestamp while its reconnect is uninitialized', async () => {
+    const { exchange, store, live, deliver } = await setup();
+    deliver('private');
+    const last = store.socketHealth!.privateLastMessage;
+    expect(last).toBeGreaterThan(0);
+    live('private').handlers.onClose(1006);
+    exchange.syncSocketHealthToStore();
+    expect(store.socketHealth!.privateInitialized).toBe(false);
+    expect(store.socketHealth!.privateLastMessage).toBe(last);
+    expect(exchange.privateWebsocket!.lastReceived).toBe(last);
   });
 
   it('a silent private stream turns unhealthy on the periodic sync', async () => {

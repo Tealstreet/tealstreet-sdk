@@ -7,6 +7,7 @@ use crate::{CredentialSlot, RequestId};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SetupOperation {
     PublicAddress,
+    PublicKey(crate::signing::Algorithm),
 }
 
 /// Who owns a signing task, and what it may be: a business role belongs only

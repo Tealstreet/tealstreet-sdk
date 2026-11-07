@@ -386,7 +386,12 @@ impl Okx {
             pacing: None,
             retry: RetryPolicy::Never,
         };
-        let context = match cx.http_context(Scope::Background, policy) {
+        let issue = if !markets {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, policy) {
             Ok(context) => context,
             Err(error) => {
                 self.public_failed(cx, markets, error.read_venue_error());
@@ -618,6 +623,104 @@ impl Okx {
         Ok(())
     }
 
+    /// One public price row: the generic serde path and the fixed-shape scanner share it.
+    fn price_row(&mut self, cx: &mut Cx<'_, Pending>, channel: PriceChannel, p: wire::Prices<'_>) {
+        // Each non-blank tickers field is validated and parsed in one pass.
+        let mut parsed = [0.0; 6];
+        if channel == PriceChannel::Tickers {
+            let fields = [
+                p.last,
+                p.open24h,
+                p.bid_px,
+                p.ask_px,
+                p.vol_ccy24h,
+                p.vol24h,
+            ];
+            for (slot, value) in parsed.iter_mut().zip(fields) {
+                if !value.is_empty() {
+                    let Some(value) = strict_decimal(value) else {
+                        return;
+                    };
+                    *slot = value;
+                }
+            }
+        }
+        let [last, open24h, bid, ask, volume, quote_volume] = parsed;
+        let mut update = |id: &str| {
+            let Some(index) = self.price_tickers.get(id).copied() else {
+                return;
+            };
+            if channel == PriceChannel::Mark && !self.marks.contains(id) {
+                self.marks.insert(id.to_owned());
+            }
+            if channel == PriceChannel::Index && !self.indexes.contains(id) {
+                self.indexes.insert(id.to_owned());
+            }
+            // Like TS, live prices only update rows the REST ticker read listed.
+            let Some(index) = index else {
+                return;
+            };
+            cx.store.update_ticker_at(index, |t| match channel {
+                PriceChannel::Tickers => {
+                    t.bid = bid;
+                    t.ask = ask;
+                    if !p.last.is_empty() {
+                        t.last = last;
+                    }
+                    if !p.last.is_empty() && !p.open24h.is_empty() {
+                        t.percentage = change(last, open24h);
+                    }
+                    t.volume = volume;
+                    t.quote_volume = quote_volume;
+                }
+                // A blank or null live value keeps the last good one.
+                PriceChannel::Mark if !p.mark_px.is_empty() => t.mark = num::parse(p.mark_px),
+                PriceChannel::Index if !p.idx_px.is_empty() => t.index = num::parse(p.idx_px),
+                PriceChannel::OpenInterest if !p.oi_ccy.is_empty() => {
+                    t.open_interest = num::parse(p.oi_ccy)
+                }
+                PriceChannel::Funding => {
+                    if !p.funding_rate.is_empty() {
+                        t.funding_rate = num::parse(p.funding_rate);
+                    }
+                    if !p.funding_time.is_empty() {
+                        t.funding_time = num::parse(p.funding_time);
+                    }
+                }
+                _ => {}
+            });
+            let mask = match channel {
+                PriceChannel::Tickers => {
+                    3 | (1 << 9)
+                        | (1 << 10)
+                        | if !p.last.is_empty() { 1 << 2 } else { 0 }
+                        | if !p.last.is_empty() && !p.open24h.is_empty() {
+                            1 << 5
+                        } else {
+                            0
+                        }
+                }
+                PriceChannel::Mark => 1 << 3,
+                PriceChannel::Index => 1 << 4,
+                PriceChannel::OpenInterest => 1 << 6,
+                PriceChannel::Funding => (1 << 7) | (1 << 8),
+                PriceChannel::Other => 0,
+            };
+            if let Some(ticker) = cx.store.tickers().get(index as usize) {
+                self.live_tickers.record(cx.store, &ticker.symbol, mask);
+            }
+        };
+        if channel == PriceChannel::Index {
+            if let Some(ids) = self.underlying_products.get(p.inst_id) {
+                for id in ids {
+                    update(id);
+                }
+            }
+        } else {
+            update(p.inst_id);
+        }
+    }
+
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, message: wire::Message<'_>) {
         let Some(data) = message.data else {
             return;
@@ -685,8 +788,7 @@ impl Okx {
             if gap {
                 let id = message.arg.inst_id;
                 if let Some(feed) = self.connections[PUBLIC].feed {
-                    let key =
-                        serde_json::to_string(&Topic::instrument("books", id)).expect("topic");
+                    let key = socket_codec::interest_key(&socket_codec::book_topic(id));
                     if let Err(error) = cx.repair_socket_interests(feed, vec![key]) {
                         cx.notice(
                             Level::Error,
@@ -716,106 +818,15 @@ impl Okx {
             }
             return;
         }
-        let _ = json::each::<wire::Prices<'_>>(data.get(), |p| {
-            if channel == "tickers"
-                && [
-                    p.last,
-                    p.open24h,
-                    p.bid_px,
-                    p.ask_px,
-                    p.vol_ccy24h,
-                    p.vol24h,
-                ]
-                .iter()
-                .any(|value| {
-                    !value.is_empty()
-                        && value
-                            .parse::<f64>()
-                            .ok()
-                            .is_none_or(|value| !value.is_finite())
-                })
-            {
-                return;
-            }
-            let mut update = |id: &str| {
-                let Some(index) = self.price_tickers.get(id).copied() else {
-                    return;
-                };
-                if channel == "mark-price" && !self.marks.contains(id) {
-                    self.marks.insert(id.to_owned());
-                }
-                if channel == "index-tickers" && !self.indexes.contains(id) {
-                    self.indexes.insert(id.to_owned());
-                }
-                // Like TS, live prices only update rows the REST ticker read listed.
-                let Some(index) = index else {
-                    return;
-                };
-                cx.store.update_ticker_at(index, |t| match channel {
-                    "tickers" => {
-                        t.bid = num::parse(p.bid_px);
-                        t.ask = num::parse(p.ask_px);
-                        if !p.last.is_empty() {
-                            t.last = num::parse(p.last);
-                        }
-                        if !p.last.is_empty() && !p.open24h.is_empty() {
-                            t.percentage = percentage(p.last, p.open24h);
-                        }
-                        t.volume = num::parse(p.vol_ccy24h);
-                        t.quote_volume = num::parse(p.vol24h);
-                    }
-                    // A blank or null live value keeps the last good one.
-                    "mark-price" if !p.mark_px.is_empty() => t.mark = num::parse(p.mark_px),
-                    "index-tickers" if !p.idx_px.is_empty() => t.index = num::parse(p.idx_px),
-                    "open-interest" if !p.oi_ccy.is_empty() => {
-                        t.open_interest = num::parse(p.oi_ccy)
-                    }
-                    "funding-rate" => {
-                        if !p.funding_rate.is_empty() {
-                            t.funding_rate = num::parse(p.funding_rate);
-                        }
-                        if !p.funding_time.is_empty() {
-                            t.funding_time = num::parse(p.funding_time);
-                        }
-                    }
-                    _ => {}
-                });
-                let mask = match channel {
-                    "tickers" => {
-                        3 | (1 << 9)
-                            | (1 << 10)
-                            | if !p.last.is_empty() { 1 << 2 } else { 0 }
-                            | if !p.last.is_empty() && !p.open24h.is_empty() {
-                                1 << 5
-                            } else {
-                                0
-                            }
-                    }
-                    "mark-price" => 1 << 3,
-                    "index-tickers" => 1 << 4,
-                    "open-interest" => 1 << 6,
-                    "funding-rate" => (1 << 7) | (1 << 8),
-                    _ => 0,
-                };
-                if let Some(ticker) = cx.store.tickers().get(index as usize) {
-                    self.live_tickers.record(cx.store, &ticker.symbol, mask);
-                }
-            };
-            if channel == "index-tickers" {
-                if let Some(ids) = self.underlying_products.get(p.inst_id) {
-                    for id in ids {
-                        update(id);
-                    }
-                }
-            } else {
-                update(p.inst_id);
-            }
-        });
+        let channel = PriceChannel::of(channel);
+        let _ = json::each::<wire::Prices<'_>>(data.get(), |p| self.price_row(cx, channel, p));
         self.account_prices(cx);
     }
 
     fn request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Account(request) = pending {
+            let error =
+                safe_cex_engine::VenueError::new(error).kind(safe_cex_engine::ErrorKind::Network);
             self.account_failed(cx, request, error);
         } else if let Pending::Trade(request) = pending {
             self.trade_lost(cx, request, error);
@@ -840,6 +851,14 @@ impl Okx {
 }
 
 impl Venue for Okx {
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.trailing_release_veto(store, pending, release)
+    }
     fn managed_sockets() -> bool {
         true
     }
@@ -874,6 +893,14 @@ impl Venue for Okx {
         Ok(())
     }
 
+    fn subscription_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(store, topic)
+    }
+
     fn encode_socket_interests(
         &self,
         store: &safe_cex_engine::Store,
@@ -892,6 +919,9 @@ impl Venue for Okx {
     }
     // reconcile_uncertain reads the uncertain symbols' orders at once.
     fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         true
     }
 
@@ -921,11 +951,57 @@ impl Venue for Okx {
         self.account_after_uncertain_write(cx);
     }
 
+    /// VENUE_STATE v1: `[1, acctLv]`, 0 while unread. The page needs the level to
+    /// refuse a hedge switch a spot-mode account cannot take.
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(vec![1, self.account.account_level])
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        match state {
+            [1, 0, ..] => {}
+            [1, level, ..] => self.account.account_level = *level,
+            _ => cx.venue_state_unreadable("Unreadable OKX venue state from the data source"),
+        }
+    }
+
+    // Frame-fed: the data source reads the config before its orders and
+    // positions, so once both have arrived the hedged flag is the account's.
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: Option<&str>) {
+        self.account_refresh_settings(cx, symbol);
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        let loaded = cx.store.loaded();
+        self.account.ready = loaded.orders && loaded.positions;
+        // An acknowledged placement the store now holds cancels through the store.
+        let stored: std::collections::HashSet<&str> = cx
+            .store
+            .orders()
+            .iter()
+            .map(|order| order.id.as_str())
+            .collect();
+        self.trading
+            .acknowledged
+            .retain(|id, _| !stored.contains(id.as_str()));
+        self.trading
+            .algo_orders
+            .retain(|id, _| stored.contains(id.as_str()));
+    }
+
     fn guard_order_mutations(&self) -> bool {
         true
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::Okx,
@@ -935,8 +1011,15 @@ impl Venue for Okx {
             client_order_lookup: true,
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             closed_positions: true,
+            fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    // Every census commits its cover (`commit_orders_read_from`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
     fn on_public_feed(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account_prices(cx);
@@ -974,6 +1057,15 @@ impl Venue for Okx {
         let Some(channel) = self.channel(cx, socket) else {
             return;
         };
+        // The hot price pushes skip serde; anything off their fixed shape takes it.
+        if let Some((name, row)) = wire::scan_price(text)
+            && let price @ (PriceChannel::Tickers | PriceChannel::Mark | PriceChannel::Index) =
+                PriceChannel::of(name)
+        {
+            self.price_row(cx, price, row);
+            self.account_prices(cx);
+            return;
+        }
         let Ok(message) = serde_json::from_str::<wire::Message<'_>>(text) else {
             return;
         };
@@ -1278,6 +1370,13 @@ impl Venue for Okx {
         if let Pending::Account(account::Request::Config { context, .. }) = &pending {
             let _ = cx.finish_http_context(context);
         }
+        if let Pending::Account(account::Request::LeverageRefresh { context, .. }) = &pending {
+            let delivered = cx.validate_background_read_http_delivery(context).is_ok();
+            let _ = cx.finish_http_context(context);
+            if !delivered {
+                return;
+            }
+        }
         // An account-cycle page passes custody and generation before any codec,
         // publishes, then retires; a stale or unauthorized one only retires.
         let page = match &pending {
@@ -1329,6 +1428,20 @@ impl Venue for Okx {
             if let Some(context) = &discovery {
                 let _ = cx.finish_http_context(context);
             }
+            // EEA's keyed catalogue is signed: a refused key is refused, not a retry.
+            if matches!(pending, Pending::Markets { .. })
+                && self.options.eea
+                && self.credentials.is_some()
+                && let Some((code, msg)) = serde_json::from_str::<wire::Envelope<'_>>(response.body)
+                    .ok()
+                    .map(|e| (e.code.to_owned(), e.msg.to_owned()))
+                && code != "50113"
+                && let Some(kind) = account::rest_key_rejection(&code)
+            {
+                let refused = account::rejection("API key", &code, &msg, kind);
+                self.reject_startup(cx, refused, kind == safe_cex_engine::ErrorKind::AuthInvalid);
+                return;
+            }
             if matches!(pending, Pending::Markets { .. } | Pending::Tickers { .. }) {
                 self.public_failed(
                     cx,
@@ -1337,7 +1450,14 @@ impl Venue for Okx {
                 );
                 return;
             }
-            self.request_failed(cx, pending, &error);
+            // Account reads take the table's kind from the reply itself.
+            match pending {
+                Pending::Account(request) => {
+                    let error = account::read_error(&response, error);
+                    self.account_failed(cx, request, error);
+                }
+                pending => self.request_failed(cx, pending, &error),
+            }
             return;
         }
         match pending {
@@ -1345,6 +1465,7 @@ impl Venue for Okx {
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
                 account::retire(cx, page.as_ref());
+                self.account_read_again(cx);
             }
             Pending::Trade(request) => self.trade_response(cx, request, response),
             Pending::History(request) => self.history_response(cx, *request, response),
@@ -1422,7 +1543,9 @@ impl Venue for Okx {
                             .push(market.id.clone());
                     }
                 }
-                if !was_loaded {
+                // A frame-fed engine loads public instrument metadata only.
+                if cx.frame_fed() {
+                } else if !was_loaded {
                     self.ticker_seed(cx, false);
                     self.account_start(cx);
                 } else if added {
@@ -1525,7 +1648,7 @@ impl Venue for Okx {
                     self.history_candles(cx, root, read);
                     return;
                 }
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = match serde_json::to_string(&rows) {
                     Ok(data) => cx.done_context(&root, data),
                     Err(error) => cx.fail_context(&root, error.to_string()),
@@ -1589,7 +1712,7 @@ impl Venue for Okx {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Trade(request) => self.trade_sign_failed(cx, request, error),
             Pending::Closed(request) => Self::closed_sign_failed(cx, *request, error),
             Pending::Account(account::Request::Leverage { context, .. }) => {
@@ -1600,7 +1723,7 @@ impl Venue for Okx {
             }
             Pending::History(read) => Self::history_sign_failed(cx, *read, error),
             pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
 
     fn read_root_retired(
@@ -1610,6 +1733,7 @@ impl Venue for Okx {
     ) {
         self.retire_history(owner);
         self.retire_closed(owner);
+        self.account.fresh_positions.retired(owner);
     }
 
     /// The managed leverage read keeps the engine's typed failure, e.g. Timeout.
@@ -1638,6 +1762,9 @@ impl Venue for Okx {
             let _ = cx.finish_http_context(context);
             self.config_unanswered();
         }
+        if let Pending::Account(account::Request::LeverageRefresh { context, .. }) = &pending {
+            let _ = cx.finish_http_context(context);
+        }
         self.request_failed(cx, pending, error);
     }
 
@@ -1647,7 +1774,7 @@ impl Venue for Okx {
                 self.load_catalogue(cx);
             } else if read == DiscoveryRead::Markets {
                 self.start(cx);
-            } else {
+            } else if !cx.frame_fed() {
                 self.ticker_seed(cx, false);
             }
             return;
@@ -1665,6 +1792,7 @@ impl Venue for Okx {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,
@@ -1770,7 +1898,7 @@ impl Venue for Okx {
                 }
                 let explicit_limit = limit.filter(|n| *n > 0);
                 let limit = explicit_limit.unwrap_or(300).min(300);
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.protocol_now());
                 let Some(default_start) = subtract_bars(end, interval, limit) else {
                     let _ = cx.fail_context(&root, interval.unsupported("OKX"));
                     return;
@@ -1792,7 +1920,8 @@ impl Venue for Okx {
                     after: end,
                     historical: false,
                     force_history: to_ms.is_some_and(|to| {
-                        subtract_bars(cx.now, interval, 1440).is_some_and(|oldest| to < oldest)
+                        subtract_bars(cx.protocol_now(), interval, 1440)
+                            .is_some_and(|oldest| to < oldest)
                     }),
                 };
                 self.send_candles(cx, root.clone(), root, read);
@@ -1887,10 +2016,45 @@ fn interval_for_bar(value: &str) -> Option<Interval> {
     BARS.iter().find(|(_, bar)| *bar == value).map(|(i, _)| *i)
 }
 fn percentage(last: &str, open: &str) -> f64 {
-    let open = num::parse(open);
     match last.parse::<f64>() {
-        Ok(last) if last.is_finite() && open != 0.0 => usd((last - open) / open * 100.0),
+        Ok(last) if last.is_finite() => change(last, num::parse(open)),
         _ => 0.0,
+    }
+}
+/// The 24h change in percent from a finite last price; 0 without an open.
+fn change(last: f64, open: f64) -> f64 {
+    if open != 0.0 {
+        usd((last - open) / open * 100.0)
+    } else {
+        0.0
+    }
+}
+/// What `str::parse::<f64>` accepts as finite, valued exactly as `num::parse`.
+fn strict_decimal(text: &str) -> Option<f64> {
+    (text.trim().len() == text.len())
+        .then(|| num::parse_decimal(text))
+        .flatten()
+}
+/// A public price channel, decided once per message rather than per row.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PriceChannel {
+    Tickers,
+    Mark,
+    Index,
+    OpenInterest,
+    Funding,
+    Other,
+}
+impl PriceChannel {
+    fn of(channel: &str) -> Self {
+        match channel {
+            "tickers" => Self::Tickers,
+            "mark-price" => Self::Mark,
+            "index-tickers" => Self::Index,
+            "open-interest" => Self::OpenInterest,
+            "funding-rate" => Self::Funding,
+            _ => Self::Other,
+        }
     }
 }
 fn usd(value: f64) -> f64 {
@@ -1933,6 +2097,83 @@ fn subtract_bars(end: f64, interval: Interval, count: u32) -> Option<f64> {
         _ => interval.ms(),
     };
     Some(end - duration * f64::from(count))
+}
+
+#[cfg(test)]
+mod price_parse_tests {
+    use super::*;
+
+    /// The one-pass parse keeps the old two-pass contract: reject exactly what
+    /// `str::parse::<f64>` rejects or reads as non-finite, else `num::parse`'s value.
+    #[test]
+    fn strict_decimal_matches_validate_then_parse() {
+        let long = "1234567890.123456789";
+        for text in [
+            "1",
+            "0",
+            "-0",
+            "+5",
+            ".5",
+            "5.",
+            "-.5",
+            "00012",
+            "65000.1",
+            "1e5",
+            "1E-3",
+            long,
+            "0.000000000000001",
+            "123456789012345",
+            "1234567890123456",
+            " 1",
+            "1 ",
+            "\u{a0}1",
+            "1.2.3",
+            "-",
+            ".",
+            "+",
+            "inf",
+            "-inf",
+            "infinity",
+            "NaN",
+            "1e400",
+            "0x10",
+            "1_000",
+            "\u{ff11}",
+            "--1",
+            "1-",
+            "e5",
+        ] {
+            let valid = text.parse::<f64>().is_ok_and(f64::is_finite);
+            let parsed = strict_decimal(text);
+            assert_eq!(parsed.is_some(), valid, "{text:?}");
+            if let Some(value) = parsed {
+                assert_eq!(value.to_bits(), num::parse(text).to_bits(), "{text:?}");
+                assert_eq!(
+                    value.to_bits(),
+                    text.parse::<f64>().unwrap().to_bits(),
+                    "{text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn change_matches_the_string_percentage() {
+        for (last, open) in [
+            ("101", "100"),
+            ("99.5", "100"),
+            ("1", "0"),
+            ("2", ""),
+            ("0", "3"),
+        ] {
+            let last_value = last.parse::<f64>().unwrap();
+            assert_eq!(
+                change(last_value, num::parse(open)).to_bits(),
+                percentage(last, open).to_bits(),
+                "{last} {open}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

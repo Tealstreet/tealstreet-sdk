@@ -200,3 +200,50 @@ fn a_hung_login_is_reissued_at_its_bound() {
     answer(&mut h, logins[1]);
     assert_eq!(summaries(&h), 1, "the current login opens the account");
 }
+
+#[test]
+fn a_refused_login_ends_the_start_with_the_reason() {
+    let mut h = Harness::started();
+    let catalog = h
+        .requests
+        .iter()
+        .find(|r| r.url.contains("all_instruments"))
+        .unwrap()
+        .id;
+    h.engine.handle(
+        h.now,
+        Event::HttpResponse {
+            request: catalog,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: CATALOG,
+            },
+        },
+    );
+    h.collect();
+    h.run_until(NOW + 60_000.0, |h| h.logins() > 0);
+    let login = h
+        .requests
+        .iter()
+        .find(|r| r.url.ends_with(LOGIN))
+        .unwrap()
+        .id;
+    h.engine.handle(
+        h.now,
+        Event::HttpResponse {
+            request: login,
+            response: Response {
+                status: 401,
+                headers: "",
+                body: r#"{"code":1008,"message":"Your IP has not been whitelisted for access","status":401}"#,
+            },
+        },
+    );
+    h.collect();
+    assert!(
+        h.notices
+            .iter()
+            .any(|a| matches!(a, safe_cex_engine::Notice::StartupFailed { .. }))
+    );
+}

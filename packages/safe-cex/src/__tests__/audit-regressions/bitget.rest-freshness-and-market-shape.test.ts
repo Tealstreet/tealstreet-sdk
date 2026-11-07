@@ -66,7 +66,13 @@ const rawAlgoOrder = (overrides: Record<string, any> = {}) => ({
 });
 
 describe('audit regression: Bitget REST freshness and market shape', () => {
-  it('uses current contract max quantity fields before legacy maxTradeNum', async () => {
+  it.each([
+    { cap: '45', expected: 45 },
+    { cap: '200', expected: 123 },
+    { cap: '0', expected: 123 },
+    { cap: '-1', expected: 123 },
+    { cap: undefined, expected: 123 },
+  ])('publishes the conservative maximum with native market cap $cap', async ({ cap, expected }) => {
     const exchange = createExchange();
     (exchange.xhr.get as any).mockResolvedValue({
       data: {
@@ -81,7 +87,7 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
             priceEndStep: '5',
             minTradeNum: '0.001',
             maxOrderQty: '123',
-            maxMarketOrderQty: '45',
+            maxMarketOrderQty: cap,
             maxTradeNum: '999',
             minLever: '1',
             maxLever: '125',
@@ -95,7 +101,7 @@ describe('audit regression: Bitget REST freshness and market shape', () => {
     expect(exchange.xhr.get).toHaveBeenCalledWith(ENDPOINTS.MARKETS, {
       params: { productType: 'usdt-futures' },
     });
-    expect(market.limits.amount.max).toBe(123);
+    expect(market.limits.amount.max).toBe(expected);
   });
 
   it('sends startTime whenever an OHLCV from timestamp is requested', async () => {

@@ -560,7 +560,7 @@ ported. The linked inventory records exact callers and product constraints.
 | Names | Readiness / remaining deletion prerequisites |
 | --- | --- |
 | `coinbase`, `coinbasespot` | Rust defaults; CFM/spot and saved spot-only covered. Retired INTX is fixture compatibility only. Keep frozen TS reference and inert Starbase evidence separate. |
-| `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | Rust defaults, one broker-configured Orderly crate. Keep frozen reference until its replay oracle is replaced deliberately. |
+| `kodiakfi`, `mode`, `what`, `woofi` | Rust defaults, one broker-configured Orderly crate. Keep frozen reference until its replay oracle is replaced deliberately. |
 | `txflow` | Rust default for testnet USDC perpetuals; mainnet rejects before I/O, production/preview availability remains disabled. Both registries use Rust; retain the independent TS replay/audit reference under `__tests__/reference/txflow` and the production `txflow.client-id` helper. Generic consumer proofs do not enable measurement-gated order controls; preserve the [exact protocol/query scope and gate evidence](TXFLOW_RUST_PORT.md). |
 | `binance`, `binancepm` | Opt-in USD-M/PM; preserve their account/query/routing behavior and regression gates while the shared crate now also supplies Spot/COIN-M. Shared TS/oracle removal still requires all callers/defaults to migrate. |
 | `binancespot` | Opt-in Spot; signed user-data WebSocket API ACK/liveness, native currency balances, no derivative positions/settings, native client-ID order identity and final-fill-aware cancel/replace. Preserve supported regular/protective/order-list preflight; private history/fills/income retain TS empty results, public-trades/client-lookup unsupported. Live public and documented private evidence: [variant plan](BINANCE_VARIANTS_PORT.md). |
@@ -752,7 +752,7 @@ overrides and refuse unsupported environments before reading credentials.
 | `bybit`, `bybitinverse`, `bybitspot` | `BYBIT` | `KEY`, `SECRET` | Testnet: `api-testnet.bybit.com`, `stream-testnet.bybit.com` |
 | `bybitdemo` | `BYBIT` | `KEY`, `SECRET` | Demo by default: `api-demo.bybit.com`, `stream-demo.bybit.com`; public market data on `stream.bybit.com`. Testnet also supported. |
 | `bitget`, `bitgetusdc`, `bitgetinverse` | `BITGET` | `KEY`, `SECRET`, `PASSPHRASE` | Testnet selects `susdt-futures`, `susdc-futures`, `scoin-futures` and simulated collateral on the shared `api.bitget.com` / `ws.bitget.com` origins. UTA testnet is unsupported. |
-| `orderly`, `tealstreet-dex`, `kodiakfi`, `mode`, `salsadex`, `what`, `woofi` | `ORDERLY` | `KEY`, `SECRET`, `ACCOUNT_ID` | Testnet: `testnet-api-evm.orderly.org`, separate `testnet-ws-evm.orderly.org` and `testnet-ws-private-evm.orderly.org` sockets. Key and secret use the engine's `ed25519:` format. |
+| `orderly`, `kodiakfi`, `mode`, `what`, `woofi` | `ORDERLY` | `KEY`, `SECRET`, `ACCOUNT_ID` | Testnet: `testnet-api-evm.orderly.org`, separate `testnet-ws-evm.orderly.org` and `testnet-ws-private-evm.orderly.org` sockets. Key and secret use the engine's `ed25519:` format. |
 | `lighter` | `LIGHTER` | `PRIVATE_KEY`, `ACCOUNT_INDEX`, `API_KEY_INDEX` | Testnet: `testnet-api.lighter.xyz`, `testnet.zklighter.elliot.ai`; indices are decimal strings. |
 | `lighter-robinhood` | — | — | Broker endpoint and signing replay are covered, but credentialed lifecycle capture/sizing has no reviewed live-smoke profile. Every mode refuses before credential access. |
 | `phemex` | `PHEMEX` | `KEY`, `SECRET` | Testnet: `testnet-api.phemex.com` |

@@ -339,11 +339,11 @@ fn futures_public_pings_every_fifteen_seconds_and_silence_retires_at_forty_five(
 }
 
 #[test]
-fn futures_private_pings_every_ten_seconds_and_silence_retires_at_sixty() {
+fn futures_private_sends_no_ping_and_silence_retires_at_sixty() {
     pings_and_idle_timeout(
         futures(false, PublicFeedPolicy::Direct),
         authenticate,
-        10_000.0,
+        f64::INFINITY,
         60_000.0,
     );
 }
@@ -521,3 +521,63 @@ fn suppressed_spot_public_feed_is_not_supervised() {
 
 #[path = "support/managed_socket_context.rs"]
 mod managed_socket_context;
+
+// Bodies from wss://futures.kraken.com/ws/v1, 2026-11-02.
+#[test]
+fn a_venue_alert_about_a_frame_does_not_refuse_the_private_socket() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = ready_socket(&mut h, authenticate);
+    assert!(
+        h.sent
+            .iter()
+            .any(|(s, t)| *s == socket && t.contains(r#""feed":"heartbeat""#))
+    );
+    h.message(
+        socket,
+        r#"{"event":"alert","message":"Bad websocket message"}"#,
+    );
+    h.message(
+        socket,
+        r#"{"event":"alert","message":"Couldn't subscribe to invalid feed"}"#,
+    );
+    h.wait(1_000.0);
+    assert!(!h.closed.contains(&socket));
+    assert_eq!(h.sockets.len(), 1);
+}
+
+#[test]
+fn a_refused_signature_still_refuses_the_private_socket() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    h.message(
+        socket,
+        r#"{"event":"challenge","message":"c100b894-1729-464d-ace1-52dbce11db42"}"#,
+    );
+    h.message(
+        socket,
+        r#"{"event":"alert","message":"Failed to subscribe to authenticated feed"}"#,
+    );
+    assert!(h.closed.contains(&socket));
+}
+
+#[test]
+fn a_restored_network_redials_a_socket_waiting_out_backoff() {
+    let mut h = futures(false, PublicFeedPolicy::Direct);
+    let socket = h.open();
+    for _ in 0..3 {
+        let waiting = h.close(h.socket());
+        assert!(waiting > 0.0);
+        h.wait(waiting);
+    }
+    let _ = socket;
+    let sockets = h.sockets.len();
+    let waiting = h.close(h.socket());
+    assert!(waiting > 500.0, "{waiting}");
+    h.event(Event::NetworkRestored);
+    h.wait(0.0);
+    assert_eq!(
+        h.sockets.len(),
+        sockets + 1,
+        "redials without the {waiting} ms"
+    );
+}

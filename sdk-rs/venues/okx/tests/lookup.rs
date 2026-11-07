@@ -492,3 +492,52 @@ fn secondary_account_cache_never_answers_primary_lookup() {
         assert_eq!(before, e.snapshot_frame(42.0));
     }
 }
+#[test]
+fn an_unfilled_cancel_cannot_confirm_placement() {
+    for native in ["canceled", "mmp_canceled"] {
+        let mut e = ready(false, false, true);
+        let r = request(query(&mut e, "BTCUSDT", "caller1"));
+        let row = ROW
+            .replace("partially_filled", native)
+            .replace(r#""accFillSz":"1""#, r#""accFillSz":"0""#);
+        let value = complete(&mut e, &r, 200, &envelope(&row)).unwrap();
+        assert!(!value.found, "{native}");
+        assert_eq!(value.definitive, Some(false), "{native}");
+    }
+}
+#[test]
+fn a_creating_row_never_answers_from_the_cache() {
+    let markets = ready(false, false, false).store().markets().to_vec();
+    let mut e = crate::support::engine(Options::default());
+    e.store_mut().set_markets(markets);
+    e.store_mut()
+        .set_orders(vec![safe_cex_engine::model::Order {
+            id: "creating:1:0".into(),
+            parent_id: None,
+            status: safe_cex_engine::model::OrderStatus::Creating,
+            symbol: "BTCUSDT".into(),
+            kind: safe_cex_engine::model::OrderType::Limit,
+            side: safe_cex_engine::model::OrderSide::Buy,
+            price: 100.0,
+            amount: 2.0,
+            filled: 0.0,
+            remaining: 2.0,
+            reduce_only: false,
+            close: None,
+            client_order_id: Some("cached1".into()),
+            time_in_force: None,
+            last_update: 123.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        }]);
+    let out = query(&mut e, "BTCUSDT", "cached1");
+    assert!(
+        !out.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { result, .. }) if result.contains(r#""found":true"#)
+        )),
+        "{out:?}"
+    );
+}

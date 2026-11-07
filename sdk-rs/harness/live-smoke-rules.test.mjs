@@ -216,7 +216,7 @@ test('Hyperliquid static documented floor requires matching perpetual universe a
 test('broker aliases retain exact Orderly settlement suffix and share reviewed sizing', () => {
   const selected = { ...market, id: 'BTC/USDC:USDC_broker', symbol: 'BTCUSDC_broker', quote: 'USDC' };
   const record = http('https://testnet-api-evm.orderly.org/v1/public/info', { success: true, data: { rows: [{ symbol: 'PERP_BTC_USDC_broker', base_min: 0.001, base_tick: 0.001, min_notional: 1 }] } });
-  for (const name of ['orderly', 'tealstreet-dex', 'kodiakfi', 'mode', 'salsadex', 'what', 'woofi'])
+  for (const name of ['orderly', 'kodiakfi', 'mode', 'what', 'woofi'])
     assert.equal(venueMarketRules(name, [record], selected).notionalKnown, true);
   assert.equal(venueMarketRules('orderly', [record], { ...selected, symbol: 'BTCUSDC' }).notionalKnown, false);
 });

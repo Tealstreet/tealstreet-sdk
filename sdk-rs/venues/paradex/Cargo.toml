@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-safe-cex-engine = { workspace = true, features = ["command-order-book", "order-locks", "session-bearer"] }
+safe-cex-engine = { workspace = true, features = ["command-order-book", "order-locks", "session-bearer", "address-nonce"] }
 safe-cex-crypto = { workspace = true, features = ["stark"] }
 starknet-crypto.workspace = true
 alloy-primitives.workspace = true

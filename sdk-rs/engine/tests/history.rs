@@ -1,6 +1,6 @@
 mod support;
 use safe_cex_engine::book::Book;
-use safe_cex_engine::history::{Completion, CursorHistory, HistoryRows};
+use safe_cex_engine::history::{Completion, CursorHistory, HistoryRows, IncompleteReason};
 use safe_cex_engine::log::code;
 use safe_cex_engine::paging::{CursorPage, CursorStep, CursorWalk, Stall};
 use safe_cex_engine::{
@@ -108,8 +108,11 @@ impl Venue for Fixture {
             }
             Read::Direct(mut completion) => {
                 if response.body != "complete" {
-                    completion.incomplete("missing rows");
-                    completion.incomplete("later cause must not erase the first");
+                    completion.incomplete(IncompleteReason::CoverageGap, "missing rows");
+                    completion.incomplete(
+                        IncompleteReason::PageFull,
+                        "later cause must not erase the first",
+                    );
                 }
                 let result = if response.body == "failed" {
                     Err(VenueError::new("serialization failed").kind(ErrorKind::Internal))
@@ -398,9 +401,12 @@ fn concurrent_commands_finish_out_of_order_with_owned_markers_at_error_only_leve
     assert_eq!(notices.len(), 4);
     for (pair, command) in notices.as_chunks::<2>().0.iter().zip([72, 71]) {
         assert!(matches!(&pair[0], Notice::Event(event)
-            if event.code == code::HISTORY_INCOMPLETE && event.level == Level::Warn
-            && event.message == "missing rows"
-            && event.fields == vec![("command", Value::Num(f64::from(command)))]));
+        if event.code == code::HISTORY_INCOMPLETE && event.level == Level::Warn
+        && event.message == "missing rows"
+        && event.fields == vec![
+            ("command", Value::Num(f64::from(command))),
+            ("reason", Value::Str("coverageGap".into())),
+        ]));
         assert!(matches!(pair[1], Notice::CommandDone { command: id, .. } if id == command));
     }
 }
@@ -553,8 +559,11 @@ fn only_accepted_pages_can_be_returned_after_failure_and_encoding_failure_still_
         } else {
             assert_eq!(notices.len(), 2);
             assert!(matches!(&notices[0], Notice::Event(event)
-                if event.code == code::HISTORY_INCOMPLETE && event.message.contains("page failed")
-                && event.fields == vec![("command", Value::Num(13.0))]));
+            if event.code == code::HISTORY_INCOMPLETE && event.message.contains("page failed")
+            && event.fields == vec![
+                ("command", Value::Num(13.0)),
+                ("reason", Value::Str("laterPageFailed".into())),
+            ]));
             assert!(
                 matches!(&notices[1], Notice::CommandDone { command: 13, result } if result == "[1]")
             );
@@ -656,8 +665,11 @@ fn stage_restart_keeps_owner_rows_and_incomplete_cause_but_not_cursor_or_budget(
         if body == "restart-stage" {
             assert_eq!(notices.len(), 2);
             assert!(matches!(&notices[0], Notice::Event(event)
-                if event.code == code::HISTORY_INCOMPLETE && event.message == "page cap"
-                && event.fields == vec![("command", Value::Num(15.0))]));
+            if event.code == code::HISTORY_INCOMPLETE && event.message == "page cap"
+            && event.fields == vec![
+                ("command", Value::Num(15.0)),
+                ("reason", Value::Str("pageBudget".into())),
+            ]));
             assert!(
                 matches!(&notices[1], Notice::CommandDone { command: 15, result } if result == "[1,2,3,4]")
             );
@@ -678,8 +690,11 @@ fn contextual_finalization_sees_only_accepted_rows_and_encoding_errors_stay_stri
         if body == "finalizer-later" {
             assert_eq!(notices.len(), 2);
             assert!(matches!(&notices[0], Notice::Event(event)
-                if event.code == code::HISTORY_INCOMPLETE
-                && event.fields == vec![("command", Value::Num(44.0))]));
+            if event.code == code::HISTORY_INCOMPLETE
+            && event.fields == vec![
+                ("command", Value::Num(44.0)),
+                ("reason", Value::Str("laterPageFailed".into())),
+            ]));
             assert!(
                 matches!(&notices[1], Notice::CommandDone { command: 44, result } if result == "[1]")
             );

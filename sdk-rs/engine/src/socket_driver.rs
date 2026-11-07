@@ -2,12 +2,13 @@
 //!
 //! Effects contain owned data only. Engine restores its registry before calling
 //! a venue codec/effect handler, then acknowledges required invalidation here.
+use crate::engine::CoreCx;
 use crate::socket::{Supervisor, Tick};
 use crate::socket_lifecycle::{
     Admission, AuthEvidence, AuthRecovery, AuthTransition, Control, Epoch, FeedId, FeedPolicy,
     Ingress, Lifecycle, RetireReason, Retirement, SocketError, TrafficPolicy,
 };
-use crate::{Cx, SocketId, TimerId};
+use crate::{SocketId, TimerId};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Effect {
@@ -109,6 +110,16 @@ struct Runtime {
     snapshot_pending: bool,
     #[cfg(feature = "socket-native-timing")]
     initial_payload_timeout: Option<f64>,
+    route_refusal: RouteRefusal,
+}
+
+/// A route-refusal streak lasts until a login succeeds. Only its first refusal
+/// redials at once, so a host that ignores `reject_route` stays backoff-paced.
+#[derive(Default)]
+struct RouteRefusal {
+    streak: bool,
+    skip_backoff: bool,
+    reject_next: bool,
 }
 
 #[derive(Default)]
@@ -155,6 +166,13 @@ impl Driver {
 
     /// Called before allocating/queuing the physical connection. begin repeats
     /// this check so a caller cannot accidentally bypass it.
+    /// The next connect after a route refusal asks the host for another route.
+    pub(crate) fn take_reject_route(&mut self, feed: FeedId) -> bool {
+        self.runtimes
+            .get_mut(feed.index())
+            .is_some_and(|runtime| std::mem::take(&mut runtime.route_refusal.reject_next))
+    }
+
     pub(crate) fn preflight_begin(&self, feed: FeedId, now: f64) -> Result<(), SocketError> {
         self.state.can_begin(feed)?;
         if !self.valid_time(feed, now) {
@@ -199,6 +217,7 @@ impl Driver {
             snapshot_pending: false,
             #[cfg(feature = "socket-native-timing")]
             initial_payload_timeout: None,
+            route_refusal: RouteRefusal::default(),
         });
         Ok(feed)
     }
@@ -280,15 +299,15 @@ impl Driver {
         }
         Ok(())
     }
-    pub(crate) fn complete_snapshot<P>(
+    pub(crate) fn complete_snapshot(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         epoch: Epoch,
     ) -> Result<(), SocketError> {
         self.validate_snapshot_completion(epoch, cx.now)?;
         let runtime = self.runtime_mut(epoch.feed());
         runtime.snapshot_pending = false;
-        runtime.supervisor.authenticated(cx);
+        runtime.supervisor.authenticated_core(cx);
         Ok(())
     }
     fn runtime_mut(&mut self, feed: FeedId) -> &mut Runtime {
@@ -297,9 +316,9 @@ impl Driver {
         runtime
     }
 
-    pub(crate) fn begin<P>(
+    pub(crate) fn begin(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         feed: FeedId,
         socket: SocketId,
     ) -> Result<Epoch, SocketError> {
@@ -310,20 +329,20 @@ impl Driver {
         runtime.next_batch = None;
         // The activation flag deliberately persists in Supervisor. Reset it on
         // every physical epoch, including replacement after a first pong.
-        runtime.supervisor.set_idle_enabled(cx, idle);
-        runtime.supervisor.connecting(cx);
+        runtime.supervisor.set_idle_enabled_core(cx, idle);
+        runtime.supervisor.connecting_core(cx);
         runtime.snapshot_pending = runtime.snapshot_timeout.is_some();
         if let Some(timeout) = runtime.snapshot_timeout {
             runtime
                 .supervisor
-                .retain_snapshot_deadline(cx, cx.now + timeout);
+                .retain_snapshot_deadline_core(cx, cx.now + timeout);
         }
         Ok(epoch)
     }
 
-    fn cancel_runtime<P>(&mut self, cx: &mut Cx<'_, P>, feed: FeedId) {
+    fn cancel_runtime(&mut self, cx: &mut CoreCx<'_>, feed: FeedId) {
         let runtime = self.runtime_mut(feed);
-        runtime.supervisor.cancel(cx);
+        runtime.supervisor.cancel_core(cx);
         runtime.snapshot_pending = false;
         if let Some(timer) = runtime.login_retry.take() {
             cx.clear_timer(timer);
@@ -334,7 +353,7 @@ impl Driver {
         runtime.next_batch = None;
     }
 
-    pub(crate) fn stop_feed<P>(&mut self, cx: &mut Cx<'_, P>, feed: FeedId) -> Option<Effect> {
+    pub(crate) fn stop_feed(&mut self, cx: &mut CoreCx<'_>, feed: FeedId) -> Option<Effect> {
         // Revocation applies even while waiting for retry, before any new epoch.
         self.state.policy(feed).ok()?;
         self.cancel_runtime(cx, feed);
@@ -348,7 +367,7 @@ impl Driver {
             })
     }
 
-    pub(crate) fn stop_all<P>(&mut self, cx: &mut Cx<'_, P>) -> Vec<Effect> {
+    pub(crate) fn stop_all(&mut self, cx: &mut CoreCx<'_>) -> Vec<Effect> {
         let retired = self.state.stop_all();
         for feed in self.state.feeds() {
             self.cancel_runtime(cx, feed);
@@ -359,9 +378,10 @@ impl Driver {
             .collect()
     }
 
-    pub(crate) fn release_frame<P>(
+    #[inline(never)]
+    pub(crate) fn release_frame(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         epoch: Epoch,
         barrier: bool,
     ) -> (Option<String>, Vec<Effect>) {
@@ -404,9 +424,9 @@ impl Driver {
         (frame, Vec::new())
     }
 
-    fn finish_retirement<P>(
+    fn finish_retirement(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         retirement: Retirement,
         reason: RetireReason,
         retry: bool,
@@ -425,9 +445,9 @@ impl Driver {
         }
     }
 
-    pub(crate) fn retire<P>(
+    pub(crate) fn retire(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         feed: FeedId,
         reason: RetireReason,
         retry: bool,
@@ -436,9 +456,9 @@ impl Driver {
         Some(self.finish_retirement(cx, retirement, reason, retry, None))
     }
 
-    pub(crate) fn ingress<P>(
+    pub(crate) fn ingress(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         socket: SocketId,
         ingress: Ingress,
     ) -> IngressResult {
@@ -448,9 +468,9 @@ impl Driver {
     }
 
     /// The venue closed the socket with `code`; its declared floor bounds the retry.
-    pub(crate) fn close<P>(
+    pub(crate) fn close(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         socket: SocketId,
         code: u16,
     ) -> IngressResult {
@@ -460,15 +480,16 @@ impl Driver {
 
     /// Admitted like a close, but the host dialled nothing: retire as exhausted
     /// without retry, since no route is left. The feed stays down.
-    pub(crate) fn route_exhausted<P>(
+    pub(crate) fn route_exhausted(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         socket: SocketId,
     ) -> IngressResult {
         let admission = self.admit_ingress(cx.now, socket, Ingress::Close);
         let Admission::Current(epoch) = admission else {
             return self.finish_ingress(cx, admission, Ingress::Close, None);
         };
+        self.runtime_mut(epoch.feed()).route_refusal = RouteRefusal::default();
         let effects = self
             .retire(cx, epoch.feed(), RetireReason::RouteExhausted, false)
             .into_iter()
@@ -498,9 +519,9 @@ impl Driver {
     }
 
     #[inline(never)]
-    pub(crate) fn finish_ingress<P>(
+    pub(crate) fn finish_ingress(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         admission: Admission,
         ingress: Ingress,
         close_code: Option<u16>,
@@ -524,7 +545,7 @@ impl Driver {
                         .supervisor
                         .arm_initial_payload(cx.now, timeout);
                 }
-                self.runtime_mut(epoch.feed()).supervisor.opened(cx);
+                self.runtime_mut(epoch.feed()).supervisor.opened_core(cx);
                 effects.push(Effect::Opened(epoch));
                 if let Some(reopened) = ready {
                     effects.push(Effect::Ready { epoch, reopened });
@@ -549,15 +570,50 @@ impl Driver {
     /// Control evidence comes from the pure native codec after ingress. Recheck
     /// expiry here too, before any auth or receive-time mutation.
     #[cfg(test)]
-    pub(crate) fn control<P>(
+    pub(crate) fn control(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         epoch: Epoch,
         control: Control,
         startup_ready: bool,
     ) -> Vec<Effect> {
         let work = self.observe_control(cx.now, epoch, &control);
         self.finish_control(cx, epoch, control, startup_ready, work)
+    }
+
+    /// Watch `feed` for data silence while its committed interests include a
+    /// continuous stream; stop watching when they no longer do.
+    pub(crate) fn refresh_data_watch(&mut self, cx: &mut CoreCx<'_>, feed: FeedId) {
+        let Some(silence) = self
+            .state
+            .policy(feed)
+            .ok()
+            .and_then(|policy| policy.data_silence)
+        else {
+            return;
+        };
+        let watched = self.state.desires_any(feed, |key| silence.streams(key));
+        self.runtime_mut(feed)
+            .supervisor
+            .set_data_watch_core(cx, watched.then_some(silence.after_ms));
+    }
+
+    pub(crate) fn note_silent_reconnect(&mut self, feed: FeedId) {
+        self.runtime_mut(feed).supervisor.note_silent_reconnect();
+    }
+
+    /// How long since `feed`'s current connection received anything; None when not open.
+    pub(crate) fn received_age(&self, feed: FeedId, now: f64) -> Option<f64> {
+        self.runtimes
+            .get(feed.index())
+            .and_then(|runtime| runtime.supervisor.received_age(now))
+    }
+
+    /// How long `feed` has gone without data while watched; None when not watched or not ready.
+    pub(crate) fn data_silent_for(&self, feed: FeedId, now: f64) -> Option<f64> {
+        self.runtimes
+            .get(feed.index())
+            .and_then(|runtime| runtime.supervisor.data_silent_for(now))
     }
 
     /// Ordinary current traffic stays in place. Scheduling/activation and auth
@@ -582,6 +638,13 @@ impl Driver {
             .policy(epoch.feed())
             .expect("current feed")
             .traffic;
+        if matches!(control, Control::Other) {
+            self.runtime_mut(epoch.feed()).supervisor.data(now);
+        }
+        #[cfg(feature = "socket-native-timing")]
+        if matches!(control, Control::Traffic) {
+            self.runtime_mut(epoch.feed()).supervisor.data(now);
+        }
         let refresh = self
             .state
             .traffic(epoch, true, matches!(control, Control::Pong));
@@ -608,9 +671,9 @@ impl Driver {
     }
 
     #[inline(never)]
-    pub(crate) fn finish_control<P>(
+    pub(crate) fn finish_control(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         epoch: Epoch,
         control: Control,
         startup_ready: bool,
@@ -632,7 +695,7 @@ impl Driver {
         };
         let runtime = self.runtime_mut(epoch.feed());
         if refresh {
-            runtime.supervisor.set_idle_enabled(cx, true);
+            runtime.supervisor.set_idle_enabled_core(cx, true);
         }
         if receive {
             runtime.supervisor.received(cx.now);
@@ -646,7 +709,7 @@ impl Driver {
             AuthTransition::Progress(epoch) => {
                 self.runtime_mut(epoch.feed())
                     .supervisor
-                    .authentication_progress(cx);
+                    .authentication_progress_core(cx);
                 Vec::new()
             }
             AuthTransition::Accepted {
@@ -655,17 +718,36 @@ impl Driver {
                 reopened,
             } => {
                 let runtime = self.runtime_mut(epoch.feed());
+                runtime.route_refusal = RouteRefusal::default();
                 if let Some(timer) = runtime.login_retry.take() {
                     cx.clear_timer(timer);
                 }
                 if !runtime.snapshot_pending {
-                    runtime.supervisor.authenticated(cx);
+                    runtime.supervisor.authenticated_core(cx);
                 }
                 let mut effects = vec![Effect::Authenticated { epoch, first }];
                 if ready {
                     effects.push(Effect::Ready { epoch, reopened });
                 }
                 effects
+            }
+            AuthTransition::Failed {
+                epoch,
+                evidence: AuthEvidence::RouteRefused(error),
+                ..
+            } => {
+                cx.notice(
+                    crate::log::Level::Warn,
+                    crate::log::code::AUTH_REJECTED,
+                    format!("{}; trying the next route", error.message),
+                );
+                let refusal = &mut self.runtime_mut(epoch.feed()).route_refusal;
+                refusal.skip_backoff = !refusal.streak;
+                refusal.streak = true;
+                refusal.reject_next = true;
+                self.retire(cx, epoch.feed(), RetireReason::RouteRefused, true)
+                    .into_iter()
+                    .collect()
             }
             AuthTransition::Failed {
                 epoch,
@@ -732,9 +814,9 @@ impl Driver {
         }
     }
 
-    pub(crate) fn acknowledge_retirement<P>(
+    pub(crate) fn acknowledge_retirement(
         &mut self,
-        cx: &mut Cx<'_, P>,
+        cx: &mut CoreCx<'_>,
         retirement: Retirement,
         acknowledged: bool,
         retry: bool,
@@ -750,10 +832,16 @@ impl Driver {
             return Err(SocketError::InvalidTime);
         }
         self.state.retired(retirement.epoch, acknowledged)?;
+        let runtime = self.runtime_mut(retirement.epoch.feed());
+        let skip_backoff = std::mem::take(&mut runtime.route_refusal.skip_backoff);
         if acknowledged && retry && self.state.awaiting_retry(retirement.epoch.feed()) {
-            self.runtime_mut(retirement.epoch.feed())
-                .supervisor
-                .retry_after(cx, floor);
+            let supervisor = &mut self.runtime_mut(retirement.epoch.feed()).supervisor;
+            // A refused route skips backoff, but a close-code floor still binds.
+            if skip_backoff && floor <= 0. {
+                supervisor.retry_now_core(cx);
+            } else {
+                supervisor.retry_after_core(cx, floor);
+            }
         }
         Ok(())
     }
@@ -769,7 +857,8 @@ impl Driver {
     }
 
     /// None means an unowned timer; Some(empty) is owned but has no callback.
-    pub(crate) fn timer<P>(&mut self, cx: &mut Cx<'_, P>, timer: TimerId) -> Option<Vec<Effect>> {
+    #[inline(never)]
+    pub(crate) fn timer(&mut self, cx: &mut CoreCx<'_>, timer: TimerId) -> Option<Vec<Effect>> {
         let index = self.runtimes.iter().position(|r| {
             r.login_retry == Some(timer)
                 || r.batch_timer == Some(timer)
@@ -797,7 +886,7 @@ impl Driver {
                 admitted.effects
             });
         }
-        let tick = self.runtimes[index].supervisor.on_timer(cx, timer);
+        let tick = self.runtimes[index].supervisor.on_timer_core(cx, timer);
         Some(match tick {
             Tick::Reconnect => self
                 .state
@@ -830,7 +919,7 @@ mod tests {
     use crate::socket::Timeout;
     use crate::socket_lifecycle::{AuthMode, Invalidation};
     use crate::{
-        Action, Command, Engine, ErrorKind, Event, Response, SocketChannel, Venue, VenueError,
+        Action, Command, Cx, Engine, ErrorKind, Event, Response, SocketChannel, Venue, VenueError,
         book::Book, socket::Config,
     };
 
@@ -849,7 +938,7 @@ mod tests {
                 return;
             }
             let socket = cx.connect("wss://driver.test");
-            self.driver.begin(cx, feed, socket).unwrap();
+            self.driver.begin(&mut cx.core(), feed, socket).unwrap();
         }
         fn apply(&mut self, cx: &mut Cx<'_, ()>, effects: Vec<Effect>) {
             for effect in effects {
@@ -872,10 +961,11 @@ mod tests {
                                 | RetireReason::Authentication
                                 | RetireReason::Stopped
                                 | RetireReason::RouteExhausted
+                                | RetireReason::RouteRefused
                         ));
                         self.driver
                             .acknowledge_retirement(
-                                cx,
+                                &mut cx.core(),
                                 *retirement,
                                 self.acknowledge,
                                 *retry,
@@ -900,18 +990,28 @@ mod tests {
             }
         }
         fn on_open(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId) {
-            let result = self.driver.ingress(cx, socket, Ingress::Open);
+            let result = self.driver.ingress(&mut cx.core(), socket, Ingress::Open);
             self.apply(cx, result.effects);
         }
         fn on_message(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, text: &str) {
-            let result = self.driver.ingress(cx, socket, Ingress::Message);
+            let result = self
+                .driver
+                .ingress(&mut cx.core(), socket, Ingress::Message);
             self.apply(cx, result.effects);
             let Admission::Current(epoch) = result.admission else {
                 return;
             };
+            if text == "arm-skip" {
+                // Arms a route refusal's backoff skip without retiring the epoch.
+                self.driver
+                    .runtime_mut(epoch.feed())
+                    .route_refusal
+                    .skip_backoff = true;
+                return;
+            }
             let effects = if text == "stop" {
                 self.driver
-                    .retire(cx, epoch.feed(), RetireReason::Stopped, false)
+                    .retire(&mut cx.core(), epoch.feed(), RetireReason::Stopped, false)
                     .into_iter()
                     .collect()
             } else {
@@ -924,16 +1024,16 @@ mod tests {
                     "pong" => Control::Pong,
                     _ => Control::Other,
                 };
-                self.driver.control(cx, epoch, control, false)
+                self.driver.control(&mut cx.core(), epoch, control, false)
             };
             self.apply(cx, effects);
         }
         fn on_close(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, code: u16) {
-            let result = self.driver.close(cx, socket, code);
+            let result = self.driver.close(&mut cx.core(), socket, code);
             self.apply(cx, result.effects);
         }
         fn on_timer(&mut self, cx: &mut Cx<'_, ()>, timer: TimerId) {
-            if let Some(effects) = self.driver.timer(cx, timer) {
+            if let Some(effects) = self.driver.timer(&mut cx.core(), timer) {
                 self.apply(cx, effects);
             }
         }
@@ -1062,6 +1162,7 @@ mod tests {
             invalidation: Invalidation::Required,
             subscription_interval_ms: 0.,
             close_floors: &[],
+            data_silence: None,
         }
     }
     fn bitunix() -> FeedPolicy {
@@ -1069,6 +1170,23 @@ mod tests {
             recovery: AuthRecovery::RetrySameSocket { delay_ms: 2_000. },
             traffic: TrafficPolicy::TextAfterFirstPong,
             ..policy(AuthMode::Observe)
+        }
+    }
+
+    /// A route refusal skips backoff only when no close-code floor applies.
+    #[test]
+    fn a_close_floor_binds_over_an_armed_route_refusal_skip() {
+        let floored = || FeedPolicy {
+            close_floors: &[(1013, 30_000.)],
+            ..policy(AuthMode::None)
+        };
+        for (code, wait) in [(1013, 30_000.), (1000, 0.)] {
+            let mut h = Harness::at(vec![floored()], true, 100.);
+            h.open(0);
+            h.text(0, "arm-skip");
+            let socket = h.epoch(0).socket();
+            h.event(Event::WsClosed { socket, code });
+            assert_eq!(h.retry_at(0), h.now + wait, "close {code}");
         }
     }
 

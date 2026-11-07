@@ -1,0 +1,40 @@
+# Nightly CPU certification (Sam, 2026-11-07): one full Rust SDK run on master per night.
+# Each night first compares the two latest completed nightly runs, filing one cpu-regression
+# issue for suites whose CPU gate failed on both, then dispatches tonight's run.
+name: Rust CPU nightly
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: rust-cpu-nightly
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    name: Rust / CPU nightly certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: File or update a cpu-regression issue for two consecutive failed nights
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node sdk-rs/harness/cpu-nightly.mjs --command evaluate
+      - name: Dispatch tonight's full certification on master
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run rust.yml --ref master --repo '${{ github.repository }}'

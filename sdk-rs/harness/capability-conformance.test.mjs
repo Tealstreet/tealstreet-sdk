@@ -37,7 +37,8 @@ function record(extra = {}) {
     stpControls: false, bybitExecutionControls: false, rejectClientSlippage: false,
     finiteCommandNumbers: false, finiteHistoryBounds: false, rejectOrderHistoryFilters: false,
     publicCatalogueValidation: false, isolatedBookSubscriptions: false,
-    inverseClosedPositions: false, scheduleCancel: false, ...extra,
+    inverseClosedPositions: false, scheduleCancel: false, orderHistoryNeedsSymbol: false, freshPositions: false,
+    nukeAccountCancel: false, symbolCancelMissesUnseen: false, orderReadCovers: false, ...extra,
   };
 }
 
@@ -45,13 +46,20 @@ test('only runtime-advertised commands are selected; policy fields add no ops', 
   assert.deepEqual(advertisedCommands(record()).map((probe) => probe.command.op), ['cancelSymbolOrders']);
   const probes = advertisedCommands(record({
     orderBookQuery: true, scheduleCancel: true, options: true,
-    bybitExecutionControls: true, quantityUnits: 'contractCount',
+    bybitExecutionControls: true, quantityUnits: 'contractCount', orderReadCovers: true,
   }));
   assert.deepEqual(probes.map((probe) => probe.command.op), [
     'cancelSymbolOrders', 'fetchOrderBook', 'fetchOptionChain', 'fetchOptionExpiries', 'fetchAccountGreeks',
     'scheduleCancel', 'scheduleCancel',
   ]);
   assert.equal(new Set(probes.map((probe) => probe.command.command)).size, probes.length);
+});
+
+test('freshPositions advertises the readPositions op', () => {
+  assert.deepEqual(
+    advertisedCommands(record({ freshPositions: true })).map((probe) => probe.command.op),
+    ['cancelSymbolOrders', 'readPositions'],
+  );
 });
 
 test('unknown, missing, mistyped and unknown-enum capabilities fail closed', () => {
@@ -120,7 +128,6 @@ test('decoder rejection and unsupported dispatch never become deferred evidence'
 
 test('construction fixture covers known prerequisites and the options profile', () => {
   assert.equal(constructionProfiles('txflow')[0].testnet, true);
-  assert.equal(constructionProfiles('breakoutprop')[0].key, 'user');
   assert.equal(constructionProfiles('hyrotrader')[0].endpoints.rest, 'https://hyro.test');
   assert.deepEqual(constructionProfiles('bybit').map((options) => options.enableOptionMarkets ?? false), [false, true]);
 });

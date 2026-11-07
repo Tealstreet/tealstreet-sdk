@@ -446,88 +446,14 @@ impl<P> Cx<'_, P> {
         Ok(())
     }
 
-    /// `refusal` names a specific issue-time refusal for the Plan's terminal.
-    #[inline(never)]
+    #[inline]
     pub(in super::super::super) fn fail_owned_admission(
         &mut self,
         admission: &Admission,
         reason: Error,
         refusal: Option<&'static str>,
     ) {
-        let Ok(Some(current)) = self.owned_http_admission(&admission.context) else {
-            return;
-        };
-        if current.attempt != admission.attempt {
-            return;
-        }
-        if let Some(plan) = self
-            .io
-            .core
-            .request_contexts
-            .plan_from_context(&admission.context)
-        {
-            let error = match refusal {
-                Some(refusal) => VenueError::new(refusal).kind(crate::ErrorKind::InvalidInput),
-                None => VenueError::new("HTTP plan admission failed").kind(
-                    if reason == Error::TimedOut {
-                        crate::ErrorKind::Timeout
-                    } else {
-                        crate::ErrorKind::Internal
-                    },
-                ),
-            };
-            if admission.context.operation() == Operation::Mutation {
-                let delivery = Delivery {
-                    context: admission.context.clone(),
-                    attempt: admission.attempt,
-                };
-                self.io
-                    .core
-                    .request_contexts
-                    .result(&delivery, WriteResult::Failed(error.clone()))
-                    .expect("pre-enrolled selected write");
-            }
-            self.fail_plan_owned(&plan, error)
-                .expect("exact selected plan failure");
-            return;
-        }
-        let handle = self
-            .io
-            .core
-            .request_contexts
-            .owner_from_context(&admission.context)
-            .expect("owned admission");
-        let state = self
-            .io
-            .core
-            .request_contexts
-            .preflight_state(&handle)
-            .expect("owned admission");
-        let inherited = self.io.core.request_contexts.inherited_uncertain(&handle);
-        let mut error = VenueError::new("HTTP read admission failed")
-            .kind(match reason {
-                Error::TimedOut => crate::ErrorKind::Timeout,
-                Error::Invalid | Error::Revoked | Error::Duplicate | Error::RetryForbidden => {
-                    crate::ErrorKind::InvalidInput
-                }
-                _ => crate::ErrorKind::Internal,
-            })
-            .outcome(crate::Outcome::NotSent);
-        let seal = if state.policy.purpose == PreflightPurpose::WriteAfterReads {
-            error = CommandWrites::new(CAPACITY)
-                .expect("fixed journal bound")
-                .inheriting(inherited)
-                .fail(error)
-                .expect("empty projection");
-            Seal::Failure(error, Vec::new())
-        } else {
-            Seal::Legacy(Some(error))
-        };
-        let Owner::Command { id, .. } = handle.owner() else {
-            unreachable!()
-        };
-        self.finish_sealed_command(id, None, seal)
-            .expect("owned admission failure");
+        self.core().fail_owned_admission(admission, reason, refusal)
     }
 
     #[inline(never)]
@@ -676,6 +602,90 @@ impl<P> Cx<'_, P> {
 }
 
 impl crate::engine::CoreCx<'_> {
+    /// `refusal` names a specific issue-time refusal for the Plan's terminal.
+    #[inline(never)]
+    pub(in super::super::super) fn fail_owned_admission(
+        &mut self,
+        admission: &Admission,
+        reason: Error,
+        refusal: Option<&'static str>,
+    ) {
+        let Ok(Some(current)) = self.core_ref().owned_http_admission(&admission.context) else {
+            return;
+        };
+        if current.attempt != admission.attempt {
+            return;
+        }
+        if let Some(plan) = self
+            .io
+            .core
+            .request_contexts
+            .plan_from_context(&admission.context)
+        {
+            let error = match refusal {
+                Some(refusal) => VenueError::new(refusal).kind(crate::ErrorKind::InvalidInput),
+                None => VenueError::new("HTTP plan admission failed").kind(
+                    if reason == Error::TimedOut {
+                        crate::ErrorKind::Timeout
+                    } else {
+                        crate::ErrorKind::Internal
+                    },
+                ),
+            };
+            if admission.context.operation() == Operation::Mutation {
+                let delivery = Delivery {
+                    context: admission.context.clone(),
+                    attempt: admission.attempt,
+                };
+                self.io
+                    .core
+                    .request_contexts
+                    .result(&delivery, WriteResult::Failed(error.clone()))
+                    .expect("pre-enrolled selected write");
+            }
+            self.fail_plan_owned(&plan, error)
+                .expect("exact selected plan failure");
+            return;
+        }
+        let handle = self
+            .io
+            .core
+            .request_contexts
+            .owner_from_context(&admission.context)
+            .expect("owned admission");
+        let state = self
+            .io
+            .core
+            .request_contexts
+            .preflight_state(&handle)
+            .expect("owned admission");
+        let inherited = self.io.core.request_contexts.inherited_uncertain(&handle);
+        let mut error = VenueError::new("HTTP read admission failed")
+            .kind(match reason {
+                Error::TimedOut => crate::ErrorKind::Timeout,
+                Error::Invalid | Error::Revoked | Error::Duplicate | Error::RetryForbidden => {
+                    crate::ErrorKind::InvalidInput
+                }
+                _ => crate::ErrorKind::Internal,
+            })
+            .outcome(crate::Outcome::NotSent);
+        let seal = if state.policy.purpose == PreflightPurpose::WriteAfterReads {
+            error = CommandWrites::new(CAPACITY)
+                .expect("fixed journal bound")
+                .inheriting(inherited)
+                .fail(error)
+                .expect("empty projection");
+            Seal::Failure(error, Vec::new())
+        } else {
+            Seal::Legacy(Some(error))
+        };
+        let Owner::Command { id, .. } = handle.owner() else {
+            unreachable!()
+        };
+        self.finish_sealed_command(id, None, seal)
+            .expect("owned admission failure");
+    }
+
     // Only some feature combinations call this.
     #[cfg_attr(feature = "http-plans", allow(dead_code))]
     #[inline]
@@ -785,6 +795,14 @@ impl crate::engine::CoreCx<'_> {
         {
             context = context.with_egress(session_egress)?;
         }
+        let class = self
+            .io
+            .core
+            .request_contexts
+            .owner_entry(handle.owner())
+            .ok_or(Error::Revoked)?
+            .request_class;
+        context.set_request_class(class);
         context.bind_issuer(&self.io.core.request_contexts.issuer);
         let signing = signed.then(|| {
             self.io

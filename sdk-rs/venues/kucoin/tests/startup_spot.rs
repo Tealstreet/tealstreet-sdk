@@ -2,14 +2,18 @@
 //! Scripted discovery regressions; no network or account credentials.
 mod support;
 use safe_cex_engine::{Action, Engine, Event, Notice, Response};
-use safe_cex_venue_kucoin::{Options, spot::KucoinSpot};
+use safe_cex_venue_kucoin::spot::KucoinSpot;
+use support::credentials::Options;
 use support::jittered;
 const CATALOGUE: &str = r###"{"code":"200000","data":[{"broken":true},{"symbol":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.001","priceIncrement":"0.1","baseMinSize":"0.001","baseMaxSize":"100"},{"symbol":"ETH-USDT","baseCurrency":"ETH","quoteCurrency":"USDT","enableTrading":true,"baseIncrement":"0.01","priceIncrement":"0.01","baseMinSize":"0.01","baseMaxSize":"1000"}]}"###;
 fn public_engine() -> Engine<KucoinSpot> {
-    safe_cex_engine::test_support::seeded_engine(KucoinSpot::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }))
+    support::credentials::engine(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        KucoinSpot::new,
+    )
 }
 #[test]
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
@@ -76,12 +80,15 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(KucoinSpot::new(Options {
-        key: Some("scripted-key".into()),
-        secret: Some("scripted-secret".into()),
-        passphrase: Some("scripted-passphrase".into()),
-        ..Default::default()
-    }));
+    let mut engine = support::credentials::engine(
+        Options {
+            key: Some("scripted-key".into()),
+            secret: Some("scripted-secret".into()),
+            passphrase: Some("scripted-passphrase".into()),
+            ..Default::default()
+        },
+        KucoinSpot::new,
+    );
     engine.start(0.0);
     let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
         .into_iter()
@@ -230,12 +237,15 @@ fn reply(engine: &mut Engine<KucoinSpot>, request: safe_cex_engine::HttpRequest,
 
 #[test]
 fn funded_wallet_usd_balance_waits_for_its_quote() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(KucoinSpot::new(Options {
-        key: Some("scripted-key".into()),
-        secret: Some("scripted-secret".into()),
-        passphrase: Some("scripted-passphrase".into()),
-        ..Default::default()
-    }));
+    let mut engine = support::credentials::engine(
+        Options {
+            key: Some("scripted-key".into()),
+            secret: Some("scripted-secret".into()),
+            passphrase: Some("scripted-passphrase".into()),
+            ..Default::default()
+        },
+        KucoinSpot::new,
+    );
     engine.start(0.0);
     let catalogue = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
         .into_iter()
@@ -287,12 +297,15 @@ struct Private {
     poll: safe_cex_engine::TimerId,
 }
 fn private_with_catalogue(catalogue: &str) -> Private {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(KucoinSpot::new(Options {
-        key: Some("scripted-key".into()),
-        secret: Some("scripted-secret".into()),
-        passphrase: Some("scripted-passphrase".into()),
-        ..Default::default()
-    }));
+    let mut engine = support::credentials::engine(
+        Options {
+            key: Some("scripted-key".into()),
+            secret: Some("scripted-secret".into()),
+            passphrase: Some("scripted-passphrase".into()),
+            ..Default::default()
+        },
+        KucoinSpot::new,
+    );
     engine.start(0.0);
     let request = safe_cex_engine::test_support::prepared_actions(&mut engine, 0.0)
         .into_iter()
@@ -385,13 +398,13 @@ fn listed_pair_missing_from_the_ticker_snapshot_is_valued_at_zero_with_one_warni
         tickers,
         r###"{"code":"200000","data":{"ticker":[{"symbol":"BTC-USDT","last":"100"}]}}"###,
     );
-    let balance = wallet_read(&engine.drain_actions().collect::<Vec<_>>());
+    let balance = wallet_read(&support::actions(&mut engine));
     reply(&mut engine, balance, wallet);
     assert!(engine.store().loaded().balance);
     assert_eq!(engine.store().balance().total, 5.0);
     let mut warned = count(&engine.drain_actions().collect::<Vec<_>>(), "valued at 0");
     engine.handle(5000.0, Event::TimerFired { timer: poll });
-    let balance = wallet_read(&engine.drain_actions().collect::<Vec<_>>());
+    let balance = wallet_read(&support::actions(&mut engine));
     reply(&mut engine, balance, wallet);
     warned += count(&engine.drain_actions().collect::<Vec<_>>(), "valued at 0");
     assert_eq!(warned, 1);
@@ -432,4 +445,24 @@ fn a_market_without_a_positive_step_is_skipped_as_malformed() {
         assert!(engine.drain_actions().any(|action| matches!(action,
             Action::Notice(Notice::Event(safe_cex_engine::LogEvent { message, ..})) if message.contains("Skipped malformed public discovery row"))));
     }
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let mut private = private_with_catalogue(CATALOGUE);
+    let body = r#"{"code":"400003","msg":"KC-API-KEY not exists"}"#;
+    let mut failures = 0;
+    for request in std::mem::take(&mut private.reads) {
+        reply(&mut private.engine, request, body);
+        failures += safe_cex_engine::test_support::prepared_actions(&mut private.engine, 0.0)
+            .into_iter()
+            .filter(|a| {
+                matches!(
+                    a,
+                    Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+                )
+            })
+            .count();
+    }
+    assert_eq!(failures, 1);
 }

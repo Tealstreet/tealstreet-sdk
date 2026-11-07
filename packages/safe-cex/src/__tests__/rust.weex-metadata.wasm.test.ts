@@ -10,6 +10,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
+import { LogSeverity } from '../types';
 import { prepareRecordedHttp } from './support/managedHttp';
 
 const running: RustEngineExchange[] = [];
@@ -128,10 +129,13 @@ it('refreshes cached WEEX rails for a flat symbol on every metadata hook and exp
   expect(state.scopedReads).toBe(3);
 });
 
-it('rejects malformed WEEX metadata without replacing the last good rails', async () => {
+it('warns on malformed WEEX metadata without replacing the last good rails', async () => {
   const { exchange, state } = await setup();
+  const logs = vi.fn();
+  exchange.on('log', logs);
   state.malformed = true;
-  await expect(exchange.updateSymbolMetadata('BTCUSDT')).rejects.toThrow(/invalid WEEX symbol configuration/);
+  await exchange.updateSymbolMetadata('BTCUSDT');
+  expect(logs).toHaveBeenCalledWith(expect.stringContaining('invalid WEEX symbol configuration'), LogSeverity.Warning);
   expect(exchange.store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 20, sellLeverage: 20 });
   state.malformed = false;
   await exchange.updateSymbolMetadata('BTCUSDT');

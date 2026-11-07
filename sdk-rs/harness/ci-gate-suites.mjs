@@ -2,7 +2,6 @@
 // excuse a diagnostic, never a missing, duplicate or substituted replay case.
 // Books are literal CLI arguments: private tapes deliberately use ''.
 const primaryBooks = Object.freeze({
-  breakoutprop: 'BTCUSD,ETHUSD',
   apexomni: 'BTCUSDT,ETHUSDT',
   asterdex: 'BTCUSDT,ETHUSDT',
   woo: 'BTCUSDT,ETHUSDT',
@@ -55,17 +54,19 @@ const suiteCases = (suite) => {
       publicCase('binanceinverse', 'BTCUSD_PERP,ETHUSD_PERP'),
       publicCase('binancepm', 'BTCUSDT,ETHUSDT,SOLUSDT', 'binance'));
     cases.push(...['binancespot', 'binanceinverse', 'binancepm'].map((venue) => privateCase(venue)));
+    cases.push({ venue: 'binanceoptions', tape: 'sdk-rs/harness/tapes/binanceoptions.jsonl', books: '' }, privateCase('binanceoptions'));
     cases.push({ venue: 'binance', tape: 'sdk-rs/harness/fixtures/binance-scripted-lifecycle-private.jsonl', books: 'BTCUSDT' });
   } else if (suite === 'bybit') {
     cases.push(publicCase('bybitinverse', 'BTCUSD,ETHUSD'),
       ...['bybitspot', 'bybitdemo', 'hyrotrader'].map((venue) => publicCase(venue, 'BTCUSDT,ETHUSDT')));
     cases.push(...['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].map((venue) => privateCase(venue)));
+    cases.push(privateCase('bybit', 'bybit-history'));
   } else if (suite === 'okx') {
     cases.push(publicCase('okx', 'BTCUSD,ETHUSD', 'okx-inverse'),
       publicCase('okxeu', xperpBooks, 'okxeu-xperp'), publicCase('okxeu', xperpBooks));
     cases.push(...['okx', 'okxeu', 'okxdemo', 'okxeudemo'].map((venue) => privateCase(venue)));
   } else if (suite === 'orderly') {
-    for (const venue of ['orderly', 'tealstreet-dex', 'kodiakfi', 'woofi', 'mode', 'salsadex', 'what']) {
+    for (const venue of ['orderly', 'kodiakfi', 'woofi', 'mode', 'what']) {
       cases.push(privateCase(venue), privateCase(venue, `${venue}-testnet`));
     }
   } else if (suite === 'coinbase') {

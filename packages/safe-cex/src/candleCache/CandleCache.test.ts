@@ -536,3 +536,61 @@ describe('CandleCache calendar candles', () => {
     expect(cached.contiguousBehindCandles.map((candle) => candle.timestamp)).toEqual([closed]);
   });
 });
+
+describe('CandleCache forming bar', () => {
+  const interval: Timeframe = '1m';
+  const minute = 60_000;
+  const cacheKey = getCandleCacheKey('binance', 'BTCUSDT', interval);
+  const barStart = alignTimestamp(1700000000000, interval);
+  /** A chart's getBars, a footprint and a module, each asking up to now. */
+  type Fetcher = (opts: { from?: number; symbol: string }) => Promise<Candle[]>;
+  const askUpToNow = (cache: CandleCache, nowMs: number, fetcher: Fetcher) =>
+    cache.fetch({
+      cacheKey,
+      interval,
+      fromMs: barStart - 2 * minute,
+      toMs: nowMs,
+      limit: 10,
+      nowMs,
+      fetcher: (opts) => fetcher({ ...opts, symbol: 'BTCUSDT' }),
+    });
+
+  it('repeat calls inside one minute share one forming-bar read, and the next bar is read again', async () => {
+    const cache = new CandleCache();
+    const fetcher = vi.fn(async (opts: { from?: number }) =>
+      [barStart - 2 * minute, barStart - minute, barStart]
+        .filter((t) => t >= (opts.from ?? 0))
+        .map(createCandle),
+    );
+    await askUpToNow(cache, barStart + 1_000, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // The closed bars are cached; only the forming bar remains, and it is read once.
+    const repeats = await Promise.all([1_500, 2_000, 3_000].map((at) => askUpToNow(cache, barStart + at, fetcher)));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls[1][0]).toMatchObject({ from: barStart });
+    for (const candles of repeats) expect(candles.map((c) => c.timestamp).at(-1)).toBe(barStart);
+    await askUpToNow(cache, barStart + 5_500, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    // Past the memo window it is read afresh; once the bar closes, the next one is new.
+    await askUpToNow(cache, barStart + 7_000, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    await askUpToNow(cache, barStart + minute + 500, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('a failed forming-bar read is not shared', async () => {
+    const cache = new CandleCache();
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce([createCandle(barStart - 2 * minute), createCandle(barStart - minute)])
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce([createCandle(barStart)]);
+    await askUpToNow(cache, barStart + 1_000, fetcher);
+    await expect(askUpToNow(cache, barStart + 1_500, fetcher)).rejects.toThrow('timeout');
+    const after = await askUpToNow(cache, barStart + 2_000, fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(after.map((c) => c.timestamp).at(-1)).toBe(barStart);
+  });
+});

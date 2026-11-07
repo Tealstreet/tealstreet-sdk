@@ -81,6 +81,13 @@ pub struct Status<'a> {
     pub ret_msg: Opt<'a>,
 }
 
+/// The envelope's own Bybit server stamp, Unix milliseconds.
+#[derive(Deserialize)]
+pub struct ServerStamp {
+    #[serde(default)]
+    pub time: Option<f64>,
+}
+
 /// A streamed list's envelope, its list emptied: status and the page cursor.
 #[derive(Deserialize)]
 pub struct PageEnvelope<'a> {
@@ -111,7 +118,11 @@ fn none<T>() -> Option<T> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListResult<T> {
-    #[serde(default = "Vec::new")]
+    #[serde(
+        default = "Vec::new",
+        deserialize_with = "null_is_empty",
+        bound(deserialize = "T: Deserialize<'de>")
+    )]
     pub list: Vec<T>,
     #[serde(default)]
     pub next_page_cursor: Option<String>,
@@ -183,6 +194,8 @@ pub struct LotSizeFilter<'a> {
     pub min_order_qty: Opt<'a>,
     #[serde(borrow, default)]
     pub max_order_qty: Opt<'a>,
+    #[serde(borrow, default)]
+    pub max_mkt_order_qty: Opt<'a>,
 }
 
 #[derive(Deserialize)]
@@ -629,6 +642,36 @@ pub struct OpFrame<'a> {
     pub success: Option<bool>,
     #[serde(borrow, default)]
     pub ret_msg: Opt<'a>,
+    #[serde(borrow, default)]
+    pub ret_code: Option<&'a serde_json::value::RawValue>,
+    #[serde(borrow, default, rename = "retCode")]
+    pub camel_ret_code: Option<&'a serde_json::value::RawValue>,
+}
+
+impl OpFrame<'_> {
+    /// Optional diagnostic metadata never decides whether authentication succeeded.
+    pub fn venue_code(&self) -> Option<String> {
+        // The row integer() helper truncates floats; diagnostic codes must be exact.
+        fn integer(raw: &serde_json::value::RawValue) -> Option<i64> {
+            if raw.get().starts_with('"') {
+                serde_json::from_str::<Cow<'_, str>>(raw.get())
+                    .ok()?
+                    .parse()
+                    .ok()
+            } else {
+                raw.get().parse().ok()
+            }
+        }
+        let code = match (self.ret_code, self.camel_ret_code) {
+            (Some(a), Some(b)) => {
+                let a = integer(a)?;
+                (integer(b)? == a).then_some(a)
+            }
+            (Some(raw), None) | (None, Some(raw)) => integer(raw),
+            _ => None,
+        };
+        code.map(|code| code.to_string())
+    }
 }
 
 /// A private topic frame.
@@ -1034,8 +1077,17 @@ pub struct WalletAccount<'a> {
     pub total_initial_margin: Opt<'a>,
     #[serde(borrow, default)]
     pub total_maintenance_margin: Opt<'a>,
-    #[serde(borrow, default)]
+    #[serde(borrow, default, deserialize_with = "null_is_empty")]
     pub coin: Vec<WalletCoin<'a>>,
+}
+
+/// An account with no coins answers `coin: null`.
+fn null_is_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Deserialize)]

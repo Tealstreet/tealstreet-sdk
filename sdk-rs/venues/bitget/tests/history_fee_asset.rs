@@ -97,14 +97,55 @@ fn missing_fee_currency_and_market_still_fail_without_partial_results() {
         fill("current", "BTCUSD", "BTC"),
         fill("delisted", "LTCUSD", "")
     ]);
-    for attempt in 0..4 {
-        page(&mut h, rows.clone());
-        if attempt < 3 {
-            assert!(h.done.iter().all(|(id, _)| *id != 42));
-            h.timer_after(250.0 * f64::from(attempt + 1));
-        }
-    }
+    page(&mut h, rows);
+    // Proven row refusals now fail immediately; h.done also contains failed terminals.
     let results: Vec<_> = h.done.iter().filter(|(id, _)| *id == 42).collect();
     assert_eq!(results.len(), 1);
-    assert!(results[0].1.as_ref().unwrap_err().contains("incomplete"));
+    assert_eq!(
+        results[0].1.as_ref().unwrap_err(),
+        "Bitget history row validation failed"
+    );
+    assert_eq!(h.failures.len(), 1);
+    let error = serde_json::to_value(&h.failures[0]).unwrap();
+    assert_eq!(error["kind"], "internal");
+    assert_eq!(error["causeCode"], "HISTORY_DECODE");
+    assert_eq!(
+        error["historyDecode"],
+        json!({"schema":"bitgetClassicFills","reason":"market"})
+    );
+    assert!(!h.command_notices.contains(&(42, "done")));
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order/fills")));
+    // Exercise the old retry horizon without firing unrelated startup deadlines.
+    let mut timers: Vec<_> = h
+        .timers
+        .iter()
+        .copied()
+        .filter(|(_, at)| *at <= h.now + 1_500.0)
+        .collect();
+    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+    for (timer, at) in timers {
+        h.now = at;
+        h.event(safe_cex_engine::Event::TimerFired { timer });
+    }
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order/fills")));
+    assert_eq!(h.done.iter().filter(|(id, _)| *id == 42).count(), 1);
+}
+
+#[test]
+fn a_null_fill_list_is_an_empty_page() {
+    for body in [
+        r#"{"code":"00000","data":{"fillList":null,"endId":""}}"#,
+        r#"{"code":"00000","data":null}"#,
+    ] {
+        let mut h = inverse();
+        h.respond("/order/fills", 200, body);
+        assert!(
+            h.done
+                .iter()
+                .any(|(id, result)| *id == 42 && result.is_ok()),
+            "{body}: {:?} {:?}",
+            h.done,
+            h.logs
+        );
+    }
 }

@@ -9,7 +9,34 @@ import { join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Generated or local-only trees: build outputs, installed packages, harness runs.
-const EXCLUDED = new Set(['target', 'node_modules', '.git', 'sdk-rs/hosts/wasm/pkg', 'sdk-rs/harness/out']);
+// Server-side crates never link into the browser wasm, so their changes must not
+// invalidate the web pin. The algos (sdk-rs/algos) DO link into every family, so
+// an algos change forces a new release and pin.
+const EXCLUDED = new Set([
+  'target',
+  'node_modules',
+  '.git',
+  'sdk-rs/hosts/wasm/pkg',
+  'sdk-rs/harness/out',
+  'sdk-rs/hosts/server',
+  'sdk-rs/hosts/candle-server',
+  'sdk-rs/hosts/remote-signer',
+  'sdk-rs/hosts/native',
+]);
+
+// Harness files that decide whether to publish, or measure, but never shape what is built: a
+// change to one must not force a cut. Tests prove no build, loader or shipped host imports
+// them; release-only size checks may still use the budget.
+export const HARNESS_NOT_BUILT = Object.freeze([
+  /^sdk-rs\/harness\/[^/]+\.test\.mjs$/,
+  /^sdk-rs\/harness\/beta-wasm-release-guard\.mjs$/,
+  /^sdk-rs\/harness\/ci-result\.mjs$/,
+  /^sdk-rs\/harness\/cpu-[^/]+\.mjs$/,
+  /^sdk-rs\/harness\/bitget-paired-[^/]+\.mjs$/,
+  /^sdk-rs\/harness\/family-measure\.mjs$/,
+  /^sdk-rs\/harness\/wasm-budget\.mjs$/,
+]);
+const notBuilt = (rel) => HARNESS_NOT_BUILT.some((pattern) => pattern.test(rel));
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
@@ -20,7 +47,7 @@ const walk = (root, dir, files) => {
     if (EXCLUDED.has(entry.name) || EXCLUDED.has(rel)) continue;
     if (entry.isSymbolicLink()) throw new Error(`symlink in beta wasm inputs: ${rel}`);
     if (entry.isDirectory()) walk(root, path, files);
-    else if (entry.isFile()) files.push([rel, sha256(readFileSync(path))]);
+    else if (entry.isFile() && !notBuilt(rel)) files.push([rel, sha256(readFileSync(path))]);
   }
 };
 
@@ -41,6 +68,13 @@ export const betaWasmInputs = (root, toolchain) => {
     files,
   });
   return { fingerprint: sha256(record), files: files.length, toolchain };
+};
+
+/** The repo-relative path of every file the fingerprint covers, sorted. */
+export const betaWasmInputPaths = (root) => {
+  const files = [];
+  walk(root, join(root, 'sdk-rs'), files);
+  return files.map(([rel]) => rel).sort();
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

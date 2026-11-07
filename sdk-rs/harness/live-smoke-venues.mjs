@@ -35,7 +35,7 @@ register('bitget bitgetusdc bitgetinverse', 'BITGET', modes(
   endpoints('https://api.bitget.com', 'wss://ws.bitget.com'),
   endpoints('https://api.bitget.com', 'wss://ws.bitget.com'),
 ), { key: 'KEY', secret: 'SECRET', passphrase: 'PASSPHRASE' });
-register('orderly tealstreet-dex kodiakfi mode salsadex what woofi', 'ORDERLY', modes(
+register('orderly kodiakfi mode what woofi', 'ORDERLY', modes(
   endpoints('https://testnet-api-evm.orderly.org', 'wss://testnet-ws-evm.orderly.org wss://testnet-ws-private-evm.orderly.org'),
   endpoints('https://api-evm.orderly.org', 'wss://ws-evm.orderly.org wss://ws-private-evm.orderly.org'),
 ), { key: 'KEY', secret: 'SECRET', applicationId: 'ACCOUNT_ID' });

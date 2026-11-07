@@ -16,6 +16,118 @@ fn place(h: &mut Harness, values: Vec<Value>) {
 fn limit() -> Value {
     json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.0021,"price":90.04})
 }
+
+fn classic_with_market_cap(cap: Option<&str>) -> Harness {
+    let mut h = Harness::started(FixtureOptions {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("pass".into()),
+        ..FixtureOptions::default()
+    });
+    let contracts = cap.map_or_else(
+        || CONTRACTS.to_owned(),
+        |cap| {
+            CONTRACTS.replace(
+                "\"maxOrderQty\":\"120\"",
+                &format!("\"maxOrderQty\":\"120\",\"maxMarketOrderQty\":\"{cap}\""),
+            )
+        },
+    );
+    h.respond("/contracts", 200, &contracts);
+    h.respond("/tickers", 200, TICKERS);
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+    );
+    h.respond("/all-position", 200, POSITION);
+    h.respond("/account/accounts", 200, ACCOUNT);
+    h.orders(OPEN_ORDER);
+    h.login();
+    h
+}
+
+#[test]
+fn market_quantity_cap_splits_reduce_only_children_but_keeps_the_limit_cap() {
+    for (kind, reduce_only, expected) in [
+        ("market", false, vec![40.0, 40.0, 20.0]),
+        ("market", true, vec![40.0, 40.0, 20.0]),
+        ("limit", false, vec![100.0]),
+    ] {
+        let mut h = classic_with_market_cap(Some("40"));
+        place(
+            &mut h,
+            vec![
+                json!({"symbol":"BTCUSDT", "type":kind, "side":"sell", "amount":100.0, "price":100.0, "reduceOnly":reduce_only}),
+            ],
+        );
+        let (_, payload) = body(&mut h, "/batch-place-order");
+        let children = payload["orderList"].as_array().unwrap();
+        let quantities: Vec<f64> = children
+            .iter()
+            .map(|child| child["size"].as_str().unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(quantities, expected, "{kind}, reduceOnly={reduce_only}");
+        assert!(
+            children
+                .iter()
+                .all(|child| child["reduceOnly"] == if reduce_only { "YES" } else { "NO" })
+        );
+        assert_eq!(
+            h.engine
+                .store()
+                .market("BTCUSDT")
+                .unwrap()
+                .limits
+                .amount
+                .max,
+            40.0
+        );
+    }
+}
+
+#[test]
+fn market_quantity_cap_never_exceeds_limit_and_missing_field_keeps_previous_cap() {
+    for cap in [None, Some("200"), Some("0"), Some("-1")] {
+        let mut h = classic_with_market_cap(cap);
+        place(
+            &mut h,
+            vec![
+                json!({"symbol":"BTCUSDT", "type":"market", "side":"sell", "amount":150.0, "reduceOnly":true}),
+            ],
+        );
+        let (_, payload) = body(&mut h, "/batch-place-order");
+        let quantities: Vec<f64> = payload["orderList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|child| child["size"].as_str().unwrap().parse().unwrap())
+            .collect();
+        assert_eq!(quantities, vec![120.0, 30.0]);
+    }
+}
+
+#[test]
+fn market_quantity_cap_refuses_a_caller_identity_spanning_children() {
+    let mut h = classic_with_market_cap(Some("40"));
+    place(
+        &mut h,
+        vec![
+            json!({"symbol":"BTCUSDT", "type":"market", "side":"sell", "amount":100.0, "reduceOnly":true, "clientOrderId":"cap-control"}),
+        ],
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|request| request.url.contains("/batch-place-order"))
+    );
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 1 && result.is_err())
+    );
+}
+
 fn body(h: &mut Harness, path: &str) -> (safe_cex_engine::RequestId, Value) {
     let request = h.take(path);
     (
@@ -403,7 +515,7 @@ fn canceling_virtual_child_cancels_parent_and_tombstones_both_siblings() {
 #[test]
 fn classic_sized_stop_amend_zero_preserves_size() {
     let mut h = Harness::classic();
-    h.private_message(r#"{"arg":{"channel":"orders-algo"},"data":[{"orderId":"3","symbol":"BTCUSDT","size":"0.5","triggerPrice":"80","holdSide":"long","planType":"loss_plan","status":"live"}]}"#);
+    h.private_message(r#"{"arg":{"channel":"orders-algo"},"data":[{"orderId":"3","symbol":"BTCUSDT","size":"0.5","triggerPrice":"80","executePrice":"0","holdSide":"long","planType":"loss_plan","status":"live"}]}"#);
     h.command(Command::AmendOrder {
         command: 1,
         id: "3".into(),
@@ -413,6 +525,24 @@ fn classic_sized_stop_amend_zero_preserves_size() {
     let (_, p) = body(&mut h, "/modify-tpsl-order");
     assert_eq!(p["size"], "0.5");
     assert_eq!(p["triggerPrice"], "85");
+}
+
+#[test]
+fn uta_symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
+    let mut h = uta();
+    h.command(Command::CancelSymbolOrders {
+        command: 9,
+        symbol: "BTCUSDT".into(),
+    });
+    let (request, sent) = body(&mut h, "cancel-symbol-order");
+    assert_eq!(sent["symbol"], "BTCUSDT");
+    assert_eq!(sent["category"], "USDT-FUTURES");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","msg":"success","data":{"list":[]}}"#,
+    );
+    assert!(h.done.iter().any(|(id, result)| *id == 9 && result.is_ok()));
 }
 
 #[test]
@@ -517,7 +647,7 @@ fn setting_commands_update_store_only_after_ack_and_failures_preserve_settings()
         side: None,
     });
     let (request, p) = body(&mut h, "/set-leverage");
-    assert_eq!(p["leverage"].as_f64(), Some(125.0));
+    assert_eq!(p["leverage"], "125");
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 20.0);
     h.reply(request, 200, r#"{"code":"00000","data":{}}"#);
     assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 125.0);
@@ -824,9 +954,12 @@ fn retained_conditional_cancels_require_their_own_semantic_ack() {
                 symbol: "BTCUSDT".into(),
             });
             let (cancel, payload) = body(&mut h, cancel_path);
-            if kind == "trailing_stop_market" {
+            if !uta_mode {
                 assert_eq!(payload["orderIdList"][0]["orderId"], "retained-conditional");
-                assert_eq!(payload["planType"], "track_plan");
+                assert!(payload.get("orderId").is_none());
+                if kind == "trailing_stop_market" {
+                    assert_eq!(payload["planType"], "track_plan");
+                }
             } else {
                 assert_eq!(payload["orderId"], "retained-conditional");
             }
@@ -834,6 +967,15 @@ fn retained_conditional_cancels_require_their_own_semantic_ack() {
                 assert_eq!(payload["symbol"], "BTCUSDT");
             }
             h.reply(cancel, 200, bad_ack);
+            if let Some(i) = h
+                .requests
+                .iter()
+                .position(|r| r.url.contains("orderId=retained-conditional"))
+            {
+                // A classic empty plan acknowledgement reads the plan back; still listed.
+                let confirm = h.requests.remove(i);
+                h.reply(confirm.id, 200, r#"{"code":"00000","data":{"entrustedList":[{"orderId":"retained-conditional","symbol":"BTCUSDT","planStatus":"live"}],"endId":"retained-conditional"}}"#);
+            }
             assert!(
                 h.done
                     .iter()
@@ -851,6 +993,16 @@ fn retained_conditional_cancels_require_their_own_semantic_ack() {
                 200,
                 r#"{"code":"00000","data":{"orderId":"retained-conditional"}}"#,
             );
+            if h.requests
+                .iter()
+                .any(|r| r.url.contains("cancel-symbol-order"))
+            {
+                h.respond(
+                    "cancel-symbol-order",
+                    200,
+                    r#"{"code":"00000","data":{"list":[]}}"#,
+                );
+            }
             assert!(h.done.iter().any(|(id, result)| *id == 3 && result.is_ok()));
             h.command(Command::CancelSymbolOrders {
                 command: 4,
@@ -1211,12 +1363,15 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             400,
             r#"{"code":"40762","msg":"The order amount exceeds the balance"}"#,
-            (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+            (
+                Some(ErrorKind::InsufficientBalance),
+                Some(Outcome::Rejected),
+            ),
         ),
         (
             429,
             r#"{"code":"429","msg":"Too Many Requests"}"#,
-            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
         ),
         // Ruled 2026-10-25: a 5xx write is the engine's unproven answer.
         (
@@ -1230,6 +1385,68 @@ fn write_failures_are_classified_without_changing_their_text() {
             200,
             r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"balance"}]}}"#,
             (Some(ErrorKind::Rejected), Some(Outcome::Rejected)),
+        ),
+        // A coded failed row keeps its code, so the table names the kind.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Insufficient balance","errorCode":"43012"}]}}"#,
+            (
+                Some(ErrorKind::InsufficientBalance),
+                Some(Outcome::Rejected),
+            ),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"The order amount exceeds the balance","errorCode":"40762"}]}}"#,
+            (
+                Some(ErrorKind::InsufficientBalance),
+                Some(Outcome::Rejected),
+            ),
+        ),
+        // The reduce-only position refusal, by its code, its text, or both;
+        // the text wins over an absent or different code, in any case.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available","errorCode":"40757"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"position","errorCode":"40757"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"not enough position is available.","errorCode":"40999"}]}}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            400,
+            r#"{"code":"40757","msg":"position"}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        (
+            400,
+            r#"{"code":"40999","msg":"Not enough position is available"}"#,
+            (Some(ErrorKind::InvalidInput), Some(Outcome::Rejected)),
+        ),
+        // The text never upgrades an unproven code to a refusal.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Not enough position is available","errorCode":"40010"}]}}"#,
+            (None, Some(Outcome::Unknown)),
+        ),
+        // Per-row outcome change: a row coded with an unproven code (40010,
+        // 40725, 45001) is now Unknown, where a code-less row was Rejected.
+        (
+            200,
+            r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"Request timed out","errorCode":"40010"}]}}"#,
+            (None, Some(Outcome::Unknown)),
         ),
         // An acknowledgement that accounts for no order is the engine's unproven reply.
         (
@@ -1251,7 +1468,8 @@ fn write_failures_are_classified_without_changing_their_text() {
         );
         assert_eq!(h.done.last().unwrap().1, Err(error.legacy_text()));
         if status == 400 {
-            assert_eq!(error.venue_code.as_deref(), Some("40762"));
+            let own: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(error.venue_code.as_deref(), own["code"].as_str(), "{body}");
         }
     }
     // Transport loss on a write is Unknown.
@@ -1272,4 +1490,456 @@ fn write_failures_are_classified_without_changing_their_text() {
     bad["clientOrderId"] = json!("bad id");
     place(&mut h, vec![bad]);
     assert_eq!(h.failures[0].outcome, Some(Outcome::NotSent));
+}
+
+/// A 40009 (signature) row inside a batch is a refusal of that row only: the
+/// one fresh resend applies to a refused request, never to one batch row, so
+/// the batch is dispatched once.
+#[test]
+fn a_signature_refused_batch_row_is_never_re_dispatched() {
+    use safe_cex_engine::{ErrorKind, Outcome};
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    let request = h.take("/batch-place-order");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"successList":[],"failureList":[{"errorMsg":"sign signature error","errorCode":"40009"}]}}"#,
+    );
+    let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+    assert_eq!(
+        (error.kind, error.outcome),
+        (Some(ErrorKind::AuthInvalid), Some(Outcome::Rejected))
+    );
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/batch-place-order")),
+        "one batch request, no per-row resend"
+    );
+}
+
+/// Per-row outcome change: an unproven code (45001) on one row beside an
+/// accepted row leaves that row unknown, so the command is a partial with an
+/// unknown outcome (reconciled), never a definitive refusal.
+#[test]
+fn an_unproven_batch_row_beside_an_accepted_one_is_partial_unknown() {
+    use safe_cex_engine::Outcome;
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit(), limit()]);
+    let request = h.take("/batch-place-order");
+    h.reply(
+        request.id,
+        200,
+        r#"{"code":"00000","data":{"successList":[{"orderId":"9"}],"failureList":[{"errorMsg":"unknown error","errorCode":"45001"}]}}"#,
+    );
+    let [error] = std::mem::take(&mut h.failures).try_into().unwrap();
+    assert_eq!(error.outcome, Some(Outcome::Unknown), "{}", error.message);
+    let partial = error.partial.as_deref().expect("the accepted id is kept");
+    assert_eq!(partial.order_ids, ["9"]);
+}
+
+#[test]
+fn a_symbol_cancel_finding_an_order_gone_succeeds() {
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    let placed = h.take("/batch-place-order");
+    batch_success(&mut h, placed.id, &["ack-only"]);
+    h.engine.store_mut().set_orders(vec![]);
+    h.command(Command::CancelSymbolOrders {
+        command: 2,
+        symbol: "BTCUSDT".into(),
+    });
+    let cancel = h.take("/batch-cancel-orders");
+    h.reply(
+        cancel.id,
+        200,
+        r#"{"code":"25204","msg":"Order does not exist"}"#,
+    );
+    assert!(
+        h.done.iter().any(|(id, r)| *id == 2 && r.is_ok()),
+        "{:?}",
+        h.done
+    );
+}
+
+#[test]
+fn a_replacement_refused_after_the_cancel_says_the_order_is_gone() {
+    let mut h = Harness::classic();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "1".into(),
+        price: Some(95.0),
+        amount: None,
+    });
+    h.respond(
+        "/modify-order",
+        200,
+        r#"{"code":"40017","msg":"cannot modify","data":null}"#,
+    );
+    let (request, _) = body(&mut h, "/batch-cancel-orders");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","data":{"successList":[{"orderId":"1"}],"failureList":[]}}"#,
+    );
+    let (request, _) = body(&mut h, "/batch-place-order");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"45110","msg":"less than the minimum amount 5 USDT"}"#,
+    );
+    let error = h.done[0].1.clone().unwrap_err();
+    assert!(error.contains("Your BTCUSDT order is gone"), "{error}");
+}
+
+#[test]
+fn an_amend_below_the_venue_minimum_value_is_refused_before_any_cancel() {
+    let mut h = Harness::classic();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "1".into(),
+        price: Some(1.0),
+        amount: None,
+    });
+    let error = h.done[0].1.clone().unwrap_err();
+    assert!(error.contains("the order is unchanged"), "{error}");
+    assert!(!h.requests.iter().any(|r| r.url.contains("cancel")));
+}
+
+#[test]
+fn an_amend_finding_its_order_gone_does_not_place_the_replacement() {
+    let mut h = Harness::classic();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "1".into(),
+        price: Some(95.0),
+        amount: None,
+    });
+    h.respond(
+        "/modify-order",
+        200,
+        r#"{"code":"40017","msg":"cannot modify","data":null}"#,
+    );
+    let (request, _) = body(&mut h, "/batch-cancel-orders");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"25204","msg":"Order does not exist"}"#,
+    );
+    assert!(h.done[0].1.is_err());
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.url.contains("/batch-place-order"))
+    );
+}
+
+#[test]
+fn split_remainder_stays_on_the_lot_step() {
+    let mut h = Harness::classic();
+    let mut market = h.engine.store().market("BTCUSDT").unwrap().clone();
+    market.precision.amount = 0.1;
+    market.limits.amount.min = 0.1;
+    market.limits.amount.max = 72000.0;
+    h.engine.store_mut().set_markets(vec![market]);
+    place(
+        &mut h,
+        vec![
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":180000.05,"price":90.0}),
+        ],
+    );
+    let (_, payload) = body(&mut h, "/batch-place-order");
+    let sizes: Vec<_> = payload["orderList"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["size"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(sizes, ["72000", "72000", "36000.1"]);
+}
+
+fn account_cancel(h: &mut Harness, command: u32) {
+    h.command(Command::Venue {
+        command,
+        action: safe_cex_engine::VenueAction::CancelAccountOrders,
+    });
+}
+
+#[test]
+fn a_nuke_account_cancel_on_classic_sends_the_product_wide_cancel_all() {
+    let mut h = Harness::classic();
+    account_cancel(&mut h, 21);
+    let (request, sent) = body(&mut h, "/api/v2/mix/order/cancel-all-orders");
+    assert_eq!(sent["productType"], "usdt-futures");
+    assert_eq!(sent["marginCoin"], "USDT");
+    assert!(sent.get("symbol").is_none(), "{sent}");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","msg":"success","data":{"successList":[],"failureList":[]}}"#,
+    );
+    // Plan orders (triggers, TP/SL, trailing) are not normal orders: each type is
+    // cancelled product-wide, so one the store never saw is reached too.
+    for plan in [
+        "normal_plan",
+        "profit_plan",
+        "loss_plan",
+        "pos_profit",
+        "pos_loss",
+        "track_plan",
+        "moving_plan",
+    ] {
+        assert!(h.done.iter().all(|(id, _)| *id != 21), "{plan}");
+        let (request, sent) = body(&mut h, "/api/v2/mix/order/cancel-plan-order");
+        assert_eq!(sent["planType"], plan);
+        assert_eq!(sent["productType"], "usdt-futures");
+        assert_eq!(sent["marginCoin"], "USDT");
+        assert!(sent.get("symbol").is_none(), "{sent}");
+        h.reply(
+            request,
+            200,
+            r#"{"code":"00000","msg":"success","data":{"successList":[],"failureList":[]}}"#,
+        );
+    }
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 21 && result.is_ok()),
+        "{:?}",
+        h.done
+    );
+}
+
+#[test]
+fn a_nuke_account_cancel_on_uta_cancels_the_whole_category() {
+    let mut h = uta();
+    account_cancel(&mut h, 22);
+    let (request, sent) = body(&mut h, "cancel-symbol-order");
+    assert_eq!(sent["category"], "USDT-FUTURES");
+    assert!(sent.get("symbol").is_none(), "{sent}");
+    h.reply(
+        request,
+        200,
+        r#"{"code":"00000","msg":"success","data":{"list":[]}}"#,
+    );
+    assert!(
+        h.done
+            .iter()
+            .any(|(id, result)| *id == 22 && result.is_ok()),
+        "{:?}",
+        h.done
+    );
+}
+
+#[test]
+fn a_symbol_cancel_never_sends_the_account_wide_cancel() {
+    for mut h in [Harness::classic(), uta()] {
+        h.command(Command::CancelSymbolOrders {
+            command: 23,
+            symbol: String::new(),
+        });
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.url.contains("cancel-all-orders")
+                    || r.url.contains("cancel-symbol-order"))
+        );
+    }
+}
+
+fn protective_plan_orders(plan: &str, size: &str, side: &str) -> Harness {
+    let mut h = Harness::classic();
+    let hold_side = if side == "sell" { "long" } else { "short" };
+    h.private_message(
+        &json!({
+            "arg": {"channel":"orders-algo"},
+            "data": (["target-plan", "sibling-plan"].map(|id| json!({
+                "orderId":id,"clientOid":format!("client-{id}"),"symbol":"BTCUSDT","size":size,"triggerPrice":"120",
+                "side":side,"holdSide":hold_side,"planType":plan,"status":"live"
+            })))
+        })
+        .to_string(),
+    );
+    assert!(h.engine.store().order("target-plan").is_some(), "{plan}");
+    h
+}
+
+#[test]
+fn classic_protective_cancels_address_one_order_with_the_documented_plan_list() {
+    for (raw, expected, size) in [
+        ("pos_profit", "pos_profit", "0"),
+        ("ptp", "pos_profit", "0"),
+        ("pos_loss", "pos_loss", "0"),
+        ("psl", "pos_loss", "0"),
+        ("profit_plan", "profit_plan", "1"),
+        ("tp", "profit_plan", "1"),
+        ("loss_plan", "loss_plan", "1"),
+        ("sl", "loss_plan", "1"),
+        ("moving_plan", "moving_plan", "1"),
+        ("track_plan", "track_plan", "1"),
+        ("track", "track_plan", "1"),
+    ] {
+        for side in ["sell", "buy"] {
+            let mut h = protective_plan_orders(raw, size, side);
+            h.engine.store_mut().set_positions(vec![]);
+            h.command(Command::CancelOrders {
+                command: 91,
+                ids: vec!["target-plan".into()],
+            });
+            let (request, payload) = body(&mut h, "/api/v2/mix/order/cancel-plan-order");
+            assert_eq!(payload["planType"], expected, "{raw} {side}");
+            assert_eq!(
+                payload["orderIdList"],
+                json!([{"orderId":"target-plan"}]),
+                "{raw} {side}: {payload}"
+            );
+            assert!(payload.get("orderId").is_none(), "{payload}");
+            assert_eq!(payload["symbol"], "BTCUSDT");
+            assert_eq!(payload["productType"], "usdt-futures");
+            assert_eq!(payload["marginCoin"], "USDT");
+            batch_success(&mut h, request, &["target-plan"]);
+            assert!(
+                h.done
+                    .iter()
+                    .any(|(id, result)| *id == 91 && result.is_ok()),
+                "{:?}",
+                h.done
+            );
+            assert!(
+                h.engine
+                    .store()
+                    .order("target-plan")
+                    .is_none_or(|o| o.status != OrderStatus::Open)
+            );
+            assert_eq!(
+                h.engine.store().order("sibling-plan").unwrap().status,
+                OrderStatus::Open
+            );
+        }
+    }
+}
+
+#[test]
+fn whole_position_tp_and_sl_cancel_resolve_only_when_the_requested_id_is_acknowledged() {
+    for plan in ["pos_profit", "pos_loss"] {
+        for side in ["sell", "buy"] {
+            for acknowledgement in [
+                "addressed",
+                "client-only",
+                "native-with-malformed-client",
+                "empty",
+                "unrelated",
+                "unrelated-client",
+                "conflicting-ids",
+                "refused",
+            ] {
+                let mut h = protective_plan_orders(plan, "0", side);
+                h.command(Command::CancelOrders {
+                    command: 92,
+                    ids: vec!["target-plan".into()],
+                });
+                let (request, payload) = body(&mut h, "/api/v2/mix/order/cancel-plan-order");
+                // Only the documented per-order selector proves the intended request reached the venue.
+                let addressed = payload["orderIdList"] == json!([{"orderId":"target-plan"}]);
+                let accepted = match acknowledgement {
+                    "addressed" if addressed => vec![json!({"orderId":"target-plan"})],
+                    "client-only" if addressed => vec![json!({"clientOid":"client-target-plan"})],
+                    "native-with-malformed-client" if addressed => {
+                        vec![json!({"orderId":"target-plan","clientOid":{"unexpected":"value"}})]
+                    }
+                    "unrelated-client" => vec![json!({"clientOid":"client-sibling-plan"})],
+                    "conflicting-ids" => {
+                        vec![json!({"orderId":"another-plan", "clientOid":"client-target-plan"})]
+                    }
+                    "unrelated" => vec![json!({"orderId":"another-plan"})],
+                    _ => vec![],
+                };
+                let failures = if acknowledgement == "refused" {
+                    vec![json!({"orderId":"target-plan","errorMsg":"plan not cancellable"})]
+                } else {
+                    vec![]
+                };
+                h.reply(
+                    request,
+                    200,
+                    &json!({"code":"00000","data":{"successList":accepted,"failureList":failures}})
+                        .to_string(),
+                );
+                if let Some(i) = h
+                    .requests
+                    .iter()
+                    .position(|r| r.url.contains("orderId=target-plan"))
+                {
+                    // An empty acknowledgement reads the plan back; still listed.
+                    let confirm = h.requests.remove(i);
+                    h.reply(confirm.id, 200, r#"{"code":"00000","data":{"entrustedList":[{"orderId":"target-plan","symbol":"BTCUSDT","planStatus":"live"}],"endId":"target-plan"}}"#);
+                }
+                let result = &h.done.iter().find(|(id, _)| *id == 92).unwrap().1;
+                let proven = matches!(
+                    acknowledgement,
+                    "addressed" | "client-only" | "native-with-malformed-client"
+                );
+                assert_eq!(
+                    result.is_ok(),
+                    proven,
+                    "{plan} {side} {acknowledgement}: {payload}; {result:?}"
+                );
+                if !proven {
+                    assert_eq!(
+                        h.engine.store().order("target-plan").unwrap().status,
+                        OrderStatus::Open
+                    );
+                }
+                assert_eq!(
+                    h.engine.store().order("sibling-plan").unwrap().status,
+                    OrderStatus::Open
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn retained_whole_position_cancels_keep_their_plan_and_client_identity_before_private_echo() {
+    for (kind, plan) in [
+        ("take_profit_market", "pos_profit"),
+        ("stop_market", "pos_loss"),
+    ] {
+        let mut h = Harness::classic();
+        place(
+            &mut h,
+            vec![json!({"symbol":"BTCUSDT","type":kind,"side":"sell","amount":0,"price":120})],
+        );
+        let placed = h.take("/place-tpsl-order");
+        let placed_payload: Value = serde_json::from_str(placed.body.as_deref().unwrap()).unwrap();
+        let client = placed_payload["clientOid"].as_str().unwrap();
+        h.reply(
+            placed.id,
+            200,
+            r#"{"code":"00000","data":{"orderId":"unseen-plan"}}"#,
+        );
+        h.engine.store_mut().set_orders(vec![]);
+        h.command(Command::CancelSymbolOrders {
+            command: 93,
+            symbol: "BTCUSDT".into(),
+        });
+        let (request, payload) = body(&mut h, "/cancel-plan-order");
+        assert_eq!(payload["orderIdList"], json!([{"orderId":"unseen-plan"}]));
+        assert_eq!(payload["planType"], plan);
+        assert!(payload.get("orderId").is_none());
+        h.reply(
+            request,
+            200,
+            &json!({"code":"00000","data":{"successList":[{"clientOid":client}],"failureList":[]}})
+                .to_string(),
+        );
+        assert!(
+            h.done
+                .iter()
+                .any(|(id, result)| *id == 93 && result.is_ok()),
+            "{:?}",
+            h.done
+        );
+    }
 }

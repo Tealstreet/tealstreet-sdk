@@ -13,6 +13,7 @@ mod signed_candles;
 pub use sign::dispatch as dispatch_signing;
 mod socket_codec;
 mod trading;
+mod venue_state;
 mod wire;
 use safe_cex_engine::Level;
 use safe_cex_engine::book::{Book, BookSide};
@@ -58,6 +59,7 @@ pub enum Pending {
     Orders(read_owners::Background<account::OrdersRead>),
     Repair(trading::RepairRequest),
     PlannedTrade(trading::PlannedRequest),
+    SymbolMode(Box<trading::SymbolModeRead>),
     History(history::Request),
     Income(income::Request),
     PublicTrades(Box<public_trades::Read>),
@@ -115,6 +117,40 @@ pub struct PhemexPerpetuals {
     income: income::State,
 }
 impl PhemexPerpetuals {
+    fn observe_rate_limit(&mut self, now: f64, r: &Response<'_>) {
+        if r.status == 429 {
+            let pause = r
+                .header("x-ratelimit-retry-after-contract")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(60.)
+                .max(1.)
+                * 1000.;
+            self.paused_until = self.paused_until.max(now + pause);
+        }
+    }
+
+    /// Report each rejected frame, including its wire type when JSON is readable.
+    fn public_unreadable(cx: &mut Cx<'_, Pending>, error: &serde_json::Error, text: &str) {
+        #[derive(serde::Deserialize)]
+        struct Header<'a> {
+            #[serde(rename = "type", borrow)]
+            kind: Option<&'a serde_json::value::RawValue>,
+        }
+        let header = serde_json::from_str::<Header<'_>>(text).ok();
+        let kind = header
+            .as_ref()
+            .and_then(|header| header.kind)
+            .map_or("unknown", |kind| kind.get());
+        cx.notice(
+            Level::Warn,
+            code::STREAM_MALFORMED,
+            format!(
+                "Phemex public message unreadable: bytes={}, type={kind}, error={error}",
+                text.len()
+            ),
+        );
+    }
+
     pub fn new(options: Options) -> Self {
         let credentials = options
             .credentials
@@ -145,7 +181,7 @@ impl PhemexPerpetuals {
         }
     }
     fn discovery_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, true) {
             Ok(read) => read,
             Err(_) => {
                 self.discovery.failed(cx, true);
@@ -303,7 +339,7 @@ impl PhemexPerpetuals {
         b.fetching = true;
         b.deadline = Some(cx.set_timer(20_000.));
         let generation = b.generation;
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, true) {
             Ok(read) => read,
             Err(_) => {
                 self.book_failed(cx, symbol);
@@ -386,6 +422,7 @@ impl PhemexPerpetuals {
             Pending::PlannedTrade(read) => {
                 self.planned_trade_failed(cx, read, safe_cex_engine::VenueError::new(error))
             }
+            Pending::SymbolMode(read) => self.symbol_mode_failed(cx, *read, error),
             Pending::History(r) => self.history_failed(cx, r, error),
             Pending::PublicTrades(read) => {
                 self.public_trades_failed(cx, *read, safe_cex_engine::VenueError::new(error));
@@ -423,16 +460,39 @@ fn apply(book: &mut Book, d: Depth) {
     }
 }
 impl Venue for PhemexPerpetuals {
+    fn observe_unproven_http_response(&mut self, now: f64, _: &Pending, response: Response<'_>) {
+        self.observe_rate_limit(now, &response);
+    }
+
     fn managed_sockets() -> bool {
         true
+    }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.stop_release_veto(store, pending, release)
     }
 
     fn fence_uncertain_placements(&self) -> bool {
         true
     }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
+        true
+    }
 
-    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _: Option<&[String]>) {
+    fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, symbols: Option<&[String]>) {
         self.reconcile_uncertain_orders(cx);
+        if let Some(symbols) = symbols {
+            self.owe_order_reads(cx, symbols);
+        }
+    }
+
+    // Each owed read commits its symbol's cover (`commit_orders_read`).
+    fn refreshes_orders(&self) -> bool {
+        true
     }
 
     fn guard_pending_placements(&self) -> bool {
@@ -449,11 +509,27 @@ impl Venue for PhemexPerpetuals {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Markets(..) => S::MARKETS,
+            Pending::Tickers(..) => S::TICKERS,
+            Pending::Account(_) => S::BALANCE.union(S::POSITIONS),
+            Pending::Orders(_) => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
             client_order_lookup: true,
             account: safe_cex_engine::AccountLookup::Query,
+            order_history_needs_symbol: true,
+            fresh_positions: true,
+            nuke_account_cancel: true,
+            symbol_cancel_misses_unseen: true,
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -470,7 +546,7 @@ impl Venue for PhemexPerpetuals {
             return;
         }
         self.catalogue_partial = false;
-        let read = match self.public_read(cx) {
+        let read = match self.public_read(cx, false) {
             Ok(read) => read,
             Err(_) => {
                 self.discovery.failed(cx, false);
@@ -513,6 +589,13 @@ impl Venue for PhemexPerpetuals {
             self.public_socket_event(cx, event)
         }
     }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
+    }
     fn encode_socket_interests(
         &self,
         _store: &safe_cex_engine::Store,
@@ -543,6 +626,38 @@ impl Venue for PhemexPerpetuals {
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, _: SocketId) {
         self.settle_retired_trading(cx);
     }
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.account.export_venue_state().encode())
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, bytes: &[u8]) {
+        let Some(state) = venue_state::VenueState::decode(bytes) else {
+            cx.venue_state_unreadable("Unreadable Phemex venue state from the data source");
+            return;
+        };
+        if self.account.apply_venue_state(cx, state) {
+            // The source's STATUS hedge flag predates the held mode.
+            cx.store.set_hedged(self.account.any_hedged());
+        }
+    }
+    /// The account cycle re-reads every symbol's mode, margin and leverage.
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        self.account_refresh(cx);
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.cancel_landed_from_frames(cx);
+        self.wake_replacements(cx);
+        let client_ids = cx
+            .store
+            .orders()
+            .iter()
+            .filter_map(|order| order.client_order_id.clone())
+            .collect();
+        self.account.frame_ingested(
+            cx.source_orders_covers().is_some(),
+            cx.store.loaded().orders,
+            &client_ids,
+        );
+    }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         self.settle_retired_trading(cx);
         if self.account_message(cx, socket, text) {
@@ -557,8 +672,9 @@ impl Venue for PhemexPerpetuals {
         {
             return;
         }
-        let Ok(e) = serde_json::from_str::<Envelope<'_>>(text) else {
-            return;
+        let e = match serde_json::from_str::<Envelope<'_>>(text) {
+            Ok(e) => e,
+            Err(error) => return Self::public_unreadable(cx, &error, text),
         };
         if e.method == "perp_market24h_pack_p.update" {
             #[derive(serde::Deserialize)]
@@ -566,7 +682,9 @@ impl Venue for PhemexPerpetuals {
                 #[serde(borrow)]
                 data: Vec<Packed<'a>>,
             }
-            if let Ok(p) = serde_json::from_str::<Pack<'_>>(text) {
+            if let Ok(p) = serde_json::from_str::<Pack<'_>>(text)
+                .inspect_err(|error| Self::public_unreadable(cx, error, text))
+            {
                 let mut added = Vec::new();
                 for r in p.data {
                     let symbol = r.0.to_ascii_uppercase();
@@ -614,7 +732,9 @@ impl Venue for PhemexPerpetuals {
                 }
             }
         } else if e.orderbook_p.is_some() {
-            if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text) {
+            if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text)
+                .inspect_err(|error| Self::public_unreadable(cx, error, text))
+            {
                 if r.kind == "snapshot"
                     && !e.orderbook_p.is_some_and(|raw| snapshot_sides(raw.get()))
                 {
@@ -629,15 +749,25 @@ impl Venue for PhemexPerpetuals {
             #[derive(serde::Deserialize)]
             struct K {
                 kline_p: Vec<CandleRow>,
+                #[serde(rename = "type", default)]
+                kind: String,
             }
-            if let Ok(k) = serde_json::from_str::<K>(text) {
-                for r in k.kline_p.into_iter().rev() {
-                    for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
-                        s == &e.symbol.to_ascii_uppercase()
-                            && resolution(*i).is_some_and(|n| n as f64 == r.1.0)
-                    }) {
-                        cx.candle(s, *i, r.candle());
-                    }
+            let mut k = match serde_json::from_str::<K>(text) {
+                Ok(k) => k,
+                Err(error) => return Self::public_unreadable(cx, &error, text),
+            };
+            // Subscribe snapshots are history, including their newest row. Only
+            // explicitly incremental frames may enter the live candle path.
+            if k.kind != "incremental" {
+                return;
+            }
+            k.kline_p.sort_by(|a, b| a.0.0.total_cmp(&b.0.0));
+            for r in k.kline_p {
+                for ((s, i), _) in self.candles.iter().filter(|((s, i), _)| {
+                    s == &e.symbol.to_ascii_uppercase()
+                        && resolution(*i).is_some_and(|n| n as f64 == r.1.0)
+                }) {
+                    cx.candle(s, *i, r.candle());
                 }
             }
         }
@@ -720,16 +850,7 @@ impl Venue for PhemexPerpetuals {
             self.on_http_failed(cx, p, error.read_venue_error());
             return;
         }
-        if r.status == 429 {
-            self.paused_until = self.paused_until.max(
-                cx.now
-                    + r.header("x-ratelimit-retry-after-contract")
-                        .and_then(|v| v.parse::<f64>().ok())
-                        .unwrap_or(60.)
-                        .max(1.)
-                        * 1000.,
-            );
-        }
+        self.observe_rate_limit(cx.now, &r);
         if let Some(context) = p.public_read_context()
             && cx.validate_background_read_http_delivery(context).is_err()
         {
@@ -750,6 +871,13 @@ impl Venue for PhemexPerpetuals {
         {
             return;
         }
+        if let Pending::SymbolMode(read) = &p
+            && cx
+                .validate_preflight_delivery(&read.preflight, &read.context)
+                .is_err()
+        {
+            return;
+        }
         if let Pending::Repair(request) = p {
             self.repair_response(cx, request, r);
             return;
@@ -758,7 +886,15 @@ impl Venue for PhemexPerpetuals {
             self.planned_trade_response(cx, read, r);
             return;
         }
+        if matches!(p, Pending::Account(_)) {
+            self.account.read_error = account::read_refusal(&r);
+        }
         if r.status >= 400 {
+            if matches!(p, Pending::Account(_))
+                && let Some(error) = account::key_refusal(&r)
+            {
+                cx.startup_read_refused(&error);
+            }
             self.fail_pending(cx, p, &format!("HTTP {}: {}", r.status, r.body));
             return;
         }
@@ -792,6 +928,10 @@ impl Venue for PhemexPerpetuals {
                 }
                 cx.store.set_markets(rows);
                 self.discovery.succeeded(cx, &false);
+                // Frame-fed: public instrument metadata only; the source sends the rest.
+                if cx.frame_fed() {
+                    return;
+                }
                 self.start_account(cx);
                 self.discovery_tickers(cx);
             }
@@ -845,19 +985,20 @@ impl Venue for PhemexPerpetuals {
                 cx.book_changed(&symbol);
             }
             Pending::Candles { root, mut rows, .. } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(root.context(), serde_json::to_string(&rows).unwrap());
             }
             Pending::PublicCandles {
                 context, mut rows, ..
             } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
             Pending::Account(p) => self.account_read_response(cx, p, r),
             Pending::Orders(read) => self.orders_background_response(cx, read, r.body),
             Pending::Repair(_) => unreachable!("handled before native envelope"),
             Pending::PlannedTrade(_) => unreachable!("handled before native envelope"),
+            Pending::SymbolMode(read) => self.symbol_mode_response(cx, *read, r.body),
             Pending::History(p) => self.history_response(cx, p, r),
             Pending::PublicTrades(read) => self.public_trades_response(cx, *read, r),
             Pending::Income(p) => self.income_response(cx, p, r),
@@ -884,22 +1025,25 @@ impl Venue for PhemexPerpetuals {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        self.settle_retired_trading(cx);
-        match pending {
-            Pending::Identity(command) => self.identity_failed(cx, command, error),
-            Pending::Candles { root, .. } => {
-                let _ = cx.fail_context(root.context(), error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.settle_retired_trading(cx);
+            match pending {
+                Pending::Identity(command) => self.identity_failed(cx, command, error),
+                Pending::Candles { root, .. } => {
+                    let _ = cx.fail_context(root.context(), error);
+                }
+                Pending::Repair(request) => self.repair_failed(cx, request, error),
+                Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
+                Pending::History(read) => self.history_failed(cx, read, error),
+                Pending::Income(read) => self.income_failed(cx, read, error),
+                Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
+                Pending::PublicCandles { context, .. } => {
+                    let _ =
+                        cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
+                }
+                pending => self.on_request_failed(cx, pending, &error.message),
             }
-            Pending::Repair(request) => self.repair_failed(cx, request, error),
-            Pending::PlannedTrade(read) => self.planned_trade_failed(cx, read, error),
-            Pending::History(read) => self.history_failed(cx, read, error),
-            Pending::Income(read) => self.income_failed(cx, read, error),
-            Pending::PublicTrades(read) => self.public_trades_failed(cx, *read, error),
-            Pending::PublicCandles { context, .. } => {
-                let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
-            }
-            pending => self.on_request_failed(cx, pending, &error.message),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,
@@ -921,7 +1065,11 @@ impl Venue for PhemexPerpetuals {
             Pending::PublicCandles { context, .. } => {
                 let _ = cx.fail_context(&context, error.outcome(safe_cex_engine::Outcome::NotSent));
             }
-            pending => self.on_request_failed(cx, pending, &error.message),
+            pending => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, pending, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
     fn on_stream_error(
@@ -931,6 +1079,14 @@ impl Venue for PhemexPerpetuals {
         response: Response<'_>,
     ) {
         self.settle_retired_trading(cx);
+        if matches!(pending, Pending::Account(_)) {
+            self.account.read_error = account::read_refusal(&response);
+        }
+        if matches!(pending, Pending::Account(_))
+            && let Some(error) = account::key_refusal(&response)
+        {
+            cx.startup_read_refused(&error);
+        }
         match pending {
             Pending::Income(read) => {
                 if read.validate_delivery(cx).is_ok() {
@@ -1016,6 +1172,25 @@ impl Venue for PhemexPerpetuals {
         safe_cex_engine::request_context::ReconciliationData::new(String::new())
     }
 
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            action @ safe_cex_engine::VenueAction::CancelAccountOrders => {
+                if self
+                    .trade_command(cx, Command::Venue { command, action })
+                    .is_some()
+                {
+                    safe_cex_engine::unsupported_venue_action(cx, command);
+                }
+            }
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
     fn read_root_retired(
         &mut self,
         owner: safe_cex_engine::request_context::Owner,
@@ -1023,6 +1198,22 @@ impl Venue for PhemexPerpetuals {
     ) {
         self.retire_history(owner);
         self.retire_income(owner);
+        self.account.fresh_positions.retired(owner);
+    }
+    fn on_http_plan_ready(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        plan: &safe_cex_engine::request_context::Plan,
+    ) {
+        self.trading_plan_ready(cx, plan);
+    }
+    fn on_condition_wait_expired(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        owner: &safe_cex_engine::request_context::ConditionOwner,
+        _: safe_cex_engine::VenueError,
+    ) {
+        self.replacement_wait_expired(cx, owner);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.settle_retired_trading(cx);

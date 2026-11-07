@@ -36,3 +36,10 @@ recorded public binary frames without replacing market data.
 Malformed public SBE frames log and drop without closing the socket or clearing
 books. Valid sequence gaps still resubscribe only the affected book, and malformed
 traffic does not refresh the silence watchdog.
+
+Public market discovery retries until it recovers, with jittered exponential
+backoff capped at 30 seconds. After two failed attempts, its one-time Error
+includes the latest cause and bounded `firstCause`/`cause` fields, distinguishing
+transport refusals, HTTP status failures and unusable lists. Response bodies are
+not copied into that diagnostic. Valid perpetual rows can load despite malformed
+peers; an empty or rejected catalogue keeps any last-good markets and retries.

@@ -8,6 +8,7 @@ import { mapBitunixClosedPosition } from '../../exchanges/bitunix/bitunix.income
 import { mapBlofinClosedPosition } from '../../exchanges/blofin/blofin.income';
 import { mapBybitClosedPnl } from '../../exchanges/bybit/bybit.closed-pnl';
 import { mapOkxClosedPosition } from '../../exchanges/okx/okx.closed-pnl';
+import { ExchangeError } from '@tealstreet/safe-cex-wasm/host';
 import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
@@ -147,8 +148,15 @@ describe('Rust closed PnL reads the engine rows through the TS mappers', () => {
     }
   });
 
-  it('a failed engine read reports once and yields an empty history, as TS does', async () => {
-    const { exchange } = make('okx', new Error('OKX closed positions: OKX 50011: Too Many Requests'));
+  // A failed read is not a successful empty history: callers retain their last good rows.
+  it('preserves the exact typed engine error instead of returning empty history', async () => {
+    const error = new ExchangeError('Too Many Requests', { message: 'Too Many Requests', kind: 'rateLimited', venueCode: '50011' });
+    const { exchange } = make('okx', error);
+    await expect(exchange.fetchClosedPnl({ symbol: 'BTCUSDT', accountName: 'a' })).rejects.toBe(error);
+  });
+
+  it('returns a genuine empty result only for a successful empty read', async () => {
+    const { exchange } = make('bybit', []);
     await expect(exchange.fetchClosedPnl({ symbol: 'BTCUSDT', accountName: 'a' })).resolves.toEqual([]);
   });
 

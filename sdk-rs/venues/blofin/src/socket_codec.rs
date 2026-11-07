@@ -1,5 +1,6 @@
 //! Native wire codecs; the engine owns epochs, authentication and retries.
 use super::*;
+use safe_cex_engine::SubscriptionTopic;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
@@ -44,7 +45,13 @@ fn policy(private: bool) -> FeedPolicy {
         },
         subscription_interval_ms: 0.,
         close_floors: &[],
+        data_silence: None,
     }
+}
+/// A book's streams; the first carries the book itself.
+const BOOK_CHANNELS: [&str; 2] = ["books", "books5"];
+fn candle_channel(i: Interval) -> Option<String> {
+    interval(i).map(|bar| format!("candle{bar}"))
 }
 fn interest(channel: &str, id: &str) -> Interest {
     Interest::from_wire_args(
@@ -155,21 +162,21 @@ impl Blofin {
         }
         for symbol in self.books.keys() {
             if !matches!(change, Some(Change::RemoveBook(s)) if s == symbol) {
-                add(symbol, &["books", "books5"]);
+                add(symbol, &BOOK_CHANNELS);
             }
         }
         for (symbol, i) in self.candles.keys() {
             if !matches!(change, Some(Change::RemoveCandle(s, n)) if s == symbol && n == i)
-                && let Some(bar) = interval(*i)
+                && let Some(channel) = candle_channel(*i)
             {
-                add(symbol, &[&format!("candle{bar}"), "books5"]);
+                add(symbol, &[&channel, "books5"]);
             }
         }
         match change {
-            Some(Change::AddBook(symbol)) => add(symbol, &["books", "books5"]),
+            Some(Change::AddBook(symbol)) => add(symbol, &BOOK_CHANNELS),
             Some(Change::AddCandle(symbol, i)) => {
-                if let Some(bar) = interval(*i) {
-                    add(symbol, &[&format!("candle{bar}"), "books5"]);
+                if let Some(channel) = candle_channel(*i) {
+                    add(symbol, &[&channel, "books5"]);
                 }
             }
             _ => (),
@@ -283,14 +290,29 @@ impl Blofin {
     ) {
         self.change_interests(cx, Change::RemoveCandle(symbol, i));
     }
+    /// The public feed and interest key `topic` streams on: a book's own
+    /// channel, or the candle channel (not their shared `books5`).
+    pub(super) fn topic_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        let (symbol, channel) = match topic {
+            SubscriptionTopic::OrderBook { symbol } => (symbol, BOOK_CHANNELS[0].to_owned()),
+            SubscriptionTopic::Candles { symbol, interval } => (symbol, candle_channel(*interval)?),
+        };
+        let market = store.market(symbol)?;
+        let key = interest(&channel, &market.id).key.to_string();
+        Some((self.public.feed?, key))
+    }
     pub(super) fn repair_book_interest(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
-        if let Some(feed) = self.public.feed
-            && let Some(market) = cx.store.market(symbol)
+        let topic = SubscriptionTopic::OrderBook {
+            symbol: symbol.to_owned(),
+        };
+        if let Some((feed, key)) = self.topic_interest(cx.store, &topic)
+            && let Err(error) = cx.repair_socket_interests(feed, vec![key])
         {
-            let key = interest("books", &market.id).key.to_string();
-            if let Err(error) = cx.repair_socket_interests(feed, vec![key]) {
-                Self::socket_notice(cx, error);
-            }
+            Self::socket_notice(cx, error);
         }
     }
     pub(super) fn classify_control(&self, feed: FeedId, text: &str) -> Control {

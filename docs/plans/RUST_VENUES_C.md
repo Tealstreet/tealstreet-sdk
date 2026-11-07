@@ -1,7 +1,7 @@
 # Venue findings lane C
 
 Open High/Medium items from `RUST_AUDITS.md` for Coinbase, Orderly/TxFlow,
-Lighter, KuCoin, Phemex, Bitget, BloFin, BreakoutProp and the Binance family.
+Lighter, KuCoin, Phemex, Bitget, BloFin and the Binance family.
 One PR per venue or family into `feat/rust-rewrite`; each fix carries a
 regression test. Items another open PR already repairs are re-verified after it
 lands, not duplicated.
@@ -14,5 +14,5 @@ lands, not duplicated.
    copy (externally placed brackets/TWAPs no longer block trading); portfolio
    probe advances on non-retryable failures; saved read-only keys sign GETs.
 3. Orderly: unscoped cancel-all (stop payloads and TP_SL blocking land in #1353).
-4. Lighter, KuCoin, Phemex, Bitget, BloFin (after #1355), Binance family,
-   BreakoutProp: remaining mediums in audit order.
+4. Lighter, KuCoin, Phemex, Bitget, BloFin (after #1355), Binance family:
+   remaining mediums in audit order.

@@ -34,6 +34,12 @@ pub enum Request {
     Orders(OrderSnapshot),
     Positions(PositionSnapshot),
 }
+
+impl Request {
+    fn needs_derived_key(&self) -> bool {
+        matches!(self, Self::Balance | Self::Orders(..) | Self::Derive)
+    }
+}
 pub struct OrderSnapshot {
     revision: u64,
     cursor: String,
@@ -271,7 +277,7 @@ impl Polymarket {
             .address
             .as_deref()
             .ok_or("Polymarket signer unavailable")?;
-        let seconds = (cx.now / 1000.0).floor() as u64;
+        let seconds = (cx.protocol_now() / 1000.0).floor() as u64;
         let headers = sign::l2_headers(
             credentials,
             address,
@@ -765,6 +771,13 @@ impl Polymarket {
                         .is_some_and(|e| !matches!(e.get(), "null" | "false" | "\"\""))
                 })
         {
+            // Time and positions are unsigned, so only the signed reads prove a refusal.
+            if matches!(response.status, 401 | 403) && request.needs_derived_key() {
+                cx.startup_read_refused(&crate::trading::http_failure(
+                    response.status,
+                    "Polymarket refused the API key".into(),
+                ));
+            }
             self.account_failed(cx, request);
             return;
         }
@@ -1314,6 +1327,19 @@ fn log_skip(
     account
         .skip_logged
         .report(cx, asset.to_owned(), level, message);
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance => S::BALANCE,
+            Self::Orders(_) => S::ORDERS,
+            Self::Positions(_) => S::POSITIONS,
+            Self::Time => S::ACCOUNT,
+            Self::Derive => S::ACCOUNT,
+        }
+    }
 }
 
 #[cfg(test)]

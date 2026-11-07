@@ -499,7 +499,7 @@ fn native_later_failed_page_keeps_only_accepted_raw_output() {
     let warning = output.iter().position(|a| matches!(a,
         Action::Notice(Notice::Event(event))
             if event.code == safe_cex_engine::log::code::HISTORY_INCOMPLETE
-                && event.fields == vec![("command", safe_cex_engine::Value::Num(f64::from(OWNER)))]
+                && event.fields.first() == Some(&("command", safe_cex_engine::Value::Num(f64::from(OWNER)))) && event.fields.get(1).is_some_and(|field| field.0 == "reason")
     )).unwrap();
     let terminal = output
         .iter()

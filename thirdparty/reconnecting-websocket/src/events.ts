@@ -21,9 +21,11 @@ export class CloseEvent extends Event {
   public code: number;
   public reason: string;
   public wasClean = true;
-  constructor(code = 1000, reason = '', target: any) {
+  public initiator?: 'local' | 'remote' | 'unknown';
+  constructor(code = 1000, reason = '', target: any, initiator: 'local' | 'remote' | 'unknown' = 'unknown') {
     super('close', target);
     this.code = code;
+    this.initiator = initiator;
     this.reason = reason;
   }
 }
@@ -37,6 +39,7 @@ export interface WebSocketEventMap {
 export interface WebSocketEventListenerMap {
   close: ((event: CloseEvent) => void | Promise<void>) | { handleEvent: (event: CloseEvent) => void | Promise<void> };
   error: ((event: ErrorEvent) => void | Promise<void>) | { handleEvent: (event: ErrorEvent) => void | Promise<void> };
-  message: ((event: MessageEvent) => void | Promise<void>) | { handleEvent: (event: MessageEvent) => void | Promise<void> };
+  message:
+    ((event: MessageEvent) => void | Promise<void>) | { handleEvent: (event: MessageEvent) => void | Promise<void> };
   open: ((event: Event) => void | Promise<void>) | { handleEvent: (event: Event) => void | Promise<void> };
 }

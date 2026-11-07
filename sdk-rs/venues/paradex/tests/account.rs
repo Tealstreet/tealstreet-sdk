@@ -1631,3 +1631,121 @@ fn one_malformed_margin_row_keeps_its_stored_leverage_while_valid_peers_commit()
     }
     assert!(!logs.iter().any(|l| l.contains("-3")));
 }
+
+#[test]
+fn the_user_s_own_cancel_is_not_logged_as_a_rejection() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    h.now += 5_000.;
+    h.actions.clear();
+    let row = ORDER
+        .replace(
+            "\"instruction\":\"GTC\"",
+            "\"instruction\":\"GTC\",\"cancel_reason\":\"USER_CANCELED\"",
+        )
+        .replace("1700000000000", "1700000005000");
+    order_update(&mut h, socket, &row);
+    assert!(!h.actions.iter().any(|a| matches!(a,
+        Action::Notice(safe_cex_engine::Notice::Event(event))
+            if event.message.contains("order rejected"))));
+}
+
+#[test]
+fn a_refused_key_fails_the_start_instead_of_waiting() {
+    let (mut h, _) = seed();
+    let auth = h.take("/auth/");
+    h.respond(auth, 401, r#"{"error":"INVALID_TOKEN"}"#);
+    assert!(h.actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+    )));
+}
+
+/// Acknowledges every subscribe sent so far on `socket`, after `skip` of them.
+fn ack_subscriptions(h: &mut Harness, socket: SocketId, skip: usize) -> usize {
+    #[derive(serde::Deserialize)]
+    struct Params {
+        channel: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Rpc {
+        method: Option<String>,
+        id: Option<u64>,
+        params: Option<Params>,
+    }
+    let acks: Vec<String> = h
+        .sent()
+        .iter()
+        .filter_map(|text| serde_json::from_str::<Rpc>(text).ok())
+        .filter(|rpc| rpc.method.as_deref() == Some("subscribe"))
+        .skip(skip)
+        .map(|rpc| {
+            format!(
+                "{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":{{\"channel\":\"{}\"}}}}",
+                rpc.id.unwrap(),
+                rpc.params.unwrap().channel
+            )
+        })
+        .collect();
+    for ack in &acks {
+        message(h, socket, ack);
+    }
+    acks.len()
+}
+
+#[test]
+fn the_first_private_ready_rereads_positions_and_orders_after_the_last_ack() {
+    let (mut h, socket) = loaded();
+    h.pending.clear();
+    authenticate(&mut h, socket);
+    assert!(h.pending.is_empty(), "{:?}", h.pending);
+    assert_eq!(ack_subscriptions(&mut h, socket, 0), 5);
+    h.take("/positions");
+    h.take("/orders");
+    assert!(h.pending.is_empty(), "{:?}", h.pending);
+}
+
+#[test]
+fn a_read_in_flight_at_private_ready_is_read_again_after_the_cycle_settles() {
+    let (mut h, socket) = seed();
+    h.reply("/auth/", r#"{"jwt_token":"jwt-first"}"#);
+    let margin = h.take("/account/margin");
+    authenticate(&mut h, socket);
+    assert_eq!(ack_subscriptions(&mut h, socket, 0), 5);
+    assert!(
+        h.pending.is_empty(),
+        "the startup margin read is still running"
+    );
+    h.respond(margin, 200, r#"{"configs":[]}"#);
+    h.reply("/positions", r#"{"results":[]}"#);
+    h.reply(
+        "/account",
+        r#"{"total_collateral":"1000","free_collateral":"800"}"#,
+    );
+    h.reply("/orders", r#"{"results":[]}"#);
+    assert!(!h.pending.iter().any(|r| r.url.contains("/positions")));
+    h.reply("/account/margin", r#"{"configs":[]}"#);
+    h.take("/positions");
+    h.take("/orders");
+    assert!(h.pending.is_empty(), "{:?}", h.pending);
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for status in [401, 403] {
+        let (mut h, _) = seed();
+        let auth = h.take("/auth/");
+        h.respond(
+            auth,
+            status,
+            r#"{"error":"INVALID_TOKEN","message":"Unauthorized"}"#,
+        );
+        assert!(
+            h.actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::StartupFailed { .. })
+            )),
+            "{status}"
+        );
+    }
+}
