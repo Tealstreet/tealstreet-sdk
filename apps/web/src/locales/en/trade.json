@@ -1360,7 +1360,6 @@
     "platform-username": "Platform Username",
     "platform-password": "Platform Password",
     "account-id": "Account ID",
-    "breakout-account-id-help": "5 digit account ID listed under Login on the credentials page or Accounts on the profile table. If you only have a single active Breakout account you can omit this field.",
     "category": "Category",
     "contract-size": "Contract Size",
     "base": "Base",

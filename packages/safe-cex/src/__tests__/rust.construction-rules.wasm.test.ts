@@ -59,8 +59,6 @@ const startRejects = async (name: ExchangeName, options: Partial<ExchangeOptions
   expect(requests).toEqual([]);
 };
 
-it('BreakoutProp market data still needs DXtrade credentials', () =>
-  startRejects('breakoutprop', { publicDataOnly: true }, 'BreakoutProp market data requires a legacy DXtrade username and password'));
 
 it('AsterDEX wallet keys without the main wallet carry the message the app routes on', () =>
   startRejects(

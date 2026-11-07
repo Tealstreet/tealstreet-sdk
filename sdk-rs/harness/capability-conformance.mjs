@@ -229,7 +229,6 @@ export function constructionProfiles(venue) {
     secret: `0x01${randomBytes(31).toString('hex')}`,
     applicationId: `0x${randomBytes(20).toString('hex')}`,
   });
-  if (venue === 'breakoutprop') Object.assign(base, { key: 'user', secret: 'password' });
   if (venue === 'hyrotrader') base.endpoints = {
     rest: 'https://hyro.test', publicWs: 'wss://hyro.test/public', privateWs: 'wss://hyro.test/private',
   };

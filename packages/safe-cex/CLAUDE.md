@@ -688,7 +688,7 @@ SDK.
   included (`isHonorableShape`): a stop is one native order, and on a bracket
   the caller's ID goes on the entry while each TP/SL leg gets its own minted
   cloid. It also mints a cloid for every order it places, caller ID or not.
-  **Rejecting venues**: AsterDEX, BreakoutProp, HyroTrader, Kraken (+spot),
+  **Rejecting venues**: AsterDEX, HyroTrader, Kraken (+spot),
   Lighter, MEXC, Polymarket.
 - **No broker prefix is composed onto a caller ID.** The generated paths keep
   their broker-attributed IDs (`x-s3vFFRQp…`, OKX/BloFin `BROKER_ID…`, Phemex
@@ -1434,10 +1434,7 @@ raw primary/secondary clients on `this._primaryXhr` / `this._secondaryXhr`. The 
 that wires it MUST equal the set the UI offers it for — i.e. everything **not** in
 `exchangesWithoutSecondaryKey` (`src/utils/exchangeSupportsSecondaryKey.ts`). That
 exclusion list is the wallet / single-keypair venues (hyperliquid, paradex,
-grvt, apexomni, lighter, polymarket, and the orderly ed25519 family) **plus** the
-session-login venue `breakoutprop` (DXtrade
-session token) — there a shared per-session token is injected on every request so a
-second client can't authenticate as a distinct key. A read-only "second API key" is
+grvt, apexomni, lighter, polymarket, and the orderly ed25519 family). A read-only "second API key" is
 not a coherent concept for any of these.
 When adding an exchange, wire the helper **and** reconcile that list.
 `binancepm` is the one bespoke case: it has no single `this.xhr` (uses
@@ -1521,7 +1518,7 @@ Is requiresCors true?
 │   └── Is enforceWsTunnel true?
 │       ├── YES → WS tunnel only, no CORS proxy
 │       │   Examples: Hyperliquid, Paradex, KuCoin, Kraken,
-│       │            AsterDEX, BreakoutProp, BitUnix, BybitDemo
+│       │            AsterDEX, BitUnix, BybitDemo
 │       └── NO → Fully direct, no proxy or tunnel
 │           Examples: OKX, Binance, BinancePM, BinanceSpot,
 │                     Bybit, BybitSpot, BybitInverse, Woo, WEEX
