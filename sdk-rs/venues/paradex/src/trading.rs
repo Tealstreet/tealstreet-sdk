@@ -1246,7 +1246,7 @@ impl Trading {
         } = &request.kind
         {
             let result = crate::success(response)
-                .map_err(|error| answer_failure(response.status, error))
+                .map_err(|error| write_failure(response.status, error))
                 .and_then(|()| decode_placement(response.body, expected, *batch).map_err(unproven));
             let result = match result {
                 Ok(PlacementResult {
@@ -1297,7 +1297,7 @@ impl Trading {
             Ok(Vec::new())
         } else {
             result.map_err(|error| match crate::success(response) {
-                Err(_) => answer_failure(response.status, error),
+                Err(_) => write_failure(response.status, error),
                 Ok(()) => unproven(error),
             })
         };
@@ -2355,6 +2355,19 @@ fn answer_failure(status: u16, message: String) -> VenueError {
         400..=499 => rejected(error, ErrorKind::Rejected),
         _ => error.outcome(Outcome::Unknown),
     }
+}
+
+/// Legacy dispatched writes do not pass the engine's HTTP proof boundary.
+/// Weaken the failure before job aggregation or protective restore decisions;
+/// keep read failures and definitive native refusals unchanged.
+fn write_failure(status: u16, message: String) -> VenueError {
+    let mut error = answer_failure(status, message);
+    if matches!(status, 408 | 429 | 500..) {
+        error.venue_message = Some(error.message);
+        error.message = "Paradex write outcome is unknown. Check Open Orders".into();
+        error.outcome = Some(Outcome::Unknown);
+    }
+    error
 }
 
 #[cfg(test)]

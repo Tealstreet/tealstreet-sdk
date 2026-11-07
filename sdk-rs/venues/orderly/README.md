@@ -31,6 +31,11 @@ parents fail before any write. SDK `cancelAllOrders`
 uses both native account-wide DELETE paths for every broker, including when
 the latest SDK store frame has no orders.
 
+Dispatched writes answered with HTTP 429, 408, or 5xx, or native rate code
+`-1003`, have an unknown outcome even if the body claims refusal. They are
+never resent or followed by a protective put-back. Check Open Orders before
+retrying; native diagnostics remain available separately from that message.
+
 The shared SDK engine transport preserves signed request bytes through direct
 requests, REST proxies and the raw HTTP-over-WebSocket adapter. Intermediary
 authorization may add headers but cannot change signed bytes or venue headers.

@@ -1746,6 +1746,141 @@ fn outcome(out: Vec<Action>, id: u32) -> Option<Option<safe_cex_engine::Outcome>
     })
 }
 
+// These replies follow physical dispatch, even when their body claims refusal.
+const AMBIGUOUS_WRITES: &[(u16, &str)] = &[
+    (429, "{}"),
+    (429, r#"{"success":false,"code":-1001,"message":"refused"}"#),
+    (
+        200,
+        r#"{"success":false,"code":-1003,"message":"rate limit"}"#,
+    ),
+    (
+        400,
+        r#"{"success":false,"code":-1003,"message":"rate limit"}"#,
+    ),
+    (408, r#"{"success":false,"code":-1103,"message":"refused"}"#),
+    (500, r#"{"success":false,"code":-1001,"message":"refused"}"#),
+    (502, "bad gateway"),
+    (503, r#"{"success":false,"code":-1103,"message":"refused"}"#),
+    (504, "gateway timeout"),
+];
+
+fn assert_dispatched_unknown(
+    e: &mut Driver,
+    request: &safe_cex_engine::HttpRequest,
+    status: u16,
+    body: &str,
+) {
+    use safe_cex_engine::{Method, Outcome};
+    assert_ne!(
+        request.method,
+        Method::Get,
+        "must physically dispatch a write"
+    );
+    reply(e, request, status, body);
+    let out = actions(e);
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+        "no resend or put-back: {out:?}"
+    );
+    let errors: Vec<_> = out
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 91, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(errors.len(), 1, "{status} {body}: {out:?}");
+    let error = errors[0];
+    assert_eq!(
+        error.outcome,
+        Some(Outcome::Unknown),
+        "{status} {body}: {error:?}"
+    );
+    let text = error.legacy_text().to_ascii_lowercase();
+    assert!(
+        text.contains("unknown") && text.contains("check open orders"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("refused") && !text.contains("no stop"),
+        "{text}"
+    );
+}
+
+#[test]
+fn dispatched_ambiguous_ordinary_writes_are_unknown_without_resend() {
+    for &(status, body) in AMBIGUOUS_WRITES {
+        for operation in ["create", "amend", "cancel", "leverage", "margin"] {
+            let (mut e, _) = ready();
+            requests(&mut e);
+            let command = match operation {
+                "create" => Command::PlaceOrders { command: 91, orders: serde_json::from_str(r#"[{"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":50000}]"#).unwrap() },
+                "amend" => Command::AmendOrder { command: 91, id: "9007199254740993".into(), price: Some(50001.), amount: None },
+                "cancel" => Command::CancelOrders { command: 91, ids: vec!["9007199254740993".into()] },
+                "leverage" => Command::SetLeverage { command: 91, symbol: "BTCUSDC".into(), leverage: 20., side: None },
+                "margin" => Command::SetMarginType { command: 91, symbol: "BTCUSDC".into(), isolated: true },
+                _ => unreachable!(),
+            };
+            e.handle(2000., Event::Command(command));
+            let writes = requests(&mut e);
+            assert_eq!(writes.len(), 1, "{operation}: {writes:?}");
+            assert_dispatched_unknown(&mut e, &writes[0], status, body);
+        }
+    }
+}
+
+#[test]
+fn dispatched_ambiguous_protective_writes_are_unknown_without_put_back() {
+    use safe_cex_engine::Method;
+    for &(status, body) in AMBIGUOUS_WRITES {
+        for leg in ["create", "cancel", "amend-cancel", "replacement"] {
+            let (mut e, socket) =
+                ready_with(ORDER, if leg == "create" { "[]" } else { ALGO }, POSITIONS);
+            requests(&mut e);
+            if leg == "cancel" {
+                e.handle(
+                    2000.,
+                    Event::Command(Command::CancelOrders {
+                        command: 91,
+                        ids: vec!["101".into(), "102".into()],
+                    }),
+                );
+            } else {
+                place(
+                    &mut e,
+                    91,
+                    r#"[{"symbol":"BTCUSDC","type":"stop_market","side":"sell","amount":1,"price":48000}]"#,
+                );
+            }
+            let mut writes = requests(&mut e);
+            assert_eq!(writes.len(), 1, "{leg}: {writes:?}");
+            if leg == "replacement" {
+                assert_eq!(writes[0].method, Method::Delete);
+                reply(
+                    &mut e,
+                    &writes[0],
+                    200,
+                    r#"{"success":true,"data":{"status":"CANCEL_SENT"}}"#,
+                );
+                assert!(!requests(&mut e).iter().any(|r| r.method != Method::Get));
+                ws(
+                    &mut e,
+                    socket,
+                    r#"{"topic":"algoexecutionreportv2","ts":3000,"data":{"algoOrderId":100,"rootAlgoOrderId":100,"symbol":"PERP_BTC_USDC","algoType":"POSITIONAL_TP_SL","algoStatus":"CANCELLED","seq":5}}"#,
+                );
+                writes = requests(&mut e)
+                    .into_iter()
+                    .filter(|r| r.method != Method::Get)
+                    .collect();
+                assert_eq!(writes.len(), 1);
+            }
+            assert_dispatched_unknown(&mut e, &writes[0], status, body);
+        }
+    }
+}
+
 #[test]
 fn lost_and_server_failed_writes_are_unknown_but_rejections_are_not() {
     use safe_cex_engine::Outcome;

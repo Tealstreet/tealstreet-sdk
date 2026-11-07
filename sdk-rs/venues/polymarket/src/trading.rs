@@ -1,4 +1,6 @@
 //! CLOB V2 writes: preflight whole batches, serialize exact signed bodies, never retry writes.
+//! Dispatched HTTP 429/408/5xx remain Unknown, including cancel-and-replace legs;
+//! the caller must Check Open Orders, and native diagnostics cannot prove refusal.
 //! Oracle: official clob-client-v2 v1.1.0 src/types/ordersV2.ts and client.ts.
 use crate::account::OrderRow;
 use crate::sign::{self, OrderSigning};
@@ -669,6 +671,7 @@ impl Polymarket {
     ) {
         let command = request.command();
         let placing = matches!(request, Request::Place { .. });
+        let write = !matches!(request, Request::ReplaceRead { .. });
         if !self.trading.jobs.contains_key(&command) {
             return;
         }
@@ -865,7 +868,11 @@ impl Polymarket {
             }
             Err(error) => {
                 let error = if !(200..300).contains(&response.status) {
-                    http_failure(response.status, error)
+                    if write {
+                        write_failure(response.status, error)
+                    } else {
+                        http_failure(response.status, error)
+                    }
                 } else if before_send {
                     not_sent(error)
                 } else if refused {
@@ -932,6 +939,20 @@ pub(crate) fn http_failure(status: u16, message: String) -> VenueError {
             .outcome(Outcome::Rejected),
         _ => error.kind(ErrorKind::Rejected).outcome(Outcome::Rejected),
     }
+}
+
+/// A dispatched write may have executed despite a rate limit or server error.
+/// Retain the native diagnostic separately so it cannot claim definitive refusal
+/// or that a canceled order's replacement is absent. Account reads still use
+/// `http_failure` directly.
+fn write_failure(status: u16, message: String) -> VenueError {
+    let mut error = http_failure(status, message);
+    if matches!(status, 408 | 429 | 500..) {
+        error.venue_message = Some(error.message);
+        error.message = "Polymarket write outcome is unknown. Check Open Orders".into();
+        error.outcome = Some(Outcome::Unknown);
+    }
+    error
 }
 
 /// Refused before any request was sent.

@@ -158,6 +158,77 @@ fn ack(id: &str) -> String {
 }
 
 #[test]
+fn dispatched_ambiguous_writes_are_unknown_without_resend_or_replacement() {
+    // No native rate-code table, protective orders, or remote settings exist
+    // for this venue. Exercise every supported dispatched mutation instead.
+    for (status, body) in [
+        (429, "{}"),
+        (429, r#"{"error":"rate limit"}"#),
+        (429, r#"{"error":"invalid signature: refused"}"#),
+        (408, r#"{"error":"invalid order: refused"}"#),
+        (500, r#"{"error":"invalid signature: refused"}"#),
+        (502, "bad gateway"),
+        (503, r#"{"error":"invalid order: refused"}"#),
+        (504, "gateway timeout"),
+    ] {
+        for operation in ["create", "cancel", "amend-cancel", "replacement"] {
+            let mut h = H::new();
+            match operation {
+                "create" => h.command(Command::PlaceOrders {
+                    command: 91,
+                    orders: vec![order()],
+                }),
+                "cancel" => h.command(Command::CancelOrders {
+                    command: 91,
+                    ids: vec!["o1".into()],
+                }),
+                "amend-cancel" => h.command(Command::AmendOrder {
+                    command: 91,
+                    id: "o1".into(),
+                    price: Some(0.6),
+                    amount: None,
+                }),
+                "replacement" => {
+                    replace(&mut h, 91);
+                    h.response("/data/order/o1", 200, &detail("o1", "CANCELED", 4.));
+                }
+                _ => unreachable!(),
+            }
+            let writes: Vec<_> = h
+                .http
+                .iter()
+                .filter(|r| r.method != Method::Get)
+                .cloned()
+                .collect();
+            assert_eq!(writes.len(), 1, "{operation}: {:?}", h.http);
+            let request = h.take(&writes[0].url);
+            h.respond(request, status, body);
+            assert_eq!(h.failures.len(), 1, "{status} {body}: {:?}", h.done);
+            let error = &h.failures[0];
+            assert_eq!(
+                error.outcome,
+                Some(safe_cex_engine::Outcome::Unknown),
+                "{operation} {status} {body}: {error:?}"
+            );
+            let text = error.legacy_text().to_ascii_lowercase();
+            assert!(
+                text.contains("unknown") && text.contains("check open orders"),
+                "{text}"
+            );
+            assert!(
+                !text.contains("refused") && !text.contains("order is gone"),
+                "{text}"
+            );
+            assert!(
+                !h.http.iter().any(|r| r.method != Method::Get),
+                "no resend or replacement: {:?}",
+                h.http
+            );
+        }
+    }
+}
+
+#[test]
 fn placement_matches_official_json_v2_and_independent_typed_data_and_hmac() {
     let mut h = H::new();
     let mut opts = order();
@@ -1154,7 +1225,7 @@ fn cancellation_with_symbol_uses_native_id_without_store_lookup() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let rejected = (Some(ErrorKind::Rejected), Some(Outcome::Rejected));
     for (status, body, classified, text) in [
@@ -1175,7 +1246,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             "{}",
-            (Some(ErrorKind::RateLimited), Some(Outcome::Rejected)),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
             None,
         ),
         (400, r#"{"error":"invalid order"}"#, rejected, None),
@@ -1204,7 +1275,16 @@ fn write_failures_are_classified_without_changing_their_text() {
             error.message
         );
         let text = text.map_or_else(|| format!("Polymarket HTTP {status}: {body}"), Into::into);
-        if status != 200 || text.starts_with("Polymarket placement") {
+        if matches!(status, 408 | 429 | 500..) {
+            assert_eq!(
+                h.done,
+                [(
+                    9,
+                    Err("Polymarket write outcome is unknown. Check Open Orders".into())
+                )]
+            );
+            assert_eq!(error.venue_message.as_deref(), Some(text.as_str()));
+        } else if status != 200 || text.starts_with("Polymarket placement") {
             assert_eq!(h.done, [(9, Err(text))], "{status} {body}");
         }
     }

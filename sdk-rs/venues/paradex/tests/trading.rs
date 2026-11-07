@@ -37,6 +37,138 @@ fn private() -> Harness {
     h.reply("/account/margin", r#"{"configs":[]}"#);
     h
 }
+
+// Paradex declares no native rate-code table; RATE_LIMIT is diagnostic on 429.
+const AMBIGUOUS_WRITES: &[(u16, &str)] = &[
+    (429, "{}"),
+    (429, r#"{"error":"RATE_LIMIT","message":"slow down"}"#),
+    (429, r#"{"error":"INVALID_SIGNATURE","message":"refused"}"#),
+    (408, r#"{"error":"INVALID_PRICE","message":"refused"}"#),
+    (500, r#"{"error":"INVALID_SIGNATURE","message":"refused"}"#),
+    (502, "bad gateway"),
+    (503, r#"{"error":"INVALID_PRICE","message":"refused"}"#),
+    (504, "gateway timeout"),
+];
+
+fn assert_dispatched_unknown(h: &Harness) {
+    let error = failed(h, 91);
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "{error:?}"
+    );
+    let text = error.legacy_text().to_ascii_lowercase();
+    assert!(
+        text.contains("unknown") && text.contains("check open orders"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("refused") && !text.replace("may have no stop", "").contains("no stop"),
+        "{text}"
+    );
+    assert_eq!(error.protection, None);
+    assert!(
+        !h.pending.iter().any(|r| r.method != Method::Get),
+        "no resend or put-back: {:?}",
+        h.pending
+    );
+}
+
+#[test]
+fn dispatched_ambiguous_ordinary_writes_are_unknown_without_resend() {
+    for &(status, body) in AMBIGUOUS_WRITES {
+        for operation in ["create", "amend", "cancel", "leverage"] {
+            let mut h = if operation == "amend" {
+                amendment_account(AMEND_ROW).0
+            } else {
+                private()
+            };
+            match operation {
+                "create" => place(&mut h, 91, vec![opts(OrderType::Limit)]),
+                "amend" => amend(&mut h, 91, Some(101.), Some(3.)),
+                "cancel" => h.command(Command::CancelOrders {
+                    command: 91,
+                    ids: vec!["123".into()],
+                }),
+                "leverage" => h.command(Command::SetLeverage {
+                    command: 91,
+                    symbol: "BTC-USD-PERP".into(),
+                    leverage: 20.,
+                    side: None,
+                }),
+                _ => unreachable!(),
+            }
+            let writes: Vec<_> = h
+                .pending
+                .iter()
+                .filter(|r| r.method != Method::Get)
+                .cloned()
+                .collect();
+            assert_eq!(writes.len(), 1, "{operation}: {:?}", h.pending);
+            let request = h.take(&writes[0].url);
+            h.respond(request, status, body);
+            assert_dispatched_unknown(&h);
+        }
+    }
+}
+
+#[test]
+fn dispatched_ambiguous_protective_writes_are_unknown_without_put_back() {
+    for &(status, body) in AMBIGUOUS_WRITES {
+        for leg in ["create", "cancel", "amend-cancel", "replacement", "restore"] {
+            let mut h = if leg == "create" {
+                private()
+            } else {
+                with_untriggered_stop()
+            };
+            if leg == "create" {
+                // An accepted entry precedes the dispatched protective child.
+                let mut order = opts(OrderType::Limit);
+                order.client_order_id = None;
+                order.stop_loss = Some(90.);
+                place(&mut h, 91, vec![order]);
+                let entry = h.take("/orders");
+                let payload: Payload =
+                    serde_json::from_str(entry.body.as_deref().unwrap()).unwrap();
+                h.respond(
+                    entry,
+                    200,
+                    &serde_json::json!({"id":"entry", "client_id":payload.client_id}).to_string(),
+                );
+            } else if leg == "cancel" {
+                h.command(Command::CancelOrders {
+                    command: 91,
+                    ids: vec!["123".into()],
+                });
+            } else {
+                amend_stop(&mut h, 91);
+                if leg != "amend-cancel" {
+                    let cancel = take_method(&mut h, Method::Delete, "/orders/123");
+                    h.respond(cancel, 204, "");
+                    confirm_stop_cancel(&mut h);
+                    if leg == "restore" {
+                        let replacement = h.take("/orders");
+                        h.respond(
+                            replacement,
+                            400,
+                            r#"{"error":"VALIDATION","message":"refused"}"#,
+                        );
+                    }
+                }
+            }
+            let writes: Vec<_> = h
+                .pending
+                .iter()
+                .filter(|r| r.method != Method::Get)
+                .cloned()
+                .collect();
+            assert_eq!(writes.len(), 1, "{leg}: {:?}", h.pending);
+            let request = h.take(&writes[0].url);
+            h.respond(request, status, body);
+            assert_dispatched_unknown(&h);
+        }
+    }
+}
 fn opts(kind: OrderType) -> PlaceOrderOpts {
     serde_json::from_str(&format!(r#"{{"symbol":"BTC-USD-PERP","type":{},"side":"buy","amount":1,"price":100,"clientOrderId":"caller"}}"#,serde_json::to_string(&kind).unwrap())).unwrap()
 }
@@ -1779,7 +1911,7 @@ fn batch_receipts_bind_exact_native_generated_and_requested_ids_before_http() {
 }
 
 #[test]
-fn write_failures_are_classified_without_changing_their_text() {
+fn write_failures_preserve_definitive_text_and_separate_ambiguous_diagnostics() {
     use safe_cex_engine::{ErrorKind, Outcome};
     let rejected = |kind| (Some(kind), Some(Outcome::Rejected));
     for (status, body, classified, text) in [
@@ -1794,7 +1926,7 @@ fn write_failures_are_classified_without_changing_their_text() {
         (
             429,
             "",
-            (Some(ErrorKind::RateLimited), None),
+            (Some(ErrorKind::RateLimited), Some(Outcome::Unknown)),
             "Paradex HTTP 429",
         ),
         (
@@ -1814,7 +1946,15 @@ fn write_failures_are_classified_without_changing_their_text() {
         place(&mut h, 8, vec![opts(OrderType::Limit)]);
         let request = h.take("/orders");
         h.respond(request, status, body);
-        assert_eq!(h.result(8), Err(text), "{status} {body}");
+        if matches!(status, 408 | 429 | 500..) {
+            assert_eq!(
+                h.result(8),
+                Err("Paradex write outcome is unknown. Check Open Orders")
+            );
+            assert_eq!(h.failures[0].venue_message.as_deref(), Some(text));
+        } else {
+            assert_eq!(h.result(8), Err(text), "{status} {body}");
+        }
         let error = &h.failures[0];
         assert_eq!((error.kind, error.outcome), classified, "{status} {body}");
     }
