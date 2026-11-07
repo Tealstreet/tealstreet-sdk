@@ -11,7 +11,8 @@ fn chart_history_uses_get_and_correlates_its_identifierless_http_response() {
     let mut transport = Transport::default();
     let mut id = 0;
     let actions = run(1000., |cx| {
-        id = transport.http(cx, "public/get_tradingview_chart_data", json!({"instrument_name":"BTC_USDC-PERPETUAL", "resolution":"1", "start_timestamp":1794009600000u64,"end_timestamp":1794013200000u64}), None, ()).unwrap().0;
+        let context = chart_context(cx);
+        id = transport.http(cx, &context, "public/get_tradingview_chart_data", json!({"instrument_name":"BTC_USDC-PERPETUAL", "resolution":"1", "start_timestamp":1794009600000u64,"end_timestamp":1794013200000u64}), None, ()).unwrap().0;
     });
     let request = actions
         .iter()
@@ -38,8 +39,16 @@ fn chart_get_still_rejects_an_explicit_wrong_id() {
     let mut transport = Transport::default();
     let mut id = 0;
     run(1000., |cx| {
+        let context = chart_context(cx);
         id = transport
-            .http(cx, "public/get_tradingview_chart_data", json!({}), None, ())
+            .http(
+                cx,
+                &context,
+                "public/get_tradingview_chart_data",
+                json!({}),
+                None,
+                (),
+            )
             .unwrap()
             .0;
     });

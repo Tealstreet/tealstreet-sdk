@@ -19,8 +19,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         .unwrap(),
     );
     engine.start(0.0);
-    let mut request = engine
-        .drain_actions()
+    let mut request = support::actions(&mut engine)
+        .into_iter()
         .find_map(|a| match a {
             Action::Http(r) => Some(r),
             _ => None,
@@ -36,7 +36,9 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
                 error: "scripted public failure",
             },
         );
-        let actions = engine.drain_actions().collect::<Vec<_>>();
+        let actions = support::actions(&mut engine)
+            .into_iter()
+            .collect::<Vec<_>>();
         assert!(
             !actions.iter().any(|action| matches!(
                 action,
@@ -60,8 +62,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
             .expect("bounded public discovery backoff");
         now += delay;
         engine.handle(now, Event::TimerFired { timer });
-        request = engine
-            .drain_actions()
+        request = support::actions(&mut engine)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -91,6 +93,8 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     );
     assert!(engine.store().loaded().markets);
     assert!(engine.store().markets().len() >= 125);
-    let actions = engine.drain_actions().collect::<Vec<_>>();
+    let actions = support::actions(&mut engine)
+        .into_iter()
+        .collect::<Vec<_>>();
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Event(safe_cex_engine::LogEvent { message, .. })) if message.contains("Skipped malformed public discovery row"))));
 }

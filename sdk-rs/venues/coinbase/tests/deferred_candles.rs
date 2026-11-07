@@ -18,8 +18,8 @@ fn fail_catalogue(mode: u8) {
         "BTC_USDC-PERPETUAL"
     };
     engine.start(0.);
-    let catalogue = engine
-        .drain_actions()
+    let catalogue = support::actions(&mut engine)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -44,10 +44,15 @@ fn fail_catalogue(mode: u8) {
             symbol: symbol.into(),
         }),
     );
-    assert!(!engine.drain_actions().any(|action| matches!(
-        action,
-        Action::Http(_) | Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
-    )));
+    assert!(
+        !support::actions(&mut engine)
+            .into_iter()
+            .any(|action| matches!(
+                action,
+                Action::Http(_)
+                    | Action::Notice(Notice::CommandFailed { .. } | Notice::CommandDone { .. })
+            ))
+    );
     let (status, body) = match mode {
         1 | 4 => (503, "{}"),
         5 => (200, r#"{"products":[],"pagination":{"has_next":false}}"#),
@@ -75,7 +80,7 @@ fn fail_catalogue(mode: u8) {
             },
         );
     }
-    let actions: Vec<_> = engine.drain_actions().collect();
+    let actions: Vec<_> = support::actions(&mut engine).into_iter().collect();
     for command in [7, 8] {
         let errors: Vec<_> = actions
             .iter()
@@ -114,8 +119,8 @@ fn fail_catalogue(mode: u8) {
         })
         .expect("existing discovery backoff is retained");
     engine.handle(1200., Event::TimerFired { timer });
-    let retry = engine
-        .drain_actions()
+    let retry = support::actions(&mut engine)
+        .into_iter()
         .find_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,
@@ -139,8 +144,8 @@ fn fail_catalogue(mode: u8) {
         },
     );
     if mode < 4 {
-        let summary = engine
-            .drain_actions()
+        let summary = support::actions(&mut engine)
+            .into_iter()
             .find_map(|a| match a {
                 Action::Http(r) => Some(r),
                 _ => None,
@@ -159,7 +164,7 @@ fn fail_catalogue(mode: u8) {
             },
         );
     }
-    let recovered: Vec<_> = engine.drain_actions().collect();
+    let recovered: Vec<_> = support::actions(&mut engine).into_iter().collect();
     assert!(engine.store().loaded().markets);
     assert!(!recovered.iter().any(|action| matches!(
         action,
@@ -182,8 +187,8 @@ fn fail_catalogue(mode: u8) {
         .unwrap();
     engine.handle(1202., Event::WsOpened { socket });
     assert!(
-        engine
-            .drain_actions()
+        support::actions(&mut engine)
+            .into_iter()
             .any(|action| matches!(action, Action::WsSend { text, .. } if text.contains(if mode < 4 { "book.BTC_USDC-PERPETUAL.100ms" } else { "level2" }))),
         "subscription intent survives catalogue recovery"
     );

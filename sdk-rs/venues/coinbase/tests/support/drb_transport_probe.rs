@@ -16,5 +16,15 @@ impl Venue for Noop {
 fn run(now: f64, mut f: impl FnMut(&mut Cx<'_, ()>)) -> Vec<Action> {
     let mut engine = safe_cex_engine::test_support::seeded_engine(ProbeVenue::new(Noop, |_: &mut Noop, cx: &mut Cx<'_, ()>| f(cx)));
     engine.start(now);
-    engine.drain_actions().collect()
+    safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+}
+fn chart_context(cx: &mut Cx<'_, ()>) -> safe_cex_engine::request_context::Context {
+    use safe_cex_engine::request_context::{Operation, Policy, RetryPolicy, Scope};
+    cx.http_context(Scope::Background, Policy {
+        operation: Operation::Read,
+        credential: None,
+        timeout_ms: safe_cex_venue_coinbase::drb::REQUEST_TIMEOUT_MS,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }).unwrap()
 }

@@ -9,6 +9,7 @@ use zeroize::{Zeroize, Zeroizing};
 pub struct Session {
     channel: Channel,
     token: Option<Zeroizing<String>>,
+    /// Latest observed authentication start, retained after token invalidation.
     started_ms: f64,
     refresh_ms: Option<f64>,
 }
@@ -60,12 +61,10 @@ impl Session {
     /// Use request-start time so network latency cannot extend token validity.
     /// Call only after Transport has correlated a successful public/auth reply.
     pub fn accept(&mut self, result: Value, started_ms: f64) -> Result<(), String> {
-        if !started_ms.is_finite()
-            || started_ms < 0.
-            || (self.token.is_some() && started_ms < self.started_ms)
-        {
+        if !started_ms.is_finite() || started_ms < 0. || started_ms < self.started_ms {
             return Err("drb invalid or stale authentication clock".into());
         }
+        self.started_ms = started_ms;
         self.invalidate();
         let mut result: AuthResult =
             serde_json::from_value(result).map_err(|_| "drb invalid public/auth result")?;
@@ -91,7 +90,6 @@ impl Session {
             return Err("drb invalid authentication expiry".into());
         }
         self.token = Some(Zeroizing::new(std::mem::take(&mut result.access_token)));
-        self.started_ms = started_ms;
         self.refresh_ms = Some(refresh_ms);
         Ok(())
     }
@@ -111,6 +109,7 @@ impl Session {
             .as_ref()
             .map(|token| format!("Bearer {}", token.as_str()))
     }
+    /// Erase the cache while retaining the authentication completion watermark.
     pub fn invalidate(&mut self) {
         self.token = None;
         self.refresh_ms = None;

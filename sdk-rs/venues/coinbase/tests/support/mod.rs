@@ -4,8 +4,13 @@ use safe_cex_venue_coinbase::{Coinbase, Options};
 pub type Driver = Engine<Coinbase>;
 // Legacy Advanced Trade spot coverage remains alongside the drb perpetual gate.
 pub const PRODUCTS: &str = r#"{"products":[{"product_id":"BTC-USD","product_type":"SPOT","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.0001","price_increment":"0.1","base_min_size":"0.0001","base_max_size":"1000000000","price":"60000","volume_24h":"20","price_percentage_change_24h":"0"}]}"#;
+pub fn actions(e: &mut Driver) -> Vec<Action> {
+    let now = safe_cex_engine::test_support::dispatch_now(e);
+    safe_cex_engine::test_support::prepared_actions(e, now)
+}
 pub fn requests(e: &mut Driver) -> Vec<HttpRequest> {
-    e.drain_actions()
+    actions(e)
+        .into_iter()
         .filter_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)

@@ -3,6 +3,7 @@
 use safe_cex_engine::{
     Cx, ErrorKind, Method, RequestId, Response, SocketId,
     classify::{self, CodeTable, Intent, Key, Native, NativeCode, Released, Row, Verdict},
+    request_context::{Context, Operation, Session},
 };
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
@@ -225,23 +226,25 @@ impl Transport {
         Ok(())
     }
 
+    /// Queue under the caller's engine-issued authority. The caller retains the
+    /// context in its pending state and validates/finishes it on delivery.
+    /// Private bearer headers are supplied by Venue::session_bearer at prepare.
     pub fn http<P>(
         &mut self,
         cx: &mut Cx<'_, P>,
+        context: &Context,
         method: &str,
         params: Value,
-        authorization: Option<&str>,
+        session: Option<&Session>,
         pending: P,
     ) -> Result<(RpcId, RequestId), String> {
-        if method.starts_with("private/") && authorization.is_none() {
-            return Err("drb HTTP private request requires bearer authorization".into());
+        if method.starts_with("private/") && session.is_none() {
+            return Err("drb HTTP private request requires an engine bearer session".into());
         }
-        if authorization.is_some_and(|value| {
-            !value.starts_with("Bearer ")
-                || value.len() <= 7
-                || value.bytes().any(|b| b.is_ascii_control())
-        }) {
-            return Err("drb invalid bearer authorization".into());
+        if (pool_for(method) == 1 || method == "private/move_positions")
+            && context.operation() != Operation::Mutation
+        {
+            return Err("drb HTTP mutation requires a Mutation context".into());
         }
         // The production chart route is GET-only and its response has no RPC ID.
         // Keep credit admission, timeout and engine HTTP correlation in this transport.
@@ -262,21 +265,24 @@ impl Transport {
             }
         }
         let (id, body) = self.prepare(Channel::Http, method, params, cx.now)?;
-        let mut headers = vec![("Content-Type", "application/json".into())];
-        if let Some(value) = authorization {
-            headers.push(("Authorization", value.into()));
-        }
-        let request = crate::rest::emit(
-            cx,
+        let request = match cx.request_managed_with_headers(
+            context.clone(),
+            session,
             if chart_get { Method::Get } else { Method::Post },
             url,
-            headers,
+            &[("Content-Type", "application/json")],
             (!chart_get).then_some(body),
             pending,
-        );
+        ) {
+            Ok(request) => request,
+            Err((_, error)) => {
+                // Admission failed before physical release. Retire correlation;
+                // credit estimates remain conservative and no resend is queued.
+                self.in_flight.remove(&id);
+                return Err(error.to_string());
+            }
+        };
         cx.request_timeout(request, REQUEST_TIMEOUT_MS);
-        // The token was issued to this session's credential identity.
-        cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
         Ok((id, request))
     }
 

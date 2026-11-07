@@ -7,6 +7,17 @@ public, account and trading streams; S0 does not switch legacy routes itself.
 
 Integration contract:
 
+- HTTP takes the caller's engine-issued `request_context::Context` and an optional
+  engine `request_context::Session` handle. Private methods require that session;
+  its `Venue::session_bearer` callback supplies the current token at preparation,
+  and `session_bearer_revision` fences the same revision at release.
+  Retain the context with the pending request, validate its delivery, record any
+  Mutation result, and finish the context through the engine lifecycle. Production
+  writes use genuine command/Plan authority. Catalogue and ticker polls use
+  Background contexts; candle/trade queries retain their command context across
+  pages. Reads deferred during discovery retain their original caller deadline
+  and settle through `settle_caller_read_root` if the catalogue fails.
+  No raw bearer strings or legacy `Cx::request` boundary are used by drb.
 - HTTP returns `(RpcId, engine::RequestId)`; retain the RPC ID in the caller's
   pending context. Forward status/body and `cx.now` to `response_at` and transport
   loss to `failed`. WebSocket sends return an RPC ID; route responses by that ID.
@@ -16,9 +27,10 @@ Integration contract:
 - Authenticate with fresh `Session::params`, send `public/auth`, then pass its
   decoded result and request-start time to `Session::accept`. Schedule refresh
   using `refresh_at`, gate private sends with `needs_refresh`, and invalidate the
-  socket session on close and invalidate rejected credentials. HTTP uses
-  `authorization`; WS authenticates in-band. Refresh always exchanges a fresh
-  CDP JWT using `coinbase_cdp`; no refresh-token grant is assumed.
+  socket session on close and invalidate rejected credentials. Invalidation keeps
+  the authentication-start watermark, so older completions cannot revive the cache.
+  The HTTP session-bearer callback can use `authorization`; WS authenticates
+  in-band. Refresh always exchanges a fresh CDP JWT using `coinbase_cdp`; no refresh-token grant is assumed.
 - Share one transport across streams so HTTP and WS consume the same credit
   pools. Local admission errors mean the request was not sent. A caller may
   schedule new admission later; released writes must never be resent implicitly.

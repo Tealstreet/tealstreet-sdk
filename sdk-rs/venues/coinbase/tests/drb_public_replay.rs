@@ -52,7 +52,7 @@ impl Replay {
         }
     }
     fn collect(&mut self) {
-        for action in self.engine.drain_actions() {
+        for action in safe_cex_engine::test_support::prepared_actions(&mut self.engine, self.now) {
             match action {
                 Action::Http(r) => self.requests.push(r),
                 Action::SetTimer { timer, at_ms } => self.timers.push((at_ms, timer)),
@@ -533,6 +533,33 @@ fn live_trade_stream_builds_second_candles_once_per_trade() {
         candle_frame(&mut s).is_empty(),
         "replayed trades must not count volume twice"
     );
+}
+
+#[test]
+fn reads_deferred_during_startup_keep_their_caller_contexts() {
+    let mut s = Replay::new();
+    s.command(Command::FetchCandles {
+        command: 81,
+        symbol: SYMBOL.into(),
+        interval: Interval::M1,
+        limit: Some(60),
+        from_ms: s.records[0]["start"].as_f64(),
+        to_ms: s.records[0]["end"].as_f64(),
+    });
+    s.command(Command::Query {
+        command: 82,
+        query: Query::PublicTrades {
+            symbol: SYMBOL.into(),
+            limit: Some(10),
+        },
+    });
+    for _ in 0..4 {
+        let request = s.next();
+        s.reply(request);
+    }
+    s.collect();
+    assert_eq!(s.results[&81].as_array().unwrap().len(), 60);
+    assert_eq!(s.results[&82].as_array().unwrap().len(), 10);
 }
 
 #[test]

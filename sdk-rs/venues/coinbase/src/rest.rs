@@ -3,7 +3,7 @@ use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::{Cx, Method, RequestRoute, TimerId, Venue};
 use std::collections::VecDeque;
 
-/// One Coinbase HTTP emission boundary shared by the REST and drb codecs.
+/// Existing Coinbase REST HTTP emission boundary.
 pub(crate) fn emit<P>(
     cx: &mut Cx<'_, P>,
     method: Method,

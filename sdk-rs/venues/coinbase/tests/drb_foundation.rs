@@ -1,16 +1,42 @@
 //! Offline protocol oracles from Coinbase's technical guide and Deribit's
 //! complete RPC error-code table (not the conflicting introductory summary).
 use safe_cex_engine::{
-    Action, Command, Cx, ErrorKind, Response, SocketId, TimerId, Venue, book::Book,
-    classify::Verdict, test_support::ProbeVenue,
+    Action, Command, Cx, ErrorKind, Response, SocketId, TimerId, Venue,
+    book::Book,
+    classify::Verdict,
+    request_context::{
+        Operation, Policy, RetryPolicy, Scope, SessionBearer, SessionHeaders, SessionPolicy,
+    },
 };
 use safe_cex_venue_coinbase::{drb::*, drb_auth::Session, sign::Credentials};
 use serde_json::{Value, json};
 
-struct Noop;
-impl Venue for Noop {
+struct Noop<F> {
+    start: F,
+}
+impl<F: FnMut(&mut Cx<'_, ()>)> Venue for Noop<F> {
     type Pending = ();
-    fn start(&mut self, _: &mut Cx<'_, ()>) {}
+    fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        (self.start)(cx);
+    }
+    fn session_bearer(&self, _: u64) -> SessionBearer {
+        SessionBearer::Ready {
+            headers: SessionHeaders::bearer("fixture").unwrap(),
+            revision: 1,
+        }
+    }
+    fn capture_http_reconciliation(
+        &self,
+        _: &(),
+    ) -> Result<
+        safe_cex_engine::request_context::ReconciliationData,
+        safe_cex_engine::request_context::Error,
+    > {
+        safe_cex_engine::request_context::ReconciliationData::new("fixture-order".into())
+    }
+    fn session_bearer_revision(&self, _: u64) -> Option<u64> {
+        Some(1)
+    }
     fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
     fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
     fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
@@ -25,27 +51,71 @@ impl Venue for Noop {
         Box::new(std::iter::empty())
     }
 }
-fn run(now: f64, mut f: impl FnMut(&mut Cx<'_, ()>)) -> Vec<Action> {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(ProbeVenue::new(
-        Noop,
-        |_: &mut Noop, cx: &mut Cx<'_, ()>| f(cx),
-    ));
+fn run(now: f64, f: impl FnMut(&mut Cx<'_, ()>)) -> Vec<Action> {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Noop { start: f });
+    engine.start(now);
+    safe_cex_engine::test_support::prepared_actions(&mut engine, now)
+}
+fn run_staged(now: f64, f: impl FnMut(&mut Cx<'_, ()>)) -> Vec<Action> {
+    let mut engine = safe_cex_engine::test_support::seeded_engine(Noop { start: f });
     engine.start(now);
     engine.drain_actions().collect()
+}
+fn policy(operation: Operation) -> Policy {
+    Policy {
+        operation,
+        credential: None,
+        timeout_ms: REQUEST_TIMEOUT_MS,
+        pacing: None,
+        retry: RetryPolicy::Never,
+    }
+}
+// Synthetic session authority lets the shared transport fixtures exercise both
+// public and private packets. Production trading retains its command context.
+fn http(
+    t: &mut Transport,
+    cx: &mut Cx<'_, ()>,
+    method: &str,
+    params: Value,
+    authorization: Option<&str>,
+    pending: (),
+) -> Result<(RpcId, safe_cex_engine::RequestId), String> {
+    let session = authorization.map(|_| {
+        cx.open_session(SessionPolicy {
+            credential: None,
+            repeat_safe: false,
+            private_egress: None,
+        })
+        .unwrap()
+    });
+    let context = if let Some(session) = &session {
+        cx.session_context(
+            session,
+            policy(if method == "private/buy" {
+                Operation::Mutation
+            } else {
+                Operation::Read
+            }),
+        )
+    } else {
+        cx.http_context(Scope::Background, policy(Operation::Read))
+    }
+    .map_err(|e| e.to_string())?;
+    t.http(cx, &context, method, params, session.as_ref(), pending)
 }
 fn send(t: &mut Transport) -> RpcId {
     let mut id = 0;
     run(1000., |cx| {
-        id = t
-            .http(
-                cx,
-                "private/buy",
-                json!({"amount":0.001}),
-                Some("Bearer fixture"),
-                (),
-            )
-            .unwrap()
-            .0
+        id = http(
+            t,
+            cx,
+            "private/buy",
+            json!({"amount":0.001}),
+            Some("Bearer fixture"),
+            (),
+        )
+        .unwrap()
+        .0;
     });
     id
 }
@@ -86,7 +156,8 @@ fn http_and_websocket_use_single_rpc_envelopes_and_unique_ids() {
     let mut ids = vec![];
     let actions = run(1000., |cx| {
         ids.push(
-            t.http(
+            http(
+                &mut t,
                 cx,
                 "public/get_instruments",
                 json!({"currency":"USDC"}),
@@ -106,7 +177,8 @@ fn http_and_websocket_use_single_rpc_envelopes_and_unique_ids() {
             .unwrap(),
         );
         ids.push(
-            t.http(
+            http(
+                &mut t,
                 cx,
                 "private/buy",
                 json!({"amount":0.001,"price":65000.5}),
@@ -186,14 +258,10 @@ fn invalid_requests_are_never_released() {
             "public/Auth",
             "public/a/b",
         ] {
-            assert!(t.http(cx, method, json!({}), None, ()).is_err());
+            assert!(http(&mut t, cx, method, json!({}), None, ()).is_err());
         }
-        assert!(t.http(cx, "private/buy", json!({}), None, ()).is_err());
-        assert!(
-            t.http(cx, "private/buy", json!({}), Some("Bearer x\r\nx:y"), ())
-                .is_err()
-        );
-        assert!(t.http(cx, "public/test", json!([]), None, ()).is_err());
+        assert!(http(&mut t, cx, "private/buy", json!({}), None, ()).is_err());
+        assert!(http(&mut t, cx, "public/test", json!([]), None, ()).is_err());
         assert!(
             t.websocket(
                 cx,
@@ -302,8 +370,15 @@ fn credit_pools_span_http_and_ws_and_refill_without_retrying_requests() {
     run(1000., |cx| {
         for i in 0..20 {
             if i % 2 == 0 {
-                t.http(cx, "private/buy", json!({}), Some("Bearer fixture"), ())
-                    .unwrap();
+                http(
+                    &mut t,
+                    cx,
+                    "private/buy",
+                    json!({}),
+                    Some("Bearer fixture"),
+                    (),
+                )
+                .unwrap();
             } else {
                 t.websocket(cx, SocketId(1), "private/sell", json!({}))
                     .unwrap();
@@ -314,7 +389,7 @@ fn credit_pools_span_http_and_ws_and_refill_without_retrying_requests() {
                 .is_err()
         );
         // General query credits are separate from matching-engine credits.
-        t.http(cx, "public/test", json!({}), None, ()).unwrap();
+        http(&mut t, cx, "public/test", json!({}), None, ()).unwrap();
     });
     run(1199., |cx| {
         assert!(
@@ -371,8 +446,15 @@ fn rate_limit_reply_exhausts_local_credits_without_resending() {
     .unwrap_err();
     let actions = run(1000., |cx| {
         assert!(
-            t.http(cx, "private/buy", json!({}), Some("Bearer fixture"), ())
-                .is_err()
+            http(
+                &mut t,
+                cx,
+                "private/buy",
+                json!({}),
+                Some("Bearer fixture"),
+                ()
+            )
+            .is_err()
         )
     });
     assert!(actions.is_empty());
@@ -451,7 +533,7 @@ fn auth_exchange_signs_fresh_cdp_jwt_and_keeps_it_out_of_urls() {
         assert_eq!(claims["exp"], 1120);
         let mut t = Transport::default();
         let actions = run(1_000_000., |cx| {
-            t.http(cx, "public/auth", a.clone(), None, ()).unwrap();
+            http(&mut t, cx, "public/auth", a.clone(), None, ()).unwrap();
         });
         let request = actions
             .into_iter()
@@ -630,4 +712,70 @@ fn auth_rejects_stale_updates_and_debug_omits_tokens_and_gateway_error_text() {
         failure.rpc_error.unwrap().data.unwrap()["token"],
         "fixture-secret"
     );
+}
+
+#[test]
+fn invalidation_keeps_the_auth_completion_watermark() {
+    let mut session = Session::new(Channel::Http);
+    session.accept(auth_result(3600), 2000.).unwrap();
+    // A credential refusal invalidates the accepted authentication.
+    session.invalidate();
+    // A delayed, correlated reply from the older auth must not revive it.
+    assert!(session.accept(auth_result(3600), 1000.).is_err());
+    assert!(session.authorization(2001.).is_none());
+    assert!(session.needs_refresh(2001.));
+    // A genuinely fresh exchange remains admissible after invalidation.
+    session.accept(auth_result(3600), 3000.).unwrap();
+    assert_eq!(
+        session.authorization(3001.).as_deref(),
+        Some("Bearer fixture-access")
+    );
+}
+
+#[test]
+fn http_requests_require_managed_preparation_before_physical_release() {
+    let mut transport = Transport::default();
+    let actions = run_staged(1000., |cx| {
+        http(
+            &mut transport,
+            cx,
+            "public/get_instruments",
+            json!({"currency":"USDC"}),
+            None,
+            (),
+        )
+        .unwrap();
+    });
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, Action::ManagedHttp(_)))
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+}
+
+#[test]
+fn read_context_cannot_authorize_an_http_order_mutation() {
+    let mut transport = Transport::default();
+    run_staged(1000., |cx| {
+        let session = cx
+            .open_session(SessionPolicy {
+                credential: None,
+                repeat_safe: false,
+                private_egress: None,
+            })
+            .unwrap();
+        let read = cx
+            .http_context(Scope::Background, policy(Operation::Read))
+            .unwrap();
+        assert!(
+            transport
+                .http(cx, &read, "private/buy", json!({}), Some(&session), ())
+                .is_err()
+        );
+    });
 }
