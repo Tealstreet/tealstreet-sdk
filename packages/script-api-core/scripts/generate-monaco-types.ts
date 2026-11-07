@@ -14,9 +14,9 @@
  *     `declare module '...' { ... }` block.
  *   - Sorts nodes for deterministic output (drift-test stability).
  *
- * Runtime constraint: this generator runs under Bun (via the root
- * `yarn generate:types` script) and under Node (via the vitest drift
- * test). It must use only platform-neutral APIs (`fs`/`path`/`url`)
+ * Runtime constraint: this generator runs under Bun (NX’s root
+ * `yarn generate:types`) and Node (the mirror’s `corepack yarn generate:script-types`
+ * and the Vitest drift test). It must use only platform-neutral APIs (`fs`/`path`/`url`)
  * plus the bundler. See SPEC §11 Phase 6.
  */
 import * as path from 'path';

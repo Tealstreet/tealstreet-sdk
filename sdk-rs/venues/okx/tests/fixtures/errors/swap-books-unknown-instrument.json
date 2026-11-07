@@ -1,0 +1,12 @@
+{
+  "source": "live",
+  "captured_at": "2026-10-28T02:19:09.198Z",
+  "endpoint": "/api/v5/market/books?instId=NOPE-USDT-SWAP",
+  "http_status": 200,
+  "body": "{\"code\":\"51001\",\"msg\":\"Instrument ID does not exist.\"}",
+  "expect": {
+    "kind": null,
+    "outcome": null,
+    "path": "read"
+  }
+}

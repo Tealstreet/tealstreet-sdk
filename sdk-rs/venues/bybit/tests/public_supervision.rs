@@ -255,6 +255,7 @@ fn suppressed_public_feed_is_not_supervised() {
         progress_at_request: vec![],
         startup_failures: vec![],
         deactivated: false,
+        prepared_routes: std::collections::HashMap::new(),
     };
     h.engine.start(h.now);
     h.collect();

@@ -283,6 +283,47 @@ const SIGNATURE: &str = r#"{"code":-1022,"msg":"Signature for this request is no
 const TIMESTAMP: &str =
     r#"{"code":-1021,"msg":"Timestamp for this request was outside of the recvWindow."}"#;
 
+fn ambiguous_http_response_never_resends(body: &str) {
+    for status in [429, 408, 500, 503] {
+        for (command_of, method, path) in [
+            (place as fn() -> Command, Method::Post, "/order"),
+            (cancel as fn() -> Command, Method::Delete, "/order"),
+            (leverage as fn() -> Command, Method::Post, "/leverage"),
+        ] {
+            let mut e = engine();
+            let sent = command(&mut e, command_of());
+            managed(&sent, 1);
+            let first = write(&sent, method, path).clone();
+            // drain() answers any clock resync through the real engine, so a
+            // timestamp retry is counted at physical release, after resync.
+            let after = answer(&mut e, &first, status, body);
+            let extra_writes = after
+                .requests
+                .iter()
+                .filter(|request| request.method != Method::Get)
+                .count();
+            assert_eq!(
+                1 + extra_writes,
+                1,
+                "HTTP {status} {method:?} {path} {body}: one physical write; released {:?}",
+                after.released
+            );
+            let error = terminal(&after).expect("one terminal").unwrap_err();
+            assert_eq!(error.outcome, Some(Outcome::Unknown), "{error:?}");
+        }
+    }
+}
+
+#[test]
+fn ambiguous_http_timestamp_response_never_resends_a_released_write() {
+    ambiguous_http_response_never_resends(TIMESTAMP);
+}
+
+#[test]
+fn ambiguous_http_signature_response_never_resends_a_released_write() {
+    ambiguous_http_response_never_resends(SIGNATURE);
+}
+
 #[test]
 fn a_placement_is_one_managed_plan_leg_with_its_native_result() {
     let mut e = engine();
@@ -377,6 +418,79 @@ fn a_timestamp_rejection_resyncs_then_resends_each_write_method_once() {
         let error = terminal(&failed).expect("one terminal").unwrap_err();
         assert_eq!(error.outcome, Some(Outcome::Rejected), "{error:?}");
     }
+}
+
+/// A placed order must report placed: a failure here makes the user place it again.
+#[test]
+fn a_write_placed_by_its_timestamp_resend_reports_success() {
+    for (command_of, method, path, body) in [
+        (
+            place as fn() -> Command,
+            Method::Post,
+            "/order",
+            r#"{"orderId":12345}"#,
+        ),
+        (
+            cancel as fn() -> Command,
+            Method::Delete,
+            "/order",
+            r#"{"status":"CANCELED"}"#,
+        ),
+        (
+            leverage as fn() -> Command,
+            Method::Post,
+            "/leverage",
+            r#"{"leverage":10,"symbol":"BTCUSDT"}"#,
+        ),
+    ] {
+        let mut e = engine();
+        if path == "/order" && method == Method::Delete {
+            e.store_mut().set_orders(vec![open("777")]);
+        }
+        let sent = command(&mut e, command_of());
+        let first = write(&sent, method, path).clone();
+        let resent = answer(&mut e, &first, 400, TIMESTAMP);
+        let second = write(&resent, method, path).clone();
+        let done = answer(&mut e, &second, 200, body);
+        let result = terminal(&done).expect("one terminal");
+        assert!(result.is_ok(), "{path}: {result:?}");
+        if method == Method::Post && path == "/order" {
+            assert_eq!(
+                result.unwrap(),
+                r#"["12345"]"#,
+                "the placed id, not a partial failure"
+            );
+        }
+    }
+}
+
+/// Two orders, the first refused for its timestamp then placed by the resend: both report placed.
+#[test]
+fn a_batch_whose_first_order_needed_a_timestamp_resend_reports_every_id() {
+    let mut e = engine();
+    let order = |price: f64| {
+        serde_json::from_value(
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1.0,"price":price}),
+        )
+        .unwrap()
+    };
+    let sent = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: COMMAND,
+            orders: vec![order(9300.0), order(9200.0)],
+        },
+    );
+    let first = write(&sent, Method::Post, "/order").clone();
+    let resent = answer(&mut e, &first, 400, TIMESTAMP);
+    let second = write(&resent, Method::Post, "/order").clone();
+    let next = answer(&mut e, &second, 200, r#"{"orderId":1}"#);
+    let third = write(&next, Method::Post, "/order").clone();
+    let done = answer(&mut e, &third, 200, r#"{"orderId":2}"#);
+    assert_eq!(
+        terminal(&done).expect("one terminal").unwrap(),
+        r#"["1","2"]"#
+    );
 }
 
 #[test]
@@ -602,6 +716,29 @@ fn a_fresh_order_read_with_a_rejected_row_keeps_the_fence() {
     assert_eq!(error.outcome, Some(Outcome::NotSent), "{error:?}");
 }
 
+/// A rejected row names its market: it cannot be an uncertain order on another
+/// one, so it no longer holds every symbol's fence for as long as it is listed.
+#[test]
+fn a_rejected_row_on_another_market_releases_the_fence() {
+    let mut e = engine();
+    let sent = command(&mut e, place());
+    let lost = write(&sent, Method::Post, "/order").clone();
+    let failed = answer(&mut e, &lost, 503, "upstream timeout");
+    let fresh = failed
+        .requests
+        .iter()
+        .find(|r| r.url.contains("/openOrders"))
+        .expect("the reconcile read starts at once")
+        .clone();
+    answer(
+        &mut e,
+        &fresh,
+        200,
+        r#"[{"orderId":77,"symbol":"ETHUSDT"}]"#,
+    );
+    write(&command(&mut e, place()), Method::Post, "/order");
+}
+
 /// Cancel-all keeps the engine's default fence: refused NotSent while a
 /// placement is Unknown, because it could miss the uncertain order. Cancel by
 /// ID stays admitted; the fresh read releases cancel-all too.
@@ -639,7 +776,9 @@ fn an_unknown_placement_fences_cancel_all_but_not_cancel_by_id() {
     answer(&mut e, &fresh, 200, "[]");
     answer(&mut e, &delete, 200, r#"{"status":"CANCELED"}"#);
     // Admitted now; the fresh read showed no open orders, so there is nothing to cancel.
-    let admitted = command(&mut e, cancel_all());
+    let mut admitted = command(&mut e, cancel_all());
+    let sweep = write(&admitted, Method::Delete, "/allOpenOrders").clone();
+    admitted = answer(&mut e, &sweep, 200, r#"{"code":"200","msg":"done"}"#);
     assert!(
         terminal(&admitted).expect("one terminal").is_ok(),
         "cancel-all is admitted after the fresh read: {:?}",
@@ -779,19 +918,20 @@ fn a_non_json_throttle_on_a_write_is_rate_limited() {
         let sent = command(&mut e, place());
         let order = write(&sent, Method::Post, "/order").clone();
         let failed = answer(&mut e, &order, status, "Too Many Requests");
-        assert!(failed.requests.is_empty());
+        assert!(
+            failed
+                .requests
+                .iter()
+                .all(|request| request.method == Method::Get)
+        );
         let error = terminal(&failed).expect("one terminal").unwrap_err();
         assert_eq!(
             error.kind,
             Some(ErrorKind::RateLimited),
             "{status}: {error:?}"
         );
-        // A documented throttle refused the write; it is not an unknown outcome.
-        assert_eq!(
-            error.outcome,
-            Some(Outcome::Rejected),
-            "{status}: {error:?}"
-        );
+        // A released throttle cannot prove that the write was not accepted.
+        assert_eq!(error.outcome, Some(Outcome::Unknown), "{status}: {error:?}");
     }
 }
 

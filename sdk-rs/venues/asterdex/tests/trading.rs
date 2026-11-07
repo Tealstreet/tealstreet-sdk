@@ -103,19 +103,75 @@ impl Harness {
             .unwrap_or_else(|| panic!("missingorder: {:?}", self.requests));
         self.requests.remove(index)
     }
+    /// The by-symbol cancel that follows a symbol's row cancels, answered as Aster does.
+    fn sweep(&mut self, symbol: &str) {
+        let index = self
+            .requests
+            .iter()
+            .position(|r| r.method == Method::Delete && r.url.contains("/allOpenOrders?"))
+            .unwrap_or_else(|| panic!("missing allOpenOrders: {:?}", self.requests));
+        let request = self.requests.remove(index);
+        assert!(
+            request.url.contains(&format!("symbol={symbol}&")),
+            "{}",
+            request.url
+        );
+        self.reply(
+            request,
+            r#"{"code":"200","msg":"The operation of cancel all open order is done."}"#,
+        );
+    }
     fn reply(&mut self, request: HttpRequest, body: &str) {
+        self.reply_status(request, 200, body);
+    }
+    fn reply_status(&mut self, request: HttpRequest, status: u16, body: &str) {
         self.engine.handle(
             1700000000000.0,
             Event::HttpResponse {
                 request: request.id,
                 response: Response {
-                    status: 200,
+                    status,
                     headers: "",
                     body,
                 },
             },
         );
         self.collect();
+    }
+    /// Starts the venue on `info` as its exchangeInfo, settling the one-way mode read.
+    fn load(&mut self, info: &str) {
+        self.engine.start(1700000000000.0);
+        self.collect();
+        for (path, body) in [
+            ("/exchangeInfo", info),
+            ("/positionSide/dual", r#"{"dualSidePosition":false}"#),
+        ] {
+            let index = self
+                .requests
+                .iter()
+                .position(|r| r.url.contains(path))
+                .unwrap_or_else(|| panic!("missing {path}: {:?}", self.requests));
+            let request = self.requests.remove(index);
+            self.reply(request, body);
+        }
+    }
+    fn native_stop(&mut self) {
+        if !self.requests.iter().any(|r| r.url.contains("/openOrders")) {
+            self.load(r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":1,"quantityPrecision":3,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"2"}]}]}"#);
+        }
+        let i = self
+            .requests
+            .iter()
+            .position(|r| r.url.contains("/openOrders"))
+            .unwrap();
+        let read = self.requests.remove(i);
+        self.reply(read, r#"[{"orderId":283194212,"symbol":"BTCUSDT","type":"STOP_MARKET","side":"SELL","price":"0","stopPrice":"9300","origQty":"1","executedQty":"0","reduceOnly":true,"closePosition":false,"workingType":"CONTRACT_PRICE","priceProtect":false,"status":"NEW","timeInForce":"GTX"}]"#);
+        self.engine.store_mut().set_tickers(vec![Ticker {
+            symbol: "BTCUSDT".into(),
+            last: 10000.0,
+            mark: 10000.0,
+            ..Ticker::default()
+        }]);
     }
     fn place(&mut self, order: serde_json::Value) {
         self.command(Command::PlaceOrders {
@@ -286,7 +342,7 @@ fn trailing_and_v1_stp_fail_before_write() {
     assert!(h.result(2).is_err());
 }
 #[test]
-fn individual_batch_failure_continues_and_returns_successful_ids() {
+fn a_refused_order_fails_the_command_and_names_the_placed_one() {
     let mut h = Harness::new();
     h.command(Command::PlaceOrders {
         command: 1,
@@ -299,7 +355,9 @@ fn individual_batch_failure_continues_and_returns_successful_ids() {
     h.reply(first, r#"{"code":-2010,"msg":"insufficient margin"}"#);
     let second = h.take(Method::Post);
     h.reply(second, r#"{"orderId":22542179}"#);
-    assert_eq!(h.result(1).as_ref().unwrap(), "[\"22542179\"]");
+    assert!(h.result(1).is_err());
+    let error = &h.failures.last().unwrap().1;
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["22542179"]);
 }
 #[test]
 fn cancel_unknown_is_idempotent_and_does_not_replace_filled_status() {
@@ -326,9 +384,7 @@ fn cancel_unknown_is_idempotent_and_does_not_replace_filled_status() {
 #[test]
 fn amend_uses_cancel_then_post_preserving_trigger_basis_and_tif() {
     let mut h = Harness::new();
-    h.engine
-        .store_mut()
-        .set_orders(vec![order("283194212", OrderType::StopLoss)]);
+    h.native_stop();
     h.command(Command::AmendOrder {
         command: 1,
         id: "283194212".into(),
@@ -336,7 +392,11 @@ fn amend_uses_cancel_then_post_preserving_trigger_basis_and_tif() {
         amount: Some(0.3),
     });
     let cancel = h.take(Method::Delete);
-    assert!(!h.requests.iter().any(|r| r.method == Method::Post));
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains("/order?"))
+    );
     h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
     let place = h.take(Method::Post);
     assert!(place.url.contains(
@@ -532,7 +592,7 @@ fn malformed_ack_is_not_success_and_ambiguous_write_is_never_retried() {
 }
 
 #[test]
-fn per_item_validation_failure_preserves_other_valid_batch_orders() {
+fn a_locally_invalid_order_still_sends_the_valid_one_and_names_it() {
     let mut h = Harness::new();
     let mut invalid = limit();
     invalid["symbol"] = json!("UNKNOWN");
@@ -545,7 +605,9 @@ fn per_item_validation_failure_preserves_other_valid_batch_orders() {
     });
     let valid = h.take(Method::Post);
     h.reply(valid, r#"{"orderId":22542179}"#);
-    assert_eq!(h.result(1).as_ref().unwrap(), "[\"22542179\"]");
+    assert!(h.result(1).is_err());
+    let error = &h.failures.last().unwrap().1;
+    assert_eq!(error.partial.as_ref().unwrap().order_ids, ["22542179"]);
 }
 
 #[test]
@@ -568,9 +630,7 @@ fn documented_algo_capacity_rejects_new_stop_but_allows_cancel_replace_at_limit(
         .unwrap();
     let mode = h.requests.remove(index);
     h.reply(mode, r#"{"dualSidePosition":false}"#);
-    h.engine
-        .store_mut()
-        .set_orders(vec![order("283194212", OrderType::StopLoss)]);
+    h.native_stop();
     h.place(json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":1,"triggerPrice":9200}));
     assert!(
         !h.requests
@@ -822,12 +882,14 @@ fn symbol_cancel_includes_acknowledged_order_before_rest_or_private_new() {
     let cancel = h.take(Method::Delete);
     assert!(cancel.url.contains("symbol=BTCUSDT&orderId=22542179&"));
     h.reply(cancel, r#"{"orderId":22542179,"status":"CANCELED"}"#);
+    h.sweep("BTCUSDT");
     assert!(h.result(2).is_ok());
     h.command(Command::CancelSymbolOrders {
         command: 3,
         symbol: "BTCUSDT".into(),
     });
-    assert!(!h.requests.iter().any(|r| r.method == Method::Delete));
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+    h.sweep("BTCUSDT");
     assert!(h.result(3).is_ok());
 }
 
@@ -846,7 +908,8 @@ fn symbol_cancel_retires_ack_provenance_when_store_has_seen_the_order() {
     });
     let cancel = h.take(Method::Delete);
     h.reply(cancel, r#"{"orderId":22542179,"status":"CANCELED"}"#);
-    assert!(!h.requests.iter().any(|r| r.method == Method::Delete));
+    assert!(!h.requests.iter().any(|r| r.url.contains("/order?")));
+    h.sweep("BTCUSDT");
     assert!(h.result(2).is_ok());
 }
 
@@ -1019,6 +1082,13 @@ fn trading_failures_carry_the_aster_code_kind_and_outcome() {
             Outcome::Unknown,
         ),
         (
+            401,
+            // The wording Aster answers from an IP the key's whitelist excludes.
+            r#"{"code":-2015,"msg":"Ip not in whitelist"}"#,
+            Some(ErrorKind::AuthInvalid),
+            Outcome::Rejected,
+        ),
+        (
             200,
             r#"{"code":200,"msg":"success"}"#,
             // An acknowledgement without an order ID is an unproven reply.
@@ -1054,6 +1124,14 @@ fn trading_failures_carry_the_aster_code_kind_and_outcome() {
             &Err(error.message.clone()),
             "text is unchanged"
         );
+        assert_eq!(
+            error
+                .message
+                .ends_with(safe_cex_engine::error::IP_WHITELIST_HINT),
+            body.contains("whitelist"),
+            "{}",
+            error.message
+        );
     }
 }
 
@@ -1067,4 +1145,405 @@ fn capability_profile_v1_does_not_advertise_stp() {
 fn capability_profile_v3_keeps_stp_advertised() {
     let h = Harness::options(v3_options());
     assert!(h.engine.capabilities().stp_controls);
+}
+
+// deaws2's live bodies follow.
+#[test]
+fn a_price_amend_of_a_partly_filled_order_sends_what_is_left() {
+    let mut h = Harness::new();
+    let mut partial = order("367384866", OrderType::Limit);
+    partial.amount = 1.0;
+    partial.filled = 0.4;
+    partial.remaining = 0.6;
+    h.engine.store_mut().set_orders(vec![partial]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "367384866".into(),
+        price: Some(9200.0),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":367384866,"status":"CANCELED"}"#);
+    let place = h.take(Method::Post);
+    assert!(place.url.contains("quantity=0.6"), "{}", place.url);
+}
+
+#[test]
+fn an_amend_size_at_or_below_the_filled_amount_is_refused_before_any_write() {
+    let mut h = Harness::new();
+    let mut partial = order("367384866", OrderType::Limit);
+    partial.amount = 590.0;
+    partial.filled = 268.0;
+    partial.remaining = 322.0;
+    h.engine.store_mut().set_orders(vec![partial]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "367384866".into(),
+        price: None,
+        amount: Some(268.0),
+    });
+    assert!(h.result(1).is_err());
+    assert!(!h.requests.iter().any(|r| r.method != Method::Get));
+}
+
+#[test]
+fn a_refused_stop_replacement_restores_or_says_the_stop_is_gone() {
+    let mut h = Harness::new();
+    h.native_stop();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(9200.04),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+    let place = h.take(Method::Post);
+    h.reply(
+        place,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let restore = h.take(Method::Post);
+    assert!(restore.url.contains("stopPrice=9300"));
+    h.reply(
+        restore,
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let message = h.result(1).as_ref().unwrap_err();
+    assert!(message.contains("no stop"), "{message}");
+}
+
+#[test]
+fn live_1000_refusals_are_not_an_uncertain_placement() {
+    for message in [
+        "No agent found",
+        "Signature check failed",
+        "Your device time must match the actual time within 5 seconds",
+    ] {
+        let mut h = Harness::new();
+        h.place(limit());
+        let place = h.take(Method::Post);
+        h.reply(place, &format!(r#"{{"code":-1000,"msg":"{message}"}}"#));
+        assert!(h.result(1).is_err());
+        h.place(limit());
+        assert!(
+            h.requests.iter().any(|r| r.method == Method::Post),
+            "{message} left a fence"
+        );
+    }
+}
+
+#[test]
+fn an_amend_below_the_value_minimum_is_refused_before_the_cancel() {
+    let mut h = Harness::new();
+    h.engine.start(1700000000000.0);
+    h.collect();
+    let index = h
+        .requests
+        .iter()
+        .position(|r| r.url.ends_with("/exchangeInfo"))
+        .unwrap();
+    let info = h.requests.remove(index);
+    h.reply(info, r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","pricePrecision":2,"quantityPrecision":3,"filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"2"},{"filterType":"MIN_NOTIONAL","notional":"5"}]}]}"#);
+    let index = h
+        .requests
+        .iter()
+        .position(|r| r.url.contains("/positionSide/dual"))
+        .unwrap();
+    let mode = h.requests.remove(index);
+    h.reply(mode, r#"{"dualSidePosition":false}"#);
+    let mut resting = order("283194212", OrderType::Limit);
+    resting.reduce_only = false;
+    h.engine.store_mut().set_orders(vec![resting]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(0.1),
+        amount: None,
+    });
+    assert!(!h.requests.iter().any(|r| r.method == Method::Delete));
+    assert!(
+        format!("{:?}", h.done).contains("the order is unchanged"),
+        "{:?}",
+        h.done
+    );
+}
+
+#[test]
+fn a_refused_limit_replacement_says_the_order_is_gone() {
+    let mut h = Harness::new();
+    h.engine
+        .store_mut()
+        .set_orders(vec![order("283194212", OrderType::Limit)]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(9200.04),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+    let place = h.take(Method::Post);
+    h.reply(
+        place,
+        r#"{"code":-2022,"msg":"ReduceOnly Order is rejected."}"#,
+    );
+    let message = h.result(1).as_ref().unwrap_err();
+    assert!(message.contains("order is gone"), "{message}");
+}
+
+#[test]
+fn symbol_cancel_hits_the_venue_with_no_order_in_the_store() {
+    let mut h = Harness::new();
+    h.command(Command::CancelSymbolOrders {
+        command: 4,
+        symbol: "BTCUSDT".into(),
+    });
+    h.sweep("BTCUSDT");
+    assert!(h.result(4).is_ok());
+}
+
+/// Aster's Cancel All Open Orders documents its success as
+/// `{"code":"200","msg":"The operation of cancel all open order is done."}`;
+/// any other answer leaves orders resting, so cancel-all (and a Nuke leg) fails.
+#[test]
+fn a_refused_cancel_all_sweep_fails_the_command_even_after_row_cancels() {
+    const LIMITED: &str = r#"{"code":-1003,"msg":"Too many requests; current limit of IP(1.2.3.4) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API."}"#;
+    let refusals = [
+        (429, LIMITED, "Too many requests"),
+        (200, LIMITED, "Too many requests"),
+        (
+            400,
+            r#"{"code":-1102,"msg":"Mandatory parameter 'symbol' was not sent, was empty/null, or malformed."}"#,
+            "Mandatory parameter",
+        ),
+        (
+            200,
+            r#"{"code":"500","msg":"Cancel all open order failed."}"#,
+            "Cancel all open order failed.",
+        ),
+    ];
+    for v3 in [false, true] {
+        for (status, body, told) in refusals {
+            for with_row in [false, true] {
+                let mut h = if v3 {
+                    Harness::options(v3_options())
+                } else {
+                    Harness::new()
+                };
+                if with_row {
+                    h.engine
+                        .store_mut()
+                        .set_orders(vec![order("283194212", OrderType::Limit)]);
+                }
+                h.command(Command::CancelSymbolOrders {
+                    command: 7,
+                    symbol: "BTCUSDT".into(),
+                });
+                if with_row {
+                    let cancel = h.take(Method::Delete);
+                    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+                }
+                let index = h
+                    .requests
+                    .iter()
+                    .position(|r| r.url.contains("/allOpenOrders?"))
+                    .expect("the sweep follows the row cancels");
+                let sweep = h.requests.remove(index);
+                h.reply_status(sweep, status, body);
+                let message = h.result(7).as_ref().expect_err(body);
+                if status == 429 {
+                    let error = &h.failures.iter().find(|(id, _)| *id == 7).unwrap().1;
+                    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                    assert_eq!(
+                        error.message,
+                        "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
+                    );
+                } else {
+                    assert!(message.contains(told), "{v3} {status} {body}: {message}");
+                }
+            }
+        }
+    }
+}
+
+/// Aster's live BTCUSDT row (2026-11-02): LOT_SIZE allows 1000 but MARKET_LOT_SIZE only 120.
+const BTC_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","filters":[{"minPrice":"1","maxPrice":"1000000","filterType":"PRICE_FILTER","tickSize":"0.1"},{"stepSize":"0.001","filterType":"LOT_SIZE","maxQty":"1000","minQty":"0.001"},{"stepSize":"0.001","filterType":"MARKET_LOT_SIZE","maxQty":"120","minQty":"0.001"},{"limit":200,"filterType":"MAX_NUM_ORDERS"},{"limit":10,"filterType":"MAX_NUM_ALGO_ORDERS"},{"notional":"5","filterType":"MIN_NOTIONAL"},{"multiplierDown":"0.9800","multiplierUp":"1.0200","ltMultiplierDown":"0","multiplierDecimal":"4","filterType":"PERCENT_PRICE","ltMultiplierUp":"0"}],"orderTypes":["LIMIT","MARKET","STOP","STOP_MARKET","TAKE_PROFIT","TAKE_PROFIT_MARKET","TRAILING_STOP_MARKET"],"timeInForce":["GTC","IOC","GTX","HIDDEN"],"createTime":1630045468108,"pair":"BTCUSDT","contractType":"PERPETUAL","deliveryDate":4133404800000,"onboardDate":1627628400000,"status":"TRADING","maintMarginPercent":"2.5000","requiredMarginPercent":"5.0000","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":1,"quantityPrecision":3,"baseAssetPrecision":8,"quotePrecision":8,"underlyingType":"COIN","underlyingSubType":["Top"],"symbolType":0,"tradingMode":0,"name":"","channel":"","sequenceNo":10,"twapMinNotional":"1000","imn":"16000.00","tags":[],"settlePlan":0,"triggerProtect":"0.0200","liquidationFee":"0.025000","marketTakeBound":"0.02"}]}"#;
+
+fn quantities(h: &mut Harness) -> Vec<String> {
+    let mut sent = Vec::new();
+    while let Some(index) = h
+        .requests
+        .iter()
+        .position(|r| r.method == Method::Post && r.url.contains("/order?"))
+    {
+        let request = h.requests.remove(index);
+        let quantity = request
+            .url
+            .split('&')
+            .find_map(|pair| pair.strip_prefix("quantity="))
+            .unwrap_or_default()
+            .to_owned();
+        sent.push(quantity);
+        h.reply(request, &format!(r#"{{"orderId":{}}}"#, 900 + sent.len()));
+    }
+    sent
+}
+
+/// Market orders, a Nuke's reduce-only close among them, split at
+/// MARKET_LOT_SIZE.maxQty; a limit order keeps LOT_SIZE.maxQty.
+#[test]
+fn market_orders_split_at_the_market_lot_maximum_and_limits_at_the_lot_maximum() {
+    for v3 in [false, true] {
+        for reduce_only in [false, true] {
+            let mut h = if v3 {
+                Harness::options(v3_options())
+            } else {
+                Harness::new()
+            };
+            h.load(BTC_INFO);
+            h.place(json!({"symbol":"BTCUSDT","type":"market","side":"sell","amount":250.0,"reduceOnly":reduce_only}));
+            assert_eq!(
+                quantities(&mut h),
+                ["120", "120", "10"],
+                "{v3} {reduce_only}"
+            );
+            assert!(h.result(1).is_ok());
+            h.done.clear();
+            h.place(json!({"symbol":"BTCUSDT","type":"limit","side":"sell","amount":250.0,"price":70000.0,"reduceOnly":reduce_only}));
+            assert_eq!(quantities(&mut h), ["250"], "{v3} {reduce_only}");
+        }
+    }
+}
+
+/// A market remainder below MARKET_LOT_SIZE.minQty borrows from the chunk before
+/// it, on MARKET_LOT_SIZE.stepSize. Live filters share LOT_SIZE's step and minimum;
+/// this body changes only those two to show which filter governs.
+#[test]
+fn a_market_split_keeps_every_chunk_on_the_market_lot_step_and_minimum() {
+    let info = BTC_INFO.replace(
+        r#"{"stepSize":"0.001","filterType":"MARKET_LOT_SIZE","maxQty":"120","minQty":"0.001"}"#,
+        r#"{"stepSize":"0.01","filterType":"MARKET_LOT_SIZE","maxQty":"120","minQty":"0.05"}"#,
+    );
+    let mut h = Harness::new();
+    h.load(&info);
+    h.place(json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":240.024}));
+    assert_eq!(quantities(&mut h), ["120", "119.97", "0.05"]);
+    h.place(
+        json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":240.0234,"price":70000.0}),
+    );
+    assert_eq!(quantities(&mut h), ["240.023"]);
+}
+
+/// Aster's exchangeInfo says of quantityPrecision "please do not use it as
+/// stepSize"; CFXUSDT reports quantityPrecision 1 with LOT_SIZE stepSize 1.
+const CFX_INFO: &str = r#"{"symbols":[{"symbol":"CFXUSDT","filters":[{"minPrice":"0.000100","maxPrice":"2000","filterType":"PRICE_FILTER","tickSize":"0.000010"},{"stepSize":"1","filterType":"LOT_SIZE","maxQty":"20000000","minQty":"1"},{"stepSize":"1","filterType":"MARKET_LOT_SIZE","maxQty":"2000000","minQty":"1"},{"limit":200,"filterType":"MAX_NUM_ORDERS"},{"limit":10,"filterType":"MAX_NUM_ALGO_ORDERS"},{"notional":"5","filterType":"MIN_NOTIONAL"},{"multiplierDown":"0.9000","multiplierUp":"1.1000","ltMultiplierDown":"0","multiplierDecimal":"4","filterType":"PERCENT_PRICE","ltMultiplierUp":"0"}],"orderTypes":["LIMIT","MARKET","STOP","STOP_MARKET","TAKE_PROFIT","TAKE_PROFIT_MARKET","TRAILING_STOP_MARKET"],"timeInForce":["GTC","IOC","GTX","HIDDEN"],"createTime":1683200686304,"pair":"CFXUSDT","contractType":"PERPETUAL","deliveryDate":4133404800000,"onboardDate":1778082000000,"status":"TRADING","maintMarginPercent":"2.5000","requiredMarginPercent":"5.0000","baseAsset":"CFX","quoteAsset":"USDT","marginAsset":"USDT","pricePrecision":6,"quantityPrecision":1,"baseAssetPrecision":8,"quotePrecision":8,"underlyingType":"COIN","underlyingSubType":[],"symbolType":0,"tradingMode":0,"name":"","channel":"{}","sequenceNo":0,"twapMinNotional":"1000","imn":"4000.00","tags":[],"settlePlan":0,"triggerProtect":"0.1000","liquidationFee":"0.025000","marketTakeBound":"0.10"}]}"#;
+
+fn cfx_order() -> Order {
+    let mut resting = order("5104447791", OrderType::Limit);
+    resting.symbol = "CFXUSDT".into();
+    resting.price = 0.15;
+    resting.amount = 100.0;
+    resting.remaining = 100.0;
+    resting
+}
+
+#[test]
+fn the_amount_step_is_the_lot_step_not_quantity_precision() {
+    let mut h = Harness::new();
+    h.load(CFX_INFO);
+    let market = h.engine.store().market("CFXUSDT").unwrap();
+    assert_eq!(market.precision.amount, 1.0);
+    assert_eq!(market.limits.amount.min, 1.0);
+}
+
+/// An amend whose size is off the lot step is rounded onto it before the cancel;
+/// one that rounds to nothing is refused before any cancel is sent.
+#[test]
+fn an_off_step_amend_is_rounded_or_refused_before_the_cancel() {
+    for v3 in [false, true] {
+        let mut h = if v3 {
+            Harness::options(v3_options())
+        } else {
+            Harness::new()
+        };
+        h.load(CFX_INFO);
+        h.engine.store_mut().set_orders(vec![cfx_order()]);
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: "5104447791".into(),
+            price: None,
+            amount: Some(0.4),
+        });
+        assert!(
+            !h.requests.iter().any(|r| r.method == Method::Delete),
+            "{v3}: {:?}",
+            h.requests
+        );
+        assert!(h.result(1).is_err());
+        h.command(Command::AmendOrder {
+            command: 2,
+            id: "5104447791".into(),
+            price: None,
+            amount: Some(150.4),
+        });
+        let cancel = h.take(Method::Delete);
+        h.reply(cancel, r#"{"orderId":5104447791,"status":"CANCELED"}"#);
+        let place = h.take(Method::Post);
+        assert!(
+            place.url.contains("quantity=150&reduceOnly=true&"),
+            "{v3}: {}",
+            place.url
+        );
+    }
+}
+
+#[test]
+fn engine_ambiguity_guarded_429_stays_unknown_in_journal() {
+    let mut h = Harness::new();
+    h.native_stop();
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "283194212".into(),
+        price: Some(9200.04),
+        amount: None,
+    });
+    let cancel = h.take(Method::Delete);
+    h.reply(cancel, r#"{"orderId":283194212,"status":"CANCELED"}"#);
+    let place = h.take(Method::Post);
+    h.reply_status(place, 429, r#"{"code":-1003,"msg":"Too many requests"}"#);
+    assert!(
+        !h.requests
+            .iter()
+            .any(|r| r.method == Method::Post && r.url.contains("/order?")),
+        "{:?}",
+        h.requests
+    );
+    let error = &h.failures.last().expect("terminal").1;
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn engine_ambiguity_429_timestamp_cannot_resend() {
+    for status in [429, 503] {
+        let mut h = Harness::new();
+        h.place(limit());
+        let request = h.take(Method::Post);
+        h.reply_status(
+            request,
+            status,
+            r#"{"code":-1021,"msg":"Timestamp for this request outside window"}"#,
+        );
+        assert!(
+            !h.requests
+                .iter()
+                .any(|r| r.method == Method::Post && r.url.contains("/order?")),
+            "{status}: {:?}",
+            h.requests
+        );
+    }
 }

@@ -14,6 +14,8 @@ import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderType, OrderTimeInForce } from '../types';
+import { coinbaseDrbPublicResponse } from './support/coinbaseDrb';
+import { prepareRecordedHttp } from './support/managedHttp';
 
 const names: ExchangeName[] = ['coinbase', 'coinbasespot'];
 const keyName = 'organizations/documented/apiKeys/sdk-fixture';
@@ -45,6 +47,7 @@ const transport = (profile: 'spot' | 'cfm' = 'spot') => {
   const response = (body: unknown, status = 200) => ({ status, body: new TextEncoder().encode(JSON.stringify(body)) });
   const native: Transport = {
     now: Date.now,
+    prepareHttp: prepareRecordedHttp,
     connect(url, handlers) {
       setTimeout(handlers.onOpen, 0);
       return { send(text) { subscriptions.push({ url, message: JSON.parse(text) }); }, close() {} };
@@ -53,6 +56,7 @@ const transport = (profile: 'spot' | 'cfm' = 'spot') => {
       requests.push(request);
       const parsed = new URL(request.url);
       const path = parsed.pathname;
+      if (parsed.hostname === 'drb.coinbase.com') return coinbaseDrbPublicResponse(request);
       if (request.method === 'POST' && path.endsWith('/orders'))
         return response({ success: true, success_response: { order_id: '9007199254740995' } });
       if (request.method === 'POST' && path.endsWith('/batch_cancel')) {
@@ -71,7 +75,7 @@ const transport = (profile: 'spot' | 'cfm' = 'spot') => {
         number_of_contracts: '2', avg_entry_price: '100', current_price: '110', unrealized_pnl: '0.2' }] });
       if (path.endsWith('/portfolios')) return response({ portfolios: [{ uuid: 'selected-spot-portfolio', type: 'DEFAULT' }] });
       if (path.endsWith('/portfolios/selected-spot-portfolio')) return response({ breakdown: {
-        spot_positions: [{ asset: 'BTC', total_balance_crypto: 1.5, available_to_trade_crypto: 1, total_balance_fiat: 165 }],
+        spot_positions: [{ account_type: 'ACCOUNT_TYPE_WALLET', asset: 'BTC', total_balance_crypto: 1.5, available_to_trade_crypto: 1, total_balance_fiat: 165 }],
       } });
       if (path.endsWith('/products')) {
         const row = profile === 'cfm' && parsed.searchParams.get('product_type') === 'FUTURE'
@@ -93,6 +97,109 @@ describe('retained Coinbase Rust family oracle', () => {
   let exchange: RustEngineExchange | undefined;
   let mirrored: BaseExchange | undefined;
   afterEach(() => { exchange?.dispose(); exchange = undefined; mirrored?.dispose(); mirrored = undefined; });
+
+  it('loads 1000 ARB-USDC minute bars through four bounded public candle requests', async () => {
+    const tape = transport();
+    const originalRequest = tape.native.request;
+    const pages: Array<{ start: number; end: number }> = [];
+    const start = Math.floor((Date.now() / 1000 - 72000) / 60) * 60;
+    tape.native.request = async (request) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith('/candles')) {
+        expect(request.method).toBe('GET');
+        expect(url.pathname).toBe('/api/v3/brokerage/market/products/ARB-USD/candles');
+        expect(request.headers).toEqual({});
+        expect(url.searchParams.get('granularity')).toBe('ONE_MINUTE');
+        const begin = Number(url.searchParams.get('start'));
+        const end = Number(url.searchParams.get('end'));
+        expect(end - begin + 1).toBeLessThanOrEqual(300 * 60);
+        expect(Number(url.searchParams.get('limit'))).toBeLessThanOrEqual(300);
+        pages.push({ start: begin, end });
+        const candles = Array.from({ length: (end - begin + 1) / 60 }, (_, i) => ({
+          start: String(begin + i * 60), open: '1', high: '3', low: '0.5', close: '2', volume: '4',
+        })).reverse();
+        return { status: 200, body: new TextEncoder().encode(JSON.stringify({ candles })) };
+      }
+      if (url.pathname.endsWith('/products')) return { status: 200,
+        body: new TextEncoder().encode(JSON.stringify({ products: [{ ...product, product_id: 'ARB-USDC', base_currency_id: 'ARB', quote_currency_id: 'USDC' }] })) };
+      return originalRequest(request);
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    exchange = new RustEngineExchange('coinbasespot', { key: '', secret: '', publicDataOnly: true, tealstreetTunnel: false }, new DefaultStore());
+    await exchange.start();
+    const bars = await exchange.fetchOHLCV({ symbol: 'ARB-USDC', interval: '1m',
+      from: start * 1000, to: (start + 1000 * 60) * 1000, limit: 1000 });
+    expect(pages).toHaveLength(4);
+    expect(pages.map((page) => (page.end - page.start + 1) / 60)).toEqual([300, 300, 300, 100]);
+    expect(bars.map((bar) => bar.timestamp)).toEqual(Array.from({ length: 1000 }, (_, i) => start + i * 60));
+  }, 20000);
+
+  it.each(names)('%s normalizes pasted BOM credentials through EngineHost without changing the JWT identity', async (name) => {
+    const tape = transport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    const encoded = seed.toString('base64');
+    const credentials = JSON.stringify({
+      name: `\uFEFF ${keyName}\uFEFF`,
+      privateKey: `\uFEFFed25519:${encoded.slice(0, 16)}\uFEFF${encoded.slice(16)}\uFEFF`,
+    });
+    exchange = await createExchange(name, {
+      key: `\uFEFF ${credentials}\uFEFF`, secret: '', tealstreetTunnel: false,
+    }) as RustEngineExchange;
+    await exchange.start();
+    expect(await exchange.getAccount()).toEqual({ userId: 'selected-spot-portfolio' });
+    const portfolioRead = tape.requests.find((r) => new URL(r.url).pathname.endsWith('/portfolios'));
+    expect(portfolioRead).toBeDefined();
+    expect(jwtClaims(portfolioRead!.headers.Authorization.slice('Bearer '.length)).uri)
+      .toBe('GET api.coinbase.com/api/v3/brokerage/portfolios');
+    expect(tape.requests.every((r) => r.method === 'GET')).toBe(true);
+  });
+
+  it('loads a US retail DEFAULT-only spot portfolio and publishes its USD cash root through EngineHost', async () => {
+    const tape = transport();
+    const originalRequest = tape.native.request;
+    tape.native.request = async (request) => {
+      if (new URL(request.url).pathname.endsWith('/portfolios/selected-spot-portfolio')) {
+        tape.requests.push(request);
+        return { status: 200, body: new TextEncoder().encode(JSON.stringify({ breakdown: {
+          portfolio_balances: {
+            total_balance: { value: '7600', currency: 'USD' },
+            total_cash_equivalent_balance: { value: '1000000', currency: 'USD' },
+          },
+          spot_positions: [
+            { asset: 'USD', account_uuid: 'fiat-one', account_type: 'ACCOUNT_TYPE_FIAT', is_cash: true,
+              total_balance_crypto: 100, available_to_trade_crypto: 90, total_balance_fiat: 100, available_to_trade_fiat: 90 },
+            { asset: 'USD', account_uuid: 'prediction-one', account_type: 'ACCOUNT_TYPE_PREDICTION_MARKETS_CFM', is_cash: true,
+              total_balance_crypto: 5000, available_to_trade_crypto: 5000, total_balance_fiat: 5000, available_to_trade_fiat: 5000 },
+            { asset: 'USD', account_uuid: 'derivatives-one', account_type: 'ACCOUNT_TYPE_DERIVATIVES_CASH', is_cash: true,
+              total_balance_crypto: 6000, available_to_trade_crypto: 6000, total_balance_fiat: 6000, available_to_trade_fiat: 6000 },
+            { asset: 'USDC', account_uuid: 'wallet-one', account_type: 'ACCOUNT_TYPE_WALLET', is_cash: true,
+              total_balance_crypto: 2600, available_to_trade_crypto: 2400, total_balance_fiat: 2600, available_to_trade_fiat: 2400 },
+            { asset: 'BTC', account_type: 'ACCOUNT_TYPE_WALLET', total_balance_crypto: 0.05, available_to_trade_crypto: 0.04,
+              total_balance_fiat: 5000, available_to_trade_fiat: 4000 },
+          ],
+          futures_positions: null, perp_positions: null, margin: null,
+        } })) };
+      }
+      if (/\/(cfm|intx)\//.test(request.url) || new URL(request.url).hostname === 'api.international.coinbase.com') {
+        throw new Error('US retail spot startup must not need a derivatives portfolio');
+      }
+      return originalRequest(request);
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    const store = new DefaultStore();
+    exchange = await createExchange('coinbasespot', { key: downloaded, secret: '', tealstreetTunnel: false }, store) as RustEngineExchange;
+    await exchange.start();
+    expect(await exchange.getAccount()).toEqual({ userId: 'selected-spot-portfolio' });
+    expect(store.loaded).toMatchObject({ markets: true, tickers: true, balance: true, orders: true, positions: true });
+    expect(tape.requests.every((request) => !/\/(cfm|intx)\//.test(request.url))).toBe(true);
+    expect(store.positions).toEqual([]);
+    expect(store.orders).toEqual([]);
+    expect(store.balance).toMatchObject({ total: 2700, free: 2490, used: 210, upnl: 0,
+      currencies: { USD: { total: 100, free: 90, used: 10 }, USDC: { total: 2600, free: 2400, used: 200 }, BTC: { total: 0.05, free: 0.04 } } });
+  }, 20000);
 
   it('delivers queued native IDs after a deadline and retains them in the existing log path if a listener throws', async () => {
     const tape = transport();
@@ -208,6 +315,32 @@ describe('retained Coinbase Rust family oracle', () => {
     if (name === 'coinbasespot') expect(tape.requests.every((r) => !/\/(cfm|intx)\//.test(r.url))).toBe(true);
   }, 20000);
 
+  it.each([
+    { shape: 'top-level null', body: null },
+    { shape: 'null summary', body: { balance_summary: null } },
+  ])('coinbase completes private startup without a US futures account: $shape', async ({ body }) => {
+    const tape = transport();
+    const originalRequest = tape.native.request;
+    tape.native.request = async (request) => {
+      if (new URL(request.url).pathname.endsWith('/cfm/balance_summary')) {
+        tape.requests.push(request);
+        return { status: 200, body: new TextEncoder().encode(JSON.stringify(body)) };
+      }
+      return originalRequest(request);
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.native);
+    const store = new DefaultStore();
+    exchange = await createExchange('coinbase', { key: downloaded, secret: '', tealstreetTunnel: false }, store) as RustEngineExchange;
+    await exchange.start();
+    expect(await exchange.getAccount()).toEqual({ userId: 'selected-spot-portfolio' });
+    expect(store.loaded).toEqual({ markets: true, tickers: true, balance: true, orders: true, positions: true });
+    expect(store.markets.map((market) => market.symbol)).toEqual(['BTC-USD']);
+    expect(store.balance.currencies?.BTC).toMatchObject({ total: 1.5, free: 1 });
+    expect(tape.requests.filter((request) => new URL(request.url).pathname.endsWith('/cfm/balance_summary'))).toHaveLength(1);
+    expect(tape.requests.some((request) => request.url.includes('/cfm/positions') || request.url.includes('/intx/'))).toBe(false);
+  });
+
   it('preserves CFM native placement units across the real WASM frame boundary', async () => {
     const tape = transport('cfm');
     setWasmEngineLoader(loadNodeEngine);
@@ -249,7 +382,8 @@ describe('retained Coinbase Rust family oracle', () => {
     expect(tape.requests.length).toBeGreaterThan(0);
     expect(tape.requests.every((r) => name === 'coinbasespot'
       ? new URL(r.url).pathname.startsWith('/api/v3/brokerage/market/')
-      : new URL(r.url).hostname === 'api.international.coinbase.com')).toBe(true);
+      : new URL(r.url).origin === 'https://drb.coinbase.com'
+        && ['/api/v2/public/get_instruments', '/api/v2/public/get_book_summary_by_currency'].includes(new URL(r.url).pathname))).toBe(true);
     expect(tape.requests.every((r) => r.headers.Authorization === undefined)).toBe(true);
     expect(tape.subscriptions.every((s) => !s.url.includes('-ws-user.') && s.message.jwt === undefined)).toBe(true);
     await expect(exchange.getAccount()).rejects.toThrow(/private portfolio ID is unavailable/);

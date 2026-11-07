@@ -12,11 +12,53 @@ use safe_cex_engine::selected_read::{
     LocalRefusal, ReadLeg, ReadLegPolicy, ReadRequest, ReadRole, ReadRoot, SelectedRead,
 };
 use safe_cex_engine::time;
-use safe_cex_engine::{CommandWait, Cx, Level, Method, Query, Response, TimerId, VenueError};
+use safe_cex_engine::{
+    CommandWait, Cx, ErrorCause, ErrorKind, Level, Method, Query, Response, TimerId, VenueError,
+};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+
+// BingX-API/api-ai-skills references/error-codes.md: preserve native codes,
+// but never make diagnostics depend on a free-form venue message.
+fn response_failure(response: &Response<'_>, now: f64, message: String) -> VenueError {
+    let code = serde_json::from_str::<wire::Rejection<'_>>(response.body)
+        .ok()
+        .and_then(|body| body.code)
+        .filter(|code| *code != 0);
+    let (kind, cause) = match (response.status, code) {
+        (500..=599, _) => (ErrorKind::VenueUnavailable, ErrorCause::HistoryVenueError),
+        (429 | 418, _) => (ErrorKind::RateLimited, ErrorCause::HistoryRateLimited),
+        (401, _) => (ErrorKind::AuthInvalid, ErrorCause::HistoryAuthInvalid),
+        (403, _) => (ErrorKind::AuthPermission, ErrorCause::HistoryAuthPermission),
+        (_, Some(100410 | 109429)) => (ErrorKind::RateLimited, ErrorCause::HistoryRateLimited),
+        (_, Some(100001 | 100412 | 100413)) => {
+            (ErrorKind::AuthInvalid, ErrorCause::HistoryAuthInvalid)
+        }
+        (_, Some(100004 | 100419)) => {
+            (ErrorKind::AuthPermission, ErrorCause::HistoryAuthPermission)
+        }
+        (_, Some(100500 | 109500)) => (ErrorKind::VenueUnavailable, ErrorCause::HistoryVenueError),
+        (400, _) | (_, Some(100400 | 100404 | 100421 | 109400)) => {
+            (ErrorKind::InvalidInput, ErrorCause::HistoryInvalidParams)
+        }
+        (_, Some(_)) => (ErrorKind::Rejected, ErrorCause::HistoryVenueError),
+        (200..=299, _) => (ErrorKind::Internal, ErrorCause::HistoryDecode),
+        _ => (ErrorKind::VenueUnavailable, ErrorCause::HistoryHttpError),
+    };
+    let mut error = VenueError::new(message).kind(kind).cause_code(cause);
+    if kind == ErrorKind::RateLimited
+        && let Some(wait) = crate::ban_wait_ms(response, now)
+    {
+        error = error.retry_after_ms(wait);
+    }
+    if let Some(code) = code {
+        error.venue_code(code.to_string())
+    } else {
+        error
+    }
+}
 
 const WEEK: f64 = 7.0 * 24.0 * 3_600_000.0;
 const PAGE_DELAY: f64 = 200.0;
@@ -405,8 +447,8 @@ impl History {
                 read.order_id = order_id;
                 read.limit = limit.unwrap_or(100).clamp(1, 1000);
                 // This endpoint requires both timestamps, unlike other rare reads.
-                read.to = Some(to_ms.unwrap_or(cx.now));
-                read.from = Some(from_ms.unwrap_or(read.to.unwrap_or(cx.now) - WEEK));
+                read.to = Some(to_ms.unwrap_or(cx.protocol_now()));
+                read.from = Some(from_ms.unwrap_or(read.to.unwrap_or(cx.protocol_now()) - WEEK));
             }
             Query::OrderHistory {
                 symbol,
@@ -441,7 +483,7 @@ impl History {
         }
         if !matches!(read.kind, Kind::Trades) {
             if read.from.is_some() && read.to.is_none() {
-                read.to = Some(cx.now);
+                read.to = Some(cx.protocol_now());
             }
             if read.to.is_some() && read.from.is_none() {
                 read.from = read.to.map(|to| to - WEEK);
@@ -592,10 +634,13 @@ impl History {
         if let Some(to) = to {
             params = params.num(end, to);
         }
-        let at = if matches!(read.native.kind, Kind::Fills) {
-            ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"])
-        } else {
-            ArrayAt::EnvelopeField("data")
+        let at = match read.native.kind {
+            Kind::Fills => {
+                ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"])
+            }
+            // Live allOrders answers {"data":{"orders":[...]}}; legacy read data.orders too.
+            Kind::Orders => ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+            _ => ArrayAt::EnvelopeField("data"),
         };
         self.send_page(
             cx,
@@ -772,12 +817,18 @@ impl History {
             Leg::Signed(_) => true,
             Leg::Public(_) => false,
         };
-        if signed && !request.page.resent && crate::signature_rejected(response.body) {
-            cx.notice(
-                Level::Warn,
-                safe_cex_engine::log::code::REQUEST_FAILED,
-                "BingX rejected a request signature; re-signing it once",
-            );
+        let timestamp = crate::sign::timestamp::refused(response.body);
+        if signed && !request.page.resent && (timestamp || crate::signature_rejected(response.body))
+        {
+            if timestamp {
+                crate::sign::timestamp::note_resend(cx);
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    safe_cex_engine::log::code::REQUEST_FAILED,
+                    "BingX rejected a request signature; re-signing it once",
+                );
+            }
             let _ = cx.finish_http_context(request.leg.context());
             request.page.resent = true;
             self.send_page(cx, request.page);
@@ -797,14 +848,17 @@ impl History {
             return;
         }
         if let Ok(request) = self.resign(cx, request, response) {
-            self.on_failed(
-                cx,
-                request,
-                &format!(
-                    "response did not contain the expected list: {}",
-                    response.body
-                ),
+            let error = response_failure(
+                &response,
+                cx.protocol_now(),
+                crate::success(response).err().unwrap_or_else(|| {
+                    format!(
+                        "response did not contain the expected list: {}",
+                        response.body
+                    )
+                }),
             );
+            self.on_http_failed(cx, request, error);
         }
     }
 
@@ -881,11 +935,23 @@ impl History {
         response: Response<'_>,
     ) {
         if !(200..300).contains(&response.status) {
-            self.on_failed(
-                cx,
-                request,
-                &format!("history HTTP {}: {}", response.status, response.body),
+            let error = response_failure(
+                &response,
+                cx.protocol_now(),
+                format!("history HTTP {}: {}", response.status, response.body),
             );
+            self.on_http_failed(cx, request, error);
+            return;
+        }
+        if let Ok(body) = serde_json::from_str::<wire::Rejection<'_>>(response.body)
+            && let Some(code) = body.code.filter(|code| *code != 0)
+        {
+            let error = response_failure(
+                &response,
+                cx.protocol_now(),
+                format!("{code}: {}", body.msg),
+            );
+            self.on_http_failed(cx, request, error);
             return;
         }
         let Some(read) = self.reads.get_mut(&request.page.command) else {
@@ -953,7 +1019,11 @@ impl History {
                 .iter()
                 .any(|row| row.timestamp() < fills.from || row.timestamp() > fills.to)
             {
-                return Err("fill history returned executions outside its requested window".into());
+                return Err(VenueError::new(
+                    "fill history returned executions outside its requested window",
+                )
+                .kind(ErrorKind::Internal)
+                .cause_code(ErrorCause::HistoryWindowMismatch));
             }
             let before = fills.seen.len();
             for row in request.rows.drain(..) {
@@ -963,7 +1033,8 @@ impl History {
             }
             if full {
                 if fills.seen.len() == before || fills.page >= MAX_FILL_PAGES {
-                    return Err("fill history is incomplete: native pagination made no progress or reached its page budget".into());
+                    return Err(VenueError::new("fill history is incomplete: native pagination made no progress or reached its page budget")
+                        .kind(ErrorKind::Internal).cause_code(ErrorCause::HistoryCursorStalled));
                 }
                 fills.page += 1;
                 None
@@ -1019,7 +1090,9 @@ impl History {
         if truncated {
             let _ = read.output.reject(
                 cx,
-                "history is incomplete: time window could not be fully paged".into(),
+                VenueError::new("history is incomplete: time window could not be fully paged")
+                    .kind(ErrorKind::Internal)
+                    .cause_code(ErrorCause::HistoryPageLimit),
             );
             return;
         }
@@ -1056,7 +1129,13 @@ impl History {
     }
 
     pub fn on_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
-        self.on_http_failed(cx, request, error.into());
+        self.on_http_failed(
+            cx,
+            request,
+            VenueError::new(error)
+                .kind(ErrorKind::Internal)
+                .cause_code(ErrorCause::HistoryDecode),
+        );
     }
 
     pub fn on_http_failed(

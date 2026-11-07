@@ -211,6 +211,8 @@ impl TxFlow {
             cx.route_request(id, safe_cex_engine::RequestRoute::PublicCors);
         }
     }
+    // perpMeta is catalogue discovery. This path still uses plain cx.request;
+    // if moved to managed HTTP it keeps the undeclared catalogue default.
     fn metadata(&self, cx: &mut Cx<'_, Pending>) {
         self.info(
             cx,
@@ -227,7 +229,7 @@ impl TxFlow {
         if let Some(old) = self.ticker_contexts.remove(&asset) {
             let _ = cx.finish_http_context(&old);
         }
-        let context = match cx.http_context_with_egress(
+        let context = match cx.http_live_context_with_egress(
             Scope::Background,
             Policy {
                 operation: Operation::Read,
@@ -608,7 +610,7 @@ impl TxFlow {
             );
             return;
         }
-        let end = to_ms.unwrap_or(cx.now);
+        let end = to_ms.unwrap_or(cx.protocol_now());
         let start = from_ms
             .unwrap_or(end - interval.ms() * f64::from(limit.unwrap_or(500).min(1500)))
             .max(0.0);
@@ -655,6 +657,19 @@ impl TxFlow {
     }
 }
 impl Venue for TxFlow {
+    fn http_plans() -> bool {
+        false
+    }
+
+    fn http_read_class(&self, pending: &Pending) -> safe_cex_engine::HttpReadClass {
+        match pending {
+            Pending::Account(account::Request::Setting { .. }) => {
+                safe_cex_engine::HttpReadClass::Reconciliation
+            }
+            _ => safe_cex_engine::HttpReadClass::Normal,
+        }
+    }
+
     fn managed_sockets() -> bool {
         true
     }
@@ -667,6 +682,16 @@ impl Venue for TxFlow {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Meta { .. } => S::MARKETS,
+            Pending::Ticker { .. } => S::TICKERS,
+            Pending::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             reject_order_history_filters: true,
@@ -702,6 +727,13 @@ impl Venue for TxFlow {
             self.account_refresh(cx);
         }
         Ok(())
+    }
+    fn subscription_interest(
+        &self,
+        _store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(FeedId, String)> {
+        self.topic_interest(topic)
     }
     fn encode_socket_interests(
         &self,
@@ -988,10 +1020,10 @@ impl Venue for TxFlow {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Candles { read, .. } => read.failed(cx, error),
             pending => self.on_sign_error(cx, pending, error),
-        }
+        });
     }
     fn on_http_failed(
         &mut self,

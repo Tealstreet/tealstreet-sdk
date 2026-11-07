@@ -101,12 +101,21 @@ pub(crate) enum OrderRead {
     Failed(String),
 }
 
+/// TS identity aliases, on an order the venue has: a Creating row may still be in flight.
 fn matches_lookup(order: &Order, symbol: &str, client_order_id: &str) -> bool {
     !matches!(client_order_id, "" | "0" | "undefined")
         && order.symbol == symbol
+        && order.status != OrderStatus::Creating
         && (order.client_order_id.as_deref() == Some(client_order_id)
             || order.id == client_order_id
             || order.parent_id.as_deref() == Some(client_order_id))
+}
+
+/// Where a lookup answer comes from. A failed venue read answers from nothing.
+enum LookupSource<'a> {
+    Store,
+    Venue(&'a [Order]),
+    Failed,
 }
 
 pub enum Request {
@@ -761,7 +770,7 @@ impl Bitrue {
             let Ok(context) = cx.admit_http_command(local_leverage_read_policy()) else {
                 return;
             };
-            Self::finish_lookup(cx, &context, &symbol, &client_order_id, None);
+            Self::finish_lookup(cx, &context, &symbol, &client_order_id, LookupSource::Store);
             return;
         }
         let Some(root) = self.command_root(cx) else {
@@ -815,7 +824,7 @@ impl Bitrue {
         context: &Context,
         symbol: &str,
         client_order_id: &str,
-        rows: Option<&[Order]>,
+        source: LookupSource<'_>,
     ) {
         #[derive(Serialize)]
         struct Lookup {
@@ -825,8 +834,12 @@ impl Bitrue {
             #[serde(skip_serializing_if = "Option::is_none")]
             definitive: Option<bool>,
         }
+        let rows = match source {
+            LookupSource::Store => cx.store.orders(),
+            LookupSource::Venue(rows) => rows,
+            LookupSource::Failed => &[],
+        };
         let mut order = rows
-            .unwrap_or_else(|| cx.store.orders())
             .iter()
             .find(|order| matches_lookup(order, symbol, client_order_id))
             .cloned();
@@ -2059,22 +2072,21 @@ impl Bitrue {
                 let schema = serde_json::from_str::<OrdersEnvelope>(response.body)
                     .is_ok_and(|v| v.data.is_empty());
                 if let Some((root, client_order_id)) = lookup {
-                    // TS only checks open orders. A failed read falls
-                    // back to the cache, and every miss remains non-definitive.
+                    // TS only checks open orders, so every miss remains non-definitive.
+                    // A failed read says nothing: it never answers from the cache.
                     if !schema || invalid {
                         cx.notice(
                             Level::Warn,
                             code::STREAM_MALFORMED,
-                            "Malformed Bitrue open-order lookup; using cache",
+                            "Malformed Bitrue open-order lookup",
                         );
                     }
-                    Self::finish_lookup(
-                        cx,
-                        root.context(),
-                        &symbol,
-                        &client_order_id,
-                        (schema && !invalid && rows.rejected() == 0).then_some(rows.rows()),
-                    );
+                    let source = if schema && !invalid && rows.rejected() == 0 {
+                        LookupSource::Venue(rows.rows())
+                    } else {
+                        LookupSource::Failed
+                    };
+                    Self::finish_lookup(cx, root.context(), &symbol, &client_order_id, source);
                     return;
                 }
                 let complete = schema && !invalid;
@@ -2223,6 +2235,18 @@ impl Bitrue {
         request: Request,
         code: Option<i64>,
     ) {
+        // 403 here is the WAF limit, not the key, so it never ends a start.
+        if matches!(code, Some(401 | -2014 | -2015 | -1022))
+            && !matches!(
+                request,
+                Request::Brackets { .. } | Request::Keepalive { .. }
+            )
+        {
+            cx.startup_read_refused(
+                &VenueError::new(private_diagnostic("Bitrue refused the API key", code))
+                    .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            );
+        }
         match request {
             Request::Brackets { root, .. } => {
                 let _ = cx.fail_context(
@@ -2260,7 +2284,13 @@ impl Bitrue {
                 let reason = private_diagnostic("request failed", code);
                 if let Some((root, client_order_id)) = lookup {
                     let _ = cx.command_error_context(root.context(), message);
-                    Self::finish_lookup(cx, root.context(), &symbol, &client_order_id, None);
+                    Self::finish_lookup(
+                        cx,
+                        root.context(),
+                        &symbol,
+                        &client_order_id,
+                        LookupSource::Failed,
+                    );
                 } else {
                     // order_finished logs the failure once per change.
                     self.order_finished(cx, symbol, OrderRead::Failed(reason));
@@ -2274,4 +2304,15 @@ impl Bitrue {
 // Only bounded numeric venue codes may cross this private diagnostic boundary.
 fn private_diagnostic(message: &str, code: Option<i64>) -> String {
     code.map_or_else(|| message.into(), |code| format!("{message} (code {code})"))
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Snapshot { .. } => S::BALANCE.union(S::POSITIONS),
+            Self::Orders { lookup: None, .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
 }

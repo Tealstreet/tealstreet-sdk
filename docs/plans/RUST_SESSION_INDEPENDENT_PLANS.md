@@ -172,6 +172,12 @@ disclosed and executed at source, never counted.
   `plan_session_resend`. Its checks and their order are unchanged.
   `serial_session_seed` is renamed `plan_session_seed` and covers both kinds of
   Plan.
+- Admission preparation and the Session admission transaction run in the shared
+  `CoreCx` implementation, alongside the existing Plan admission and issue
+  refusal paths.
+- Merge controls in `request_context_session_plan_tests.rs` cover released
+  408/429/500 responses after a refusal, plus forward and backward host clock
+  steps: signing resyncs while Plan deadlines and expiry use scheduling time.
 
 **Originals:** the tests are in `request_context_session_plan_tests.rs`
 (`session_plan_calls`).

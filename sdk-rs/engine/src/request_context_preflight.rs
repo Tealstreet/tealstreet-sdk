@@ -75,6 +75,7 @@ impl ContextRegistry {
         self.commands.insert(
             command,
             CommandOwner {
+                request_class: self.dispatch_request_class(command),
                 generation,
                 phase: CommandPhase::Preflight(State::new(policy)),
                 last_deadline: now,
@@ -297,6 +298,15 @@ impl<P> Cx<'_, P> {
             &crate::request_context::Session,
         >,
     ) -> Result<Preflight, Error> {
+        // Every Plan, Session root and owner retirement hangs off a Preflight. A
+        // venue declaring no Plans that gets here is a bug: loud in debug builds.
+        debug_assert!(
+            self.io.core.http_plans_declared,
+            "Preflight from a venue declaring Venue::http_plans() false"
+        );
+        if !self.io.core.http_plans_declared {
+            return Err(Error::Invalid);
+        }
         if self.io.core.http_delivery.is_some() {
             return Err(Error::Revoked);
         }
@@ -374,13 +384,29 @@ impl<P> Cx<'_, P> {
     /// Failure before any plan was admitted proves this command sent no write;
     /// an inherited maybe-sent fact still projects Unknown.
     /// Expiry cannot turn this handle into success, retry or send authority.
+    #[inline]
     pub fn fail_preflight(
         &mut self,
         preflight: &Preflight,
         error: impl Into<VenueError>,
     ) -> Result<(), Error> {
+        // Conversion is caller code; refused custody must not run it.
+        #[cfg(not(feature = "condition-waits"))]
+        self.core_ref()
+            .validate_preflight_failure_custody(preflight)?;
+        self.core().fail_preflight(preflight, error.into())
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    #[inline(never)]
+    pub(in crate::engine) fn fail_preflight(
+        &mut self,
+        preflight: &Preflight,
+        error: VenueError,
+    ) -> Result<(), Error> {
         #[cfg(feature = "condition-waits")]
-        let seal = self.seal_condition_preflight(preflight, error.into())?;
+        let seal = self.seal_condition_preflight(preflight, error)?;
         #[cfg(not(feature = "condition-waits"))]
         self.validate_preflight_failure_custody(preflight)?;
         #[cfg(not(feature = "condition-waits"))]
@@ -388,16 +414,14 @@ impl<P> Cx<'_, P> {
             preflight,
             self.now,
             self.io.core.http_delivery.as_ref(),
-            Some(error.into()),
+            Some(error),
         )?;
         let Owner::Command { id, .. } = preflight.owner() else {
             return Err(Error::Invalid);
         };
         self.finish_sealed_command(id, None, seal)
     }
-}
 
-impl crate::engine::CoreCx<'_> {
     /// Record that an earlier attempt of this intent may have reached the venue.
     /// Monotonic: every later failure of this command projects at least Unknown.
     /// It grants no send, resend, renewal, import or success authority; the

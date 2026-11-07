@@ -10,6 +10,10 @@ const KEY_ERROR: &str = "Coinbase API key must be organizations/{org_id}/apiKeys
 const SECRET_ERROR: &str =
     "Coinbase secret must be a P-256 private-key PEM or base64 Ed25519 seed/keypair";
 
+fn credential_whitespace(c: char) -> bool {
+    c.is_whitespace() || c == '\u{feff}'
+}
+
 pub struct Credentials {
     key: String,
     signer: Signer,
@@ -58,8 +62,8 @@ struct DownloadedKey {
 
 impl DownloadedKey {
     fn parse(value: &str) -> Option<Self> {
+        let value = value.trim_matches(credential_whitespace);
         value
-            .trim()
             .starts_with('{')
             .then(|| serde_json::from_str(value).ok())
             .flatten()
@@ -110,7 +114,7 @@ impl Credentials {
             .and_then(|json| json.name.as_ref())
             .and_then(CredentialField::text)
             .unwrap_or(key)
-            .trim();
+            .trim_matches(credential_whitespace);
         let mut parts = key.split('/');
         if parts.next() != Some("organizations")
             || !parts.next().is_some_and(|part| !part.is_empty())
@@ -128,7 +132,7 @@ impl Credentials {
             .or_else(|| key_json.as_ref().and_then(DownloadedKey::secret))
             .unwrap_or(secret);
         let secret = Zeroizing::new(secret.replace("\\n", "\n"));
-        let secret = secret.trim();
+        let secret = secret.trim_matches(credential_whitespace);
         let signer = if secret.starts_with("-----BEGIN ") {
             Signer::Es256(import_pem(secret)?)
         } else {
@@ -164,7 +168,28 @@ impl Credentials {
         self.jwt_with_nonce(now, uri, &safe_cex_crypto::uuid::uuid_with_entropy(fill)?)
     }
 
+    /// Gateway token exchange uses the current CDP issuer for both key types.
+    pub(crate) fn drb_jwt(
+        &self,
+        now: f64,
+        uri: Option<&str>,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), String>,
+    ) -> Result<String, String> {
+        let nonce = safe_cex_crypto::uuid::uuid_with_entropy(fill)?;
+        self.jwt_with_claims(now, uri, &nonce, true)
+    }
+
     fn jwt_with_nonce(&self, now: f64, uri: Option<&str>, nonce: &str) -> Result<String, String> {
+        self.jwt_with_claims(now, uri, nonce, false)
+    }
+
+    fn jwt_with_claims(
+        &self,
+        now: f64,
+        uri: Option<&str>,
+        nonce: &str,
+        cdp: bool,
+    ) -> Result<String, String> {
         let seconds = (now / 1_000.0).floor();
         if !now.is_finite() || now < 0.0 || seconds >= (u64::MAX - 120) as f64 {
             return Err("Coinbase invalid clock".into());
@@ -173,7 +198,7 @@ impl Credentials {
             Signer::Es256(_) => JwtAlgorithm::Es256,
             Signer::Ed25519(_) => JwtAlgorithm::EdDsa,
         };
-        let input = signing_input(algorithm, &self.key, nonce, seconds as u64, uri)?;
+        let input = signing_input_for(algorithm, &self.key, nonce, seconds as u64, uri, cdp)?;
         let signature = match &self.signer {
             Signer::Es256(key) => key.sign(input.as_bytes())?,
             Signer::Ed25519(seed) => {
@@ -221,6 +246,17 @@ fn signing_input(
     nbf: u64,
     uri: Option<&str>,
 ) -> Result<String, String> {
+    signing_input_for(algorithm, kid, nonce, nbf, uri, false)
+}
+
+fn signing_input_for(
+    algorithm: JwtAlgorithm,
+    kid: &str,
+    nonce: &str,
+    nbf: u64,
+    uri: Option<&str>,
+    cdp: bool,
+) -> Result<String, String> {
     if uri.is_some_and(|value| {
         value.is_empty() || value.len() > MAX_URI_BYTES || value.chars().any(char::is_control)
     }) {
@@ -230,10 +266,12 @@ fn signing_input(
         return Err("Coinbase invalid JWT nonce".into());
     }
     let exp = nbf.checked_add(120).ok_or("Coinbase invalid clock")?;
-    // Keep the active TS claim contract; current Coinbase examples disagree.
-    let (alg, iss, aud) = match algorithm {
-        JwtAlgorithm::Es256 => ("ES256", "coinbase-cloud", None),
-        JwtAlgorithm::EdDsa => ("EdDSA", "cdp", Some(["cdp_service"])),
+    // Legacy requests retain their TS claims; gateway exchanges use CDP claims.
+    let (alg, iss, aud) = match (algorithm, cdp) {
+        (JwtAlgorithm::Es256, false) => ("ES256", "coinbase-cloud", None),
+        (JwtAlgorithm::EdDsa, false) => ("EdDSA", "cdp", Some(["cdp_service"])),
+        (JwtAlgorithm::Es256, true) => ("ES256", "cdp", None),
+        (JwtAlgorithm::EdDsa, true) => ("EdDSA", "cdp", None),
     };
     let header = serde_json::to_vec(&Header {
         alg,
@@ -521,7 +559,7 @@ fn decode_base64(value: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     let normalized = Zeroizing::new(
         value
             .chars()
-            .filter(|c| !c.is_whitespace())
+            .filter(|c| !credential_whitespace(*c))
             .map(|c| match c {
                 '+' => '-',
                 '/' => '_',

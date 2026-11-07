@@ -1,10 +1,14 @@
 //! The shared JSON command boundary for engine hosts.
-#[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
+#[cfg(any(
+    feature = "command-asterdex",
+    feature = "command-kucoinspot",
+    feature = "command-bitget"
+))]
 use crate::model::CancelOrderRef;
 #[cfg(feature = "command-asterdex")]
 use crate::model::StpMode;
 use crate::model::{Interval, PlaceOrderOpts, PositionSide};
-use crate::{Command, Query};
+use crate::{Command, Query, SubscriptionTopic};
 use serde::Deserialize;
 
 /// Commands shared by JavaScript and native WebSocket clients.
@@ -42,6 +46,9 @@ enum CommandIn {
     UnsubscribeCandles {
         symbol: String,
         interval: Interval,
+    },
+    RepairSubscription {
+        topic: SubscriptionTopic,
     },
     PlaceOrders {
         command: u32,
@@ -123,6 +130,25 @@ enum CommandIn {
     FetchBalanceInfo {
         command: u32,
     },
+    RefreshSettings {
+        command: u32,
+        symbol: Option<String>,
+    },
+    RefreshOrders {
+        command: u32,
+        symbols: Option<Vec<String>>,
+    },
+    #[cfg(feature = "command-bitget")]
+    RegisterCancelChecks {
+        command: u32,
+        orders: Vec<CancelOrderRef>,
+    },
+    ReadPositions {
+        command: u32,
+    },
+    CancelAccountOrders {
+        command: u32,
+    },
     FetchClosedPositions {
         command: u32,
         symbol: Option<String>,
@@ -197,6 +223,7 @@ enum Op {
     UnsubscribeOrderBook,
     SubscribeCandles,
     UnsubscribeCandles,
+    RepairSubscription,
     PlaceOrders,
     CancelOrders,
     #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
@@ -221,6 +248,12 @@ enum Op {
     FetchAccountTier,
     SetAccountTier,
     FetchBalanceInfo,
+    RefreshSettings,
+    RefreshOrders,
+    #[cfg(feature = "command-bitget")]
+    RegisterCancelChecks,
+    ReadPositions,
+    CancelAccountOrders,
     FetchClosedPositions,
     FetchLeverage,
     FetchMaxLeverage,
@@ -291,6 +324,12 @@ struct SubscribeCandlesIn {
 struct UnsubscribeCandlesIn {
     symbol: String,
     interval: Interval,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::RepairSubscription with 1 element")]
+struct RepairSubscriptionIn {
+    topic: SubscriptionTopic,
 }
 
 #[derive(Deserialize)]
@@ -433,6 +472,42 @@ struct SetAccountTierIn {
 #[derive(Deserialize)]
 #[serde(expecting = "struct variant CommandIn::FetchBalanceInfo with 1 element")]
 struct FetchBalanceInfoIn {
+    command: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::RefreshSettings with 2 elements")]
+struct RefreshSettingsIn {
+    command: u32,
+    #[serde(default)]
+    symbol: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::RefreshOrders with 2 elements")]
+struct RefreshOrdersIn {
+    command: u32,
+    #[serde(default)]
+    symbols: Option<Vec<String>>,
+}
+
+#[cfg(feature = "command-bitget")]
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::RegisterCancelChecks with 2 elements")]
+struct RegisterCancelChecksIn {
+    command: u32,
+    orders: Vec<CancelOrderRef>,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::ReadPositions with 1 element")]
+struct ReadPositionsIn {
+    command: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(expecting = "struct variant CommandIn::CancelAccountOrders with 1 element")]
+struct CancelAccountOrdersIn {
     command: u32,
 }
 
@@ -599,6 +674,10 @@ fn decode_payload(op: Op, json: &str) -> Result<CommandIn, serde_json::Error> {
             let UnsubscribeCandlesIn { symbol, interval } = payload(json)?;
             CommandIn::UnsubscribeCandles { symbol, interval }
         }
+        Op::RepairSubscription => {
+            let RepairSubscriptionIn { topic } = payload(json)?;
+            CommandIn::RepairSubscription { topic }
+        }
         Op::PlaceOrders => {
             let PlaceOrdersIn { command, orders } = payload(json)?;
             CommandIn::PlaceOrders { command, orders }
@@ -728,6 +807,27 @@ fn decode_payload(op: Op, json: &str) -> Result<CommandIn, serde_json::Error> {
         Op::FetchBalanceInfo => {
             let FetchBalanceInfoIn { command } = payload(json)?;
             CommandIn::FetchBalanceInfo { command }
+        }
+        Op::RefreshSettings => {
+            let RefreshSettingsIn { command, symbol } = payload(json)?;
+            CommandIn::RefreshSettings { command, symbol }
+        }
+        Op::RefreshOrders => {
+            let RefreshOrdersIn { command, symbols } = payload(json)?;
+            CommandIn::RefreshOrders { command, symbols }
+        }
+        #[cfg(feature = "command-bitget")]
+        Op::RegisterCancelChecks => {
+            let RegisterCancelChecksIn { command, orders } = payload(json)?;
+            CommandIn::RegisterCancelChecks { command, orders }
+        }
+        Op::ReadPositions => {
+            let ReadPositionsIn { command } = payload(json)?;
+            CommandIn::ReadPositions { command }
+        }
+        Op::CancelAccountOrders => {
+            let CancelAccountOrdersIn { command } = payload(json)?;
+            CommandIn::CancelAccountOrders { command }
         }
         Op::FetchClosedPositions => {
             let FetchClosedPositionsIn {
@@ -886,6 +986,7 @@ impl From<CommandIn> for Command {
             CommandIn::UnsubscribeCandles { symbol, interval } => {
                 Self::UnsubscribeCandles { symbol, interval }
             }
+            CommandIn::RepairSubscription { topic } => Self::RepairSubscription(topic),
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
             #[cfg(any(feature = "command-asterdex", feature = "command-kucoinspot"))]
@@ -970,6 +1071,27 @@ impl From<CommandIn> for Command {
             CommandIn::FetchBalanceInfo { command } => Self::Venue {
                 command,
                 action: crate::VenueAction::FetchBalanceInfo,
+            },
+            CommandIn::RefreshSettings { command, symbol } => Self::Venue {
+                command,
+                action: crate::VenueAction::RefreshSettings { symbol },
+            },
+            CommandIn::RefreshOrders { command, symbols } => Self::Venue {
+                command,
+                action: crate::VenueAction::RefreshOrders { symbols },
+            },
+            #[cfg(feature = "command-bitget")]
+            CommandIn::RegisterCancelChecks { command, orders } => Self::Venue {
+                command,
+                action: crate::VenueAction::RegisterCancelChecks { orders },
+            },
+            CommandIn::ReadPositions { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::ReadPositions,
+            },
+            CommandIn::CancelAccountOrders { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::CancelAccountOrders,
             },
             CommandIn::FetchClosedPositions {
                 command,
@@ -1281,6 +1403,7 @@ pub enum HostInput {
         scale: f64,
         ceiling_ms: Option<f64>,
     },
+    NetworkRestored,
 }
 
 /// Decode startup subscriptions without compiling the trading/query parser.
@@ -1358,6 +1481,9 @@ pub fn decode_host_input(json: &str) -> Result<HostInput, serde_json::Error> {
             books: control.books,
             candles: control.candles,
         }));
+    }
+    if header.op == "networkRestored" {
+        return Ok(HostInput::NetworkRestored);
     }
     #[cfg(feature = "polling-control")]
     if header.op == "setPollScale" {
@@ -1588,6 +1714,49 @@ mod tests {
             }
         );
         assert!(decode_command(r#"{"op":"fetchMaxLeverage","command":82}"#).is_err());
+    }
+
+    #[test]
+    fn repair_subscription_names_one_candle_or_book_topic() {
+        assert_eq!(
+            decode_command(
+                r#"{"op":"repairSubscription","topic":{"kind":"candles","symbol":"BTCUSDT","interval":"1m"}}"#
+            )
+            .unwrap(),
+            Command::RepairSubscription(SubscriptionTopic::Candles {
+                symbol: "BTCUSDT".into(),
+                interval: Interval::M1,
+            })
+        );
+        // A host's reply ID is ignored: the command is replyless.
+        assert_eq!(
+            decode_host_input(
+                r#"{"op":"repairSubscription","command":9,"topic":{"kind":"orderBook","symbol":"BTCUSDT"}}"#
+            )
+            .unwrap(),
+            HostInput::Command {
+                command: Command::RepairSubscription(SubscriptionTopic::OrderBook {
+                    symbol: "BTCUSDT".into(),
+                }),
+                timeout_ms: None,
+            }
+        );
+        for bad in [
+            r#"{"op":"repairSubscription"}"#,
+            r#"{"op":"repairSubscription","kind":"orderBook","symbol":"BTCUSDT"}"#,
+            r#"{"op":"repairSubscription","topic":{"kind":"candles","symbol":"BTCUSDT"}}"#,
+            r#"{"op":"repairSubscription","topic":{"kind":"trades","symbol":"BTCUSDT"}}"#,
+            r#"{"op":"repairSubscription","topic":{"symbol":"BTCUSDT"}}"#,
+        ] {
+            assert!(decode_command(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            decode_subscription(
+                r#"{"op":"repairSubscription","topic":{"kind":"orderBook","symbol":"BTCUSDT"}}"#
+            )
+            .unwrap(),
+            None
+        );
     }
 
     fn assert_subscription_decoders_match(json: &str) {
@@ -1826,6 +1995,19 @@ mod tests {
             );
             assert!(decode_command(&json).is_err(), "{json}");
         }
+    }
+
+    #[test]
+    fn cancel_check_registration_is_read_only_and_feature_gated() {
+        let decoded = decode_command(
+            r#"{"op":"registerCancelChecks","command":7,"orders":[{"id":"native-1","symbol":"BTCUSDT"}]}"#,
+        );
+        #[cfg(feature = "command-bitget")]
+        assert!(
+            matches!(decoded, Ok(Command::Venue { command: 7, action: crate::VenueAction::RegisterCancelChecks { orders } }) if orders == vec![crate::model::CancelOrderRef { id: "native-1".into(), symbol: "BTCUSDT".into() }])
+        );
+        #[cfg(not(feature = "command-bitget"))]
+        assert!(decoded.is_err());
     }
 
     #[test]

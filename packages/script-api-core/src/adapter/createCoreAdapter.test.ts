@@ -320,7 +320,9 @@ describe('createCoreAdapter', () => {
     it('keeps the observer text for a plain failure record while preserving its SDK message on the wrapper', async () => {
       const failure = { message: 'serialized native message', partialOrderIds: ['accepted-1'], outcome: 'rejected' };
       const { host, writes } = fakeHost({ getExchange: () => ({ placeOrders: vi.fn().mockRejectedValue(failure) }) });
-      const caught = await createCoreAdapter(host).placeOrders(batch, 'main').catch((error: unknown) => error);
+      const caught = await createCoreAdapter(host)
+        .placeOrders(batch, 'main')
+        .catch((error: unknown) => error);
       expect(caught).toMatchObject({ name: 'ScriptBatchOrderError', message: failure.message, cause: failure });
       expect(writes[0]).toMatchObject({ ok: false, error: 'Unknown error', partialOrderIds: ['accepted-1'] });
     });
@@ -333,6 +335,19 @@ describe('createCoreAdapter', () => {
       });
       expect(placeOrders).not.toHaveBeenCalled();
     });
+  });
+
+  it('never shows a script a terminal row as resting, nor sends it to cancel', async () => {
+    const orders = [
+      order({ id: 'gone', status: 'canceled' as never }),
+      order({ id: 'done', status: 'closed' as never }),
+      order({ id: 'live' }),
+    ];
+    const { host, cancelOrders } = fakeHost({ getStore: () => ({ orders }) as never });
+    const adapter = createCoreAdapter(host);
+    expect(adapter.getOrders({ account: 'main' } as never).map((row) => row.id)).toEqual(['live']);
+    await adapter.cancelOrders({ ids: ['gone', 'live'] } as never, 'main');
+    expect(cancelOrders).toHaveBeenCalledWith([orders[2]]);
   });
 
   it('cancels exactly the ids named, ignoring the other filter fields', async () => {
@@ -406,7 +421,14 @@ describe('createCoreAdapter', () => {
     const { host } = fakeHost();
     await expect(
       createCoreAdapter(host).placeOrder(
-        { symbol: 'BTCUSDT', side: 'sell', type: OrderType.Limit, amount: 0.04, price: 60_000, reduceOnly: true } as never,
+        {
+          symbol: 'BTCUSDT',
+          side: 'sell',
+          type: OrderType.Limit,
+          amount: 0.04,
+          price: 60_000,
+          reduceOnly: true,
+        } as never,
         'main',
       ),
     ).rejects.toThrow(/below the venue lot step/);
@@ -545,11 +567,27 @@ describe('createCoreAdapter', () => {
     expect('amount' in sent.update).toBe(false);
   });
 
+  it('hands a rounded amend to the host lifetime boundary without a raw write', async () => {
+    const raw = vi.fn(async () => undefined);
+    const submitOrderAmend = vi.fn(async () => undefined);
+    const { host } = fakeHost({
+      getExchange: () => ({ name: 'binance', updateOrder: raw }) as never,
+      getStore: () => ({ orders: [order()], markets: [market()] }) as never,
+      submitOrderAmend,
+    });
+    await createCoreAdapter(host).updateOrder('o1', { update: { price: 60_000.27 } } as never, 'main');
+    expect(submitOrderAmend).toHaveBeenCalledExactlyOnceWith(
+      'main',
+      expect.objectContaining({
+        order: expect.objectContaining({ id: 'o1' }),
+        update: { price: 60_000.5 },
+      }),
+    );
+    expect(raw).not.toHaveBeenCalled();
+  });
+
   it('closes each matching position and reports partial ids when a later leg throws', async () => {
-    const placeOrder = vi
-      .fn()
-      .mockResolvedValueOnce(['id-1'])
-      .mockRejectedValueOnce(new Error('venue said no'));
+    const placeOrder = vi.fn().mockResolvedValueOnce(['id-1']).mockRejectedValueOnce(new Error('venue said no'));
     const positions = [position({ side: 'long' }), position({ side: 'short', contracts: 1 })];
     const { host, writes } = fakeHost({
       getExchange: () => ({ name: 'binance', placeOrder, store: { positions } }) as never,
@@ -579,14 +617,14 @@ describe('createCoreAdapter', () => {
     const { host } = fakeHost({
       getExchange: () => {
         const placeOrder = vi.fn(async () => [`id-${used.length + 1}`]);
-        return ({
+        return {
           name: 'binance',
           placeOrder: (opts: never) => {
             used.push(placeOrder);
             return placeOrder(opts);
           },
           store: { positions },
-        }) as never;
+        } as never;
       },
       getStore: () => ({ positions, markets: [market()] }) as never,
     });

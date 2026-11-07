@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
+/// GRVT 1008: the request IP is not in the API key's whitelist.
+const IP_NOT_WHITELISTED: &str = "GRVT IP is not whitelisted. Please re-add your API key and whitelist every Tealstreet IP listed in the API key form.";
+
 const AUTH: &str = "/auth/api_key/login";
 const SUMMARY: &str = "/lite/v1/aggregated_account_summary";
 const POSITIONS: &str = "/lite/v1/positions";
@@ -71,6 +74,8 @@ pub(crate) struct Account {
     summary_pending: bool,
     orders_pending: bool,
     positions_pending: bool,
+    orders_again: bool,
+    positions_again: bool,
     leverage_pending: bool,
     authenticated: bool,
     authentication_failed: bool,
@@ -832,6 +837,13 @@ impl Grvt {
             ("X-Grvt-Remember-Me", "true"),
             ("Cookie", "rm=true"),
         ];
+        let credential = self.signing.as_ref().and_then(|identity| {
+            let slots = Slots::new(Some(identity), None, SlotPolicy::default());
+            slots
+                .select(CredentialRole::SessionAuth)
+                .ok()
+                .map(|(selection, id)| selection.authority(id))
+        });
         let session = match self.account.login_session.take() {
             Some(session) if cx.session_live(&session) => Ok(session),
             _ => {
@@ -842,9 +854,13 @@ impl Grvt {
                     .ok()
                     .and_then(|(selection, _)| selection.session_egress());
                 cx.open_session(SessionPolicy {
-                    credential: None,
+                    credential: credential.clone(),
                     repeat_safe: false,
-                    private_egress,
+                    private_egress: if credential.is_none() {
+                        private_egress
+                    } else {
+                        None
+                    },
                 })
             }
         };
@@ -853,7 +869,7 @@ impl Grvt {
                 &session,
                 Policy {
                     operation: Operation::Mutation,
-                    credential: None,
+                    credential: credential.clone(),
                     // The host default the unmanaged login relied on.
                     timeout_ms: 20_000,
                     pacing: None,
@@ -873,21 +889,41 @@ impl Grvt {
             context: None,
         };
         let refused = match queued {
-            Ok(context) => cx
-                .request_managed_with_headers(
-                    context.clone(),
-                    None,
-                    safe_cex_engine::Method::Post,
-                    format!("{}{AUTH}", self.edge()),
-                    HEADERS,
-                    Some(body),
-                    Pending {
-                        context: Some(context),
-                        ..pending
-                    },
-                )
-                .err()
-                .map(|(pending, _)| pending),
+            Ok(context) => {
+                let pending = Pending {
+                    context: Some(context.clone()),
+                    ..pending
+                };
+                if let Some(identity) = &self.signing {
+                    let recipe = crate::provider::Login::new(
+                        identity.credential.clone(),
+                        self.options.testnet,
+                    );
+                    cx.request_signed_managed(
+                        context,
+                        None,
+                        safe_cex_engine::Method::Post,
+                        recipe.url(),
+                        None,
+                        Box::new(recipe),
+                        pending,
+                    )
+                    .err()
+                    .map(|(pending, _)| pending)
+                } else {
+                    cx.request_managed_with_headers(
+                        context,
+                        None,
+                        safe_cex_engine::Method::Post,
+                        format!("{}{AUTH}", self.edge()),
+                        HEADERS,
+                        Some(body),
+                        pending,
+                    )
+                    .err()
+                    .map(|(pending, _)| pending)
+                }
+            }
             Err(_) => Some(pending),
         };
         if refused.is_some() {
@@ -895,7 +931,7 @@ impl Grvt {
             self.account_login_unavailable(cx);
         }
     }
-    fn retire_login_session(&mut self, cx: &mut Cx<'_, Pending>) {
+    pub(crate) fn retire_login_session(&mut self, cx: &mut Cx<'_, Pending>) {
         if let Some(session) = self.account.login_session.take() {
             let _ = cx.retire_session(&session);
         }
@@ -1072,6 +1108,9 @@ impl Grvt {
                 .expect("serialize subscription"),
             );
         }
+        // A startup read still running may predate the stream: read again when it settles.
+        self.account.orders_again = self.account.orders_pending;
+        self.account.positions_again = self.account.positions_pending;
         self.refresh_orders(cx);
         self.refresh_positions(cx);
     }
@@ -1082,6 +1121,14 @@ impl Grvt {
     }
     /// `code` is `auth.rejected` only when GRVT refused the credentials.
     fn fail_authentication(&mut self, cx: &mut Cx<'_, Pending>, code: &'static str) {
+        self.fail_authentication_with(cx, code, "GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
+    }
+    fn fail_authentication_with(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        code: &'static str,
+        message: &str,
+    ) {
         self.cancel_pong_ping(cx);
         self.account.authentication_failed = true;
         self.account.authenticated = false;
@@ -1094,7 +1141,15 @@ impl Grvt {
             cx.clear_timer(timer);
         }
         self.retire_login_session(cx);
-        cx.notice(Level::Error, code,"GRVT private WebSocket authentication failed closed. Check the API key and account authorization, then reconnect.");
+        // Nothing reads the account once login is refused, so the start ends here.
+        let refused = code == code::AUTH_REJECTED
+            && cx.startup_read_refused(
+                &safe_cex_engine::VenueError::new(message)
+                    .kind(safe_cex_engine::ErrorKind::AuthInvalid),
+            );
+        if !refused {
+            cx.notice(Level::Error, code, message);
+        }
     }
     fn refresh_stream_session(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.login_pending || self.account.authentication_failed {
@@ -1615,6 +1670,9 @@ impl Grvt {
                 mut positions,
             } => {
                 self.account.positions_pending = false;
+                if std::mem::take(&mut self.account.positions_again) {
+                    self.refresh_positions(cx);
+                }
                 if revision == self.account.positions_revision {
                     let mut seen: HashSet<_> = rows.iter().map(|p| p.position.id.clone()).collect();
                     rearm_skips(
@@ -1694,6 +1752,9 @@ impl Grvt {
                 orders: mut snapshot,
             } => {
                 self.account.orders_pending = false;
+                if std::mem::take(&mut self.account.orders_again) {
+                    self.refresh_orders(cx);
+                }
                 if revision == self.account.orders_revision {
                     rearm_skips(
                         &mut self.account.skip_logged,
@@ -1953,14 +2014,18 @@ impl Grvt {
             Request::Login => {
                 self.account.login_pending = false;
                 let refused = error.contains("(HTTP 401") || error.contains("(HTTP 403");
-                self.fail_authentication(
-                    cx,
-                    if refused {
-                        code::AUTH_REJECTED
-                    } else {
-                        code::STREAM_UNAVAILABLE
-                    },
-                );
+                if refused && error.contains(", code 1008)") {
+                    self.fail_authentication_with(cx, code::AUTH_REJECTED, IP_NOT_WHITELISTED);
+                } else {
+                    self.fail_authentication(
+                        cx,
+                        if refused {
+                            code::AUTH_REJECTED
+                        } else {
+                            code::STREAM_UNAVAILABLE
+                        },
+                    );
+                }
                 self.fail_waiting(cx);
             }
             Request::Summary => {
@@ -1973,10 +2038,16 @@ impl Grvt {
             }
             Request::Positions { .. } => {
                 self.account.positions_pending = false;
+                if std::mem::take(&mut self.account.positions_again) {
+                    self.refresh_positions(cx);
+                }
                 cx.store.set_positions(cx.store.positions().to_vec());
             }
             Request::Orders { .. } => {
                 self.account.orders_pending = false;
+                if std::mem::take(&mut self.account.orders_again) {
+                    self.refresh_orders(cx);
+                }
                 cx.store.set_orders(cx.store.orders().to_vec());
             }
             Request::Leverage { command, .. } => {
@@ -2045,9 +2116,7 @@ impl Grvt {
             return true;
         }
         if code == "1008" {
-            cx.notice(Level::Error, code::AUTH_REJECTED,
-                "GRVT IP is not whitelisted. Please re-add your API key with correct IP whitelisting (18.176.98.246).",
-            );
+            cx.notice(Level::Error, code::AUTH_REJECTED, IP_NOT_WHITELISTED);
             return true;
         }
         if !code.is_empty() && code != "0" {
@@ -2403,6 +2472,19 @@ fn session_headers(response: &Response<'_>) -> (Option<String>, Option<String>) 
         .filter(|v| !v.is_empty())
         .map(str::to_owned);
     (cookie, account)
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Summary => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            Self::Login => S::ACCOUNT,
+            _ => S::NONE,
+        }
+    }
 }
 
 #[cfg(test)]

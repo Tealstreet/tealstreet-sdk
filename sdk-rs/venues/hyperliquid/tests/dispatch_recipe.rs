@@ -245,7 +245,31 @@ fn provider_recipe_matches_native_signature_and_body_on_both_networks_and_vaults
         ] {
             let (mut e, signer) = engine(testnet, vault.clone(), false);
             let (attempt, work) = work(&mut e);
-            assert_eq!(work.operations.len(), 2);
+            assert_eq!(work.operations.len(), 3);
+            // The statement re-derives exactly the digest the provider signs.
+            let (
+                safe_cex_engine::signing::Operation::Sha256 { payload: statement },
+                safe_cex_engine::signing::Operation::Sign {
+                    payload: digest, ..
+                },
+            ) = (&work.operations[0], &work.operations[2])
+            else {
+                panic!("statement then digest");
+            };
+            let bytes = |parts: &[safe_cex_engine::signing::PayloadPart]| match parts {
+                [safe_cex_engine::signing::PayloadPart::Bytes { bytes }] => bytes.clone(),
+                _ => panic!("one bytes part"),
+            };
+            let account = sign::statement::Account {
+                mainnet: !testnet,
+                vault: vault.as_deref(),
+            };
+            assert_eq!(
+                sign::statement::derive(std::str::from_utf8(&bytes(statement)).unwrap(), &account)
+                    .unwrap()
+                    .to_vec(),
+                bytes(digest)
+            );
             assert_eq!(work.receipt.stamp_ms, Some(2000.));
             assert!(work.receipt.nonce.is_some());
             let result = signer.sign_now(&work).unwrap();
@@ -300,15 +324,15 @@ fn provider_recipe_matches_native_signature_and_body_on_both_networks_and_vaults
 }
 #[test]
 fn malformed_or_changed_provider_results_never_bind_a_body() {
-    for case in 0..6 {
+    for case in 0..7 {
         let (mut e, signer) = engine(false, None, false);
         let (attempt, work) = work(&mut e);
         let mut result = signer.sign_now(&work).unwrap();
         match case {
             0 => result.receipt.nonce = result.receipt.nonce.map(|n| n + 1),
-            1 => result.values[0].pop().map(drop).unwrap(),
-            2 => result.values[0][0] ^= 1,
-            3 => result.values[1].pop().map(drop).unwrap(),
+            1 => result.values[1].pop().map(drop).unwrap(),
+            2 => result.values[1][0] ^= 1,
+            3 => result.values[2].pop().map(drop).unwrap(),
             4 => result.headers.push(("X-Injected".into(), "bad".into())),
             5 => {
                 let order: [u8; 32] = [
@@ -316,7 +340,7 @@ fn malformed_or_changed_provider_results_never_bind_a_body() {
                     0xff, 0xff, 0xfe, 0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b, 0xbf, 0xd2,
                     0x5e, 0x8c, 0xd0, 0x36, 0x41, 0x41,
                 ];
-                let signature = &mut result.values[1];
+                let signature = &mut result.values[2];
                 let mut borrow = 0i16;
                 for i in (0..32).rev() {
                     let value = i16::from(order[i]) - i16::from(signature[32 + i]) - borrow;
@@ -329,6 +353,8 @@ fn malformed_or_changed_provider_results_never_bind_a_body() {
                     signature[64] ^ 1
                 };
             }
+            // A provider answering for another statement never binds.
+            6 => result.values[0][0] ^= 1,
             _ => unreachable!(),
         }
         if case == 3 {

@@ -891,3 +891,183 @@ fn inherited_uncertainty_requires_live_write_preflight_custody_and_mutates_nothi
     });
     assert_eq!(outcome, Some(Some(crate::Outcome::NotSent)));
 }
+
+#[cfg(not(feature = "condition-waits"))]
+struct ObservedFailure<'a> {
+    conversions: &'a Cell<usize>,
+    panic: bool,
+}
+
+#[cfg(not(feature = "condition-waits"))]
+impl From<ObservedFailure<'_>> for VenueError {
+    fn from(error: ObservedFailure<'_>) -> Self {
+        error.conversions.set(error.conversions.get() + 1);
+        assert!(!error.panic, "error conversion ran");
+        VenueError::new("counted failure")
+    }
+}
+
+#[cfg(not(feature = "condition-waits"))]
+#[test]
+fn preflight_failure_refuses_invalid_custody_before_converting_the_error() {
+    let mut foreign_engine = engine();
+    let foreign = begin(&mut foreign_engine, 7, PreflightPurpose::ReadOnly);
+    let mut local = engine();
+    let live = begin(&mut local, 7, PreflightPurpose::ReadOnly);
+    let revoked = begin(&mut local, 8, PreflightPurpose::ReadOnly);
+    cx(&mut local, 1., |cx| {
+        cx.done_preflight(&revoked, "cached".into())
+    })
+    .unwrap();
+    let before = local.io.core.actions.len();
+    for (label, handle, now, expected) in [
+        ("foreign", &foreign, 2., Error::Revoked),
+        ("revoked", &revoked, 2., Error::Revoked),
+        ("nonfinite", &live, f64::NAN, Error::Invalid),
+    ] {
+        for panic in [false, true] {
+            let conversions = Cell::new(0);
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                cx(&mut local, now, |cx| {
+                    cx.fail_preflight(
+                        handle,
+                        ObservedFailure {
+                            conversions: &conversions,
+                            panic,
+                        },
+                    )
+                })
+            }));
+            assert!(
+                matches!(result, Ok(Err(error)) if error == expected),
+                "{label}: typed refusal must not run conversion"
+            );
+            assert_eq!(conversions.get(), 0, "{label}: conversion is after custody");
+            assert_eq!(
+                local.io.core.actions.len(),
+                before,
+                "{label}: no terminal or action"
+            );
+        }
+    }
+    cx(&mut local, 3., |cx| {
+        cx.done_preflight(&live, "still live".into())
+    })
+    .unwrap();
+    cx(&mut foreign_engine, 3., |cx| {
+        cx.done_preflight(&foreign, "still live".into())
+    })
+    .unwrap();
+}
+
+#[cfg(not(feature = "condition-waits"))]
+#[test]
+fn preflight_failure_converts_an_owned_error_once_and_keeps_the_terminal() {
+    let mut local = engine();
+    let owner = begin(&mut local, 7, PreflightPurpose::ReadOnly);
+    let conversions = Cell::new(0);
+    cx(&mut local, 1., |cx| {
+        cx.fail_preflight(
+            &owner,
+            ObservedFailure {
+                conversions: &conversions,
+                panic: false,
+            },
+        )
+    })
+    .unwrap();
+    assert_eq!(conversions.get(), 1);
+    let actions: Vec<_> = local.drain_actions().collect();
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|action| matches!(action,
+        Action::Notice(Notice::CommandFailed { command: 7, error })
+            if error.message == "counted failure"))
+            .count(),
+        1
+    );
+}
+
+/// A venue declaring no Plans: the engine skips every per-event Plan sweep for it.
+#[derive(Default)]
+struct Planless(Probe);
+impl Venue for Planless {
+    type Pending = ();
+    fn http_plans() -> bool {
+        false
+    }
+    fn capabilities(&self) -> Capabilities {
+        self.0.capabilities()
+    }
+    fn start(&mut self, cx: &mut Cx<'_, ()>) {
+        self.0.start(cx);
+    }
+    fn on_open(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId) {
+        self.0.on_open(cx, socket);
+    }
+    fn on_close(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, code: u16) {
+        self.0.on_close(cx, socket, code);
+    }
+    fn on_message(&mut self, cx: &mut Cx<'_, ()>, socket: SocketId, text: &str) {
+        self.0.on_message(cx, socket, text);
+    }
+    fn on_timer(&mut self, cx: &mut Cx<'_, ()>, timer: TimerId) {
+        self.0.on_timer(cx, timer);
+    }
+    fn on_response(&mut self, cx: &mut Cx<'_, ()>, pending: (), response: Response<'_>) {
+        self.0.on_response(cx, pending, response);
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, ()>, pending: (), error: &str) {
+        self.0.on_request_failed(cx, pending, error);
+    }
+    fn on_command(&mut self, cx: &mut Cx<'_, ()>, command: Command) {
+        self.0.on_command(cx, command);
+    }
+    fn book(&self, symbol: &str) -> Option<&Book> {
+        self.0.book(symbol)
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        self.0.books()
+    }
+}
+
+#[test]
+fn a_venue_declaring_no_plans_cannot_open_a_preflight() {
+    let mut declared = engine();
+    assert!(declared.io.core.http_plans_declared);
+    begin(&mut declared, 7, PreflightPurpose::ReadOnly);
+
+    let mut planless = crate::test_support::seeded_engine(Planless::default());
+    assert!(!planless.io.core.http_plans_declared);
+    for purpose in [
+        PreflightPurpose::ReadOnly,
+        PreflightPurpose::WriteAfterReads,
+    ] {
+        // A declaration bug is loud under test and refused, not issued, in release.
+        let issued = catch_unwind(AssertUnwindSafe(|| {
+            f(&mut planless, |cx| cx.issue_preflight(7, policy(purpose)))
+        }));
+        assert_eq!(issued.is_err(), cfg!(debug_assertions));
+        match issued {
+            Err(panic) => {
+                assert!(
+                    panic
+                        .downcast_ref::<&str>()
+                        .is_some_and(|message| message.contains("http_plans() false"))
+                );
+            }
+            Ok(refused) => assert_eq!(refused.err(), Some(Error::Invalid)),
+        }
+    }
+    assert!(!planless.io.core.request_contexts.has_plans());
+    assert!(!planless.io.core.request_contexts.has_retirements());
+}
+
+fn f<R>(engine: &mut Engine<Planless>, op: impl FnOnce(&mut Cx<'_, ()>) -> R) -> R {
+    op(&mut Cx {
+        now: 0.,
+        store: &mut engine.store,
+        io: &mut engine.io,
+    })
+}

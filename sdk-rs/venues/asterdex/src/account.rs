@@ -6,6 +6,7 @@ use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::credential_selection::CredentialRole;
 use safe_cex_engine::execution::ObservedProgress;
+use safe_cex_engine::fresh_positions::{self, FreshPositions};
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::num::parse_decimal;
@@ -45,10 +46,17 @@ pub struct AccountState {
     last_orders: f64,
     last_balance: f64,
     positions_in_flight: bool,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<VenueError>,
     orders_in_flight: bool,
     /// An uncertain write wants a read that starts after it; the in-flight
     /// one predates it, so its completion starts the fresh read at once.
     orders_requery: bool,
+    /// As `orders_requery`, for a position read that predates the private stream.
+    positions_requery: bool,
     balance_in_flight: bool,
     position_version: u64,
     mode_version: u64,
@@ -118,6 +126,7 @@ pub enum Request {
         version: u64,
         rows: SnapshotBuilder<String, Position>,
         settings: Vec<(String, MarketSetting)>,
+        read: u32,
     },
     Orders {
         version: u64,
@@ -136,6 +145,16 @@ pub(crate) struct OrderRow<'a> {
     pub time: f64,
     #[serde(default, borrow)]
     pub position_side: Option<Cow<'a, str>>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtectionFlags {
+    #[serde(alias = "pP")]
+    price_protect: Option<bool>,
+    #[serde(alias = "R")]
+    reduce_only: Option<bool>,
+    #[serde(alias = "cp")]
+    close_position: Option<bool>,
 }
 fn new_status<'a>() -> Cow<'a, str> {
     Cow::Borrowed("NEW")
@@ -417,6 +436,92 @@ impl AsterDex {
     pub(crate) fn position_mode_pending(&self) -> bool {
         self.account.mode == ModeLoad::Loading
     }
+    fn remember_protection(
+        &mut self,
+        order: &Order,
+        row: &OpenOrder<'_>,
+        flags: Option<ProtectionFlags>,
+    ) {
+        if order.status != OrderStatus::Open
+            || !matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
+        {
+            self.trading.protections.remove(&order.id);
+            return;
+        }
+        let reference = match row.working_type.as_deref() {
+            Some("MARK_PRICE") => StopTriggerType::MarkPrice,
+            Some("CONTRACT_PRICE") => StopTriggerType::LastPrice,
+            _ => {
+                self.trading.protections.remove(&order.id);
+                return;
+            }
+        };
+        let Some(flags) = flags.filter(|f| f.reduce_only.is_some() && f.close_position.is_some())
+        else {
+            self.trading.protections.remove(&order.id);
+            return;
+        };
+        // The documented WS delta omits priceProtect; retain only this same
+        // native order's previously observed flag, never infer a default.
+        let price_protect = flags.price_protect.or_else(|| {
+            self.trading
+                .protections
+                .get(&order.id)
+                .filter(|prior| {
+                    let mut prior_order = prior.order.clone();
+                    prior_order.last_update = order.last_update;
+                    prior_order == *order
+                })
+                .map(|prior| prior.price_protect)
+        });
+        let Some(price_protect) = price_protect else {
+            self.trading.protections.remove(&order.id);
+            return;
+        };
+        let Some(stop) = row
+            .stop_price
+            .as_deref()
+            .filter(|p| parse_decimal(p).is_some_and(|p| p > 0.0))
+        else {
+            return;
+        };
+        let mut query = Query::new()
+            .str("symbol", &row.symbol)
+            .str("side", &row.side)
+            .str("type", &row.kind)
+            .opt_str("positionSide", row.position_side.as_deref())
+            .str("stopPrice", stop)
+            .str("workingType", row.working_type.as_deref().unwrap())
+            .str("priceProtect", if price_protect { "TRUE" } else { "FALSE" })
+            .opt_str("newClientOrderId", row.client_order_id.as_deref());
+        if row.close_position {
+            query = query.str("closePosition", "true");
+        } else {
+            query = query.str("quantity", &row.orig_qty);
+            if row.position_side.as_deref().is_none_or(|s| s == "BOTH") {
+                query = query.str("reduceOnly", if row.reduce_only { "true" } else { "false" });
+            }
+        }
+        if matches!(&*row.kind, "STOP" | "TAKE_PROFIT") {
+            query = query
+                .str("price", &row.price)
+                .opt_str("timeInForce", row.time_in_force.as_deref());
+        }
+        if self.trading.protections.len() < 10_000
+            || self.trading.protections.contains_key(&order.id)
+        {
+            self.trading.protections.insert(
+                order.id.clone(),
+                crate::trading::NativeProtection {
+                    order: order.clone(),
+                    query,
+                    reference,
+                    price_protect,
+                },
+            );
+        }
+    }
+
     pub(crate) fn order_position_side(&self, id: &str) -> Option<PositionSide> {
         self.account.order_position_sides.get(id).copied()
     }
@@ -493,6 +598,7 @@ impl AsterDex {
             return;
         }
         self.account.positions_in_flight = true;
+        self.account.positions_read += 1;
         let path = self.path("positionRisk");
         self.signed_streamed(
             cx,
@@ -502,8 +608,40 @@ impl AsterDex {
                 version: self.account.position_version,
                 rows: SnapshotBuilder::default(),
                 settings: Vec::new(),
+                read: self.account.positions_read,
             }),
         );
+    }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.feed.is_none() {
+            let error = VenueError::new("Aster account is not loaded")
+                .kind(safe_cex_engine::ErrorKind::InvalidInput);
+            fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.positions_read + 1;
+        if self.account.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.refresh_positions(cx);
+        }
+    }
+    /// The venue's error for a positions read that could not answer.
+    fn positions_read_error(response: &Result<Response<'_>, &str>) -> VenueError {
+        let Ok(response) = response else {
+            return VenueError::new(response.err().unwrap_or_default());
+        };
+        let (code, message) = venue_error(response)
+            .unwrap_or_else(|| (0, "Aster positions: malformed reply".to_owned()));
+        let kind = match (code, response.status) {
+            (-2014 | -2015, _) => safe_cex_engine::ErrorKind::AuthInvalid,
+            (_, 429) | (-1003, _) => safe_cex_engine::ErrorKind::RateLimited,
+            _ => return VenueError::new(message).venue_code(code.to_string()),
+        };
+        VenueError::new(message.clone())
+            .kind(kind)
+            .venue_code(code.to_string())
+            .venue_message(message)
     }
     /// A fresh authoritative order read for an uncertain write: now, or as
     /// soon as the read already in flight (which predates it) completes.
@@ -561,6 +699,8 @@ impl AsterDex {
                 #[serde(rename_all = "camelCase")]
                 struct Identity {
                     order_id: wire::Id,
+                    #[serde(default)]
+                    symbol: String,
                 }
                 let row = serde_json::from_str::<OrderRow>(item).ok();
                 match row.as_ref().and_then(|o| Some((o, order_from_wire(o)?))) {
@@ -570,6 +710,11 @@ impl AsterDex {
                                 .order_position_sides
                                 .insert(order.id.clone(), side);
                         }
+                        self.remember_protection(
+                            &order,
+                            &row.row,
+                            serde_json::from_str::<ProtectionFlags>(item).ok(),
+                        );
                         rows.push(order);
                     }
                     None => match serde_json::from_str::<Identity>(item) {
@@ -580,7 +725,7 @@ impl AsterDex {
                                 code::ROW_SKIPPED,
                                 format!("Aster skipped malformed open order row {id}"),
                             );
-                            rows.reject(Some(id));
+                            rows.reject_in(Some(id), &row.symbol);
                         }
                         Err(_) => {
                             cx.notice(
@@ -718,7 +863,21 @@ impl AsterDex {
         response: Result<Response<'_>, &str>,
     ) {
         let error = match &response {
-            Ok(r) => venue_error(r).map(|(_, m)| m),
+            Ok(r) => venue_error(r).map(|(code, m)| {
+                // Aster's whitelist refusal does not always carry a key code; its words do.
+                if matches!(code, -2014 | -2015)
+                    || safe_cex_engine::error::ip_whitelist_text(&m, None)
+                        .is_some_and(|(_, named)| named)
+                {
+                    cx.startup_read_refused(
+                        &safe_cex_engine::VenueError::new(m.clone())
+                            .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+                            .venue_code(code.to_string())
+                            .venue_message(m.clone()),
+                    );
+                }
+                m
+            }),
             Err(e) => Some((*e).into()),
         };
         let body = response.as_ref().map_or("", |r| r.body);
@@ -900,11 +1059,13 @@ impl AsterDex {
                 version,
                 rows,
                 settings,
+                read,
             } => {
                 self.account.positions_in_flight = false;
                 self.account.last_positions = cx.now;
                 if valid && version == self.account.position_version {
-                    if rows.rejected() == 0 {
+                    let rejected = rows.rejected() != 0;
+                    if !rejected {
                         self.account.skip_logged.clear();
                     }
                     // A skipped row cannot prove its leg flat; keep what the store knows.
@@ -913,7 +1074,30 @@ impl AsterDex {
                     for (symbol, setting) in settings {
                         cx.store.update_setting(&symbol, |s| *s = setting);
                     }
+                    if rejected {
+                        let error = VenueError::new("Aster positions: a row could not be mapped");
+                        self.account.fresh_positions.failed(cx, 0, read, &error);
+                    } else {
+                        self.account.fresh_positions.committed(cx, 0, read, &[]);
+                    }
                 } else if version != self.account.position_version
+                    && self.account.positions_timer.is_none()
+                {
+                    self.account.positions_timer = Some(cx.set_timer(1_000.0));
+                }
+                if !valid {
+                    let error = self
+                        .account
+                        .read_error
+                        .take()
+                        .unwrap_or_else(|| Self::positions_read_error(&response));
+                    self.account.fresh_positions.failed(cx, 0, read, &error);
+                }
+                if std::mem::take(&mut self.account.positions_requery)
+                    || self.account.fresh_positions.predates(0, read)
+                {
+                    self.refresh_positions(cx);
+                } else if self.account.fresh_positions.owed(0)
                     && self.account.positions_timer.is_none()
                 {
                     self.account.positions_timer = Some(cx.set_timer(1_000.0));
@@ -930,7 +1114,7 @@ impl AsterDex {
                         }
                     } else {
                         // Only a clean snapshot can prove an uncertain placement absent.
-                        let clean = rows.rejected() == 0;
+                        let unproven = rows.unproven().to_vec();
                         let mut rows =
                             rows.commit(cx.store.orders().iter().cloned(), |o| o.id.clone());
                         self.account
@@ -969,10 +1153,12 @@ impl AsterDex {
                             }
                             self.account.orders_seeded = true;
                         }
+                        self.trading.protections.retain(|id, _| {
+                            rows.iter()
+                                .any(|o| &o.id == id && o.status == OrderStatus::Open)
+                        });
                         cx.store.set_orders(rows);
-                        if clean {
-                            cx.orders_reconciled(None);
-                        }
+                        cx.orders_reconciled_except(&unproven, u64::MAX);
                     }
                 }
                 if std::mem::take(&mut self.account.orders_requery) {
@@ -1005,8 +1191,14 @@ impl AsterDex {
                 self.account.socket = Some(epoch.socket());
                 self.account.key_failures = 0;
                 cx.send(epoch.socket(), r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#);
-                // The only resync on reopen; balances and positions follow the poll.
-                self.request_refresh_orders(cx);
+                // Events before this open were never delivered, the first open included;
+                // a read still in flight may predate it, so it is followed by another.
+                self.reconcile_orders(cx);
+                if self.account.positions_in_flight {
+                    self.account.positions_requery = true;
+                } else {
+                    self.refresh_positions(cx);
+                }
             }
             LifecycleEvent::Ping(epoch) => {
                 cx.send(epoch.socket(), r#"{"id":42,"method":"LIST_SUBSCRIPTIONS"}"#)
@@ -1195,6 +1387,7 @@ impl AsterDex {
             };
             wire::OrderUpdate {
                 i: event.i,
+                ps: None,
                 s: event.s,
                 side: event.side,
                 ot: None,
@@ -1370,6 +1563,35 @@ impl AsterDex {
             stop_loss: None,
             extra: None,
         };
+        #[derive(Deserialize)]
+        struct ProtectionEvent {
+            o: ProtectionFlags,
+        }
+        let flags = serde_json::from_str::<ProtectionEvent>(text)
+            .ok()
+            .map(|e| e.o);
+        self.remember_protection(
+            &order,
+            &OpenOrder {
+                order_id: o.i,
+                symbol: o.s.clone(),
+                kind: o.ot.clone().or(o.o.clone()).unwrap(),
+                side: o.side.clone(),
+                price: o.p.clone(),
+                stop_price: o.sp.clone(),
+                orig_qty: o.q.clone(),
+                executed_qty: o.z.clone(),
+                reduce_only: o.reduce_only,
+                close_position: o.close_position,
+                working_type: o.wt.clone(),
+                time_in_force: o.f.clone(),
+                client_order_id: o.c.clone(),
+                position_side: o.ps.clone(),
+                price_rate: None,
+                activate_price: None,
+            },
+            flags,
+        );
         if !self.account.terminal.contains_key(&id) || status != OrderStatus::Open {
             cx.store.upsert_order(order.clone());
         }
@@ -1658,4 +1880,16 @@ struct LegacyAsset<'a> {
     f: Cow<'a, str>,
     #[serde(borrow)]
     l: Cow<'a, str>,
+}
+
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::Orders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
 }

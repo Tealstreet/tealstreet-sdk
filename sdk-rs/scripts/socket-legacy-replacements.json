@@ -1,8 +1,8 @@
 {
-  "venues/bitget/src/lib.rs": [
+  "venues/coinbase/src/public.rs": [
     {
-      "old": "704e3037e3c7c4eb59c2231c2278deb5d1db0ebea6e55a92b963166f94a34dc2",
-      "new": "cfc6b7fbf7585d64ea3fd3339ba6b3b6d5313a14039f353d8d8f2ab25f5795dc"
+      "old": "632efff5a9082aa22bf2a2a91f0104a93fc1a42f9ccc388478b028220bc3ee02",
+      "new": "1048fbdc0a05786a43250a11e1958597faebcdd23e6a645fab2a6ae668888169"
     }
   ]
 }

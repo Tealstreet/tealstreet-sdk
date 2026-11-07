@@ -42,19 +42,27 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         const markets = this._exchange.store.markets;
         if (!markets.some((m) => m.symbol === payload.data.symbol)) {
           console.warn(
-            `[OHLCVSubscriptionsHandler] Symbol "${payload.data.symbol}" not found on ${this._exchange.name}, skipping subscription`,
+            `[OHLCVSubscriptionsHandler] Symbol "${payload.data.symbol}" not found on ${this._exchange.name}, skipping subscription${
+              payload.data.reset ? ' and its forced repair' : ''
+            }`,
           );
           return;
         }
 
-        const key = this._getKey(payload.data.symbol, payload.data.interval);
-        const subId = payload.data.subId;
+        const { reset, ...data } = payload.data;
+        const key = this._getKey(data.symbol, data.interval);
+        const subId = data.subId;
         const existing = this._subsByKey.get(key);
+        // After attaching: a forced reset also stands behind this key's other subscribers.
+        const repairIfReset = () => {
+          if (reset) this._exchange.repairOHLCV?.({ symbol: data.symbol, interval: data.interval });
+        };
 
         if (existing) {
           // Already subscribed to this symbol:interval — just track the subscriber
           existing.subIds.add(subId);
-          existing.payloadDataBySubId.set(subId, { ...payload.data });
+          existing.payloadDataBySubId.set(subId, { ...data });
+          repairIfReset();
           return;
         }
 
@@ -64,7 +72,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
           throttleFn: undefined,
           subIds: new Set([subId]),
           lastCandleTimestamp: 0,
-          payloadDataBySubId: new Map([[subId, { ...payload.data }]]),
+          payloadDataBySubId: new Map([[subId, { ...data }]]),
         };
         const f = throttle(
           this._sendCandleUpdate.bind(this, sub),
@@ -73,7 +81,7 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         );
         sub.throttleFn = f;
 
-        const ohlcvSub = this._exchange.listenOHLCV(payload.data, (c) => {
+        const ohlcvSub = this._exchange.listenOHLCV(data, (c) => {
           if (c.timestamp !== sub.lastCandleTimestamp) {
             try {
               f?.flush?.();
@@ -87,10 +95,12 @@ export class OHLCVSubscriptionsHandler extends BaseHandler {
         sub.unsub = ohlcvSub || (() => {});
 
         this._subsByKey.set(key, sub);
+        repairIfReset();
         break;
       }
       case 'unsubscribeOHLCV': {
         const subId = payload.data.subId;
+        this.cancelPending(subId);
 
         // Find which key this subId belongs to
         for (const [key, sub] of this._subsByKey) {

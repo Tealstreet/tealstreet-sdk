@@ -2,7 +2,7 @@
 
 ## Exchange Information
 
-Orderly Network is an omnichain orderbook DEX infrastructure that supports white-label deployments. Multiple front-ends (KodiakFi, SalsaDEX, Mode, WooFi, What, Tealstreet DEX) share the same backend. All variants extend the base `OrderlyExchange` class, differing only in `orderlyExchangeName` and the `order_tag` used for broker attribution.
+Orderly Network is an omnichain orderbook DEX infrastructure that supports white-label deployments. Multiple front-ends (KodiakFi, Mode, WooFi, What, ) share the same backend. All variants extend the base `OrderlyExchange` class, differing only in `orderlyExchangeName` and the `order_tag` used for broker attribution.
 
 ## API Documentation
 
@@ -33,8 +33,6 @@ Each variant extends `OrderlyExchange` with a different `orderlyExchangeName`:
 | -------------- | ----------------------------------------------------- | --------------------- | -------------------------------------- |
 | KodiakFi       | `exchanges/kodiakfi/kodiakfi.exchange.ts`             | `KODIAKFI`            | `TEALKODIAK`                           |
 | Mode           | `exchanges/mode/mode.exchange.ts`                     | `MODE`                | `TEALMODE`                             |
-| SalsaDEX       | `exchanges/salsadex/salsadex.exchange.ts`             | `SALSADEX`            | `TEALSALSA`                            |
-| Tealstreet DEX | `exchanges/tealstreet-dex/tealstreet-dex.exchange.ts` | `Tealstreet DEX`      | `TEALSTREET` (default)                 |
 | What           | `exchanges/what/what.exchange.ts`                     | `WHAT`                | `TEALWHAT`                             |
 | WooFi          | `exchanges/woofi/woofi.exchange.ts`                   | `WOOFI`               | `TEALSTREET` (default, no special tag) |
 

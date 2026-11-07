@@ -183,7 +183,12 @@ impl Blofin {
         }
     }
     fn read(&mut self, cx: &mut Cx<'_, Pending>, path: &str, pending: Pending) {
-        let context = match cx.http_context(Scope::Background, Self::read_policy()) {
+        let issue = if matches!(&pending, Pending::Tickers { .. } | Pending::Candles { .. }) {
+            Cx::http_live_context
+        } else {
+            Cx::http_context
+        };
+        let context = match issue(cx, Scope::Background, Self::read_policy()) {
             Ok(context) => context,
             Err(_) => {
                 self.public_failed(
@@ -284,7 +289,8 @@ impl Blofin {
                 } else {
                     self.startup.succeeded(cx, DiscoveryRead::Markets);
                 }
-                if refresh {
+                // Frame-fed: tickers and the account arrive as frames.
+                if refresh || cx.frame_fed() {
                     return;
                 }
                 if let Err(error) = self.connect_feed(cx, false) {
@@ -309,7 +315,7 @@ impl Blofin {
                 mut rows,
                 failed: false,
             } => {
-                rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
+                safe_cex_engine::model::sort_candles_by_time(&mut rows);
                 let _ = cx.done_context(&context, serde_json::to_string(&rows).unwrap());
             }
             other @ (Pending::Markets { .. } | Pending::Tickers { .. }) => self.public_failed(
@@ -511,6 +517,14 @@ impl Venue for Blofin {
     fn managed_sockets() -> bool {
         true
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), VenueError> {
+        self.stop_release_veto(store, pending, release)
+    }
     fn socket_capabilities() -> safe_cex_engine::socket_lifecycle::SocketCapabilities {
         safe_cex_engine::socket_lifecycle::SocketCapabilities { handoff: false }
     }
@@ -530,6 +544,13 @@ impl Venue for Blofin {
     ) -> safe_cex_engine::socket_lifecycle::Control {
         self.classify_control(feed, text)
     }
+    fn subscription_interest(
+        &self,
+        store: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(store, topic)
+    }
     fn encode_socket_interests(
         &self,
         _: &safe_cex_engine::Store,
@@ -543,6 +564,9 @@ impl Venue for Blofin {
         self.encode_interests(feed, subscribe, interests, emit)
     }
     fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         true
     }
 
@@ -589,8 +613,45 @@ impl Venue for Blofin {
     fn reconcile_uncertain(&mut self, cx: &mut Cx<'_, Pending>, _symbols: Option<&[String]>) {
         self.reconcile_uncertain_orders(cx);
     }
+    fn refreshes_orders(&self) -> bool {
+        true
+    }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Managed(_, pending) => Self::startup_reads(pending),
+            Pending::Markets { .. } => S::MARKETS,
+            Pending::Tickers { .. } => S::TICKERS,
+            Pending::Account(_, request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
+    fn export_venue_state(&self) -> Option<Vec<u8>> {
+        Some(self.account.export_venue_state())
+    }
+    fn apply_venue_state(&mut self, cx: &mut Cx<'_, Pending>, state: &[u8]) {
+        let ours = self.account.margin;
+        if self.account.apply_venue_state(state) {
+            self.hold_margin_over_source(cx, ours);
+        } else {
+            cx.venue_state_unreadable("Unreadable BloFin venue state from the data source");
+        }
+    }
+    fn on_frame_ingested(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.reapply_held_margin(cx);
+    }
+    fn refresh_settings(&mut self, cx: &mut Cx<'_, Pending>, _symbol: Option<&str>) {
+        // The existing reads: margin and position mode, and positions (leverage).
+        if cx.frame_fed() || !self.signed() {
+            return;
+        }
+        self.read_setting(cx, account::StartupRead::Margin);
+        self.read_setting(cx, account::StartupRead::Mode);
+        self.refresh_account(cx);
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             position_history: safe_cex_engine::PositionHistory::Blofin,
@@ -601,6 +662,10 @@ impl Venue for Blofin {
             leverage_query: safe_cex_engine::LeverageQuery::OnRead,
             account_margin_type: true,
             closed_positions: true,
+            fresh_positions: true,
+            symbol_cancel_misses_unseen: true,
+            // Every census commits its covers and answers a refresh ask.
+            order_read_covers: true,
             ..safe_cex_engine::Capabilities::BASE
         }
     }
@@ -932,18 +997,19 @@ impl Venue for Blofin {
                     };
                 self.public_failure(cx, context, *pending, error);
             }
-            other => self.delivered_failure(
-                cx,
-                other,
-                &format!(
+            other => {
+                let message = format!(
                     "response did not contain the expected list: {}",
                     response.body
-                ),
-            ),
+                );
+                self.account.read_error = account::read_refusal(&response, &message);
+                self.delivered_failure(cx, other, &message);
+                self.account.read_error = None;
+            }
         }
     }
     fn on_sign_error(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: VenueError) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::PublicTrades(request) => self.public_trades_failed(cx, request, error),
             Pending::Managed(context, pending) => self.public_failure(cx, context, *pending, error),
             Pending::Leverage(leverage) => self.leverage_failed(cx, leverage, error),
@@ -951,7 +1017,7 @@ impl Venue for Blofin {
             Pending::History(request) => self.history_refused(cx, request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, false),
             other => self.on_request_failed(cx, other, &error.message),
-        }
+        });
     }
     /// A failed delivery has no body to validate. History and closed positions
     /// keep one leg in flight per query, so the failure belongs to that leg.
@@ -963,7 +1029,11 @@ impl Venue for Blofin {
             Pending::Closed(request) => Self::closed_failed(cx, request, error),
             Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Trade(request) => self.trade_call_failed(cx, *request, error, true),
-            other => self.on_request_failed(cx, other, &error.message),
+            other => {
+                self.account.read_error = Some(error.clone());
+                self.on_request_failed(cx, other, &error.message);
+                self.account.read_error = None;
+            }
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
@@ -1029,6 +1099,13 @@ impl Venue for Blofin {
         self.account_timer(cx, timer);
     }
 
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
+    }
     fn on_venue_action(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -1036,6 +1113,7 @@ impl Venue for Blofin {
         action: safe_cex_engine::VenueAction,
     ) {
         match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
             safe_cex_engine::VenueAction::FetchClosedPositions {
                 symbol,
                 from_ms,
@@ -1090,7 +1168,7 @@ impl Venue for Blofin {
                         return;
                     };
                     let step = i.ms();
-                    let end = to_ms.unwrap_or(cx.now);
+                    let end = to_ms.unwrap_or(cx.protocol_now());
                     let count = limit.filter(|n| *n > 0).unwrap_or(1440).min(1440);
                     let start = if limit.is_none() {
                         from_ms.unwrap_or(end - step * f64::from(count))

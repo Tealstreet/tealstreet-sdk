@@ -1,5 +1,6 @@
 //! Replayable socket liveness and retry policy; wire protocols remain venue-owned.
 use crate::backoff::Backoff;
+use crate::engine::CoreCx;
 use crate::{Cx, TimerId};
 
 #[derive(Clone, Copy, Debug)]
@@ -27,11 +28,16 @@ impl Default for Config {
     }
 }
 
+/// The longest a silence window grows to between reconnects: ten minutes.
+const MAX_SILENCE_WINDOW_MS: f64 = 600_000.0;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Timeout {
     Connect,
     Auth,
     Idle,
+    /// Open and answering pings, but no data on a feed that streams continuously.
+    Silent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +72,11 @@ pub struct Supervisor {
     since: f64,
     received: f64,
     idle_enabled: bool,
+    /// The data-silence window while the feed carries a continuous stream; None when not watched.
+    data_after_ms: Option<f64>,
+    data_received: f64,
+    /// Consecutive reconnects for silence without data since: each doubles the window.
+    silent_streak: u32,
     next_ping: Option<f64>,
     watch: Option<TimerId>,
     watch_at: Option<f64>,
@@ -106,6 +117,9 @@ impl Supervisor {
             since: 0.0,
             received: 0.0,
             idle_enabled: true,
+            data_after_ms: None,
+            data_received: 0.0,
+            silent_streak: 0,
             next_ping: None,
             watch: None,
             watch_at: None,
@@ -116,78 +130,15 @@ impl Supervisor {
 
     /// Call before connecting (or acquiring a connection token).
     pub fn connecting<P>(&mut self, cx: &mut Cx<'_, P>) {
-        self.cancel(cx);
-        #[cfg(feature = "managed-sockets")]
-        {
-            self.snapshot_deadline = None;
-        }
-        self.phase = Phase::Connecting;
-        self.since = cx.now;
-        #[cfg(feature = "socket-native-timing")]
-        {
-            self.stable_since = cx.now;
-        }
-        self.received = cx.now;
-        self.arm(cx);
+        self.connecting_core(&mut cx.core())
     }
 
     pub fn opened<P>(&mut self, cx: &mut Cx<'_, P>) {
-        if self.phase != Phase::Connecting {
-            return;
-        }
-        self.phase = if self.config.auth_timeout_ms.is_some() {
-            Phase::Authenticating
-        } else {
-            Phase::Ready
-        };
-        self.since = cx.now;
-        #[cfg(feature = "socket-native-timing")]
-        {
-            self.stable_since = cx.now;
-        }
-        self.received = cx.now;
-        self.next_ping = self.config.ping_interval_ms.map(|ms| cx.now + ms);
-        self.rearm(cx);
+        self.opened_core(&mut cx.core())
     }
 
     pub fn authenticated<P>(&mut self, cx: &mut Cx<'_, P>) {
-        if self.phase == Phase::Authenticating {
-            #[cfg(feature = "managed-sockets")]
-            {
-                self.snapshot_deadline = None;
-            }
-            self.phase = Phase::Ready;
-            self.since = cx.now;
-            self.received = cx.now;
-            self.rearm(cx);
-        }
-    }
-
-    #[cfg(feature = "managed-sockets")]
-    pub(crate) fn authentication_progress<P>(&mut self, cx: &mut Cx<'_, P>) {
-        let Some(timeout) = self.config.auth_timeout_ms else {
-            return;
-        };
-        let deadline = cx.now + timeout;
-        if self.phase != Phase::Authenticating
-            || !cx.now.is_finite()
-            || !deadline.is_finite()
-            || deadline <= cx.now
-            || self.expired(cx.now).is_some()
-        {
-            return;
-        }
-        let Some(at) = self.next_watch_at_from(cx.now, cx.now) else {
-            return;
-        };
-        // Allocate before replacing the old origin/watch; exhaustion keeps the
-        // old bound intact and uses the existing fatal engine boundary.
-        let timer = cx.set_timer(at - cx.now);
-        if let Some(old) = self.watch.replace(timer) {
-            cx.clear_timer(old);
-        }
-        self.since = cx.now;
-        self.watch_at = Some(at);
+        self.authenticated_core(&mut cx.core())
     }
 
     /// Call only for traffic belonging to the current connection.
@@ -207,6 +158,41 @@ impl Supervisor {
     }
 
     #[cfg(feature = "managed-sockets")]
+    /// A data frame (not a pong or control) on the current connection.
+    pub(crate) fn data(&mut self, now: f64) {
+        if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
+            self.data_received = now;
+            self.silent_streak = 0;
+        }
+    }
+
+    /// The silence window now: the declared one, doubled per consecutive silent
+    /// reconnect, so a feed that stays quiet is not redialled every minute.
+    fn data_window(&self) -> Option<f64> {
+        self.data_after_ms.map(|ms| {
+            (ms * f64::from(1u32 << self.silent_streak.min(4))).min(MAX_SILENCE_WINDOW_MS)
+        })
+    }
+
+    /// A reconnect for silence the timer did not raise (a repair that escalated).
+    pub(crate) fn note_silent_reconnect(&mut self) {
+        self.silent_streak = self.silent_streak.saturating_add(1);
+    }
+
+    /// How long since the current connection received anything; None when not open.
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn received_age(&self, now: f64) -> Option<f64> {
+        matches!(self.phase, Phase::Authenticating | Phase::Ready).then_some(now - self.received)
+    }
+
+    #[cfg(feature = "managed-sockets")]
+    /// How long a watched, ready feed has gone without data; None when not watched.
+    pub(crate) fn data_silent_for(&self, now: f64) -> Option<f64> {
+        (self.phase == Phase::Ready && self.data_after_ms.is_some())
+            .then_some(now - self.data_received)
+    }
+
+    #[cfg(feature = "managed-sockets")]
     pub(crate) fn idle_enabled(&self) -> bool {
         self.idle_enabled
     }
@@ -215,22 +201,7 @@ impl Supervisor {
     /// Existing callers start enabled. Repeated activation does not refresh
     /// the receive timestamp; traffic admission remains a separate operation.
     pub fn set_idle_enabled<P>(&mut self, cx: &mut Cx<'_, P>, enabled: bool) {
-        if self.idle_enabled == enabled {
-            return;
-        }
-        self.idle_enabled = enabled;
-        if enabled {
-            self.received = cx.now;
-        }
-        if enabled
-            && self
-                .watch_at
-                .zip(self.next_watch_at(cx.now))
-                .is_some_and(|(old, new)| old <= new)
-        {
-            return;
-        }
-        self.rearm(cx);
+        self.set_idle_enabled_core(&mut cx.core(), enabled)
     }
 
     /// The same absolute expiry predicate used by timer delivery. Managed
@@ -271,6 +242,13 @@ impl Supervisor {
             {
                 Some(Timeout::Idle)
             }
+            Phase::Ready
+                if self
+                    .data_window()
+                    .is_some_and(|ms| now >= self.data_received + ms) =>
+            {
+                Some(Timeout::Silent)
+            }
             _ => None,
         }
     }
@@ -300,86 +278,33 @@ impl Supervisor {
         self.initial_payload_deadline = None;
     }
 
-    #[cfg(feature = "managed-sockets")]
-    pub(crate) fn retain_snapshot_deadline<P>(&mut self, cx: &mut Cx<'_, P>, at: f64) {
-        assert!(self.phase == Phase::Connecting && at.is_finite() && at > cx.now);
-        self.snapshot_deadline = Some(at);
-        if self
-            .watch_at
-            .zip(self.next_watch_at(cx.now))
-            .is_none_or(|(old, new)| new < old)
-        {
-            self.rearm(cx);
-        }
-    }
-
     pub fn set_ping_interval<P>(&mut self, cx: &mut Cx<'_, P>, interval_ms: Option<f64>) {
-        assert!(interval_ms.is_none_or(|ms| ms.is_finite() && ms > 0.0));
-        self.config.ping_interval_ms = interval_ms;
-        if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
-            self.next_ping = interval_ms.map(|ms| cx.now + ms);
-            self.rearm(cx);
-        }
+        self.set_ping_interval_core(&mut cx.core(), interval_ms)
     }
 
     /// Negotiate a protocol's welcome/auth bound without extending its start time.
     pub fn set_auth_timeout<P>(&mut self, cx: &mut Cx<'_, P>, timeout_ms: Option<f64>) {
-        assert!(timeout_ms.is_none_or(|ms| ms.is_finite() && ms > 0.0));
-        assert!(self.phase != Phase::Authenticating || timeout_ms.is_some());
-        self.config.auth_timeout_ms = timeout_ms;
-        if self.phase == Phase::Authenticating {
-            self.rearm(cx);
-        }
+        self.set_auth_timeout_core(&mut cx.core(), timeout_ms)
     }
 
     /// Retire supervision and schedule exactly one retry. The venue closes its socket.
     pub fn retry<P>(&mut self, cx: &mut Cx<'_, P>) {
-        self.retry_after(cx, 0.0);
+        self.retry_core(&mut cx.core())
     }
 
     /// The minimum may enforce an upstream rate-limit/token-acquisition pause.
     pub fn retry_after<P>(&mut self, cx: &mut Cx<'_, P>, minimum_ms: f64) {
-        if self.retry.is_some() {
-            return;
-        }
-        self.cancel(cx);
-        let nominal = Backoff::new(self.config.backoff_base_ms, 31, self.config.backoff_cap_ms)
-            .delay(self.failures);
-        self.failures = self.failures.saturating_add(1);
-        let delay = cx.jittered(nominal).max(minimum_ms.max(0.0));
-        self.phase = Phase::Waiting;
-        self.retry = Some(cx.set_timer(delay));
+        self.retry_after_core(&mut cx.core(), minimum_ms)
     }
 
     /// Reconnect at once without counting a failure: the venue refused this
     /// route, not the transport. The caller bounds how often it skips backoff.
     pub fn retry_now<P>(&mut self, cx: &mut Cx<'_, P>) {
-        if self.retry.is_some() {
-            return;
-        }
-        self.cancel(cx);
-        self.phase = Phase::Waiting;
-        self.retry = Some(cx.set_timer(0.0));
+        self.retry_now_core(&mut cx.core())
     }
 
     pub fn cancel<P>(&mut self, cx: &mut Cx<'_, P>) {
-        if let Some(timer) = self.watch.take() {
-            cx.clear_timer(timer);
-        }
-        if let Some(timer) = self.retry.take() {
-            cx.clear_timer(timer);
-        }
-        self.watch_at = None;
-        #[cfg(feature = "socket-native-timing")]
-        {
-            self.initial_payload_deadline = None;
-        }
-        #[cfg(feature = "managed-sockets")]
-        {
-            self.snapshot_deadline = None;
-        }
-        self.phase = Phase::Stopped;
-        self.next_ping = None;
+        self.cancel_core(&mut cx.core())
     }
 
     pub fn owns_timer(&self, timer: TimerId) -> bool {
@@ -391,38 +316,17 @@ impl Supervisor {
     }
 
     pub fn on_timer<P>(&mut self, cx: &mut Cx<'_, P>, timer: TimerId) -> Tick {
-        if self.retry == Some(timer) {
-            self.retry = None;
-            self.phase = Phase::Stopped;
-            return Tick::Reconnect;
-        }
-        if self.watch != Some(timer) {
-            return Tick::Unhandled;
-        }
-        self.watch = None;
-        self.watch_at = None;
-        if let Some(timeout) = self.expired(cx.now) {
-            // Retire first; late activity cannot rescue an expired connection.
-            self.phase = Phase::Stopped;
-            self.next_ping = None;
-            return Tick::TimedOut(timeout);
-        }
-        let ping = self.next_ping.is_some_and(|at| cx.now >= at);
-        if ping {
-            self.next_ping = self.config.ping_interval_ms.map(|ms| cx.now + ms);
-        }
-        self.arm(cx);
-        if ping { Tick::Ping } else { Tick::Handled }
+        self.on_timer_core(&mut cx.core(), timer)
     }
 
-    fn rearm<P>(&mut self, cx: &mut Cx<'_, P>) {
+    fn rearm(&mut self, cx: &mut CoreCx<'_>) {
         if let Some(timer) = self.watch.take() {
             cx.clear_timer(timer);
         }
         self.arm(cx);
     }
 
-    fn arm<P>(&mut self, cx: &mut Cx<'_, P>) {
+    fn arm(&mut self, cx: &mut CoreCx<'_>) {
         if let Some(at) = self.next_watch_at(cx.now) {
             self.watch = Some(cx.set_timer(at - cx.now));
             self.watch_at = Some(at);
@@ -446,7 +350,13 @@ impl Supervisor {
                     (auth, idle) => auth.or(idle),
                 }
             }
-            Phase::Ready => idle,
+            Phase::Ready => {
+                let silent = self.data_window().map(|ms| self.data_received + ms);
+                match (idle, silent) {
+                    (Some(i), Some(d)) => Some(i.min(d)),
+                    (idle, silent) => idle.or(silent),
+                }
+            }
             Phase::Stopped | Phase::Waiting => return None,
         };
         #[cfg(feature = "managed-sockets")]
@@ -464,6 +374,220 @@ impl Supervisor {
             (deadline, ping) => deadline.or(ping),
         };
         deadline.map(|deadline| now + (deadline - now).clamp(0.0, 5_000.0))
+    }
+}
+
+impl Supervisor {
+    #[inline(never)]
+    pub(crate) fn connecting_core(&mut self, cx: &mut CoreCx<'_>) {
+        self.cancel_core(cx);
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.snapshot_deadline = None;
+        }
+        self.phase = Phase::Connecting;
+        self.since = cx.now;
+        #[cfg(feature = "socket-native-timing")]
+        {
+            self.stable_since = cx.now;
+        }
+        self.received = cx.now;
+        self.data_received = cx.now;
+        self.arm(cx);
+    }
+    #[inline(never)]
+    pub(crate) fn opened_core(&mut self, cx: &mut CoreCx<'_>) {
+        if self.phase != Phase::Connecting {
+            return;
+        }
+        self.phase = if self.config.auth_timeout_ms.is_some() {
+            Phase::Authenticating
+        } else {
+            Phase::Ready
+        };
+        self.since = cx.now;
+        #[cfg(feature = "socket-native-timing")]
+        {
+            self.stable_since = cx.now;
+        }
+        self.received = cx.now;
+        self.data_received = cx.now;
+        self.next_ping = self.config.ping_interval_ms.map(|ms| cx.now + ms);
+        self.rearm(cx);
+    }
+    #[inline(never)]
+    pub(crate) fn authenticated_core(&mut self, cx: &mut CoreCx<'_>) {
+        if self.phase == Phase::Authenticating {
+            #[cfg(feature = "managed-sockets")]
+            {
+                self.snapshot_deadline = None;
+            }
+            self.phase = Phase::Ready;
+            self.since = cx.now;
+            self.received = cx.now;
+            self.data_received = cx.now;
+            self.rearm(cx);
+        }
+    }
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn authentication_progress_core(&mut self, cx: &mut CoreCx<'_>) {
+        let Some(timeout) = self.config.auth_timeout_ms else {
+            return;
+        };
+        let deadline = cx.now + timeout;
+        if self.phase != Phase::Authenticating
+            || !cx.now.is_finite()
+            || !deadline.is_finite()
+            || deadline <= cx.now
+            || self.expired(cx.now).is_some()
+        {
+            return;
+        }
+        let Some(at) = self.next_watch_at_from(cx.now, cx.now) else {
+            return;
+        };
+        // Allocate before replacing the old origin/watch; exhaustion keeps the
+        // old bound intact and uses the existing fatal engine boundary.
+        let timer = cx.set_timer(at - cx.now);
+        if let Some(old) = self.watch.replace(timer) {
+            cx.clear_timer(old);
+        }
+        self.since = cx.now;
+        self.watch_at = Some(at);
+    }
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn set_data_watch_core(&mut self, cx: &mut CoreCx<'_>, after_ms: Option<f64>) {
+        if self.data_after_ms == after_ms {
+            return;
+        }
+        assert!(after_ms.is_none_or(|ms| ms.is_finite() && ms > 0.0));
+        self.data_after_ms = after_ms;
+        self.data_received = cx.now;
+        if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
+            self.rearm(cx);
+        }
+    }
+    pub(crate) fn set_idle_enabled_core(&mut self, cx: &mut CoreCx<'_>, enabled: bool) {
+        if self.idle_enabled == enabled {
+            return;
+        }
+        self.idle_enabled = enabled;
+        if enabled {
+            self.received = cx.now;
+        }
+        if enabled
+            && self
+                .watch_at
+                .zip(self.next_watch_at(cx.now))
+                .is_some_and(|(old, new)| old <= new)
+        {
+            return;
+        }
+        self.rearm(cx);
+    }
+    #[cfg(feature = "managed-sockets")]
+    pub(crate) fn retain_snapshot_deadline_core(&mut self, cx: &mut CoreCx<'_>, at: f64) {
+        assert!(self.phase == Phase::Connecting && at.is_finite() && at > cx.now);
+        self.snapshot_deadline = Some(at);
+        if self
+            .watch_at
+            .zip(self.next_watch_at(cx.now))
+            .is_none_or(|(old, new)| new < old)
+        {
+            self.rearm(cx);
+        }
+    }
+    pub(crate) fn set_ping_interval_core(&mut self, cx: &mut CoreCx<'_>, interval_ms: Option<f64>) {
+        assert!(interval_ms.is_none_or(|ms| ms.is_finite() && ms > 0.0));
+        self.config.ping_interval_ms = interval_ms;
+        if matches!(self.phase, Phase::Authenticating | Phase::Ready) {
+            self.next_ping = interval_ms.map(|ms| cx.now + ms);
+            self.rearm(cx);
+        }
+    }
+    pub(crate) fn set_auth_timeout_core(&mut self, cx: &mut CoreCx<'_>, timeout_ms: Option<f64>) {
+        assert!(timeout_ms.is_none_or(|ms| ms.is_finite() && ms > 0.0));
+        assert!(self.phase != Phase::Authenticating || timeout_ms.is_some());
+        self.config.auth_timeout_ms = timeout_ms;
+        if self.phase == Phase::Authenticating {
+            self.rearm(cx);
+        }
+    }
+    pub(crate) fn retry_core(&mut self, cx: &mut CoreCx<'_>) {
+        self.retry_after_core(cx, 0.0);
+    }
+    #[inline(never)]
+    pub(crate) fn retry_after_core(&mut self, cx: &mut CoreCx<'_>, minimum_ms: f64) {
+        if self.retry.is_some() {
+            return;
+        }
+        self.cancel_core(cx);
+        let nominal = Backoff::new(self.config.backoff_base_ms, 31, self.config.backoff_cap_ms)
+            .delay(self.failures);
+        self.failures = self.failures.saturating_add(1);
+        let delay = cx.jittered(nominal).max(minimum_ms.max(0.0));
+        self.phase = Phase::Waiting;
+        let timer = cx.set_timer(delay);
+        self.retry = Some(timer);
+        if minimum_ms <= 0.0 {
+            cx.note_socket_backoff(timer);
+        }
+    }
+    pub(crate) fn retry_now_core(&mut self, cx: &mut CoreCx<'_>) {
+        if self.retry.is_some() {
+            return;
+        }
+        self.cancel_core(cx);
+        self.phase = Phase::Waiting;
+        self.retry = Some(cx.set_timer(0.0));
+    }
+    #[inline(never)]
+    pub(crate) fn cancel_core(&mut self, cx: &mut CoreCx<'_>) {
+        if let Some(timer) = self.watch.take() {
+            cx.clear_timer(timer);
+        }
+        if let Some(timer) = self.retry.take() {
+            cx.clear_timer(timer);
+        }
+        self.watch_at = None;
+        #[cfg(feature = "socket-native-timing")]
+        {
+            self.initial_payload_deadline = None;
+        }
+        #[cfg(feature = "managed-sockets")]
+        {
+            self.snapshot_deadline = None;
+        }
+        self.phase = Phase::Stopped;
+        self.next_ping = None;
+    }
+    #[inline(never)]
+    pub(crate) fn on_timer_core(&mut self, cx: &mut CoreCx<'_>, timer: TimerId) -> Tick {
+        if self.retry == Some(timer) {
+            self.retry = None;
+            self.phase = Phase::Stopped;
+            return Tick::Reconnect;
+        }
+        if self.watch != Some(timer) {
+            return Tick::Unhandled;
+        }
+        self.watch = None;
+        self.watch_at = None;
+        if let Some(timeout) = self.expired(cx.now) {
+            // Retire first; late activity cannot rescue an expired connection.
+            self.phase = Phase::Stopped;
+            self.next_ping = None;
+            if timeout == Timeout::Silent {
+                self.note_silent_reconnect();
+            }
+            return Tick::TimedOut(timeout);
+        }
+        let ping = self.next_ping.is_some_and(|at| cx.now >= at);
+        if ping {
+            self.next_ping = self.config.ping_interval_ms.map(|ms| cx.now + ms);
+        }
+        self.arm(cx);
+        if ping { Tick::Ping } else { Tick::Handled }
     }
 }
 

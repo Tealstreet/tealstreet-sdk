@@ -412,8 +412,12 @@ impl Grvt {
             cx.refuse_command(Operation::Read, "Unknown GRVT query market");
             return;
         }
-        let result =
-            (|| Ok::<_, String>((from.map(bound).transpose()?, bound(to.unwrap_or(cx.now))?)))();
+        let result = (|| {
+            Ok::<_, String>((
+                from.map(bound).transpose()?,
+                bound(to.unwrap_or(cx.protocol_now()))?,
+            ))
+        })();
         let (from, to) = match result {
             Ok(v) => v,
             Err(e) => {
@@ -455,7 +459,11 @@ impl Grvt {
             page_lifecycles: HashMap::new(),
             from,
             to,
-            limit: limit.unwrap_or(1000).clamp(1, 1000) as usize,
+            // A window with no limit walks to its start; no default may stop it.
+            limit: match limit {
+                None if from.is_some() => usize::MAX,
+                limit => limit.unwrap_or(1000).clamp(1, 1000) as usize,
+            },
             income_kind,
             combine_income,
             history: Box::new(CursorHistory::new(
@@ -824,6 +832,25 @@ impl Grvt {
                     || Some(&decoded.order.symbol) != r.symbol.as_ref()
                 {
                     return Err("GRVT lookup identity mismatch".into());
+                }
+                // A rejection was never placed; an unfilled cancel may be a post-only reject.
+                #[derive(serde::Deserialize)]
+                struct Native<'a> {
+                    #[serde(borrow, rename = "s1", alias = "state")]
+                    state: NativeState<'a>,
+                }
+                #[derive(serde::Deserialize)]
+                struct NativeState<'a> {
+                    #[serde(borrow, rename = "s", alias = "status")]
+                    status: std::borrow::Cow<'a, str>,
+                }
+                let native: Native<'_> =
+                    serde_json::from_str(raw.get()).map_err(|_| "Malformed GRVT lookup state")?;
+                if native.state.status == "REJECTED" {
+                    return Ok("{\"found\":false,\"definitive\":true}".into());
+                }
+                if native.state.status == "CANCELLED" && decoded.order.filled == 0.0 {
+                    return Ok("{\"found\":false,\"definitive\":false}".into());
                 }
                 serde_json::to_string(&Found {
                     found: true,

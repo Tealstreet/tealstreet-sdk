@@ -77,6 +77,37 @@ struct Envelope<'a> {
     msg: std::borrow::Cow<'a, str>,
 }
 
+/// The venue may refuse with an empty `msg`; the user is never shown nothing.
+fn failure_text(code: i64, venue_text: &str) -> String {
+    let reason = match venue_text.trim() {
+        "" => "no reason given",
+        text => text,
+    };
+    format!("ApeX Omni request failed [{code}]: {reason}")
+}
+
+/// A 403 without ApeX's JSON envelope came from an edge on the path (a CDN or WAF page),
+/// not from ApeX judging the key: it ends a start as a failure, never a refused key.
+const EDGE_BLOCKED: &str = "ApeX Omni request blocked [403]: ";
+
+fn edge_blocked(body: &str) -> safe_cex_engine::VenueError {
+    let excerpt: String = body.trim().chars().take(120).collect();
+    let excerpt = if excerpt.is_empty() {
+        "empty body".into()
+    } else {
+        excerpt
+    };
+    safe_cex_engine::VenueError::new(format!("{EDGE_BLOCKED}{excerpt}"))
+        .kind(safe_cex_engine::ErrorKind::Rejected)
+        .outcome(safe_cex_engine::Outcome::Rejected)
+}
+
+pub(crate) fn is_edge_blocked(error: &safe_cex_engine::VenueError) -> bool {
+    error.kind == Some(safe_cex_engine::ErrorKind::Rejected)
+        && error.venue_code.is_none()
+        && error.message.starts_with(EDGE_BLOCKED)
+}
+
 enum ApiResponse {
     Success,
     SignatureRefusal(safe_cex_engine::VenueError),
@@ -97,6 +128,9 @@ fn api_response(response: Response<'_>) -> ApiResponse {
     if (200..300).contains(&response.status) && code.is_none_or(|code| code == 0) {
         return ApiResponse::Success;
     }
+    if envelope.is_none() && response.status == 403 {
+        return ApiResponse::Failed(edge_blocked(response.body));
+    }
     let signature = envelope.as_ref().is_some_and(|e| {
         code.is_some_and(|code| code != 0)
             && (matches!(code, Some(20016 | 401)) || e.msg.to_ascii_lowercase().contains("sign"))
@@ -104,13 +138,12 @@ fn api_response(response: Response<'_>) -> ApiResponse {
     let error = trading::failure(
         code,
         response.status,
-        format!(
-            "ApeX Omni request failed [{}]: {}",
+        failure_text(
             code.unwrap_or(i64::from(response.status)),
             envelope
                 .as_ref()
                 .map(|e| e.msg.as_ref())
-                .unwrap_or("invalid response")
+                .unwrap_or("invalid response"),
         ),
     );
     if signature {
@@ -193,6 +226,13 @@ impl Venue for ApexOmni {
     ) -> safe_cex_engine::socket_lifecycle::Control {
         self.classify_control(store, feed, authenticated, text)
     }
+    fn subscription_interest(
+        &self,
+        _: &safe_cex_engine::Store,
+        topic: &safe_cex_engine::SubscriptionTopic,
+    ) -> Option<(safe_cex_engine::socket_lifecycle::FeedId, String)> {
+        self.topic_interest(topic)
+    }
     fn encode_socket_interests(
         &self,
         _: &safe_cex_engine::Store,
@@ -253,13 +293,26 @@ impl Venue for ApexOmni {
         pending: Pending,
         error: safe_cex_engine::VenueError,
     ) {
-        self.failed(cx, pending, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            self.failed(cx, pending, error);
+        });
     }
     fn guard_order_mutations(&self) -> bool {
         true
     }
+    fn http_release_veto(
+        &self,
+        store: &safe_cex_engine::Store,
+        pending: &Pending,
+        release: &safe_cex_engine::request_context::HttpRelease,
+    ) -> Result<(), safe_cex_engine::VenueError> {
+        self.trading_release_veto(store, pending, release)
+    }
     // reconcile_uncertain starts a fresh open-orders read at once, or owes one.
     fn fence_uncertain_placements(&self) -> bool {
+        true
+    }
+    fn enforces_reduce_only(&self, _store: &safe_cex_engine::Store, _symbol: &str) -> bool {
         true
     }
     /// The engine asks once per uncertain seal and re-asks while fenced; the fresh
@@ -269,14 +322,42 @@ impl Venue for ApexOmni {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match pending {
+            Pending::Public(_, _) => S::MARKETS,
+            Pending::Account(_, request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             fill_history_time: safe_cex_engine::FillHistoryTime::SecondsOrMilliseconds,
             account: safe_cex_engine::AccountLookup::Query,
             order_history: false,
             income_history: false,
+            fresh_positions: true,
             ..safe_cex_engine::Capabilities::BASE
         }
+    }
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: safe_cex_engine::CommandId,
+        action: safe_cex_engine::VenueAction,
+    ) {
+        match action {
+            safe_cex_engine::VenueAction::ReadPositions => self.read_positions(cx),
+            _ => safe_cex_engine::unsupported_venue_action(cx, command),
+        }
+    }
+    fn read_root_retired(
+        &mut self,
+        owner: safe_cex_engine::request_context::Owner,
+        _pending: Vec<Pending>,
+    ) {
+        self.account.fresh_positions.retired(owner);
     }
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.options.credentials_ignored {
@@ -348,11 +429,11 @@ impl Venue for ApexOmni {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        match pending {
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| match pending {
             Pending::Candles(pending) => Self::candle_failed(cx, pending, error),
             Pending::Trade(request) => self.trading_failed(cx, request, error),
             pending => self.on_sign_error(cx, pending, error),
-        }
+        });
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if !self.public_timer(cx, timer) && !self.account_timer(cx, timer) {

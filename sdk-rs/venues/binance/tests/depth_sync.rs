@@ -60,11 +60,13 @@ fn a_snapshot_frame_carries_the_whole_state_without_draining_changes() {
         [
             MARKETS,
             TICKERS,
+            TICKER_OBSERVATIONS,
             ORDERS,
             POSITIONS,
             BALANCE,
             SETTINGS,
             STATUS,
+            VENUE_STATE,
             CAPABILITIES,
             BOOK,
             STRINGS

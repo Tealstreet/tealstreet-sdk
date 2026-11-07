@@ -1,14 +1,18 @@
 //! Scripted discovery regressions; no network or account credentials.
 mod support;
 use safe_cex_engine::{Action, Engine, Event, Response};
-use safe_cex_venue_kucoin::{Kucoin, Options};
+use safe_cex_venue_kucoin::Kucoin;
+use support::credentials::Options;
 use support::jittered;
 const CATALOGUE: &str = r###"{"code":"200000","data":[{"broken":true},{"symbol":"XBTUSDTM","baseCurrency":"XBT","quoteCurrency":"USDT","settleCurrency":"USDT","status":"Open","lotSize":1,"tickSize":0.1,"multiplier":0.001,"maxOrderQty":100000,"maxLeverage":100}]}"###;
 fn public_engine() -> Engine<Kucoin> {
-    safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        public_data_only: true,
-        ..Default::default()
-    }))
+    support::credentials::engine(
+        Options {
+            public_data_only: true,
+            ..Default::default()
+        },
+        Kucoin::new,
+    )
 }
 #[test]
 fn catalogue_network_failures_back_off_then_keep_valid_rows() {
@@ -75,12 +79,15 @@ fn catalogue_network_failures_back_off_then_keep_valid_rows() {
 
 #[test]
 fn private_snapshot_starts_while_ticker_response_is_still_pending() {
-    let mut engine = safe_cex_engine::test_support::seeded_engine(Kucoin::new(Options {
-        key: Some("scripted-key".into()),
-        secret: Some("scripted-secret".into()),
-        passphrase: Some("scripted-passphrase".into()),
-        ..Default::default()
-    }));
+    let mut engine = support::credentials::engine(
+        Options {
+            key: Some("scripted-key".into()),
+            secret: Some("scripted-secret".into()),
+            passphrase: Some("scripted-passphrase".into()),
+            ..Default::default()
+        },
+        Kucoin::new,
+    );
     engine.start(0.0);
     let catalogue = engine
         .drain_actions()
@@ -102,8 +109,8 @@ fn private_snapshot_starts_while_ticker_response_is_still_pending() {
     );
     assert!(engine.store().loaded().markets);
     assert!(!engine.store().loaded().tickers);
-    let reads = engine
-        .drain_actions()
+    let reads = support::actions(&mut engine)
+        .into_iter()
         .filter_map(|action| match action {
             Action::Http(request) => Some(request),
             _ => None,

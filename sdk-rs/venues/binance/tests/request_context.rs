@@ -3,6 +3,9 @@ mod support;
 use safe_cex_engine::{Command, Event, Outcome};
 use support::{Harness, Options};
 
+/// Startup discovery's bound (the engine's discovery timeout plus readiness allowance).
+const DISCOVERY_DEADLINE_MS: f64 = 90_000.;
+
 fn ready() -> Harness {
     let mut h = Harness::started(Options {
         key: Some("api-key".into()),
@@ -545,7 +548,7 @@ fn background_catalogue_reply_at_its_deadline_cannot_publish_markets() {
         ..Options::default()
     });
     let request = h.take("exchangeInfo");
-    h.now += 20_000.;
+    h.now += DISCOVERY_DEADLINE_MS;
     h.reply(request.id, 200, "", support::EXCHANGE_INFO);
     assert!(!h.engine.store().loaded().markets);
     assert!(h.engine.store().markets().is_empty());
@@ -656,14 +659,37 @@ fn mixed_native_cancel_batch_with_proven_effects_is_known_partial_not_rejected()
         h.engine.store().order("12").unwrap().status,
         OrderStatus::Canceled
     );
+    // -2011 reads as it does on a single cancel: gone until a snapshot says otherwise.
     assert_eq!(
         h.engine.store().order("13").unwrap().status,
-        OrderStatus::Open
+        OrderStatus::Canceled
     );
-    let error = &h.failures.iter().find(|(id, _)| *id == 715).unwrap().1;
-    assert_eq!(
-        error.outcome, None,
-        "proven cancellation effects forbid whole-command rejection"
+    assert!(h.failures.iter().all(|(id, _)| *id != 715));
+}
+
+// (8) A row -2011 must not leave the later batches' orders live.
+#[test]
+fn an_unknown_row_in_a_cancel_batch_does_not_stop_the_later_batches() {
+    let mut h = ready();
+    put_order(&mut h);
+    let template = h.engine.store().order("12").unwrap().clone();
+    let ids: Vec<String> = (12..=22).map(|id| id.to_string()).collect();
+    for id in &ids {
+        let mut order = template.clone();
+        order.id = id.clone();
+        h.engine.store_mut().upsert_order(order);
+    }
+    h.event(Event::Command(Command::CancelOrders { command: 716, ids }));
+    let request = h.take("/fapi/v1/batchOrders");
+    let rows: Vec<String> = (12..=20)
+        .map(|id| format!(r#"{{"symbol":"BTCUSDT","orderId":{id},"status":"CANCELED","origQty":"1","executedQty":"0"}}"#))
+        .chain([r#"{"code":-2011,"msg":"unknown order"}"#.to_owned()])
+        .collect();
+    h.reply(request.id, 200, "", &format!("[{}]", rows.join(",")));
+    assert!(
+        h.paths().iter().any(|p| p.starts_with("DELETE")),
+        "{:?}",
+        h.paths()
     );
 }
 
@@ -916,20 +942,124 @@ fn unproven_batch_error_object_keeps_bounded_native_diagnostics_without_ids() {
 }
 
 #[test]
-fn documented_rate_limit_statuses_without_a_code_are_typed_refusals() {
+fn rate_limits_are_unknown_while_definitive_status_refusals_stay_rejected() {
     use safe_cex_engine::ErrorKind;
     for (status, headers, outcome, kind, retry) in [
         (
             429,
             "Retry-After: 3\r\n",
-            Some(Outcome::Rejected),
+            Some(Outcome::Unknown),
             Some(ErrorKind::RateLimited),
             Some(3_000.),
         ),
         (
             418,
             "",
+            Some(Outcome::Unknown),
+            Some(ErrorKind::RateLimited),
+            None,
+        ),
+        (
+            403,
+            "",
             Some(Outcome::Rejected),
+            Some(ErrorKind::Rejected),
+            None,
+        ),
+        // 409 can mean a partially successful cancel-replace: never a refusal.
+        (409, "", Some(Outcome::Unknown), None, None),
+    ] {
+        let mut h = ready();
+        let order = serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}"#,
+        )
+        .unwrap();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 730,
+            orders: vec![order],
+        }));
+        let request = h.take("/fapi/v1/order");
+        h.reply(
+            request.id,
+            status,
+            headers,
+            "<html>Too Many Requests</html>",
+        );
+        let failure = &h.failures.iter().find(|(id, _)| *id == 730).unwrap().1;
+        assert_eq!(failure.outcome, outcome, "{status}");
+        assert_eq!(failure.kind, kind, "{status}");
+        assert_eq!(failure.retry_after_ms, retry, "{status}");
+        assert!(failure.message.contains("HTTP"), "{status}");
+    }
+}
+
+#[test]
+fn a_later_native_batch_rate_limit_stops_the_remaining_lots() {
+    for rate_limited in [true, false] {
+        let mut h = ready();
+        h.requests.clear();
+        let order = serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":100}"#,
+        )
+        .unwrap();
+        h.event(Event::Command(Command::PlaceOrders {
+            command: 740,
+            orders: vec![order; 6],
+        }));
+        let batch = h.take("/fapi/v1/batchOrders");
+        let later_code = if rate_limited { -1003 } else { -2019 };
+        let rows = serde_json::json!([
+            {"code":-2019,"msg":"insufficient margin"},
+            {"code":later_code,"msg":"second refusal"},
+            {"code":-2019,"msg":"insufficient margin"},
+            {"code":-2019,"msg":"insufficient margin"},
+            {"code":-2019,"msg":"insufficient margin"}
+        ]);
+        h.reply(batch.id, 200, "", &rows.to_string());
+        if !rate_limited {
+            let last = h.take("/fapi/v1/order");
+            h.reply(
+                last.id,
+                400,
+                "",
+                r#"{"code":-2019,"msg":"insufficient margin"}"#,
+            );
+        }
+        assert!(
+            h.requests
+                .iter()
+                .all(|r| r.method == safe_cex_engine::Method::Get),
+            "rate_limited={rate_limited}: {:?}",
+            h.paths()
+        );
+        let error = &h.failures.iter().find(|(id, _)| *id == 740).unwrap().1;
+        assert_eq!(
+            error.outcome,
+            Some(if rate_limited {
+                Outcome::Unknown
+            } else {
+                Outcome::Rejected
+            }),
+            "{error:?}"
+        );
+    }
+}
+
+#[test]
+fn released_rate_limit_statuses_without_a_code_are_unknown() {
+    use safe_cex_engine::ErrorKind;
+    for (status, headers, outcome, kind, retry) in [
+        (
+            429,
+            "Retry-After: 3\r\n",
+            Some(Outcome::Unknown),
+            Some(ErrorKind::RateLimited),
+            Some(3_000.),
+        ),
+        (
+            418,
+            "",
+            Some(Outcome::Unknown),
             Some(ErrorKind::RateLimited),
             None,
         ),

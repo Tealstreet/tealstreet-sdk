@@ -590,9 +590,10 @@ fn bounded_history_page_cap_owns_warning_before_retained_rows_at_error_only_leve
         .expect("semantic bounded-history cap marker");
     assert_eq!(event.level, safe_cex_engine::Level::Warn);
     assert_eq!(
-        event.fields,
-        vec![("command", safe_cex_engine::Value::Num(37.0))]
+        event.fields[..1],
+        [("command", safe_cex_engine::Value::Num(37.0))]
     );
+    assert_eq!(event.fields[1].0, "reason");
     let done = h
         .actions
         .iter()
@@ -735,9 +736,10 @@ fn assert_owned_marker(h: &Harness, id: u32) {
     );
     assert_eq!(markers[0].1.level, Level::Warn);
     assert_eq!(
-        markers[0].1.fields,
-        vec![("command", Value::Num(f64::from(id)))]
+        markers[0].1.fields[..1],
+        [("command", Value::Num(f64::from(id)))]
     );
+    assert_eq!(markers[0].1.fields[1].0, "reason");
     let done = h
         .actions
         .iter()
@@ -933,7 +935,7 @@ fn owned_history_preparation_refusal_after_accepted_rows_remains_strict() {
                 .iter()
                 .filter_map(|a| match a {
                     safe_cex_engine::Action::SetTimer { timer, at_ms }
-                        if *at_ms == h.now + 19_994. =>
+                        if *at_ms == h.now + 20_000. =>
                     {
                         Some(*timer)
                     }
@@ -941,7 +943,7 @@ fn owned_history_preparation_refusal_after_accepted_rows_remains_strict() {
                 })
                 .collect();
             assert!(!windows.is_empty(), "the parked page has the walk's window");
-            h.now += 19_994.;
+            h.now += 20_000.;
             for timer in windows {
                 h.e.handle(h.now, safe_cex_engine::Event::TimerFired { timer });
                 h.collect();
@@ -1120,4 +1122,93 @@ fn a_market_unlisted_at_admission_keeps_its_native_empty_answers() {
             .iter()
             .any(|r| r.url.contains("/orders-history") || r.url.contains("/orders?"))
     );
+}
+#[test]
+fn a_lookup_says_placed_only_for_an_order_the_venue_took() {
+    let unfilled = ORDER.replace(r#""remaining_size":"0.5""#, r#""remaining_size":"2""#);
+    for (row, expected) in [
+        (
+            unfilled.replace("USER_CANCELED", "POST_ONLY_WOULD_CROSS"),
+            r#"{"found":false,"definitive":true}"#,
+        ),
+        (
+            unfilled.replace(r#""status":"CLOSED""#, r#""status":"REJECTED""#),
+            r#"{"found":false,"definitive":true}"#,
+        ),
+        (
+            unfilled.replace("USER_CANCELED", ""),
+            r#"{"found":false,"definitive":false}"#,
+        ),
+    ] {
+        let mut h = private();
+        read(
+            &mut h,
+            11,
+            Query::OrderByClientId {
+                symbol: "BTC-USD-PERP".into(),
+                client_order_id: "caller".into(),
+            },
+        );
+        h.reply("/orders?", r#"{"results":[]}"#);
+        h.reply("/orders-history", &format!(r#"{{"results":[{row}]}}"#));
+        assert_eq!(h.result(11).unwrap(), expected, "{row}");
+    }
+    let mut h = private();
+    read(
+        &mut h,
+        12,
+        Query::OrderByClientId {
+            symbol: "BTC-USD-PERP".into(),
+            client_order_id: "caller".into(),
+        },
+    );
+    h.reply("/orders?", r#"{"results":[]}"#);
+    h.reply("/orders-history", &format!(r#"{{"results":[{unfilled}]}}"#));
+    let result: serde_json::Value = serde_json::from_str(h.result(12).unwrap()).unwrap();
+    assert_eq!(result["found"], true, "a user cancel after acknowledgement");
+}
+
+#[test]
+fn a_null_flags_field_does_not_drop_a_history_row() {
+    let mut h = private();
+    read(
+        &mut h,
+        6,
+        Query::OrderHistory {
+            symbol: Some("BTC-USD-PERP".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let row = ORDER.replace(r#""flags":[]"#, r#""flags":null"#);
+    assert_ne!(row, ORDER);
+    h.reply("/orders-history", &format!(r#"{{"results":[{row}]}}"#));
+    let rows: Vec<serde_json::Value> = serde_json::from_str(h.result(6).unwrap()).unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[test]
+fn window_fills_with_no_limit_walk_past_the_default() {
+    let mut h = private();
+    read(
+        &mut h,
+        1,
+        Query::Fills {
+            symbol: Some("BTC-USD-PERP".into()),
+            order_id: None,
+            from_ms: Some(1_681_375_000_000.),
+            to_ms: Some(1_681_376_000_000.),
+            limit: None,
+        },
+    );
+    let rows = (0..100)
+        .map(|n| FILL.replace("fill-a", &format!("fill-{n}")))
+        .collect::<Vec<_>>()
+        .join(",");
+    h.reply(
+        "/fills?",
+        &format!(r#"{{"next":"page-2","results":[{rows}]}}"#),
+    );
+    assert!(h.pending.iter().any(|r| r.url.contains("cursor=page-2")));
 }

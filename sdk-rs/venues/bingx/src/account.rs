@@ -1,6 +1,8 @@
 //! Private account state and its independently recovered listen key.
 #[path = "metadata.rs"]
 mod metadata;
+#[path = "open_order.rs"]
+mod open_order;
 use crate::Pending;
 use crate::account_wire::*;
 use crate::sign::{Credentials, Params};
@@ -9,6 +11,7 @@ use safe_cex_engine::Level;
 use safe_cex_engine::credential_selection::{PrimaryReason, Slots};
 use safe_cex_engine::execution::ObservedProgress;
 use safe_cex_engine::fence::StaleGuard;
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::log::code;
 use safe_cex_engine::metadata::{Observation, ObservedSetting};
 use safe_cex_engine::model::{
@@ -20,7 +23,9 @@ use safe_cex_engine::selected_read::ReadRole;
 use safe_cex_engine::signing::Identity;
 use safe_cex_engine::socket_lifecycle::{FeedId, LifecycleEvent, RetireReason, SocketError};
 use safe_cex_engine::store::{MarketSetting, OrderSnapshotToken, Store};
-use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId, json::ArrayAt};
+use safe_cex_engine::{
+    Cx, ErrorKind, Fill, Method, Response, SocketId, TimerId, VenueError, json::ArrayAt,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const LISTEN_KEY: &str = "/openApi/user/auth/userDataStream";
@@ -48,6 +53,14 @@ pub enum Request {
     PositionMode {
         revision: u64,
     },
+    SymbolLeverage {
+        id: u64,
+        symbol: String,
+    },
+    SymbolMarginType {
+        id: u64,
+        symbol: String,
+    },
     Balance {
         revision: u64,
         first: Option<Balance>,
@@ -60,8 +73,9 @@ pub enum Request {
         rows: Vec<Position>,
         settings: Vec<(String, MarketSetting)>,
         skipped: Vec<String>,
-        // An owned row outside the catalogue makes the snapshot incomplete.
-        unavailable: bool,
+        read: u32,
+        /// Owned rows on a market the catalogue does not list.
+        unlisted: Vec<String>,
     },
     OpenOrders {
         owner: u64,
@@ -70,11 +84,32 @@ pub enum Request {
         rows: Vec<Order>,
         metas: Vec<OrderMeta>,
         skipped: Vec<String>,
-        unavailable: bool,
+        /// Markets of the skipped rows, which stay fenced.
+        unproven: Vec<String>,
+        issues: Vec<open_order::Issue>,
     },
 }
 
-type OrderMeta = (Order, String, String, bool, String);
+/// The one read-cover scope of BingX's account-wide open-orders read.
+const ORDERS_SCOPE: &str = "orders";
+
+type OrderMeta = (
+    Order,
+    String,
+    String,
+    bool,
+    String,
+    Option<crate::trading::protection::Original>,
+);
+
+/// One background per-symbol settings refresh. Both legs share the issue-time
+/// stamp, so their merged row publishes once and never over a newer write.
+struct SymbolSettingsRead {
+    id: u64,
+    stamp: Observation,
+    leverage: Option<Option<(f64, f64)>>,
+    margin_type: Option<Option<MarginType>>,
+}
 
 struct KeyRetry {
     timer: Option<TimerId>,
@@ -103,9 +138,15 @@ pub struct Account {
     orders_witness: Option<OrderSnapshotToken>,
     positions_revision: u64,
     settings_revision: u64,
+    symbol_settings: HashMap<String, SymbolSettingsRead>,
+    symbol_settings_sequence: u64,
     balance_revision: u64,
     orders_in_flight: Option<u64>,
+    source_orders_owed: bool,
     positions_in_flight: Option<u64>,
+    /// Numbers every positions read, so `readPositions` can name one it may trust.
+    positions_read: u32,
+    pub(crate) fresh_positions: FreshPositions,
     balance_in_flight: Option<u64>,
     mode_guard: StaleGuard,
     balance_guard: StaleGuard,
@@ -227,6 +268,16 @@ fn log_snapshot_skips(
         log_skip(cx, logged, kind, id, kept(id));
     }
 }
+fn order_row_symbol(store: &safe_cex_engine::Store, item: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Row<'a> {
+        #[serde(borrow)]
+        symbol: &'a str,
+    }
+    let row = serde_json::from_str::<Row<'_>>(item).ok();
+    safe_cex_engine::coverage::fence_symbol(store, row.as_ref().map(|row| row.symbol))
+}
+
 /// A malformed order row's id; empty when even that is unreadable.
 fn order_identity(item: &str) -> String {
     serde_json::from_str::<OrderIdentity<'_>>(item)
@@ -248,17 +299,22 @@ fn mode(cx: &Cx<'_, Pending>) -> PositionMode {
         PositionMode::Oneway
     }
 }
-fn position_side(text: &str, quantity: f64, mode: PositionMode) -> PositionSide {
-    if mode == PositionMode::Oneway {
-        if quantity < 0.0 {
-            PositionSide::Short
-        } else {
-            PositionSide::Long
-        }
-    } else if text == "SHORT" {
-        PositionSide::Short
-    } else {
-        PositionSide::Long
+/// As legacy: the venue's side first, and the sign only for a one-way row.
+fn position_side(text: &str, quantity: f64) -> PositionSide {
+    match text {
+        "LONG" => PositionSide::Long,
+        "SHORT" => PositionSide::Short,
+        _ if quantity < 0.0 => PositionSide::Short,
+        _ => PositionSide::Long,
+    }
+}
+/// The mode a held row was reported under; a flat or unlabelled row says nothing.
+fn row_mode(text: &str, quantity: f64) -> Option<PositionMode> {
+    match text {
+        _ if quantity == 0.0 => None,
+        "LONG" | "SHORT" => Some(PositionMode::Hedged),
+        "BOTH" => Some(PositionMode::Oneway),
+        _ => None,
     }
 }
 fn time_in_force(text: &str) -> Option<TimeInForce> {
@@ -269,6 +325,42 @@ fn time_in_force(text: &str) -> Option<TimeInForce> {
         "PostOnly" | "POST_ONLY" | "GTX" => TimeInForce::PostOnly,
         _ => return None,
     })
+}
+
+impl Request {
+    /// Which read an envelope failure came from, so the report can name it.
+    fn named(&self, error: String) -> String {
+        let read = match self {
+            Self::ListenKey { .. } => "listen key",
+            Self::Keepalive { .. } => "listen key renewal",
+            Self::PositionMode { .. } => "position mode",
+            Self::SymbolLeverage { .. } => "leverage",
+            Self::SymbolMarginType { .. } => "margin type",
+            Self::Balance { .. } => "balance",
+            Self::Positions { .. } => "positions",
+            Self::OpenOrders { .. } => "open orders",
+        };
+        format!("{error} ({read} read)")
+    }
+}
+
+/// A success whose list is null, which is how BingX answers an empty one.
+pub(crate) fn null_list(body: &str) -> bool {
+    use serde_json::value::RawValue;
+    use std::collections::HashMap;
+    let Ok(reply) = serde_json::from_str::<HashMap<&str, &RawValue>>(body) else {
+        return false;
+    };
+    let code = reply.get("code").map(|code| code.get());
+    let Some(data) = reply.get("data").filter(|_| code == Some("0")) else {
+        return false;
+    };
+    data.get() == "null"
+        || serde_json::from_str::<HashMap<&str, &RawValue>>(data.get()).is_ok_and(|fields| {
+            fields
+                .get("orders")
+                .is_some_and(|list| list.get() == "null")
+        })
 }
 
 /// A venue error is a failed snapshot, including errors transported as HTTP 200.
@@ -285,6 +377,10 @@ fn response_error(response: Response<'_>, allow_missing_code: bool) -> Option<St
             return Some(format!("{} ({})", s.msg, s.code));
         }
     } else if !allow_missing_code || serde_json::from_str::<KeyStatus>(response.body).is_err() {
+        // A gateway's error page is its HTTP status; only a 2xx body is BingX's to malform.
+        if !(200..300).contains(&response.status) {
+            return Some(format!("HTTP {}", response.status));
+        }
         return Some("malformed BingX response envelope".into());
     }
     if !(200..300).contains(&response.status) {
@@ -293,6 +389,28 @@ fn response_error(response: Response<'_>, allow_missing_code: bool) -> Option<St
     None
 }
 
+/// A body naming one of BingX's key refusals, typed for the start to report.
+pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::VenueError> {
+    #[derive(serde::Deserialize)]
+    struct Evidence<'a> {
+        code: i64,
+        #[serde(borrow, default)]
+        msg: std::borrow::Cow<'a, str>,
+    }
+    let evidence: Evidence<'_> = serde_json::from_str(response.body).ok()?;
+    crate::trading::KEY_REFUSALS
+        .contains(&evidence.code)
+        .then(|| {
+            safe_cex_engine::VenueError::new(format!("BingX refused the API key: {}", evidence.msg))
+                .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+                .venue_code(evidence.code.to_string())
+                .venue_message(evidence.msg.to_string())
+        })
+}
+/// A typed cause for a failing read: a refused key, or a rate limit.
+pub(crate) fn read_refusal(response: &Response<'_>, now: f64) -> Option<VenueError> {
+    key_refusal(response).or_else(|| crate::read_rate_limit(response, now))
+}
 impl Account {
     pub(crate) fn with_slots(slots: Slots<Identity>) -> Self {
         Self {
@@ -422,7 +540,7 @@ impl Account {
                 pending => pending,
             };
             if let Pending::Account(request) = pending {
-                self.on_request_failed(cx, request, &error.message, credentials);
+                self.request_failed(cx, request, &error.message, Some(&error), credentials);
             }
         }
     }
@@ -543,6 +661,7 @@ impl Account {
         }
         self.last_positions = cx.now;
         self.positions_in_flight = Some(self.positions_revision);
+        self.positions_read += 1;
         let settings_stamp = cx.store.metadata_observation();
         self.read_snapshot(
             cx,
@@ -555,25 +674,62 @@ impl Account {
                 rows: Vec::new(),
                 settings: Vec::new(),
                 skipped: Vec::new(),
-                unavailable: false,
+                read: self.positions_read,
+                unlisted: Vec::new(),
             },
             true,
             None,
         );
     }
+    /// `readPositions`: wait on the next read. One already out may predate the
+    /// close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
+        if !self.mode_known {
+            let error =
+                VenueError::new("BingX account is not loaded").kind(ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.positions_read + 1;
+        if self.fresh_positions.admit(cx, vec![(0, need)]) {
+            self.fetch_positions(cx, credentials);
+        }
+    }
+    fn read_fresh_positions_again(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        read: u32,
+        credentials: &Credentials,
+    ) {
+        if self.fresh_positions.predates(0, read) {
+            self.fetch_positions(cx, credentials);
+        } else if self.fresh_positions.owed(0) {
+            self.schedule_repair(cx);
+        }
+    }
     fn fetch_orders(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
         if self.orders_in_flight.is_some() {
             return;
         }
-        self.start_order_read(cx, credentials, None);
+        let primary = std::mem::take(&mut self.source_orders_owed)
+            .then_some(PrimaryReason::PostUnknownOrderRead);
+        self.start_order_read(cx, credentials, primary);
     }
     /// The snapshot that clears an uncertain-write fence is Primary-signed, so a
     /// read key can never be the read that proves the trading account's orders.
     pub(crate) fn reconcile_orders(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
+        if cx.frame_fed() {
+            return;
+        }
+        if cx.orders_refresh_pending() && self.orders_in_flight.is_some() {
+            self.source_orders_owed = true;
+            return;
+        }
         if cx.reconcile_reask() && self.orders_in_flight.is_some() {
             return;
         }
         self.bump_orders(cx.store);
+        self.source_orders_owed = false;
         self.start_order_read(cx, credentials, Some(PrimaryReason::PostUnknownOrderRead));
     }
     /// A fence needs a new owner even if an older snapshot is still pending.
@@ -613,14 +769,141 @@ impl Account {
                 rows: Vec::new(),
                 metas: Vec::new(),
                 skipped: Vec::new(),
-                unavailable: false,
+                unproven: Vec::new(),
+                issues: Vec::new(),
             },
             true,
             primary,
         );
     }
 
+    /// Data source: re-read the position mode, whose response re-reads the
+    /// positions that carry margin type and leverage, and a named symbol's own
+    /// leverage and margin type, which a flat symbol's positions never carry.
+    /// Never a write.
+    pub fn refresh_settings(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: &Credentials,
+        symbol: Option<&str>,
+    ) {
+        if cx.frame_fed() || !self.started {
+            return;
+        }
+        self.fetch_mode(cx, credentials);
+        if let Some(symbol) = symbol {
+            self.fetch_symbol_settings(cx, credentials, symbol);
+        }
+    }
+
+    /// A newer refresh of the same symbol supersedes an unanswered one.
+    fn fetch_symbol_settings(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        credentials: &Credentials,
+        symbol: &str,
+    ) {
+        let Some(native) = cx.store.market(symbol).map(|market| market.id.clone()) else {
+            cx.notice(
+                Level::Warn,
+                code::REQUEST_FAILED,
+                format!("BingX settings refresh skipped unknown market {symbol}"),
+            );
+            return;
+        };
+        self.symbol_settings_sequence = self.symbol_settings_sequence.wrapping_add(1);
+        let id = self.symbol_settings_sequence;
+        self.symbol_settings.insert(
+            symbol.to_owned(),
+            SymbolSettingsRead {
+                id,
+                stamp: cx.store.metadata_observation(),
+                leverage: None,
+                margin_type: None,
+            },
+        );
+        for (path, request) in [
+            (
+                crate::paths::LEVERAGE,
+                Request::SymbolLeverage {
+                    id,
+                    symbol: symbol.to_owned(),
+                },
+            ),
+            (
+                metadata::MARGIN_TYPE,
+                Request::SymbolMarginType {
+                    id,
+                    symbol: symbol.to_owned(),
+                },
+            ),
+        ] {
+            self.read_snapshot(
+                cx,
+                credentials,
+                path,
+                Params::new().str("symbol", &native),
+                request,
+                false,
+                None,
+            );
+        }
+    }
+
+    /// Records one leg's answer (None when it failed); once both legs answered,
+    /// merges them over the stored row so one leg's failure keeps the other field.
+    fn settle_symbol_settings(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        id: u64,
+        answer: impl FnOnce(&mut SymbolSettingsRead),
+    ) {
+        let Some(read) = self.symbol_settings.get_mut(symbol).filter(|r| r.id == id) else {
+            return;
+        };
+        answer(read);
+        let (Some(leverage), Some(margin_type)) = (read.leverage, read.margin_type) else {
+            return;
+        };
+        let Some(read) = self.symbol_settings.remove(symbol) else {
+            return;
+        };
+        if leverage.is_none() && margin_type.is_none() {
+            return;
+        }
+        let mut setting = cx.store.setting(symbol).unwrap_or_default();
+        if let Some((buy, sell)) = leverage {
+            setting.leverage = buy;
+            setting.buy_leverage = Some(buy);
+            setting.sell_leverage = Some(sell);
+        }
+        if let Some(margin_type) = margin_type {
+            setting.margin_type = Some(margin_type);
+        }
+        match ObservedSetting::new(setting) {
+            Ok(value) => {
+                if cx.store.observe_setting(symbol, &read.stamp, value) {
+                    self.settings_changed();
+                }
+            }
+            Err(_) => cx.notice(
+                Level::Warn,
+                code::SNAPSHOT_DISCARDED,
+                format!("BingX settings refresh for {symbol} is incomplete"),
+            ),
+        }
+    }
+
+    pub(crate) fn mode_known(&self) -> bool {
+        self.mode_known
+    }
+
     pub fn reconcile(&mut self, cx: &mut Cx<'_, Pending>, credentials: &Credentials) {
+        // Frame-fed: the data source's frames carry the outcome.
+        if cx.frame_fed() {
+            return;
+        }
         self.fetch_orders(cx, credentials);
         self.fetch_positions(cx, credentials);
         self.fetch_balance(cx, credentials);
@@ -802,7 +1085,7 @@ impl Account {
                 rows,
                 settings,
                 skipped,
-                unavailable,
+                unlisted,
                 ..
             } => {
                 let Ok(row) = serde_json::from_str::<PositionRow<'_>>(item) else {
@@ -812,10 +1095,12 @@ impl Account {
                 let symbol = row.symbol.replace('-', "");
                 if self.untracked_market(cx, &symbol) {
                     if row.position_amt != 0.0 {
+                        // Ruled: one unreadable market must not hide every other position.
                         if self.skipped_markets.contains(&symbol) {
-                            *unavailable = true;
-                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
-                                "BingX owned position market unavailable; preserving previous snapshot",
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
+                                format!("Skipping BingX position on unreadable market {symbol}"),
                             );
                         } else {
                             cx.notice(
@@ -823,19 +1108,21 @@ impl Account {
                                 code::ROW_SKIPPED,
                                 format!("Skipping BingX position on uncatalogued market {symbol}"),
                             );
+                            unlisted.push(symbol);
                         }
                     }
                     return;
                 }
-                let mode = mode(cx);
-                let side = position_side(&row.position_side, row.position_amt, mode);
-                if row.leverage <= 0.0 {
-                    // A flat row closes its position whatever its leverage.
-                    if row.position_amt != 0.0 {
-                        skipped.push(position_id(&symbol, side, mode));
-                    }
-                    return;
+                let known = mode(cx);
+                let reported = row_mode(&row.position_side, row.position_amt);
+                // The mode changed outside the app: believe the row and read the mode again.
+                if reported.is_some_and(|reported| reported != known) {
+                    self.mode_known = false;
                 }
+                let mode = reported.unwrap_or(known);
+                let side = position_side(&row.position_side, row.position_amt);
+                // As legacy, a held row without leverage still shows; only its margin is unknown.
+                let leverage = (row.leverage > 0.0).then_some(row.leverage);
                 let margin = if row.isolated {
                     MarginType::Isolated
                 } else {
@@ -846,25 +1133,27 @@ impl Account {
                     .position(|(s, _)| s == &symbol)
                     .unwrap_or_else(|| {
                         let mut setting = cx.store.setting(&symbol).unwrap_or_default();
-                        if !setting.leverage.is_finite() {
-                            setting.leverage = row.leverage;
+                        if let Some(leverage) = leverage.filter(|_| !setting.leverage.is_finite()) {
+                            setting.leverage = leverage;
                         }
                         settings.push((symbol.clone(), setting));
                         settings.len() - 1
                     });
                 let setting = &mut settings[index].1;
                 setting.margin_type = Some(margin);
-                if mode == PositionMode::Oneway {
-                    setting.leverage = row.leverage;
-                    setting.buy_leverage = Some(row.leverage);
-                    setting.sell_leverage = Some(row.leverage);
-                } else {
-                    match side {
-                        PositionSide::Long => {
-                            setting.leverage = row.leverage;
-                            setting.buy_leverage = Some(row.leverage);
+                if let Some(leverage) = leverage {
+                    if mode == PositionMode::Oneway {
+                        setting.leverage = leverage;
+                        setting.buy_leverage = Some(leverage);
+                        setting.sell_leverage = Some(leverage);
+                    } else {
+                        match side {
+                            PositionSide::Long => {
+                                setting.leverage = leverage;
+                                setting.buy_leverage = Some(leverage);
+                            }
+                            PositionSide::Short => setting.sell_leverage = Some(leverage),
                         }
-                        PositionSide::Short => setting.sell_leverage = Some(row.leverage),
                     }
                 }
                 if row.position_amt == 0.0 {
@@ -872,11 +1161,11 @@ impl Account {
                 }
                 let notional = row.position_amt.abs() * row.avg_price + row.unrealized_profit;
                 let margin_size = if row.isolated_margin > 0.0 {
-                    row.isolated_margin
+                    Some(row.isolated_margin)
                 } else if row.initial_margin > 0.0 {
-                    row.initial_margin
+                    Some(row.initial_margin)
                 } else {
-                    notional / row.leverage
+                    leverage.map(|leverage| notional / leverage)
                 };
                 rows.push(Position {
                     id: position_id(&symbol, side, mode),
@@ -891,7 +1180,7 @@ impl Account {
                     realized_pnl: None,
                     contracts: row.position_amt.abs(),
                     liquidation_price: row.liquidation_price,
-                    margin_size: Some(margin_size),
+                    margin_size,
                     last_update: None,
                 });
             }
@@ -899,26 +1188,49 @@ impl Account {
                 rows,
                 metas,
                 skipped,
-                unavailable,
+                unproven,
+                issues,
                 ..
             } => {
-                let Some(order) = serde_json::from_str::<NativeOrder<'_>>(item)
-                    .ok()
-                    .and_then(|native| Some((map_order(&native, cx)?, native)))
-                else {
-                    skipped.push(order_identity(item));
-                    return;
+                let open_order::Parsed {
+                    order,
+                    metadata: meta,
+                    fields,
+                } = match open_order::parse(item, cx) {
+                    Ok(parsed) => parsed,
+                    Err(fields) => {
+                        let id = order_identity(item);
+                        issues.push(open_order::Issue {
+                            id: id.clone(),
+                            fields,
+                            displayed: false,
+                        });
+                        skipped.push(id);
+                        unproven.push(order_row_symbol(cx.store, item));
+                        return;
+                    }
                 };
-                let (order, native) = order;
+                if !fields.is_empty() {
+                    unproven.push(order_row_symbol(cx.store, item));
+                    issues.push(open_order::Issue {
+                        id: order.id.clone(),
+                        fields,
+                        displayed: true,
+                    });
+                }
                 if self.terminal_orders.contains_key(&order.id) {
                     return;
                 }
                 if self.untracked_market(cx, &order.symbol) {
                     if order.status == OrderStatus::Open {
                         if self.skipped_markets.contains(&order.symbol) {
-                            *unavailable = true;
-                            cx.notice(Level::Warn, code::SNAPSHOT_DISCARDED,
-                                "BingX working order market unavailable; preserving previous orders",
+                            cx.notice(
+                                Level::Warn,
+                                code::ROW_SKIPPED,
+                                format!(
+                                    "Skipping BingX order on unreadable market {}",
+                                    order.symbol
+                                ),
                             );
                         } else {
                             cx.notice(
@@ -933,8 +1245,8 @@ impl Account {
                     }
                     return;
                 }
-                if native.complete_metadata() {
-                    metas.push(observation(order.clone(), &native));
+                if let Some(meta) = meta {
+                    metas.push(meta);
                 }
                 rows.push(order);
             }
@@ -958,7 +1270,10 @@ impl Account {
             request,
             Request::ListenKey { .. } | Request::Keepalive { .. }
         );
-        if let Some(error) = response_error(response, is_key) {
+        if let Some(error) = key_refusal(&response) {
+            cx.startup_read_refused(&error);
+        }
+        if let Some(error) = response_error(response, is_key).map(|error| request.named(error)) {
             if matches!(request, Request::Keepalive { .. })
                 && (response.status == 404 || {
                     let m = error.to_ascii_lowercase();
@@ -975,7 +1290,8 @@ impl Account {
                 );
                 self.fresh_key(cx, credentials);
             } else {
-                self.on_request_failed(cx, request, &error, credentials);
+                let typed = read_refusal(&response, cx.protocol_now());
+                self.request_failed(cx, request, &error, typed.as_ref(), credentials);
             }
             return;
         }
@@ -1062,6 +1378,30 @@ impl Account {
                     self.fetch_mode(cx, credentials);
                 }
             }
+            Request::SymbolLeverage { id, symbol } => {
+                let rails = metadata::leverage_answer(response.body);
+                if rails.is_none() {
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        format!("BingX malformed leverage response for {symbol}"),
+                    );
+                }
+                self.settle_symbol_settings(cx, &symbol, id, |read| read.leverage = Some(rails));
+            }
+            Request::SymbolMarginType { id, symbol } => {
+                let margin_type = metadata::margin_type_answer(response.body);
+                if margin_type.is_none() {
+                    cx.notice(
+                        Level::Warn,
+                        code::STREAM_MALFORMED,
+                        format!("BingX malformed margin type response for {symbol}"),
+                    );
+                }
+                self.settle_symbol_settings(cx, &symbol, id, |read| {
+                    read.margin_type = Some(margin_type)
+                });
+            }
             Request::Balance {
                 revision,
                 first,
@@ -1082,11 +1422,9 @@ impl Account {
                     if let Some(balance) = usdt.or(first) {
                         cx.store.set_balance(balance);
                     } else {
-                        cx.notice(
-                            Level::Error,
-                            code::SNAPSHOT_DISCARDED,
-                            "BingX balance snapshot contained no settlement asset",
-                        );
+                        // A new account may hold no row: as legacy, the stored balance stands.
+                        let stored = cx.store.balance().clone();
+                        cx.store.set_balance(stored);
                     }
                 }
                 if !current {
@@ -1099,16 +1437,12 @@ impl Account {
                 mut rows,
                 settings,
                 skipped,
-                unavailable,
+                read,
+                unlisted,
             } => {
                 self.positions_in_flight = None;
-                if unavailable {
-                    for id in &skipped {
-                        log_skip(cx, &mut self.skip_logged, "position", id, true);
-                    }
-                    return;
-                }
                 if revision == self.positions_revision {
+                    let rejected = !skipped.is_empty();
                     let unidentified = skipped.iter().any(String::is_empty);
                     // A malformed row never closes the known position it names
                     // (by id, or by symbol when its side is unreadable).
@@ -1136,12 +1470,19 @@ impl Account {
                             cx.store.observe_setting(&symbol, &settings_stamp, value);
                         }
                     }
+                    if rejected {
+                        let error = VenueError::new("BingX positions: a row could not be mapped");
+                        self.fresh_positions.failed(cx, 0, read, &error);
+                    } else {
+                        self.fresh_positions.committed(cx, 0, read, &unlisted);
+                    }
                 } else {
                     for id in &skipped {
                         log_skip(cx, &mut self.skip_logged, "position", id, true);
                     }
                     self.schedule_repair(cx);
                 }
+                self.read_fresh_positions_again(cx, read, credentials);
             }
             Request::OpenOrders {
                 owner,
@@ -1150,7 +1491,8 @@ impl Account {
                 mut rows,
                 metas,
                 skipped,
-                unavailable,
+                unproven,
+                issues,
             } => {
                 if self.orders_in_flight == Some(owner) {
                     self.orders_in_flight = None;
@@ -1165,54 +1507,71 @@ impl Account {
                     }
                     return;
                 }
-                if unavailable {
-                    for id in &skipped {
-                        log_skip(cx, &mut self.skip_logged, "open order", id, true);
-                    }
-                    return;
-                }
                 let complete = skipped.is_empty();
-                let mut kept_ids = Vec::new();
-                let committed = cx.store.commit_orders_snapshot([snapshot], |current| {
-                    // Startup history is a baseline; later REST reads cannot consume live executions.
-                    if !self.orders_seeded {
-                        for order in &rows {
-                            if order.filled
-                                > self.cumulative_fills.get(&order.id).copied().unwrap_or(0.0)
-                            {
-                                self.covered_history.insert(order.id.clone());
-                            }
-                            self.record_cumulative(&order.id, order.filled);
+                // A malformed row never removes the known open order it names.
+                let unidentified = skipped.iter().any(String::is_empty);
+                let kept: Vec<_> = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| {
+                        o.status == OrderStatus::Open
+                            && (unidentified || skipped.contains(&o.id))
+                            && !self.terminal_orders.contains_key(&o.id)
+                            && !rows.iter().any(|row| row.id == o.id)
+                    })
+                    .cloned()
+                    .collect();
+                let kept_ids: Vec<String> = kept.iter().map(|order| order.id.clone()).collect();
+                let fresh: Vec<Order> = rows.clone();
+                rows.extend(kept);
+                // Rows and venue-side order state change together, only for the
+                // symbols this read may replace (docs/plans/RUST_FRAME_FED_READ_COVER.md §4.1).
+                let scope = safe_cex_engine::order_read_cover::OrderReadScope::Account {
+                    key: ORDERS_SCOPE,
+                    account: &[ORDERS_SCOPE],
+                };
+                // Refused whole: a newer read of these rows has already committed.
+                let Some(refused) = cx.orders_read_refusals(scope, |_| true, &rows) else {
+                    return;
+                };
+                let admitted = |symbol: &str| !refused.iter().any(|held| held == symbol);
+                // Startup history is a baseline; later REST reads cannot consume live executions.
+                if !self.orders_seeded {
+                    for order in fresh.iter().filter(|order| admitted(&order.symbol)) {
+                        if order.filled
+                            > self.cumulative_fills.get(&order.id).copied().unwrap_or(0.0)
+                        {
+                            self.covered_history.insert(order.id.clone());
                         }
+                        self.record_cumulative(&order.id, order.filled);
                     }
-                    self.orders_seeded = true;
-                    self.observations.extend(metas);
-                    // A malformed row never removes the known open order it names.
-                    let unidentified = skipped.iter().any(String::is_empty);
-                    let kept: Vec<_> = current
-                        .iter()
-                        .filter(|o| {
-                            o.status == OrderStatus::Open
-                                && (unidentified || skipped.contains(&o.id))
-                                && !self.terminal_orders.contains_key(&o.id)
-                                && !rows.iter().any(|row| row.id == o.id)
-                        })
-                        .cloned()
-                        .collect();
-                    kept_ids.extend(kept.iter().map(|order| order.id.clone()));
-                    rows.extend(kept);
-                    rows
-                });
-                if committed {
-                    log_snapshot_skips(cx, &mut self.skip_logged, "open order", &skipped, |id| {
-                        kept_ids.iter().any(|kept| id.is_empty() || kept == id)
-                    });
+                }
+                self.orders_seeded = true;
+                self.observations
+                    .extend(metas.into_iter().filter(|meta| admitted(&meta.0.symbol)));
+                // Any row the read could not map proves the account nothing.
+                let mut cover_unproven = unproven.clone();
+                if !complete {
+                    cover_unproven.push(String::new());
+                }
+                if cx
+                    .commit_orders_read(scope, |_| true, rows, &cover_unproven)
+                    .is_some()
+                {
+                    cx.store.set_orders_loaded();
+                    open_order::log_issues(cx, &mut self.skip_logged, &issues, &kept_ids);
                     if complete {
                         self.orders_witness = cx.store.begin_orders_snapshot();
-                        cx.orders_reconciled_since(None, read_epoch);
                     }
+                    let mut fenced = unproven;
+                    fenced.extend(refused);
+                    cx.orders_reconciled_except(&fenced, read_epoch);
                 }
             }
+        }
+        if self.source_orders_owed && self.orders_in_flight.is_none() {
+            self.fetch_orders(cx, credentials);
         }
     }
 
@@ -1232,7 +1591,7 @@ impl Account {
         if owns_read {
             // Native recovery owns retries and listen-key epoch checks. A provider
             // failure supplies no response and therefore no venue-auth evidence.
-            self.on_request_failed(cx, request, &error.message, credentials);
+            self.request_failed(cx, request, &error.message, Some(&error), credentials);
         }
     }
 
@@ -1241,17 +1600,56 @@ impl Account {
         cx: &mut Cx<'_, Pending>,
         request: Request,
         error: &str,
-        _credentials: &Credentials,
+        credentials: &Credentials,
+    ) {
+        self.request_failed(cx, request, error, None, credentials);
+    }
+
+    pub(crate) fn request_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+        typed: Option<&VenueError>,
+        credentials: &Credentials,
     ) {
         if matches!(&request,Request::ListenKey{epoch}|Request::Keepalive{epoch} if *epoch!=self.epoch)
         {
             return;
         }
-        cx.notice(
-            Level::Warn,
-            code::REQUEST_FAILED,
-            format!("BingX private request failed: {error}"),
-        );
+        let refresh = match &request {
+            Request::SymbolLeverage { id, symbol } => Some((*id, symbol, true)),
+            Request::SymbolMarginType { id, symbol } => Some((*id, symbol, false)),
+            _ => None,
+        };
+        if let Some((id, symbol, leverage)) = refresh {
+            if let Some(error) = typed.filter(|error| error.kind == Some(ErrorKind::RateLimited)) {
+                cx.notice_error(Level::Warn, code::REQUEST_FAILED, error);
+            } else {
+                cx.notice(
+                    Level::Warn,
+                    code::REQUEST_FAILED,
+                    format!("BingX settings refresh for {symbol} failed: {error}"),
+                );
+            }
+            self.settle_symbol_settings(cx, symbol, id, |read| {
+                if leverage {
+                    read.leverage = Some(None);
+                } else {
+                    read.margin_type = Some(None);
+                }
+            });
+            return;
+        }
+        // A failing private read surfaces as an Error at the retried-failure cadence.
+        if let Some(error) = typed.filter(|error| error.kind == Some(ErrorKind::RateLimited)) {
+            cx.retried_failure_error("bingx.account:private", error);
+        } else {
+            cx.retried_failure(
+                "bingx.account:private",
+                format!("BingX private request failed: {error}"),
+            );
+        }
         match request {
             Request::ListenKey { .. } => {
                 self.invalidate_private(cx);
@@ -1264,8 +1662,16 @@ impl Account {
                 self.keepalive = Some(cx.set_timer(RETRY_MS));
             }
             Request::PositionMode { .. } => self.mode_in_flight = false,
+            Request::SymbolLeverage { .. } | Request::SymbolMarginType { .. } => {}
             Request::Balance { .. } => self.balance_in_flight = None,
-            Request::Positions { .. } => self.positions_in_flight = None,
+            Request::Positions { read, .. } => {
+                self.positions_in_flight = None;
+                let fresh = typed
+                    .cloned()
+                    .unwrap_or_else(|| VenueError::new(format!("BingX positions: {error}")));
+                self.fresh_positions.failed(cx, 0, read, &fresh);
+                self.read_fresh_positions_again(cx, read, credentials);
+            }
             Request::OpenOrders { owner, .. } => {
                 if self.orders_in_flight == Some(owner) {
                     self.orders_in_flight = None;
@@ -1285,6 +1691,15 @@ impl Account {
             return;
         }
         let Ok(event) = serde_json::from_str::<UserEvent<'_>>(text) else {
+            // An order event we cannot read may be a fill: only a fresh read shows what changed.
+            if text.contains("TRADE_UPDATE") {
+                cx.notice(
+                    Level::Warn,
+                    code::STREAM_MALFORMED,
+                    "BingX order event could not be read; re-reading orders",
+                );
+                self.reconcile_orders(cx, credentials);
+            }
             return;
         };
         if event.ping.is_some() {
@@ -1614,14 +2029,18 @@ impl Account {
         if self.untracked_market(cx, &symbol) {
             return;
         }
+        let reported = row_mode(&p.ps, quantity);
         let current_mode = if self.mode_known {
-            mode(cx)
+            if reported.is_some_and(|reported| reported != mode(cx)) {
+                self.mode_known = false;
+            }
+            reported.unwrap_or_else(|| mode(cx))
         } else if p.ps == "BOTH" {
             PositionMode::Oneway
         } else {
             PositionMode::Hedged
         };
-        let side = position_side(&p.ps, quantity, current_mode);
+        let side = position_side(&p.ps, quantity);
         let expected = position_id(&symbol, side, current_mode);
         let existing = cx
             .store
@@ -1684,9 +2103,22 @@ impl Account {
 }
 
 fn observation(order: Order, native: &NativeOrder<'_>) -> OrderMeta {
+    let original = original_protection(native);
     (
         order,
-        native.kind.to_string(),
+        if (native.stop_guaranteed.is_some()
+            || native.price_protect.is_some()
+            || native.position_id.is_some())
+            && matches!(
+                native.kind.as_ref(),
+                "STOP_MARKET" | "TAKE_PROFIT_MARKET" | "TRIGGER_MARKET"
+            )
+            && original.is_none()
+        {
+            String::new()
+        } else {
+            native.kind.to_string()
+        },
         native.position_side.to_string(),
         native
             .take_profit
@@ -1697,7 +2129,105 @@ fn observation(order: Order, native: &NativeOrder<'_>) -> OrderMeta {
                 .as_ref()
                 .is_some_and(Protection::meaningful),
         native.status.as_deref().unwrap_or_default().to_owned(),
+        original,
     )
+}
+
+fn original_protection(native: &NativeOrder<'_>) -> Option<crate::trading::protection::Original> {
+    use crate::trading::protection::{NativeScalar, Original};
+    if !native.complete_metadata()
+        || native.filled != Some(0.0)
+        || native
+            .parent_order_id
+            .as_deref()
+            .is_some_and(|s| !s.is_empty())
+        || native.group_id.as_deref().is_some_and(|s| !s.is_empty())
+        || native
+            .take_profit
+            .as_ref()
+            .is_some_and(Protection::meaningful)
+        || native
+            .stop_loss
+            .as_ref()
+            .is_some_and(Protection::meaningful)
+        || !matches!(native.status.as_deref(), Some("NEW" | "PENDING"))
+        || !matches!(native.position_side.as_ref(), "BOTH" | "LONG" | "SHORT")
+        || !matches!(native.side.as_ref(), "BUY" | "SELL")
+    {
+        return None;
+    }
+    let quantity = native.quantity.filter(|q| q.is_finite() && *q > 0.0)?;
+    let stop = matches!(
+        native.kind.as_ref(),
+        "STOP_MARKET" | "TAKE_PROFIT_MARKET" | "TRIGGER_MARKET"
+    );
+    if !stop && !(native.kind == "LIMIT" && native.reduce_only) {
+        return None;
+    }
+    let (price, stop_price, working_type, time_in_force) = if stop {
+        if !native.stop_price.is_finite() || native.stop_price <= 0.0 {
+            return None;
+        }
+        (
+            None,
+            Some(native.stop_price),
+            Some(
+                native
+                    .working_type
+                    .as_deref()
+                    .filter(|s| matches!(*s, "MARK_PRICE" | "CONTRACT_PRICE"))?
+                    .to_owned(),
+            ),
+            None,
+        )
+    } else {
+        if !native.price.is_finite() || native.price <= 0.0 {
+            return None;
+        }
+        (
+            Some(native.price),
+            None,
+            None,
+            Some(
+                native
+                    .time_in_force
+                    .as_deref()
+                    .filter(|s| matches!(*s, "GTC" | "PostOnly" | "GTX"))?
+                    .to_owned(),
+            ),
+        )
+    };
+    let scalar = |raw: Option<&serde_json::value::RawValue>| -> Option<Option<NativeScalar>> {
+        raw.map(|r| serde_json::from_str(r.get())).transpose().ok()
+    };
+    let guaranteed = scalar(native.stop_guaranteed)?;
+    if guaranteed.as_ref().is_some_and(|v| {
+        matches!(v, NativeScalar::Boolean(true))
+            || matches!(v, NativeScalar::Text(s) if s == "true" || s == "cutfee")
+    }) && working_type.as_deref() != Some("CONTRACT_PRICE")
+    {
+        return None;
+    }
+    Some(Original {
+        symbol: native.symbol.to_string(),
+        native_kind: native.kind.to_string(),
+        side: native.side.to_string(),
+        position_side: native.position_side.to_string(),
+        quantity,
+        price,
+        stop_price,
+        working_type,
+        time_in_force,
+        close_position: native.close_position,
+        reduce_only: (native.position_side == "BOTH" && !native.close_position)
+            .then_some(native.reduce_only),
+        client_order_id: (!stop)
+            .then(|| native.client_order_id.as_deref().map(str::to_owned))
+            .flatten(),
+        stop_guaranteed: guaranteed,
+        price_protect: scalar(native.price_protect)?,
+        position_id: scalar(native.position_id)?,
+    })
 }
 
 pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Option<Order> {
@@ -1777,7 +2307,9 @@ pub(crate) fn map_order(native: &NativeOrder<'_>, cx: &Cx<'_, Pending>) -> Optio
 pub(crate) fn auth_scope(request: &Request) -> Option<safe_cex_engine::AccountReadScope> {
     use safe_cex_engine::AccountReadScope::*;
     Some(match request {
-        Request::PositionMode { .. } => Settings,
+        Request::PositionMode { .. }
+        | Request::SymbolLeverage { .. }
+        | Request::SymbolMarginType { .. } => Settings,
         Request::Balance { .. } => Balance,
         Request::Positions { .. } => Positions,
         Request::OpenOrders { .. } => Orders,
@@ -1791,10 +2323,13 @@ impl crate::Bingx {
         response: &Response<'_>,
     ) -> Option<safe_cex_engine::AuthOutcome> {
         use safe_cex_engine::AuthOutcome::{Accepted, Rejected};
-        // A first signature rejection is re-signed once; only the final answer counts.
+        // A first signature or timestamp refusal is re-signed once; only the
+        // final answer counts.
         let pending = match pending {
             Pending::Signed(signed)
-                if !signed.resent && crate::signature_rejected(response.body) =>
+                if !signed.resent
+                    && (crate::signature_rejected(response.body)
+                        || crate::sign::timestamp::refused(response.body)) =>
             {
                 return None;
             }
@@ -1848,6 +2383,18 @@ pub(crate) fn metadata_error(
     }
 }
 
+impl Request {
+    pub(crate) fn startup_sections(&self) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match self {
+            Self::Balance { .. } => S::BALANCE,
+            Self::Positions { .. } => S::POSITIONS,
+            Self::OpenOrders { .. } => S::ORDERS,
+            _ => S::NONE,
+        }
+    }
+}
+
 #[cfg(test)]
 mod sign_failure_owners {
     use super::*;
@@ -1869,12 +2416,13 @@ mod sign_failure_owners {
                     failed: false,
                 },
                 1 => Request::Positions {
+                    read: 0,
+                    unlisted: vec![],
                     revision: 1,
                     settings_stamp: Observation::default(),
                     rows: vec![],
                     settings: vec![],
                     skipped: vec![],
-                    unavailable: false,
                 },
                 2 => Request::OpenOrders {
                     owner: 1,
@@ -1883,7 +2431,8 @@ mod sign_failure_owners {
                     rows: vec![],
                     metas: vec![],
                     skipped: vec![],
-                    unavailable: false,
+                    unproven: vec![],
+                    issues: vec![],
                 },
                 3 => Request::ListenKey { epoch: 4 },
                 _ => Request::Keepalive { epoch: 4 },
@@ -2331,5 +2880,33 @@ mod tests {
         assert!(!account.first_execution((RETAINED_EXECUTIONS + 99).to_string()));
         assert!(account.first_execution("0".into()));
         assert_eq!(account.seen_executions.len(), RETAINED_EXECUTIONS);
+    }
+}
+
+#[cfg(test)]
+mod protective_provenance_tests {
+    use super::*;
+    #[test]
+    fn only_complete_standalone_unfilled_native_rows_supply_restoration() {
+        let good = r#"{"orderId":"1","symbol":"BTC-USDT","type":"STOP_MARKET","side":"SELL","status":"NEW","origQty":"2","executedQty":"0","stopPrice":"90","positionSide":"BOTH","workingType":"MARK_PRICE","reduceOnly":true}"#;
+        let native: NativeOrder<'_> = serde_json::from_str(good).unwrap();
+        assert_eq!(original_protection(&native).unwrap().quantity, 2.0);
+        for bad in [
+            good.replace("STOP_MARKET", "TRAILING_STOP_MARKET"),
+            good.replace("\"NEW\"", "\"PARTIALLY_FILLED\""),
+            good.replace("\"executedQty\":\"0\"", "\"executedQty\":\"1\""),
+            good.replace("MARK_PRICE", "UNKNOWN"),
+            good.replace(
+                "\"reduceOnly\":true",
+                "\"parentOrderId\":\"parent\",\"reduceOnly\":true",
+            ),
+            good.replace(
+                "\"reduceOnly\":true",
+                "\"stopLoss\":{\"stopPrice\":90},\"reduceOnly\":true",
+            ),
+        ] {
+            let native: NativeOrder<'_> = serde_json::from_str(&bad).unwrap();
+            assert!(original_protection(&native).is_none(), "{bad}");
+        }
     }
 }

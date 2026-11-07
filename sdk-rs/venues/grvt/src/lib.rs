@@ -18,7 +18,8 @@ use safe_cex_engine::model::{Interval, Limits, Market, MinMax, Precision, Ticker
 use safe_cex_engine::request_context::{Context, Operation, Policy, RetryPolicy, Scope};
 use safe_cex_engine::socket::{Config, Supervisor, Tick as SocketTick};
 use safe_cex_engine::{
-    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, TimerId, Venue,
+    Command, Cx, Method, PublicFeedPolicy, Response, SocketChannel, SocketId, SubscriptionTopic,
+    TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -114,6 +115,17 @@ struct Depth {
     sequence: Option<u64>,
     ready: bool,
 }
+impl Depth {
+    /// A new stream restarts its sequence; its first snapshot readies the book.
+    fn restart(&mut self) {
+        self.ready = false;
+        self.sequence = None;
+    }
+}
+/// The `v1.book.s` selector every book subscribe, unsubscribe and repair names.
+fn book_selector(id: &str) -> String {
+    format!("{id}@500-50")
+}
 #[derive(Clone, Copy, Default)]
 struct TickerState {
     buy: f64,
@@ -122,9 +134,11 @@ struct TickerState {
     sequence: Option<u64>,
     first_sequence: Option<u64>,
     subscriptions: u8,
+    references: trading::protection::References,
 }
 pub struct Grvt {
     options: safe_cex_crypto::secrets::Sensitive<Options>,
+    signing: Option<safe_cex_engine::signing::Identity>,
     account: account::Account,
     trading: trading::Trading,
     metadata: HashMap<String, InstrumentInfo>,
@@ -178,6 +192,7 @@ impl Grvt {
         let options = safe_cex_crypto::secrets::Sensitive::new(options);
         Self {
             options,
+            signing: None,
             account: account::Account::new(),
             trading: trading::Trading::default(),
             metadata: HashMap::new(),
@@ -192,6 +207,18 @@ impl Grvt {
             startup_retry: Default::default(),
             refresh: None,
         }
+    }
+    /// Installed custody; raw credentials are consumed by trusted registry setup.
+    pub fn with_signing(
+        mut options: Options,
+        identity: Option<safe_cex_engine::signing::Identity>,
+    ) -> Self {
+        options.secret = None;
+        // Only presence is used outside the provider-backed login.
+        options.key = identity.as_ref().map(|_| "installed".into());
+        let mut venue = Self::new(options);
+        venue.signing = identity;
+        venue
     }
     fn edge(&self) -> &'static str {
         if self.options.testnet {
@@ -295,14 +322,62 @@ impl Grvt {
                 request.array_at(),
             ),
         };
+        let signing = if let Job::Trade(request) = &pending.job {
+            request.signing()
+        } else {
+            None
+        };
+        let signing_recipe = if let (Some(order), Some(identity)) = (signing, &self.signing) {
+            match crate::provider::CreateOrder::new(
+                identity,
+                self.options.signer_address.as_deref().unwrap_or_default(),
+                order,
+            ) {
+                Ok(recipe) => Some(
+                    recipe.hosted(
+                        headers
+                            .iter()
+                            .filter(|(key, _)| *key != "Content-Type")
+                            .cloned()
+                            .collect(),
+                    ),
+                ),
+                Err(_) => {
+                    self.fail_pending(cx, pending, "Invalid GRVT signing recipe");
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let headers = if signing_recipe.is_some() {
+            vec![("Content-Type", "application/json".into())]
+        } else {
+            headers
+        };
         let url = format!("{base}{}", pending.path);
-        let body = Some(pending.body.clone());
+        let body = if signing_recipe.is_some() {
+            None
+        } else {
+            Some(pending.body.clone())
+        };
         let builders = matches!(pending.job, Job::Account(account::Request::Builders { .. }));
         let id = if let Some(at) = at {
             cx.request_streamed_body(Method::Post, url, headers, body, at, pending)
         } else {
             cx.request(Method::Post, url, headers, body, pending)
         };
+        if let (Some(recipe), Some(identity)) = (signing_recipe, &self.signing) {
+            let slots = safe_cex_engine::credential_selection::Slots::new(
+                Some(identity),
+                None,
+                safe_cex_engine::credential_selection::SlotPolicy::default(),
+            );
+            let (selection, _) = slots
+                .select(safe_cex_engine::credential_selection::CredentialRole::Mutation)
+                .expect("installed identity");
+            selection.sign(cx, id, Box::new(recipe));
+        }
         if builders {
             // Matches TS's 10s abort; its own retry budget lives in `builder_failed`.
             cx.request_timeout(id, 10_000);
@@ -475,10 +550,10 @@ impl Grvt {
             state.subscriptions = 0;
             state.sequence = None;
             state.first_sequence = None;
+            state.references = Default::default();
         }
         for depth in self.books.values_mut() {
-            depth.ready = false;
-            depth.sequence = None;
+            depth.restart();
         }
         self.public.supervisor.retry(cx);
     }
@@ -518,6 +593,51 @@ impl Grvt {
         if cx.public_feed_policy() == PublicFeedPolicy::Direct {
             c.supervisor.connecting(cx);
         }
+    }
+    fn repair(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Result<(), String> {
+        let not_subscribed = || format!("{topic} is not subscribed");
+        match topic {
+            SubscriptionTopic::Candles { symbol, interval } => {
+                if !self
+                    .candles
+                    .get(&(symbol.clone(), *interval))
+                    .is_some_and(|n| *n > 0)
+                {
+                    return Err(not_subscribed());
+                }
+                if !self
+                    .candle_sockets
+                    .get(interval)
+                    .is_some_and(|c| c.open && c.socket.is_some())
+                {
+                    return Err(format!("the candle socket carrying {topic} is not open"));
+                }
+                self.candle_subscription(cx, symbol, *interval, true);
+                self.candle_subscription(cx, symbol, *interval, false);
+            }
+            SubscriptionTopic::OrderBook { symbol } => {
+                let market = cx.store.market(symbol).ok_or_else(not_subscribed)?;
+                let selector = book_selector(&market.id);
+                let depth = self
+                    .books
+                    .get_mut(&market.symbol)
+                    .filter(|d| d.subscribers > 0)
+                    .ok_or_else(not_subscribed)?;
+                if !self.public.open {
+                    return Err(format!(
+                        "the public socket carrying v1.book.s {selector} is not open"
+                    ));
+                }
+                depth.restart();
+                self.subscribe(cx, "v1.book.s", &selector, true);
+                self.subscribe(cx, "v1.book.s", &selector, false);
+            }
+        }
+        Ok(())
     }
     fn candle_subscription(
         &mut self,
@@ -642,6 +762,14 @@ impl Grvt {
                 if let Some(v) = feed.open_price {
                     state.open = v.0;
                 }
+                state.references.observe(
+                    cx.now,
+                    [
+                        feed.last.map(|v| v.0),
+                        feed.mark.map(|v| v.0),
+                        feed.index.map(|v| v.0),
+                    ],
+                );
                 // This venue constructs tickers in catalog order at every replacement.
                 cx.store.update_ticker_at(index, |t| {
                     if let Some(v) = feed.last {
@@ -743,6 +871,22 @@ impl Venue for Grvt {
     }
 
     type Pending = Pending;
+    fn startup_reads(pending: &Pending) -> safe_cex_engine::startup::Sections {
+        use safe_cex_engine::startup::Sections as S;
+        match &pending.job {
+            Job::Markets { .. } => S::MARKETS,
+            Job::Account(request) => request.startup_sections(),
+            _ => S::NONE,
+        }
+    }
+
+    fn repair_subscription(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        topic: &SubscriptionTopic,
+    ) -> Option<Result<(), String>> {
+        Some(self.repair(cx, topic))
+    }
     fn capabilities(&self) -> safe_cex_engine::Capabilities {
         safe_cex_engine::Capabilities {
             order_book_query: true,
@@ -821,7 +965,7 @@ impl Venue for Grvt {
             .collect();
         for s in books {
             if let Some(m) = cx.store.market(&s) {
-                self.subscribe(cx, "v1.book.s", &format!("{}@500-50", m.id), false);
+                self.subscribe(cx, "v1.book.s", &book_selector(&m.id), false);
             }
         }
     }
@@ -966,8 +1110,22 @@ impl Venue for Grvt {
         }
         if let Err(error) = wire::check(&response) {
             let code = wire::code(&response);
+            let (restoring, protective, ambiguous_write) = if let Job::Trade(request) = &pending.job
+            {
+                (
+                    request.is_restore(),
+                    request.is_protective(),
+                    !request.is_read()
+                        && request.failed_outcome(&response) == safe_cex_engine::Outcome::Unknown,
+                )
+            } else {
+                (false, false, false)
+            };
             if code == "1000"
                 && !pending.auth_resent
+                && !restoring
+                && !ambiguous_write
+                && (!protective || (response.status != 429 && wire::venue_rejected(&response)))
                 && !matches!(pending.job, Job::Account(account::Request::Login))
                 && !matches!(pending.job, Job::Markets { .. } | Job::Candles(_))
                 && !matches!(&pending.job,Job::History(request) if request.is_public())
@@ -983,7 +1141,8 @@ impl Venue for Grvt {
                 }
                 self.account_refresh(cx, pending);
             } else if let Job::Trade(request) = pending.job {
-                self.trade_failed(cx, request, &error, wire::write_outcome(&response));
+                let outcome = request.failed_outcome(&response);
+                self.trade_failed(cx, request, &error, outcome);
             } else if let Job::History(request) = pending.job {
                 self.history_failed(cx, *request, &error);
             } else {
@@ -1140,16 +1299,40 @@ impl Venue for Grvt {
         _reason: safe_cex_engine::request_context::Error,
         error: safe_cex_engine::VenueError,
     ) {
-        if matches!(pending.job, Job::Markets { .. }) {
-            self.fail_pending(cx, pending, &error.message);
-            return;
-        }
-        if let Job::BookQuery(request) = pending.job {
-            let _ = cx.fail_plan(&request.plan, error);
-        } else if let Job::Candles(request) = pending.job {
-            let _ = cx.fail_plan(&request.plan, error);
+        cx.with_startup_request_failure(pending, error, |cx, pending, error| {
+            if matches!(pending.job, Job::Markets { .. }) {
+                self.fail_pending(cx, pending, &error.message);
+                return;
+            }
+            if let Job::BookQuery(request) = pending.job {
+                let _ = cx.fail_plan(&request.plan, error);
+            } else if let Job::Candles(request) = pending.job {
+                let _ = cx.fail_plan(&request.plan, error);
+            } else {
+                self.on_sign_error(cx, pending, error);
+            }
+        });
+    }
+    fn on_sign_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        error: safe_cex_engine::VenueError,
+    ) {
+        if let Job::Trade(request) = pending.job {
+            self.trade_failed(
+                cx,
+                request,
+                &error.message,
+                error.outcome.unwrap_or(safe_cex_engine::Outcome::NotSent),
+            );
+        } else if matches!(pending.job, Job::Account(account::Request::Login))
+            && self.signing.is_some()
+        {
+            self.retire_login_session(cx);
+            self.account_login_unavailable(cx);
         } else {
-            self.on_sign_error(cx, pending, error);
+            self.on_request_failed(cx, pending, &error.message);
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, mut pending: Pending, error: &str) {
@@ -1319,7 +1502,8 @@ impl Venue for Grvt {
             return;
         }
         match command {
-            Command::SetTickerSymbols { .. } => {}
+            // The engine repairs subscriptions itself; it never forwards this.
+            Command::SetTickerSymbols { .. } | Command::RepairSubscription(_) => {}
             Command::Venue { command, .. } => {
                 safe_cex_engine::unsupported_venue_action(cx, command)
             }
@@ -1331,13 +1515,12 @@ impl Venue for Grvt {
                 let depth = self.books.entry(key.clone()).or_default();
                 depth.subscribers += 1;
                 if depth.subscribers == 1 {
-                    depth.ready = false;
-                    depth.sequence = None;
+                    depth.restart();
                 }
                 if depth.subscribers == 1
                     && let Some(m) = cx.store.market(&key)
                 {
-                    self.subscribe(cx, "v1.book.s", &format!("{}@500-50", m.id), false);
+                    self.subscribe(cx, "v1.book.s", &book_selector(&m.id), false);
                 }
             }
             Command::UnsubscribeOrderBook { symbol } => {
@@ -1346,7 +1529,7 @@ impl Venue for Grvt {
                     if depth.subscribers == 0
                         && let Some(m) = cx.store.market(&symbol)
                     {
-                        self.subscribe(cx, "v1.book.s", &format!("{}@500-50", m.id), true);
+                        self.subscribe(cx, "v1.book.s", &book_selector(&m.id), true);
                     }
                 }
             }

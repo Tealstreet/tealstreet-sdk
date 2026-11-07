@@ -26,6 +26,7 @@ export type ErrorCategory =
   | 'exchange_down'
   | 'time_sync'
   | 'order_rejected'
+  | 'insufficient_balance'
   | 'order_warning'
   | 'unsupported_backend'
   | 'suppressed'

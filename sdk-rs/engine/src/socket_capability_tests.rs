@@ -45,6 +45,7 @@ impl<const HANDOFF: bool> Venue for Handoff<HANDOFF> {
                 invalidation: Invalidation::None,
                 subscription_interval_ms: 0.,
                 close_floors: &[],
+                data_silence: None,
             })
             .unwrap();
         self.feed = Some(feed);

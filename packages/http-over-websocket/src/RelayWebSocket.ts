@@ -19,15 +19,17 @@
 //
 // It is constructed by the vendored ReconnectingWebSocket through its
 // `WebSocket` option, from a URL of the form
-//   wss://fsjnpy143pbz.<region>.tealstreet.io/tunnel?ts-relay=<encoded upstream>
+//   wss://<tunnel host>/tunnel?ts-relay=<encoded upstream>
 // (`buildRelayUrl`), so the exchange classes keep treating it as just another
 // host in `transport/tealstreet/routing/routingTable.ts`. In Node/Bun the inner socket is the `ws`
 // client with whatever upgrade options the caller passed (Origin/UA headers,
 // ALPN http/1.1 — the tunnel's WAF needs them); in browsers it is the native
 // WebSocket, which ignores those options.
 
+import { ConnectionDiagnostics } from './connectionDiagnostics';
+
 import { bindProxyToken } from './config';
-import { parseRelayUrl } from './tunnelEndpoints';
+import { noteTunnelDialFailed, noteTunnelDialOpened, parseRelayUrl, tunnelDialUrl } from './tunnelEndpoints';
 
 export { buildRelayUrl, isRelayUrl, parseRelayUrl, RELAY_QUERY_PARAM } from './tunnelEndpoints';
 
@@ -79,6 +81,7 @@ export class RelayWebSocket extends EventTarget {
   readonly CLOSING = 2;
   readonly CLOSED = 3;
 
+  readonly diagnostics = new ConnectionDiagnostics('relay');
   readonly url: string;
   readonly tunnelUrl: string;
   readonly upstream: string;
@@ -97,6 +100,10 @@ export class RelayWebSocket extends EventTarget {
   private authSent = false;
   private closeDispatched = false;
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
+  // Whether the tunnel socket itself opened, and whether our caller closed it: a socket
+  // that closes before opening, unprompted, counts against the tunnel lane.
+  private innerOpened = false;
+  private closedByCaller = false;
   // Read on the inner socket's open event, outside the creating context.
   private readonly getProxyToken = bindProxyToken();
 
@@ -104,17 +111,19 @@ export class RelayWebSocket extends EventTarget {
     super();
     const { tunnelUrl, upstream } = parseRelayUrl(url);
     this.url = url;
-    this.tunnelUrl = tunnelUrl;
+    this.tunnelUrl = tunnelDialUrl(tunnelUrl);
     this.upstream = upstream;
+    this.diagnostics.dial(this.tunnelUrl);
 
     const Socket = WebSocketCtor ?? NodeWebSocket;
     this.inner = Socket
       ? new (Socket as new (url: string, protocols?: string | string[], options?: unknown) => WebSocket)(
-          tunnelUrl,
+          this.tunnelUrl,
           protocols ?? [],
           nodeOptions,
         )
-      : new WebSocket(tunnelUrl);
+      : // eslint-disable-next-line network/require-fetch-signal -- bounded by handshakeTimer (HANDSHAKE_TIMEOUT_MS) below
+        new WebSocket(this.tunnelUrl);
     this.inner.addEventListener('open', this.onInnerOpen);
     this.inner.addEventListener('message', this.onInnerMessage);
     this.inner.addEventListener('close', this.onInnerClose as EventListener);
@@ -142,6 +151,8 @@ export class RelayWebSocket extends EventTarget {
   close(code?: number, reason?: string): void {
     if (this.readyState === RelayWebSocket.CLOSING || this.readyState === RelayWebSocket.CLOSED) return;
     this.readyState = RelayWebSocket.CLOSING;
+    this.closedByCaller = true;
+    this.diagnostics.closed('local');
     this.clearHandshakeTimer();
     try {
       if (code === undefined) this.inner.close();
@@ -154,6 +165,9 @@ export class RelayWebSocket extends EventTarget {
   // ---- inner socket ----
 
   private onInnerOpen = () => {
+    this.innerOpened = true;
+    this.diagnostics.opened(true);
+    noteTunnelDialOpened(this.tunnelUrl);
     if (this.readyState !== RelayWebSocket.CONNECTING) return;
     this.getProxyToken()
       .then((token) => {
@@ -208,6 +222,7 @@ export class RelayWebSocket extends EventTarget {
       reason?: string;
       wasClean?: boolean;
     };
+    if (!this.diagnostics.lastClose) this.diagnostics.closed(code === 1006 || !wasClean ? 'unknown' : 'remote');
     this.finish(code, reason, wasClean);
   };
 
@@ -221,6 +236,7 @@ export class RelayWebSocket extends EventTarget {
   private becomeOpen() {
     this.clearHandshakeTimer();
     this.readyState = RelayWebSocket.OPEN;
+    this.diagnostics.established();
     const event = new Event('open');
     this.onopen?.(event);
     this.dispatchEvent(event);
@@ -229,6 +245,7 @@ export class RelayWebSocket extends EventTarget {
 
   private fail(message: string) {
     if (this.readyState === RelayWebSocket.CLOSED) return;
+    this.diagnostics.closed('local');
     this.dispatchError(message);
     this.readyState = RelayWebSocket.CLOSING;
     this.clearHandshakeTimer();
@@ -246,6 +263,7 @@ export class RelayWebSocket extends EventTarget {
     if (this.closeDispatched) return;
     this.closeDispatched = true;
     this.clearHandshakeTimer();
+    if (!this.innerOpened && !this.closedByCaller) noteTunnelDialFailed(this.tunnelUrl);
     this.readyState = RelayWebSocket.CLOSED;
     this.inner.removeEventListener('open', this.onInnerOpen);
     this.inner.removeEventListener('message', this.onInnerMessage);

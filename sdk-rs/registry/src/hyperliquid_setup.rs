@@ -195,9 +195,12 @@ mod tests {
                 let mut options = options(scalar);
                 options.payload_signer = true;
                 options.passphrase = Some("ignored-passphrase-sentinel".into());
-                let expected = VenueError::new(format!("Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."))
-                    .kind(safe_cex_engine::ErrorKind::Unsupported)
-                    .outcome(safe_cex_engine::Outcome::NotSent);
+                // Remote signing is declared, so PayloadSigner takes the family refusal.
+                let expected = VenueError::new(format!(
+                    "Rust {venue} has no REST-only PayloadSigner lifecycle"
+                ))
+                .kind(safe_cex_engine::ErrorKind::Unsupported)
+                .outcome(safe_cex_engine::Outcome::NotSent);
                 let error = crate::prepare_local_signer_for(venue, &mut options)
                     .err()
                     .unwrap();
@@ -274,9 +277,11 @@ mod tests {
                         .is_ok()
                     );
                 } else {
-                    let expected = VenueError::new(format!("Rust {venue} delegated signing is unsupported in this build. Remove payloadSigner and configure local signing credentials."))
-                        .kind(safe_cex_engine::ErrorKind::Unsupported)
-                        .outcome(safe_cex_engine::Outcome::NotSent);
+                    let expected = VenueError::new(format!(
+                        "Rust {venue} has no REST-only PayloadSigner lifecycle"
+                    ))
+                    .kind(safe_cex_engine::ErrorKind::Unsupported)
+                    .outcome(safe_cex_engine::Outcome::NotSent);
                     assert_eq!(
                         crate::prepare_local_signer_for(venue, &mut options)
                             .err()

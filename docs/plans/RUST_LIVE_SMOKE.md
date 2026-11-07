@@ -156,10 +156,13 @@ Hyperliquid and Hyperliquid Spot share the HYPERLIQUID environment fields:
 SIGNER_ADDRESS is the agent (API) wallet address, PRIVATE_KEY is that agent's
 key, and ACCOUNT_ADDRESS is the funded account. Never provide the main wallet
 key. Equal signer/account addresses refuse; distinct addresses alone do not
-prove that an API wallet was authorized. The mainnet beta run must explicitly use --mainnet and a dedicated account
-with no open orders; use --symbol UBTC/USDC for Spot. Spot leverage is fixed at 1,
-so the harness never attempts a leverage change. Existing write caps, no-retry,
-post-only and fresh cleanup readback checks stay in effect.
+prove that an API wallet was authorized. The funded beta smoke is testnet only
+and uses --symbol PURR/USDC for Spot (see Hyperliquid under Funded beta smoke).
+A mainnet run would need an explicit --mainnet, a dedicated account with no open
+orders and --symbol UBTC/USDC, and is not authorized. Spot leverage is fixed at
+1: the harness skips lowering, and its restore setLeverage(1) is a local no-op
+that sends no request. Existing write caps, no-retry, post-only and fresh cleanup
+readback checks stay in effect.
 
 Spot sizing requires a successful spotMetaAndAssetCtxs reply that uniquely
 identifies the selected pair, its base lot precision and USDC quote token.
@@ -193,3 +196,132 @@ fresh cleanup/readback remain unchanged.
 This adds a reviewed harness profile, not credentialed live-success evidence.
 The probe uses the compiled Rust engine through JS `EngineHost`; native-only
 unit results do not establish browser beta readiness.
+
+## Funded beta smoke
+
+Covers the `BETA_VENUES` set in `packages/safe-cex/src/exchanges/rust/betaVenues.ts`.
+Every venue runs in its test environment (testnet or demo) where the engine
+supports one. Only `bitunix`, `bingx` and `krakenspot` run on mainnet. No
+credentialed run starts until Sam has supplied the keys and the overseer has
+approved the per-venue list.
+
+### Getting keys in
+
+- Each credential set is one `oneshot-secret` entry in scope
+  `tealstreet-beta-livesmoke`. The entry name is `FAMILY_MODE` (the harness
+  environment prefix, for example `BITUNIX_MAINNET`). Its value is one JSON
+  object whose keys are the field names below, for example `{"KEY": "...",
+  "SECRET": "..."}`.
+- Pipe the value straight into the runner. Read it with `recall`, which is
+  non-destructive and prompts for Sam's password, or with `peek` from the
+  handoff slot. Never use `get`. For example:
+  `oneshot-secret recall tealstreet-beta-livesmoke/BITUNIX_MAINNET | corepack yarn -s rust:live-smoke --venue bitunix --mainnet --credentials-stdin`
+- `--credentials-stdin` replaces the environment completely. The runner refuses
+  unknown fields, missing fields and anything that is not one object of strings,
+  and every error names the field, never its value. Values never reach argv, the
+  process environment, stdout, stderr or the private tape.
+- `corepack yarn -s rust:live-smoke --list-credentials` prints every set's entry
+  name, mode, venues, required and optional fields. It reads no values.
+
+### Dry run
+
+`--dry-run` runs everything up to the first signed request.
+- Supplied credentials go only to the engine constructor, which proves they
+  parse. The engine is never started with them.
+- A public-only engine then discovers markets on the selected environment's live
+  public endpoints, reads the book and sizes the exact order the live run would
+  place. It uses the same endpoint fence, pacing and $100 cap as a live run.
+- A transport guard refuses any outgoing URL, header, body or socket message
+  that contains supplied credential material.
+- The result names the symbol, the order plan (price, amount and, outside
+  mainnet, the amend price), the step sequence and `credentials: parsed|absent`.
+  Credentials are optional, so the dry run can run before keys exist.
+
+### Mainnet sequence
+
+A `--mainnet` run uses the minimal sequence:
+1. Place one minimum-size post-only order far from the market.
+2. Confirm it is open.
+3. Cancel it, then cancel the symbol.
+4. A fresh engine reads back no orders and no positions.
+
+Amend and both leverage writes are skipped and reported in `skipped`, never as
+passing. Test environments run the full sequence.
+
+### Credential sets
+
+Every key gets read and trade permission only: no withdrawal, no transfer and no
+sub-account management. The account must be dedicated: no open orders, no
+positions and one-way position mode, because cancel-all is intentional.
+
+| Entry | Fields | Venues | Notes |
+| --- | --- | --- | --- |
+| `BINANCE_TESTNET` | `KEY`, `SECRET` | binance, binanceinverse | demo.binance.com futures key with USD-M and COIN-M enabled. COIN-M margin is the base coin, so the demo account needs some ETH (or BTC); run binanceinverse with `--symbol ETHUSD_PERP`, one 10 USD contract (BTCUSD_PERP's one contract is 100 USD, exactly the cap) |
+| `BINANCESPOT_TESTNET` | `KEY`, `SECRET` | binancespot | testnet.binance.vision key, separate from futures |
+| `BYBIT_TESTNET` | `KEY`, `SECRET` | bybit, bybitinverse, bybitspot | testnet unified account with testnet USDT and some BTC for inverse |
+| `BYBIT_DEMO` | `KEY`, `SECRET` | bybitdemo | Demo Trading key from a mainnet account |
+| `OKX_DEMO` | `KEY`, `SECRET`, `PASSPHRASE` | okx, okxdemo | global OKX Demo Trading key |
+| `OKX_EEA_DEMO` | `KEY`, `SECRET`, `PASSPHRASE` | okxeu, okxeudemo | EEA (my.okx.com) Demo Trading key |
+| `BITGET_TESTNET` | `KEY`, `SECRET`, `PASSPHRASE` | bitget, bitgetusdc | Demo Trading key; simulated SUSDT/SUSDC products |
+| `KRAKEN_DEMO` | `KEY`, `SECRET` | kraken | demo-futures.kraken.com key |
+| `HYPERLIQUID_TESTNET` | `SIGNER_ADDRESS`, `PRIVATE_KEY`, `ACCOUNT_ADDRESS`; optional `VAULT_ADDRESS` | hyperliquid, hyperliquidspot | See Hyperliquid below |
+| `LIGHTER_TESTNET` | `PRIVATE_KEY`, `ACCOUNT_INDEX`, `API_KEY_INDEX` | lighter | API key slot 2 or higher |
+| `PARADEX_TESTNET` | `PRIVATE_KEY`, `ACCOUNT_ADDRESS`, `SUBKEY_ADDRESS` | paradex | subkey private key |
+| `PHEMEX_TESTNET` | `KEY`, `SECRET` | phemex | testnet.phemex.com, USDT-M contract trade |
+| `APEXOMNI_TESTNET` | `KEY`, `SECRET`, `PASSPHRASE`, `OMNI_KEY_SEED` | apexomni | |
+| `BLOFIN_DEMO` | `KEY`, `SECRET`, `PASSPHRASE` | blofin | Demo Trading key |
+| `CRYPTOCOM_TESTNET` | `KEY`, `SECRET` | cryptocom | UAT sandbox; access is by application to Crypto.com. Trading still refuses until its monetary floor can be established |
+| `ASTERDEX_TESTNET` | `KEY`, `SECRET`; optional `API_VERSION`, `USER_ADDRESS`, `SIGNER_ADDRESS`, `PRIVATE_KEY` | asterdex | v1 HMAC unless v3 fields are supplied |
+| `BITUNIX_MAINNET` | `KEY`, `SECRET` | bitunix | futures read and trade; BTCUSDT minimum 0.0001 BTC; fund 20 USDT |
+| `BINGX_MAINNET` | `KEY`, `SECRET` | bingx | perpetual read and trade; switch to one-way mode; BTC-USDT minimum 0.0001 BTC; fund 20 USDT |
+| `KRAKEN_SPOT_MAINNET` | `KEY`, `SECRET` (Base64) | krakenspot | Query Funds, Query Open Orders and Trades, Create and Modify Orders, Cancel/Close Orders; XBT/USD ordermin 0.00006, costmin 0.5 USD; fund 20 USD cash |
+
+COIN-M sizing uses the selected symbol's public `/dapi/v1/exchangeInfo` row:
+one `LOT_SIZE` filter, a positive `contractSize`, and valid supplied
+`PERCENT_PRICE` lower bounds. Quantity is in contracts, so the dollar notional
+is `quantity * contractSize`, independent of the resting price. Missing or
+ambiguous sizing metadata refuses the run; the fixed 100 USD cap still applies.
+Fine-tick prices and amounts tolerate float noise relative to their step count,
+while a real fraction of a step still floors prices and ceils minimum amounts.
+
+`binancepm` has no test environment and no profile yet. Whether it runs on
+mainnet or stays unsmoked is an open decision. `binanceoptions` (European
+Options, #2356) has no reviewed profile either and refuses every mode.
+
+### Hyperliquid
+
+Hyperliquid and Hyperliquid Spot share the `HYPERLIQUID_TESTNET` credential
+set. A profile and the symbols below do not authorize a funded run: Sam must
+supply the credentials and the overseer must approve the per-request list
+against the exact harness revision before any credentialed call.
+
+- **Entry**: `HYPERLIQUID_TESTNET` in `tealstreet-beta-livesmoke`, read with
+  `peek` only and piped to `--credentials-stdin`.
+  - `SIGNER_ADDRESS` is the approved agent (API) wallet.
+  - `PRIVATE_KEY` is that agent's key only, never the master wallet's.
+  - `ACCOUNT_ADDRESS` is the funded testnet account, distinct from the agent.
+  - The first run omits `VAULT_ADDRESS`; a vault needs its own approved list.
+- **Environment**: testnet only. Mainnet is not authorized.
+- **Operations**: one post-only BUY limit far below the bid, amend, cancel,
+  cancel-all and a fresh-host readback. There are no withdrawals, transfers,
+  agent or builder approvals, vault operations, market orders or TP/SL.
+- **Configuration**: limited to the perps leverage lower and exact restore,
+  with a fresh readback. A failed restore stops the run and is reported. Spot
+  `setLeverage(1)` is a local no-op that sends no request.
+- **Funding**: testnet faucet USDC, with the Spot share moved to Spot by the
+  account owner before handoff. The harness makes no transfers.
+- **Size**: the venue minimum, never above the fixed 100 USDC cap, and never
+  raised after a rejection.
+- **Precondition**: the operator rechecks the approved harness revision and
+  per-request list at run time. A historical approval does not cover a changed
+  harness or an additional operation.
+
+| Venue | Testnet symbol (requires approval) | Mainnet symbol (not authorized) |
+| --- | --- | --- |
+| hyperliquid | BTC-PERP | BTC-PERP |
+| hyperliquidspot | PURR/USDC | UBTC/USDC |
+
+The testnet Spot catalog has no UBTC/USDC, and its BTC/USDC has no quoted price
+or book. PURR/USDC passed a public testnet capture and correctness replay on the
+SDK 14f89490f7b pin. It is used only if its quoted rules are still present at
+smoke time, which the harness enforces before sizing.

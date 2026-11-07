@@ -45,7 +45,6 @@ fn private_companions_cannot_drift_from_canonical_definitions() {
         "src/extra_model.rs",
         "src/accounts.rs",
         "src/gateway.rs",
-        "../safe-cex-store/src/contract.rs",
     ] {
         let file = syn::parse_file(&std::fs::read_to_string(root.join(relative)).unwrap()).unwrap();
         let parent_types: BTreeSet<_> = file

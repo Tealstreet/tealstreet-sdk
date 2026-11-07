@@ -256,6 +256,46 @@ fn candle_history_uses_singapore_time_and_filters_requested_window() {
     );
 }
 #[test]
+fn candle_history_sorts_stably_and_keeps_the_first_duplicate_timestamp() {
+    let (mut e, socket) = boot();
+    e.handle(
+        2.0,
+        Event::Command(Command::FetchCandles {
+            command: 1,
+            symbol: "E-BTC-USDT".into(),
+            interval: safe_cex_engine::model::Interval::M1,
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    message(
+        &mut e,
+        socket,
+        r#"{"event_rep":"rep","channel":"market_e_btcusdt_kline_1min","data":[{"ds":"2024-01-01 08:01:00","open":1,"high":3,"low":1,"close":7,"vol":1000},{"ds":"2024-01-01 08:00:00","open":1,"high":3,"low":1,"close":2,"vol":1000},{"ds":"2024-01-01 08:01:00","open":1,"high":3,"low":1,"close":9,"vol":1000}]}"#,
+    );
+    let result = drain(&mut e, 3.0)
+        .find_map(|a| {
+            if let Action::Notice(Notice::CommandDone { result, .. }) = a {
+                Some(result)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+    let rows: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            (
+                row["timestamp"].as_f64().unwrap(),
+                row["close"].as_f64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(rows, [(1704067200.0, 2.0), (1704067260.0, 7.0)]);
+}
+#[test]
 fn subscriptions_before_markets_are_retained() {
     let mut e = support::engine(Options {
         public_data_only: true,

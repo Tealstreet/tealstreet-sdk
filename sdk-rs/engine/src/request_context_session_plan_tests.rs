@@ -989,4 +989,67 @@ mod session_plan_calls {
         assert_eq!(error.outcome, Some(crate::Outcome::Unknown), "leg 0 is in flight");
         assert!(answer(&mut e, sent.leg(0), 3., "ok").terminal().is_none());
     }
+    #[test]
+    fn released_status_after_a_refusal_stays_unknown_and_continues_the_session_plan() {
+        for status in [408, 429, 500] {
+            let (mut e, first) = admitted(probe(Shape::Cancels, Venue::Continue));
+            let second = answer(&mut e, first.leg(0), 2., "refused");
+            e.handle(
+                3.,
+                Event::HttpResponse {
+                    request: second.leg(1).id,
+                    response: Response {
+                        status,
+                        headers: "",
+                        body: "unproven",
+                    },
+                },
+            );
+            let third = pump(&mut e, 3.);
+            assert!(third.terminal().is_none());
+            assert_eq!(third.packets.len(), 1, "the last cancel still runs");
+            let end = answer(&mut e, third.leg(2), 4., "ok");
+            let error = end.terminal().expect("one terminal").unwrap_err();
+            assert_eq!(error.outcome, Some(crate::Outcome::Unknown), "{status}");
+            assert_eq!(error.message, crate::request_context::UNKNOWN_AFTER_REFUSAL);
+            assert_eq!(error.partial.as_ref().unwrap().order_ids, ["id-2"]);
+            assert_eq!(e.venue.observed.len(), 3);
+        }
+    }
+
+    #[test]
+    fn host_clock_steps_resync_signing_without_moving_session_plan_deadlines() {
+        const UTC: f64 = 1_800_000_000_000.;
+        for utc_after_step in [UTC + 7_200_000., UTC - 7_200_000.] {
+            let mut e = ready(probe(Shape::Protective, Venue::Continue));
+            assert!(e.sync_host_time(1., UTC));
+            assert!(e.io.core.protocol_clock.observe(1., UTC + 100.));
+            let before = e.signing_clock(1.);
+            let entry = command(&mut e, 7, 1.);
+            assert_eq!(e.venue.admitted, Some(Ok(())));
+            let plan = e.venue.plan.clone().unwrap();
+            let deadline = plan.deadline();
+            assert!(deadline < 1_000_000., "the Plan uses scheduling time");
+
+            assert!(e.sync_host_time(2., utc_after_step));
+            let after = e.signing_clock(2.);
+            assert_eq!(after.0, utc_after_step);
+            assert!(after.1 > before.1, "old venue calibration was invalidated");
+            let children = answer(&mut e, entry.leg(0), 2., "ok");
+            assert_eq!(children.packets.len(), 2, "both signed siblings release");
+            assert_eq!(e.venue.work.len(), 4);
+            assert_eq!(e.venue.plan.as_ref().unwrap().deadline(), deadline);
+            assert!(e.venue.observed.iter().all(|(_, context)| context.deadline() <= deadline));
+
+            let mut cx = Cx {
+                now: deadline - 1.,
+                store: &mut e.store,
+                io: &mut e.io,
+            };
+            assert!(cx.plan_slots(&plan).is_ok());
+            cx.now = deadline;
+            assert!(matches!(cx.plan_slots(&plan), Err(Error::TimedOut)));
+        }
+    }
+
 }

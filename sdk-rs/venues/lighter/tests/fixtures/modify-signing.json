@@ -1,0 +1,188 @@
+{
+  "purpose": "Public offline test scalar and official signing vectors; never a venue credential",
+  "source": "elliottech/lighter-python@38a34672e7cb43c67d807ece25f125fda2dfdecf",
+  "librarySha256": "5dc6de23dfac70dac56b6005e2b2697db333939f76f570da281dd08d3bf1144d",
+  "secret": "01000000000000000000000000000000000000000000000000000000000000000000000000000000",
+  "cases": [
+    {
+      "chainId": 300,
+      "txType": 17,
+      "txInfo": {
+        "AccountIndex": 42,
+        "ApiKeyIndex": 3,
+        "MarketIndex": 1,
+        "Index": 42,
+        "BaseAmount": 2000,
+        "Price": 7900,
+        "TriggerPrice": 8500,
+        "ExpiredAt": 1793970674329,
+        "Nonce": 7,
+        "Sig": "LcwsKzeW391SlnUvBCqJHajJ4mYG186Y8q/9xyWqv86Sx8A5y2e+TidLMuSyWIloQogLHlVtsJoNoTH5sZLMajbMYD+4F3R+Yb0i4G5HOzQ=",
+        "L2TxAttributes": null
+      },
+      "txHash": "222c9a532d5d516799f7bd31b39dff9c94104c147cc51697880f12426a92a6d973d157661579977a",
+      "message": null,
+      "signatureHex": "2dcc2c2b3796dfdd5296752f042a891da8c9e26606d7ce98f2affdc725aabfce92c7c039cb67be4e274b32e4b258896842880b1e556db09a0da131f9b192cc6a36cc603fb817747e61bd22e06e473b34"
+    },
+    {
+      "chainId": 300,
+      "txType": 17,
+      "txInfo": {
+        "AccountIndex": 42,
+        "ApiKeyIndex": 3,
+        "MarketIndex": 4098,
+        "Index": 576460752303423505,
+        "BaseAmount": 1,
+        "Price": 1,
+        "TriggerPrice": 2,
+        "ExpiredAt": 1793970674330,
+        "Nonce": 8,
+        "Sig": "nvBTJ93g91fyEIH654AJWY8ZwlljUN4wOlfAfWh7gVqKCxpnHOVZLS9LnOLDrjb2d8juY/MP6qGWJWBZAr0EC2os/aI5KrycEU+yPOH0dXM=",
+        "L2TxAttributes": null
+      },
+      "txHash": "cf83879533034eff5f54b97a335122ff9deb0fd98e1fa139b1699da8d7b84b4b2ee86da7b5848113",
+      "message": null,
+      "signatureHex": "9ef05327dde0f757f21081fae78009598f19c2596350de303a57c07d687b815a8a0b1a671ce5592d2f4b9ce2c3ae36f677c8ee63f30feaa19625605902bd040b6a2cfda2392abc9c114fb23ce1f47573"
+    },
+    {
+      "chainId": 300,
+      "txType": 17,
+      "txInfo": {
+        "AccountIndex": 42,
+        "ApiKeyIndex": 3,
+        "MarketIndex": 32767,
+        "Index": 1152921504606846975,
+        "BaseAmount": 281474976710655,
+        "Price": 4294967295,
+        "TriggerPrice": 4294967294,
+        "ExpiredAt": 1793970674330,
+        "Nonce": 9,
+        "Sig": "uldX56UDmLrmCV524iIaNfPizh0+HuBuhFdEp0/3DEOvVT3oL4czElgmw2mw4JemwGG48unOA3UHF/86Q5UZxQ5/joqJWtIESpEbxVN1qCs=",
+        "L2TxAttributes": null
+      },
+      "txHash": "f683044127e4fec15b6a65a5b3b5c5d507023b21df0c95c187c2fb3a5dd055e6d0620a1b9f83b9ea",
+      "message": null,
+      "signatureHex": "ba5757e7a50398bae6095e76e2221a35f3e2ce1d3e1ee06e845744a74ff70c43af553de82f8733125826c369b0e097a6c061b8f2e9ce03750717ff3a439519c50e7f8e8a895ad2044a911bc55375a82b"
+    },
+    {
+      "chainId": 304,
+      "txType": 17,
+      "txInfo": {
+        "AccountIndex": 42,
+        "ApiKeyIndex": 3,
+        "MarketIndex": 1,
+        "Index": 42,
+        "BaseAmount": 2000,
+        "Price": 7900,
+        "TriggerPrice": 8500,
+        "ExpiredAt": 1793970674330,
+        "Nonce": 7,
+        "Sig": "jwB646k++4ZwweO8UNX8woRJG8JUSXCIWcBKIdlh9e7I3zgYGccnU87tvHJtRgB6imP//AvE05OPSkLoIrKwwolERjnMskxpURlGwlTvlFI=",
+        "L2TxAttributes": null
+      },
+      "txHash": "7ef5df6734f223178d2a89709992a5863e2d6e238e14cf2df38faed93a31810cee18a6b85ee6e878",
+      "message": null,
+      "signatureHex": "8f007ae3a93efb8670c1e3bc50d5fcc284491bc25449708859c04a21d961f5eec8df381819c72753ceedbc726d46007a8a63fffc0bc4d3938f4a42e822b2b0c289444639ccb24c69511946c254ef9452"
+    },
+    {
+      "chainId": 304,
+      "txType": 17,
+      "txInfo": {
+        "AccountIndex": 42,
+        "ApiKeyIndex": 3,
+        "MarketIndex": 4098,
+        "Index": 576460752303423505,
+        "BaseAmount": 1,
+        "Price": 1,
+        "TriggerPrice": 2,
+        "ExpiredAt": 1793970674331,
+        "Nonce": 8,
+        "Sig": "NpZ217DtZEgOW/MDFTsOmzjQjfftYjrO9DJJeYx/4f/1FocNvGdNPMHY8I9IF/pMwv3eI5V0ZInb6QxKkquK/pwXtxOEerhlq2iS4IvEug0=",
+        "L2TxAttributes": null
+      },
+      "txHash": "bea6aaa31e17ecf4850820632cefcab962caa9fbdc782cdc33bd79332d7718fe270ddcc3ba4462b9",
+      "message": null,
+      "signatureHex": "369676d7b0ed64480e5bf303153b0e9b38d08df7ed623acef43249798c7fe1fff516870dbc674d3cc1d8f08f4817fa4cc2fdde2395746489dbe90c4a92ab8afe9c17b713847ab865ab6892e08bc4ba0d"
+    },
+    {
+      "chainId": 304,
+      "txType": 17,
+      "txInfo": {
+        "AccountIndex": 42,
+        "ApiKeyIndex": 3,
+        "MarketIndex": 32767,
+        "Index": 1152921504606846975,
+        "BaseAmount": 281474976710655,
+        "Price": 4294967295,
+        "TriggerPrice": 4294967294,
+        "ExpiredAt": 1793970674331,
+        "Nonce": 9,
+        "Sig": "NDpF6yiK9yLi7pRC51hvPcXWrS6WHGG1GYCbHy4w+bEhsWlt2nLgbm4QUd55C/WWvNBk3KWYKeCSITMDHqbjYICwUITSbfYowKyP/S/6gTE=",
+        "L2TxAttributes": null
+      },
+      "txHash": "212de4a120af907aa9eddaef272afbc2954d35ea86ae54afbe2efa3eff0130ba6171e382dd97af2b",
+      "message": null,
+      "signatureHex": "343a45eb288af722e2ee9442e7586f3dc5d6ad2e961c61b519809b1f2e30f9b121b1696dda72e06e6e1051de790bf596bcd064dca59829e0922133031ea6e36080b05084d26df628c0ac8ffd2ffa8131"
+    },
+    {
+      "chainId": 466324,
+      "txType": 17,
+      "txInfo": {
+        "AccountIndex": 42,
+        "ApiKeyIndex": 3,
+        "MarketIndex": 1,
+        "Index": 42,
+        "BaseAmount": 2000,
+        "Price": 7900,
+        "TriggerPrice": 8500,
+        "ExpiredAt": 1793970674331,
+        "Nonce": 7,
+        "Sig": "maTIWDR5VfqADVF3UDStBhDRr6azbouAEE+6x+k0FpIP7d0wYfAqNcgprECYSlZQaS7bMP+19cSRkbfA8l804H8yDGiX3DLfl3jqT+Ac0Vw=",
+        "L2TxAttributes": null
+      },
+      "txHash": "861c474d9c0ad766d1a112249c1abbd4db751b9297a2cf7b762da789c0195cf4f5c17a5f93ed2df4",
+      "message": null,
+      "signatureHex": "99a4c858347955fa800d51775034ad0610d1afa6b36e8b80104fbac7e93416920feddd3061f02a35c829ac40984a5650692edb30ffb5f5c49191b7c0f25f34e07f320c6897dc32df9778ea4fe01cd15c"
+    },
+    {
+      "chainId": 466324,
+      "txType": 17,
+      "txInfo": {
+        "AccountIndex": 42,
+        "ApiKeyIndex": 3,
+        "MarketIndex": 4098,
+        "Index": 576460752303423505,
+        "BaseAmount": 1,
+        "Price": 1,
+        "TriggerPrice": 2,
+        "ExpiredAt": 1793970674332,
+        "Nonce": 8,
+        "Sig": "dUdeUz4lYeQxJAR0FJrkBDT2WiJxQOo6NPBYV6YngIeUaiGGySdRFmwb4tqqHMcj93NsXn7o5RXkvxpiMRmtWsKZMXGtW4Zv6JMYJ6jiKF8=",
+        "L2TxAttributes": null
+      },
+      "txHash": "e5e3e0663752e259d7cf1f6ec8422ee83d48b806704eea64ffe9a4de6b5e61ed958bf0d30edf3b4a",
+      "message": null,
+      "signatureHex": "75475e533e2561e431240474149ae40434f65a227140ea3a34f05857a6278087946a2186c92751166c1be2daaa1cc723f7736c5e7ee8e515e4bf1a623119ad5ac2993171ad5b866fe8931827a8e2285f"
+    },
+    {
+      "chainId": 466324,
+      "txType": 17,
+      "txInfo": {
+        "AccountIndex": 42,
+        "ApiKeyIndex": 3,
+        "MarketIndex": 32767,
+        "Index": 1152921504606846975,
+        "BaseAmount": 281474976710655,
+        "Price": 4294967295,
+        "TriggerPrice": 4294967294,
+        "ExpiredAt": 1793970674332,
+        "Nonce": 9,
+        "Sig": "v4Ber9QkHFRJ5O0dJapJvObhIIRSOuTWHoMJERewJz9XpjEBfPBJAbLzPI6vb2U/sFw7xody94V8XKztUgEESYpA/iWf3kc0J1rNROw9pmU=",
+        "L2TxAttributes": null
+      },
+      "txHash": "6211f2b947ac249c5857227b12d786abd44e1a2b390d71cd713767e22aa5f9c12c553a02e2268166",
+      "message": null,
+      "signatureHex": "bf805eafd4241c5449e4ed1d25aa49bce6e12084523ae4d61e83091117b0273f57a631017cf04901b2f33c8eaf6f653fb05c3bc68772f7857c5caced520104498a40fe259fde4734275acd44ec3da665"
+    }
+  ]
+}

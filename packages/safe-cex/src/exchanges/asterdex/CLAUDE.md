@@ -109,8 +109,8 @@ exercised on first order) — same caveat as the other non-binance HMAC exchange
 
 **Egress.** `createAPI` takes its transport from a per-call `transportOptions`
 argument (default = the primary account). The secondary read client passes its own
-`ExchangeOptions`, so its GETs pick up `overrideProxyUrl` = the AWS public CORS
-proxy (`AWS_PUBLIC_CORS_PROXY`) — reads egress there while writes stay on the
+`ExchangeOptions`, so its GETs pick up `overrideProxyUrl` = the public CORS
+proxy (`PUBLIC_CORS_PROXY`) — reads egress there while writes stay on the
 primary transport. This
 is the same handling as the tunnelled CORS HMAC exchanges (bitget et al.); Aster's
 `createAPI` previously read transport from `exchange.options` and ignored the override,
@@ -542,7 +542,7 @@ the dedicated Aster clock uses the same REST constant.
 
 ## Known Quirks / Implementation Notes
 
-- **BaseWebSocket lifecycle handlers are instance arrow fields — `getPrototypeOf`-based super calls silently no-op.** `BaseWebSocket.onClose` is a class-field arrow function (an instance property), not a prototype method, so `Object.getPrototypeOf(Object.getPrototypeOf(this)).onClose` is `undefined` and a guarded call skips the base reconnect logic entirely. This bug shipped: both AsterDEX WS classes used that trick in their `onClose` overrides, so sockets were permanently dead after any disconnect. The fix (and the required pattern, matching `bitmex.ws-private.ts`) is to retain the base instance handler in the constructor — `const baseOnClose = this.onClose; this.onClose = (event) => { ...asterdex cleanup...; baseOnClose(event); }`. `dispose()` IS a regular prototype method, so `super.dispose()` works from the arrow-field overrides.
+- **BaseWebSocket lifecycle handlers are instance arrow fields — `getPrototypeOf`-based super calls silently no-op.** `BaseWebSocket.onClose` is a class-field arrow function (an instance property), not a prototype method, so `Object.getPrototypeOf(Object.getPrototypeOf(this)).onClose` is `undefined` and a guarded call skips the base reconnect logic entirely. This bug shipped: both AsterDEX WS classes used that trick in their `onClose` overrides, so sockets were permanently dead after any disconnect. The fix (and the required pattern) is to retain the base instance handler in the constructor — `const baseOnClose = this.onClose; this.onClose = (event) => { ...asterdex cleanup...; baseOnClose(event); }`. `dispose()` IS a regular prototype method, so `super.dispose()` works from the arrow-field overrides.
 - **Update order not supported**: AsterDEX has no PUT endpoint for orders. `updateOrder` cancels the old order and places a new one.
 - **Bracket orders**: TP/SL attached to entry orders are placed sequentially as separate orders (non-atomic).
 - **Close-position TP/SL**: `amount=0` uses `closePosition='true'` instead of `quantity`, and omits `reduceOnly`.

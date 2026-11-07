@@ -17,6 +17,10 @@ use std::borrow::Cow;
 /// Pages per stage before a read that still has a cursor fails as incomplete.
 const MAX_PAGES: u32 = 1000;
 
+const IDENTITY_UNAVAILABLE: &str = "Lighter private account identity is unavailable";
+/// Reads parked behind the account index lookup; more refuse at once.
+const MAX_AWAITING_IDENTITY: usize = 8;
+
 pub struct Request {
     owner: Box<ReadCursorHistory<Row>>,
     leg: Option<Context>,
@@ -351,11 +355,22 @@ impl Lighter {
             },
             None => None,
         };
+        let mut park = false;
         let account = if matches!(read, Read::Trades) {
             None
         } else {
             match self.account.account_index {
                 Some(a) if self.account.identity.is_some() => Some(a),
+                // The index lookup is still running: wait for it rather than refuse a
+                // read issued right after a (re)start. The root's own deadline bounds it.
+                None if self.account.identity.is_some()
+                    && !self.options.public_data_only
+                    && !self.account.lookup_abandoned
+                    && self.account.awaiting_identity.len() < MAX_AWAITING_IDENTITY =>
+                {
+                    park = true;
+                    None
+                }
                 _ => {
                     if self.options.public_data_only
                         || (self.options.identity.is_none() && !self.options.remote_signer)
@@ -377,18 +392,18 @@ impl Lighter {
                         };
                         let _ = cx.done_context(&context, "[]".into());
                     } else {
-                        cx.refuse_command(
-                            Operation::Read,
-                            "Lighter private account identity is unavailable",
-                        );
+                        cx.refuse_command(Operation::Read, IDENTITY_UNAVAILABLE);
                     }
                     return;
                 }
             }
         };
-        let credential = account
-            .and(self.account.identity.as_ref())
-            .map(crate::primary_credential);
+        let credential = if park {
+            self.account.identity.as_ref()
+        } else {
+            account.and(self.account.identity.as_ref())
+        }
+        .map(crate::primary_credential);
         let root = match cx.admit_caller_read_root(credential, None) {
             Ok(root) => root,
             Err(CommandEntryError::Rejected(_)) => return,
@@ -417,13 +432,44 @@ impl Lighter {
             order,
             from,
             to,
-            limit: limit.unwrap_or(100).clamp(1, 200) as usize,
+            // A window with no limit walks to its start; no default may stop it.
+            limit: match limit {
+                None if from.is_some() => usize::MAX,
+                limit => limit.unwrap_or(100).clamp(1, 200) as usize,
+            },
             stage_start: 0,
             count: 0,
             failed: None,
             past_window: false,
         };
+        if park {
+            self.account.awaiting_identity.push(request);
+            return;
+        }
         self.history_request(cx, request);
+    }
+
+    /// The account index arrived: send every read that waited for it.
+    pub(crate) fn release_awaiting_identity(&mut self, cx: &mut Cx<'_, Pending>, account: u64) {
+        for mut request in std::mem::take(&mut self.account.awaiting_identity) {
+            request.account = Some(account);
+            self.history_request(cx, request);
+        }
+    }
+
+    pub(crate) fn schedule_identity_refusal(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.awaiting_identity.is_empty() && self.account.identity_refusal.is_none() {
+            self.account.identity_refusal = Some(cx.set_timer(0.0));
+        }
+    }
+
+    /// The lookup gave up: the reads that waited for it are refused as before.
+    pub(crate) fn refuse_awaiting_identity(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Never sent, so no leg exists to finish through: the root itself carries the refusal.
+        for request in std::mem::take(&mut self.account.awaiting_identity) {
+            let root = request.owner.root().clone();
+            let _ = cx.fail_context(&root, VenueError::new(IDENTITY_UNAVAILABLE));
+        }
     }
 
     fn history_request(&self, cx: &mut Cx<'_, Pending>, mut request: Request) {
@@ -824,6 +870,10 @@ impl Lighter {
             Ok(e) if response.status < 300 && e.code.0 == "200" => e,
             Ok(e) => {
                 self.history_failed(cx, request, &format!("{} {}", response.status, e.message));
+                return;
+            }
+            Err(_) if response.status >= 300 => {
+                self.history_failed(cx, request, &format!("HTTP {}", response.status));
                 return;
             }
             Err(e) => {

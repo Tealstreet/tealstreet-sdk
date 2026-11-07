@@ -13,7 +13,7 @@ struct Fees {
     engine: Engine<Hyperliquid>,
     reads: Vec<(String, String)>,
     role: Option<HttpRequest>,
-    role_timer: Option<TimerId>,
+    timers: Vec<(TimerId, f64)>,
     now: f64,
     fee_status: u16,
 }
@@ -26,7 +26,7 @@ impl Fees {
             engine,
             reads: Vec::new(),
             role: None,
-            role_timer: None,
+            timers: Vec::new(),
             now: 1000.0,
             fee_status,
         };
@@ -58,12 +58,7 @@ impl Fees {
             }
             for action in actions {
                 match action {
-                    Action::SetTimer {
-                        timer,
-                        at_ms: 7000.0,
-                    } => {
-                        self.role_timer = Some(timer);
-                    }
+                    Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                     Action::Http(request) => {
                         let value: serde_json::Value =
                             serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
@@ -101,6 +96,23 @@ impl Fees {
         panic!("account reads did not quiesce");
     }
 
+    fn advance(&mut self, until: f64) {
+        loop {
+            self.pump();
+            self.timers.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let Some(&(timer, at)) = self.timers.last() else {
+                break;
+            };
+            if at > until {
+                break;
+            }
+            self.timers.pop();
+            self.now = self.now.max(at);
+            self.engine.handle(self.now, Event::TimerFired { timer });
+        }
+        self.now = until;
+    }
+
     fn subjects(&self, kind: &str) -> Vec<&str> {
         self.reads
             .iter()
@@ -127,8 +139,8 @@ impl Fees {
             .position(|(kind, _)| kind == "userAbstraction")
             .unwrap();
         assert!(
-            fee < mode,
-            "fee read must retain its place before private state reads"
+            mode < fee,
+            "core account reads must precede ancillary fee reads"
         );
     }
 }
@@ -220,14 +232,13 @@ fn failed_or_malformed_role_never_queries_unresolved_fees() {
 }
 
 #[test]
-fn timed_out_role_ignores_a_late_success_without_fee_bootstrap() {
+fn a_role_answer_after_six_seconds_resolves_fees_without_a_duplicate_lookup() {
     let mut h = Fees::start(agent(), 200);
     assert!(h.subjects("userFees").is_empty());
     let request = h.role.take().unwrap();
-    let timer = h.role_timer.unwrap();
-    h.now = 7000.0;
-    h.engine.handle(h.now, Event::TimerFired { timer });
-    h.pump();
+    h.advance(7000.0);
+    assert_eq!(h.subjects("userRole"), [AGENT]);
+    assert!(h.subjects("userFees").is_empty());
     h.now = 8000.0;
     h.reply(
         &request,
@@ -235,8 +246,8 @@ fn timed_out_role_ignores_a_late_success_without_fee_bootstrap() {
         &format!(r#"{{"role":"agent","data":{{"user":"{ACCOUNT}"}}}}"#),
     );
     h.pump();
-    assert!(h.subjects("userFees").is_empty());
-    assert!(h.subjects("userAbstraction").is_empty());
+    assert_eq!(h.subjects("userRole"), [AGENT]);
+    h.assert_tier(ACCOUNT);
 }
 
 #[test]

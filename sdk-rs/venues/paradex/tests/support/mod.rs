@@ -109,6 +109,48 @@ impl Harness {
         Self::start(engine(options, Some(key)), policy)
     }
     /// As `keyed`, with every signature answered by the test through the host.
+    /// A keyless account: no installed provider. The engine's PublicKey setup
+    /// binds the host-answered key (`bind` alters it), and every later sign
+    /// task waits for the host. Returns the provider the host answers with.
+    pub fn keyless(
+        options: Options,
+        key: &str,
+        bind: impl FnOnce(&mut Vec<u8>),
+    ) -> (Self, safe_cex_engine::signing::Provider) {
+        let now = 1_700_000_000_000.;
+        let (options, signer, identities) = keyed(options, key);
+        let mut e = safe_cex_engine::test_support::seeded_engine(Paradex::new(options));
+        e.set_identities(identities).unwrap();
+        e.set_address_setup_host_support(safe_cex_engine::SetupHostSupport::OwnedPublicAddress1)
+            .unwrap();
+        e.initialize_address_nonce(now).unwrap();
+        let (attempt, work) = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Sign { attempt, work, .. } => Some((attempt, work)),
+                _ => None,
+            })
+            .expect("PublicKey setup task");
+        let mut result = signer.sign_ready(&work).unwrap().unwrap();
+        bind(&mut result.values[0]);
+        e.handle(
+            now,
+            Event::Signed {
+                attempt,
+                result: Ok(result),
+            },
+        );
+        let token = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::RetireAddressSetup { token, .. } => Some(token),
+                _ => None,
+            })
+            .expect("setup retirement");
+        assert!(e.address_setup_retired(token, now));
+        assert!(e.address_nonce_setup_ready());
+        (Self::start(e, PublicFeedPolicy::Direct), signer)
+    }
     pub fn deferred(options: Options, key: &str) -> Self {
         Self::start(
             engine_with(options, key.into(), true),

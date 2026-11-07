@@ -831,3 +831,20 @@ fn bounded_fills_empty_optional_order_id_still_returns_all_orders() {
     );
     assert_eq!(h.result(1).unwrap().as_array().unwrap().len(), 1);
 }
+
+#[test]
+fn open_ended_fills_with_no_limit_walk_up_to_now_instead_of_one_page() {
+    let mut h = Harness::new();
+    h.query(
+        1,
+        Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(0.0),
+            to_ms: None,
+            limit: None,
+        },
+    );
+    let first = h.take("/userTrades");
+    assert!(field(&first, "endTime").is_some(), "{}", first.url);
+}

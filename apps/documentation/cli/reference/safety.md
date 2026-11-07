@@ -8,6 +8,10 @@ sidebar_position: 6
 Guards designed to keep an off-script command from doing damage.
 All of these are state that lives in the CLI, not the exchange.
 
+> **Standalone CLI only.** The web terminal does not enforce these guards: it
+> refuses to turn them on, and its orders, including webhook alerts, are always
+> live.
+
 | Guard                     | Scope                                         | Persistence                       |
 | ------------------------- | --------------------------------------------- | --------------------------------- |
 | [Simulation](#simulation) | All write-ops on every account                | Persistent (per CLI install)      |

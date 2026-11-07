@@ -65,35 +65,8 @@ impl<P> Cx<'_, P> {
         auth: &[&[CallAuth]],
         policy: PlanPolicy,
     ) -> Result<Plan, Error> {
-        let auth = declared_auth(steps, auth)?;
-        if !policy.independent_calls || policy.operation != Operation::Mutation {
-            return Err(Error::Invalid);
-        }
-        if policy.credential.is_none() && auth.contains(&CallAuth::Preflight) {
-            return Err(Error::Invalid);
-        }
-        let registry = &self.io.core.request_contexts;
-        let root = registry
-            .keyless_session(preflight.owner())
-            .ok_or(Error::Invalid)?
-            .clone();
-        registry.validate_keyless_session(preflight.owner(), &self.io.core.identities)?;
-        let count = auth.len();
-        let session = SessionLegs {
-            root,
-            auth,
-            wire: empty(count, None)?,
-            seed: empty(count, None)?,
-        };
-        let mut prepared = self.prepare_admission(AdmissionDeclaration {
-            steps,
-            policy,
-            terminals: &[],
-            barriers: &[],
-        })?;
-        prepared.session = Some(session);
-        self.admit_plan_root(preflight, prepared, false, None)
-            .map(|(plan, _)| plan)
+        self.core()
+            .admit_session_plan(preflight, steps, auth, policy)
     }
 
     /// Select a complete Plan Session call's one authentication resend: the
@@ -196,5 +169,45 @@ impl ContextRegistry {
             Some(session) => session.seed[body.entry_of(context)?],
             None => body.serial.as_ref()?.session_seed,
         }
+    }
+}
+
+impl crate::engine::CoreCx<'_> {
+    fn admit_session_plan(
+        &mut self,
+        preflight: &Preflight,
+        steps: &[StepBound<'_>],
+        auth: &[&[CallAuth]],
+        policy: PlanPolicy,
+    ) -> Result<Plan, Error> {
+        let auth = declared_auth(steps, auth)?;
+        if !policy.independent_calls || policy.operation != Operation::Mutation {
+            return Err(Error::Invalid);
+        }
+        if policy.credential.is_none() && auth.contains(&CallAuth::Preflight) {
+            return Err(Error::Invalid);
+        }
+        let registry = &self.io.core.request_contexts;
+        let root = registry
+            .keyless_session(preflight.owner())
+            .ok_or(Error::Invalid)?
+            .clone();
+        registry.validate_keyless_session(preflight.owner(), &self.io.core.identities)?;
+        let count = auth.len();
+        let session = SessionLegs {
+            root,
+            auth,
+            wire: empty(count, None)?,
+            seed: empty(count, None)?,
+        };
+        let mut prepared = self.prepare_admission(AdmissionDeclaration {
+            steps,
+            policy,
+            terminals: &[],
+            barriers: &[],
+        })?;
+        prepared.session = Some(session);
+        self.admit_plan_root(preflight, prepared, false, None)
+            .map(|(plan, _)| plan)
     }
 }

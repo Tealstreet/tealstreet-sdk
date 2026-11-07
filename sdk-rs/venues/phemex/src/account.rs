@@ -7,16 +7,19 @@ use safe_cex_engine::Level;
 use safe_cex_engine::backoff::Backoff;
 use safe_cex_engine::coverage::{RowReports, SnapshotBuilder};
 use safe_cex_engine::credential_selection::PrimaryReason;
+use safe_cex_engine::fresh_positions::FreshPositions;
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::log::code;
 use safe_cex_engine::model::*;
 use safe_cex_engine::request_context::{Context as ReadContext, Error as ReadError};
 use safe_cex_engine::selected_read::{ReadRequest, ReadRole};
+use safe_cex_engine::setting_holds::SettingKey;
 use safe_cex_engine::socket::Config;
 use safe_cex_engine::socket_lifecycle::{
     AuthEvidence, AuthMode, AuthRecovery, Control, ControlPolicy, EncodedBatch, FeedId, FeedPolicy,
     Interest, Invalidation, LifecycleEvent, RetireReason, SocketError, TrafficPolicy,
 };
+use safe_cex_engine::text::JoinWith;
 use safe_cex_engine::{Cx, Fill, Method, Response, SocketId, TimerId};
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -108,11 +111,20 @@ struct Reconcile {
     abandoned: bool,
     /// clOrdIDs of unknown-outcome placements, tagged with the generation that owes their read.
     lost: Vec<(String, u64)>,
+    /// Partly filled snapshot rows the active list must confirm, or they are gone.
+    unconfirmed: Vec<String>,
+    /// Long-resting limit rows the periodic read checks; absent from a short list, they are gone.
+    resting: Vec<String>,
     /// Lost placements a later cancel-all must still cancel if the read reveals them.
     cancel: Vec<(String, u64)>,
 }
 /// Reads with rows this engine cannot map before giving up on a symbol.
 const INCOMPLETE_READS: u32 = 3;
+const RESTING_ROWS_READ_MS: f64 = 60_000.;
+/// When a replacement waiting on its cancel reads the account again.
+const REPLACE_WAIT_REFRESH_MS: [f64; 2] = [3_000., 6_000.];
+/// The list's page size is unverified; a list this long may be cut, so absence proves nothing.
+const RESTING_LIST_MAX_ROWS: usize = 20;
 #[derive(Deserialize)]
 struct OrdersEnvelope<'a> {
     code: i64,
@@ -124,8 +136,50 @@ struct OrdersPage<'a> {
     #[serde(borrow)]
     rows: Vec<&'a RawValue>,
 }
+/// A read refused over the key: HTTP or body 401 or 403.
+/// A typed cause for a failing account read: a refused key, or a rate limit.
+pub(crate) fn read_refusal(response: &Response<'_>) -> Option<safe_cex_engine::VenueError> {
+    key_refusal(response).or_else(|| {
+        (response.status == 429).then(|| {
+            safe_cex_engine::VenueError::new(format!("Phemex HTTP 429: {}", response.body))
+                .kind(safe_cex_engine::ErrorKind::RateLimited)
+        })
+    })
+}
+pub(crate) fn key_refusal(response: &Response<'_>) -> Option<safe_cex_engine::VenueError> {
+    #[derive(Deserialize)]
+    struct Evidence<'a> {
+        #[serde(default)]
+        code: Option<i64>,
+        #[serde(borrow, default)]
+        msg: std::borrow::Cow<'a, str>,
+    }
+    let evidence = serde_json::from_str::<Evidence<'_>>(response.body).ok();
+    let code = evidence.as_ref().and_then(|e| e.code);
+    if !matches!(response.status, 401 | 403) && !matches!(code, Some(401 | 403)) {
+        return None;
+    }
+    // Phemex answers a key bound to another IP in plain text: 401 Request IP mismatch.
+    let detail = evidence
+        .as_ref()
+        .map_or_else(|| response.body.to_owned(), |e| e.msg.to_string());
+    let error = safe_cex_engine::VenueError::new(format!("Phemex refused the API key: {detail}"))
+        .kind(safe_cex_engine::ErrorKind::AuthInvalid)
+        .venue_message(detail.clone());
+    Some(if detail.contains("IP mismatch") {
+        error.ip_whitelist_refused()
+    } else {
+        error
+    })
+}
+/// How soon `readPositions` tries again after a read a newer stream frame overrode.
+const FRESH_POSITIONS_RETRY_MS: f64 = 500.0;
+const FRESH_PAUSED: &str = "Phemex account reads are paused after a rate limit";
 #[derive(Default)]
 pub struct State {
+    pub(crate) fresh_positions: FreshPositions,
+    /// The typed cause of the read failure being delivered, for its waiters.
+    pub(crate) read_error: Option<safe_cex_engine::VenueError>,
     started: bool,
     cycle: u64,
     pending: u8,
@@ -156,12 +210,21 @@ pub struct State {
     fills: HashSet<String>,
     fill_queue: VecDeque<(String, u64)>,
     fill_floor: u64,
-    uncertain_fills: HashMap<String, u64>,
+    uncertain_fills: HashMap<String, (String, u64)>,
     uncertainty_overflow: bool,
     reconcile: HashMap<String, Reconcile>,
     reconcile_timer: Option<TimerId>,
+    resting_timer: Option<TimerId>,
+    /// Re-reads while a replacement waits on its cancel: a read already in flight
+    /// when the cancel landed shows the old order, and nothing else asks again.
+    replace_refresh: Vec<TimerId>,
+    /// Limit rows open at the last periodic tick: only these are old enough to check.
+    resting_seen: HashSet<String>,
     /// `{currency}:{symbol}` (or `{currency}:` for an unreadable row) of skips already logged.
     skip_logged: RowReports<String>,
+    /// Frame-fed: the data source's unknown-outcome clOrdIDs and fill uncertainty.
+    source_lost: HashSet<String>,
+    source_unreconciled_fills: bool,
 }
 impl State {
     pub fn new() -> Self {
@@ -218,6 +281,149 @@ impl State {
             .copied()
             .or_else(|| self.context(symbol).map(|c| c.mode))
     }
+    /// Data source: the write-path state a frame-fed engine needs (VENUE_STATE).
+    pub(crate) fn export_venue_state(&self) -> crate::venue_state::VenueState {
+        crate::venue_state::VenueState {
+            contexts: self.contexts.iter().map(|(s, c)| (s.clone(), *c)).collect(),
+            confirmed: self
+                .confirmed_modes
+                .iter()
+                .map(|(s, m)| (s.clone(), *m))
+                .collect(),
+            sides: self
+                .order_sides
+                .iter()
+                .map(|(i, s)| (i.clone(), s.clone()))
+                .collect(),
+            lost: self
+                .reconcile
+                .values()
+                .flat_map(|entry| entry.lost.iter().chain(&entry.cancel))
+                .map(|(id, _)| id.clone())
+                .collect(),
+            unreconciled_fills: self.has_unreconciled_fills(),
+        }
+    }
+    /// Frame-fed: the source's state replaces what this engine would have read,
+    /// except a setting this engine confirmed that the source has not re-read.
+    /// Returns whether a held position mode was kept over the source's.
+    pub(crate) fn apply_venue_state(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut state: crate::venue_state::VenueState,
+    ) -> bool {
+        let symbols: HashSet<String> = self
+            .contexts
+            .keys()
+            .chain(self.confirmed_modes.keys())
+            .cloned()
+            .collect();
+        let mut kept_mode = false;
+        for symbol in &symbols {
+            kept_mode |= self.keep_held(cx, &mut state, symbol);
+        }
+        self.replace_venue_state(state);
+        kept_mode
+    }
+    /// A held key the source now reports is released; one it contradicts keeps
+    /// this engine's value in `state`.
+    fn keep_held(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        state: &mut crate::venue_state::VenueState,
+        symbol: &str,
+    ) -> bool {
+        let mut kept_mode = false;
+        let key = SettingKey::PositionMode(symbol.into());
+        if cx.setting_held(&key)
+            && let Some(mine) = self.mode(symbol)
+        {
+            let source = (state.confirmed.get(symbol).copied())
+                .or_else(|| state.contexts.get(symbol).map(|c| c.mode));
+            if source == Some(mine) {
+                cx.release_setting(&key);
+            } else {
+                state.confirmed.insert(symbol.into(), mine);
+                if let Some(context) = state.contexts.get_mut(symbol) {
+                    context.mode = mine;
+                }
+                kept_mode = true;
+            }
+        }
+        let Some(mine) = self.context(symbol) else {
+            return kept_mode;
+        };
+        let margin = SettingKey::MarginType(symbol.into());
+        let leverage = SettingKey::Leverage(symbol.into());
+        if !cx.setting_held(&margin) && !cx.setting_held(&leverage) {
+            return kept_mode;
+        }
+        // A source with no context for the symbol has not confirmed it either.
+        let reported = state.contexts.get(symbol).copied();
+        let source = state.contexts.entry(symbol.into()).or_insert(mine);
+        if cx.setting_held(&margin) {
+            if reported.is_some_and(|r| r.margin_type == mine.margin_type) {
+                cx.release_setting(&margin);
+            }
+            source.margin_type = mine.margin_type;
+        }
+        if cx.setting_held(&leverage) {
+            let same = |a: f64, b: f64| a.to_bits() == b.to_bits();
+            if reported.is_some_and(|r| {
+                same(r.long_leverage, mine.long_leverage)
+                    && same(r.short_leverage, mine.short_leverage)
+            }) {
+                cx.release_setting(&leverage);
+            }
+            source.long_leverage = mine.long_leverage;
+            source.short_leverage = mine.short_leverage;
+        }
+        kept_mode
+    }
+    fn replace_venue_state(&mut self, state: crate::venue_state::VenueState) {
+        self.contexts = state.contexts.into_iter().collect();
+        self.confirmed_modes = state.confirmed.into_iter().collect();
+        self.order_sides = state.sides.into_iter().collect();
+        self.source_lost = state.lost.into_iter().collect();
+        self.source_unreconciled_fills = state.unreconciled_fills;
+    }
+    /// Frame-fed: the source's order snapshot is this engine's, once it has loaded;
+    /// a lost placement the source's orders now show is no longer lost.
+    pub(crate) fn frame_ingested(
+        &mut self,
+        orders: bool,
+        orders_loaded: bool,
+        client_ids: &HashSet<String>,
+    ) {
+        // A create-ack sent before these orders must not upsert over them.
+        if orders {
+            self.order_revision += 1;
+        }
+        self.authenticated = orders_loaded;
+        self.snapshot = orders_loaded;
+        self.open = orders_loaded;
+        for entry in self.reconcile.values_mut() {
+            entry.lost.retain(|(id, _)| !client_ids.contains(id));
+            entry.cancel.retain(|(id, _)| !client_ids.contains(id));
+        }
+        self.reconcile
+            .retain(|_, entry| !entry.lost.is_empty() || !entry.cancel.is_empty());
+    }
+    /// Frame-fed: removes each symbol's lost placements whose signed expiry
+    /// is at or before its `cover`, returning the symbol and that expiry.
+    pub(crate) fn take_proven_lost(
+        &mut self,
+        cover: impl Fn(&str) -> Option<f64>,
+    ) -> Vec<(String, f64)> {
+        let proven: Vec<_> = (self.reconcile.iter())
+            .filter(|(symbol, entry)| cover(symbol).is_some_and(|cover| entry.not_before <= cover))
+            .map(|(symbol, entry)| (symbol.clone(), entry.not_before))
+            .collect();
+        for (symbol, _) in &proven {
+            self.reconcile.remove(symbol);
+        }
+        proven
+    }
     pub fn orders_ready(&self) -> bool {
         self.authenticated && self.snapshot && self.open && !self.uncertainty_overflow
     }
@@ -226,16 +432,29 @@ impl State {
     }
     /// Whether `id` is the clOrdID of a placement whose outcome is still unknown.
     pub fn lost_client(&self, id: &str) -> bool {
-        self.reconcile.values().any(|entry| {
-            entry
-                .lost
-                .iter()
-                .chain(&entry.cancel)
-                .any(|(lost, _)| lost == id)
-        })
+        self.source_lost.contains(id)
+            || self.reconcile.values().any(|entry| {
+                entry
+                    .lost
+                    .iter()
+                    .chain(&entry.cancel)
+                    .any(|(lost, _)| lost == id)
+            })
     }
     pub fn has_unreconciled_fills(&self) -> bool {
-        self.uncertainty_overflow || !self.uncertain_fills.is_empty()
+        self.uncertainty_overflow
+            || !self.uncertain_fills.is_empty()
+            || self.source_unreconciled_fills
+    }
+    pub fn has_unreconciled_fills_for(&self, symbol: &str, id: &str) -> bool {
+        self.uncertainty_overflow
+            || self.source_unreconciled_fills
+            || self
+                .uncertain_fills
+                .iter()
+                .any(|(order, (filled_symbol, _))| {
+                    order == id || filled_symbol.eq_ignore_ascii_case(symbol)
+                })
     }
     pub fn order_pos_side(&self, id: &str) -> Option<&str> {
         self.order_sides
@@ -307,7 +526,7 @@ fn optional_integer<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64
 }
 impl PhemexPerpetuals {
     pub(crate) fn start_account(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.started {
+        if self.account.started || cx.frame_fed() {
             return;
         }
         self.account.started = true;
@@ -320,12 +539,26 @@ impl PhemexPerpetuals {
         cx.store.set_hedged(true);
         self.account_cycle(cx);
         self.account_connect(cx);
+        if !cx.frame_fed() && self.account.resting_timer.is_none() {
+            self.account.resting_timer = Some(cx.set_timer(RESTING_ROWS_READ_MS));
+        }
     }
     pub(crate) fn account_write(&mut self, _cx: &mut Cx<'_, Pending>) {
         self.account.write_revision += 1;
         self.account.order_revision += 1;
     }
+    /// Refresh now and again at 3 s and 6 s, inside a replacement's cancel wait.
+    pub(crate) fn replace_wait_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account_refresh(cx);
+        for delay in REPLACE_WAIT_REFRESH_MS {
+            self.account.replace_refresh.push(cx.set_timer(delay));
+        }
+    }
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
+        // Frame-fed: the data source's frames carry every account change; nothing is read here.
+        if cx.frame_fed() {
+            return;
+        }
         if !self.account.started {
             self.start_account(cx);
             return;
@@ -340,7 +573,7 @@ impl PhemexPerpetuals {
         self.account_cycle(cx);
     }
     fn account_cycle(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.account.pending != 0 {
+        if self.account.pending != 0 || cx.frame_fed() {
             return;
         }
         if cx.now < self.paused_until {
@@ -434,6 +667,7 @@ impl PhemexPerpetuals {
                     invalidation: Invalidation::Required,
                     subscription_interval_ms: 0.,
                     close_floors: &[],
+                    data_silence: None,
                 })?;
                 self.account.feed = Some(feed);
                 feed
@@ -477,6 +711,61 @@ impl PhemexPerpetuals {
                 ..Default::default()
             },
         ));
+        self.read_fresh_positions_again(cx);
+    }
+    /// `readPositions`: wait on each currency's next read. One already out may
+    /// predate the close, so it is followed by a new read and never answers.
+    pub(crate) fn read_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.started || self.credentials.is_none() || self.options.public_data_only {
+            let error = safe_cex_engine::VenueError::new("Phemex account is not loaded")
+                .kind(safe_cex_engine::ErrorKind::InvalidInput);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        if cx.now < self.paused_until {
+            let wait = self.paused_until - cx.now;
+            let error = safe_cex_engine::fresh_positions::rate_limited(FRESH_PAUSED, wait);
+            safe_cex_engine::fresh_positions::refuse(cx, error);
+            return;
+        }
+        let need = self.account.cycle as u32 + 1;
+        let legs = (0..CURRENCIES.len() as u8).map(|key| (key, need)).collect();
+        if self.account.fresh_positions.admit(cx, legs) {
+            self.retry_fresh_positions(cx);
+        }
+    }
+    /// At once for a waiter the last cycle predates, else once a stream frame
+    /// that held the read can have passed.
+    fn read_fresh_positions_again(&mut self, cx: &mut Cx<'_, Pending>) {
+        let read = self.account.cycle as u32;
+        let keys = 0..CURRENCIES.len() as u8;
+        let fresh = &self.account.fresh_positions;
+        if keys.clone().any(|key| fresh.predates(key, read)) {
+            self.retry_fresh_positions(cx);
+        } else if keys.into_iter().any(|key| fresh.owed(key)) {
+            if let Some(timer) = self.account.refresh.take() {
+                cx.clear_timer(timer);
+            }
+            self.account.refresh = Some(cx.set_timer(FRESH_POSITIONS_RETRY_MS));
+        }
+    }
+    fn retry_fresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now < self.paused_until {
+            let wait = self.paused_until - cx.now;
+            let error = safe_cex_engine::fresh_positions::rate_limited(FRESH_PAUSED, wait);
+            for key in 0..CURRENCIES.len() as u8 {
+                self.account
+                    .fresh_positions
+                    .failed(cx, key, u32::MAX, &error);
+            }
+            return;
+        }
+        if self.account.pending == 0 {
+            if let Some(timer) = self.account.refresh.take() {
+                cx.clear_timer(timer);
+            }
+            self.account_cycle(cx);
+        }
     }
     fn currency_read_current(&self, read: &Background<Request>) -> bool {
         read.native.cycle == self.account.cycle
@@ -659,6 +948,46 @@ impl PhemexPerpetuals {
             request.positions.push(position);
         }
     }
+    /// A symbol-scoped position read: the row's context, or at least its mode
+    /// when a never-traded row carries no usable leverage.
+    pub(crate) fn install_symbol_mode(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        body: &str,
+    ) {
+        #[derive(Deserialize)]
+        struct Positions<'a> {
+            #[serde(borrow)]
+            data: PositionsData<'a>,
+        }
+        #[derive(Deserialize)]
+        struct PositionsData<'a> {
+            #[serde(borrow)]
+            positions: Vec<PositionRow<'a>>,
+        }
+        let Ok(parsed) = serde_json::from_str::<Positions<'_>>(body) else {
+            return;
+        };
+        let Some(row) = parsed
+            .data
+            .positions
+            .iter()
+            .find(|row| row.symbol.eq_ignore_ascii_case(symbol))
+        else {
+            return;
+        };
+        if let Some((context, _)) = row.map(cx.store, self.account.context(symbol)) {
+            self.account.install_context(cx, symbol, context, false);
+        } else if let Some(mode) = match row.pos_mode.as_ref() {
+            "Hedged" => Some(PositionMode::Hedged),
+            "OneWay" => Some(PositionMode::Oneway),
+            _ => None,
+        } {
+            self.account
+                .apply_settings(symbol, None, None, None, Some(mode));
+        }
+    }
     pub(crate) fn account_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -687,9 +1016,12 @@ impl PhemexPerpetuals {
             return;
         }
         let currency = request.currency;
+        let read = request.cycle as u32;
+        self.account.read_error = None;
         if request.write_revision == self.account.write_revision
             && request.slice_revision == self.account.slices[currency].revision
         {
+            let rejected = request.positions.rejected() != 0;
             let (mut positions, slice): (Vec<_>, Vec<_>) =
                 cx.store.positions().iter().cloned().partition(|p| {
                     cx.store
@@ -763,6 +1095,14 @@ impl PhemexPerpetuals {
             };
             self.account.slices[currency].revision += 1;
             self.account_publish_balance(cx);
+            let key = currency as u8;
+            if rejected {
+                let error =
+                    safe_cex_engine::VenueError::new("Phemex positions: a row could not be mapped");
+                self.account.fresh_positions.failed(cx, key, read, &error);
+            } else {
+                self.account.fresh_positions.committed(cx, key, read, &[]);
+            }
         }
         self.account_finish(cx, currency, false);
     }
@@ -775,14 +1115,17 @@ impl PhemexPerpetuals {
         if request.cycle != self.account.cycle {
             return;
         }
+        let currency = CURRENCIES[request.currency];
         cx.notice(
             Level::Warn,
             code::REQUEST_FAILED,
-            format!(
-                "Phemex {} account read: {error}",
-                CURRENCIES[request.currency]
-            ),
+            format!("Phemex {currency} account read: {error}"),
         );
+        let fresh = self.account.read_error.take().unwrap_or_else(|| {
+            safe_cex_engine::VenueError::new(format!("Phemex {currency} positions: {error}"))
+        });
+        let (key, read) = (request.currency as u8, request.cycle as u32);
+        self.account.fresh_positions.failed(cx, key, read, &fresh);
         self.account_finish(cx, request.currency, true);
     }
     fn account_publish_balance(&self, cx: &mut Cx<'_, Pending>) {
@@ -1262,7 +1605,7 @@ impl PhemexPerpetuals {
                             .account
                             .uncertain_fills
                             .get(row.order_id.as_ref())
-                            .is_some_and(|time| version >= *time)
+                            .is_some_and(|(_, time)| version >= *time)
                     {
                         self.account.uncertain_fills.remove(row.order_id.as_ref());
                     }
@@ -1300,9 +1643,32 @@ impl PhemexPerpetuals {
                     for order in mapped {
                         cx.store.upsert_order(order);
                     }
+                    // A terminal row may not repeat its TP/SL; the legs do not outlive it anyway.
+                    if row.terminal() {
+                        for suffix in ["__stop_loss", "__take_profit"] {
+                            let leg = format!("{}{suffix}", row.order_id);
+                            if cx
+                                .store
+                                .order(&leg)
+                                .is_some_and(|o| o.status == OrderStatus::Open)
+                            {
+                                cx.store.set_order_status(&leg, OrderStatus::Canceled);
+                            }
+                        }
+                    }
                 }
             }
             if safe_snapshot {
+                // Execution events share the frame: a later Filled ends an earlier partial row,
+                // and the newest row of an order wins.
+                let mut newest = HashSet::new();
+                staged.reverse();
+                staged.retain(|order: &Order| {
+                    !self.account.terminals.contains_key(&order.id)
+                        && newest.insert(order.id.clone())
+                });
+                staged.reverse();
+                self.note_unconfirmed_snapshot_rows(cx, &staged);
                 let active: HashSet<_> = staged.iter().map(|o| o.id.as_str()).collect();
                 self.account.order_versions.retain(|id, _| {
                     active.contains(id.as_str()) || self.account.terminals.contains_key(id)
@@ -1315,11 +1681,13 @@ impl PhemexPerpetuals {
                 self.account.uncertainty_overflow = false;
             }
             self.account.order_revision += 1;
+            self.wake_replacements(cx);
             if snapshot {
                 if !safe_snapshot {
                     cx.store.set_orders(cx.store.orders().to_vec());
                 }
                 self.account.snapshot = true;
+                self.orders_reconcile(cx);
             }
             let owed: Vec<_> = self
                 .account
@@ -1412,6 +1780,21 @@ impl PhemexPerpetuals {
         self.note_uncertain_orders(symbols, lost, not_before);
         self.orders_reconcile(cx);
     }
+    /// Only partly filled rows: a resting order with no execution needs no read per symbol.
+    fn note_unconfirmed_snapshot_rows(&mut self, cx: &Cx<'_, Pending>, staged: &[Order]) {
+        if cx.frame_fed() {
+            return;
+        }
+        for order in staged.iter().filter(|order| order.filled > 0.0) {
+            let entry = self
+                .account
+                .reconcile
+                .entry(order.symbol.clone())
+                .or_default();
+            entry.generation += 1;
+            entry.unconfirmed.push(order.id.clone());
+        }
+    }
     pub(crate) fn note_uncertain_orders(
         &mut self,
         symbols: Vec<String>,
@@ -1463,7 +1846,7 @@ impl PhemexPerpetuals {
             format!(
                 "Phemex cancel-all on {symbol} sent while placement {} has an unknown outcome; \
                  it is canceled if the open-order read after its signed expiry finds it",
-                ids.join(", ")
+                ids.join_with(", ")
             ),
         );
         let covered = self.mint_late_subjects(cx, preflight, symbol, &lost);
@@ -1490,6 +1873,22 @@ impl PhemexPerpetuals {
                 .lost
                 .retain(|(_, generation)| *generation > read.generation);
         }
+    }
+    /// Frame-fed: a placement a cancel-all covered that the source's orders now
+    /// show is canceled here, before `frame_ingested` stops tracking it.
+    pub(crate) fn cancel_landed_from_frames(&mut self, cx: &mut Cx<'_, Pending>) {
+        let owed: Vec<_> = self
+            .account
+            .reconcile
+            .iter()
+            .filter(|(_, entry)| !entry.cancel.is_empty())
+            .map(|(symbol, _)| symbol.clone())
+            .collect();
+        for symbol in owed {
+            self.cancel_landed(cx, &symbol);
+        }
+        self.retire_late_subjects(cx, None);
+        self.expire_lost_from_frames(cx);
     }
     /// Cancels any stored order a cancel-all owes on `symbol`, however it arrived.
     fn cancel_landed(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
@@ -1530,13 +1929,44 @@ impl PhemexPerpetuals {
                 code::CHILD_LEG_FAILED,
                 format!(
                     "Phemex order {} landed after cancel-all on {symbol}; check the position",
-                    filled.join(", ")
+                    filled.join_with(", ")
                 ),
             );
         }
         if !late.is_empty() {
             self.cancel_late(cx, symbol, late);
         }
+    }
+    /// Whether an untriggered stop is listed is unverified, so only plain limit rows are checked.
+    fn read_resting_rows(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.resting_timer = Some(cx.set_timer(RESTING_ROWS_READ_MS));
+        if cx.frame_fed() || !self.account.orders_ready() {
+            self.account.resting_seen.clear();
+            return;
+        }
+        let open: Vec<(String, String)> = (cx.store.orders().iter())
+            .filter(|order| {
+                order.kind == OrderType::Limit
+                    && order.status == OrderStatus::Open
+                    && order.parent_id.is_none()
+            })
+            .map(|order| (order.symbol.clone(), order.id.clone()))
+            .collect();
+        for (symbol, id) in &open {
+            if !self.account.resting_seen.contains(id) {
+                continue;
+            }
+            let entry = self.account.reconcile.entry(symbol.clone()).or_default();
+            if entry.reading || entry.abandoned {
+                continue;
+            }
+            if entry.resting.is_empty() {
+                entry.generation += 1;
+            }
+            entry.resting.push(id.clone());
+        }
+        self.account.resting_seen = open.into_iter().map(|(_, id)| id).collect();
+        self.orders_reconcile(cx);
     }
     pub(crate) fn reconcile_uncertain_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         self.settle_retired_trading(cx);
@@ -1547,7 +1977,8 @@ impl PhemexPerpetuals {
 
     /// Starts each owed read once it is due and no placement on that symbol is in flight.
     pub(crate) fn orders_reconcile(&mut self, cx: &mut Cx<'_, Pending>) {
-        if self.credentials.is_none() {
+        // Frame-fed: the source's orders settle an unknown outcome; nothing is read here.
+        if self.credentials.is_none() || cx.frame_fed() {
             return;
         }
         if let Some(timer) = self.account.reconcile_timer.take() {
@@ -1642,6 +2073,15 @@ impl PhemexPerpetuals {
             self.orders_read_failed(cx, read, "malformed open-order envelope");
             return;
         };
+        // Before this response's own writes: whether the stream changed the
+        // symbol after the read went out, so its census is older than the rows.
+        let outran = cx
+            .orders_read_refusals(
+                safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&[&read.symbol]),
+                |_| true,
+                &[],
+            )
+            .is_some_and(|refused| !refused.is_empty());
         let data = envelope
             .data
             .map(RawValue::get)
@@ -1662,7 +2102,11 @@ impl PhemexPerpetuals {
             return;
         };
         let mut complete = true;
+        // Another symbol's rows: the answer is not this symbol's list.
+        let mut foreign = false;
         let mut published = Vec::new();
+        let mut listed = HashSet::new();
+        let list_len = rows.len();
         for raw in rows {
             let Ok(row) = serde_json::from_str::<OrderRow<'_>>(raw.get()) else {
                 cx.notice(
@@ -1676,9 +2120,14 @@ impl PhemexPerpetuals {
                 complete = false;
                 continue;
             };
-            if row.symbol.to_ascii_uppercase() != read.symbol || row.terminal() {
+            if row.symbol.to_ascii_uppercase() != read.symbol {
+                foreign = true;
                 continue;
             }
+            if row.terminal() {
+                continue;
+            }
+            listed.insert(row.order_id.to_string());
             if row.unrecognized() {
                 cx.notice(
                     Level::Warn,
@@ -1729,7 +2178,16 @@ impl PhemexPerpetuals {
         } else {
             None
         };
-        if receipt.is_none() {
+        if receipt.is_none()
+            && !self.commit_orders_read(
+                cx,
+                &read.symbol,
+                &published,
+                &listed,
+                (complete, !foreign),
+                list_len,
+            )
+        {
             for order in published {
                 cx.store.upsert_order(order);
             }
@@ -1763,7 +2221,31 @@ impl PhemexPerpetuals {
         }
         if let Some(entry) = self.account.reconcile.get_mut(&symbol) {
             entry.reading = false;
-            entry.failures = 0;
+            if outran {
+                // Its absences prove nothing: the rows stay owed, read again on the
+                // failure backoff, and a clean read removes the genuinely gone ones.
+                entry.generation += 1;
+                entry.failures = entry.failures.saturating_add(1);
+                let wait =
+                    cx.jittered(Backoff::new(1_000.0, 5, f64::INFINITY).delay(entry.failures));
+                entry.not_before = entry.not_before.max(cx.now + wait);
+            } else {
+                entry.failures = 0;
+            }
+            let (mut gone, resting) = if outran {
+                (Vec::new(), Vec::new())
+            } else {
+                let unconfirmed = std::mem::take(&mut entry.unconfirmed);
+                (unconfirmed, std::mem::take(&mut entry.resting))
+            };
+            if list_len < RESTING_LIST_MAX_ROWS {
+                gone.extend(resting);
+            }
+            for id in gone.iter().filter(|id| !listed.contains(*id)) {
+                let version = self.account.order_versions.get(id).copied().unwrap_or(0);
+                self.account.remember_terminal(id.clone(), version);
+                cx.store.remove_orders(&[id.as_str()]);
+            }
         }
         if !self.trading.placing(&symbol) {
             cx.orders_reconciled(Some(&symbol));
@@ -1777,6 +2259,65 @@ impl PhemexPerpetuals {
             }
         }
         self.orders_reconcile(cx);
+    }
+    /// Commits a read's rows with the cover its send time proves: the symbol's rows,
+    /// less those it shows gone, plus the ones it found. A read that is not
+    /// complete, or not this symbol's list (`proves`), commits them with no cover. False when the stream changed
+    /// the symbol after the read went out: its rows stand, and the read proves nothing.
+    fn commit_orders_read(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        published: &[Order],
+        listed: &HashSet<String>,
+        (complete, proves): (bool, bool),
+        list_len: usize,
+    ) -> bool {
+        let entry = self.account.reconcile.get(symbol);
+        let cut = list_len >= RESTING_LIST_MAX_ROWS;
+        let gone = |id: &String| {
+            complete
+                && !listed.contains(id)
+                && entry.is_some_and(|entry| {
+                    entry.unconfirmed.contains(id) || (!cut && entry.resting.contains(id))
+                })
+        };
+        let mut rows: Vec<Order> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|order| order.symbol == symbol && !gone(&order.id))
+            .cloned()
+            .collect();
+        rows.extend_from_slice(published);
+        let unproven = if complete && proves && !cut {
+            vec![]
+        } else {
+            vec![symbol.to_owned()]
+        };
+        cx.commit_orders_read(
+            safe_cex_engine::order_read_cover::OrderReadScope::Symbols(&[symbol]),
+            |_| true,
+            rows,
+            &unproven,
+        )
+        .is_some_and(|refused| refused.is_empty())
+    }
+    /// A refresh ask: each named symbol owes a read, paced as any other. One already
+    /// owed is read after the ask anyway; one out when asked, the engine asks again.
+    pub(crate) fn owe_order_reads(&mut self, cx: &mut Cx<'_, Pending>, symbols: &[String]) {
+        let mut owed = false;
+        for symbol in symbols.iter().filter(|symbol| !symbol.is_empty()) {
+            if !self.account.reconcile.contains_key(symbol) {
+                self.account
+                    .reconcile
+                    .insert(symbol.clone(), Reconcile::default());
+                owed = true;
+            }
+        }
+        if owed {
+            self.orders_reconcile(cx);
+        }
     }
     pub(crate) fn orders_read_failed(
         &mut self,
@@ -1839,8 +2380,13 @@ impl PhemexPerpetuals {
                 self.account
                     .uncertain_fills
                     .entry(row.order_id.to_string())
-                    .and_modify(|time| *time = (*time).max(version))
-                    .or_insert(version);
+                    .and_modify(|(symbol, time)| {
+                        *time = (*time).max(version);
+                        if !symbol.eq_ignore_ascii_case(&row.symbol) {
+                            self.account.uncertainty_overflow = true;
+                        }
+                    })
+                    .or_insert_with(|| (row.symbol.to_string(), version));
             } else {
                 self.account.uncertainty_overflow = true;
                 cx.notice(Level::Warn, code::STREAM_UNAVAILABLE,"Phemex execution reconciliation capacity exceeded; reconnecting for an authoritative snapshot");
@@ -1859,6 +2405,16 @@ impl PhemexPerpetuals {
         });
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if let Some(at) = self
+            .account
+            .replace_refresh
+            .iter()
+            .position(|t| *t == timer)
+        {
+            self.account.replace_refresh.swap_remove(at);
+            self.account_refresh(cx);
+            return true;
+        }
         if self.account.reconcile_timer == Some(timer) {
             self.account.reconcile_timer = None;
             self.orders_reconcile(cx);
@@ -1869,12 +2425,24 @@ impl PhemexPerpetuals {
             self.account_cycle(cx);
             return true;
         }
+        if self.account.resting_timer == Some(timer) {
+            self.read_resting_rows(cx);
+            return true;
+        }
         if self.account.deadline == Some(timer) {
             self.account.deadline = None;
             for context in &mut self.account.reads {
                 if let Some(context) = context.take() {
                     let _ = cx.finish_http_context(&context);
                 }
+            }
+            let lost = safe_cex_engine::VenueError::new(
+                "Phemex positions read exceeded its 20-second deadline",
+            )
+            .kind(safe_cex_engine::ErrorKind::Timeout);
+            for key in 0..CURRENCIES.len() as u8 {
+                let read = self.account.cycle as u32;
+                self.account.fresh_positions.failed(cx, key, read, &lost);
             }
             self.account.cycle += 1;
             self.account.pending = 0;
@@ -1891,6 +2459,7 @@ impl PhemexPerpetuals {
                     ..Default::default()
                 },
             ));
+            self.read_fresh_positions_again(cx);
             return true;
         }
         false

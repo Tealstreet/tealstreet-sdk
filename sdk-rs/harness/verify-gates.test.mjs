@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { verifyGateSuite, loadGateLedger } from './verify-gates.mjs';
 import { expectedGateCases } from './ci-gate-suites.mjs';
-import { performanceFailures, performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, performanceFailures, performanceOrder } from './performance-policy.mjs';
 import { createHash } from 'node:crypto';
 const manifest = { schema: 1, failures: [] };
 const metric = (amount, mode) => ({
@@ -132,14 +132,16 @@ test('enabled Bitget collection retains an eligible miss as unresolved without r
       books: Object.fromEntries(item.books.split(',').map((symbol) => [symbol, { bids: [[1, 1]] }])),
       metrics: metric(impl === 'ts' ? 200 : 183.6, mode) };
     if (impl === 'ts') Object.assign(output.metrics, { heapUsedBytes: 200, heapRetainedBytes: 100, retainedBytes: 100 });
+    // Only steady misses: Rust over 1.00x TS there, the case the paired Bitget certificate can still decide.
+    if (impl === 'rust' && mode === 'performance') output.metrics.steadyCpuMs = 201;
     const bytes = JSON.stringify(output);
     raw.push({ impl, mode, run, bytes, sha256: createHash('sha256').update(bytes).digest('hex') });
   };
   for (const impl of ['ts', 'rust']) add(impl, 'correctness', 0);
-  for (let run = 0; run < 9; run++) for (const impl of performanceOrder(run)) add(impl, 'performance', run);
+  for (let run = 0; run < PUBLIC_REPLAY_PAIRS; run++) for (const impl of performanceOrder(run)) add(impl, 'performance', run);
   const samples = Object.fromEntries(['ts', 'rust'].map((impl) => [impl,
     raw.filter((value) => value.impl === impl && value.mode === 'performance').map((value) => JSON.parse(value.bytes).metrics)]));
-  const report = { ...item, schema: 1, tapeSha256: 'a'.repeat(64), private: false, runs: 9, correctnessRuns: 1,
+  const report = { ...item, schema: 1, tapeSha256: 'a'.repeat(64), private: false, runs: PUBLIC_REPLAY_PAIRS, correctnessRuns: 1,
     requiredImprovement: .1, samples, fixers: [], status: 'FAIL', failures: performanceFailures(samples.ts, samples.rust).sort(),
     artifacts: raw.map(({ impl, mode, run }) => ({ impl, mode, run, path: `out/${impl}-${mode}-${run}` })) };
   const values = [{ report, raw, exitCode: 1 }, ...expectedGateCases('bitget').slice(1).map((value, index) => ({

@@ -53,6 +53,7 @@ fn ready() -> Harness {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
     }
+    h.answer_open_position_read();
     h
 }
 
@@ -198,6 +199,7 @@ fn ready_from(mut h: Harness) -> Harness {
         let socket = h.socket(path).unwrap();
         h.event(Event::WsOpened { socket });
     }
+    h.answer_open_position_read();
     h
 }
 
@@ -308,6 +310,39 @@ fn a_stale_position_snapshot_cannot_overwrite_a_newer_stream_event() {
     let close = update.replace(r#""pa":"0.015""#, r#""pa":"0""#);
     h.message("/private/ws", &close);
     assert!(h.engine.store().positions().is_empty());
+}
+
+fn conditional(trigger: f64, price: Option<f64>) -> PlaceOrderOpts {
+    let mut opts = limit(OrderSide::Buy, 0.012, 90000.0);
+    opts.kind = OrderType::Conditional;
+    opts.trigger_price = Some(trigger);
+    opts.price = price;
+    opts
+}
+
+// Live: /fapi/v1/order answered STOP_MARKET with -4120, use the Algo Order API.
+#[test]
+fn a_conditional_goes_to_the_algo_endpoint_in_both_forms() {
+    let mut h = ready();
+    let mark = h.engine.store().ticker("BTCUSDT").unwrap().mark;
+    for (command, trigger, price, kind) in [
+        (7, mark * 1.1, None, "STOP_MARKET"),
+        (8, mark * 1.1, Some(mark * 1.2), "STOP"),
+        (9, mark * 0.9, None, "TAKE_PROFIT_MARKET"),
+        (10, mark * 0.9, Some(mark * 0.8), "TAKE_PROFIT"),
+    ] {
+        place(&mut h, command, vec![conditional(trigger, price)]);
+        assert!(!h.has_request("/fapi/v1/order?"));
+        let sent = h.take("/fapi/v1/algoOrder");
+        let q = query_of(&sent.url);
+        let get = |name: &str| q.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+        assert_eq!(get("type"), Some(kind));
+        assert_eq!(get("algoType"), Some("CONDITIONAL"));
+        assert!(get("triggerPrice").is_some());
+        assert_eq!(get("price").is_some(), price.is_some());
+        assert_eq!(get("timeInForce").is_some(), price.is_some());
+        h.reply(sent.id, 200, "", r#"{"algoId":1,"clientAlgoId":"x"}"#);
+    }
 }
 
 #[test]
@@ -506,7 +541,7 @@ fn cancel_all_reports_a_partial_failure_and_only_marks_what_succeeded() {
     assert_eq!(store.order("2146760").unwrap().status, OrderStatus::Open);
     assert_eq!(
         h.result(11),
-        Some(&Err("HTTP response does not prove the write outcome".into()))
+        Some(&Err("HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders".into()))
     );
     let failure = &h.failures.iter().find(|(id, _)| *id == 11).unwrap().1;
     assert_eq!(
@@ -545,6 +580,102 @@ fn amend_cancels_then_places_the_replacement() {
         param(&replacement.url, "quantity").as_deref(),
         Some("0.003")
     );
+}
+
+/// The stop drag: the cancel lands, the replacement is refused, the stop is gone.
+#[test]
+fn a_stop_whose_replacement_is_refused_says_the_stop_is_gone() {
+    let mut h = ready();
+    let id = "8389765519993909000";
+    let mut stop = h.engine.store().order(id).unwrap().clone();
+    stop.kind = OrderType::StopLoss;
+    stop.reduce_only = true;
+    stop.trigger_type = Some(safe_cex_engine::model::StopTriggerType::MarkPrice);
+    h.engine.store_mut().upsert_order(stop);
+    // A buy stop (a short's) sits above the price.
+    h.engine
+        .store_mut()
+        .update_ticker("BTCUSDT", |ticker| ticker.mark = 85_000.0);
+    h.event(Event::Command(Command::AmendOrder {
+        command: 12,
+        id: id.into(),
+        price: Some(91000.0),
+        amount: None,
+    }));
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":8389765519993909000,"code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/fapi/v1/algoOrder");
+    assert_eq!(replacement.method, Method::Post);
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    // Putting the old stop back is refused too: nothing protects the position now.
+    let restore = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        restore.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let (_, error) = h
+        .failures
+        .iter()
+        .find(|(id, _)| *id == 12)
+        .expect("a failure");
+    assert!(
+        error.message.contains("BTCUSDT") && error.message.contains("has no stop"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains("Order would immediately trigger"));
+}
+
+/// The limit drag: the cancel lands, the replacement is refused, the order is gone.
+#[test]
+fn a_limit_whose_replacement_is_refused_says_the_order_is_gone() {
+    let mut h = ready();
+    let id = "8389765519993909000";
+    h.event(Event::Command(Command::AmendOrder {
+        command: 12,
+        id: id.into(),
+        price: Some(91000.0),
+        amount: None,
+    }));
+    let cancel = h.take("/fapi/v1/order");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"symbol":"BTCUSDT","orderId":8389765519993909000,"status":"CANCELED","origQty":"0.004","executedQty":"0.001"}"#,
+    );
+    let replacement = h.take("/fapi/v1/order");
+    assert_eq!(replacement.method, Method::Post);
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
+    );
+    let (_, error) = h
+        .failures
+        .iter()
+        .find(|(id, _)| *id == 12)
+        .expect("a failure");
+    assert!(
+        error.message.contains("Your BTCUSDT order is gone"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains("Margin is insufficient"));
 }
 
 #[test]
@@ -594,6 +725,49 @@ fn near_the_weight_limit_background_reads_pause() {
 }
 
 #[test]
+fn a_write_limit_keeps_background_pause_when_the_engine_seals_unknown() {
+    for (status, headers, body) in [
+        (
+            429,
+            "Retry-After: 60",
+            r#"{"code":-1022,"msg":"signature refused"}"#,
+        ),
+        (
+            503,
+            "x-mbx-used-weight-1m: 2000",
+            r#"{"code":-1022,"msg":"signature refused"}"#,
+        ),
+        (
+            200,
+            "x-mbx-used-weight-1m: 2000",
+            r#"{"code":-1003,"msg":"rate limited"}"#,
+        ),
+    ] {
+        let mut h = ready();
+        place(&mut h, 91, vec![limit(OrderSide::Buy, 1., 100.)]);
+        let write = h.take("/fapi/v1/order");
+        h.reply(write.id, status, headers, body);
+        let error = &h
+            .failures
+            .iter()
+            .find(|(command, _)| *command == 91)
+            .unwrap()
+            .1;
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        h.advance(50_000.);
+        assert!(
+            !h.has_request("/fapi/v3/account"),
+            "HTTP {status}: background read escaped pause"
+        );
+        h.advance(15_000.);
+        assert!(
+            h.has_request("/fapi/v3/account"),
+            "HTTP {status}: reads never resumed"
+        );
+    }
+}
+
+#[test]
 fn a_silent_socket_is_closed_and_reconnected() {
     let mut h = ready();
     let public = h.socket("/public/ws").unwrap();
@@ -632,6 +806,25 @@ fn an_expired_listen_key_reconnects_with_a_new_one() {
     assert!(
         h.has_request("/fapi/v1/openOrders"),
         "reconnect resyncs orders"
+    );
+}
+
+#[test]
+fn a_reopened_private_stream_reads_positions_at_once() {
+    let mut h = ready();
+    let private = h.socket("/private/ws").unwrap();
+    h.requests.clear();
+    h.event(Event::WsClosed {
+        socket: private,
+        code: 1006,
+    });
+    h.advance(1_000.0);
+    h.respond("/fapi/v1/listenKey", 200, r#"{"listenKey":"fresh"}"#);
+    let socket = h.socket("/private/ws").unwrap();
+    h.event(Event::WsOpened { socket });
+    assert!(
+        h.has_request("/fapi/v3/positionRisk"),
+        "the gap lost position events"
     );
 }
 
@@ -1102,9 +1295,51 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
         (
             400,
             r#"{"code":-2019,"msg":"Margin is insufficient."}"#,
-            Some(ErrorKind::Rejected),
+            Some(ErrorKind::InsufficientBalance),
             Outcome::Rejected,
             Some("-2019"),
+        ),
+        (
+            400,
+            r#"{"code":-2018,"msg":"Balance is insufficient."}"#,
+            Some(ErrorKind::InsufficientBalance),
+            Outcome::Rejected,
+            Some("-2018"),
+        ),
+        (
+            400,
+            r#"{"code":-2028,"msg":"Leverage is smaller than permitted: insufficient margin balance."}"#,
+            Some(ErrorKind::InsufficientBalance),
+            Outcome::Rejected,
+            Some("-2028"),
+        ),
+        (
+            400,
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+            Some(ErrorKind::InvalidInput),
+            Outcome::Rejected,
+            Some("-2021"),
+        ),
+        (
+            400,
+            r#"{"code":-5022,"msg":"Due to the order could not be executed as maker, the Post Only order will be rejected."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Rejected,
+            Some("-5022"),
+        ),
+        (
+            400,
+            r#"{"code":-5021,"msg":"Due to the order could not be filled immediately, the FOK order has been rejected."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Rejected,
+            Some("-5021"),
+        ),
+        (
+            400,
+            r#"{"code":-2027,"msg":"Exceeded the maximum allowable position at current leverage."}"#,
+            Some(ErrorKind::Rejected),
+            Outcome::Rejected,
+            Some("-2027"),
         ),
         (
             400,
@@ -1124,7 +1359,7 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
             429,
             r#"{"code":-1003,"msg":"Too many requests."}"#,
             Some(ErrorKind::RateLimited),
-            Outcome::Rejected,
+            Outcome::Unknown,
             Some("-1003"),
         ),
         (
@@ -1174,10 +1409,19 @@ fn trading_failures_carry_the_binance_code_kind_and_outcome() {
             Some(&Err(error.message.clone())),
             "text is unchanged"
         );
+        // -2015 may be the key's IP whitelist, so the user is told what to check.
+        assert_eq!(
+            error
+                .message
+                .ends_with(safe_cex_engine::error::IP_WHITELIST_MAYBE_HINT),
+            code == Some("-2015"),
+            "{}",
+            error.message
+        );
         if status >= 500 {
             assert_eq!(
                 error.message,
-                "HTTP response does not prove the write outcome"
+                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
             let native: Option<serde_json::Value> = serde_json::from_str(body).ok();
             assert_eq!(
@@ -1226,7 +1470,10 @@ fn a_rejected_replacement_after_a_confirmed_cancel_is_not_reported_as_rejected()
     let [(12, error)] = h.failures.as_slice() else {
         panic!("{:?}", h.failures);
     };
-    assert_eq!(error.message, "Margin is insufficient.");
+    assert_eq!(
+        error.message,
+        "Your BTCUSDT order is gone: it was canceled and its replacement refused: Margin is insufficient."
+    );
     assert_eq!(error.outcome, None, "the cancel already took effect");
 }
 
@@ -1345,6 +1592,9 @@ fn risk_row(side: &str, amount: &str) -> String {
 #[test]
 fn a_skipped_position_row_with_no_stored_leg_is_an_error_logged_once_until_it_maps() {
     let mut h = ready();
+    h.advance(10_000.0);
+    h.respond("/fapi/v1/openOrders", 200, OPEN_ORDERS);
+    h.respond("/fapi/v1/openAlgoOrders", 200, OPEN_ALGO_ORDERS);
     let malformed = risk_row("SHORT", "-0.050").replace(r#""entryPrice":"95000.0","#, "");
     let message = "Binance skipped malformed positionRisk row BTCUSDT:short";
     advance_to_position_read(
@@ -1410,7 +1660,10 @@ fn a_skipped_position_row_holds_the_startup_snapshot_while_the_catalogue_is_part
     h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
     h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
     h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
-    advance_to_position_read(&mut h, &format!("[{malformed}]"));
+    // A failed position read is tried again within seconds, not at the next interval.
+    advance_with_account_replies(&mut h, 5_000.0);
+    h.respond("/fapi/v3/positionRisk", 200, &format!("[{malformed}]"));
+    h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
     assert!(h.engine.store().loaded().positions);
     assert_eq!(
         h.errors,
@@ -1625,7 +1878,9 @@ fn a_hung_listen_key_create_is_bounded_and_backs_off() {
     h.advance(1.0);
     assert_eq!(
         h.errors,
-        ["Binance user data stream unavailable: network error: HTTP request timed out"]
+        [
+            "Binance user data stream unavailable: network error: HTTP request timed out (class=orderWrite budget=20000ms elapsed=20000ms)"
+        ]
     );
     h.take("/fapi/v1/listenKey");
     h.advance(5_000.0);
@@ -1655,4 +1910,409 @@ fn listen_key_requests_present_only_the_key_on_livenet_and_sign_on_testnet() {
         assert_eq!(create.url.contains("signature="), testnet, "{}", create.url);
         assert_eq!(create.url.contains("timestamp="), testnet, "{}", create.url);
     }
+}
+
+#[test]
+fn a_refused_key_ends_the_start_with_the_reason() {
+    let refused = r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#;
+    let mut h = Harness::started(credentials());
+    h.expect_startup_failure = true;
+    h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+    h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+    h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+    h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+    h.respond("/fapi/v1/listenKey", 401, refused);
+    h.respond("/fapi/v3/account", 401, refused);
+    assert_eq!(h.startup_failures.len(), 1, "{:?}", h.startup_failures);
+    let message = &h.startup_failures[0].message;
+    assert!(message.contains("Invalid API-key"), "{message}");
+}
+
+// Live: a 90 day start with no end answered empty while 7 days answered 16 rows.
+#[test]
+fn a_fills_start_with_no_end_walks_every_seven_day_window_to_now() {
+    let mut h = ready();
+    let now = h.engine.signing_clock(h.now).0;
+    h.event(Event::Command(Command::Query {
+        command: 42,
+        query: Query::Fills {
+            symbol: Some("BTCUSDT".into()),
+            order_id: None,
+            from_ms: Some(now - 15.0 * 86_400_000.0),
+            to_ms: None,
+            limit: None,
+        },
+    }));
+    let mut windows = 0;
+    while h.has_request("/fapi/v1/userTrades") {
+        let page = h.take("/fapi/v1/userTrades");
+        assert!(page.url.contains("endTime="), "{}", page.url);
+        windows += 1;
+        h.reply(page.id, 200, "", "[]");
+    }
+    assert_eq!(windows, 3);
+}
+
+// Live, 1 attempt in 5: a fill between the REST snapshot and the subscribe stayed lost for 75 s.
+#[test]
+fn the_first_private_open_reads_orders_and_positions() {
+    let mut h = ready();
+    assert_eq!(h.answered_count("ositionRisk"), 2, "startup, then the open");
+    h.advance(10_000.0);
+    assert!(h.has_request("/fapi/v1/openOrders"));
+}
+
+#[test]
+fn a_refusal_ends_the_start_however_it_arrives() {
+    for (status, body) in [
+        (
+            401,
+            r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#,
+        ),
+        (
+            200,
+            r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action"}"#,
+        ),
+        (401, r#"{"code":-2014,"msg":"API-key format invalid."}"#),
+    ] {
+        let mut h = Harness::started(credentials());
+        h.expect_startup_failure = true;
+        h.respond("/fapi/v1/exchangeInfo", 200, support::EXCHANGE_INFO);
+        h.respond("/fapi/v1/ticker/24hr", 200, support::DAILY);
+        h.respond("/fapi/v1/ticker/bookTicker", 200, support::BOOK_TICKERS);
+        h.respond("/fapi/v1/premiumIndex", 200, support::PREMIUM);
+        h.respond("/fapi/v1/listenKey", status, body);
+        h.respond("/fapi/v3/account", status, body);
+        assert_eq!(h.startup_failures.len(), 1, "{status} {body}");
+    }
+}
+
+/// The PEPE take profit: a protective edit whose new trigger already fires, or
+/// is nowhere near the market, is refused before its old order is canceled.
+fn protective(
+    h: &mut Harness,
+    kind: OrderType,
+    trigger: safe_cex_engine::model::StopTriggerType,
+) -> String {
+    let id = "8389765519993909000";
+    let mut row = h.engine.store().order(id).unwrap().clone();
+    row.kind = kind;
+    row.side = OrderSide::Sell;
+    row.price = if kind == OrderType::TakeProfit {
+        99_000.0
+    } else {
+        91_000.0
+    };
+    row.amount = 0.0;
+    row.filled = 0.0;
+    row.reduce_only = true;
+    row.close = Some(true);
+    row.trigger_type = Some(trigger);
+    h.engine.store_mut().upsert_order(row);
+    h.engine.store_mut().update_ticker("BTCUSDT", |ticker| {
+        ticker.mark = 95_000.0;
+        ticker.last = 95_000.0;
+    });
+    id.into()
+}
+
+fn amend(h: &mut Harness, id: &str, price: f64) {
+    h.event(Event::Command(Command::AmendOrder {
+        command: 12,
+        id: id.into(),
+        price: Some(price),
+        amount: None,
+    }));
+}
+
+fn failure(h: &Harness) -> &safe_cex_engine::error::VenueError {
+    &h.failures
+        .iter()
+        .find(|(id, _)| *id == 12)
+        .expect("a failure")
+        .1
+}
+
+#[test]
+fn a_take_profit_moved_past_the_price_is_refused_before_its_cancel() {
+    use safe_cex_engine::model::StopTriggerType::LastPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::TakeProfit, LastPrice);
+    amend(&mut h, &id, 94_000.0);
+    assert!(!h.has_request("/fapi/v1/algoOrder") && !h.has_request("/fapi/v1/order"));
+    let error = failure(&h);
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::error::Outcome::NotSent)
+    );
+    assert!(error.message.contains("take profit"), "{}", error.message);
+}
+
+#[test]
+fn a_stop_moved_to_another_symbols_price_is_refused_before_its_cancel() {
+    use safe_cex_engine::model::StopTriggerType::MarkPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::StopLoss, MarkPrice);
+    // The right side of the price, but 1/19th of it: a price meant for another symbol.
+    amend(&mut h, &id, 5_000.0);
+    assert!(!h.has_request("/fapi/v1/algoOrder"));
+    assert_eq!(
+        failure(&h).outcome,
+        Some(safe_cex_engine::error::Outcome::NotSent)
+    );
+}
+
+/// On a stale ticker nothing is refused up front; a refused replacement puts the old order back.
+fn refused_after_cancel(restore: Option<&str>) -> Harness {
+    use safe_cex_engine::model::StopTriggerType::LastPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::TakeProfit, LastPrice);
+    advance_with_account_replies(&mut h, 10_000.0);
+    amend(&mut h, &id, 94_000.0);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":8389765519993909000,"code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/fapi/v1/algoOrder");
+    assert_eq!(
+        param(&replacement.url, "triggerPrice").as_deref(),
+        Some("94000")
+    );
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    );
+    let restored = h.take("/fapi/v1/algoOrder");
+    assert_eq!(restored.method, Method::Post);
+    for (name, value) in [
+        ("triggerPrice", "99000"),
+        ("type", "TAKE_PROFIT_MARKET"),
+        ("side", "SELL"),
+        ("workingType", "CONTRACT_PRICE"),
+        ("closePosition", "true"),
+    ] {
+        assert_eq!(param(&restored.url, name).as_deref(), Some(value), "{name}");
+    }
+    match restore {
+        None => h.reply(
+            restored.id,
+            200,
+            "",
+            r#"{"algoId":2146799,"algoStatus":"NEW"}"#,
+        ),
+        Some(body) => h.reply(restored.id, 400, "", body),
+    }
+    h
+}
+
+#[test]
+fn a_refused_take_profit_replacement_puts_the_old_one_back() {
+    let h = refused_after_cancel(None);
+    let error = failure(&h);
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Restored),
+        "{error:?} {:?}",
+        h.failures
+    );
+    assert!(error.message.contains("put back"), "{}", error.message);
+    assert!(
+        error.message.contains("Order would immediately trigger"),
+        "{}",
+        error.message
+    );
+    assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
+}
+
+#[test]
+fn a_take_profit_that_cannot_be_put_back_says_the_position_is_unprotected() {
+    let h = refused_after_cancel(Some(
+        r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+    ));
+    let error = failure(&h);
+    assert_eq!(
+        error.protection,
+        Some(safe_cex_engine::error::Protection::Unprotected)
+    );
+    assert!(
+        error.message.contains("has no take profit"),
+        "{}",
+        error.message
+    );
+    assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
+}
+
+/// codex-mxb4mq's P1: a replacement whose outcome is unknown (-1007) may have
+/// landed, so putting the old take profit back could leave two. It is never restored.
+#[test]
+fn an_unknown_replacement_outcome_never_puts_the_old_take_profit_back() {
+    use safe_cex_engine::model::StopTriggerType::LastPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::TakeProfit, LastPrice);
+    advance_with_account_replies(&mut h, 10_000.0);
+    amend(&mut h, &id, 94_000.0);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":8389765519993909000,"code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-1007,"msg":"Timeout waiting for response from backend server. Send status unknown; execution status unknown."}"#,
+    );
+    assert!(
+        !h.has_request("/fapi/v1/algoOrder"),
+        "no restore after an unknown outcome"
+    );
+    let error = failure(&h);
+    assert_eq!(
+        error.outcome,
+        Some(safe_cex_engine::error::Outcome::Unknown)
+    );
+    assert_eq!(error.protection, None);
+    assert!(
+        error.message.contains("may have no take profit"),
+        "{}",
+        error.message
+    );
+}
+
+// codex-mxb4mq's #3018 reproducers, kept as regression tests.
+
+fn review_3018_pending_replacement() -> (Harness, safe_cex_engine::HttpRequest) {
+    use safe_cex_engine::model::StopTriggerType::LastPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::TakeProfit, LastPrice);
+    advance_with_account_replies(&mut h, 10_000.0);
+    amend(&mut h, &id, 94_000.0);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    assert_eq!(cancel.method, Method::Delete);
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":8389765519993909000,"code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/fapi/v1/algoOrder");
+    assert_eq!(
+        param(&replacement.url, "triggerPrice").as_deref(),
+        Some("94000")
+    );
+    (h, replacement)
+}
+/// A signature refusal (-1022) is proven: after the landed cancel it is not resent
+/// (its known effects suppress the resend), and the old take profit goes back once.
+#[test]
+fn review_3018_signature_refusal_puts_the_old_take_profit_back_once() {
+    let (mut h, replacement) = review_3018_pending_replacement();
+    h.reply(
+        replacement.id,
+        400,
+        "",
+        r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#,
+    );
+    let restore = h.take("/fapi/v1/algoOrder");
+    assert_eq!(
+        param(&restore.url, "triggerPrice").as_deref(),
+        Some("99000")
+    );
+    h.reply(
+        restore.id,
+        200,
+        "",
+        r#"{"algoId":2146799,"algoStatus":"NEW"}"#,
+    );
+    assert!(
+        !h.has_request("/fapi/v1/algoOrder"),
+        "one put-back, no second protective order"
+    );
+    assert_eq!(
+        failure(&h).protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+}
+#[test]
+fn review_3018_unknown_replacement_must_not_restore() {
+    let (mut h, replacement) = review_3018_pending_replacement();
+    h.reply(replacement.id,400,"",r#"{"code":-1007,"msg":"Timeout waiting for response from backend server. Send status unknown; execution status unknown."}"#);
+    assert!(
+        !h.has_request("/fapi/v1/algoOrder"),
+        "unknown replacement must not add old protection"
+    );
+}
+#[test]
+fn review_3018_refused_restore_working_control() {
+    let h = refused_after_cancel(None);
+    assert_eq!(
+        failure(&h).protection,
+        Some(safe_cex_engine::error::Protection::Restored)
+    );
+    assert!(!h.has_request("/fapi/v1/algoOrder"));
+}
+
+#[test]
+fn review_3018_book_update_must_not_freshen_a_stale_mark_stream() {
+    use safe_cex_engine::model::StopTriggerType::MarkPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::StopLoss, MarkPrice);
+    let at = h
+        .engine
+        .store()
+        .reference_seen_at("BTCUSDT", MarkPrice)
+        .unwrap();
+    h.now += 10_000.;
+    h.message(
+        "/public/ws",
+        r#"{"e":"bookTicker","s":"BTCUSDT","b":"95001","a":"95002"}"#,
+    );
+    assert!(h.now - at > 5_000.);
+    assert_eq!(
+        h.engine.store().ticker("BTCUSDT").unwrap().bid,
+        95001.,
+        "real book delta applied"
+    );
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().mark, 95000.);
+    amend(&mut h, &id, 96000.);
+    assert!(
+        h.has_request("/fapi/v1/algoOrder"),
+        "a fresh bid must not refuse a trigger against stale MarkPrice; terminal {:?}",
+        h.result(12)
+    );
+}
+#[test]
+fn review_3018_stale_mark_stream_working_control() {
+    use safe_cex_engine::model::StopTriggerType::MarkPrice;
+    let mut h = ready();
+    let id = protective(&mut h, OrderType::StopLoss, MarkPrice);
+    h.now += 10_000.;
+    amend(&mut h, &id, 96000.);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    assert_eq!(cancel.method, Method::Delete);
+}
+
+/// A put-back whose own outcome is unknown may have landed: neither restored nor unprotected.
+#[test]
+fn a_put_back_of_unknown_outcome_claims_no_protection() {
+    let h = refused_after_cancel(Some(
+        r#"{"code":-1007,"msg":"Timeout waiting for response from backend server. Send status unknown; execution status unknown."}"#,
+    ));
+    let error = failure(&h);
+    assert_eq!(error.protection, None, "{error:?}");
+    assert!(
+        error.message.contains("unknown outcome"),
+        "{}",
+        error.message
+    );
+    assert!(!h.has_request("/fapi/v1/algoOrder"), "never loops");
 }
