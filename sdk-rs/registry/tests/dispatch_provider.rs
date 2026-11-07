@@ -462,10 +462,10 @@ fn mexc_provider_injection_requires_its_installed_provider() {
     }
 }
 
-// WOO remains a provider-injection refusal control after KuCoin adoption.
-#[cfg(feature = "woo")]
+// Orderly remains a provider-injection refusal control after WOO adoption.
+#[cfg(feature = "orderly")]
 #[test]
-fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_woo() {
+fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_orderly() {
     struct NeverConstruct;
     impl safe_cex_venues::Visit for NeverConstruct {
         type Output = ();
@@ -477,7 +477,7 @@ fn enabling_provider_setup_does_not_admit_injection_into_unmigrated_woo() {
         r#"{"primary":{"key":"primary-key","secret":"primary-secret"}}"#.into(),
     )
     .unwrap();
-    for venue in ["woo"] {
+    for venue in ["orderly"] {
         for (refs, supplied_provider) in [(true, false), (false, true), (true, true)] {
             let mut options: EngineOptions = serde_json::from_str("{}").unwrap();
             options.signing = refs.then(|| identities.clone());

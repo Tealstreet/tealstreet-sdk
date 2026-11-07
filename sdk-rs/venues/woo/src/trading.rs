@@ -951,8 +951,8 @@ impl Woo {
             _ => return,
         };
         if self.options.public_data_only
-            || self.options.key.is_none()
-            || self.options.secret.is_none()
+            || (self.options.credentials.is_none()
+                && (self.options.key.is_none() || self.options.secret.is_none()))
         {
             cx.fail(
                 command,
@@ -1543,6 +1543,51 @@ impl Woo {
                 self.trade_write_failed(cx, &request.step, error);
             }
         }
+        self.trade_pump(cx);
+    }
+    /// Signing/preparation failed before this physical write. Keep earlier job evidence.
+    pub(crate) fn trade_sign_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        mut error: VenueError,
+    ) {
+        if !matches!(request.step, Step::Write { .. }) {
+            self.trade_failed(cx, request, &error.message);
+            return;
+        }
+        let Some(job) = self
+            .trading
+            .active
+            .as_ref()
+            .filter(|job| job.command == request.command)
+        else {
+            return;
+        };
+        error.outcome = Some(Outcome::NotSent);
+        if !job.errors.is_empty() {
+            let message = job
+                .errors
+                .iter()
+                .map(|e| e.message.as_str())
+                .collect::<Vec<_>>()
+                .join_with("; ");
+            let signing_failure = error.message;
+            error = job
+                .errors
+                .iter()
+                .find(|e| e.kind == Some(ErrorKind::RateLimited))
+                .unwrap_or(&job.errors[0])
+                .clone();
+            error.message = format!("{message}; {signing_failure}");
+            error.outcome = job
+                .errors
+                .iter()
+                .any(|e| e.outcome == Some(Outcome::Unknown))
+                .then_some(Outcome::Unknown);
+        }
+        self.trade_config_finished(&request.step);
+        self.trade_abort(cx, error);
         self.trade_pump(cx);
     }
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
