@@ -401,6 +401,30 @@ struct ResultRow<'a> {
     #[serde(borrow, default, deserialize_with = "nullable_text")]
     msg: Str<'a>,
 }
+impl ResultRow<'_> {
+    fn has_unproven_error(&self) -> bool {
+        self.code.is_empty()
+            && !matches!(
+                self.msg.trim().to_ascii_lowercase().as_str(),
+                "" | "success" | "order placed"
+            )
+    }
+    fn failed(&self) -> bool {
+        (!self.code.is_empty() && self.code != "0") || self.has_unproven_error()
+    }
+}
+fn failed_row<'r, 'a>(rows: &'r [ResultRow<'a>], intent: Intent) -> Option<&'r ResultRow<'a>> {
+    // A known refusal cannot hide another row whose write may have landed.
+    rows.iter()
+        .find(|row| {
+            row.failed()
+                && matches!(
+                    CODES.verdict(&native(&row.code, &row.msg), intent),
+                    Verdict::Unknown(_)
+                )
+        })
+        .or_else(|| rows.iter().find(|row| row.failed()))
+}
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum ResultRows<'a> {
@@ -408,6 +432,12 @@ enum ResultRows<'a> {
     One(#[serde(borrow)] ResultRow<'a>),
 }
 impl<'a> ResultRows<'a> {
+    fn as_slice(&self) -> &[ResultRow<'a>] {
+        match self {
+            Self::Many(rows) => rows,
+            Self::One(row) => std::slice::from_ref(row),
+        }
+    }
     fn rows(self) -> Vec<ResultRow<'a>> {
         match self {
             Self::Many(v) => v,
@@ -2602,17 +2632,26 @@ impl Blofin {
         let context = &request.context;
         let parsed = serde_json::from_str::<Reply<'_>>(response.body);
         if !(200..300).contains(&response.status) {
-            let native = parsed
-                .as_ref()
-                .ok()
-                .filter(|reply| !reply.code.is_empty())
-                .map(|reply| native(&reply.code, &reply.msg));
+            let detail = parsed.as_ref().ok().and_then(|reply| {
+                if reply.code != "0" {
+                    return (!reply.code.is_empty()).then_some((&*reply.code, &*reply.msg));
+                }
+                // A success envelope on an HTTP failure cannot hide an uncertain row.
+                reply
+                    .data
+                    .as_ref()?
+                    .as_slice()
+                    .iter()
+                    .find(|row| {
+                        matches!(
+                            CODES.verdict(&native(&row.code, &row.msg), request.step.intent()),
+                            Verdict::Unknown(_)
+                        )
+                    })
+                    .map(|row| (&*row.code, &*row.msg))
+            });
+            let native = detail.map(|(code, message)| native(code, message));
             let error = if let Effect::Setting = &request.step.effect {
-                let detail = parsed
-                    .as_ref()
-                    .ok()
-                    .filter(|reply| !reply.code.is_empty())
-                    .map(|reply| (&*reply.code, &*reply.msg));
                 setting_failure(request.step.path, response.status, detail)
             } else {
                 http_failure(response.status, response.body)
@@ -2663,14 +2702,12 @@ impl Blofin {
                         1 => &row.tpsl_id,
                         _ => &row.algo_id,
                     };
-                    let text = row.msg.trim().to_ascii_lowercase();
                     // Only a non-zero row code refuses, and code 0 accepts whatever its
                     // text says. A cancel-only "gone" code or a code-less row with
                     // unexpected text proves nothing here.
                     let refused = !row.code.is_empty() && row.code != "0";
                     let gone = matches!(&*row.code, "1000" | "102068");
-                    let odd = row.code.is_empty()
-                        && !matches!(text.as_str(), "" | "success" | "order placed");
+                    let odd = row.has_unproven_error();
                     if refused && !gone {
                         items.push(BatchItem::Native(native(&row.code, &row.msg)));
                         maybe_live |= outcome_unknown(&row.code, &row.msg);
@@ -2790,7 +2827,8 @@ impl Blofin {
                             .contains("filled, triggered, canceled or does not exist");
                     let gone = matches!(&*row.code, "1000" | "102068") || gone_text;
                     // Each row speaks for itself: code 2 is "partially succeeded".
-                    let accepted = row.code == "0" || (reply.code == "0" && row.code.is_empty());
+                    let accepted = row.code == "0"
+                        || (reply.code == "0" && row.code.is_empty() && !row.has_unproven_error());
                     let replacing = !job.replacement_targets.is_empty();
                     if gone && replacing {
                         // Nothing to move: the old order ended first, and no replacement goes out.
@@ -2862,7 +2900,7 @@ impl Blofin {
                 }
             }
             Effect::Setting => {
-                let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
+                let refused = failed_row(&rows, request.step.intent());
                 if reply.code != "0" || refused.is_some() {
                     let (code, message) = match refused {
                         Some(row) if reply.code == "0" => (&*row.code, &*row.msg),
@@ -2882,7 +2920,7 @@ impl Blofin {
                 Ok(())
             }
             Effect::AmendTpsl(removed) => {
-                let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
+                let refused = failed_row(&rows, request.step.intent());
                 if reply.code == "0" && refused.is_none() {
                     let _ = cx.http_write_fact(
                         context,
@@ -2915,7 +2953,7 @@ impl Blofin {
                 Ok(())
             }
             Effect::NativeAmend { symbol } => {
-                let refused = rows.iter().find(|r| !r.code.is_empty() && r.code != "0");
+                let refused = failed_row(&rows, request.step.intent());
                 if reply.code == "0" && refused.is_none() {
                     let _ = cx.http_write_fact(
                         context,
@@ -2942,9 +2980,11 @@ impl Blofin {
                 } else {
                     format!("Your {symbol} is unchanged: BloFin refused the edit ({code}: {msg})")
                 };
-                let error = record_failed(cx, context, Some(native(code, msg)), &message);
+                let mut error = record_failed(cx, context, Some(native(code, msg)), &message);
                 if gone {
                     self.reconcile_orders(cx);
+                    error.message = format!("{}; {message}", error.message);
+                    error.presents = true;
                 }
                 Err(error)
             }

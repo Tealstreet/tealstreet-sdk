@@ -291,6 +291,34 @@ fn dispatched_ambiguity_covers_every_write_path() {
             200,
             r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"999999","msg":"internal failure"}]}"#,
         ),
+        (
+            200,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"","msg":"internal failure"}]}"#,
+        ),
+        (
+            400,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"103013","msg":"internal failure"}]}"#,
+        ),
+        (
+            400,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"999999","msg":"internal failure"}]}"#,
+        ),
+        (
+            400,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"","msg":"internal failure"}]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"102014","msg":"refused"},{"orderId":"12","tpslId":"91","algoId":"78","code":"103013","msg":"internal failure"}]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"102014","msg":"refused"},{"orderId":"12","tpslId":"91","algoId":"78","code":"999999","msg":"internal failure"}]}"#,
+        ),
+        (
+            200,
+            r#"{"code":"0","data":[{"orderId":"12","tpslId":"91","algoId":"78","code":"102014","msg":"refused"},{"orderId":"12","tpslId":"91","algoId":"78","code":"","msg":"internal failure"}]}"#,
+        ),
         (429, "{}"),
         (429, r#"{"code":"152401","msg":"Invalid signature"}"#),
         (200, r#"{"code":"429","msg":"Too Many Requests"}"#),

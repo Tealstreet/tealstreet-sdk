@@ -44,3 +44,5 @@ choosing journal text or a fallback. Internal errors, blank codes and unlisted
 codes retain Unknown guidance on HTTP 200 and HTTP 400, including native edits
 that remove one combined TP/SL leg. An uncertain replacement or put-back never
 authorizes another POST or claims the position is definitively unprotected.
+This also applies to row-level errors under a success envelope: a blank row
+code with unexpected failure text cannot acknowledge a cancel or native edit.
