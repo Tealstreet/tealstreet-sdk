@@ -71,9 +71,10 @@ export class DelegatedSignerSetup {
     const secondary = publicCredential(options.secondary_key, secondaryMetadata?.trimCredential === true);
     const secondaryRequested = options.secondary_key !== undefined || options.secondary_secret !== undefined
       || options.secondary_passphrase !== undefined || metadata.secondary !== undefined;
-    // WOO's raw HMAC callback has no slot selector; never install unusable read refs.
-    if (name === 'woo' && remoteSigner && secondaryRequested) {
-      const message = 'WOO X secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser';
+    // Raw HMAC callbacks have no slot selector; never install unusable read refs.
+    if ((name === 'woo' || name === 'bitrue') && remoteSigner && secondaryRequested) {
+      const venue = name === 'woo' ? 'WOO X' : 'Bitrue';
+      const message = `${venue} secondary read keys are unsupported on the Hosted Server; remove the secondary credentials or turn Hosted Server off to use them in this browser`;
       throw new ExchangeError(message, { message, kind: 'unsupported', outcome: 'notSent' });
     }
     if (secondaryRequested && !secondary) invalid('Rust engine secondary delegated signing requires a nonempty public key');
