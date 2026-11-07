@@ -14,3 +14,8 @@ responses unknown, including a bracket leg after an accepted entry. Their user
 text says the outcome is unknown and directs the caller to Check Open Orders.
 These failures never resend or place a replacement stop. Definitive refusals and
 private reads retain their existing behavior.
+
+All Futures Unknown trading failures include reconciliation guidance, including
+HTTP 200 native server errors and unproven cancellation statuses. Batch errors
+retain an unknown leg's message and native diagnostics together when a later
+leg is definitively refused.
