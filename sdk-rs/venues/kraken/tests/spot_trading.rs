@@ -1032,6 +1032,50 @@ fn beta_cancel_prefix_survives_a_later_refusal() {
 }
 
 #[test]
+fn http_429_signature_error_must_not_resend_add_order() {
+    let (mut e, _, _) = ready(false);
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 81,
+            orders: vec![opts("limit", 99.)],
+        }),
+    );
+    let sent = requests(&mut e);
+    assert_eq!(sent.len(), 1, "one initial physical write");
+    let first = &sent[0];
+    assert!(first.url.ends_with("AddOrder"));
+    e.handle(
+        NOW,
+        Event::HttpResponse {
+            request: first.id,
+            response: safe_cex_engine::Response {
+                status: 429,
+                headers: "",
+                body: r#"{"error":["EAPI:Invalid signature"]}"#,
+            },
+        },
+    );
+    // Complete host preparation so this counts physical dispatches, not intents.
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    let duplicates = actions
+        .iter()
+        .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("AddOrder")))
+        .count();
+    assert_eq!(
+        duplicates, 0,
+        "HTTP 429 with a native signature error must not dispatch a second AddOrder"
+    );
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Notice(Notice::CommandFailed { command: 81, error })
+            if error.outcome == Some(safe_cex_engine::Outcome::Unknown)
+    )));
+    assert!(actions.iter().any(|a| matches!(a,
+        Action::Http(r) if r.url.ends_with("OpenOrders")
+    )));
+}
+
+#[test]
 fn beta_unproven_status_never_grants_a_signature_resend() {
     for status in [408, 500, 503] {
         let (mut e, _, _) = ready(false);
