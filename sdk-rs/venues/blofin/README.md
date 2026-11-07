@@ -13,3 +13,11 @@ repair. Retirement invalidates books before replacement rows. See
 `docs/plans/RUST_BLOFIN_MANAGED_SOCKETS.md` and production-binding controls in
 `tests/managed_sockets.rs`. Replay tapes are scripted evidence, not live account
 connectivity evidence.
+
+Dispatched writes answered by HTTP 429, 408 or 5xx remain unknown through the
+engine journal, regardless of a native refusal body. Native code `429` inside
+HTTP 200 is also unknown, including a row with order ID `0` under an
+`All operations failed` envelope: it cannot prove that nothing was placed or
+authorize a protective put-back. Native rate failures direct the caller to
+Check Open Orders and retain the venue code/message as diagnostic evidence.
+Reads and documented definitive refusal codes on other statuses are unchanged.

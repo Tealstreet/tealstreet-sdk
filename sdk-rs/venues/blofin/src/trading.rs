@@ -24,8 +24,14 @@ const CALL_MS: u32 = 20_000;
 /// nothing. "Gone" is satisfied only for a cancel. BloFin returns its 400/401
 /// codes in a 200 body; only 403 (firewall) and 429 are documented HTTP statuses.
 const NONE_PLACED: &str = "none-placed";
+const UNKNOWN_RATE: &str = "BloFin write outcome is unknown. Check Open Orders";
 const CODES: CodeTable = CodeTable {
     rows: &[
+        Row {
+            key: Key::Int(429),
+            verdict: Verdict::Unknown(Some(ErrorKind::RateLimited)),
+            only: None,
+        },
         // "Bad Request" and "Invalid signature" body codes.
         refused(Key::Int(400), ErrorKind::InvalidInput),
         refused(Key::Int(401), ErrorKind::AuthInvalid),
@@ -2673,11 +2679,12 @@ impl Blofin {
                     let gone = matches!(&*row.code, "1000" | "102068");
                     let odd = row.code.is_empty()
                         && !matches!(text.as_str(), "" | "success" | "order placed");
-                    // Order ID 0 under this envelope names no order: nothing was placed.
+                    // Order ID 0 under this envelope names no order, but a rate
+                    // code still cannot prove that nothing was placed.
                     let none_placed = id == "0"
                         && reply.code != "0"
                         && reply.msg.eq_ignore_ascii_case("All operations failed");
-                    if none_placed {
+                    if none_placed && row.code != "429" {
                         items.push(BatchItem::Native(Native {
                             code: NativeCode::Text(NONE_PLACED),
                             message: &row.msg,
@@ -2711,6 +2718,9 @@ impl Blofin {
                 unproven |= reply.code != "0" && !refused;
                 if multi_position {
                     error = Some(MULTI_POSITION_MESSAGE.to_owned());
+                }
+                if rows.iter().any(|row| row.code == "429") {
+                    error = Some(UNKNOWN_RATE.to_owned());
                 }
                 if unproven {
                     let message = error.clone().unwrap_or_else(|| message.clone());
@@ -2843,6 +2853,9 @@ impl Blofin {
                     } else {
                         error = Some(format!("BloFin cancellation rejected: {}", row.msg));
                     }
+                }
+                if rows.iter().any(|row| row.code == "429") {
+                    error = Some(UNKNOWN_RATE.to_owned());
                 }
                 if unproven {
                     let message = error.clone().unwrap_or_default();
@@ -3137,6 +3150,16 @@ fn record_failed(
     native: Option<Native<'_>>,
     message: &str,
 ) {
+    // A native rate response can arrive inside HTTP 200. Keep its diagnostic
+    // evidence, but do not present the unknown write as a definitive refusal.
+    let message = if native
+        .as_ref()
+        .is_some_and(|n| n.code == NativeCode::Int(429))
+    {
+        UNKNOWN_RATE
+    } else {
+        message
+    };
     match cx.classify_write(context, &CODES, native.as_ref(), message.to_owned()) {
         Ok(fact) => {
             let failed = WriteFact::Failed {

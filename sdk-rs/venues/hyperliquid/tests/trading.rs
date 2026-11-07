@@ -7,6 +7,108 @@ use serde_json::Value;
 use support::prepared_now;
 use support::*;
 const CLOID: &str = "0x00000000000000000000000000000001";
+
+#[test]
+fn dispatched_ambiguity_covers_ordinary_and_protective_writes() {
+    for (status, text) in [
+        (429, "Too many requests"),
+        (
+            429,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+        (
+            408,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+        (
+            500,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+        (
+            503,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+    ] {
+        for operation in ["create", "cancel", "amend", "amend-replacement", "setting"] {
+            for protective in [false, true] {
+                if protective && matches!(operation, "setting" | "amend-replacement") {
+                    continue;
+                }
+                let (mut e, socket) = ready("disabled");
+                let row = serde_json::json!({"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"cloid":CLOID,"side":"A","limitPx":"95","origSz":"1","sz":"1","reduceOnly":protective,"orderType":if protective {"Stop Market"} else {"Limit"},"triggerPx":if protective {"80"} else {"0"}},"status":"open"}]});
+                message(&mut e, socket, 1900.0, &row.to_string());
+                prepared_now(&mut e);
+                let kind = if protective { "stop_market" } else { "limit" };
+                let input = opts(&serde_json::json!({"symbol":"BTC-PERP","type":kind,"side":"sell","price":if protective {80} else {110},"amount":1,"reduceOnly":protective}).to_string());
+                let cmd = match operation {
+                    "create" => Command::PlaceOrders {
+                        command: 1,
+                        orders: vec![input],
+                    },
+                    "cancel" => Command::CancelOrders {
+                        command: 1,
+                        ids: vec!["9".into()],
+                    },
+                    "amend" | "amend-replacement" => Command::AmendOrder {
+                        command: 1,
+                        id: "9".into(),
+                        price: Some(if protective { 75.0 } else { 110.0 }),
+                        amount: None,
+                    },
+                    _ => Command::SetLeverage {
+                        command: 1,
+                        symbol: "BTC-PERP".into(),
+                        leverage: 5.0,
+                        side: None,
+                    },
+                };
+                e.handle(2000.0, Event::Command(cmd));
+                let mut request = write(&mut e);
+                if operation == "amend-replacement" {
+                    reply(
+                        &mut e,
+                        &request,
+                        200,
+                        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+                    );
+                    request = write(&mut e);
+                    assert_eq!(body(&request)["action"]["type"], "order");
+                }
+                assert!(request.url.ends_with("/exchange"));
+                reply(&mut e, &request, status, text);
+                let actions = prepared_now(&mut e);
+                let errors: Vec<_> = actions
+                    .iter()
+                    .filter_map(|a| match a {
+                        Action::Notice(Notice::CommandFailed { command: 1, error }) => Some(error),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    errors.len(),
+                    1,
+                    "{operation} protective={protective} {status}: {actions:?}"
+                );
+                let error = errors[0];
+                assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+                assert_eq!(error.protection, None);
+                assert!(
+                    error.message.to_lowercase().contains("unknown"),
+                    "{error:?}"
+                );
+                assert!(error.message.contains("Check Open Orders"), "{error:?}");
+                assert!(!error.message.contains("refused"), "{error:?}");
+                assert!(!error.message.contains("no stop"), "{error:?}");
+                assert!(
+                    !actions
+                        .iter()
+                        .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange"))),
+                    "no resend or put-back"
+                );
+            }
+        }
+    }
+}
 #[test]
 fn all_actual_bracket_cloids_are_receipted_before_the_signed_write() {
     let (mut e, _) = ready("disabled");
