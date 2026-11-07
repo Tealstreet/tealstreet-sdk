@@ -1124,7 +1124,7 @@ fn released_http_throttles_are_unknown_and_never_replay() {
             assert_eq!(error.outcome, Some(Outcome::Unknown));
             assert_eq!(
                 error.message,
-                "HTTP response does not prove the write outcome"
+                "HTTP response does not prove the write outcome. The outcome is unknown. Check Open Orders"
             );
             assert_eq!(error.venue_code, None);
         } else {
