@@ -203,6 +203,8 @@ export const WASM_BUDGETS = Object.freeze({ venue: 1_343_488, combined: 17_825_7
 // CI size plus 10 KiB rounded up to KiB; KuCoin Spot retains its existing cap.
 // #3210 run 42320236420, job 128244910061 measured Bitget 2,422,853 B at 191de16bd7d.
 // CI size plus 10 KiB rounded up to the KiB; BitgetUSDC shares the family cap.
+// #3193 at ad4f1d6d5d9: seven CI measurements + 10 KiB, rounded up to KiB.
+// Later master caps win per family; shared-family siblings remain equal.
 export const WASM_VENUE_OVERRIDES = Object.freeze({
   apexomni: 2_024_448,
   asterdex: 2_161_664,
@@ -211,19 +213,20 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   // and the trailing put-back. CI size plus 10 KiB, rounded up to the KiB.
   // #3179 on master 160884d020d (merge bd354d2e09e), run 42319187479, job 128239693319 measured
   // binance 2,224,977 B. CI size plus 10 KiB rounded up to the KiB; all Binance aliases share the cap.
-  binance: 2_235_392,
+  binance: 2_236_416,
   bingx: 2_085_888,
   bitget: 2_434_048,
   bitgetusdc: 2_434_048,
   bitrue: 1_851_392,
   bitunix: 1_863_680,
   blofin: 2_001_920,
-  breakoutprop: 1_565_696,
+  breakoutprop: 1_580_032,
   bybit: 2_270_208,
-  coinbase: 1_838_080,
+  // #3193 at 90750c898c2, CI job 128343606114: 1,841,539 B + 10 KiB, rounded up to KiB.
+  coinbase: 1_852_416,
   cryptocom: 1_740_800,
   // #3129, CI run 42145552491: GRVT measured 1,806,590 B + 10 KiB, rounded up.
-  grvt: 1_817_600,
+  grvt: 1_830_912,
   // #3120 run 42241033166, job 127971867963: Hyperliquid 2,167,039 B at c5208b32b0f.
   // CI size plus 10 KiB rounded up to the KiB; Hyperliquid Spot shares the cap.
   // #3120 on master 160884d020d (merge be90b5c6891), run 42319184274, job 128239709172 measured
@@ -237,16 +240,17 @@ export const WASM_VENUE_OVERRIDES = Object.freeze({
   lighter: 2_093_056,
   'lighter-robinhood': 2_093_056,
   // #3169, CI run 42228563954: MEXC measured 1,848,283 B + 10 KiB, rounded up.
-  mexc: 1_858_560,
+  mexc: 1_872_896,
   okx: 1_986_560,
-  orderly: 1_732_608,
+  orderly: 1_744_896,
   // #3191, CI run 42249705679: Paradex measured 2,249,779 B + 10 KiB, rounded up.
   paradex: 2_266_112,
   phemex: 2_079_744,
   polymarket: 1_611_776,
   txflow: 1_852_416,
   weex: 1_948_672,
-  woo: 2_416_640,
+  // #3193 at 90750c898c2, CI job 128343606230: 2,417,950 B + 10 KiB, rounded up to KiB.
+  woo: 2_428_928,
 });
 export const wasmBudgetBytes = (profile, venue) =>
   profile === 'venue' && venue !== undefined && Object.hasOwn(WASM_VENUE_OVERRIDES, venue) ? WASM_VENUE_OVERRIDES[venue] : WASM_BUDGETS[profile];

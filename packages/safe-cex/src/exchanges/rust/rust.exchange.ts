@@ -2004,7 +2004,7 @@ export class RustEngineExchange extends BaseExchange {
           markErrorReported(error);
           this.dispose();
         },
-        sharedFeed.policy,
+        { ...sharedFeed.policy, observations: new Frame(this.host.snapshot()).tickerObservations?.() !== undefined },
       );
       try {
         await this.sharedPublicFeed.connect();
@@ -2212,7 +2212,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.publicFeedObservers.size) {
       let publicChanged = catalogChanged;
       try {
-        publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas());
+        publicChanged ||= Boolean(frame.tickers() || frame.tickerDeltas() || frame.tickerObservations?.());
       } catch (error) {
         needsSnapshot = true;
         console.error('Engine public feed section failed', error);
