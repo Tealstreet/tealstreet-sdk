@@ -34,6 +34,8 @@ const TAGS: &[&str] = &[
     "venue_code",
     "venue",
     "target",
+    "startup_unloaded",
+    "startup_refused",
 ];
 const EXTRAS: &[&str] = &["user_tag", "suppressed_since_last_event"];
 
@@ -489,6 +491,10 @@ pub struct Report<'a> {
     pub target: Option<&'a str>,
     pub error_kind: Option<&'a str>,
     pub venue_code: Option<&'a str>,
+    /// A start failure's first unloaded section (`markets`..`positions`): what had
+    /// not loaded, never which read failed.
+    pub startup_unloaded: Option<&'static str>,
+    pub startup_refused: Option<bool>,
 }
 
 impl Report<'_> {
@@ -500,6 +506,12 @@ impl Report<'_> {
             ("target", self.target),
             ("error_kind", self.error_kind),
             ("venue_code", self.venue_code),
+            ("startup_unloaded", self.startup_unloaded),
+            (
+                "startup_refused",
+                self.startup_refused
+                    .map(|refused| if refused { "true" } else { "false" }),
+            ),
         ] {
             if let Some(value) = value {
                 tags.insert(key.to_owned(), value.to_owned());
@@ -567,6 +579,8 @@ fn from_native<'a>(report: &safe_cex_native::report::ErrorReport<'a>) -> Report<
         target: report.target,
         error_kind: report.error_kind,
         venue_code: report.venue_code,
+        startup_unloaded: report.startup_unloaded,
+        startup_refused: report.startup_refused,
     }
 }
 
@@ -787,6 +801,73 @@ mod tests {
     }
 
     #[test]
+    fn the_tag_allowlist_is_exactly_this_closed_set() {
+        assert_eq!(
+            TAGS,
+            [
+                "service",
+                "box",
+                "kind",
+                "error_kind",
+                "venue_code",
+                "venue",
+                "target",
+                "startup_unloaded",
+                "startup_refused",
+            ]
+        );
+        assert_eq!(EXTRAS, ["user_tag", "suppressed_since_last_event"]);
+    }
+
+    #[test]
+    fn a_start_failure_carries_its_cause_tags_and_nothing_else_leaves() {
+        use safe_cex_native::report::{ErrorKind, ErrorReport};
+        let events = captured(Identity::default(), || {
+            let mut event = from_native(&ErrorReport {
+                kind: ErrorKind::AccountStartFailed,
+                label: Some("a1b2c3 Main account binance"),
+                target: None,
+                error_kind: Some("authInvalid"),
+                venue_code: Some("-2015"),
+                venue: None,
+                startup_unloaded: Some("balance"),
+                startup_refused: Some(true),
+            })
+            .event();
+            for (key, value) in [
+                ("account", "Main account"),
+                ("user_id", "auth0|opaque-user"),
+                ("http_status", "401"),
+                ("message", "Invalid API-key, IP, or permissions for action"),
+                ("api_key", "k3y"),
+            ] {
+                event.tags.insert(key.into(), value.into());
+            }
+            event.extra.insert("account".into(), "Main account".into());
+            sentry::capture_event(event);
+        });
+        let tags: Vec<_> = events[0]
+            .tags
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(
+            tags,
+            [
+                ("error_kind", "authInvalid"),
+                ("kind", "account.start_failed"),
+                ("service", "exchange-server"),
+                ("startup_refused", "true"),
+                ("startup_unloaded", "balance"),
+                ("venue", "binance"),
+                ("venue_code", "-2015"),
+            ]
+        );
+        assert_eq!(events[0].extra.keys().collect::<Vec<_>>(), ["user_tag"]);
+        assert_eq!(events[0].message.as_deref(), Some("account start failed"));
+    }
+
+    #[test]
     fn a_report_carries_its_summary_never_error_text() {
         let event = report_event(&Report {
             kind: "account.start_failed",
@@ -901,6 +982,8 @@ mod tests {
                         error_kind: None,
                         venue_code: None,
                         venue,
+                        startup_unloaded: None,
+                        startup_refused: None,
                     })
                     .event(),
                 );
@@ -931,6 +1014,8 @@ mod tests {
             error_kind: Some("auth"),
             venue_code: None,
             venue: None,
+            startup_unloaded: None,
+            startup_refused: None,
         });
         assert_eq!(start.venue, Some("kraken"));
         assert_eq!(start.user_tag.as_deref(), Some("a1b2c3"));
