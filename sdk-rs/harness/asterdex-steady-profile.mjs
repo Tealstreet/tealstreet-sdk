@@ -29,15 +29,16 @@ const paired = (arm) => {
   return { summary: gate.summary, failures: gate.failures, moduleSha256: hash('sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm'),
     moduleBytes: readFileSync('sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm').length };
 };
-const wirePath = 'sdk-rs/venues/asterdex/src/wire.rs', candidateWire = readFileSync(wirePath);
+const sourcePaths = ['sdk-rs/venues/asterdex/src/wire.rs', 'sdk-rs/venues/asterdex/src/lib.rs'];
+const candidateSources = new Map(sourcePaths.map(path => [path, readFileSync(path)]));
 run('git', ['fetch', '--no-tags', '--depth=1', 'origin', baseline]);
 let before;
 try {
-  writeFileSync(wirePath, run('git', ['show', `${baseline}:${wirePath}`]));
+  for (const path of sourcePaths) writeFileSync(path, run('git', ['show', `${baseline}:${path}`]));
   run('bash', ['sdk-rs/harness/build.sh', '--venue', 'asterdex'], 'baseline-build.log');
   before = paired('baseline');
 } finally {
-  writeFileSync(wirePath, candidateWire);
+  for (const [path, contents] of candidateSources) writeFileSync(path, contents);
 }
 run('bash', ['sdk-rs/harness/build.sh', '--venue', 'asterdex'], 'candidate-build.log');
 const after = paired('candidate');
