@@ -314,3 +314,206 @@ fn a_new_trailing_stop_reduces_by_default_and_honours_an_explicit_false() {
         );
     }
 }
+
+#[test]
+fn ambiguous_ordinary_rate_limit_is_unknown() {
+    let mut h = ready();
+    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":90.0})).unwrap();
+    place(&mut h, 901, order);
+    let sent = h.take("/fapi/v1/order");
+    h.reply(
+        sent.id,
+        429,
+        "",
+        r#"{"code":-1003,"msg":"Too many requests"}"#,
+    );
+    let error = h
+        .failures
+        .iter()
+        .find(|(id, _)| *id == 901)
+        .expect("terminal failure");
+    assert_eq!(
+        error.1.outcome,
+        Some(safe_cex_engine::Outcome::Unknown),
+        "{:?}",
+        error
+    );
+}
+
+#[test]
+fn ambiguous_replacement_cannot_put_back() {
+    let mut h = ready();
+    amend(&mut h, 902, "5550", 97.0);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        cancel.id,
+        200,
+        "",
+        r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+    );
+    let replacement = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        replacement.id,
+        429,
+        "",
+        r#"{"code":-1003,"msg":"Too many requests"}"#,
+    );
+    assert!(
+        no_writes(&h),
+        "ambiguous replacement caused another write: {:?}",
+        h.paths()
+    );
+    let error = &h
+        .failures
+        .iter()
+        .find(|(id, _)| *id == 902)
+        .expect("terminal failure")
+        .1;
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.protection, None);
+}
+
+#[test]
+fn ambiguous_signature_body_cannot_resend() {
+    let mut h = ready();
+    let order = serde_json::from_value(serde_json::json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.01,"price":90.0})).unwrap();
+    place(&mut h, 903, order);
+    let sent = h.take("/fapi/v1/order");
+    h.reply(
+        sent.id,
+        429,
+        "",
+        r#"{"code":-1022,"msg":"Signature for this request is not valid."}"#,
+    );
+    assert!(
+        no_writes(&h),
+        "429 authorized physical resend: {:?}",
+        h.paths()
+    );
+    assert_eq!(
+        h.failures
+            .iter()
+            .find(|(id, _)| *id == 903)
+            .unwrap()
+            .1
+            .outcome,
+        Some(safe_cex_engine::Outcome::Unknown)
+    );
+}
+
+#[test]
+fn unproven_replacement_controls_do_not_put_back() {
+    for status in [408, 503] {
+        let mut h = ready();
+        amend(&mut h, 904, "5550", 97.0);
+        let cancel = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            cancel.id,
+            200,
+            "",
+            r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+        );
+        let replacement = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            replacement.id,
+            status,
+            "",
+            r#"{"code":-1003,"msg":"Too many requests"}"#,
+        );
+        assert!(no_writes(&h), "{status}: {:?}", h.paths());
+    }
+}
+
+#[test]
+fn ambiguous_native_rate_replacements_cannot_put_back() {
+    for code in [-1003, -1015] {
+        let mut h = ready();
+        amend(&mut h, 905, "5550", 97.0);
+        let cancel = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            cancel.id,
+            200,
+            "",
+            r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+        );
+        let replacement = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            replacement.id,
+            200,
+            "",
+            &format!(r#"{{"code":{code},"msg":"Too many requests"}}"#),
+        );
+        assert!(
+            no_writes(&h),
+            "native rate {code} put back the old stop: {:?}",
+            h.paths()
+        );
+        let error = &h.failures.iter().find(|(id, _)| *id == 905).unwrap().1;
+        assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+        assert_eq!(error.protection, None);
+        assert_eq!(error.venue_code.as_deref(), Some(code.to_string().as_str()));
+    }
+}
+
+#[test]
+fn ambiguous_trailing_cancel_cannot_resend_or_replace() {
+    let mut h = ready();
+    amend(&mut h, 906, "5550", 97.0);
+    let cancel = h.take("/fapi/v1/algoOrder");
+    h.reply(
+        cancel.id,
+        429,
+        "",
+        r#"{"code":-1022,"msg":"Signature is not valid"}"#,
+    );
+    assert!(
+        no_writes(&h),
+        "ambiguous cancel sent another write: {:?}",
+        h.paths()
+    );
+    let error = &h.failures.iter().find(|(id, _)| *id == 906).unwrap().1;
+    assert_eq!(error.outcome, Some(safe_cex_engine::Outcome::Unknown));
+    assert_eq!(error.protection, None);
+    assert_eq!(
+        h.engine.store().order("5550").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+}
+
+#[test]
+fn ambiguous_put_back_has_no_protection_claim_or_further_write() {
+    for (status, code) in [(429, -1003), (200, -1015), (429, -1022)] {
+        let mut h = ready();
+        amend(&mut h, 907, "5550", 97.0);
+        let cancel = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            cancel.id,
+            200,
+            "",
+            r#"{"algoId":5550,"clientAlgoId":"trail","code":"200","msg":"success"}"#,
+        );
+        let replacement = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            replacement.id,
+            400,
+            "",
+            r#"{"code":-2021,"msg":"Order would immediately trigger."}"#,
+        );
+        let restore = h.take("/fapi/v1/algoOrder");
+        h.reply(
+            restore.id,
+            status,
+            "",
+            &format!(r#"{{"code":{code},"msg":"uncertain write"}}"#),
+        );
+        assert!(no_writes(&h), "{status}/{code}: {:?}", h.paths());
+        let error = &h.failures.iter().find(|(id, _)| *id == 907).unwrap().1;
+        assert_eq!(
+            error.outcome,
+            Some(safe_cex_engine::Outcome::Unknown),
+            "{status}/{code}: {error:?}"
+        );
+        assert_eq!(error.protection, None, "{status}/{code}: {error:?}");
+        assert!(error.message.contains("unknown"), "{error:?}");
+    }
+}

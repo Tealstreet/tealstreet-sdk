@@ -939,9 +939,11 @@ impl BinanceFutures {
         let mut reports = Vec::new();
         let mut batch_reports = false;
         let mut continue_after_item_refusal = false;
-        // The shared engine filters unproven envelopes before this reducer.
-        // Native malformed/mixed replies still supply their native facts here.
-        let mut unproven = false;
+        // A rate response cannot prove the write was refused, even when its
+        // body carries a normally definitive signature error.
+        let mut unproven = response
+            .as_ref()
+            .is_ok_and(|response| response.status == 429);
         let outcome = match response {
             Ok(response) => match venue_error(&response) {
                 Some((code, message)) => Err((code, algo_only_refusal(code, message))),
@@ -1182,6 +1184,7 @@ impl BinanceFutures {
                 else {
                     return;
                 };
+                unproven |= verdict.kind() == Some(ErrorKind::RateLimited);
                 // A signature refusal is as proven as any; once the cancel landed it is not resent.
                 let refused =
                     !unproven && matches!(verdict, Verdict::Refused(_) | Verdict::RefusedResend(_));
@@ -2714,7 +2717,10 @@ fn item_unknown(code: i64) -> bool {
         code: NativeCode::Int(code),
         message: "",
     };
-    code == 0 || matches!(BINANCE.verdict(&native, Intent::Place), Verdict::Unknown(_))
+    let verdict = BINANCE.verdict(&native, Intent::Place);
+    code == 0
+        || matches!(verdict, Verdict::Unknown(_))
+        || verdict.kind() == Some(ErrorKind::RateLimited)
 }
 
 #[cfg(test)]
