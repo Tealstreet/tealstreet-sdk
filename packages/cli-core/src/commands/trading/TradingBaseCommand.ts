@@ -367,13 +367,13 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * Returns 0 when price is unavailable so the budget gate fails open
    * rather than mis-counting.
    */
-  protected sizeToNotional(exchange: ExchangeLike, symbol: string, amount: number): number {
+  protected sizeToNotional(exchange: ExchangeLike, symbol: string, amount: number, orderPrice?: number): number {
     const market = exchange.store?.markets?.find((m) => m.symbol === symbol);
     if (market?.isInverse) {
       const contractSize = market.contractSize && market.contractSize > 0 ? market.contractSize : 1;
       return Math.abs(amount) * contractSize;
     }
-    const price = exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
+    const price = orderPrice ?? exchange.store?.tickers?.find((t) => t.symbol === symbol)?.last;
     if (!price) return 0;
     // The inverse of `baseToNativeContracts`: a linear contract (OKX, BloFin) is `contractSize` base.
     const contractSize = market?.contractSize && market.contractSize > 0 ? market.contractSize : 1;
@@ -390,13 +390,20 @@ export abstract class TradingBaseCommand extends BaseCommand {
    * orders (skip reduce-only). Throws on breach — callers catch and
    * surface as a command error.
    */
-  protected checkBudget(ctx: CommandContext, exchange: ExchangeLike, symbol: string, amount: number): number {
+  protected checkBudget(
+    ctx: CommandContext,
+    exchange: ExchangeLike,
+    symbol: string,
+    amount: number,
+    orderPrice?: number,
+    pendingNotional = 0,
+  ): number {
     const store = ctx.preprocessStore;
     const cap = store?.getBudget();
     if (!store || !cap || cap <= 0) return 0;
-    const notional = this.sizeToNotional(exchange, symbol, amount);
+    const notional = this.sizeToNotional(exchange, symbol, amount, orderPrice);
     if (notional <= 0) return 0; // can't price → don't gate (fail open)
-    const spent = store.getBudgetSpent();
+    const spent = store.getBudgetSpent() + pendingNotional;
     if (spent + notional > cap) {
       throw new Error(
         `budget: $${spent.toFixed(2)} spent + $${notional.toFixed(2)} this order exceeds the $${cap.toFixed(2)} cap. ` +

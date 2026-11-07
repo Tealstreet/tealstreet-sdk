@@ -1,5 +1,6 @@
 import type { ExchangeLike } from '../types';
 import type { ExchangeName, PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
+import { deserializeCommandError, serializeCommandError } from '@tealstreet/safe-cex/src/commandOutcome';
 
 import { tradfiPreflightMessage } from '@tealstreet/safe-cex/src/instrument-class/describe';
 import { classifyMarket } from '@tealstreet/safe-cex/src/instrument-class/resolve';
@@ -75,6 +76,42 @@ export const prepareCliOrders = <T extends { symbol: string; type: PlaceOrderOpt
   exchange: ExchangeLike,
   orders: readonly T[],
 ): PlaceOrderOpts[] => orders.map((order) => prepareCliOrder(exchange, order));
+
+/** Preflight the whole fan-out before the first write. No policy or budget
+ *  check may refuse a later leg after an earlier leg has been accepted. */
+export const placeCliOrders = async (
+  exchange: ExchangeLike,
+  orders: readonly PlaceOrderOpts[],
+  hooks: {
+    validate: (prepared: readonly PlaceOrderOpts[]) => void;
+    onAccepted: (order: PlaceOrderOpts) => void;
+  },
+): Promise<string[]> => {
+  const prepared = prepareCliOrders(exchange, orders);
+  hooks.validate(prepared);
+  const ids: string[] = [];
+  let accepted = 0;
+  for (const order of prepared) {
+    try {
+      ids.push(...((await exchange.placeOrder!(order)) ?? []));
+    } catch (error) {
+      if (accepted === 0) throw error;
+      const details = serializeCommandError(error);
+      // Keep native Unknown/client-ID attribution and any inner partial batch.
+      // Earlier accepted legs also forbid retrying this whole command.
+      throw deserializeCommandError({
+        ...details,
+        partialOrderIds: [...ids, ...(details.partialOrderIds ?? [])],
+        partialOrderCount:
+          Math.max(accepted, ids.length) +
+          Math.max(details.partialOrderCount ?? 0, details.partialOrderIds?.length ?? 0),
+      });
+    }
+    accepted++;
+    hooks.onAccepted(order);
+  }
+  return ids;
+};
 
 /**
  * Round and validate a price for amends and order-price notional sizing.

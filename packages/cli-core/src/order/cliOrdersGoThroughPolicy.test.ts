@@ -27,7 +27,7 @@ const COMMANDS_DIR = path.resolve(__dirname, '../commands');
 /** A placement call, capturing what it opens with. `if (!exchange.placeOrder)`
  *  and `const placeOrder = exchange.placeOrder;` have no `(` after the name
  *  and do not match. */
-const PLACEMENT_CALL = /\bplaceOrders?[!?]?\s*\(\s*([A-Za-z_$]*)/g;
+const PLACEMENT_CALL = /\b(placeCliOrders|placeOrders?)[!?]?\s*\(\s*([A-Za-z_$]*)/g;
 
 /** Amends carry only a price, and the value is nested inside an object
  *  literal, so this one stays per-file. */
@@ -66,19 +66,23 @@ const HOW = (verb: string, call: string): string =>
   `scripts all get. Wrap the payload: ${call}`;
 
 describe('CLI commands write through the shared order policy', () => {
-  it('every placement call opens with prepareCliOrder(s)', () => {
+  it('every placement call uses the shared order policy or its preflighted fan-out', () => {
     const offenders: string[] = [];
     for (const { rel, source } of sourceFiles()) {
       for (const match of source.matchAll(PLACEMENT_CALL)) {
-        if (!match[1].startsWith('prepareCli')) {
+        const sharedFanOut =
+          match[1] === 'placeCliOrders' &&
+          /import\s*\{\s*placeCliOrders\s*\}\s*from ['"]\.\.\/\.\.\/order\/prepareCliOrder['"]/.test(source);
+        if (!sharedFanOut && !match[2].startsWith('prepareCli')) {
           const line = source.slice(0, match.index).split('\n').length;
           offenders.push(`${rel}:${line}`);
         }
       }
     }
-    expect(offenders.sort(), HOW('placing an order', '`exchange.placeOrder(prepareCliOrder(exchange, order))`')).toEqual(
-      [],
-    );
+    expect(
+      offenders.sort(),
+      HOW('placing an order', '`exchange.placeOrder(prepareCliOrder(exchange, order))`'),
+    ).toEqual([]);
   });
 
   it('every command that amends an order rounds the new price', () => {
@@ -90,9 +94,10 @@ describe('CLI commands write through the shared order policy', () => {
   });
 
   it('the detectors match real calls and ignore the guards beside them', () => {
-    const hits = (src: string) => [...src.matchAll(PLACEMENT_CALL)].map((m) => m[1]);
+    const hits = (src: string) => [...src.matchAll(PLACEMENT_CALL)].map((m) => m[2]);
     expect(hits('await exchange.placeOrder!(prepareCliOrder(exchange, order))')).toEqual(['prepareCliOrder']);
     expect(hits('await placeOrder(order)')).toEqual(['order']);
+    expect(hits('await placeCliOrders(exchange, orders, hooks)')).toEqual(['exchange']);
     expect(hits('if (!exchange.placeOrder) {')).toEqual([]);
     expect(hits('const placeOrder = exchange.placeOrder;')).toEqual([]);
     expect(AMEND_CALL.test('await ctx.exchange.updateOrder({ order, update })')).toBe(true);
