@@ -349,24 +349,41 @@ jobs:
             return { summary: gate.summary, failures: gate.failures, moduleSha256: hash('sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm'),
               moduleBytes: readFileSync('sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm').length };
           };
-          const sourcePaths = ['sdk-rs/venues/txflow/src/lib.rs'];
+          const privateGate = arm => {
+            run('corepack', ['yarn', 'rust:private-tape-txflow'], `${arm}-private-input.log`);
+            const directory = 'sdk-rs/harness/out/ci';
+            const before = new Set(readdirSync(directory));
+            run('corepack', ['yarn', '-s', 'rust:gate:record', '--venue', 'txflow',
+              '--tape', 'sdk-rs/harness/tapes/txflow-private.jsonl', '--books', '', '--runs', '1'], `${arm}-private.log`);
+            const reports = readdirSync(directory).filter(name => /^gate-.*\.json$/.test(name) && !before.has(name));
+            assert.equal(reports.length, 1);
+            const gate = JSON.parse(readFileSync(`${directory}/${reports[0]}`));
+            writeFileSync(resolve(out, `${arm}-private-gate.json`), JSON.stringify(gate, null, 2));
+            cpSync(resolve(gate.artifacts[0].path, '..'), resolve(out, `${arm}-private-raw`), { recursive: true });
+            return gate.failures;
+          };
+          const sourcePaths = ['sdk-rs/engine/src/de.rs', 'sdk-rs/venues/txflow/src/wire.rs', 'sdk-rs/venues/txflow/src/lib.rs'];
           const candidateSources = new Map(sourcePaths.map(path => [path, readFileSync(path)]));
           run('git', ['fetch', '--no-tags', '--depth=1', 'origin', baseline]);
-          let before;
+          let before, privateBefore;
           try {
             for (const path of sourcePaths) writeFileSync(path, run('git', ['show', `${baseline}:${path}`]));
             run('bash', ['sdk-rs/harness/build.sh', '--venue', 'txflow'], 'baseline-build.log');
             before = paired('baseline');
+            privateBefore = privateGate('baseline');
           } finally {
             for (const [path, contents] of candidateSources) writeFileSync(path, contents);
           }
           run('bash', ['sdk-rs/harness/build.sh', '--venue', 'txflow'], 'candidate-build.log');
           const after = paired('candidate');
+          const privateAfter = privateGate('candidate');
+          assert.equal(privateBefore.length, 3);
+          assert.deepEqual(privateAfter, privateBefore);
           const parity = result => result.failures.filter(failure => !failure.startsWith('performance '));
           assert.equal(parity(before).length, 0);
           assert.deepEqual(parity(after), parity(before));
           writeFileSync(resolve(out, 'paired-comparison.json'), JSON.stringify({ diagnosticOnly: true, baseline,
-            candidate: run('git', ['rev-parse', 'HEAD']).trim(), before, after,
+            candidate: run('git', ['rev-parse', 'HEAD']).trim(), before, after, privateBefore, privateAfter,
             beforeRatio: before.summary.rust.steadyCpuMs / before.summary.ts.steadyCpuMs,
             afterRatio: after.summary.rust.steadyCpuMs / after.summary.ts.steadyCpuMs }, null, 2));
           writeFileSync(resolve(out, 'custody.json'), JSON.stringify({
