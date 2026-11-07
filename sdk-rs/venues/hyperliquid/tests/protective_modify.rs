@@ -930,50 +930,77 @@ fn final_cancel_veto_preserves_the_order_when_its_position_closed_after_sizing()
 }
 
 #[test]
-fn replacement_429_is_uncertain_without_restore_or_resend() {
-    for size in ["0", "1"] {
-        let row = order("Take Profit Market", "120", size);
-        let (mut e, _) = setup(&row);
-        let replacement = fallback_place(&mut e, &row);
-        reply(&mut e, &replacement, 429, "Too many requests");
-        let actions = prepared_now(&mut e);
-        let failures: Vec<_> = actions
-            .iter()
-            .filter_map(|a| match a {
-                Action::Notice(Notice::CommandFailed { command: 90, error }) => Some(error),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(failures.len(), 1);
-        let error = failures[0];
-        assert_eq!(error.kind, Some(safe_cex_engine::ErrorKind::RateLimited));
-        assert_eq!(error.outcome, Some(Outcome::Unknown));
-        assert_eq!(error.protection, None);
-        assert!(
-            error
-                .message
-                .contains("outcome is unknown. Check Open Orders"),
-            "{}",
-            error.message
-        );
-        assert!(
-            !error.message.contains("replacement refused"),
-            "{}",
-            error.message
-        );
-        assert!(!error.message.contains("UNPROTECTED"));
-        assert!(
-            !actions
+fn dispatched_ambiguity_replacement_is_uncertain_without_restore_or_resend() {
+    for (status, text) in [
+        (429, "Too many requests"),
+        (
+            429,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+        (
+            408,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+        (
+            500,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+        (
+            503,
+            r#"{"status":"err","response":"User or API Wallet does not exist."}"#,
+        ),
+    ] {
+        for size in ["0", "1"] {
+            let row = order("Take Profit Market", "120", size);
+            let (mut e, _) = setup(&row);
+            let replacement = fallback_place(&mut e, &row);
+            reply(&mut e, &replacement, status, text);
+            let actions = prepared_now(&mut e);
+            let failures: Vec<_> = actions
                 .iter()
-                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
-        );
-        assert_eq!(
-            actions
-                .iter()
-                .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
-                .count(),
-            1
-        );
+                .filter_map(|a| match a {
+                    Action::Notice(Notice::CommandFailed { command: 90, error }) => Some(error),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(failures.len(), 1);
+            let error = failures[0];
+            assert_eq!(
+                error.kind,
+                Some(match status {
+                    429 => safe_cex_engine::ErrorKind::RateLimited,
+                    408 => safe_cex_engine::ErrorKind::Timeout,
+                    _ => safe_cex_engine::ErrorKind::VenueUnavailable,
+                })
+            );
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            assert_eq!(error.protection, None);
+            assert!(
+                error
+                    .message
+                    .contains("outcome is unknown. Check Open Orders"),
+                "{}",
+                error.message
+            );
+            assert!(
+                !error.message.contains("replacement refused"),
+                "{}",
+                error.message
+            );
+            assert!(!error.message.contains("UNPROTECTED"));
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+            );
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|a| matches!(a, Action::Notice(Notice::CommandFailed { .. })))
+                    .count(),
+                1
+            );
+        }
     }
 }
 
