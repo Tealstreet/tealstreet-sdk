@@ -1070,3 +1070,14 @@ test('#3270 (run 42404311752 at 46e5a6918ec) retains measured wasm headroom', ()
     assert.match(wasmBudgetError(cap + 1, 'venue', venue), /exceeds/);
   }
 });
+
+test('#3277 TxFlow public decode (run 42407352871, job 128508214838) retains CI headroom', () => {
+  const measured = 1_896_742;
+  const minimumCap = 1_907_712;
+  assert.equal(minimumCap, Math.ceil((measured + 10 * 1024) / 1024) * 1024);
+  const current = WASM_VENUE_OVERRIDES.txflow;
+  assert.ok(current >= minimumCap);
+  assert.equal(wasmBudgetError(measured, 'venue', 'txflow'), undefined);
+  assert.equal(wasmBudgetError(current, 'venue', 'txflow'), undefined);
+  assert.match(wasmBudgetError(current + 1, 'venue', 'txflow'), /exceeds/);
+});

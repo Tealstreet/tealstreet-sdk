@@ -4050,6 +4050,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-txflow-public-wire"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-types"
 version = "0.1.0"
 dependencies = [
@@ -4329,6 +4338,7 @@ dependencies = [
  "alloy-dyn-abi",
  "safe-cex-crypto",
  "safe-cex-engine",
+ "safe-cex-txflow-public-wire",
  "safe-cex-venue-hyperliquid",
  "serde",
  "serde_json",
