@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import os from 'node:os';
 
@@ -14,15 +14,47 @@ const run = (command, args, output) => {
   return result;
 };
 const hash = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+const baseline = '87b3c423e5bd9f6c13e501f2d4f72d9feba4ed6c';
+const paired = (arm) => {
+  const directory = 'sdk-rs/harness/out/ci';
+  mkdirSync(directory, { recursive: true });
+  const before = new Set(readdirSync(directory));
+  run('corepack', ['yarn', '-s', 'rust:gate:record', '--venue', 'asterdex',
+    '--tape', 'sdk-rs/harness/fixtures/asterdex-public.jsonl.gz', '--books', 'BTCUSDT,ETHUSDT', '--runs', '16'], `${arm}-paired.log`);
+  const reports = readdirSync(directory).filter(name => /^gate-.*\.json$/.test(name) && !before.has(name));
+  assert.equal(reports.length, 1);
+  const gate = JSON.parse(readFileSync(`${directory}/${reports[0]}`));
+  writeFileSync(resolve(out, `${arm}-gate.json`), JSON.stringify(gate, null, 2));
+  cpSync('sdk-rs/hosts/wasm/pkg/node', resolve(out, `${arm}-node`), { recursive: true });
+  return { summary: gate.summary, failures: gate.failures, moduleSha256: hash('sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm'),
+    moduleBytes: readFileSync('sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm').length };
+};
+const wirePath = 'sdk-rs/venues/asterdex/src/wire.rs', candidateWire = readFileSync(wirePath);
+run('git', ['fetch', '--no-tags', '--depth=1', 'origin', baseline]);
+let before;
+try {
+  writeFileSync(wirePath, run('git', ['show', `${baseline}:${wirePath}`]));
+  run('bash', ['sdk-rs/harness/build.sh', '--venue', 'asterdex'], 'baseline-build.log');
+  before = paired('baseline');
+} finally {
+  writeFileSync(wirePath, candidateWire);
+}
+run('bash', ['sdk-rs/harness/build.sh', '--venue', 'asterdex'], 'candidate-build.log');
+const after = paired('candidate');
+const parity = result => result.failures.filter(failure => !failure.startsWith('performance '));
+assert.equal(parity(before).length, 283);
+assert.deepEqual(parity(after), parity(before));
+writeFileSync(resolve(out, 'paired-comparison.json'), JSON.stringify({ diagnosticOnly: true, baseline,
+  candidate: run('git', ['rev-parse', 'HEAD']).trim(), before, after,
+  beforeRatio: before.summary.rust.steadyCpuMs / before.summary.ts.steadyCpuMs,
+  afterRatio: after.summary.rust.steadyCpuMs / after.summary.ts.steadyCpuMs }, null, 2));
 writeFileSync(resolve(out, 'custody.json'), JSON.stringify({
   source: run('git', ['rev-parse', 'HEAD']).trim(), node: process.version,
   cpu: os.cpus()[0], platform: process.platform, arch: process.arch,
-  rustc: run('rustc', ['--version']), bindgen: run('wasm-bindgen', ['--version']),
+  rustc: run('rustup', ['run', '1.99.0', 'rustc', '--version']), bindgen: run('wasm-bindgen', ['--version']),
   binaryen: run('wasm-opt', ['--version']),
   moduleSha256: hash('sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm'),
 }, null, 2));
-run('corepack', ['yarn', '-s', 'rust:gate:record', '--venue', 'asterdex',
-  '--tape', 'sdk-rs/harness/fixtures/asterdex-public.jsonl.gz', '--books', 'BTCUSDT,ETHUSDT', '--runs', '16'], 'paired.log');
 cpSync('sdk-rs/hosts/wasm/pkg/node', resolve(out, 'shipped-node'), { recursive: true });
 
 const named = resolve(out, 'named-node');

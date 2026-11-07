@@ -314,8 +314,7 @@ jobs:
           cache-dir: ${{ steps.yarn.outputs.cache-dir }}
           cache-key: ${{ steps.yarn.outputs.cache-key }}
           cache-hit: ${{ steps.yarn.outputs.cache-hit }}
-      - run: corepack yarn rust:build-wasm --venue asterdex
-      - name: Paired baseline, then isolated steady-window profiles (never certification)
+      - name: Same-run baseline/candidate pairs, then steady profiles (never certification)
         run: node sdk-rs/harness/asterdex-steady-profile.mjs '${{ runner.temp }}/asterdex-steady-profile'
       - uses: actions/upload-artifact@v7
         if: always()
