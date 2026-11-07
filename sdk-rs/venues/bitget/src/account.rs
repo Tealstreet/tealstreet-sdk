@@ -1039,6 +1039,13 @@ impl BitgetFutures {
                 } else {
                     vec![None; rows.len()]
                 };
+                // Every identity the response carries more than once, before any guard.
+                let mut seen = HashSet::new();
+                let duplicated: HashSet<String> = rows
+                    .iter()
+                    .filter(|p| !seen.insert(p.id.clone()))
+                    .map(|p| p.id.clone())
+                    .collect();
                 let (mut rows, stream_held, admitted) =
                     self.merge_positions(cx, rows, started, cut);
                 if stream_held && !repair {
@@ -1093,29 +1100,22 @@ impl BitgetFutures {
                 cx.store
                     .set_positions(rows.into_iter().filter(|p| p.contracts > 0.0).collect());
                 // Only this read's own admitted rows that every later filter kept carry a
-                // split; a duplicated identity is ambiguous and keeps none.
-                let survivors: Vec<_> = admitted
-                    .into_iter()
-                    .filter(|(_, p)| !conflicts.contains(&p.symbol))
-                    .collect();
-                for (index, admitted) in &survivors {
-                    let duplicated = survivors
-                        .iter()
-                        .filter(|(_, p)| p.id == admitted.id)
-                        .count()
-                        > 1;
-                    let stored = cx
-                        .store
-                        .positions()
-                        .iter()
-                        .find(|p| p.id == admitted.id)
-                        .cloned();
-                    match stored {
-                        Some(stored) if !duplicated => {
-                            self.commit_closable(&stored, staged[*index])
-                        }
-                        _ => self.commit_closable(admitted, None),
+                // split, and only onto that same occurrence; a duplicated identity keeps none.
+                for (index, admitted) in admitted {
+                    if conflicts.contains(&admitted.symbol) {
+                        continue;
                     }
+                    let mut stored = cx.store.positions().iter().filter(|p| p.id == admitted.id);
+                    let same = match (stored.next(), stored.next()) {
+                        (Some(stored), None) => {
+                            stored.contracts == admitted.contracts
+                                && stored.last_update == admitted.last_update
+                        }
+                        _ => false,
+                    };
+                    let split =
+                        staged[index].filter(|_| same && !duplicated.contains(&admitted.id));
+                    self.commit_closable(&admitted, split);
                 }
                 self.prune_closable(cx);
                 self.settle_fresh_positions(cx, read, skipped.rejected() != 0, stream_held);
@@ -3151,14 +3151,20 @@ impl BitgetFutures {
         side: PositionSide,
     ) -> Option<Closable> {
         let split = self.account.closable.get(&(symbol.to_owned(), side))?;
+        // Exactly one Store row for the position, and it is the split's own row.
+        let mut rows = cx
+            .store
+            .positions()
+            .iter()
+            .filter(|p| p.symbol == symbol && p.side == side);
+        let row = match (rows.next(), rows.next()) {
+            (Some(row), None) => row,
+            _ => return None,
+        };
         (split.epoch == self.account.position_epoch
-            && cx.store.positions().iter().any(|p| {
-                p.symbol == symbol
-                    && p.side == side
-                    && p.contracts == split.contracts
-                    && p.last_update == split.last_update
-            }))
-        .then_some(*split)
+            && row.contracts == split.contracts
+            && row.last_update == split.last_update)
+            .then_some(*split)
     }
 
     fn map_position(

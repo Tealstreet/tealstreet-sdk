@@ -255,3 +255,36 @@ fn an_absent_position_never_quotes_a_kept_split() {
     let message = &h.failures.last().unwrap().message;
     assert!(message.contains(NO_NUMBERS), "{message}");
 }
+
+// Review probe (#3210): a REST duplicate whose first occurrence the guards replaced
+// with the retained row must not lend the admitted peer's split to either.
+#[test]
+fn a_retained_duplicate_never_certifies_an_admitted_peers_split() {
+    let mut h = settled();
+    let mut observed = fresh_row(true);
+    observed["uTime"] = json!("200");
+    h.now += 1.0;
+    stream(&mut h, vec![observed]);
+    assert_eq!(h.engine.store().positions()[0].last_update, Some(200.0));
+    h.now += 1.0;
+    let response: Value = serde_json::from_str(HELD).unwrap();
+    let old = response["data"][0].clone();
+    let mut agreeing = old.clone();
+    agreeing["openPriceAvg"] = json!("91");
+    let id = read_positions(&mut h);
+    h.reply(
+        id,
+        200,
+        &json!({"code":"00000","data":[old, agreeing]}).to_string(),
+    );
+    let positions = h.engine.store().positions();
+    assert_eq!(
+        positions.len(),
+        2,
+        "one retained row and one admitted duplicate"
+    );
+    assert_eq!(positions[0].id, positions[1].id);
+    let message = refusal(&mut h);
+    assert!(!message.contains("only "), "{message}");
+    assert!(message.contains(NO_NUMBERS), "{message}");
+}
