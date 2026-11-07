@@ -25,7 +25,7 @@ import { runAuditedFixer } from './oracle-audit.mjs';
 import { createTsFixes } from './ts-oracle.mjs';
 import { duplicateSymbols, compareCheckpoints, compareSnapshots, valueDifferences, checkpointCoverageErrors, snapshotCoverageErrors } from './snapshot-compare.mjs';
 import { writeCpuAnnotations } from './cpu-annotations.mjs';
-import { CPU_SLOWER, PUBLIC_REPLAY_PAIRS, cpuSlower, median, performanceMetricErrors, performanceOrder, performanceVerdict, replayRunCount } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, cpuSlower, median, performanceMetricErrors, performanceOrder, performanceVerdict, remeasuredVerdict, replayRunCount } from './performance-policy.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -176,7 +176,7 @@ if (!isPrivate && !values['correctness-only']) {
   // final set is reported and retained, so recorded revalidation never re-measures.
   const first = recorded ? undefined : performanceVerdict(metricsOf('ts'), metricsOf('rust'));
   if (first && cpuSlower(first.failures)) {
-    remeasure = { first: first.failures.filter((failure) => failure.includes(`: ${CPU_SLOWER} (`)) };
+    remeasure = { first };
     for (const impl of ['ts', 'rust']) performanceResults[impl].length = 0;
     for (let index = artifacts.length - 1; index >= 0; index--) if (artifacts[index].mode === 'performance') artifacts.splice(index, 1);
     sampleOrder.length = 0;
@@ -431,11 +431,10 @@ const failures = [...differences];
 const warnings = [];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate && !values['correctness-only']) {
-  const verdict = performanceVerdict(metricsOf('ts'), metricsOf('rust'));
+  const measured = performanceVerdict(metricsOf('ts'), metricsOf('rust'));
+  const verdict = remeasure ? remeasuredVerdict(remeasure.first, measured) : measured;
   failures.push(...verdict.failures);
   warnings.push(...verdict.warnings);
-  if (remeasure && !cpuSlower(verdict.failures))
-    warnings.push(...remeasure.first.map((failure) => `${failure}; cleared on the one re-measure`));
 }
 warnings.sort();
 // Report order must not depend on the arrival order of keyed replay rows.
@@ -447,12 +446,12 @@ writeFileSync(values.report ?? `${outDir}/gate.json`, JSON.stringify({
   private: isPrivate, books: values.books, runs: isPrivate ? 0 : runs, correctnessRuns, requiredImprovement: 0.10,
   ...(values['correctness-only'] ? { correctnessOnly: true, coverage: { correctness: 'complete', performance: 'not-run' } } : {}),
   status: failures.length ? 'FAIL' : 'PASS', failures, artifacts, fixers: fixerReports,
-  ...(warnings.length ? { warnings } : {}), ...(remeasure ? { remeasure } : {}),
+  ...(warnings.length ? { warnings } : {}), ...(remeasure ? { remeasure: { first: remeasure.first.failures } } : {}),
   ...(recorded ? {} : { measurement: { cpu: cpuObservation, sampleOrder } }),
   summary: { ts: t, rust: r },
   samples: { ts: measuredResults.ts.map((output) => output.metrics), rust: measuredResults.rust.map((output) => output.metrics) },
 }, null, 2) + '\n');
-if (!recorded) writeCpuAnnotations({ venue: values.venue, tape: values.tape, failures, warnings, remeasure });
+if (!recorded) writeCpuAnnotations({ venue: values.venue, tape: values.tape, failures, warnings, remeasure: remeasure && { first: remeasure.first.failures } });
 if (failures.length) {
   console.log(`FAIL (${failures.length})`);
   for (const failure of failures.slice(0, 40)) console.log(`  ${failure}`);

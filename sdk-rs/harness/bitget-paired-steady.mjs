@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { parseCohortJson } from './cpu-cohort.mjs';
 import { validatePublicEvidence } from './cpu-remeasure.mjs';
 import { assessGateReport, validateKnownFailures } from './known-failure-policy.mjs';
-import { PUBLIC_REPLAY_PAIRS, median, performanceFailures, performanceObjectives, REQUIRED_IMPROVEMENT } from './performance-policy.mjs';
+import { CPU_FAIL_RATIO, PUBLIC_REPLAY_PAIRS, median, performanceFailures, performanceObjectives, REQUIRED_IMPROVEMENT } from './performance-policy.mjs';
 
 export const BITGET_PAIRED_TOLERANCE = 1.023110;
 export const BITGET_PAIRED_FREEZE_SHA256 = 'ee6b8fd762184969b2eacf7a5ef030bc8872acfbc474ca229377f1b181e99b62';
@@ -47,7 +47,8 @@ export function bitgetPairedAuthority({ run, pull, landing, job, checkoutSha, ch
     run.run_attempt === 1 && ['pull_request', 'workflow_dispatch', 'push'].includes(run.event), 'original repository run required');
   insist(run.event !== 'push' || run.head_branch === 'master', 'push must be the Rust landing branch');
   let baseline, pullNumber = null;
-  if (run.event === 'push' && run.head_branch === 'master') {
+  // A dispatched master run (the nightly certification) measures the landed tip like a push.
+  if ((run.event === 'push' || run.event === 'workflow_dispatch') && run.head_branch === 'master') {
     insist(landing?.sha === run.head_sha && checkoutSha === landing.sha && landing.tree?.sha === checkoutTree &&
       oid(landing.parents?.[0]?.sha), 'landing baseline must be the authenticated actual first parent');
     baseline = landing.parents[0].sha;
@@ -174,7 +175,9 @@ function assessContent(authority, evidence, manifest) {
       imageVersion: evidence.imageVersion, nodeSha256: evidence.nodeSha256 },
     measurementWindow: { startedAt: evidence.cohorts[0].before.startedAt,
       completedAt: evidence.cohorts.at(-1).finishedAt },
-    steadyAccepted: q <= BITGET_PAIRED_TOLERANCE, q, tolerance: BITGET_PAIRED_TOLERANCE,
+    // Sam, 2026-11-07: Rust must not be slower than TS; q's frozen creep bound can only reject further.
+    steadyAccepted: summary.candidate.rustTsRatio <= CPU_FAIL_RATIO && q <= BITGET_PAIRED_TOLERANCE,
+    notSlowerThanTs: summary.candidate.rustTsRatio <= CPU_FAIL_RATIO, q, tolerance: BITGET_PAIRED_TOLERANCE,
     freezeSha256: BITGET_PAIRED_FREEZE_SHA256, authority, pooled: summary,
     readiness: { cpuModel: evidence.cpuModel, rustTsRatio: summary.candidate.rustTsRatio,
       limit: 1 - REQUIRED_IMPROVEMENT, ready: summary.candidate.rustTsRatio <= 1 - REQUIRED_IMPROVEMENT },
@@ -267,6 +270,13 @@ export function combineBitgetPairedCertificates(tip, anchor) {
       comparisons: { tip: tip.readiness, anchor: anchor.readiness } }, noOverallSuiteCertification: true });
   combinedCertificates.add(certificate);
   return certificate;
+}
+
+/** Bitget's 10%-faster readiness miss on an accepted steady certificate: a warning, never a failure. */
+export function bitgetSteadyWarning(certificate) {
+  const readiness = certificate?.readinessByCpuModel?.comparisons?.tip ?? certificate?.readiness;
+  if (!certificate?.steadyAccepted || !readiness || readiness.ready) return null;
+  return `bitget steady-state CPU (paired): missed the 10%-faster target (rust/ts=${readiness.rustTsRatio.toFixed(3)}x, target ${readiness.limit.toFixed(2)}x)`;
 }
 
 export function pairedSteadyAssessment(assessment, report, certificate, source) {

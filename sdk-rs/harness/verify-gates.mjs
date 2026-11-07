@@ -5,15 +5,14 @@ import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 import { assessGateReport, assessCorrectnessReport, acceptedReplayErrors, ACCEPTED_DIFFERENCES } from './known-failure-policy.mjs';
 import { expectedGateCases, validateGateCoverage } from './ci-gate-suites.mjs';
-import { assessEligibility, splitCpuErrors } from './cpu-remeasure.mjs';
+import { splitCpuErrors } from './cpu-remeasure.mjs';
 import { cpuRemeasureEnabled } from './cpu-rollout.mjs';
 import { readEvidenceText } from './recorded-replay.mjs';
-import { revalidateRecordedEvidence } from './revalidate-gate.mjs';
 import { familyCpuAssessment, familyCpuMiss } from './cpu-family-identity.mjs';
 import { pendingBitgetSteady } from './bitget-paired-steady.mjs';
 
-/** Strict remains the default. Collection may retain an eligible unresolved
- * CPU miss, but cannot label it PASS or supply final certification. Any other
+/** Strict remains the default. Collection may retain Bitget's paired-steady miss
+ * unresolved, but cannot label it PASS or supply final certification. Any other
  * CPU-only miss is left to the CPU gate, so measurement fails only on correctness. */
 export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_DIFFERENCES, mode = 'strict', family, sourceHead }) {
   if (!['strict', 'collect', 'correctness'].includes(mode)) throw new Error('unknown gate verifier mode');
@@ -34,8 +33,9 @@ export function verifyGateSuite({ suite, entries, manifest, accepted = ACCEPTED_
     let assessment = (mode === 'correctness' ? assessCorrectnessReport : assessGateReport)(report, manifest, accepted);
     const unchanged = mode === 'collect' && family && !ledgerMismatch && familyCpuMiss(entry, assessment);
     if (unchanged) assessment = familyCpuAssessment(assessment, report, family, sourceHead);
+    // Only Bitget's steady miss stays unresolved here, for its paired counterbalanced certificate.
     const eligible = mode === 'collect' && cpuRemeasureEnabled(suite) && !ledgerMismatch && assessment.errors.length > 0 &&
-      (assessEligibility({ report, raw: entry.raw }).eligible || suite === 'bitget' && pendingBitgetSteady(entry, manifest));
+      suite === 'bitget' && pendingBitgetSteady(entry, manifest);
     const split = mode === 'collect' && !eligible && !ledgerMismatch && assessment.errors.length > 0
       ? splitCpuErrors({ report, raw: entry.raw }, assessment.errors) : { kept: assessment.errors, deferred: [] };
     const cpuMiss = split.deferred.length > 0 && split.kept.length === 0;
@@ -79,8 +79,6 @@ export function loadGateLedger({ root = process.cwd(), directory = 'sdk-rs/harne
       return { impl, mode, run, bytes, sha256: createHash('sha256').update(bytes).digest('hex') };
     }) : undefined;
     const evidence = { report, reportBytes, exitCode, ...(raw ? { raw } : {}) };
-    if (includeRaw && report.private === false && assessEligibility(evidence).eligible)
-      evidence.revalidation = revalidateRecordedEvidence(evidence, { root });
     return evidence;
   });
 }

@@ -1,24 +1,21 @@
-// Collection remains strict. This separate policy can certify exactly two
-// complete public measurements; it never rewrites either strict report.
+// Public strict-evidence validation and the CPU-only split: a valid report whose only
+// unexpected failures are computed CPU misses is judged by the CPU gate, not correctness.
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { memoryMetricErrors } from './memory.mjs';
 import { compareSnapshots, snapshotCoverageErrors } from './snapshot-compare.mjs';
 import { sameCommandResults } from './tape.mjs';
-import { PUBLIC_REPLAY_PAIRS, CPU_FAIL_RATIO, CPU_FIELDS, performanceFailures, performanceMetricErrors, performanceObjectives, performanceOrder } from './performance-policy.mjs';
+import { PUBLIC_REPLAY_PAIRS, CPU_FIELDS, performanceFailures, performanceMetricErrors, performanceObjectives, performanceOrder } from './performance-policy.mjs';
 import { hasPairedBitgetSteady } from './bitget-paired-steady.mjs';
 
-export const CPU_REMEASURE_RULE = 'all-objective-normalized-two-run-mean-v1';
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const slotKey = (value) => JSON.stringify([value?.impl, value?.mode, value?.run]);
 const expectedSlots = () => [
   ...['ts', 'rust'].map((impl) => ({ impl, mode: 'correctness', run: 0 })),
   ...Array.from({ length: PUBLIC_REPLAY_PAIRS }, (_, run) => performanceOrder(run).map((impl) => ({ impl, mode: 'performance', run }))).flat(),
 ];
-const positiveId = (value) => typeof value === 'string' && /^[1-9]\d*$/.test(value);
 const digest = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const same = isDeepStrictEqual;
-const nonmetric = ({ metrics: _metrics, ...output }) => output;
 const decode = (slot) => JSON.parse(slot.bytes);
 const objectives = (report, paired, source) => performanceObjectives(report.samples.ts, report.samples.rust)
   .filter(({ field }) => CPU_FIELDS.includes(field) && !(field === 'steadyCpuMs' && hasPairedBitgetSteady(paired, report, source)));
@@ -88,7 +85,7 @@ export function validatePublicEvidence(value) {
   catch (error) { return [`malformed public evidence: ${error.message}`]; }
 }
 
-function cpuOnlyErrors(value, requireMiss, paired, cap = true) {
+function cpuOnlyErrors(value, paired) {
   const errors = validatePublicEvidence(value);
   if (errors.length) return errors;
   const report = value.report, source = value.execution?.measuredCheckoutSha;
@@ -99,84 +96,18 @@ function cpuOnlyErrors(value, requireMiss, paired, cap = true) {
   const cpuFailures = calculated.filter((failure) => objectives(report).some(({ label }) => failure.startsWith(`performance ${label}:`)));
   if (!same(calculated, cpuFailures) || !same([...report.failures].sort(), cpuFailures))
     errors.push('strict failures include non-CPU diagnostics or omit/repeat computed failures');
-  if (requireMiss && !cpuFailures.some(failure => objectives(report, paired, source).some(({ label }) => failure.startsWith(`performance ${label}:`))))
+  if (!cpuFailures.some(failure => objectives(report, paired, source).some(({ label }) => failure.startsWith(`performance ${label}:`))))
     errors.push('first measurement has no remaining CPU miss');
-  if (cap) for (const objective of objectives(report, paired, source)) if (!Number.isFinite(objective.ratio) || objective.ratio >= 1.05)
-    errors.push(`${objective.field}: CPU ratio must be strictly below 1.05`);
   return errors;
 }
 
 /** Split assessment errors of a valid CPU-only strict miss: only the exact computed
  * CPU failures are deferred to the CPU gate; every other error is kept. */
 export function splitCpuErrors(value, errors, paired) {
-  if (cpuOnlyErrors(value, true, paired, false).length) return { kept: errors, deferred: [] };
+  if (cpuOnlyErrors(value, paired).length) return { kept: errors, deferred: [] };
   const report = value.report;
   const cpu = new Set(performanceFailures(report.samples.ts, report.samples.rust)
     .filter((failure) => objectives(report).some(({ label }) => failure.startsWith(`performance ${label}:`)))
     .map((failure) => `${report.venue}: unexpected ${failure}`));
   return { kept: errors.filter((error) => !cpu.has(error)), deferred: errors.filter((error) => cpu.has(error)) };
-}
-
-export function assessEligibility(first, paired) {
-  const errors = cpuOnlyErrors(first, true, paired);
-  // A CPU miss is Rust > 1.00x TS after gate.mjs's in-job re-measure (Sam, 2026-11-07),
-  // so none is eligible: the cross-job remeasure below is unreachable until it is removed.
-  if (!errors.length) for (const objective of objectives(first.report, paired, first.execution?.measuredCheckoutSha))
-    if (!(objective.candidate <= objective.reference * CPU_FAIL_RATIO)) errors.push(`${objective.field}: Rust over 1.00x TS is decided in-job, not remeasured`);
-  return { eligible: errors.length === 0, errors, objectives: errors.length ? [] : objectives(first.report, paired, first.execution?.measuredCheckoutSha) };
-}
-
-export function validateSecondExecution(first, second) {
-  const errors = [];
-  const a = first?.execution, b = second?.execution;
-  for (const [name, execution] of [['first', a], ['second', b]]) {
-    if (!execution || !positiveId(execution.runId) || !positiveId(execution.jobId) || !positiveId(execution.runnerId) || execution.attempt !== 1) {
-      errors.push(`${name}: invalid physical execution identity/attempt`); continue;
-    }
-    for (const field of ['nodeSha256', 'inputsSha256', 'policySha256', 'runtimeSha256', 'initialCacheSha256', 'finalCacheSha256'])
-      if (!digest(execution[field])) errors.push(`${name}: missing ${field}`);
-    for (const field of ['imageOS', 'imageVersion', 'architecture', 'nodeVersion'])
-      if (typeof execution[field] !== 'string' || !execution[field]) errors.push(`${name}: missing ${field}`);
-    const start = Date.parse(execution.startedAt), end = Date.parse(execution.completedAt);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start)) errors.push(`${name}: invalid execution window`);
-  }
-  if (!a || !b) return errors;
-  if (a.runId !== b.runId || a.jobId === b.jobId || a.runnerId === b.runnerId)
-    errors.push('remeasurement must use a different physical job/runner in the original cohort');
-  if (!(Date.parse(b.startedAt) >= Date.parse(a.completedAt))) errors.push('measurement execution windows overlap or are invalid');
-  for (const field of ['imageOS', 'imageVersion', 'architecture', 'nodeVersion', 'nodeSha256', 'inputsSha256', 'policySha256',
-    'runtimeSha256', 'initialCacheSha256', 'finalCacheSha256'])
-    if (!same(a[field], b[field])) errors.push(`second execution changed ${field}`);
-  return errors;
-}
-
-/** Caller must also authenticate live cohort/artifact provenance. Pure content
- * checks are deliberately insufficient authority to certify a workflow. */
-export function decideRemeasurement(first, second, paired) {
-  const errors = [...cpuOnlyErrors(first, true, paired), ...cpuOnlyErrors(second, false, paired), ...validateSecondExecution(first, second)];
-  if (errors.length) return { accepted: false, errors, receipt: null };
-  for (const field of ['venue', 'tape', 'books', 'tapeSha256', 'runs', 'correctnessRuns', 'requiredImprovement', 'fixers'])
-    if (!same(first.report[field], second.report[field])) errors.push(`second strict report changed ${field}`);
-  for (let index = 0; index < first.raw.length; index++)
-    if (!same(nonmetric(decode(first.raw[index])), nonmetric(decode(second.raw[index]))))
-      errors.push(`nonmetric output differs at slot ${index}`);
-  const a = objectives(first.report, paired, first.execution?.measuredCheckoutSha), b = objectives(second.report, paired, second.execution?.measuredCheckoutSha);
-  const aggregate = a.map((objective, index) => {
-    const other = b[index], mean = (objective.ratio + other.ratio) / 2;
-    if (objective.category !== other.category) errors.push(`${objective.field}: small-window category changed`);
-    if (!(mean <= 1)) errors.push(`${objective.field}: two-run mean exceeds existing bound`);
-    return { field: objective.field, category: objective.category, first: objective, second: other, mean };
-  });
-  if (errors.length) return { accepted: false, errors, receipt: null };
-  return { accepted: true, errors: [], receipt: {
-    schema: 1, rule: CPU_REMEASURE_RULE,
-    case: { venue: first.report.venue, tape: first.report.tape, tapeSha256: first.report.tapeSha256, books: first.report.books },
-    objectives: aggregate,
-    executions: [first.execution, second.execution].map((value) => structuredClone(value)),
-    strictReports: [first, second].map((value) => ({ status: value.report.status,
-      contentSha256: sha256(JSON.stringify(value.report)),
-      ...(typeof value.reportBytes === 'string' ? { sha256: sha256(value.reportBytes) } : {}),
-    })),
-    raw: [first.raw, second.raw].map((slots) => slots.map(({ impl, mode, run, sha256: hash }) => ({ impl, mode, run, sha256: hash }))),
-  } };
 }

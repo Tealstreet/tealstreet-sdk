@@ -87,5 +87,14 @@ export function performanceVerdict(ts, rust) {
 
 export const performanceFailures = (ts, rust) => performanceVerdict(ts, rust).failures;
 
+const isSlower = (failure) => failure.includes(`: ${CPU_SLOWER} (`);
 /** True when a CPU objective is over the 1.00x line, the one case that is re-measured. */
-export const cpuSlower = (failures) => failures.some((failure) => failure.includes(`: ${CPU_SLOWER} (`));
+export const cpuSlower = (failures) => failures.some(isSlower);
+
+/** The reported verdict after at most one in-job re-measure: the re-measured set decides,
+ * and a first miss that cleared on it is kept as a warning. */
+export function remeasuredVerdict(first, remeasured) {
+  if (!remeasured) return first;
+  const cleared = cpuSlower(remeasured.failures) ? [] : first.failures.filter(isSlower).map((failure) => `${failure}; cleared on the one re-measure`);
+  return { failures: remeasured.failures, warnings: [...remeasured.warnings, ...cleared].sort() };
+}

@@ -234,12 +234,10 @@ test('immutable CDN recovery repeats the same authority and never forwards its c
   assert.equal(reader.snapshots().responses.length, 1);
 });
 
-test('artifact execution wrapper fixes first/second/plan/final job and upload name pairs', () => {
+test('artifact execution wrapper fixes first/plan/final job and upload name pairs', () => {
   for (const [jobName, artifactName, stepName] of [
     ['Rust / replay measurement (bitget)', 'cpu-cohort-bitget', CPU_COHORT_STEPS.first],
     ['Rust / replay measurement (bitget)', 'strict-replay-bitget', CPU_COHORT_STEPS.strict],
-    ['Rust / replay measurement (bitget)', 'cpu-runtime-bitget', CPU_COHORT_STEPS.runtime],
-    ['Rust / CPU remeasurement (bitget)', 'cpu-second-bitget', CPU_COHORT_STEPS.second],
     ['Rust / CPU remeasurement plan', 'cpu-plan', CPU_COHORT_STEPS.plan],
     ['Rust / CPU gate (bitget)', 'cpu-cert-bitget', CPU_COHORT_STEPS.final],
   ]) {
@@ -255,6 +253,17 @@ test('artifact execution wrapper fixes first/second/plan/final job and upload na
     assert.throws(() => authenticateArtifactExecution({ ...input, run: { ...input.run, run_attempt: 2 } }), /attempt1/);
     assert.throws(() => authenticateArtifactExecution({ ...input, expectedCheckoutSha: undefined }), /authenticated expected source/);
     assert.throws(() => authenticateArtifactExecution({ ...input, expectedCheckoutSha: git('unrelated PR merge') }), /authenticated expected source/);
+  }
+  // The retired second runner and runtime handoff grant no artifact authority.
+  for (const [jobName, artifactName, stepName] of [
+    ['Rust / CPU remeasurement (bitget)', 'cpu-second-bitget', 'Retain CPU remeasurement results'],
+    ['Rust / replay measurement (bitget)', 'cpu-runtime-bitget', 'Retain the eligible original runtime bytes'],
+  ]) {
+    const value = fixture(), record = value.claims[0], source = record.observations[0];
+    source.job.name = jobName; source.job.steps[1].name = stepName; record.artifact.name = artifactName;
+    assert.throws(() => authenticateArtifactExecution({ artifact: record.artifact, artifactBytes: record.artifactBytes, run: value.runs[0],
+      job: source.job, logBytes: log(source.checkout.sha, record.artifact), jobName, stepName, expectedCheckoutSha: source.checkout.sha }),
+    /unknown artifact authority/);
   }
 });
 
@@ -312,10 +321,8 @@ test('reader caches only immutable Git/ZIP/completed log bytes; mutable authorit
 });
 
 
-test('runtime response admits the authentic 743167768-byte Bybit archive within the existing 4 GiB ZIP bound', () => {
-  assert.doesNotThrow(() => requireGithubResponseSize(743_167_768, 'runtime-artifact'));
-  assert.doesNotThrow(() => requireGithubResponseSize(4 * 1024 ** 3, 'runtime-artifact'));
-  assert.throws(() => requireGithubResponseSize(4 * 1024 ** 3 + 1, 'runtime-artifact'), /oversized/);
+test('the retired runtime handoff archive kind is no longer a GitHub response kind', () => {
+  assert.throws(() => requireGithubResponseSize(743_167_768, 'runtime-artifact'), /invalid GitHub response kind/);
 });
 
 test('metadata, logs and ordinary archives retain the original 512 MiB bound', () => {
