@@ -100,6 +100,9 @@ pub(crate) fn native(code: Option<Code>, message: String, write: bool) -> VenueE
             error
                 .message
                 .push_str(". The outcome is unknown. Check Open Orders");
+            // A replacement can follow a refused native amend. Present the
+            // uncertainty instead of that stale refusal, without changing facts.
+            error.presents = true;
         }
     }
     error

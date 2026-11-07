@@ -200,3 +200,142 @@ fn native_rates_at_http_200_are_unknown_for_all_dispatched_writes() {
 fn documented_definitive_refusal_stays_rejected() {
     probe(200, 21702, false);
 }
+
+fn nonce_retry_stale_refusal(status: u16, code: u64, unknown: bool) {
+    let mut opts = options();
+    opts.testnet = true;
+    let (mut e, _, _) = ready_feeds(opts, true);
+    let order: PlaceOrderOpts = serde_json::from_str(
+        r#"{"symbol":"ETH","type":"limit","side":"buy","amount":0.2,"price":90}"#,
+    )
+    .unwrap();
+    e.handle(
+        NOW,
+        Event::Command(Command::PlaceOrders {
+            command: 7,
+            orders: vec![order],
+        }),
+    );
+    let nonce = take_http(&mut e, NOW, "nextNonce");
+    reply(&mut e, &nonce, 200, r#"{"code":200,"nonce":10}"#);
+    let first = take_http(&mut e, NOW, "sendTx");
+    reply(
+        &mut e,
+        &first,
+        200,
+        r#"{"code":21104,"message":"invalid nonce"}"#,
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, NOW);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandFailed { command: 7, .. })))
+    );
+    let (timer, now) = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 150.0 => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .expect("one permitted nonce retry");
+    e.handle(now, Event::TimerFired { timer });
+    let nonce = take_http(&mut e, now, "nextNonce");
+    reply_at(&mut e, now, &nonce, 200, r#"{"code":200,"nonce":20}"#);
+    let resent = take_http(&mut e, now, "sendTx");
+    assert_eq!(resent.method, Method::Post);
+    reply_at(
+        &mut e,
+        now,
+        &resent,
+        status,
+        &format!(r#"{{"code":{code},"message":"retry response"}}"#),
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, now);
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "{actions:?}");
+    let error = failures[0];
+    assert_eq!(
+        error.outcome,
+        Some(if unknown {
+            Outcome::Unknown
+        } else {
+            Outcome::Rejected
+        }),
+        "{error:?}"
+    );
+    if unknown {
+        let text = error.message.to_ascii_lowercase();
+        assert!(
+            text.contains("unknown") && text.contains("check open orders"),
+            "{error:?}"
+        );
+        assert!(!text.contains("invalid nonce"), "stale refusal: {error:?}");
+        assert_eq!(error.protection, None);
+    }
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+    );
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    let mut later = actions;
+    // Replay the old retry timer too: a terminal command cannot regain write authority.
+    e.handle(now + 1.0, Event::TimerFired { timer });
+    later.extend(safe_cex_engine::test_support::prepared_actions(
+        &mut e,
+        now + 1.0,
+    ));
+    for (timer, at) in timers {
+        e.handle(at, Event::TimerFired { timer });
+        later.extend(safe_cex_engine::test_support::prepared_actions(&mut e, at));
+    }
+    assert!(
+        !later
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+        "no third write or put-back: {later:?}"
+    );
+    assert_eq!(
+        later
+            .iter()
+            .filter(|a| matches!(
+                a,
+                Action::Notice(
+                    Notice::CommandDone { command: 7, .. }
+                        | Notice::CommandFailed { command: 7, .. }
+                )
+            ))
+            .count(),
+        1,
+        "one terminal only: {later:?}"
+    );
+}
+
+#[test]
+fn stale_refusal_after_nonce_retry_23000_is_replaced_by_unknown_guidance() {
+    nonce_retry_stale_refusal(200, 23000, true);
+}
+#[test]
+fn stale_refusal_after_nonce_retry_23100_is_replaced_by_unknown_guidance() {
+    nonce_retry_stale_refusal(200, 23100, true);
+}
+#[test]
+fn stale_refusal_after_nonce_retry_http_429_already_has_unknown_guidance() {
+    nonce_retry_stale_refusal(429, 23000, true);
+}
+#[test]
+fn stale_refusal_nonce_retry_definitive_response_stays_rejected() {
+    nonce_retry_stale_refusal(200, 21702, false);
+}

@@ -163,3 +163,140 @@ fn native_rates_at_http_200_are_unknown_for_all_dispatched_writes() {
 fn documented_definitive_refusal_stays_rejected() {
     probe(200, 20003, false);
 }
+
+fn replacement_stale_refusal(status: u16, code: i64, unknown: bool) {
+    let (mut e, _) = startup();
+    e.handle(
+        100.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id: "one__tp".into(),
+            price: Some(79.0),
+            amount: None,
+        }),
+    );
+    let modify = requests(&mut e).remove(0);
+    assert!(modify.url.ends_with("/trade/modify_order"));
+    reply(
+        &mut e,
+        modify.id,
+        r#"{"code":20003,"msg":"The order does not support this operation"}"#,
+    );
+    let cancel = requests(&mut e).remove(0);
+    assert!(cancel.url.ends_with("/trade/cancel_orders"));
+    reply(
+        &mut e,
+        cancel.id,
+        r#"{"code":0,"data":{"successList":[{"orderId":"one"}],"failureList":[]}}"#,
+    );
+    let proof = requests(&mut e).remove(0);
+    assert_eq!(proof.method, Method::Get);
+    assert!(proof.url.contains("get_order_detail?orderId=one"));
+    reply(
+        &mut e,
+        proof.id,
+        r#"{"code":0,"data":{"symbol":"BTCUSDT","orderId":"one","qty":"3","tradeQty":"1","status":"CANCELED","orderType":"LIMIT","side":"SELL"}}"#,
+    );
+    let replacement = requests(&mut e).remove(0);
+    assert!(replacement.url.ends_with("/trade/place_order"));
+    assert_eq!(replacement.method, Method::Post);
+    assert!(
+        replacement
+            .body
+            .as_deref()
+            .unwrap()
+            .contains(r#""qty":"2""#)
+    );
+    e.handle(
+        110.0,
+        Event::HttpResponse {
+            request: replacement.id,
+            response: Response {
+                status,
+                headers: "",
+                body: &format!(r#"{{"code":{code},"msg":"replacement response"}}"#),
+            },
+        },
+    );
+    let actions = safe_cex_engine::test_support::prepared_actions(&mut e, 110.0);
+    let failures: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::Notice(Notice::CommandFailed { command: 7, error }) => Some(error),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failures.len(), 1, "{actions:?}");
+    let error = failures[0];
+    assert_eq!(
+        error.outcome,
+        if unknown {
+            Some(Outcome::Unknown)
+        } else {
+            None
+        },
+        "{error:?}"
+    );
+    if unknown {
+        let text = error.message.to_ascii_lowercase();
+        assert!(
+            text.contains("unknown") && text.contains("check open orders"),
+            "{error:?}"
+        );
+        assert!(
+            !text.contains("does not support this operation"),
+            "stale refusal: {error:?}"
+        );
+        assert_eq!(error.protection, None);
+    }
+    assert_eq!(
+        e.store().order("one").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Canceled
+    );
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. })))
+    );
+    let timers: Vec<_> = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect();
+    let mut later = actions;
+    for (timer, at) in timers {
+        e.handle(at, Event::TimerFired { timer });
+        later.extend(safe_cex_engine::test_support::prepared_actions(&mut e, at));
+    }
+    assert!(
+        !later
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.method != Method::Get)),
+        "no retry or put-back: {later:?}"
+    );
+    assert!(
+        !later
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone { command: 7, .. }))),
+        "{later:?}"
+    );
+}
+
+#[test]
+fn stale_refusal_before_replacement_10005_is_replaced_by_unknown_guidance() {
+    replacement_stale_refusal(200, 10005, true);
+}
+#[test]
+fn stale_refusal_before_replacement_10006_is_replaced_by_unknown_guidance() {
+    replacement_stale_refusal(200, 10006, true);
+}
+#[test]
+fn stale_refusal_before_replacement_http_429_already_has_unknown_guidance() {
+    replacement_stale_refusal(429, 10005, true);
+}
+#[test]
+fn stale_refusal_definitive_replacement_response_stays_known_partial() {
+    replacement_stale_refusal(200, 20003, false);
+}
