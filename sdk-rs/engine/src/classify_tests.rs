@@ -1187,3 +1187,69 @@ fn released_ambiguity_batch_rate_row_keeps_accepted_prefix_unknown() {
     };
     assert_eq!(error.partial.unwrap().order_ids, ["native"]);
 }
+
+#[test]
+fn batch_code_less_rows_preserve_the_tables_unlisted_verdict() {
+    use crate::request_context::WriteResult;
+    let native = BatchItem::Native(Native {
+        code: NativeCode::None,
+        message: "Invalid TP/SL price.",
+    });
+    for unlisted in [
+        Verdict::Refused(ErrorKind::Rejected),
+        Verdict::Refused(ErrorKind::RateLimited),
+        Verdict::Unknown(None),
+    ] {
+        let table = CodeTable {
+            rows: &[],
+            success: &[],
+            status: &[],
+            unlisted,
+        };
+        for status in [200, 408, 429, 500, 503] {
+            let result = batch(
+                &table,
+                Intent::Place,
+                &response(status),
+                1,
+                &[native],
+                "known batch refusal",
+            )
+            .unwrap();
+            if status == 200 && unlisted == Verdict::Refused(ErrorKind::Rejected) {
+                let WriteResult::Rejected(error) = result else {
+                    panic!("a proven code-less refusal stays Rejected: {result:?}");
+                };
+                assert_eq!(error.outcome, Some(Outcome::Rejected));
+                assert_eq!(error.kind, Some(ErrorKind::Rejected));
+            } else {
+                let WriteResult::Failed(error) = result else {
+                    panic!("ambiguous status or native rate stays Unknown: {result:?}");
+                };
+                assert_eq!(error.outcome, Some(Outcome::Unknown));
+            }
+        }
+        let result = batch(
+            &table,
+            Intent::Place,
+            &response(200),
+            2,
+            &[BatchItem::Accepted("accepted"), native],
+            "partial batch refusal",
+        )
+        .unwrap();
+        let error = if unlisted == Verdict::Refused(ErrorKind::Rejected) {
+            let WriteResult::KnownPartial(error) = result else {
+                panic!("proven partial refusal stays KnownPartial: {result:?}");
+            };
+            error
+        } else {
+            let WriteResult::PartialUnknown(error) = result else {
+                panic!("native ambiguity keeps partial Unknown: {result:?}");
+            };
+            assert_eq!(error.outcome, Some(Outcome::Unknown));
+            error
+        };
+        assert_eq!(error.partial.unwrap().order_ids, ["accepted"]);
+    }
+}

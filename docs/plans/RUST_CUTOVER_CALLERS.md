@@ -10532,6 +10532,8 @@ or when an older result wrapper calls it Rejected or KnownPartial.
 An engine-sealed ambiguous put-back replaces earlier definitive refusal words,
 including KnownPartial, with Unknown and Check Open Orders. It grants no
 protection claim or additional write.
+Batch rows retain their codec-selected table's code-less refusal verdict;
+the write ambiguity guard still dominates native rate limits and HTTP 408/429/5xx.
 
 The real-engine audit cases are centrally blocked for Binance, ApeX Omni,
 AsterDEX, Bybit, BingX, Bitrue, OKX and Crypto.com. This does not convert raw

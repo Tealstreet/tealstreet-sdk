@@ -533,10 +533,12 @@ pub(crate) fn batch(
         .enumerate()
         .filter_map(|(index, item)| match item {
             BatchItem::Accepted(_) => None,
-            BatchItem::Native(native) => match verdict(table, intent, released, Some(native)) {
-                Verdict::Satisfied(_) => None,
-                verdict => Some((index, native, verdict)),
-            },
+            BatchItem::Native(native) => {
+                match write_verdict(table.verdict(native, intent), intent, released) {
+                    Verdict::Satisfied(_) => None,
+                    verdict => Some((index, native, verdict)),
+                }
+            }
         });
     let Some(first) = failures.next() else {
         return Ok(WriteResult::Accepted { order_ids: ids });
